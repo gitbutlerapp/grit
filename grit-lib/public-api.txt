@@ -24089,9 +24089,13 @@ pub grit_lib::revwalk::rev_list_error::RevListError::SparseBlobUnreadable::spec:
 pub grit_lib::revwalk::rev_list_error::RevListError::SparseFilterUnparsable
 pub grit_lib::revwalk::rev_list_error::RevListError::SparseFilterUnparsable::object_id: alloc::string::String
 pub grit_lib::revwalk::rev_list_error::RevListError::SymmetricRangeRequired
+pub grit_lib::revwalk::rev_list_error::RevListError::UnexpandedSymmetricRange
+pub grit_lib::revwalk::rev_list_error::RevListError::UnexpandedSymmetricRange::spec: alloc::string::String
 pub grit_lib::revwalk::rev_list_error::RevListError::UnexpectedObjectKind
 pub grit_lib::revwalk::rev_list_error::RevListError::UnexpectedObjectKind::expected: &'static str
 pub grit_lib::revwalk::rev_list_error::RevListError::UnexpectedObjectKind::input: alloc::string::String
+pub grit_lib::revwalk::rev_list_error::RevListError::UnsupportedWalkSpec
+pub grit_lib::revwalk::rev_list_error::RevListError::UnsupportedWalkSpec::spec: alloc::string::String
 impl core::convert::From<grit_lib::revwalk::rev_list_error::RevListError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::rev_list_error::RevListError) -> Self
 impl core::error::Error for grit_lib::revwalk::rev_list_error::RevListError

@@ -183,7 +183,9 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
 
     let walk = RevWalk::new(&repo);
     let _ = merge_bases(&repo, tip, side, true)?;
-    let via_handle = walk.walk(
+    // Every commit has the same tree, so only the root (below the merge base) touches the path;
+    // `git rev-list --left-right main...side -- tracked.txt` is empty here.
+    let path_limited = walk.walk(
         "main...side",
         &RevListOptions {
             ordering: OrderingMode::AuthorDateTopo,
@@ -192,7 +194,21 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
             ..RevListOptions::default()
         },
     )?;
-    assert!(!via_handle.commits.is_empty());
+    assert!(path_limited.commits.is_empty());
+    let via_handle = walk.walk(
+        "main...side",
+        &RevListOptions {
+            ordering: OrderingMode::AuthorDateTopo,
+            left_right: true,
+            ..RevListOptions::default()
+        },
+    )?;
+    // `side` is merged into `main`: the linear commits above the fork plus the merge, all left.
+    assert_eq!(via_handle.commits.len(), 1100 - 1100 / 3 - 1 + 1);
+    assert!(via_handle
+        .commits
+        .iter()
+        .all(|oid| via_handle.left_right_map.get(oid) == Some(&true)));
 
     Ok(())
 }

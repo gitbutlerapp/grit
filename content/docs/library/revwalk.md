@@ -14,6 +14,15 @@ Common helpers that do not need a full repository walk:
 - [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) — split `main..feature` into two tokens (ignores `...` and path segments).
 - [`abbreviate_ref_name`](rustdoc:grit_lib::revwalk::rev_parse::abbreviate_ref_name) — shorten `refs/heads/main` to `main` for display.
 
+## Listing commits on a repository handle
+
+`RevWalk` has two ways to list commits:
+
+- [`RevWalk::commits`](rustdoc:grit_lib::revwalk::RevWalk::commits), [`rev_list_result`](rustdoc:grit_lib::revwalk::RevWalk::rev_list_result) and [`count`](rustdoc:grit_lib::revwalk::RevWalk::count) take revision **tokens** (`&["main", "^v1.0"]`, `&["main...topic"]`) plus [`RevWalkListOptions`](rustdoc:grit_lib::revwalk::queries::RevWalkListOptions). This is the API most callers want. Ref selections (`--all`, `--branches`) go in `RevWalkListOptions::refs` and path limits in `RevWalkListOptions::paths`, not in the tokens.
+- [`RevWalk::walk`](rustdoc:grit_lib::revwalk::RevWalk::walk) takes **one** spec (`main`, `^tip`, `A..B` or `A...B`) plus the full engine [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) described below. Options, `--`, and several space-separated tokens fail with `RevListError::UnsupportedWalkSpec`, so use `commits` for those.
+
+Both list the symmetric difference for `A...B`, exactly like `git rev-list A...B`. [`parse_rev_walk_tokens`](rustdoc:grit_lib::revwalk::parse_rev_walk_tokens) does the expansion if you call `rev_list` yourself.
+
 ## Rev-list
 
 [`rev_list`](rustdoc:grit_lib::revwalk::rev_list::rev_list) takes positive and negative revision specs plus [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions). It returns a [`RevListResult`](rustdoc:grit_lib::revwalk::rev_list::RevListResult) whose `commits` field is the final oid list (after skip, max-count, and reverse).
@@ -32,7 +41,7 @@ With [`RevListOptions::default`](rustdoc:grit_lib::revwalk::rev_list::RevListOpt
 
 To print the listed commits, set `retain_commit_data` and hand `commit_data` to [`load_commits_with_decorations_reusing`](rustdoc:grit_lib::porcelain::log::load_commits_with_decorations_reusing). It moves out the commits the walk parsed and reads only the rest, such as commits whose parents came from a commit-graph.
 
-For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`, order included. In default order, with or without `max_count`, a range walk only visits commits down to where the two sides meet, not the whole history behind `main`, so a short topic range on a large repository is as quick as `git rev-list`. `OrderingMode::DateOrderWalk` (`--date-order`) and output filters such as paths or `--left-right` still sort the whole range first.
+For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). A symmetric range `main...feature` needs the merge bases, so expand it with `parse_rev_walk_tokens` and copy its `symmetric_left` / `symmetric_right` into the options; `rev_list` rejects a raw `A...B` spec with `RevListError::UnexpandedSymmetricRange`. That matches `git rev-list main..feature`, order included. In default order, with or without `max_count`, a range walk only visits commits down to where the two sides meet, not the whole history behind `main`, so a short topic range on a large repository is as quick as `git rev-list`. `OrderingMode::DateOrderWalk` (`--date-order`) and output filters such as paths or `--left-right` still sort the whole range first.
 
 ### Commit filters
 

@@ -42,6 +42,29 @@ pub enum RevListError {
     #[error("symmetric revision range (A...B) required for left/right commit counts")]
     SymmetricRangeRequired,
 
+    /// [`crate::revwalk::RevWalk::walk`] got something other than one revision or range: an
+    /// option such as `--all`, the `--` separator, or several whitespace-separated tokens.
+    ///
+    /// Use [`crate::revwalk::RevWalk::commits`] with
+    /// [`crate::revwalk::RevWalkListOptions::refs`] / [`crate::revwalk::RevWalkListOptions::paths`]
+    /// for ref selections, path limits, and multiple tokens.
+    #[error("'{spec}' is not a single revision or range; list several tokens, refs or paths with RevWalk::commits")]
+    UnsupportedWalkSpec {
+        /// The spec exactly as passed to `walk`.
+        spec: String,
+    },
+
+    /// [`crate::rev_list::rev_list`] got a raw `A...B` spec; symmetric ranges must be expanded
+    /// first with [`crate::revwalk::parse_rev_walk_tokens`] (positive tips, merge-base
+    /// exclusions, and the `symmetric_left` / `symmetric_right` options).
+    #[error(
+        "symmetric range '{spec}' must be expanded with parse_rev_walk_tokens before rev_list"
+    )]
+    UnexpandedSymmetricRange {
+        /// The unexpanded `A...B` spec.
+        spec: String,
+    },
+
     /// Object walk expected a tree, blob, commit, or tag but read another kind from the ODB (upstream `t6102`).
     #[error("object {input} is not a {expected}")]
     UnexpectedObjectKind {
@@ -84,6 +107,22 @@ mod tests {
         let msg = RevListError::InvalidNoWalkArgument.to_string();
         assert!(!msg.contains("fatal:"));
         assert!(!msg.contains("error:"));
+    }
+
+    #[test]
+    fn walk_spec_variants_keep_the_spec() {
+        let unsupported = RevListError::UnsupportedWalkSpec {
+            spec: "--all".into(),
+        };
+        assert!(unsupported.to_string().contains("'--all'"));
+        let symmetric = RevListError::UnexpandedSymmetricRange {
+            spec: "a...b".into(),
+        };
+        assert!(symmetric.to_string().contains("'a...b'"));
+        assert!(matches!(
+            Error::from(symmetric),
+            Error::RevList(RevListError::UnexpandedSymmetricRange { .. })
+        ));
     }
 
     #[test]

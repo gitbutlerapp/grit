@@ -3,8 +3,11 @@ use crate::error::Result;
 use crate::object_inspect::{ResolveError, ResolvedObject};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
-use crate::rev_list::{rev_list, split_revision_token, RevListOptions, RevListResult};
+use crate::rev_list::{rev_list, RevListOptions, RevListResult};
+use crate::rev_list_error::RevListError;
 use crate::rev_parse::resolve_revision;
+use crate::revwalk::parse_rev_walk_tokens;
+use std::borrow::Cow;
 
 /// Parse revision specs and walk commit history for one repository.
 #[derive(Debug, Copy, Clone)]
@@ -74,21 +77,68 @@ impl<'repo> RevWalk<'repo> {
         self.repo.resolve(spec)
     }
 
-    /// Walk commits matching `spec` (supports `A..B`, `^tip`, and plain tips).
+    /// Walk commits matching one revision `spec`: a plain tip (`main`, `HEAD~3`), an exclusion
+    /// (`^tip`), a range (`A..B`), or a symmetric difference (`A...B`, like `git rev-list A...B`).
+    /// Either side of a range may be empty and defaults to `HEAD`.
     ///
-    /// Uses the same [`RevListOptions`] defaults as [`rev_list`]: commit-graph acceleration
-    /// and bounded `-n` early-stop apply with [`RevListOptions::default`].
+    /// This is the low-level entry point: it takes the [`rev_list`] engine's full
+    /// [`RevListOptions`]. For several tokens, ref selections (`--all`, `--branches`), or path
+    /// limits use [`RevWalk::commits`] / [`RevWalk::rev_list_result`] with
+    /// [`RevWalkListOptions`](crate::revwalk::RevWalkListOptions). For `A...B`,
+    /// `symmetric_left` / `symmetric_right` are filled from the range unless already set, so
+    /// `left_right`, `left_only`, and `right_only` work as in Git.
+    ///
+    /// Commit-graph acceleration and bounded `-n` early-stop apply with
+    /// [`RevListOptions::default`].
     ///
     /// # Errors
     ///
-    /// Propagates rev-parse and rev-list errors.
+    /// - [`RevListError::UnsupportedWalkSpec`] when `spec` starts with `-` (an option or `--`)
+    ///   or holds several whitespace-separated tokens.
+    /// - Rev-parse, merge-base, and rev-list errors otherwise.
     ///
     /// # Examples
     ///
     /// See the library guide page on [revision walking](https://grit-scm.com/docs/library/revwalk/).
-    #[inline]
     pub fn walk(&self, spec: &str, options: &RevListOptions) -> Result<RevListResult> {
-        let (positive, negative) = split_revision_token(spec);
-        rev_list(self.repo, &positive, &negative, options)
+        if !is_single_walk_spec(spec) {
+            return Err(RevListError::UnsupportedWalkSpec {
+                spec: spec.to_owned(),
+            }
+            .into());
+        }
+        let parsed = parse_rev_walk_tokens(self.repo, &[spec])?;
+        let options = if parsed.symmetric_left.is_some()
+            && (options.symmetric_left.is_none() || options.symmetric_right.is_none())
+        {
+            let mut symmetric = options.clone();
+            symmetric.symmetric_left = symmetric.symmetric_left.or(parsed.symmetric_left);
+            symmetric.symmetric_right = symmetric.symmetric_right.or(parsed.symmetric_right);
+            Cow::Owned(symmetric)
+        } else {
+            Cow::Borrowed(options)
+        };
+        rev_list(self.repo, &parsed.positive, &parsed.negative, &options)
     }
+}
+
+/// Whether `spec` can be one revision expression rather than an option or a token list.
+///
+/// Whitespace is legal inside `@{...}` / `^{...}` (reflog dates, message searches) and after a
+/// `:` (`:/message`, `rev:path`), so only whitespace outside those forms marks several tokens.
+fn is_single_walk_spec(spec: &str) -> bool {
+    if spec.starts_with('-') {
+        return false;
+    }
+    let mut brace_depth = 0usize;
+    for c in spec.chars() {
+        match c {
+            ':' if brace_depth == 0 => return true,
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            c if c.is_whitespace() && brace_depth == 0 => return false,
+            _ => {}
+        }
+    }
+    true
 }

@@ -460,6 +460,12 @@ pub enum OrderingMode {
 }
 
 /// Parsed and normalized options for rev-list traversal.
+///
+/// These are the low-level engine options taken by [`rev_list`] and
+/// [`crate::revwalk::RevWalk::walk`] (one spec string). Most callers should use the
+/// token-based [`crate::revwalk::RevWalk::commits`] / [`crate::revwalk::RevWalk::count`] with
+/// the smaller [`crate::revwalk::RevWalkListOptions`], which also handles several tokens,
+/// ref selections (`--all`, `--branches`), and path limits, and is translated into these options.
 #[derive(Debug, Clone)]
 pub struct RevListOptions {
     /// Include all refs (`--all`) as positive tips.
@@ -923,6 +929,10 @@ fn retain_maximal_commits(
 
 /// Resolve and walk revisions for the requested options.
 ///
+/// This is the low-level engine behind [`crate::revwalk::RevWalk::walk`] (one spec string) and
+/// [`crate::revwalk::RevWalk::commits`] (tokens plus [`crate::revwalk::RevWalkListOptions`]);
+/// prefer those unless you need options only [`RevListOptions`] exposes.
+///
 /// # Parameters
 ///
 /// - `repo` - repository used for ref/object lookup.
@@ -930,10 +940,16 @@ fn retain_maximal_commits(
 /// - `negative_specs` - negative revision tokens (`^A`, `A..B` lhs).
 /// - `options` - traversal and output selection options.
 ///
+/// Split `A..B` with [`split_revision_token`]. Expand `A...B` with
+/// [`crate::revwalk::parse_rev_walk_tokens`], which yields both tips as positive specs, their
+/// merge bases as negative specs, and the tips for [`RevListOptions::symmetric_left`] /
+/// [`RevListOptions::symmetric_right`].
+///
 /// # Errors
 ///
 /// Returns [`Error::ObjectNotFound`] / [`Error::InvalidRef`] for bad revision
-/// specs and [`Error::CorruptObject`] for non-commit or malformed commit data.
+/// specs, [`RevListError::UnexpandedSymmetricRange`] for a raw `A...B` spec, and
+/// [`Error::CorruptObject`] for non-commit or malformed commit data.
 pub fn rev_list(
     repo: &Repository,
     positive_specs: &[String],
@@ -941,6 +957,13 @@ pub fn rev_list(
     options: &RevListOptions,
 ) -> Result<RevListResult> {
     crate::trace::trace_span!("grit.revwalk.setup");
+    if let Some(spec) = positive_specs
+        .iter()
+        .chain(negative_specs)
+        .find(|spec| is_unexpanded_symmetric_range(spec))
+    {
+        return Err(RevListError::UnexpandedSymmetricRange { spec: spec.clone() }.into());
+    }
     let repo_config = repo
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
@@ -1868,6 +1891,10 @@ pub fn rev_list(
 /// - `<a>..<b>` => negative `<a>`, positive `<b>`
 /// - `^<rev>` => negative `<rev>`
 /// - `<rev>` => positive `<rev>`
+///
+/// A symmetric range `<a>...<b>` is **not** split: it comes back unchanged as one positive spec,
+/// which [`rev_list`] rejects with [`RevListError::UnexpandedSymmetricRange`]. Expanding it
+/// needs the merge bases, so use [`crate::revwalk::parse_rev_walk_tokens`] for user input.
 #[must_use]
 pub fn split_revision_token(token: &str) -> (Vec<String>, Vec<String>) {
     if let Some((lhs, rhs)) = crate::rev_parse::split_double_dot_range(token) {
@@ -1887,6 +1914,14 @@ pub fn split_revision_token(token: &str) -> (Vec<String>, Vec<String>) {
         return (Vec::new(), vec![rest.to_owned()]);
     }
     (vec![token.to_owned()], Vec::new())
+}
+
+/// Whether `spec` is an `A...B` range that was handed to [`rev_list`] without expansion.
+///
+/// Specs with a `:` (`rev:path`, `:/message`) may legitimately contain `...` in the path or
+/// search text, so they are left to normal revision resolution.
+fn is_unexpanded_symmetric_range(spec: &str) -> bool {
+    !spec.contains(':') && crate::rev_parse::split_triple_dot_range(spec).is_some()
 }
 
 fn ansi_color_from_name(name: &str) -> String {
@@ -9970,6 +10005,19 @@ mod tests {
     }
 
     #[test]
+    fn split_revision_token_leaves_symmetric_range_unsplit() {
+        for token in ["main...feature", "main...", "...feature"] {
+            let (pos, neg) = split_revision_token(token);
+            assert_eq!(pos, vec![token.to_owned()], "{token}");
+            assert!(neg.is_empty(), "{token}");
+            assert!(is_unexpanded_symmetric_range(token), "{token}");
+        }
+        for spec in ["main", "main..feature", "HEAD:a...b", ":/fix ...", "a....b"] {
+            assert!(!is_unexpanded_symmetric_range(spec), "{spec}");
+        }
+    }
+
+    #[test]
     fn symmetric_diff_token_detection() {
         assert!(is_symmetric_diff("main...feature"));
         assert!(!is_symmetric_diff("main..feature"));
@@ -10706,7 +10754,7 @@ mod line_coverage_tests {
         let _ = select_bisect_commits(&repo, &default_out.commits, true)?;
         assert!(is_symmetric_diff("main...side"));
         if let Some((left, right)) = split_symmetric_diff("main...side") {
-            let _ = rev_list(
+            let err = rev_list(
                 &repo,
                 &[format!("{left}...{right}")],
                 &[],
@@ -10714,7 +10762,12 @@ mod line_coverage_tests {
                     left_right: true,
                     ..RevListOptions::default()
                 },
-            )?;
+            )
+            .expect_err("raw symmetric range");
+            assert!(matches!(
+                err,
+                Error::RevList(RevListError::UnexpandedSymmetricRange { ref spec }) if spec == "main...side"
+            ));
         }
         let _ = expand_object_filter_for_protocol("blob:limit=1k")
             .map_err(|msg| Error::Message(msg))?;
