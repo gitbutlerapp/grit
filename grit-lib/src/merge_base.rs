@@ -2410,7 +2410,26 @@ pub(crate) fn push_commit_heap_key(
     seq: &mut u64,
     oid: ObjectId,
 ) -> Result<()> {
-    let rank = commit_rank_for_walk(cache, oid);
+    push_describe_heap_key(cache, heap, seq, oid, None)
+}
+
+/// Like [`push_commit_heap_key`], but when commit-graph generations are unavailable uses
+/// `walk_dist` (minimum hops from the describe target) so children are processed before
+/// parents even under committer-date skew.
+pub(crate) fn push_describe_heap_key(
+    cache: &mut CommitGraphCache<'_>,
+    heap: &mut BinaryHeap<PaintKey>,
+    seq: &mut u64,
+    oid: ObjectId,
+    walk_dist: Option<&OidHashMap<u32>>,
+) -> Result<()> {
+    let mut rank = commit_rank_for_walk(cache, oid);
+    if rank == UNRANKED_COMMIT {
+        if let Some(distances) = walk_dist {
+            let hops = distances.get(&oid).copied().unwrap_or(0);
+            rank = UNRANKED_COMMIT.saturating_sub(u64::from(hops));
+        }
+    }
     let committed_at = cache.commit_time(oid)?;
     heap.push(PaintKey {
         rank,
@@ -3215,6 +3234,13 @@ pub(crate) struct CommitGraphCache<'r> {
 impl<'r> CommitGraphCache<'r> {
     fn new(repo: &'r Repository) -> Self {
         Self::with_commit_graph(repo, true)
+    }
+
+    /// True when describe can rely on commit-graph generation for heap order from `tip`.
+    pub(crate) fn generation_ranked_walk_from(&mut self, tip: ObjectId) -> Result<bool> {
+        Ok(self.graph.is_some()
+            && !self.has_parent_rewrites()?
+            && commit_rank_for_walk(self, tip) != UNRANKED_COMMIT)
     }
 
     /// `use_commit_graph: false` leaves [`Self::graph`] empty so every lookup parses the commit.

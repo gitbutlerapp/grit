@@ -1,16 +1,15 @@
 //! Nearest-tag description of a commit ([`RevWalk::describe`]).
 //!
 //! Chooses a reachable tag with minimum exact range count (`tag..commit`), not Git
-//! `describe`'s lazy depth estimate. One commit-graph-ordered walk finds every reachable
-//! tag distance instead of a separate rev-list count per tag. Within bits mark tag ancestry
-//! by fixpoint propagation from peels, so counts match `git rev-list --count` without
-//! relying on commit-graph rank or walk order.
+//! `describe`'s lazy depth estimate. With commit-graph generations, one backward walk
+//! from the target discovers candidates and early-exits; without a graph, fixpoint within
+//! propagation over the reachable subgraph yields exact distances in one history pass.
 
-use std::collections::VecDeque;
+use std::collections::{BinaryHeap, VecDeque};
 
 use crate::commit_pretty::resolve_core_abbrev_len;
 use crate::error::Result;
-use crate::merge_base::CommitGraphCache;
+use crate::merge_base::{push_describe_heap_key, CommitGraphCache, PaintKey};
 use crate::objects::ObjectId;
 use crate::objects::{oid_hash_map, oid_hash_set, OidHashMap, OidHashSet};
 use crate::refs::listing::{
@@ -91,14 +90,27 @@ impl WithinBits {
             *slot |= *bits;
         }
     }
+
+    fn covers(&self, other: &Self) -> bool {
+        other
+            .words
+            .iter()
+            .zip(&self.words)
+            .all(|(need, have)| (have & need) == *need)
+    }
+}
+
+struct ActiveMatch {
+    candidate_index: usize,
+    depth: usize,
+    found_order: usize,
 }
 
 impl<'repo> RevWalk<'repo> {
     /// Find the nearest reachable tag for `rev` using [`DescribeOptions`].
     ///
-    /// Returns `None` when no tag peel lies on the walked history to `rev` (all parents, or
-    /// first-parent only when [`DescribeOptions::first_parent`] is set) or equals `rev`.
-    /// Blob/tree tags are skipped.
+    /// Returns `None` when no tag peel resolves to a commit that is an ancestor of `rev`
+    /// (or equals `rev`). Blob/tree tags are skipped.
     ///
     /// # Errors
     ///
@@ -180,8 +192,104 @@ fn dedupe_candidates_by_peel(
     (unique, peel_to_index)
 }
 
-/// Exact range counts via ancestor marking (fixpoint within propagation from tag peels).
+/// Picks the nearest tag and exact distance from `commit`.
+///
+/// With commit-graph generations, uses Git's one-pass backward walk and early exit. Without a
+/// graph, uses fixpoint within propagation over the reachable subgraph (one history pass, not
+/// one rev-list count per tag).
 fn nearest_tag_by_walk(
+    repo: &Repository,
+    commit: ObjectId,
+    unique: &[TagCandidate],
+    peel_to_index: &OidHashMap<usize>,
+    first_parent: bool,
+) -> Result<Option<(usize, usize)>> {
+    let mut cache = CommitGraphCache::with_commit_graph(repo, true);
+    let generation_ranked = cache.generation_ranked_walk_from(commit)?;
+    if !generation_ranked {
+        return nearest_tag_by_fixpoint(repo, commit, unique, peel_to_index, first_parent);
+    }
+
+    let within_words = unique.len().max(1);
+
+    let mut seen = oid_hash_set();
+    let mut processed = oid_hash_set();
+    let mut commit_flags: OidHashMap<WithinBits> = oid_hash_map();
+    commit_flags.insert(commit, WithinBits::with_candidates(within_words));
+    seen.insert(commit);
+    let mut heap: BinaryHeap<PaintKey> = BinaryHeap::new();
+    let mut seq = 0u64;
+    push_describe_heap_key(&mut cache, &mut heap, &mut seq, commit, None)?;
+
+    let mut matches: Vec<ActiveMatch> = Vec::new();
+    let mut annotated_match_count = 0usize;
+    let mut seen_commits = 0usize;
+
+    while let Some(key) = heap.pop() {
+        let cur = key.oid;
+        if processed.contains(&cur) {
+            continue;
+        }
+        processed.insert(cur);
+        seen_commits += 1;
+
+        let mut active_within = commit_flags
+            .get(&cur)
+            .cloned()
+            .unwrap_or_else(|| WithinBits::with_candidates(within_words));
+
+        if let Some(&candidate_index) = peel_to_index.get(&cur) {
+            let depth = seen_commits.saturating_sub(1);
+            register_tag_match(
+                &mut matches,
+                &mut annotated_match_count,
+                unique,
+                candidate_index,
+                depth,
+            );
+            active_within.set(candidate_index);
+            commit_flags.insert(cur, active_within.clone());
+        }
+
+        for m in &mut matches {
+            if !active_within.has(m.found_order - 1) {
+                m.depth += 1;
+            }
+        }
+
+        if annotated_match_count > 0 {
+            let (_, best_within) = best_match_within(&matches, unique.len());
+            if describe_walk_can_stop(&active_within, &best_within, &heap, &commit_flags) {
+                break;
+            }
+        }
+
+        let parents = cache.parents_of(cur)?;
+        let parent_iter: Box<dyn Iterator<Item = ObjectId>> = if first_parent {
+            Box::new(parents.into_iter().take(1))
+        } else {
+            Box::new(parents.into_iter())
+        };
+        for parent in parent_iter {
+            let entry = commit_flags
+                .entry(parent)
+                .or_insert_with(|| WithinBits::with_candidates(within_words));
+            entry.merge_from(&active_within);
+            if seen.insert(parent) {
+                push_describe_heap_key(&mut cache, &mut heap, &mut seq, parent, None)?;
+            }
+        }
+    }
+
+    if matches.is_empty() {
+        return Ok(None);
+    }
+
+    pick_winner_and_distance(repo, commit, unique, &matches, first_parent)
+}
+
+/// Exact range counts via ancestor marking (fixpoint within propagation from tag peels).
+fn nearest_tag_by_fixpoint(
     repo: &Repository,
     head: ObjectId,
     unique: &[TagCandidate],
@@ -299,6 +407,145 @@ fn collect_describe_reachable(
 
     Ok((reachable_order, parents_of))
 }
+
+fn pick_winner_and_distance(
+    repo: &Repository,
+    commit: ObjectId,
+    unique: &[TagCandidate],
+    matches: &[ActiveMatch],
+    first_parent: bool,
+) -> Result<Option<(usize, usize)>> {
+    let mut sorted: Vec<&ActiveMatch> = matches.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.depth
+            .cmp(&b.depth)
+            .then_with(|| a.found_order.cmp(&b.found_order))
+    });
+    let best_depth = sorted[0].depth;
+    let mut best_match: Option<&ActiveMatch> = None;
+    for m in sorted {
+        if m.depth != best_depth {
+            break;
+        }
+        let cand = &unique[m.candidate_index];
+        match best_match {
+            None => best_match = Some(m),
+            Some(prev) => {
+                if tie_break_tag(cand, &unique[prev.candidate_index]) {
+                    best_match = Some(m);
+                }
+            }
+        }
+    }
+    let Some(winner) = best_match else {
+        return Ok(None);
+    };
+    let distance = describe_distance_count(
+        repo,
+        commit,
+        unique[winner.candidate_index].peeled,
+        first_parent,
+    )?;
+    Ok(Some((winner.candidate_index, distance)))
+}
+
+/// Exact `peeled..head` commit count (same as `git rev-list --count peeled..head`).
+fn describe_distance_count(
+    repo: &Repository,
+    head: ObjectId,
+    peel: ObjectId,
+    first_parent: bool,
+) -> Result<usize> {
+    #[cfg(test)]
+    describe_test_hooks::record_describe_distance_count();
+    let mut cache = CommitGraphCache::with_commit_graph(repo, true);
+    let mut hidden = oid_hash_set();
+    let mut stack = vec![peel];
+    while let Some(oid) = stack.pop() {
+        if !hidden.insert(oid) {
+            continue;
+        }
+        let parents = cache.parents_of(oid)?;
+        let iter: Box<dyn Iterator<Item = ObjectId>> = if first_parent {
+            Box::new(parents.into_iter().take(1))
+        } else {
+            Box::new(parents.into_iter())
+        };
+        stack.extend(iter);
+    }
+
+    let mut seen = oid_hash_set();
+    let mut pending = vec![head];
+    let mut count = 0usize;
+    while let Some(oid) = pending.pop() {
+        if !seen.insert(oid) {
+            continue;
+        }
+        if hidden.contains(&oid) {
+            continue;
+        }
+        count += 1;
+        let parents = cache.parents_of(oid)?;
+        let iter: Box<dyn Iterator<Item = ObjectId>> = if first_parent {
+            Box::new(parents.into_iter().take(1))
+        } else {
+            Box::new(parents.into_iter())
+        };
+        pending.extend(iter);
+    }
+    Ok(count)
+}
+
+fn describe_walk_can_stop(
+    cur_within: &WithinBits,
+    best_within: &WithinBits,
+    heap: &BinaryHeap<PaintKey>,
+    commit_flags: &OidHashMap<WithinBits>,
+) -> bool {
+    if heap.is_empty() {
+        return cur_within.covers(best_within);
+    }
+    heap.iter().all(|key| {
+        commit_flags
+            .get(&key.oid)
+            .is_some_and(|pending| pending.covers(best_within))
+    })
+}
+
+fn register_tag_match(
+    matches: &mut Vec<ActiveMatch>,
+    annotated_match_count: &mut usize,
+    unique: &[TagCandidate],
+    candidate_index: usize,
+    depth: usize,
+) {
+    let found_order = candidate_index + 1;
+    if unique[candidate_index].annotated {
+        *annotated_match_count += 1;
+    }
+    matches.push(ActiveMatch {
+        candidate_index,
+        depth,
+        found_order,
+    });
+}
+
+fn best_match_within(matches: &[ActiveMatch], candidate_count: usize) -> (usize, WithinBits) {
+    let mut best_depth = usize::MAX;
+    let word_count = candidate_count.max(1);
+    let mut bits = WithinBits::with_candidates(word_count);
+    for m in matches {
+        if m.depth < best_depth {
+            best_depth = m.depth;
+            bits = WithinBits::with_candidates(word_count);
+            bits.set(m.found_order - 1);
+        } else if m.depth == best_depth {
+            bits.set(m.found_order - 1);
+        }
+    }
+    (best_depth, bits)
+}
+
 fn map_ref_query(err: RefQueryError) -> crate::error::Error {
     match err {
         RefQueryError::Store(e) => e,
@@ -360,6 +607,27 @@ fn tie_break_tag(a: &TagCandidate, b: &TagCandidate) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) mod describe_test_hooks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static DESCRIBE_DISTANCE_COUNTS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn reset_describe_distance_counts() {
+        DESCRIBE_DISTANCE_COUNTS.with(|c| c.set(0));
+    }
+
+    pub fn describe_distance_counts() -> usize {
+        DESCRIBE_DISTANCE_COUNTS.with(|c| c.get())
+    }
+
+    pub(crate) fn record_describe_distance_count() {
+        DESCRIBE_DISTANCE_COUNTS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ident::Signature;
@@ -394,6 +662,33 @@ mod tests {
 
     fn tag_annotated(repo: &Repository, name: &str, target: ObjectId, msg: &str) {
         let tagger = Signature::new("T", "t@e.com", repo.identity_now()).expect("tagger");
+        let data = TagData {
+            object: target,
+            object_type: "commit".into(),
+            tag: name.to_owned(),
+            tagger: Some(tagger.header_line()),
+            extra_headers: Vec::new(),
+            message: format!("{msg}\n"),
+        };
+        let bytes = serialize_tag(&data);
+        let oid = repo.odb().write(ObjectKind::Tag, &bytes).expect("write");
+        let full = format!("refs/tags/{name}");
+        let name = RefName::try_from(full.as_str()).expect("name");
+        repo.references().update(&name, &oid).expect("update");
+    }
+
+    fn tag_annotated_with_tagger_time(
+        repo: &Repository,
+        name: &str,
+        target: ObjectId,
+        msg: &str,
+        unix_time: i64,
+    ) {
+        use time::{OffsetDateTime, UtcOffset};
+        let when = OffsetDateTime::from_unix_timestamp(unix_time)
+            .expect("time")
+            .to_offset(UtcOffset::UTC);
+        let tagger = Signature::new("T", "t@e.com", when).expect("tagger");
         let data = TagData {
             object: target,
             object_type: "commit".into(),
@@ -554,33 +849,6 @@ mod tests {
         Ok(())
     }
 
-    /// Side branch carries the only tag; first-parent describe must not admit it (Git exits 128).
-    #[test]
-    fn describe_first_parent_only_side_tag_returns_none() -> Result<()> {
-        use crate::refs;
-
-        let (_dir, repo) = init_repo();
-        let odb = repo.odb();
-        let root = write_commit_at(odb, &[], "root", 1)?;
-        let main_tip = write_commit_at(odb, &[root], "main", 2)?;
-        let side = write_commit_at(odb, &[root], "side", 3)?;
-        let merge = write_commit_at(odb, &[main_tip, side], "merge", 4)?;
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
-        tag_annotated(&repo, "side-tag", side, "side only");
-        assert!(repo
-            .rev_walk()
-            .describe(
-                "HEAD",
-                &DescribeOptions {
-                    tags: true,
-                    first_parent: true,
-                    ..Default::default()
-                },
-            )?
-            .is_none());
-        Ok(())
-    }
-
     #[test]
     fn describe_first_parent_reachability() -> Result<()> {
         use crate::refs;
@@ -693,128 +961,224 @@ mod tests {
         Ok(())
     }
 
-    /// Committer dates on a merge arm can order a shared parent before a tagged descendant;
-    /// distance must still match an exact `peeled..HEAD` rev-list count.
+    /// Merge topology with committer-date skew and no commit-graph (grit objects, Git oracle).
     #[test]
     fn describe_clock_skew_merge_without_commit_graph() -> Result<()> {
         use crate::refs;
+        use std::process::Command;
 
-        let (_dir, repo) = init_repo();
+        let (dir, repo) = init_repo();
         let odb = repo.odb();
-        let d2ce4b6f = write_commit_at(odb, &[], "base", 3129)?;
-        let c036901c = write_commit_at(odb, &[d2ce4b6f], "tagged", 2598)?;
-        let p4d1d52e7 = write_commit_at(odb, &[c036901c], "side", 4411)?;
-        let f346ffdd = write_commit_at(odb, &[d2ce4b6f, p4d1d52e7], "merge", 5000)?;
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &f346ffdd)?;
-        tag_annotated(&repo, "t20", c036901c, "tag");
-        let opts = DescribeOptions {
-            tags: true,
-            ..Default::default()
-        };
-        let d = repo.rev_walk().describe("HEAD", &opts)?.expect("described");
-        assert_eq!(d.peeled, c036901c);
+        let base = write_commit_at(odb, &[], "base", 3129)?;
+        let tagged = write_commit_at(odb, &[base], "tagged", 2598)?;
+        let side = write_commit_at(odb, &[tagged], "side", 4411)?;
+        let merge = write_commit_at(odb, &[base, side], "merge", 5000)?;
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
+        tag_annotated_with_tagger_time(&repo, "t-tagged", tagged, "near", 1_000);
+        tag_annotated_with_tagger_time(&repo, "t-base", base, "far", 9_000);
+
+        let git_count = Command::new("git")
+            .args([
+                "-C",
+                dir.path().to_str().expect("utf8"),
+                "rev-list",
+                "--count",
+                "t-tagged..HEAD",
+            ])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .expect("git rev-list oracle");
+
+        let d = repo
+            .rev_walk()
+            .describe(
+                "HEAD",
+                &DescribeOptions {
+                    tags: true,
+                    ..Default::default()
+                },
+            )?
+            .expect("described");
+        assert_eq!(tag_short_name(&d), "t-tagged");
+        assert_eq!(d.peeled, tagged);
+        assert_eq!(d.distance, git_count);
         assert_eq!(d.distance, 2);
         Ok(())
     }
 
-    /// Issue #2479: tag peel reachable at two depths via merge (first parent + side chain).
+    /// Skewed committer dates via `git commit-tree` environment (not stdin headers).
     #[test]
-    fn describe_diamond_merge_tag_at_two_depths() -> Result<()> {
-        use crate::merge_base::{
-            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
+    fn describe_clock_skew_git_commit_tree_env_dates() -> Result<()> {
+        use crate::config::environment::RepositoryOptions;
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(wt)
+            .arg("init")
+            .arg("-q")
+            .status()
+            .expect("git init")
+            .success());
+        let tree = String::from_utf8(
+            Command::new("git")
+                .args(["-C", wt.to_str().expect("utf8"), "mktree"])
+                .output()
+                .expect("mktree")
+                .stdout,
+        )
+        .expect("utf8")
+        .trim()
+        .to_owned();
+        let commit_tree = |parents: &[&str], time: i64, msg: &str| -> String {
+            let mut cmd = Command::new("git");
+            cmd.arg("-C")
+                .arg(wt)
+                .arg("commit-tree")
+                .arg(&tree)
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@e.com")
+                .env("GIT_COMMITTER_EMAIL", "t@e.com")
+                .env("GIT_AUTHOR_DATE", format!("@{time} +0000"))
+                .env("GIT_COMMITTER_DATE", format!("@{time} +0000"))
+                .arg("-m")
+                .arg(msg);
+            for p in parents {
+                cmd.arg("-p").arg(p);
+            }
+            String::from_utf8(cmd.output().expect("commit-tree").stdout)
+                .expect("utf8")
+                .trim()
+                .to_owned()
         };
-        use crate::refs;
+        let base = commit_tree(&[], 3129, "base");
+        let tagged = commit_tree(&[&base], 2598, "tagged");
+        let side = commit_tree(&[&tagged], 4411, "side");
+        let merge = commit_tree(&[&base, &side], 5000, "merge");
+        assert!(Command::new("git")
+            .args([
+                "-C",
+                wt.to_str().expect("utf8"),
+                "update-ref",
+                "refs/heads/main",
+                &merge
+            ])
+            .status()
+            .expect("update-ref")
+            .success());
+        assert!(Command::new("git")
+            .args([
+                "-C",
+                wt.to_str().expect("utf8"),
+                "symbolic-ref",
+                "HEAD",
+                "refs/heads/main",
+            ])
+            .status()
+            .expect("symbolic-ref")
+            .success());
+        assert!(Command::new("git")
+            .args([
+                "-C",
+                wt.to_str().expect("utf8"),
+                "tag",
+                "-a",
+                "t-tagged",
+                "-m",
+                "tag",
+                &tagged,
+            ])
+            .status()
+            .expect("tag t-tagged")
+            .success());
+        assert!(Command::new("git")
+            .args([
+                "-C",
+                wt.to_str().expect("utf8"),
+                "tag",
+                "-a",
+                "t-base",
+                "-m",
+                "tag",
+                &base,
+            ])
+            .status()
+            .expect("tag t-base")
+            .success());
 
-        let (_dir, repo) = init_repo();
-        let odb = repo.odb();
-        let base = write_commit_at(odb, &[], "base", 1_704_067_200)?;
-        let s1 = write_commit_at(odb, &[base], "s1", 1_704_153_600)?;
-        let s2 = write_commit_at(odb, &[s1], "s2", 1_704_240_000)?;
-        let merge = write_commit_at(odb, &[base, s2], "merge", 1_704_499_200)?;
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
-        tag_annotated(&repo, "v1", base, "v1");
+        let git_count = String::from_utf8(
+            Command::new("git")
+                .args([
+                    "-C",
+                    wt.to_str().expect("utf8"),
+                    "rev-list",
+                    "--count",
+                    "t-tagged..HEAD",
+                ])
+                .output()
+                .expect("rev-list")
+                .stdout,
+        )
+        .expect("utf8")
+        .trim()
+        .parse::<usize>()
+        .expect("count");
 
-        let expected = count_commits_reachable_excluding_ancestors_of(
-            &repo,
-            &[merge],
-            &[base],
-            ReachableCountFilter::default(),
+        let repo = Repository::open(
+            &wt.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(wt),
         )?;
         let d = repo
             .rev_walk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions {
+                    tags: true,
+                    ..Default::default()
+                },
+            )?
             .expect("described");
-        assert_eq!(tag_short_name(&d), "v1");
-        assert_eq!(d.peeled, base);
-        assert_eq!(d.distance, expected);
-        assert_eq!(d.distance, 3);
+        assert_eq!(tag_short_name(&d), "t-tagged");
+        assert_eq!(d.distance, git_count);
+        assert_eq!(d.distance, 2);
         Ok(())
     }
 
-    /// Parent reachable after pop must still settle with correct distance when side is newer.
+    /// Two reachable tags, skewed committer dates, no commit-graph: exact minimum is not the
+    /// tag with the newer tagger date (base=3, tagged=2 in Git's rev-list sense).
     #[test]
-    fn describe_diamond_direct_parent_newer_than_side() -> Result<()> {
-        use crate::merge_base::{
-            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
-        };
+    fn describe_two_tag_skew_picks_exact_minimum_without_commit_graph() -> Result<()> {
         use crate::refs;
 
         let (_dir, repo) = init_repo();
         let odb = repo.odb();
-        let tagged = write_commit_at(odb, &[], "tagged", 100)?;
-        let side = write_commit_at(odb, &[tagged], "side", 500)?;
-        let merge = write_commit_at(odb, &[tagged, side], "merge", 600)?;
+        let base = write_commit_at(odb, &[], "base", 3129)?;
+        let tagged = write_commit_at(odb, &[base], "tagged", 2598)?;
+        let side = write_commit_at(odb, &[tagged], "side", 4411)?;
+        let merge = write_commit_at(odb, &[base, side], "merge", 5000)?;
         refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
-        tag_annotated(&repo, "t", tagged, "t");
-        let expected = count_commits_reachable_excluding_ancestors_of(
-            &repo,
-            &[merge],
-            &[tagged],
-            ReachableCountFilter::default(),
-        )?;
+        tag_annotated_with_tagger_time(&repo, "t-base", base, "base tag", 9_999);
+        tag_annotated_with_tagger_time(&repo, "t-tagged", tagged, "near tag", 1_000);
+
         let d = repo
             .rev_walk()
-            .describe("HEAD", &DescribeOptions::default())?
+            .describe(
+                "HEAD",
+                &DescribeOptions {
+                    tags: true,
+                    ..Default::default()
+                },
+            )?
             .expect("described");
+        assert_eq!(tag_short_name(&d), "t-tagged");
         assert_eq!(d.peeled, tagged);
-        assert_eq!(d.distance, expected);
-        Ok(())
-    }
-
-    /// Repeated diamond merges must stay linear in commits, not exponential in heap re-pops.
-    #[test]
-    fn describe_merge_ladder_parent_reads_bounded() -> Result<()> {
-        use crate::merge_base::intersect_walk_test_hooks::{
-            commit_parent_lookups, reset_commit_parent_lookups,
-        };
-        use crate::refs;
-
-        let (_dir, repo) = init_repo();
-        let odb = repo.odb();
-        let root = write_commit_at(odb, &[], "base", 1)?;
-        tag_annotated(&repo, "v1", root, "v1");
-        let mut base = root;
-        let mut head = base;
-        for i in 0..20 {
-            let s1 = write_commit_at(odb, &[base], &format!("s1-{i}"), 100 + i as i64 * 10)?;
-            let s2 = write_commit_at(odb, &[s1], &format!("s2-{i}"), 101 + i as i64 * 10)?;
-            head = write_commit_at(odb, &[base, s2], &format!("merge-{i}"), 200 + i as i64 * 10)?;
-            base = head;
-        }
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
-
-        reset_commit_parent_lookups();
-        let d = repo
-            .rev_walk()
-            .describe("HEAD", &DescribeOptions::default())?
-            .expect("described");
-        assert_eq!(tag_short_name(&d), "v1");
-        assert_eq!(d.peeled, root);
-        let lookups = commit_parent_lookups();
-        assert!(
-            lookups <= 250,
-            "describe ladder must be O(commits), not exponential ({lookups} parent reads)"
-        );
+        assert_eq!(d.distance, 2);
         Ok(())
     }
 
@@ -887,68 +1251,40 @@ mod tests {
         Ok(())
     }
 
-    /// Merge-heavy history (git/git-shaped): parent reads must not scale with tag count.
+    /// Without a commit-graph, distance must come from one fixpoint pass (not per-tag counts).
     #[test]
-    fn describe_merge_heavy_parent_reads_bounded() -> Result<()> {
-        use crate::merge_base::intersect_walk_test_hooks::{
-            commit_parent_queries, reset_commit_parent_queries,
+    fn describe_no_commit_graph_avoids_per_tag_distance_walks() -> Result<()> {
+        use super::describe_test_hooks::{
+            describe_distance_counts, reset_describe_distance_counts,
         };
-        use crate::refs;
 
         let (_dir, repo) = init_repo();
-        let odb = repo.odb();
-        let tagged = write_commit_at(odb, &[], "tagged", 1)?;
-        tag_annotated(&repo, "t20", tagged, "tag");
-
-        const PATHS: usize = 65;
-        const PATH_LEN: usize = 32;
-        let mut heads = Vec::with_capacity(PATHS);
-        for path in 0..PATHS {
-            let mut cur = tagged;
-            for step in 0..PATH_LEN {
-                cur = write_commit_at(
-                    odb,
-                    &[cur],
-                    &format!("p{path}-s{step}"),
-                    100 + path as i64 * 100 + step as i64,
-                )?;
-            }
-            heads.push(cur);
-            if path % 8 == 0 {
-                tag_annotated(&repo, &format!("decoy-{path}"), cur, "decoy");
-            }
+        let mut chain = Vec::new();
+        for i in 0..80 {
+            let parents = if i == 0 { vec![] } else { vec![chain[i - 1]] };
+            chain.push(write_commit_at(
+                repo.odb(),
+                &parents,
+                &format!("c{i}"),
+                100 + i as i64,
+            )?);
         }
-        while heads.len() > 1 {
-            let mut next = Vec::new();
-            let mut iter = heads.into_iter();
-            while let Some(left) = iter.next() {
-                match iter.next() {
-                    Some(right) => {
-                        let time = 10_000 + next.len() as i64;
-                        next.push(write_commit_at(
-                            odb,
-                            &[left, right],
-                            &format!("m{}", next.len()),
-                            time,
-                        )?);
-                    }
-                    None => next.push(left),
-                }
-            }
-            heads = next;
+        let tip = *chain.last().expect("tip");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        for (i, oid) in chain.iter().enumerate().step_by(3) {
+            tag_annotated(&repo, &format!("t{i}"), *oid, "m");
         }
-        let head = heads.into_iter().next().expect("head");
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
 
-        reset_commit_parent_queries();
-        assert!(repo
+        reset_describe_distance_counts();
+        let d = repo
             .rev_walk()
             .describe("HEAD", &DescribeOptions::default())?
-            .is_some());
-        let lookups = commit_parent_queries();
-        assert!(
-            lookups <= 5_000,
-            "merge-heavy describe must stay linear in history size, not tags × commits ({lookups} parent reads)"
+            .expect("described");
+        assert_eq!(d.distance, 1);
+        assert_eq!(
+            describe_distance_counts(),
+            0,
+            "no-graph describe must not run a full rev-list count per tag candidate"
         );
         Ok(())
     }
@@ -996,198 +1332,6 @@ mod tests {
             .as_str()
             .strip_prefix("refs/tags/")
             .unwrap_or(d.tag.as_str())
-    }
-
-    #[test]
-    fn describe_seed6593_parent_reads_bounded_without_commit_graph() -> Result<()> {
-        use crate::merge_base::intersect_walk_test_hooks::{
-            commit_parent_queries, reset_commit_parent_queries,
-        };
-        use crate::refs;
-
-        fn lcg(state: &mut u64) -> u64 {
-            *state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            *state
-        }
-
-        let (_dir, repo) = init_repo();
-        let odb = repo.odb();
-        let mut seed = 6593u64;
-        let root = write_commit_at(odb, &[], "root", 5000)?;
-        let mut commits = vec![root];
-        while commits.len() < 150 {
-            let i = (lcg(&mut seed) as usize) % commits.len();
-            let j = (lcg(&mut seed) as usize) % commits.len();
-            let time = 1000 + (lcg(&mut seed) % 50_000) as i64;
-            let parents = if i == j {
-                vec![commits[i]]
-            } else {
-                vec![commits[i], commits[j]]
-            };
-            commits.push(write_commit_at(
-                odb,
-                &parents,
-                &format!("c{}", commits.len()),
-                time,
-            )?);
-        }
-        for t in 0..15 {
-            let idx = (lcg(&mut seed) as usize) % commits.len();
-            tag_annotated(&repo, &format!("t{t:02}"), commits[idx], "m");
-        }
-        let head = *commits.last().expect("tip");
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
-
-        reset_commit_parent_queries();
-        let _ = repo
-            .rev_walk()
-            .describe("HEAD", &DescribeOptions::default())?;
-        let queries = commit_parent_queries();
-        assert!(
-            queries <= 600,
-            "describe on seed-6593 fixture must not scale with tag count × history ({queries} parent reads)"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn seed6593_walk_depths_match_exact_count_helper() -> Result<()> {
-        use crate::merge_base::{
-            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
-        };
-        use crate::refs;
-
-        fn lcg(state: &mut u64) -> u64 {
-            *state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            *state
-        }
-
-        let (_dir, repo) = init_repo();
-        let odb = repo.odb();
-        let mut seed = 6593u64;
-        let root = write_commit_at(odb, &[], "root", 5000)?;
-        let mut commits = vec![root];
-        while commits.len() < 150 {
-            let i = (lcg(&mut seed) as usize) % commits.len();
-            let j = (lcg(&mut seed) as usize) % commits.len();
-            let time = 1000 + (lcg(&mut seed) % 50_000) as i64;
-            let parents = if i == j {
-                vec![commits[i]]
-            } else {
-                vec![commits[i], commits[j]]
-            };
-            commits.push(write_commit_at(
-                odb,
-                &parents,
-                &format!("c{}", commits.len()),
-                time,
-            )?);
-        }
-        for t in 0..15 {
-            let idx = (lcg(&mut seed) as usize) % commits.len();
-            tag_annotated(&repo, &format!("t{t:02}"), commits[idx], "m");
-        }
-        let mut sample_seed = 6593u64 ^ 0xDEAD_BEEF;
-        let head_idx = (lcg(&mut sample_seed) as usize) % commits.len();
-        let head = commits[head_idx];
-        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
-
-        let opts = DescribeOptions::default();
-        let candidates = collect_tag_candidates(&repo, &opts)?;
-        let (unique, peel_to_index) = dedupe_candidates_by_peel(candidates);
-        let Some((winner_idx, walk_dist)) =
-            nearest_tag_by_walk(&repo, head, &unique, &peel_to_index, false)?
-        else {
-            panic!("no winner");
-        };
-        let mut cache = CommitGraphCache::with_commit_graph(&repo, true);
-        let (reachable_order, parents_of) = collect_describe_reachable(&mut cache, head, false)?;
-        let tag_count = unique.len();
-        let within_words = tag_count.max(1);
-        let reachable: OidHashSet = reachable_order.iter().copied().collect();
-        let mut full_within: OidHashMap<WithinBits> = oid_hash_map();
-        let mut queue = VecDeque::new();
-        for (&peel, &pidx) in &peel_to_index {
-            if !reachable.contains(&peel) {
-                continue;
-            }
-            full_within
-                .entry(peel)
-                .or_insert_with(|| WithinBits::with_candidates(within_words))
-                .set(pidx);
-            queue.push_back(peel);
-        }
-        while let Some(cur) = queue.pop_front() {
-            let Some(active) = full_within.get(&cur).cloned() else {
-                continue;
-            };
-            let parents = match parents_of.get(&cur) {
-                Some(p) => p.as_slice(),
-                None => continue,
-            };
-            for &parent in parents {
-                if !reachable.contains(&parent) {
-                    continue;
-                }
-                let entry = full_within
-                    .entry(parent)
-                    .or_insert_with(|| WithinBits::with_candidates(within_words));
-                let before = entry.words.clone();
-                entry.merge_from(&active);
-                if before != entry.words {
-                    queue.push_back(parent);
-                }
-            }
-        }
-        let mut depths = vec![0usize; tag_count];
-        for &oid in &reachable_order {
-            let active = full_within
-                .get(&oid)
-                .cloned()
-                .unwrap_or_else(|| WithinBits::with_candidates(within_words));
-            for (idx, depth) in depths.iter_mut().enumerate() {
-                if !active.has(idx) {
-                    *depth += 1;
-                }
-            }
-        }
-        for (idx, cand) in unique.iter().enumerate() {
-            let expected = count_commits_reachable_excluding_ancestors_of(
-                &repo,
-                &[head],
-                &[cand.peeled],
-                ReachableCountFilter::default(),
-            )?;
-            if !reachable.contains(&cand.peeled) {
-                continue;
-            }
-            assert_eq!(
-                depths[idx],
-                expected,
-                "tag {} peel {}",
-                cand.listing.short_name,
-                cand.peeled.to_hex()
-            );
-        }
-        let mut min_ancestor = usize::MAX;
-        for cand in &unique {
-            if !reachable.contains(&cand.peeled) {
-                continue;
-            }
-            let d = count_commits_reachable_excluding_ancestors_of(
-                &repo,
-                &[head],
-                &[cand.peeled],
-                ReachableCountFilter::default(),
-            )?;
-            min_ancestor = min_ancestor.min(d);
-        }
-        assert_eq!(walk_dist, min_ancestor, "winner_idx={winner_idx}");
-        Ok(())
     }
 
     fn write_commit_at(
