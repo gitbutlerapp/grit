@@ -41,8 +41,11 @@ use crate::error::{Error, Result};
 use crate::hooks::run_hook;
 use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
-use crate::objects::parse_commit;
+use crate::objects::{
+    parse_commit, read_commit_oneline_fields, CommitOnelineFields, Object, ObjectId, ObjectKind,
+};
 use crate::odb::Odb;
+use crate::pack::SingleLocalPackReader;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;
@@ -303,6 +306,21 @@ struct RepoCachedSettings {
     use_replace_refs: bool,
     /// Effective `refs/replace/` base path (always slash-terminated).
     replace_ref_base: String,
+}
+
+fn read_commit_object_fast(
+    single: &mut Option<SingleLocalPackReader>,
+    repo: &Repository,
+    oid: &ObjectId,
+) -> Result<Object> {
+    if let Some(reader) = single.as_mut() {
+        match reader.read_object(oid) {
+            Ok(obj) => return Ok(obj),
+            Err(Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
+    repo.odb().read(oid)
 }
 
 impl Repository {
@@ -834,6 +852,49 @@ impl Repository {
     #[must_use]
     pub fn odb(&self) -> &Odb {
         &self.odb
+    }
+
+    /// Read author lines and subjects for default log output without parsing full message bodies.
+    ///
+    /// Uses the pack read context and [`SingleLocalPackReader`] when the repo has one local pack.
+    ///
+    /// # Errors
+    ///
+    /// Returns object read and corrupt-object errors from the ODB.
+    pub fn read_commits_oneline_fields(
+        &self,
+        oids: &[ObjectId],
+    ) -> Result<Vec<CommitOnelineFields>> {
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.odb.with_pack_read_context(|| {
+            let objects_dir = self.odb.objects_dir();
+            let mut single = SingleLocalPackReader::open_allow_loose(objects_dir)?;
+            oids.iter()
+                .map(|oid| {
+                    let object = read_commit_object_fast(&mut single, self, oid)?;
+                    if object.kind != ObjectKind::Commit {
+                        return Err(Error::CorruptObject(format!(
+                            "object {oid} is not a commit"
+                        )));
+                    }
+                    read_commit_oneline_fields(&object.data)
+                })
+                .collect()
+        })
+    }
+
+    /// Read the author line and subject for one commit ([`Self::read_commits_oneline_fields`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns object read and corrupt-object errors from the ODB.
+    pub fn read_commit_oneline_fields(&self, oid: &ObjectId) -> Result<CommitOnelineFields> {
+        self.read_commits_oneline_fields(std::slice::from_ref(oid))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::CorruptObject("missing commit oneline fields".to_owned()))
     }
 
     /// Discovery provenance for safe-directory and setup tracing.

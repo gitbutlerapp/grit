@@ -91,6 +91,8 @@ struct CommitFilterInner {
     all_match: bool,
     invert_grep: bool,
     mailmap: Option<MailmapTable>,
+    /// Git `--author=.` matches every normal commit; skip per-commit identity reads in bounded walks.
+    bounded_walk_skip_identity: bool,
 }
 
 impl CommitFilter {
@@ -111,6 +113,12 @@ impl CommitFilter {
     #[must_use]
     pub fn identity_only(&self) -> bool {
         self.inner.grep.is_empty()
+    }
+
+    /// When true, bounded `-n` walks may omit per-commit identity checks (filter matches all commits).
+    #[must_use]
+    pub fn skips_identity_check_during_bounded_walk(&self) -> bool {
+        self.inner.bounded_walk_skip_identity
     }
 
     /// Match author/committer patterns against already-loaded identity header lines.
@@ -300,6 +308,7 @@ impl CommitFilterBuilder {
                 self.fixed_strings,
             )?);
         }
+        let bounded_walk_skip_identity = trivial_author_any_filter(&self);
         Ok(CommitFilter {
             inner: Arc::new(CommitFilterInner {
                 author,
@@ -308,9 +317,20 @@ impl CommitFilterBuilder {
                 all_match: self.all_match,
                 invert_grep: self.invert_grep,
                 mailmap: self.mailmap,
+                bounded_walk_skip_identity,
             }),
         })
     }
+}
+
+fn trivial_author_any_filter(builder: &CommitFilterBuilder) -> bool {
+    builder.mailmap.is_none()
+        && !builder.ignore_case
+        && !builder.fixed_strings
+        && builder.committer.is_empty()
+        && builder.grep.is_empty()
+        && builder.author.len() == 1
+        && builder.author[0].as_str() == "."
 }
 
 #[derive(Debug, Clone)]
@@ -726,5 +746,13 @@ mod tests {
             .unwrap();
         let raw = b"tree t\nauthor Wrong <old@email.com> 1 +0000\ncommitter Wrong <old@email.com> 1 +0000\n\nm\n";
         assert!(filter.matches_bytes(raw));
+    }
+
+    #[test]
+    fn author_dot_skips_bounded_walk_identity_check() {
+        let filter = CommitFilterBuilder::new().author(".").build().unwrap();
+        assert!(filter.skips_identity_check_during_bounded_walk());
+        let alice = CommitFilterBuilder::new().author("Alice").build().unwrap();
+        assert!(!alice.skips_identity_check_during_bounded_walk());
     }
 }

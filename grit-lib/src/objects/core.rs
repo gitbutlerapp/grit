@@ -837,6 +837,29 @@ pub struct CommitData {
     pub extra_headers: Vec<u8>,
 }
 
+/// Author identity line and first message line for default log output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitOnelineFields {
+    /// Full `author` header value (name, email, timestamp).
+    pub author: String,
+    /// First non-blank line of the commit message body.
+    pub subject: String,
+}
+
+/// Parse author/committer headers and the subject line without retaining the full message body.
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] when headers or the message body are malformed.
+pub fn read_commit_oneline_fields(data: &[u8]) -> Result<CommitOnelineFields> {
+    let linkage = parse_commit_linkage(data)?;
+    let subject = read_commit_subject_line(data)?;
+    Ok(CommitOnelineFields {
+        author: linkage.author,
+        subject,
+    })
+}
+
 /// Commit headers needed for graph walks without parsing the message body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommitLinkage {
@@ -1366,6 +1389,22 @@ pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
 #[cfg(test)]
 mod commit_parse_tests {
     use super::*;
+
+    #[test]
+    fn read_commit_oneline_fields_matches_full_parse() {
+        let raw = concat!(
+            "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+            "author A <a@example.com> 1 +0000\n",
+            "committer C <c@example.com> 2 +0000\n",
+            "\n",
+            "subject line\n",
+            "body\n",
+        );
+        let fields = read_commit_oneline_fields(raw.as_bytes()).expect("oneline");
+        let full = parse_commit(raw.as_bytes()).expect("parse");
+        assert_eq!(fields.author, full.author);
+        assert_eq!(fields.subject, "subject line");
+    }
 
     #[test]
     fn parse_commit_linkage_matches_commit_headers() {

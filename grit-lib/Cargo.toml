@@ -44,7 +44,7 @@ similar = { workspace = true, features = ["inline"] }
 merge3.workspace = true
 imara-diff.workspace = true
 regex.workspace = true
-fancy-regex = "0.14"
+fancy-regex = "0.19"
 libc.workspace = true
 unicode-width.workspace = true
 terminal_size.workspace = true

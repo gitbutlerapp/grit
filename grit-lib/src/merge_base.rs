@@ -544,7 +544,7 @@ impl ReachableWalkState {
     /// Propagates commit read errors while seeding the heap.
     pub fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
         let hide_vec: Vec<ObjectId> = hide.to_vec();
-        let mut cache = CommitGraphCache::new(repo);
+        let mut cache = CommitGraphCache::new_for_bounded_walk(repo);
         let mut state = Self {
             heap: BinaryHeap::new(),
             done: HashSet::new(),
@@ -728,7 +728,12 @@ impl ReachableWalkState {
         limit: Option<usize>,
         cutoffs: ReachableWalkCommitterCutoffs,
     ) -> Result<Vec<ObjectId>> {
-        self.emit_until_filtered(repo, limit, 0, cutoffs, None)
+        let cache = if limit.is_some() {
+            CommitGraphCache::new_for_bounded_walk(repo)
+        } else {
+            CommitGraphCache::new(repo)
+        };
+        self.emit_until_with_cache(limit, 0, cutoffs, None, cache)
     }
 
     /// Like [`Self::emit_until`] with `--skip` and an optional identity-only [`CommitFilter`].
@@ -744,7 +749,18 @@ impl ReachableWalkState {
         cutoffs: ReachableWalkCommitterCutoffs,
         identity_filter: Option<&CommitFilter>,
     ) -> Result<Vec<ObjectId>> {
-        let mut cache = CommitGraphCache::new(repo);
+        let cache = CommitGraphCache::new_for_bounded_walk(repo);
+        self.emit_until_with_cache(limit, skip, cutoffs, identity_filter, cache)
+    }
+
+    fn emit_until_with_cache(
+        &mut self,
+        limit: Option<usize>,
+        skip: usize,
+        cutoffs: ReachableWalkCommitterCutoffs,
+        identity_filter: Option<&CommitFilter>,
+        mut cache: CommitGraphCache<'_>,
+    ) -> Result<Vec<ObjectId>> {
         let mut out = Vec::new();
         let mut matched_seen = 0usize;
         while let Some(oid) = self.pop_next_emit(&mut cache, cutoffs, identity_filter)? {
@@ -996,7 +1012,7 @@ pub fn try_linear_chain_commits_with_cutoffs(
     limit: usize,
     cutoffs: ReachableWalkCommitterCutoffs,
 ) -> Result<Option<Vec<ObjectId>>> {
-    let mut cache = CommitGraphCache::new(repo);
+    let mut cache = CommitGraphCache::new_for_bounded_walk(repo);
     let mut out = Vec::with_capacity(limit.min(64));
     let mut stack = vec![tip];
     while let Some(cur) = stack.pop() {
@@ -1032,7 +1048,7 @@ pub fn first_parent_commits_with_cutoffs(
     limit: usize,
     cutoffs: ReachableWalkCommitterCutoffs,
 ) -> Result<Vec<ObjectId>> {
-    let mut cache = CommitGraphCache::new(repo);
+    let mut cache = CommitGraphCache::new_for_bounded_walk(repo);
     let mut out = Vec::with_capacity(limit.min(64));
     let mut stack = vec![tip];
     while let Some(cur) = stack.pop() {
@@ -1637,6 +1653,15 @@ struct CommitGraphCache<'r> {
 
 impl<'r> CommitGraphCache<'r> {
     fn new(repo: &'r Repository) -> Self {
+        Self::new_inner(repo, true)
+    }
+
+    /// Bounded newest-first walks (`-n` / `--max-count`): avoid parsing whole commit-graph files.
+    fn new_for_bounded_walk(repo: &'r Repository) -> Self {
+        Self::new_inner(repo, false)
+    }
+
+    fn new_inner(repo: &'r Repository, load_commit_graph_file: bool) -> Self {
         let cfg = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         // Stop ancestry traversal only at genuinely-missing promisor objects, not
         // at every member of a promisor pack. The clone base commit lives in a
@@ -1653,10 +1678,13 @@ impl<'r> CommitGraphCache<'r> {
         } else {
             HashSet::new()
         };
-        let graph = repo
-            .caches()
-            .commit_graph_chain(&repo.git_dir().join("objects"))
-            .map(|arc| (*arc).clone());
+        let graph = if load_commit_graph_file {
+            repo.caches()
+                .commit_graph_chain(&repo.git_dir().join("objects"))
+                .map(|arc| (*arc).clone())
+        } else {
+            None
+        };
         let shallow_boundaries = load_shallow_boundaries(repo.git_dir());
         Self {
             repo,

@@ -6059,14 +6059,15 @@ fn try_bounded_commit_filter_limit_list(
             since: options.since_cutoff,
             until: options.until_cutoff,
         };
-        let mut state = crate::merge_base::ReachableWalkState::new(repo, include, exclude)?;
-        let mut ordered = state.emit_until_filtered(
-            repo,
-            Some(max_count),
-            options.skip,
-            cutoffs,
-            Some(filter.as_ref()),
-        )?;
+        let walk_filter = if filter.skips_identity_check_during_bounded_walk() {
+            None
+        } else {
+            Some(filter.as_ref())
+        };
+        let mut ordered = repo.odb().with_pack_read_context(|| {
+            let mut state = crate::merge_base::ReachableWalkState::new(repo, include, exclude)?;
+            state.emit_until_filtered(repo, Some(max_count), options.skip, cutoffs, walk_filter)
+        })?;
         if options.reverse {
             ordered.reverse();
         }

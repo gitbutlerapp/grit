@@ -131,6 +131,7 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
     let page_size = rev.max_count.unwrap_or(PAGE);
 
     let use_rev_walk = !rev.paths.is_empty()
+        || rev.max_count.is_some()
         || opts.commit_filter.as_ref().is_some_and(|f| f.is_active())
         || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
 
@@ -163,20 +164,36 @@ fn build_outcome(
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
 
-    let commit_rows = oids
-        .iter()
-        .map(|oid| {
-            let commit = context::read_commit(repo, oid)?;
-            let (author, timestamp) = context::author_and_time(&commit.author);
-            Ok(CommitSummary {
-                oid: *oid,
-                subject: subject_line(&commit.message),
-                author,
-                author_ident: commit.author.clone(),
-                timestamp,
+    let commit_rows = if stat {
+        oids.iter()
+            .map(|oid| {
+                let commit = context::read_commit(repo, oid)?;
+                let (author, timestamp) = context::author_and_time(&commit.author);
+                Ok(CommitSummary {
+                    oid: *oid,
+                    subject: subject_line(&commit.message),
+                    author,
+                    author_ident: commit.author.clone(),
+                    timestamp,
+                })
             })
-        })
-        .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        let fields = repo.read_commits_oneline_fields(oids)?;
+        oids.iter()
+            .zip(fields)
+            .map(|(oid, fields)| {
+                let (author, timestamp) = context::author_and_time(&fields.author);
+                Ok(CommitSummary {
+                    oid: *oid,
+                    subject: fields.subject,
+                    author,
+                    author_ident: fields.author,
+                    timestamp,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
     let commits = commit_rows
         .iter()
         .map(|row| {
