@@ -849,6 +849,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "encoding_rs",
+ "fancy-regex",
  "filetime",
  "flate2",
  "grit-test-support",

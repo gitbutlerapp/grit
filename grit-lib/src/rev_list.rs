@@ -6049,6 +6049,30 @@ fn try_bounded_commit_filter_limit_list(
         return Ok(None);
     };
 
+    if filter.identity_only()
+        && matches!(
+            options.ordering,
+            OrderingMode::Default | OrderingMode::DateOrderWalk
+        )
+    {
+        let cutoffs = crate::merge_base::ReachableWalkCommitterCutoffs {
+            since: options.since_cutoff,
+            until: options.until_cutoff,
+        };
+        let mut state = crate::merge_base::ReachableWalkState::new(repo, include, exclude)?;
+        let mut ordered = state.emit_until_filtered(
+            repo,
+            Some(max_count),
+            options.skip,
+            cutoffs,
+            Some(filter.as_ref()),
+        )?;
+        if options.reverse {
+            ordered.reverse();
+        }
+        return Ok(Some(ordered));
+    }
+
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
     let excluded = if exclude.is_empty() {
@@ -6075,16 +6099,34 @@ fn try_bounded_commit_filter_limit_list(
 
     let mut matched_seen = 0usize;
     let mut ordered = Vec::with_capacity(max_count.min(64));
+    let since = options.since_cutoff;
+    let until = options.until_cutoff;
     while let Some(item) = heap.pop() {
         let oid = item.oid;
         if excluded.contains(&oid) {
             continue;
         }
 
-        if filter.matches(repo, oid)? {
-            matched_seen += 1;
-            if matched_seen > options.skip && ordered.len() < max_count {
-                ordered.push(oid);
+        let mut consider = true;
+        if since.is_some() || until.is_some() {
+            let ts = graph.committer_time(oid);
+            if until.is_some_and(|u| ts > u) || since.is_some_and(|s| ts < s) {
+                consider = false;
+            }
+        }
+
+        if consider {
+            let (author_line, committer_line) = graph.commit_identity_lines(oid)?;
+            if filter.matches_identities(
+                repo,
+                oid,
+                author_line.as_deref(),
+                committer_line.as_deref(),
+            )? {
+                matched_seen += 1;
+                if matched_seen > options.skip && ordered.len() < max_count {
+                    ordered.push(oid);
+                }
             }
         }
 
@@ -6729,6 +6771,8 @@ pub(crate) struct CommitGraph<'r> {
     commit_trees: HashMap<ObjectId, ObjectId>,
     committer_time: HashMap<ObjectId, i64>,
     author_time: HashMap<ObjectId, i64>,
+    author_lines: HashMap<ObjectId, String>,
+    committer_lines: HashMap<ObjectId, String>,
     shallow_boundaries: HashSet<ObjectId>,
     graft_parents: HashMap<ObjectId, Vec<ObjectId>>,
 }
@@ -6760,6 +6804,8 @@ impl<'r> CommitGraph<'r> {
             commit_trees: HashMap::new(),
             committer_time: HashMap::new(),
             author_time: HashMap::new(),
+            author_lines: HashMap::new(),
+            committer_lines: HashMap::new(),
             shallow_boundaries,
             graft_parents,
         }
@@ -6830,6 +6876,31 @@ impl<'r> CommitGraph<'r> {
         }
     }
 
+    pub(crate) fn commit_identity_lines(
+        &mut self,
+        oid: ObjectId,
+    ) -> Result<(Option<String>, Option<String>)> {
+        self.ensure_identity_lines(oid)?;
+        Ok((
+            self.author_lines.get(&oid).cloned(),
+            self.committer_lines.get(&oid).cloned(),
+        ))
+    }
+
+    fn ensure_identity_lines(&mut self, oid: ObjectId) -> Result<()> {
+        if self.author_lines.contains_key(&oid) {
+            return Ok(());
+        }
+        self.populate(oid)?;
+        if self.author_lines.contains_key(&oid) {
+            return Ok(());
+        }
+        let commit = load_commit(self.repo, oid)?;
+        self.author_lines.insert(oid, commit.author);
+        self.committer_lines.insert(oid, commit.committer);
+        Ok(())
+    }
+
     fn populate(&mut self, oid: ObjectId) -> Result<()> {
         if self.parents.contains_key(&oid) {
             return Ok(());
@@ -6870,6 +6941,8 @@ impl<'r> CommitGraph<'r> {
             .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
         self.author_time
             .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+        self.author_lines.insert(oid, commit.author);
+        self.committer_lines.insert(oid, commit.committer);
         self.commit_trees.insert(oid, commit.tree);
         self.parents.insert(oid, parents);
         Ok(())

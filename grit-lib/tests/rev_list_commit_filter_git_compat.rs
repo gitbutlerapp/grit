@@ -311,6 +311,55 @@ fn grep_or_and_all_match_match_git() {
 }
 
 #[test]
+fn grep_all_match_invert_combined_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let c0 =
+        commit_tree_with_identities(wt, "c0", &[], ("A", "a@x.com"), ("A", "a@x.com"), "neither");
+    let c1 = commit_tree_with_identities(
+        wt,
+        "c1",
+        &[c0],
+        ("A", "a@x.com"),
+        ("A", "a@x.com"),
+        "foo only",
+    );
+    let c2 = commit_tree_with_identities(
+        wt,
+        "c2",
+        &[c1],
+        ("A", "a@x.com"),
+        ("A", "a@x.com"),
+        "foo bar",
+    );
+    let tip =
+        commit_tree_with_identities(wt, "c3", &[c2], ("A", "a@x.com"), ("A", "a@x.com"), "aba");
+    git(wt, &["update-ref", "refs/heads/main", &tip.to_hex()]);
+    let repo = open_grit_repo(wt);
+    assert_rev_list_filter_matches_git(
+        wt,
+        &repo,
+        &[
+            "--grep=foo",
+            "--grep=bar",
+            "--all-match",
+            "--invert-grep",
+            "main",
+        ],
+    );
+}
+
+#[test]
+fn bre_grep_backreference_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let tip = commit_tree_with_identities(wt, "t", &[], ("A", "a@x.com"), ("A", "a@x.com"), "aba");
+    git(wt, &["update-ref", "refs/heads/main", &tip.to_hex()]);
+    let repo = open_grit_repo(wt);
+    assert_rev_list_filter_matches_git(wt, &repo, &["--grep", r"^\(.\).*\1$", "main"]);
+}
+
+#[test]
 fn invert_grep_matches_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
@@ -479,6 +528,120 @@ fn max_count_counts_filtered_commits_matches_git() {
     git(wt, &["update-ref", "refs/heads/main", &prev.to_hex()]);
     let repo = open_grit_repo(wt);
     assert_rev_list_filter_matches_git(wt, &repo, &["-n", "3", "--author=Alice", "main"]);
+}
+
+#[test]
+fn count_since_and_author_matches_git() {
+    use grit_lib::revwalk::{CommitFilterBuilder, RevWalkListOptions};
+    use std::sync::Arc;
+
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let mut prev =
+        commit_tree_with_identities(wt, "c0", &[], ("Bob", "b@x.com"), ("Bob", "b@x.com"), "m0");
+    for i in 1..6 {
+        prev = commit_tree_with_identities(
+            wt,
+            &format!("c{i}"),
+            &[prev],
+            ("Bob", "b@x.com"),
+            ("Bob", "b@x.com"),
+            &format!("m{i}"),
+        );
+    }
+    git(wt, &["update-ref", "refs/heads/main", &prev.to_hex()]);
+    let repo = open_grit_repo(wt);
+    let filter = Arc::new(
+        CommitFilterBuilder::new()
+            .author("Alice")
+            .build()
+            .expect("filter"),
+    );
+    let opts = RevWalkListOptions {
+        since: Some(1_000_000_000),
+        limit: Some(2),
+        commit_filter: Some(filter),
+        ..RevWalkListOptions::default()
+    };
+    let git_n = git_rev_list_count(
+        wt,
+        &[
+            "--count",
+            "-n",
+            "2",
+            "--since=1000000000",
+            "--author=Alice",
+            "HEAD",
+        ],
+    );
+    let grit_n = repo.rev_walk().count(&["HEAD"], &opts).expect("count");
+    assert_eq!(grit_n, git_n);
+}
+
+#[test]
+fn left_right_author_count_matches_git() {
+    use grit_lib::revwalk::{CommitFilterBuilder, RevWalkListOptions};
+    use std::sync::Arc;
+
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let base = commit_tree_with_identities(
+        wt,
+        "base",
+        &[],
+        ("Bob", "b@x.com"),
+        ("Bob", "b@x.com"),
+        "base",
+    );
+    let left_tip = commit_tree_with_identities(
+        wt,
+        "left",
+        &[base],
+        ("Alice", "a@x.com"),
+        ("Alice", "a@x.com"),
+        "left",
+    );
+    let right_tip = commit_tree_with_identities(
+        wt,
+        "right",
+        &[base],
+        ("Bob", "b@x.com"),
+        ("Bob", "b@x.com"),
+        "right",
+    );
+    git(wt, &["update-ref", "refs/heads/left", &left_tip.to_hex()]);
+    git(wt, &["update-ref", "refs/heads/right", &right_tip.to_hex()]);
+    let repo = open_grit_repo(wt);
+    let filter = Arc::new(
+        CommitFilterBuilder::new()
+            .author("Alice")
+            .build()
+            .expect("filter"),
+    );
+    let opts = RevWalkListOptions {
+        commit_filter: Some(filter),
+        ..RevWalkListOptions::default()
+    };
+    let range = format!("left...right");
+    let git_out = git(
+        wt,
+        &[
+            "rev-list",
+            "--left-right",
+            "--count",
+            "--author=Alice",
+            &range,
+        ],
+    );
+    let mut parts = git_out.split_whitespace();
+    let git_left: usize = parts.next().unwrap_or("0").parse().expect("left");
+    let git_right: usize = parts.next().unwrap_or("0").parse().expect("right");
+    let grit = repo
+        .rev_walk()
+        .left_right_counts(&[&range], &opts)
+        .expect("left_right");
+    assert_eq!(grit.left, git_left);
+    assert_eq!(grit.right, git_right);
 }
 
 #[test]

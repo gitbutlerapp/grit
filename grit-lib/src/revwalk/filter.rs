@@ -2,9 +2,9 @@
 //!
 //! Patterns use Git's default POSIX basic regular expression (BRE) syntax unless
 //! [`CommitFilterBuilder::fixed_strings`] is set. Callers supply an optional
-//! [`MailmapTable`](crate::config::mailmap::MailmapTable) loaded explicitly
-//! (for example via [`load_mailmap_table`](crate::config::mailmap::load_mailmap_table));
-//! the filter never reads repository config on its own.
+//! `MailmapTable` loaded explicitly
+//! (for example via [`crate::config::mailmap::load_mailmap_table`]). The filter never reads
+//! repository config on its own.
 //!
 //! ```
 //! use grit_lib::config::mailmap::MailmapTable;
@@ -26,6 +26,7 @@
 
 use std::sync::Arc;
 
+use fancy_regex::Regex as FancyRegex;
 use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use crate::config::mailmap::{map_contact_table, parse_contact, MailmapTable};
@@ -86,7 +87,7 @@ pub struct CommitFilter {
 struct CommitFilterInner {
     author: Option<RegexSet>,
     committer: Option<RegexSet>,
-    grep: Vec<Regex>,
+    grep: Vec<GrepPattern>,
     all_match: bool,
     invert_grep: bool,
     mailmap: Option<MailmapTable>,
@@ -106,6 +107,22 @@ impl CommitFilter {
         i.author.is_some() || i.committer.is_some() || !i.grep.is_empty()
     }
 
+    /// True when the filter only inspects author/committer lines (no `--grep`).
+    #[must_use]
+    pub fn identity_only(&self) -> bool {
+        self.inner.grep.is_empty()
+    }
+
+    /// Match author/committer patterns against already-loaded identity header lines.
+    #[must_use]
+    pub(crate) fn matches_identity_lines(
+        &self,
+        author_line: Option<&str>,
+        committer_line: Option<&str>,
+    ) -> bool {
+        self.matches_identity_lines_impl(author_line, committer_line)
+    }
+
     /// Test whether `oid` satisfies this filter (author/committer/grep/mailmap rules).
     ///
     /// # Errors
@@ -120,6 +137,46 @@ impl CommitFilter {
             )));
         }
         Ok(self.matches_bytes(&object.data))
+    }
+
+    /// Match author/committer lines without loading the message body (no `--grep`).
+    ///
+    /// # Errors
+    ///
+    /// Returns repository read errors when identity lines must be loaded from the ODB.
+    pub fn matches_identities(
+        &self,
+        repo: &Repository,
+        oid: ObjectId,
+        author_line: Option<&str>,
+        committer_line: Option<&str>,
+    ) -> Result<bool> {
+        let inner = &self.inner;
+        if inner.grep.is_empty() {
+            return Ok(self.matches_identity_lines_impl(author_line, committer_line));
+        }
+        self.matches(repo, oid)
+    }
+
+    fn matches_identity_lines_impl(
+        &self,
+        author_line: Option<&str>,
+        committer_line: Option<&str>,
+    ) -> bool {
+        let inner = &self.inner;
+        if let Some(set) = &inner.author {
+            let ident = mapped_ident_bytes(author_line, inner.mailmap.as_ref());
+            if !set.is_match(ident.as_bytes()) {
+                return false;
+            }
+        }
+        if let Some(set) = &inner.committer {
+            let ident = mapped_ident_bytes(committer_line, inner.mailmap.as_ref());
+            if !set.is_match(ident.as_bytes()) {
+                return false;
+            }
+        }
+        true
     }
 
     fn matches_bytes(&self, raw: &[u8]) -> bool {
@@ -142,13 +199,7 @@ impl CommitFilter {
 
         if !inner.grep.is_empty() {
             let body = commit_message_body(raw);
-            let grep_ok = if inner.all_match {
-                inner.grep.iter().all(|re| re.is_match(body))
-            } else {
-                inner.grep.iter().any(|re| re.is_match(body))
-            };
-            let grep_ok = if inner.invert_grep { !grep_ok } else { grep_ok };
-            if !grep_ok {
+            if !grep_group_matches(&inner.grep, body, inner.all_match, inner.invert_grep) {
                 return false;
             }
         }
@@ -262,6 +313,40 @@ impl CommitFilterBuilder {
     }
 }
 
+#[derive(Debug, Clone)]
+enum GrepPattern {
+    Standard(Regex),
+    Backref(FancyRegex),
+}
+
+impl GrepPattern {
+    fn is_match(&self, body: &[u8]) -> bool {
+        match self {
+            Self::Standard(re) => re.is_match(body),
+            Self::Backref(re) => std::str::from_utf8(body)
+                .ok()
+                .and_then(|s| re.is_match(s).ok())
+                .unwrap_or(false),
+        }
+    }
+}
+
+fn grep_group_matches(
+    patterns: &[GrepPattern],
+    body: &[u8],
+    all_match: bool,
+    invert_grep: bool,
+) -> bool {
+    let grep_ok = if invert_grep {
+        !patterns.iter().any(|re| re.is_match(body))
+    } else if all_match {
+        patterns.iter().all(|re| re.is_match(body))
+    } else {
+        patterns.iter().any(|re| re.is_match(body))
+    };
+    grep_ok
+}
+
 struct CommitHeaderFields<'a> {
     author: Option<&'a str>,
     committer: Option<&'a str>,
@@ -353,16 +438,56 @@ fn compile_grep_pattern(
     pattern: &str,
     ignore_case: bool,
     fixed_strings: bool,
-) -> std::result::Result<Regex, CommitFilterError> {
+) -> std::result::Result<GrepPattern, CommitFilterError> {
     let rust_pat = pattern_to_rust_regex(pattern, ignore_case, fixed_strings)?;
     let with_newline = format!("(?m){rust_pat}");
-    RegexBuilder::new(&with_newline)
-        .case_insensitive(ignore_case)
-        .build()
-        .map_err(|e| CommitFilterError::InvalidPattern {
-            pattern: pattern.to_owned(),
-            detail: e.to_string(),
-        })
+    if !fixed_strings && bre_has_backreference(pattern) {
+        let fancy_pat = if ignore_case {
+            format!("(?i){with_newline}")
+        } else {
+            with_newline
+        };
+        FancyRegex::new(&fancy_pat)
+            .map(GrepPattern::Backref)
+            .map_err(|e| CommitFilterError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                detail: e.to_string(),
+            })
+    } else {
+        RegexBuilder::new(&with_newline)
+            .case_insensitive(ignore_case)
+            .build()
+            .map(GrepPattern::Standard)
+            .map_err(|e| CommitFilterError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                detail: e.to_string(),
+            })
+    }
+}
+
+fn bre_has_backreference(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0usize;
+    let mut in_bracket = false;
+    while i + 1 < chars.len() {
+        if in_bracket {
+            if chars[i] == ']' && i > 0 {
+                in_bracket = false;
+            }
+            i += 1;
+            continue;
+        }
+        if chars[i] == '[' {
+            in_bracket = true;
+            i += 1;
+            continue;
+        }
+        if chars[i] == '\\' && chars[i + 1].is_ascii_digit() && chars[i + 1] != '0' {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 fn pattern_to_rust_regex(
@@ -457,6 +582,11 @@ pub(crate) fn bre_translate_to_rust_regex(pattern: &str) -> std::result::Result<
                     out.push('}');
                     i += 2;
                 }
+                c @ '1'..='9' => {
+                    out.push('\\');
+                    out.push(c);
+                    i += 2;
+                }
                 _ => {
                     out.push('\\');
                     out.push(chars[i + 1]);
@@ -539,6 +669,34 @@ mod tests {
             .unwrap();
         assert!(!invert.matches_bytes(msg));
         assert!(invert.matches_bytes(partial));
+
+        let foo_bar = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nfoo bar\n";
+        let foo_only = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nfoo only\n";
+        let neither = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nneither\n";
+        let aba = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\naba\n";
+        let all_invert = CommitFilterBuilder::new()
+            .grep("foo")
+            .grep("bar")
+            .all_match(true)
+            .invert_grep(true)
+            .build()
+            .unwrap();
+        assert!(!all_invert.matches_bytes(foo_bar));
+        assert!(!all_invert.matches_bytes(foo_only));
+        assert!(all_invert.matches_bytes(neither));
+        assert!(all_invert.matches_bytes(aba));
+    }
+
+    #[test]
+    fn bre_backreference_grep_matches_aba() {
+        let filter = CommitFilterBuilder::new()
+            .grep(r"^\(.\).*\1$")
+            .build()
+            .expect("backref pattern");
+        let hit = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\naba\n";
+        assert!(filter.matches_bytes(hit));
+        let miss = b"tree t\nauthor A <a> 1 +0000\ncommitter A <a> 1 +0000\n\nabc\n";
+        assert!(!filter.matches_bytes(miss));
     }
 
     #[test]

@@ -18,6 +18,7 @@ use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_upstream_symbolic_name,
     upstream_suffix_info,
 };
+use crate::revwalk::filter::CommitFilter;
 use crate::shallow::load_shallow_boundaries;
 
 /// Resolve commit-ish command arguments to commit object IDs.
@@ -672,6 +673,7 @@ impl ReachableWalkState {
         &mut self,
         cache: &mut CommitGraphCache<'_>,
         cutoffs: ReachableWalkCommitterCutoffs,
+        identity_filter: Option<&CommitFilter>,
     ) -> Result<Option<ObjectId>> {
         loop {
             let Some(key) = self.heap.pop() else {
@@ -703,6 +705,13 @@ impl ReachableWalkState {
                 self.after_processed(cache, oid)?;
                 continue;
             }
+            if let Some(filter) = identity_filter.filter(|f| f.is_active() && f.identity_only()) {
+                let (author, committer) = cache.commit_identity_lines(oid)?;
+                if !filter.matches_identity_lines(Some(author.as_str()), Some(committer.as_str())) {
+                    self.after_processed(cache, oid)?;
+                    continue;
+                }
+            }
             self.after_processed(cache, oid)?;
             return Ok(Some(oid));
         }
@@ -719,10 +728,30 @@ impl ReachableWalkState {
         limit: Option<usize>,
         cutoffs: ReachableWalkCommitterCutoffs,
     ) -> Result<Vec<ObjectId>> {
+        self.emit_until_filtered(repo, limit, 0, cutoffs, None)
+    }
+
+    /// Like [`Self::emit_until`] with `--skip` and an optional identity-only [`CommitFilter`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read and ancestry errors during traversal.
+    pub fn emit_until_filtered(
+        &mut self,
+        repo: &Repository,
+        limit: Option<usize>,
+        skip: usize,
+        cutoffs: ReachableWalkCommitterCutoffs,
+        identity_filter: Option<&CommitFilter>,
+    ) -> Result<Vec<ObjectId>> {
         let mut cache = CommitGraphCache::new(repo);
         let mut out = Vec::new();
-        while let Some(oid) = self.pop_next_emit(&mut cache, cutoffs)? {
-            out.push(oid);
+        let mut matched_seen = 0usize;
+        while let Some(oid) = self.pop_next_emit(&mut cache, cutoffs, identity_filter)? {
+            matched_seen += 1;
+            if matched_seen > skip && limit.is_none_or(|n| out.len() < n) {
+                out.push(oid);
+            }
             if limit.is_some_and(|n| out.len() >= n) {
                 break;
             }
@@ -774,7 +803,7 @@ pub fn walk_commits_reachable_excluding_ancestors_of_cutoffs(
         let mut cache = CommitGraphCache::new(repo);
         let mut out = Vec::new();
         let mut emitted = 0usize;
-        while let Some(oid) = state.pop_next_emit(&mut cache, cutoffs)? {
+        while let Some(oid) = state.pop_next_emit(&mut cache, cutoffs, None)? {
             emitted += 1;
             if out.len() < k {
                 out.push(oid);
@@ -1708,11 +1737,13 @@ impl<'r> CommitGraphCache<'r> {
                     "object {commit_oid} is not a commit"
                 )));
             }
-            let commit = parse_commit(&object.data)?;
-            let time = crate::ident::committer_timestamp_for_until_filter(&commit.committer);
+            let linkage = crate::objects::parse_commit_linkage(&object.data)?;
+            let time = crate::ident::committer_timestamp_for_until_filter(&linkage.committer);
             self.with_linkage(|link| {
                 link.times.insert(oid, time);
                 link.parents.insert(oid, Vec::new());
+                link.authors.insert(oid, linkage.author.clone());
+                link.committers.insert(oid, linkage.committer.clone());
             });
             return Ok(Vec::new());
         }
@@ -1771,8 +1802,61 @@ impl<'r> CommitGraphCache<'r> {
         self.with_linkage(|link| {
             link.times.insert(oid, time);
             link.parents.insert(oid, parents.clone());
+            link.authors.insert(oid, linkage.author.clone());
+            link.committers.insert(oid, linkage.committer.clone());
         });
         Ok(parents)
+    }
+
+    fn commit_identity_lines(&mut self, oid: ObjectId) -> Result<(String, String)> {
+        if let Some(pair) =
+            self.with_linkage(
+                |link| match (link.authors.get(&oid), link.committers.get(&oid)) {
+                    (Some(a), Some(c)) => Some((a.clone(), c.clone())),
+                    _ => None,
+                },
+            )
+        {
+            return Ok(pair);
+        }
+        self.parents_of(oid)?;
+        if let Some(pair) =
+            self.with_linkage(
+                |link| match (link.authors.get(&oid), link.committers.get(&oid)) {
+                    (Some(a), Some(c)) => Some((a.clone(), c.clone())),
+                    _ => None,
+                },
+            )
+        {
+            return Ok(pair);
+        }
+        let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+            Error::InvalidRef(msg) => Error::CorruptObject(msg),
+            other => other,
+        })?;
+        self.ensure_single_pack_reader();
+        let linkage = if let Some(reader) = self.single_pack.as_mut() {
+            let object = reader.read_object(&commit_oid)?;
+            if object.kind != ObjectKind::Commit {
+                return Err(Error::CorruptObject(format!(
+                    "object {commit_oid} is not a commit"
+                )));
+            }
+            crate::objects::parse_commit_linkage(&object.data)?
+        } else {
+            let object = self.repo.odb().read(&commit_oid)?;
+            if object.kind != ObjectKind::Commit {
+                return Err(Error::CorruptObject(format!(
+                    "object {commit_oid} is not a commit"
+                )));
+            }
+            crate::objects::parse_commit_linkage(&object.data)?
+        };
+        self.with_linkage(|link| {
+            link.authors.insert(oid, linkage.author.clone());
+            link.committers.insert(oid, linkage.committer.clone());
+        });
+        Ok((linkage.author, linkage.committer))
     }
 
     /// Committer timestamp (unix seconds) for `oid`, peeling tags to their commit.

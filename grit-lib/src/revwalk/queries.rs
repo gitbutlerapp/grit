@@ -311,6 +311,10 @@ impl<'repo> RevWalk<'repo> {
             && !options.reverse
             && options.merges == MergeFilter::Any
             && !options.first_parent
+            && options
+                .commit_filter
+                .as_ref()
+                .is_none_or(|f| !f.is_active())
         {
             let tip = crate::rev_parse::resolve_revision_for_range_end(repo, &positive[0])?;
             let tip = crate::rev_parse::peel_to_commit_for_merge_base(repo, tip)?;
@@ -357,6 +361,10 @@ impl<'repo> RevWalk<'repo> {
             && options.skip == 0
             && options.limit.is_none()
             && !options.reverse
+            && options
+                .commit_filter
+                .as_ref()
+                .is_none_or(|f| !f.is_active())
         {
             let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
             let filter = ReachableCountFilter {

@@ -131,7 +131,6 @@ pub fn run(rev: RevSelectArgs, cursor: Option<String>, stat: bool) -> Result<Log
     let page_size = rev.max_count.unwrap_or(PAGE);
 
     let use_rev_walk = !rev.paths.is_empty()
-        || rev.max_count.is_some()
         || opts.commit_filter.as_ref().is_some_and(|f| f.is_active())
         || LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?.is_none();
 

@@ -36,6 +36,8 @@ use crate::repo::Repository;
 pub(crate) struct CommitLinkageCache {
     pub parents: HashMap<ObjectId, Vec<ObjectId>>,
     pub times: HashMap<ObjectId, i64>,
+    pub authors: HashMap<ObjectId, String>,
+    pub committers: HashMap<ObjectId, String>,
 }
 
 /// Per-repository cache arena (held behind [`Arc`] on [`Repository`]).
