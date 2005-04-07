@@ -252,6 +252,55 @@ mod tests {
     }
 
     #[test]
+    fn fingerprint_rejects_invalid_trailer_width_and_malformed_header() {
+        let tiny = b"PACK\x00\x00\x00\x02\x00\x00\x00\x00";
+        let owned = PackData::from_owned(tiny.to_vec());
+        assert!(owned.fingerprint(19).is_err());
+        assert!(owned.fingerprint(33).is_err());
+        assert!(fingerprint_from_file(
+            &tempfile::tempdir().expect("d").path().join("missing.pack"),
+            20
+        )
+        .is_err());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.pack");
+        fs::write(&path, b"NOTPACK\x00\x00\x00\x02\x00\x00\x00\x00").expect("write");
+        let err = fingerprint_from_file(&path, 20).expect_err("bad sig");
+        assert!(matches!(err, Error::CorruptObject(_)));
+
+        fs::write(&path, b"PACK\x00\x00\x00\x09\x00\x00\x00\x00").expect("bad ver");
+        let err = fingerprint_from_file(&path, 20).expect_err("bad ver");
+        assert!(matches!(err, Error::CorruptObject(_)));
+
+        fs::write(&path, b"PACK\x00\x00\x00\x02").expect("trunc");
+        assert!(matches!(
+            PackData::open(&path),
+            Err(Error::CorruptObject(_))
+        ));
+
+        let mut short_trailer = Vec::from(b"PACK\x00\x00\x00\x02\x00\x00\x00\x00" as &[u8]);
+        short_trailer.push(0);
+        fs::write(&path, &short_trailer).expect("short trailer");
+        let err = fingerprint_from_file(&path, 20).expect_err("short trailer");
+        assert!(matches!(err, Error::CorruptObject(_)));
+    }
+
+    #[test]
+    fn owned_buffer_when_pack_at_or_below_threshold() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("medium.pack");
+        let mut pack = Vec::from(b"PACK\x00\x00\x00\x02\x00\x00\x00\x00" as &[u8]);
+        pack.resize(8192, 0);
+        pack.extend_from_slice(b"aaaaaaaaaaaaaaaaaaaa");
+        fs::write(&path, &pack).expect("write");
+        let data = PackData::open(&path).expect("open owned");
+        assert_eq!(data.len(), pack.len());
+        let fp = data.fingerprint(20).expect("fp");
+        assert_eq!(fp.trailer, b"aaaaaaaaaaaaaaaaaaaa".to_vec());
+    }
+
+    #[test]
     fn mmap_large_sparse_pack() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("sparse.pack");

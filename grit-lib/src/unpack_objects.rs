@@ -476,8 +476,11 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
     let _version = rd.read_u32_be()?;
     let nr_objects = rd.read_u32_be()? as usize;
 
-    let mut in_pack: HashSet<ObjectId> = HashSet::new();
+    let mut by_offset: HashMap<usize, (ObjectKind, Vec<u8>)> = HashMap::new();
+    let mut by_oid: HashMap<ObjectId, (ObjectKind, Vec<u8>)> = HashMap::new();
     let mut ref_delta_bases: Vec<ObjectId> = Vec::new();
+    let mut pending: Vec<PendingDelta> = Vec::new();
+
     for _ in 0..nr_objects {
         let obj_offset = rd.pos;
         let (type_code, size) = rd.read_type_size()?;
@@ -485,24 +488,71 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let obj_data = rd.decompress(size)?;
-                in_pack.insert(crate::hash::hash_object(algo, kind, &obj_data));
+                let oid = crate::hash::hash_object(algo, kind, &obj_data);
+                by_offset.insert(obj_offset, (kind, obj_data.clone()));
+                by_oid.insert(oid, (kind, obj_data));
             }
             6 => {
-                // ofs-delta: base is always in-pack (referenced by relative offset).
-                let _neg = rd.read_ofs_neg_offset()?;
-                let _ = obj_offset;
-                let _ = rd.decompress(size)?;
+                let neg = rd.read_ofs_neg_offset()?;
+                let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
+                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
+                })?;
+                let delta_data = rd.decompress(size)?;
+                pending.push(PendingDelta {
+                    offset: obj_offset,
+                    base_oid: None,
+                    base_offset: Some(base_offset),
+                    delta_data,
+                });
             }
             7 => {
                 let base_bytes = rd.read_exact(algo.len())?;
-                ref_delta_bases.push(ObjectId::from_bytes(base_bytes)?);
-                let _ = rd.decompress(size)?;
+                let base_oid = ObjectId::from_bytes(base_bytes)?;
+                ref_delta_bases.push(base_oid);
+                let delta_data = rd.decompress(size)?;
+                pending.push(PendingDelta {
+                    offset: obj_offset,
+                    base_oid: Some(base_oid),
+                    base_offset: None,
+                    delta_data,
+                });
             }
             _ => return Ok(false),
         }
     }
-    // Thin iff any ref-delta points at a base that is not packed alongside it.
-    Ok(ref_delta_bases.iter().any(|b| !in_pack.contains(b)))
+
+    let mut remaining = pending;
+    loop {
+        if remaining.is_empty() {
+            break;
+        }
+        let before = remaining.len();
+        let mut still_pending: Vec<PendingDelta> = Vec::new();
+        for delta in remaining {
+            let base = if let Some(base_off) = delta.base_offset {
+                by_offset.get(&base_off).cloned()
+            } else if let Some(ref base_id) = delta.base_oid {
+                by_oid.get(base_id).cloned()
+            } else {
+                None
+            };
+            if let Some((base_kind, base_data)) = base {
+                let result = apply_delta(&base_data, &delta.delta_data)?;
+                let oid = crate::hash::hash_object(algo, base_kind, &result);
+                by_offset.insert(delta.offset, (base_kind, result.clone()));
+                by_oid.insert(oid, (base_kind, result));
+            } else {
+                still_pending.push(delta);
+            }
+        }
+        remaining = still_pending;
+        if remaining.len() == before {
+            break;
+        }
+    }
+
+    // Thin iff a ref-delta names a base OID that is not stored anywhere in this pack.
+    Ok(ref_delta_bases.iter().any(|b| !by_oid.contains_key(b)))
 }
 
 /// Parse a pack byte stream and return every resolved object (after delta resolution) keyed by OID.

@@ -17,7 +17,9 @@ use grit_lib::index::MODE_REGULAR;
 use grit_lib::index_pack::{ingest_received_pack, install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::odb::Odb;
-use grit_lib::pack::{read_pack_index, write_v2_pack_index, write_v2_pack_index_with_trailer};
+use grit_lib::pack::{
+    read_pack_bytes_cached, read_pack_index, write_v2_pack_index, write_v2_pack_index_with_trailer,
+};
 use grit_lib::pack_rev::{
     append_hashfile_checksum, build_pack_rev_bytes, build_pack_rev_bytes_from_index_order_offsets,
     build_pack_rev_bytes_from_index_order_offsets_and_checksum, hashfile_checksum_valid,
@@ -75,8 +77,10 @@ const INGEST_VARIANTS: &[IngestPackOptions] = &[
 enum PackShape {
     GitWhole,
     GitDelta,
-    GritWhole,
-    GritDelta,
+    /// Whole objects from [`build_pack`] (`PackBuildOptions::delta = false`).
+    PackBuilderWhole,
+    /// Delta-compressed objects from [`build_pack`] (`PackBuildOptions::delta = true`).
+    PackBuilderDelta,
 }
 
 impl PackShape {
@@ -84,9 +88,13 @@ impl PackShape {
         match self {
             Self::GitWhole => "git-whole",
             Self::GitDelta => "git-delta",
-            Self::GritWhole => "grit-whole",
-            Self::GritDelta => "grit-delta",
+            Self::PackBuilderWhole => "pack-builder-whole",
+            Self::PackBuilderDelta => "pack-builder-delta",
         }
+    }
+
+    fn expects_delta_entries(self) -> bool {
+        matches!(self, Self::GitDelta | Self::PackBuilderDelta)
     }
 }
 
@@ -134,6 +142,165 @@ fn init_repo(dir: &Path, sha256: bool) {
     }
 }
 
+fn pack_header_count(bytes: &[u8]) -> u32 {
+    u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]])
+}
+
+fn read_type_size(b: &[u8]) -> (u8, u64, usize) {
+    let mut c = b[0];
+    let type_code = (c >> 4) & 0x7;
+    let mut size = (c & 0x0f) as u64;
+    let mut shift = 4u32;
+    let mut i = 1usize;
+    while c & 0x80 != 0 {
+        c = b[i];
+        size |= ((c & 0x7f) as u64) << shift;
+        shift += 7;
+        i += 1;
+    }
+    (type_code, size, i)
+}
+
+fn zlib_consume(b: &[u8]) -> usize {
+    use std::io::Read as _;
+    let mut dec = flate2::bufread::ZlibDecoder::new(b);
+    let mut sink = Vec::new();
+    dec.read_to_end(&mut sink).expect("zlib decode");
+    dec.total_in() as usize
+}
+
+/// `(ref_delta_count, ofs_delta_count, total_objects)` walking the PACK v2 stream.
+fn pack_delta_stats(bytes: &[u8], algo_len: usize) -> (usize, usize, usize) {
+    let nr = pack_header_count(bytes) as usize;
+    let mut pos = 12usize;
+    let mut ofs = 0usize;
+    let mut refs = 0usize;
+    for _ in 0..nr {
+        let (type_code, _size, consumed) = read_type_size(&bytes[pos..]);
+        pos += consumed;
+        match type_code {
+            6 => {
+                ofs += 1;
+                while bytes[pos] & 0x80 != 0 {
+                    pos += 1;
+                }
+                pos += 1;
+            }
+            7 => {
+                refs += 1;
+                pos += algo_len;
+            }
+            _ => {}
+        }
+        pos += zlib_consume(&bytes[pos..]);
+    }
+    (refs, ofs, nr)
+}
+
+fn assert_pack_contains_deltas(bytes: &[u8], algo: HashAlgo, label: &str) {
+    let (ref_d, ofs_d, total) = pack_delta_stats(bytes, algo.len());
+    assert!(
+        ref_d + ofs_d > 0,
+        "{label}: expected OFS_DELTA or REF_DELTA entries (verify-pack-style walk), \
+         got ref={ref_d} ofs={ofs_d} total={total}"
+    );
+}
+
+fn git_verify_pack_reports_deltas(pack: &[u8], algo: HashAlgo) {
+    let scratch = tempfile::tempdir().expect("scratch");
+    if algo == HashAlgo::Sha256 {
+        git_run(
+            scratch.path(),
+            &["init", "-q", "--object-format=sha256", "-b", "main", "."],
+        );
+    } else {
+        git_run(scratch.path(), &["init", "-q", "-b", "main", "."]);
+    }
+    let pack_path = scratch.path().join("in.pack");
+    std::fs::write(&pack_path, pack).expect("write pack");
+    git_run(
+        scratch.path(),
+        &[
+            "index-pack",
+            pack_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .expect("name"),
+        ],
+    );
+    let out = Command::new("git")
+        .current_dir(scratch.path())
+        .args(["verify-pack", "-v", "in.idx"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("verify-pack");
+    assert!(
+        out.status.success(),
+        "git verify-pack: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let has_delta_chain =
+        text.contains("chain length =") || text.lines().any(|l| l.contains(" delta "));
+    assert!(
+        has_delta_chain,
+        "git verify-pack must report at least one delta chain:\n{text}"
+    );
+}
+
+fn git_pack_objects_stdout(dir: &Path, tips: &[ObjectId]) -> Vec<u8> {
+    let mut child = Command::new("git");
+    child
+        .current_dir(dir)
+        .args(["pack-objects", "--stdout", "--revs", "--delta-base-offset"]);
+    for (k, v) in GIT_ENV {
+        child.env(k, v);
+    }
+    child
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = child.spawn().expect("spawn git pack-objects");
+    {
+        let mut stdin = child.stdin.take().expect("stdin");
+        for tip in tips {
+            writeln!(stdin, "{}", tip.to_hex()).expect("write rev");
+        }
+    }
+    let out = child.wait_with_output().expect("wait pack-objects");
+    assert!(
+        out.status.success(),
+        "git pack-objects: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+}
+
+fn build_delta_bait_repo(dir: &Path) -> Vec<ObjectId> {
+    let mut body = String::new();
+    for i in 0..4000 {
+        body.push_str(&format!(
+            "line {i:05} lorem ipsum dolor sit amet consectetur\n"
+        ));
+    }
+    let mut tips = Vec::new();
+    for rev in 0..6 {
+        body.push_str(&format!("--- revision {rev} appended ---\n"));
+        std::fs::write(dir.join("big.txt"), body.as_bytes()).expect("write big.txt");
+        git_run(dir, &["add", "big.txt"]);
+        git_run(dir, &["commit", "-q", "-m", &format!("c{rev}")]);
+        tips.push(ObjectId::from_hex(git(dir, &["rev-parse", "HEAD"]).trim()).expect("commit oid"));
+    }
+    tips
+}
+
+fn reseal_ridx_trailing_checksum(mut data: Vec<u8>, hash_len: usize) -> Vec<u8> {
+    data.truncate(data.len().saturating_sub(hash_len));
+    append_hashfile_checksum(&mut data, hash_len);
+    data
+}
+
 fn read_pack_from_repo(git_dir: &Path) -> Vec<u8> {
     let pack_dir = git_dir.join("objects/pack");
     let pack_path = std::fs::read_dir(&pack_dir)
@@ -170,21 +337,26 @@ fn build_git_delta_pack(sha256: bool) -> PackFixture {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
     init_repo(dir, sha256);
-    std::fs::write(dir.join("data.txt"), b"seed payload for deltas\n").expect("write");
-    git_run(dir, &["add", "data.txt"]);
-    git_run(dir, &["commit", "-q", "-m", "seed"]);
-    for i in 1..=12 {
-        let payload = format!("seed payload for deltas — revision {i}\n");
-        std::fs::write(dir.join("data.txt"), payload).expect("write");
-        git_run(dir, &["commit", "-am", &format!("edit {i}")]);
-    }
-    git_run(dir, &["repack", "-adf", "--depth=50", "-q"]);
-    let pack = read_pack_from_repo(&dir.join(".git"));
+    let tips = build_delta_bait_repo(dir);
+    let pack = git_pack_objects_stdout(dir, &tips);
     let algo = if sha256 {
         HashAlgo::Sha256
     } else {
         HashAlgo::Sha1
     };
+    assert_pack_contains_deltas(&pack, algo, "git pack-objects delta pack");
+    let hb = algo.len();
+    assert!(
+        pack.len() >= 12 + hb,
+        "git delta pack shorter than header + trailer"
+    );
+    let body = &pack[..pack.len() - hb];
+    assert_eq!(
+        algo.digest(body).as_bytes(),
+        &pack[pack.len() - hb..],
+        "git pack-objects pack trailer must match repository hash algorithm"
+    );
+    git_verify_pack_reports_deltas(&pack, algo);
     PackFixture {
         bytes: pack,
         algo,
@@ -207,14 +379,20 @@ fn open_odb_for_algo(sha256: bool) -> (tempfile::TempDir, Odb) {
     (tmp, odb)
 }
 
-fn build_grit_pack(sha256: bool, delta: bool) -> PackFixture {
+fn build_pack_builder_pack(sha256: bool, delta: bool) -> PackFixture {
     let (tmp, odb) = open_odb_for_algo(sha256);
     let algo = odb.hash_algo();
+    let mut body = String::new();
+    for i in 0..4000 {
+        body.push_str(&format!(
+            "line {i:05} pack builder shared prefix for delta selection\n"
+        ));
+    }
     let mut oids = Vec::new();
-    for i in 0..8 {
-        let data = format!("grit pack builder blob {i}\n");
+    for rev in 0..6 {
+        body.push_str(&format!("--- pack-builder revision {rev} ---\n"));
         let oid = odb
-            .write(ObjectKind::Blob, data.as_bytes())
+            .write(ObjectKind::Blob, body.as_bytes())
             .expect("write blob");
         oids.push(oid);
     }
@@ -224,10 +402,22 @@ fn build_grit_pack(sha256: bool, delta: bool) -> PackFixture {
         &[],
         &PackBuildOptions {
             delta,
+            window: 10,
+            max_depth: 50,
             ..Default::default()
         },
     )
     .expect("build_pack");
+    if delta {
+        assert_pack_contains_deltas(&pack, algo, "grit pack builder delta pack");
+    } else {
+        let (ref_d, ofs_d, _) = pack_delta_stats(&pack, algo.len());
+        assert_eq!(
+            ref_d + ofs_d,
+            0,
+            "whole-object pack builder must not emit deltas"
+        );
+    }
     PackFixture {
         bytes: pack,
         algo,
@@ -237,13 +427,13 @@ fn build_grit_pack(sha256: bool, delta: bool) -> PackFixture {
 
 static GIT_WHOLE_SHA1: OnceLock<PackFixture> = OnceLock::new();
 static GIT_DELTA_SHA1: OnceLock<PackFixture> = OnceLock::new();
-static GRIT_WHOLE_SHA1: OnceLock<PackFixture> = OnceLock::new();
-static GRIT_DELTA_SHA1: OnceLock<PackFixture> = OnceLock::new();
+static PACK_BUILDER_WHOLE_SHA1: OnceLock<PackFixture> = OnceLock::new();
+static PACK_BUILDER_DELTA_SHA1: OnceLock<PackFixture> = OnceLock::new();
 
 static GIT_WHOLE_SHA256: OnceLock<Option<PackFixture>> = OnceLock::new();
 static GIT_DELTA_SHA256: OnceLock<Option<PackFixture>> = OnceLock::new();
-static GRIT_WHOLE_SHA256: OnceLock<Option<PackFixture>> = OnceLock::new();
-static GRIT_DELTA_SHA256: OnceLock<Option<PackFixture>> = OnceLock::new();
+static PACK_BUILDER_WHOLE_SHA256: OnceLock<Option<PackFixture>> = OnceLock::new();
+static PACK_BUILDER_DELTA_SHA256: OnceLock<Option<PackFixture>> = OnceLock::new();
 
 fn shared_pack(shape: PackShape, algo: HashAlgo) -> Option<&'static PackFixture> {
     match (shape, algo) {
@@ -253,11 +443,11 @@ fn shared_pack(shape: PackShape, algo: HashAlgo) -> Option<&'static PackFixture>
         (PackShape::GitDelta, HashAlgo::Sha1) => {
             Some(GIT_DELTA_SHA1.get_or_init(|| build_git_delta_pack(false)))
         }
-        (PackShape::GritWhole, HashAlgo::Sha1) => {
-            Some(GRIT_WHOLE_SHA1.get_or_init(|| build_grit_pack(false, false)))
+        (PackShape::PackBuilderWhole, HashAlgo::Sha1) => {
+            Some(PACK_BUILDER_WHOLE_SHA1.get_or_init(|| build_pack_builder_pack(false, false)))
         }
-        (PackShape::GritDelta, HashAlgo::Sha1) => {
-            Some(GRIT_DELTA_SHA1.get_or_init(|| build_grit_pack(false, true)))
+        (PackShape::PackBuilderDelta, HashAlgo::Sha1) => {
+            Some(PACK_BUILDER_DELTA_SHA1.get_or_init(|| build_pack_builder_pack(false, true)))
         }
         (PackShape::GitWhole, HashAlgo::Sha256) => GIT_WHOLE_SHA256
             .get_or_init(|| {
@@ -279,28 +469,35 @@ fn shared_pack(shape: PackShape, algo: HashAlgo) -> Option<&'static PackFixture>
                 Some(build_git_delta_pack(true))
             })
             .as_ref(),
-        (PackShape::GritWhole, HashAlgo::Sha256) => GRIT_WHOLE_SHA256
+        (PackShape::PackBuilderWhole, HashAlgo::Sha256) => PACK_BUILDER_WHOLE_SHA256
             .get_or_init(|| {
                 let probe = tempfile::tempdir().ok()?;
                 if !git_try(probe.path(), &["init", "--object-format=sha256"]) {
                     return None;
                 }
                 drop(probe);
-                Some(build_grit_pack(true, false))
+                Some(build_pack_builder_pack(true, false))
             })
             .as_ref(),
-        (PackShape::GritDelta, HashAlgo::Sha256) => GRIT_DELTA_SHA256
+        (PackShape::PackBuilderDelta, HashAlgo::Sha256) => PACK_BUILDER_DELTA_SHA256
             .get_or_init(|| {
                 let probe = tempfile::tempdir().ok()?;
                 if !git_try(probe.path(), &["init", "--object-format=sha256"]) {
                     return None;
                 }
                 drop(probe);
-                Some(build_grit_pack(true, true))
+                Some(build_pack_builder_pack(true, true))
             })
             .as_ref(),
     }
 }
+
+const ALL_PACK_SHAPES: [PackShape; 4] = [
+    PackShape::GitWhole,
+    PackShape::GitDelta,
+    PackShape::PackBuilderWhole,
+    PackShape::PackBuilderDelta,
+];
 
 fn git_index_pack_rev(pack: &[u8], algo: HashAlgo) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let dir = tempfile::tempdir().expect("scratch");
@@ -457,6 +654,7 @@ fn install_into_git_repo(
     pack: Vec<u8>,
     algo: HashAlgo,
     opts: &IngestPackOptions,
+    label: &str,
 ) -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().expect("install repo");
     let git_dir = tmp.path().join("repo.git");
@@ -469,31 +667,35 @@ fn install_into_git_repo(
         git_run(tmp.path(), &["init", "--bare", "-q", "repo.git"]);
     }
     let odb = Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir.clone());
-    install_pack_bytes(pack, &odb, opts).expect("install pack");
+    install_pack_bytes(pack, &odb, opts)
+        .unwrap_or_else(|e| panic!("install pack ({label}, {opts:?}): {e}"));
     (tmp, git_dir)
 }
 
 #[test]
 fn idx_and_rev_match_git_for_all_pack_shapes_sha1() {
-    for shape in [
-        PackShape::GitWhole,
-        PackShape::GitDelta,
-        PackShape::GritWhole,
-        PackShape::GritDelta,
-    ] {
+    for shape in ALL_PACK_SHAPES {
         let fx = shared_pack(shape, HashAlgo::Sha1).expect("fixture");
         assert_idx_rev_matches_git(&fx.bytes, fx.algo, shape);
     }
 }
 
 #[test]
+fn delta_pack_fixtures_contain_delta_entries() {
+    for shape in [PackShape::GitDelta, PackShape::PackBuilderDelta] {
+        let fx = shared_pack(shape, HashAlgo::Sha1).expect("fixture");
+        assert!(
+            shape.expects_delta_entries(),
+            "test matrix mislabeled {shape:?}"
+        );
+        assert_pack_contains_deltas(&fx.bytes, fx.algo, shape.label());
+        git_verify_pack_reports_deltas(&fx.bytes, fx.algo);
+    }
+}
+
+#[test]
 fn idx_and_rev_match_git_for_all_pack_shapes_sha256() {
-    for shape in [
-        PackShape::GitWhole,
-        PackShape::GitDelta,
-        PackShape::GritWhole,
-        PackShape::GritDelta,
-    ] {
+    for shape in ALL_PACK_SHAPES {
         let Some(fx) = shared_pack(shape, HashAlgo::Sha256) else {
             eprintln!("skip: sha256 object format unavailable ({})", shape.label());
             continue;
@@ -521,15 +723,11 @@ fn pack_index_records_with_threads_matches_single_thread() {
 
 #[test]
 fn ingest_every_option_passes_git_verify_and_fsck_sha1() {
-    for shape in [
-        PackShape::GitWhole,
-        PackShape::GitDelta,
-        PackShape::GritWhole,
-        PackShape::GritDelta,
-    ] {
+    for shape in ALL_PACK_SHAPES {
         let fx = shared_pack(shape, HashAlgo::Sha1).expect("fixture");
         for opts in INGEST_VARIANTS {
-            let (_keep, git_dir) = install_into_git_repo(fx.bytes.clone(), fx.algo, opts);
+            let (_keep, git_dir) =
+                install_into_git_repo(fx.bytes.clone(), fx.algo, opts, shape.label());
             git_verify_and_fsck(&git_dir.join("objects/pack"), fx.algo);
         }
     }
@@ -551,7 +749,7 @@ fn ingest_received_pack_matches_install_sha1() {
 
 #[test]
 fn pack_is_thin_classifies_thin_and_full_packs() {
-    let full = shared_pack(PackShape::GritWhole, HashAlgo::Sha1).expect("fixture");
+    let full = shared_pack(PackShape::PackBuilderWhole, HashAlgo::Sha1).expect("fixture");
     assert!(
         !pack_is_thin(&full.bytes, full.algo),
         "whole-object pack must not be thin"
@@ -604,8 +802,10 @@ fn verify_pack_rev_accepts_git_rev_and_rejects_corruption() {
     let positions = try_rev_positions_in_pack_order(&git_rev, index.len()).expect("rev order");
     assert_eq!(positions.len(), index.len());
 
+    let hb = fx.algo.len();
     let mut bad_sig = git_rev.clone();
     bad_sig[0..4].copy_from_slice(&0xDEADBEEF_u32.to_be_bytes());
+    let bad_sig = reseal_ridx_trailing_checksum(bad_sig, hb);
     assert!(
         verify_pack_rev_file_contents(&bad_sig, &index, "bad.rev").is_err(),
         "bad signature must fail"
@@ -613,10 +813,12 @@ fn verify_pack_rev_accepts_git_rev_and_rejects_corruption() {
 
     let mut bad_ver = git_rev.clone();
     bad_ver[4..8].copy_from_slice(&99u32.to_be_bytes());
+    let bad_ver = reseal_ridx_trailing_checksum(bad_ver, hb);
     assert!(verify_pack_rev_file_contents(&bad_ver, &index, "bad.rev").is_err());
 
     let mut bad_hash_id = git_rev.clone();
     bad_hash_id[8..12].copy_from_slice(&99u32.to_be_bytes());
+    let bad_hash_id = reseal_ridx_trailing_checksum(bad_hash_id, hb);
     assert!(verify_pack_rev_file_contents(&bad_hash_id, &index, "bad.rev").is_err());
 
     let mut bad_perm = git_rev.clone();
@@ -626,11 +828,11 @@ fn verify_pack_rev_accepts_git_rev_and_rejects_corruption() {
         let first = u32::from_be_bytes(bad_perm[pos..pos + 4].try_into().unwrap());
         bad_perm[pos..pos + 4].copy_from_slice(&first.to_be_bytes()); // duplicate on purpose
         bad_perm[pos + 4..pos + 8].copy_from_slice(&first.to_be_bytes());
+        let bad_perm = reseal_ridx_trailing_checksum(bad_perm, hb);
         assert!(verify_pack_rev_file_contents(&bad_perm, &index, "bad.rev").is_err());
     }
 
     let mut bad_checksum = git_rev.clone();
-    let hb = fx.algo.len();
     let last = bad_checksum.len();
     bad_checksum[last - hb] ^= 0xFF;
     assert!(verify_pack_rev_file_contents(&bad_checksum, &index, "bad.rev").is_err());
@@ -955,7 +1157,7 @@ fn pack_rev_fsck_messages_cover_header_and_body_errors() {
 
 #[test]
 fn pack_index_build_errors_and_thin_pack_with_odb_base() {
-    let fx = shared_pack(PackShape::GritWhole, HashAlgo::Sha1).expect("fixture");
+    let fx = shared_pack(PackShape::PackBuilderWhole, HashAlgo::Sha1).expect("fixture");
     let tmp = tempfile::tempdir().expect("odb");
     let odb = Odb::new(tmp.path());
     let mut corrupt = fx.bytes.clone();
@@ -1036,4 +1238,22 @@ fn pack_index_build_sha256_delta_pack_threads() {
     let (grit_idx, grit_rev) = grit_idx_rev_bytes(&pack_on_disk, &odb, 4, false);
     assert_eq!(grit_idx, git_idx);
     assert_eq!(grit_rev, git_rev);
+}
+
+#[test]
+fn read_pack_bytes_cached_serves_installed_delta_pack() {
+    let fx = shared_pack(PackShape::GitDelta, HashAlgo::Sha1).expect("fixture");
+    let (_keep, git_dir) =
+        install_into_git_repo(fx.bytes.clone(), fx.algo, &INGEST_VARIANTS[0], "git-delta");
+    let pack_dir = git_dir.join("objects/pack");
+    let pack_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .expect("pack file");
+    let cached = read_pack_bytes_cached(&pack_path).expect("read_pack_bytes_cached");
+    assert_eq!(&cached[..], fx.bytes.as_slice());
+    assert_pack_contains_deltas(&cached, fx.algo, "cached installed delta pack");
+    grit_lib::pack::clear_pack_cache();
 }
