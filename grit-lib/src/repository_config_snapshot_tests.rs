@@ -158,6 +158,55 @@ mod tests {
     }
 
     #[test]
+    fn repository_config_reloads_after_external_local_rewrite() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        assert!(repo.config().unwrap().get("grit.rewriteKey").is_none());
+
+        let config_path = repo.git_dir().join("config");
+        let existing = fs::read_to_string(&config_path).expect("read config");
+        let mut lines: Vec<&str> = existing.lines().collect();
+        lines.push("[grit]");
+        lines.push("\trewriteKey = replaced");
+        fs::write(&config_path, lines.join("\n")).expect("rewrite config");
+
+        assert_eq!(
+            repo.config().unwrap().get("grit.rewriteKey").as_deref(),
+            Some("replaced")
+        );
+    }
+
+    #[test]
+    fn repository_config_reloads_after_external_local_append() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        assert!(repo
+            .config()
+            .unwrap()
+            .get("grit.externalAppendKey")
+            .is_none());
+
+        let config_path = repo.git_dir().join("config");
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&config_path)
+            .expect("append config");
+        use std::io::Write;
+        file.write_all(b"\n[grit]\n\texternalAppendKey = seen\n")
+            .expect("write");
+
+        assert_eq!(
+            repo.config()
+                .unwrap()
+                .get("grit.externalAppendKey")
+                .as_deref(),
+            Some("seen")
+        );
+    }
+
+    #[test]
     fn repository_config_reload_after_write() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();

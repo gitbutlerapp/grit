@@ -224,8 +224,6 @@ pub struct Odb {
     extra_read_sources: Vec<Arc<dyn ObjectStore>>,
     /// When false, alternate object directories are not consulted ([`OdbBuilder::alternates`]).
     alternates_enabled: bool,
-    /// Avoid re-reading the same loose object repeatedly during one repository session.
-    session_loose_reads: Arc<std::sync::Mutex<std::collections::HashMap<ObjectId, Object>>>,
 }
 
 const _: () = {
@@ -314,7 +312,6 @@ impl Odb {
             custom_primary: None,
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
-            session_loose_reads: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -364,30 +361,11 @@ impl Odb {
             custom_primary: None,
             extra_read_sources: Vec::new(),
             alternates_enabled: true,
-            session_loose_reads: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
             hot_path_test_metrics: crate::hot_path_test_metrics::HotPathTestMetrics::new(),
         }
-    }
-
-    fn session_cached_loose_read(&self, oid: &ObjectId) -> Option<Object> {
-        self.session_loose_reads.lock().ok()?.get(oid).cloned()
-    }
-
-    fn remember_session_loose_read(&self, oid: &ObjectId, obj: &Object) {
-        if let Ok(mut guard) = self.session_loose_reads.lock() {
-            if guard.len() > 256 {
-                guard.clear();
-            }
-            guard.insert(*oid, obj.clone());
-        }
-    }
-
-    fn finish_session_loose_read(&self, oid: &ObjectId, obj: Object) -> Result<Object> {
-        self.remember_session_loose_read(oid, &obj);
-        Ok(obj)
     }
 
     /// Hot-path regression counters (crate-internal tests only).
@@ -412,6 +390,7 @@ impl Odb {
         state: crate::repo::RepositoryConfigSnapshot,
         env: Arc<crate::environment::Environment>,
     ) -> Self {
+        self.pack_store.set_repo_caches(Arc::clone(&state));
         self.shared_config_state = Some(state);
         self.shared_environment = Some(env);
         self
@@ -425,11 +404,6 @@ impl Odb {
     }
 
     fn load_config_cascade(&self) -> Result<ConfigSet> {
-        if let Some(caches) = &self.shared_config_state {
-            if let Some(cfg) = caches.session_config() {
-                return Ok(cfg.as_ref().clone());
-            }
-        }
         if let (Some(caches), Some(env)) = (&self.shared_config_state, &self.shared_environment) {
             let git_dir = self
                 .config_git_dir
@@ -1442,10 +1416,6 @@ impl Odb {
             });
         }
 
-        if let Some(obj) = self.session_cached_loose_read(oid) {
-            return Ok(obj);
-        }
-
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(obj);
         }
@@ -1469,7 +1439,7 @@ impl Odb {
         } else {
             self.with_pack_store_for(&self.objects_dir, read_primary)
         } {
-            Ok(Some(obj)) => return self.finish_session_loose_read(oid, obj),
+            Ok(Some(obj)) => return Ok(obj),
             Ok(None) => {}
             Err(err)
                 if files_primary
@@ -1482,12 +1452,12 @@ impl Odb {
         }
 
         if let Some(obj) = self.try_read_extra_sources(oid)? {
-            return self.finish_session_loose_read(oid, obj);
+            return Ok(obj);
         }
 
         if self.alternates_enabled {
             match self.sources()?.read(oid) {
-                Ok(Some(obj)) => return self.finish_session_loose_read(oid, obj),
+                Ok(Some(obj)) => return Ok(obj),
                 Ok(None) => {}
                 Err(err) => return Err(err),
             }

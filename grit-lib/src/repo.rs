@@ -626,6 +626,11 @@ impl Repository {
                 {
                     return Ok(());
                 }
+                let env = self.environment.as_ref();
+                let base_stamps = config_file_stamps(env, Some(&self.git_dir), &opts);
+                if session.validation.base_stamps.as_slice() != base_stamps.as_slice() {
+                    self.caches.invalidate_config_file_derived();
+                }
             }
         }
         self.caches.clear_session_config();

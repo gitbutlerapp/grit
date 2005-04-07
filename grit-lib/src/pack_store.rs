@@ -57,6 +57,8 @@ pub struct PackStore {
     catalog: RwLock<crate::pack::pack_cache::CatalogState>,
     delta_bases: crate::pack::pack_cache::ShardedDeltaBaseLru,
     midx: Mutex<crate::midx::midx_cache::State>,
+    /// Repository-scoped config cache for MIDX chain parsing (paired with [`crate::odb::Odb`]).
+    repo_caches: RwLock<Option<Arc<crate::repo_caches::RepoCaches>>>,
 }
 
 const _: () = {
@@ -83,7 +85,47 @@ impl PackStore {
             catalog: RwLock::new(crate::pack::pack_cache::CatalogState::default()),
             delta_bases: crate::pack::pack_cache::ShardedDeltaBaseLru::new(),
             midx: Mutex::new(crate::midx::midx_cache::State::default()),
+            repo_caches: RwLock::new(None),
         }
+    }
+
+    /// Share the open repository's config cache for pack/MIDX reads on this store.
+    pub(crate) fn set_repo_caches(&self, caches: Arc<crate::repo_caches::RepoCaches>) {
+        if let Ok(mut guard) = self.repo_caches.write() {
+            *guard = Some(caches);
+        }
+    }
+
+    fn repo_caches(&self) -> Option<Arc<crate::repo_caches::RepoCaches>> {
+        self.repo_caches
+            .read()
+            .ok()
+            .and_then(|g| g.as_ref().map(Arc::clone))
+    }
+
+    /// Config cache for MIDX reads against `objects_dir`, when opened via [`crate::odb::Odb`].
+    pub(crate) fn repo_caches_for_objects_dir(
+        objects_dir: &Path,
+    ) -> Option<Arc<crate::repo_caches::RepoCaches>> {
+        if Self::has_context() {
+            let store = Self::active_for_reads();
+            if store.objects_dir() == objects_dir {
+                return store.repo_caches();
+            }
+        }
+        LEGACY_BY_DIR.with(|map| {
+            map.borrow()
+                .get(objects_dir)
+                .and_then(|store| store.repo_caches())
+        })
+    }
+
+    /// Like [`Self::repo_caches_for_objects_dir`] using a repository `config` path.
+    pub(crate) fn repo_caches_for_config_path(
+        config_path: &Path,
+    ) -> Option<Arc<crate::repo_caches::RepoCaches>> {
+        let git_dir = config_path.parent()?;
+        Self::repo_caches_for_objects_dir(&git_dir.join("objects"))
     }
 
     /// Generation counter incremented when pack caches are invalidated.
