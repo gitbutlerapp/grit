@@ -36,44 +36,52 @@ use crate::parallel::{
 pub(crate) fn extend_send_order_blob_deltas(
     send: &[ObjectId],
     objects: &HashMap<ObjectId, Object>,
+    blob_name_hashes: &HashMap<ObjectId, u32>,
     islands: &DeltaIslands,
     delta_to_base: &mut HashMap<ObjectId, ObjectId>,
     skip_targets: &HashSet<ObjectId>,
     hash_len: usize,
 ) {
-    let mut prev_blob: Option<ObjectId> = None;
+    let mut recent_same_path: HashMap<u32, Vec<ObjectId>> = HashMap::new();
     for &oid in send {
         let obj = &objects[&oid];
         if obj.kind != ObjectKind::Blob || obj.data.is_empty() {
             continue;
         }
+        let path_key = blob_name_hashes.get(&oid).copied().unwrap_or(0);
         if skip_targets.contains(&oid) || delta_to_base.contains_key(&oid) {
-            prev_blob = Some(oid);
+            recent_same_path.entry(path_key).or_default().push(oid);
             continue;
         }
-        if let Some(base) = prev_blob {
-            if !islands.in_same_island(&oid, &base) {
-                prev_blob = Some(oid);
-                continue;
+        let max_size = obj.data.len().saturating_div(2).saturating_sub(hash_len);
+        if max_size > 0 {
+            let mut best_base = None;
+            let mut best_len = max_size.saturating_add(1);
+            if let Some(candidates) = recent_same_path.get(&path_key) {
+                for &base in candidates.iter().rev() {
+                    if base == oid || !islands.in_same_island(&oid, &base) {
+                        continue;
+                    }
+                    let base_data = &objects[&base].data;
+                    let chosen =
+                        if obj.data.starts_with(base_data) && obj.data.len() > base_data.len() {
+                            encode_prefix_extension_delta(base_data, &obj.data).ok()
+                        } else {
+                            DeltaIndex::new(base_data).encode(&obj.data, max_size)
+                        };
+                    if let Some(delta) = chosen {
+                        if delta.len() <= max_size && delta.len() < best_len {
+                            best_len = delta.len();
+                            best_base = Some(base);
+                        }
+                    }
+                }
             }
-            let max_size = obj.data.len().saturating_div(2).saturating_sub(hash_len);
-            if max_size == 0 {
-                prev_blob = Some(oid);
-                continue;
-            }
-            let base_data = &objects[&base].data;
-            let chosen = if obj.data.starts_with(base_data) && obj.data.len() > base_data.len() {
-                encode_prefix_extension_delta(base_data, &obj.data)
-                    .ok()
-                    .filter(|d| d.len() <= max_size)
-            } else {
-                DeltaIndex::new(base_data).encode(&obj.data, max_size)
-            };
-            if chosen.is_some() {
+            if let Some(base) = best_base {
                 delta_to_base.insert(oid, base);
             }
         }
-        prev_blob = Some(oid);
+        recent_same_path.entry(path_key).or_default().push(oid);
     }
 }
 

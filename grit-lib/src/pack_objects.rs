@@ -827,6 +827,7 @@ fn plan_deltas(
         crate::pack_delta::extend_send_order_blob_deltas(
             send,
             &objects,
+            blob_name_hashes,
             &islands,
             &mut delta_to_base,
             &reuse_delta_bases,

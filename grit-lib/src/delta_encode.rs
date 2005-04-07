@@ -97,7 +97,7 @@ pub(crate) fn push_insert(out: &mut Vec<u8>, mut data: &[u8]) {
 
 /// Rolling-hash index over a base buffer for reuse when encoding many targets.
 pub struct DeltaIndex {
-    inner: crate::delta_rabin::RabinDeltaIndex,
+    inner: crate::pack_roll_delta::BaseMatchCatalog,
 }
 
 impl DeltaIndex {
@@ -105,7 +105,7 @@ impl DeltaIndex {
     #[must_use]
     pub fn new(base: &[u8]) -> Self {
         Self {
-            inner: crate::delta_rabin::RabinDeltaIndex::new(base),
+            inner: crate::pack_roll_delta::BaseMatchCatalog::build(base),
         }
     }
 
@@ -172,6 +172,12 @@ mod tests {
     }
 
     #[test]
+    fn empty_target_respects_max_size_before_return() {
+        let base = b"non-empty base";
+        assert!(DeltaIndex::new(base).encode(b"", 1).is_none());
+    }
+
+    #[test]
     fn empty_base_and_target_roundtrip() {
         assert_roundtrip(b"", b"");
     }
@@ -187,6 +193,24 @@ mod tests {
     #[test]
     fn roundtrip_lcp_delta() {
         assert_roundtrip(b"padding\n9", b"padding\n10");
+    }
+
+    #[test]
+    fn roundtrip_mid_file_insertion() {
+        let mut lines: Vec<String> = (1..=200)
+            .map(|i| format!("The quick brown fox jumps over the lazy dog line {i}\n"))
+            .collect();
+        let base = lines.join("");
+        lines.insert(100, "inserted: extra line for delta test\n".to_owned());
+        let target = lines.join("");
+        let delta = encode_delta(base.as_bytes(), target.as_bytes(), 0).expect("encode");
+        assert!(
+            delta.len() * 100 <= target.len() * 105,
+            "delta {} bytes vs target {} (want <=5%)",
+            delta.len(),
+            target.len()
+        );
+        assert_roundtrip(base.as_bytes(), target.as_bytes());
     }
 
     #[test]
@@ -357,6 +381,31 @@ mod tests {
         assert!(
             delta.len() < target.len() / 10,
             "delta {} vs target {} (expect Git-scale compression)",
+            delta.len(),
+            target.len()
+        );
+    }
+
+    #[test]
+    fn multi_line_edit_step_encodes_small() {
+        let line = " some moderately long line of text to make blob bigger abcdefghijklmnop\n";
+        let mut body = String::new();
+        while body.len() < 90 * 1024 {
+            let n = body.lines().count() + 1;
+            body.push_str(&format!("{n}{line}"));
+        }
+        let base = body.as_bytes();
+        let mut lines: Vec<String> = body.lines().map(str::to_owned).collect();
+        let stride = lines.len() / 16;
+        for k in 0..15 {
+            let idx = (3 + k * stride).min(lines.len().saturating_sub(1));
+            lines[idx] = format!("edit 1-{k}");
+        }
+        let target = lines.join("\n");
+        let delta = encode_delta(base, target.as_bytes(), 0).expect("encode");
+        assert!(
+            delta.len() < target.len() / 10,
+            "delta {} vs target {}",
             delta.len(),
             target.len()
         );

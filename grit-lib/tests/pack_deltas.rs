@@ -90,6 +90,64 @@ fn t5303_apply_delta_source_size_mismatch_is_rejected() {
 // --- delta_encode round-trip via git index-pack ---
 
 #[test]
+fn rolling_hash_delta_mid_insertion_index_pack_strict_and_git_fsck() {
+    run_algo(HashAlgo::Sha1, |algo| {
+        let mut lines: Vec<String> = (1..=4000)
+            .map(|i| format!("pack delta base line {i}\n"))
+            .collect();
+        let base = lines.join("");
+        lines.insert(
+            2000,
+            "pack delta base line INSERTED for rolling hash\n".to_owned(),
+        );
+        let target = lines.join("");
+        let base = base.into_bytes();
+        let target = target.into_bytes();
+        let delta = encode_delta(&base, &target, 0).expect("encode");
+        assert_eq!(apply_delta(&base, &delta).expect("apply"), target);
+        assert!(
+            delta.len() * 100 <= target.len() * 105,
+            "delta {} vs target {} bytes",
+            delta.len(),
+            target.len()
+        );
+
+        let base_oid = ObjectId::from_hex(&hash_loose_object(algo, "blob", &base)).unwrap();
+        let built = {
+            let mut builder = PackBuilder::new(algo);
+            builder.add_full(PackObjectKind::Blob, &base);
+            builder.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
+            builder.build()
+        };
+        let repo = RepoFixture::init(algo).expect("init");
+        let outcome = write_pack_and_index(
+            &repo.objects_dir(),
+            "rolling-hash-insert",
+            &built.bytes,
+            algo,
+            &IndexPackOptions::default(),
+        );
+        assert!(outcome.index_ok, "{}", outcome.index_stderr);
+
+        let pack_path = outcome.pack_path;
+        let strict = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["index-pack", "--strict", "-v"])
+            .arg(&pack_path)
+            .output()
+            .expect("git index-pack --strict");
+        assert!(
+            strict.status.success(),
+            "strict index-pack: {}",
+            String::from_utf8_lossy(&strict.stderr)
+        );
+
+        let fsck = git_fsck(repo.path(), true);
+        assert!(fsck.ok, "git fsck --strict: {:?}", fsck.msg_ids);
+    });
+}
+
+#[test]
 fn rolling_hash_delta_mid_edit_index_pack_strict_and_git_fsck() {
     run_algo(HashAlgo::Sha1, |algo| {
         let mut lines: Vec<String> = (1..=4000)
