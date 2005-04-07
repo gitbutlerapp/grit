@@ -419,8 +419,8 @@ pub fn build_pack_from_send_list(
     if !opts.delta {
         return serialize_pack(odb, send, opts);
     }
-    let plan = plan_deltas(odb, send, have_closure, opts, blob_name_hashes, None)?;
-    crate::pack_delta::serialize_pack_with_deltas(odb, &plan.entries, opts, None)
+    let plan = plan_deltas(odb, send, have_closure, opts, blob_name_hashes, Some(1))?;
+    crate::pack_delta::serialize_pack_with_deltas(odb, &plan.entries, opts, Some(1))
 }
 
 /// Like [`build_pack`] with an explicit pack-write worker override for tests and embedders.
@@ -847,7 +847,9 @@ fn plan_deltas(
             },
             search_threads,
         )?;
-        delta_to_base.extend(window_found);
+        for (target, base) in window_found {
+            delta_to_base.entry(target).or_insert(base);
+        }
 
         if opts.thin {
             let hash_len = odb.hash_algo().len();

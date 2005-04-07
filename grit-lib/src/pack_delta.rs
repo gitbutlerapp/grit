@@ -154,7 +154,11 @@ pub(crate) fn search_windowed_blob_deltas(
 
     let par = pack_delta_search_parallel_options(odb, search_threads)?;
     let segments = fixed_delta_segments(sorted.len(), opts.window);
-    let workers = par.threads.get().min(segments.len()).max(1);
+    let workers = if sorted.len() <= 250 {
+        1
+    } else {
+        par.threads.get().min(segments.len()).max(1)
+    };
     let sorted = Arc::new(sorted);
 
     let segment_params = SegmentSearchParams {
@@ -254,6 +258,9 @@ fn segment_warmup(sorted: &[ObjectId], start: usize, window: usize) -> Vec<Objec
 fn fixed_delta_segments(n: usize, window: usize) -> Vec<(usize, usize)> {
     if n == 0 {
         return Vec::new();
+    }
+    if n <= 250 {
+        return vec![(0, n)];
     }
     let chunk = (2 * window).max(1);
     if n <= chunk {
