@@ -229,6 +229,86 @@ fn t1410_expire_matches_git_byte_for_byte() {
     }
 }
 
+/// Git `parse_expiry_date` / `match_digit`: bare values below `100_000_000` are not literal epochs.
+#[test]
+fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
+    each_backend(|backend, repo| {
+        let refname = "refs/heads/main";
+        let git_dir = repo.git_dir();
+        let oid = git_empty_commit_oid(repo.worktree());
+        write_ref(&git_dir, refname, &oid).expect("tip");
+        let body = format!(
+            "0000000000000000000000000000000000000000 {oid} {identity}\t2020\n",
+            identity = reflog_identity(1_577_836_800)
+        );
+        let path = reflog_file_path(&git_dir, refname);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("mkdir logs");
+        }
+        fs::write(&path, body).expect("write 2020 reflog");
+
+        for (expire_val, label) in [(90_000_i64, "90000"), (100_000_000_i64, "100000000")] {
+            let grit_copy = tempfile::tempdir().expect("grit copy");
+            let git_copy = tempfile::tempdir().expect("git copy");
+            copy_worktree(repo.worktree(), grit_copy.path());
+            copy_worktree(repo.worktree(), git_copy.path());
+
+            write_repo_config(
+                grit_copy.path(),
+                &format!("[gc]\n\treflogExpire = {expire_val}\n"),
+            );
+            if expire_val == 90_000 {
+                let cfg = load_repo_config(&grit_copy.path().join(".git"));
+                let gc = load_gc_reflog_expire_config(&cfg, NOW);
+                assert_ne!(
+                    gc.global_total,
+                    Some(90_000),
+                    "90000 must not parse as a literal Unix epoch"
+                );
+            }
+            write_repo_config(
+                git_copy.path(),
+                &format!("[gc]\n\treflogExpire = {expire_val}\n"),
+            );
+
+            grit_expire_git(
+                grit_copy.path(),
+                refname,
+                ReflogExpireParams {
+                    stale_fix: false,
+                    dry_run: false,
+                    verbose: false,
+                },
+                None,
+                None,
+            );
+            git_expire(
+                git_copy.path(),
+                &[
+                    "reflog",
+                    "expire",
+                    &format!("--expire={expire_val}"),
+                    "--expire-unreachable=never",
+                    refname,
+                ],
+            );
+
+            let git_log = reflog_tree_bytes(&git_copy.path().join(".git"));
+            let grit_log = reflog_tree_bytes(&grit_copy.path().join(".git"));
+            assert_eq!(
+                grit_log, git_log,
+                "expire={label}: grit reflog bytes differ from git"
+            );
+            if backend == Backend::Files {
+                assert_reflog_tree_matches(
+                    &git_copy.path().join(".git"),
+                    &grit_copy.path().join(".git"),
+                );
+            }
+        }
+    });
+}
+
 #[test]
 fn t1421_grit_written_entries_read_by_git_log_g() {
     each_backend(|_, repo| {

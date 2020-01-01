@@ -632,18 +632,12 @@ fn parse_gc_reflog_expiry(raw: &str, now: i64) -> Result<i64> {
     if s.eq_ignore_ascii_case("now") || s.eq_ignore_ascii_case("all") {
         return Ok(i64::MAX);
     }
-    if let Ok(n) = s.parse::<u64>() {
-        if n == 0 {
-            return Ok(0);
-        }
-        // Match Git: bare integers above one day in seconds are absolute timestamps.
-        if n > 86_400 {
-            return Ok(n as i64);
-        }
-        return Ok(now - (n as i64 * 86_400));
+    let mut err = 0;
+    let ts = crate::git_date::approx::approxidate_careful_at(s, now, Some(&mut err));
+    if err != 0 {
+        return Err(Error::Message(format!("invalid reflog expiry: {raw:?}")));
     }
-    s.parse::<i64>()
-        .map_err(|_| Error::Message(format!("invalid reflog expiry: {raw:?}")))
+    i64::try_from(ts).map_err(|_| Error::Message(format!("reflog expiry out of range: {raw:?}")))
 }
 
 /// Default `gc.reflogExpire`: reachable reflog entries older than this are dropped.
@@ -1059,18 +1053,17 @@ mod default_expire_tests {
     use super::{parse_gc_reflog_expiry, parse_reflog_line};
 
     #[test]
-    fn gc_reflog_expiry_bare_integer_days_vs_timestamp() {
+    fn gc_reflog_expiry_uses_git_approxidate_threshold() {
         let now = 1_700_000_000_i64;
-        assert_eq!(
-            parse_gc_reflog_expiry("90", now).expect("days"),
-            now - 90 * 86_400
-        );
-        assert_eq!(
-            parse_gc_reflog_expiry("1600000000", now).expect("ts"),
-            1_600_000_000
-        );
         assert_eq!(parse_gc_reflog_expiry("never", now).expect("never"), 0);
         assert_eq!(parse_gc_reflog_expiry("now", now).expect("now"), i64::MAX);
+        // Git `match_digit`: bare integers >= 100_000_000 are Unix timestamps.
+        assert_eq!(
+            parse_gc_reflog_expiry("100000000", now).expect("100M"),
+            100_000_000
+        );
+        // 86_401..99_999_999 are not literal epoch seconds (e.g. 90000 → approxidate, not 90000).
+        assert_ne!(parse_gc_reflog_expiry("90000", now).expect("90000"), 90_000);
     }
 
     #[test]
