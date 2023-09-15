@@ -7,6 +7,7 @@ mod support;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use grit_lib::config::ConfigSet;
 use grit_lib::environment::Environment;
@@ -30,6 +31,16 @@ use support::{
 };
 
 const NOW: i64 = 1_700_000_000;
+
+fn wall_clock_now() -> i64 {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_secs(),
+    )
+    .expect("now fits in i64")
+}
 
 fn load_repo_config(git_dir: &Path) -> ConfigSet {
     ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("load config")
@@ -306,6 +317,145 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
                 );
             }
         }
+    });
+}
+
+/// Git wildmatch must not treat `refs/heads/main*suffix` as matching `refs/heads/main`.
+#[test]
+fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
+    each_backend(|backend, repo| {
+        let refname = "refs/heads/main";
+        let now = wall_clock_now();
+        let git_dir = repo.git_dir();
+        let oid = git_empty_commit_oid(repo.worktree());
+        write_ref(&git_dir, refname, &oid).expect("tip");
+        let ts = now - 60 * 86_400;
+        let body = format!(
+            "0000000000000000000000000000000000000000 {oid} {identity}\tsixty-day\n",
+            identity = reflog_identity(ts)
+        );
+        let path = reflog_file_path(&git_dir, refname);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("mkdir logs");
+        }
+        fs::write(&path, body).expect("write reflog");
+
+        let config_fragment = "[gc \"refs/heads/main*suffix\"]\n\treflogExpire = now\n";
+
+        let grit_copy = tempfile::tempdir().expect("grit copy");
+        let git_copy = tempfile::tempdir().expect("git copy");
+        copy_worktree(repo.worktree(), grit_copy.path());
+        copy_worktree(repo.worktree(), git_copy.path());
+
+        append_repo_config(grit_copy.path(), config_fragment);
+        append_repo_config(git_copy.path(), config_fragment);
+
+        let grit_git_dir = grit_copy.path().join(".git");
+        let grit_repo = open_repo(grit_copy.path());
+        let cfg = load_repo_config(&grit_git_dir);
+        let gc = load_gc_reflog_expire_config(&cfg, now);
+        let grit_result = expire_reflog_git(
+            &grit_repo,
+            &grit_git_dir,
+            refname,
+            &ReflogExpireParams {
+                stale_fix: false,
+                dry_run: false,
+                verbose: false,
+            },
+            None,
+            None,
+            &gc.patterns,
+            gc.global_total,
+            gc.global_unreachable,
+            now,
+        )
+        .expect("grit expire");
+        assert_eq!(
+            grit_result.pruned, 0,
+            "main*suffix must not match refs/heads/main (would prune with gc now)"
+        );
+
+        git_expire(git_copy.path(), &["reflog", "expire", "refs/heads/main"]);
+
+        assert_reflog_tree_matches(
+            &git_copy.path().join(".git"),
+            &grit_copy.path().join(".git"),
+        );
+        assert!(
+            !read_reflog(&grit_git_dir, refname)
+                .expect("grit read")
+                .is_empty(),
+            "pattern must not apply to refs/heads/main"
+        );
+        let _ = backend;
+    });
+}
+
+/// When several per-ref gc patterns match, Git uses the first matching rule in config order.
+#[test]
+fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
+    each_backend(|backend, repo| {
+        let refname = "refs/heads/main";
+        let now = wall_clock_now();
+        let git_dir = repo.git_dir();
+        let oid = git_empty_commit_oid(repo.worktree());
+        write_ref(&git_dir, refname, &oid).expect("tip");
+        let ts = now - 60 * 86_400;
+        let body = format!(
+            "0000000000000000000000000000000000000000 {oid} {identity}\tsixty-day\n",
+            identity = reflog_identity(ts)
+        );
+        let path = reflog_file_path(&git_dir, refname);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("mkdir logs");
+        }
+        fs::write(&path, body).expect("write reflog");
+
+        let config_fragment = "\
+[gc \"refs/heads/main\"]\n\
+\treflogExpire = now\n\
+[gc \"refs/heads/*\"]\n\
+\treflogExpire = never\n\
+";
+
+        let grit_copy = tempfile::tempdir().expect("grit copy");
+        let git_copy = tempfile::tempdir().expect("git copy");
+        copy_worktree(repo.worktree(), grit_copy.path());
+        copy_worktree(repo.worktree(), git_copy.path());
+
+        append_repo_config(grit_copy.path(), config_fragment);
+        append_repo_config(git_copy.path(), config_fragment);
+
+        let grit_git_dir = grit_copy.path().join(".git");
+        let grit_repo = open_repo(grit_copy.path());
+        let cfg = load_repo_config(&grit_git_dir);
+        let gc = load_gc_reflog_expire_config(&cfg, now);
+        expire_reflog_git(
+            &grit_repo,
+            &grit_git_dir,
+            refname,
+            &ReflogExpireParams {
+                stale_fix: false,
+                dry_run: false,
+                verbose: false,
+            },
+            None,
+            None,
+            &gc.patterns,
+            gc.global_total,
+            gc.global_unreachable,
+            now,
+        )
+        .expect("grit expire");
+
+        git_expire(git_copy.path(), &["reflog", "expire", "refs/heads/main"]);
+
+        assert_reflog_tree_matches(
+            &git_copy.path().join(".git"),
+            &grit_copy.path().join(".git"),
+        );
+        let _ = backend;
     });
 }
 

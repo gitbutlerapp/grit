@@ -570,6 +570,7 @@ pub struct GcReflogPattern {
 
 fn collect_gc_reflog_patterns(config: &ConfigSet, now: i64) -> Vec<GcReflogPattern> {
     let mut by_pattern: HashMap<String, GcReflogPattern> = HashMap::new();
+    let mut pattern_order: Vec<String> = Vec::new();
     for e in config.entries() {
         let key = e.key.as_str();
         let Some(rest) = key.strip_prefix("gc.") else {
@@ -597,20 +598,25 @@ fn collect_gc_reflog_patterns(config: &ConfigSet, now: i64) -> Vec<GcReflogPatte
         let Ok(ts) = parse_gc_reflog_expiry(val, now) else {
             continue;
         };
-        let ent = by_pattern
-            .entry(pat.to_string())
-            .or_insert(GcReflogPattern {
-                pattern: pat.to_string(),
-                expire_total: None,
-                expire_unreachable: None,
-            });
+        let pat_owned = pat.to_string();
+        if !by_pattern.contains_key(&pat_owned) {
+            pattern_order.push(pat_owned.clone());
+        }
+        let ent = by_pattern.entry(pat_owned).or_insert(GcReflogPattern {
+            pattern: pat.to_string(),
+            expire_total: None,
+            expire_unreachable: None,
+        });
         if is_total {
             ent.expire_total = Some(ts);
         } else {
             ent.expire_unreachable = Some(ts);
         }
     }
-    by_pattern.into_values().collect()
+    pattern_order
+        .into_iter()
+        .filter_map(|p| by_pattern.remove(&p))
+        .collect()
 }
 
 fn global_gc_reflog_expiry(config: &ConfigSet, now: i64) -> (Option<i64>, Option<i64>) {
@@ -671,13 +677,8 @@ fn resolve_expire_for_ref(
         return (expire_total, expire_unreachable);
     }
     for ent in patterns {
-        let wildcard_prefix_matches = ent
-            .pattern
-            .split_once('*')
-            .is_some_and(|(prefix, _)| refname.starts_with(prefix));
         if wildmatch(ent.pattern.as_bytes(), refname.as_bytes(), WM_PATHNAME)
             || wildmatch(ent.pattern.as_bytes(), refname.as_bytes(), 0)
-            || wildcard_prefix_matches
         {
             // Partial per-pattern config only sets one key; the other keeps the global/default.
             if explicit_total.is_none() {
@@ -1051,6 +1052,36 @@ mod default_expire_tests {
         truncate_last_reflog_line, ReflogExpireActionKind, ReflogExpireParams,
     };
     use super::{parse_gc_reflog_expiry, parse_reflog_line};
+
+    #[test]
+    fn gc_main_suffix_pattern_does_not_match_main_ref() {
+        let now = 1_700_000_000_i64;
+        let (tmp, _repo) = seed_repo();
+        let git_dir = tmp.path().join(".git");
+        std::fs::write(
+            git_dir.join("config"),
+            "[core]\nrepositoryformatversion = 0\n[gc \"refs/heads/main*suffix\"]\n\treflogExpire = now\n",
+        )
+        .expect("write config");
+        let cfg = ConfigSet::load(&Environment::empty(), Some(&git_dir), true).expect("cfg");
+        let gc = load_gc_reflog_expire_config(&cfg, now);
+        assert_eq!(gc.patterns.len(), 1);
+        assert_eq!(gc.patterns[0].pattern, "refs/heads/main*suffix");
+        let (total, _) = super::resolve_expire_for_ref(
+            "refs/heads/main",
+            None,
+            None,
+            &gc.patterns,
+            super::default_expire_total(now),
+            super::default_expire_unreachable(now),
+        );
+        assert_ne!(
+            total,
+            i64::MAX,
+            "refs/heads/main must not pick up main*suffix reflogExpire=now"
+        );
+        assert_eq!(total, super::default_expire_total(now));
+    }
 
     #[test]
     fn gc_reflog_expiry_uses_git_approxidate_threshold() {
