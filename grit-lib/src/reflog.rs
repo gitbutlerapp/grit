@@ -570,6 +570,7 @@ pub struct GcReflogPattern {
 
 fn collect_gc_reflog_patterns(config: &ConfigSet, now: i64) -> Vec<GcReflogPattern> {
     let mut by_pattern: HashMap<String, GcReflogPattern> = HashMap::new();
+    let mut pattern_order: Vec<String> = Vec::new();
     for e in config.entries() {
         let key = e.key.as_str();
         let Some(rest) = key.strip_prefix("gc.") else {
@@ -597,20 +598,25 @@ fn collect_gc_reflog_patterns(config: &ConfigSet, now: i64) -> Vec<GcReflogPatte
         let Ok(ts) = parse_gc_reflog_expiry(val, now) else {
             continue;
         };
-        let ent = by_pattern
-            .entry(pat.to_string())
-            .or_insert(GcReflogPattern {
-                pattern: pat.to_string(),
-                expire_total: None,
-                expire_unreachable: None,
-            });
+        let pat_owned = pat.to_string();
+        if !by_pattern.contains_key(&pat_owned) {
+            pattern_order.push(pat_owned.clone());
+        }
+        let ent = by_pattern.entry(pat_owned).or_insert(GcReflogPattern {
+            pattern: pat.to_string(),
+            expire_total: None,
+            expire_unreachable: None,
+        });
         if is_total {
             ent.expire_total = Some(ts);
         } else {
             ent.expire_unreachable = Some(ts);
         }
     }
-    by_pattern.into_values().collect()
+    pattern_order
+        .into_iter()
+        .filter_map(|p| by_pattern.remove(&p))
+        .collect()
 }
 
 fn global_gc_reflog_expiry(config: &ConfigSet, now: i64) -> (Option<i64>, Option<i64>) {
@@ -632,14 +638,12 @@ fn parse_gc_reflog_expiry(raw: &str, now: i64) -> Result<i64> {
     if s.eq_ignore_ascii_case("now") || s.eq_ignore_ascii_case("all") {
         return Ok(i64::MAX);
     }
-    if let Ok(days) = s.parse::<u64>() {
-        if days == 0 {
-            return Ok(0);
-        }
-        return Ok(now - (days as i64 * 86400));
+    let mut err = 0;
+    let ts = crate::git_date::approx::approxidate_careful_at(s, now, Some(&mut err));
+    if err != 0 {
+        return Err(Error::Message(format!("invalid reflog expiry: {raw:?}")));
     }
-    s.parse::<i64>()
-        .map_err(|_| Error::Message(format!("invalid reflog expiry: {raw:?}")))
+    i64::try_from(ts).map_err(|_| Error::Message(format!("reflog expiry out of range: {raw:?}")))
 }
 
 /// Default `gc.reflogExpire`: reachable reflog entries older than this are dropped.
@@ -673,13 +677,8 @@ fn resolve_expire_for_ref(
         return (expire_total, expire_unreachable);
     }
     for ent in patterns {
-        let wildcard_prefix_matches = ent
-            .pattern
-            .split_once('*')
-            .is_some_and(|(prefix, _)| refname.starts_with(prefix));
         if wildmatch(ent.pattern.as_bytes(), refname.as_bytes(), WM_PATHNAME)
             || wildmatch(ent.pattern.as_bytes(), refname.as_bytes(), 0)
-            || wildcard_prefix_matches
         {
             // Partial per-pattern config only sets one key; the other keeps the global/default.
             if explicit_total.is_none() {
@@ -1035,7 +1034,68 @@ pub fn mark_stalefix_reachable(repo: &Repository, git_dir: &Path) -> Result<Hash
 
 #[cfg(test)]
 mod default_expire_tests {
-    use super::{default_expire_total, default_expire_unreachable};
+    use std::fs;
+    use std::path::Path;
+
+    use tempfile::TempDir;
+
+    use crate::config::ConfigSet;
+    use crate::environment::Environment;
+    use crate::objects::ObjectId;
+    use crate::refs::{append_reflog, write_ref};
+    use crate::repo::{init_repository, Repository};
+
+    use super::{
+        all_reflog_oids, all_reflog_oids_ordered, default_expire_total, default_expire_unreachable,
+        delete_reflog_entries, expire_reflog, expire_reflog_git, list_reflog_refs,
+        load_gc_reflog_expire_config, mark_stalefix_reachable, read_reflog, read_reflog_dwim,
+        truncate_last_reflog_line, ReflogExpireActionKind, ReflogExpireParams,
+    };
+    use super::{parse_gc_reflog_expiry, parse_reflog_line};
+
+    #[test]
+    fn gc_main_suffix_pattern_does_not_match_main_ref() {
+        let now = 1_700_000_000_i64;
+        let (tmp, _repo) = seed_repo();
+        let git_dir = tmp.path().join(".git");
+        std::fs::write(
+            git_dir.join("config"),
+            "[core]\nrepositoryformatversion = 0\n[gc \"refs/heads/main*suffix\"]\n\treflogExpire = now\n",
+        )
+        .expect("write config");
+        let cfg = ConfigSet::load(&Environment::empty(), Some(&git_dir), true).expect("cfg");
+        let gc = load_gc_reflog_expire_config(&cfg, now);
+        assert_eq!(gc.patterns.len(), 1);
+        assert_eq!(gc.patterns[0].pattern, "refs/heads/main*suffix");
+        let (total, _) = super::resolve_expire_for_ref(
+            "refs/heads/main",
+            None,
+            None,
+            &gc.patterns,
+            super::default_expire_total(now),
+            super::default_expire_unreachable(now),
+        );
+        assert_ne!(
+            total,
+            i64::MAX,
+            "refs/heads/main must not pick up main*suffix reflogExpire=now"
+        );
+        assert_eq!(total, super::default_expire_total(now));
+    }
+
+    #[test]
+    fn gc_reflog_expiry_uses_git_approxidate_threshold() {
+        let now = 1_700_000_000_i64;
+        assert_eq!(parse_gc_reflog_expiry("never", now).expect("never"), 0);
+        assert_eq!(parse_gc_reflog_expiry("now", now).expect("now"), i64::MAX);
+        // Git `match_digit`: bare integers >= 100_000_000 are Unix timestamps.
+        assert_eq!(
+            parse_gc_reflog_expiry("100000000", now).expect("100M"),
+            100_000_000
+        );
+        // 86_401..99_999_999 are not literal epoch seconds (e.g. 90000 → approxidate, not 90000).
+        assert_ne!(parse_gc_reflog_expiry("90000", now).expect("90000"), 90_000);
+    }
 
     #[test]
     fn default_expire_total_is_ninety_days_before_now() {
@@ -1049,5 +1109,281 @@ mod default_expire_tests {
         let now = 1_700_000_000_i64;
         let cutoff = default_expire_unreachable(now);
         assert_eq!(cutoff, now - 30 * 86_400);
+    }
+
+    fn seed_repo() -> (TempDir, Repository) {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+        (tmp, repo)
+    }
+
+    fn write_loose_reflog(git_dir: &Path, refname: &str, body: &str) {
+        let path = super::reflog_path(git_dir, refname);
+        if let Some(p) = path.parent() {
+            fs::create_dir_all(p).expect("mkdir logs");
+        }
+        fs::write(path, body).expect("write reflog");
+    }
+
+    #[test]
+    fn parse_and_dwim_read_reflog_lines() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let oid = ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect("oid");
+        write_ref(git_dir, "refs/heads/dwim", &oid).expect("write ref");
+        let line = format!(
+            "0000000000000000000000000000000000000000 {oid} Tester <t@e.com> 100 +0000\tmsg\n"
+        );
+        write_loose_reflog(git_dir, "refs/heads/dwim", &line);
+        let parsed = parse_reflog_line(line.trim_end()).expect("parse");
+        assert_eq!(parsed.message, "msg");
+        let dwim = read_reflog_dwim(git_dir, "dwim").expect("dwim");
+        assert_eq!(dwim.len(), 1);
+        assert_eq!(dwim[0].message, "msg");
+        assert!(read_reflog(git_dir, "missing").expect("read").is_empty());
+        let _ = tmp;
+    }
+
+    #[test]
+    fn truncate_delete_and_expire_loose_reflog() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let refname = "refs/heads/main";
+        let o1 = ObjectId::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").expect("o1");
+        let o2 = ObjectId::from_hex("cccccccccccccccccccccccccccccccccccccccc").expect("o2");
+        write_ref(git_dir, refname, &o2).expect("tip");
+        append_reflog(
+            git_dir,
+            refname,
+            &ObjectId::zero(),
+            &o1,
+            "T <t@e.com> 1000 +0000",
+            "a",
+            true,
+        )
+        .expect("log1");
+        append_reflog(
+            git_dir,
+            refname,
+            &o1,
+            &o2,
+            "T <t@e.com> 2000 +0000",
+            "b",
+            false,
+        )
+        .expect("log2");
+
+        delete_reflog_entries(git_dir, refname, &[0]).expect("delete newest");
+        assert_eq!(read_reflog(git_dir, refname).expect("read").len(), 1);
+
+        truncate_last_reflog_line(git_dir, refname).expect("truncate");
+        assert!(read_reflog(git_dir, refname).expect("read2").is_empty());
+
+        append_reflog(
+            git_dir,
+            refname,
+            &ObjectId::zero(),
+            &o1,
+            "T <t@e.com> 500 +0000",
+            "old",
+            true,
+        )
+        .expect("log old");
+        let pruned = expire_reflog(git_dir, refname, Some(1_000)).expect("expire");
+        assert_eq!(pruned, 1);
+        let _ = tmp;
+    }
+
+    #[test]
+    fn expire_reflog_git_dry_run_and_stash_gc_never() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let now = 1_700_000_000_i64;
+        let refname = "refs/stash";
+        let oid = ObjectId::from_hex("dddddddddddddddddddddddddddddddddddddddd").expect("oid");
+        write_ref(git_dir, refname, &oid).expect("stash ref");
+        append_reflog(
+            git_dir,
+            refname,
+            &ObjectId::zero(),
+            &oid,
+            &format!("T <t@e.com> {} +0000", now - 86_400),
+            "stash",
+            true,
+        )
+        .expect("stash log");
+
+        let cfg = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("cfg");
+        let gc = load_gc_reflog_expire_config(&cfg, now);
+        let dry = expire_reflog_git(
+            &repo,
+            git_dir,
+            refname,
+            &ReflogExpireParams {
+                stale_fix: false,
+                dry_run: true,
+                verbose: true,
+            },
+            None,
+            None,
+            &gc.patterns,
+            gc.global_total,
+            gc.global_unreachable,
+            now,
+        )
+        .expect("dry");
+        assert!(!dry.actions.is_empty());
+        assert!(read_reflog(git_dir, refname).expect("stash kept").len() == 1);
+
+        let real = expire_reflog_git(
+            &repo,
+            git_dir,
+            refname,
+            &ReflogExpireParams {
+                stale_fix: false,
+                dry_run: false,
+                verbose: false,
+            },
+            None,
+            None,
+            &gc.patterns,
+            gc.global_total,
+            gc.global_unreachable,
+            now,
+        )
+        .expect("real");
+        assert_eq!(real.pruned, 0, "refs/stash uses gc never by default");
+        assert_eq!(read_reflog(git_dir, refname).expect("stash still").len(), 1);
+        let _ = tmp;
+    }
+
+    #[test]
+    fn mark_stalefix_reachable_walks_reflog_mentions() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let oid = ObjectId::from_hex("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee").expect("oid");
+        write_ref(git_dir, "refs/heads/main", &oid).expect("write");
+        append_reflog(
+            git_dir,
+            "refs/heads/main",
+            &ObjectId::zero(),
+            &oid,
+            "T <t@e.com> 1000 +0000",
+            "m",
+            true,
+        )
+        .expect("log");
+        let seen = mark_stalefix_reachable(&repo, git_dir).expect("stalefix");
+        assert!(seen.contains(&oid));
+        let _ = tmp;
+    }
+
+    #[test]
+    fn all_reflog_oids_and_list_includes_head() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let oid = ObjectId::from_hex("1212121212121212121212121212121212121212").expect("oid");
+        write_ref(git_dir, "refs/heads/main", &oid).expect("write");
+        append_reflog(
+            git_dir,
+            "HEAD",
+            &ObjectId::zero(),
+            &oid,
+            "T <t@e.com> 1000 +0000",
+            "head",
+            true,
+        )
+        .expect("head log");
+        let refs = list_reflog_refs(git_dir).expect("list");
+        assert!(refs.iter().any(|r| r == "HEAD"));
+        let oids = all_reflog_oids(git_dir).expect("all oids");
+        assert!(oids.contains(&oid));
+        let ordered = all_reflog_oids_ordered(git_dir).expect("ordered");
+        assert!(ordered.contains(&oid));
+        let _ = tmp;
+    }
+
+    #[test]
+    fn mirror_branch_reflog_to_head_copies_bytes() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let branch = "refs/heads/main";
+        let oid = ObjectId::from_hex("1313131313131313131313131313131313131313").expect("oid");
+        write_ref(git_dir, branch, &oid).expect("write");
+        append_reflog(
+            git_dir,
+            branch,
+            &ObjectId::zero(),
+            &oid,
+            "T <t@e.com> 1000 +0000",
+            "branch",
+            true,
+        )
+        .expect("branch log");
+        super::mirror_branch_reflog_to_head(git_dir, branch).expect("mirror");
+        let head = read_reflog(git_dir, "HEAD").expect("head log");
+        assert_eq!(head.len(), 1);
+        assert_eq!(head[0].message, "branch");
+        let _ = tmp;
+    }
+
+    #[test]
+    fn read_reflog_skips_blank_lines_and_no_message_tab() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let oid = ObjectId::from_hex("1414141414141414141414141414141414141414").expect("oid");
+        let body =
+            format!("\n0000000000000000000000000000000000000000 {oid} T <t@e.com> 1000 +0000\n");
+        write_loose_reflog(git_dir, "refs/heads/x", &body);
+        let entries = read_reflog(git_dir, "refs/heads/x").expect("read");
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].message.is_empty());
+        let _ = tmp;
+    }
+
+    #[test]
+    fn expire_git_prunes_old_entry_and_reports_action() {
+        let (tmp, repo) = seed_repo();
+        let git_dir = &repo.git_dir;
+        let refname = "refs/heads/main";
+        let oid = ObjectId::from_hex("ffffffffffffffffffffffffffffffffffffffff").expect("oid");
+        write_ref(git_dir, refname, &oid).expect("write");
+        append_reflog(
+            git_dir,
+            refname,
+            &ObjectId::zero(),
+            &oid,
+            "T <t@e.com> 1000 +0000",
+            "prune-me",
+            true,
+        )
+        .expect("log");
+        let now = 2_000_000_i64;
+        let cfg = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("cfg");
+        let gc = load_gc_reflog_expire_config(&cfg, now);
+        let result = expire_reflog_git(
+            &repo,
+            git_dir,
+            refname,
+            &ReflogExpireParams {
+                stale_fix: false,
+                dry_run: false,
+                verbose: false,
+            },
+            Some(1_500_000),
+            None,
+            &gc.patterns,
+            gc.global_total,
+            gc.global_unreachable,
+            now,
+        )
+        .expect("expire");
+        assert_eq!(result.pruned, 1);
+        assert!(result
+            .actions
+            .iter()
+            .any(|a| a.action == ReflogExpireActionKind::Prune && a.entry.message == "prune-me"));
+        assert!(read_reflog(git_dir, refname).expect("empty").is_empty());
+        let _ = tmp;
     }
 }

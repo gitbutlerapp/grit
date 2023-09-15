@@ -131,8 +131,18 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t0008-ignores.sh | nested `.gitignore`, exclude, global excludes, negation, tracked overrides; `check-ignore -v -n` source/line/pattern | `grit-lib/tests/ignore_rules.rs` (`t0008_check_path_matches_git_check_ignore_verbose`, symlink warning, CLI precedence) | covered |
 | t3001-ls-files-others-exclude | `--exclude-from`, `--exclude-per-directory` | `grit-lib/tests/ignore_rules.rs` (`t3001_exclude_from_and_per_directory_name`) | covered |
 | t3003-ls-files-exclude | CRLF `.gitignore` lines | `grit-lib/tests/ignore_rules.rs` (`t3003_crlf_gitignore_lines`) | partial (core parse/match; skip UX-only ls-files flags) |
+| t0600-reffiles-backend.sh | empty reflog file; `reflog expire --all`; symref expire vs referent | `grit-lib/tests/reflog_roundtrip.rs` (`reflog_exists_list_and_path_match_git`, `t0600_expire_on_symref_not_referent`) | covered (symref expire files backend only) |
+| t1410-reflog.sh | reflog expire vs git (reachable/unreachable, gc patterns, stale-fix subset) | `grit-lib/tests/reflog_roundtrip.rs` (`t1410_expire_matches_git_byte_for_byte`, `expire_unreachable_stalefix_and_mark_reachable`) | covered (byte-compare on files backend) |
+| t1411-reflog.sh | reflog line parsing (subset) | `grit-lib/tests/reflog_roundtrip.rs` (`git_written_reflog_lines_parse_like_grit`) | covered |
+| t1413-reflog-detach.sh | detached HEAD + branch HEAD reflog mirror | `grit-lib/tests/reflog_roundtrip.rs` (`mirror_branch_reflog_to_head_and_detached`) | partial |
+| t1417-reflog-updateref.sh | expire with `--updateref` | — | not applicable: no `--updateref` API |
+| t1418-reflog-exists.sh | `reflog exists` / list | `grit-lib/tests/reflog_roundtrip.rs` (`reflog_exists_list_and_path_match_git`) | covered |
+| t1421-reflog-write.sh | grit-written reflog bytes read by git | `grit-lib/tests/reflog_roundtrip.rs` (`t1421_grit_written_entries_read_by_git_log_g`) | covered |
+| t0600 / rev-list | `all_reflog_oids` walk order | `grit-lib/tests/reflog_roundtrip.rs` (`all_reflog_oids_and_ordered_match_git_walk`) | covered |
+| — | `core.logAllRefUpdates` modes vs git auto-create | `grit-lib/tests/reflog_roundtrip.rs` (`log_all_ref_updates_modes_match_git`) | covered |
+| — | delete / truncate vs `git reflog delete` | `grit-lib/tests/reflog_roundtrip.rs` (`delete_reflog_and_truncate_match_git`) | covered (files backend byte-compare) |
 
-Detailed rows for reflog, packed refs, transactions, and remaining t1405 cases are filled in as steps 3–12 of the refs/config plan land; see also the ODB/pack mapping below.
+Detailed rows for packed refs, transactions, and remaining t1405 cases are filled in as later plan steps land; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 

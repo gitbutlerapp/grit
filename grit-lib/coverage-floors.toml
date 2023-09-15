@@ -11,7 +11,7 @@ minimum = 85.0
 
 [aggregate.refs-config]
 groups = ["refs", "reflog", "config", "ignore", "attributes"]
-minimum = 51.6
+minimum = 54.0
 
 [group.attributes]
 files = [
@@ -67,7 +67,7 @@ minimum = 86.1
 files = [
     "reflog.rs",
 ]
-minimum = 34.6
+minimum = 83.4
 
 [group.refs]
 files = [
@@ -150,7 +150,7 @@ minimum = 73.4
 minimum = 81.1
 
 [file."reflog.rs"]
-minimum = 34.6
+minimum = 83.4
 
 [file."refs.rs"]
 minimum = 72.0
