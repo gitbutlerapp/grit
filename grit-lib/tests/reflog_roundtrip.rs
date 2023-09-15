@@ -25,10 +25,21 @@ use grit_lib::refs::{
 use grit_lib::repo::Repository;
 
 use support::{
-    append_repo_config, assert_reflog_tree_matches, copy_worktree, each_backend, git,
-    git_empty_commit_oid, git_fsck_strict, git_ok, git_reflog_refs, reflog_identity,
+    append_repo_config, assert_reflog_tree_matches, copy_worktree, each_backend, empty_commit_oid,
+    git, git_empty_commit_oid, git_fsck_strict, git_interop_available, git_ok, git_reflog_refs,
+    reflog_identity,
     reflog_tree_bytes, write_repo_config, Backend, TestRepo, AUTHOR_EMAIL, AUTHOR_NAME,
 };
+
+fn each_backend_git_oracle(f: impl Fn(Backend, &TestRepo)) {
+    each_backend(|backend, repo| {
+        if !git_interop_available(backend) {
+            eprintln!("SKIP: git lacks reftable interop");
+            return;
+        }
+        f(backend, repo);
+    });
+}
 
 const NOW: i64 = 1_700_000_000;
 
@@ -52,9 +63,9 @@ fn open_repo(worktree: &Path) -> Repository {
 
 fn seed_three_entry_reflog(repo: &TestRepo, refname: &str) -> (ObjectId, ObjectId, ObjectId) {
     let git_dir = repo.git_dir();
-    let o1 = git_empty_commit_oid(repo.worktree());
-    let o2 = git_empty_commit_oid(repo.worktree());
-    let o3 = git_empty_commit_oid(repo.worktree());
+    let o1 = empty_commit_oid(repo);
+    let o2 = empty_commit_oid(repo);
+    let o3 = empty_commit_oid(repo);
     write_ref(&git_dir, refname, &o3).expect("write tip");
     let z = ObjectId::zero();
     let entries = [
@@ -200,7 +211,7 @@ fn t1410_expire_matches_git_byte_for_byte() {
     ];
 
     for case in cases {
-        each_backend(|backend, repo| {
+        each_backend_git_oracle(|backend, repo| {
             seed_three_entry_reflog(repo, refname);
             if let Some(fragment) = case.config {
                 append_repo_config(repo.worktree(), fragment);
@@ -243,10 +254,10 @@ fn t1410_expire_matches_git_byte_for_byte() {
 /// Git `parse_expiry_date` / `match_digit`: bare values below `100_000_000` are not literal epochs.
 #[test]
 fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let refname = "refs/heads/main";
         let git_dir = repo.git_dir();
-        let oid = git_empty_commit_oid(repo.worktree());
+        let oid = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &oid).expect("tip");
         let body = format!(
             "0000000000000000000000000000000000000000 {oid} {identity}\t2020\n",
@@ -323,11 +334,11 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
 /// Git wildmatch must not treat `refs/heads/main*suffix` as matching `refs/heads/main`.
 #[test]
 fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let refname = "refs/heads/main";
         let now = wall_clock_now();
         let git_dir = repo.git_dir();
-        let oid = git_empty_commit_oid(repo.worktree());
+        let oid = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &oid).expect("tip");
         let ts = now - 60 * 86_400;
         let body = format!(
@@ -395,11 +406,11 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
 /// When several per-ref gc patterns match, Git uses the first matching rule in config order.
 #[test]
 fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let refname = "refs/heads/main";
         let now = wall_clock_now();
         let git_dir = repo.git_dir();
-        let oid = git_empty_commit_oid(repo.worktree());
+        let oid = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &oid).expect("tip");
         let ts = now - 60 * 86_400;
         let body = format!(
@@ -461,11 +472,11 @@ fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
 
 #[test]
 fn t1421_grit_written_entries_read_by_git_log_g() {
-    each_backend(|_, repo| {
+    each_backend_git_oracle(|_, repo| {
         let git_dir = repo.git_dir();
         let refname = "refs/heads/main";
-        let o1 = git_empty_commit_oid(repo.worktree());
-        let o2 = git_empty_commit_oid(repo.worktree());
+        let o1 = empty_commit_oid(repo);
+        let o2 = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &o2).expect("tip");
         let z = ObjectId::zero();
         let identity = reflog_identity(1_650_000_000);
@@ -553,7 +564,7 @@ fn log_all_ref_updates_modes_match_git() {
     ];
 
     for mode in modes {
-        each_backend(|_, repo| {
+        each_backend_git_oracle(|_, repo| {
             write_repo_config(
                 repo.worktree(),
                 &format!(
@@ -562,7 +573,7 @@ fn log_all_ref_updates_modes_match_git() {
                 ),
             );
             let git_dir = repo.git_dir();
-            let oid = git_empty_commit_oid(repo.worktree());
+            let oid = empty_commit_oid(repo);
             let tag = "refs/tags/rlu-tag";
             let branch = "refs/heads/rlu-branch";
             git(repo.worktree(), &["update-ref", tag, &oid.to_string()]);
@@ -686,7 +697,7 @@ fn t0600_expire_on_symref_not_referent() {
         &git_dir,
         sym,
         &ObjectId::zero(),
-        &git_empty_commit_oid(worktree),
+        &git_empty_commit_oid(worktree), // files-only repo; system git seed
         &reflog_identity(1_000_000),
         "sym only",
         true,
@@ -720,14 +731,14 @@ fn t0600_expire_on_symref_not_referent() {
 
 #[test]
 fn git_written_reflog_lines_parse_like_grit() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         if backend == Backend::Reftable {
             return;
         }
         let git_dir = repo.git_dir();
         let refname = "refs/heads/parse-me";
-        let o1 = git_empty_commit_oid(repo.worktree());
-        let o2 = git_empty_commit_oid(repo.worktree());
+        let o1 = empty_commit_oid(repo);
+        let o2 = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &o2).expect("tip");
         let path = reflog_file_path(&git_dir, refname);
         if let Some(parent) = path.parent() {
@@ -775,10 +786,10 @@ fn git_written_reflog_lines_parse_like_grit() {
 
 #[test]
 fn reflog_exists_list_and_path_match_git() {
-    each_backend(|_, repo| {
+    each_backend_git_oracle(|_, repo| {
         let git_dir = repo.git_dir();
         let nested = "refs/heads/group/deep/ref";
-        let oid = git_empty_commit_oid(repo.worktree());
+        let oid = empty_commit_oid(repo);
         write_ref(&git_dir, nested, &oid).expect("write nested");
         append_reflog(
             &git_dir,
@@ -822,7 +833,7 @@ fn reflog_exists_list_and_path_match_git() {
 
 #[test]
 fn delete_reflog_and_truncate_match_git() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let refname = "refs/heads/main";
         seed_three_entry_reflog(repo, refname);
 
@@ -856,7 +867,7 @@ fn delete_reflog_and_truncate_match_git() {
 
 #[test]
 fn expire_unreachable_stalefix_and_mark_reachable() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let git_dir = repo.git_dir();
         let refname = "refs/heads/main";
         let (o1, o2, o3) = seed_three_entry_reflog(repo, refname);
@@ -939,7 +950,7 @@ fn expire_unreachable_stalefix_and_mark_reachable() {
 
 #[test]
 fn mirror_branch_reflog_to_head_and_detached() {
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let git_dir = repo.git_dir();
         let branch = "refs/heads/main";
         seed_three_entry_reflog(repo, branch);
@@ -950,7 +961,7 @@ fn mirror_branch_reflog_to_head_and_detached() {
             assert_eq!(head, branch_log);
         }
 
-        let oid = git_empty_commit_oid(repo.worktree());
+        let oid = empty_commit_oid(repo);
         write_ref(&git_dir, "HEAD", &oid).expect("detach head");
         append_reflog(
             &git_dir,
@@ -1000,13 +1011,13 @@ fn all_reflog_oids_and_ordered_match_git_walk() {
         out
     }
 
-    each_backend(|backend, repo| {
+    each_backend_git_oracle(|backend, repo| {
         seed_three_entry_reflog(repo, "refs/heads/main");
         append_reflog(
             &repo.git_dir(),
             "refs/heads/extra",
             &ObjectId::zero(),
-            &git_empty_commit_oid(repo.worktree()),
+            &empty_commit_oid(repo),
             &reflog_identity(1_610_000_000),
             "extra",
             true,
