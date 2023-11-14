@@ -4135,7 +4135,7 @@ fn parallel_process_blob_worktree_jobs(
             )?;
             let worktree_oid = if materialize_dirty_blobs {
                 if hash_blobs_without_write {
-                    odb.hash(ObjectKind::Blob, &data)
+                    odb.hash(ObjectKind::Blob, &data)?
                 } else {
                     odb.write_with_options(
                         ObjectKind::Blob,
@@ -4342,7 +4342,7 @@ fn push_index_blob_worktree_diff(
     )?;
     let worktree_oid = if materialize_dirty_blobs {
         if hash_blobs_without_write {
-            odb.hash(ObjectKind::Blob, &data)
+            odb.hash(ObjectKind::Blob, &data)?
         } else {
             odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
         }

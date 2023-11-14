@@ -23,6 +23,7 @@ use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
+use crate::path_validate::{EntryMode, PathValidationKind, ProtectOptions};
 use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
@@ -504,7 +505,7 @@ fn stage_inner_on_index(
 
     if ignorecase {
         outcome.modified.extend(stage_ignorecase_spelling_updates(
-            repo, work_tree, &icase_map, &matches, index, dry_run,
+            work_tree, &icase_map, &matches, index, dry_run,
         )?);
     }
 
@@ -561,6 +562,19 @@ fn stage_inner_on_index(
     }
 
     Ok(outcome)
+}
+
+fn validate_index_staging_path(repo: &Repository, path: &[u8], mode: u32) -> Result<()> {
+    let opts = ProtectOptions::from_config(&*repo.config()?);
+    crate::path_validate::validate_path(
+        path,
+        EntryMode::new(mode),
+        opts,
+        PathValidationKind::Worktree,
+    )
+    .map_err(|reason| {
+        Error::invalid_path_component(String::from_utf8_lossy(path).into_owned(), reason)
+    })
 }
 
 /// Stage worktree content for explicit pathspecs that match unmerged index entries.
@@ -925,6 +939,12 @@ fn stage_untracked_paths_parallel(
             continue;
         }
         let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
+        if fs::symlink_metadata(&resolved.abs)
+            .ok()
+            .is_some_and(|meta| crate::read_dir_kind::metadata_is_git_ignored_special(&meta))
+        {
+            continue;
+        }
         if is_unregistered_embedded_git_repo(index, &resolved.index_relpath, &resolved.abs) {
             deferred.push(resolved.index_relpath.trim_end_matches('/').to_owned());
             continue;
@@ -1061,6 +1081,10 @@ fn stage_untracked_path(
             format!("could not read {rel_path}: {e}"),
         ))
     })?;
+
+    if crate::read_dir_kind::metadata_is_git_ignored_special(&meta) {
+        return Ok(());
+    }
 
     if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
         let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
