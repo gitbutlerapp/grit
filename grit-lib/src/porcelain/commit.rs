@@ -503,7 +503,7 @@ fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index)
         let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
         let meta = fs::metadata(&abs).map_err(Error::Io)?;
         let file_attrs = rules.file_attrs(&rel, false);
-        let oid = materialize_worktree_blob(
+        let stored = materialize_worktree_blob(
             odb,
             &abs,
             &meta,
@@ -513,7 +513,7 @@ fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index)
             Some(entry),
             Some(rules.filter_process()),
         )?;
-        if oid != entry.oid {
+        if stored != entry.oid {
             return Err(Error::Message(format!(
                 "internal error: staged oid mismatch for {rel}"
             )));

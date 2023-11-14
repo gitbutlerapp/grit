@@ -287,6 +287,7 @@ fn stage_inner_on_index(
 ) -> Result<StageOutcome> {
     let dry_run = opts.dry_run;
     let persist_index = write_index && !dry_run;
+    let dry_run_list_only = dry_run && write_index;
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
@@ -341,13 +342,14 @@ fn stage_inner_on_index(
             ..DiffIndexToWorktreeOptions::default()
         };
         if dry_run {
-            let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
+            let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
                 repo.odb(),
+                repo.git_dir(),
                 index,
                 work_tree,
                 diff_opts,
             )?;
-            (unstaged, std::collections::BTreeMap::new())
+            (unstaged, staging_stats)
         } else {
             let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
                 repo.odb(),
@@ -476,7 +478,7 @@ fn stage_inner_on_index(
                 continue;
             }
             if plan.remove {
-                if dry_run {
+                if dry_run && write_index {
                     if index.get(path.as_bytes(), 0).is_some() {
                         outcome.removed.push(path);
                     }
@@ -485,20 +487,22 @@ fn stage_inner_on_index(
                 }
                 continue;
             }
-            if !dry_run {
-                icase_map.remove_alias_of(index, path.as_bytes());
-                apply_tracked_stage_plan(
-                    repo,
-                    work_tree,
-                    &path,
-                    &plan,
-                    staging_stats.get(&path),
-                    index,
-                    has_unmerged,
-                    opts.executable_hint,
-                    &matches,
-                )?;
+            if dry_run && write_index {
+                outcome.modified.push(path);
+                continue;
             }
+            icase_map.remove_alias_of(index, path.as_bytes());
+            apply_tracked_stage_plan(
+                repo,
+                work_tree,
+                &path,
+                &plan,
+                staging_stats.get(&path),
+                index,
+                has_unmerged,
+                opts.executable_hint,
+                &matches,
+            )?;
             outcome.modified.push(path);
         }
     }
@@ -524,6 +528,7 @@ fn stage_inner_on_index(
             parallelism,
             opts.executable_hint,
             dry_run,
+            dry_run_list_only,
             &mut outcome,
         )?;
     }
@@ -917,6 +922,7 @@ fn stage_untracked_paths_parallel(
     parallelism: Parallelism,
     executable_hint: StageExecutableHint,
     dry_run: bool,
+    dry_run_list_only: bool,
     outcome: &mut StageOutcome,
 ) -> Result<()> {
     let precompose_unicode = rules
@@ -1002,7 +1008,7 @@ fn stage_untracked_paths_parallel(
             deferred.push(prep.index_relpath);
             continue;
         }
-        if dry_run {
+        if dry_run_list_only {
             outcome.added.push(prep.index_relpath);
             continue;
         }
@@ -1022,19 +1028,19 @@ fn stage_untracked_paths_parallel(
     let staged_batch_count = batch_entries.len();
     for entry in batch_entries {
         validate_index_staging_path(repo, &entry.path, entry.mode)?;
-        if !dry_run {
+        if !dry_run_list_only {
             if let Ok(rel) = std::str::from_utf8(&entry.path) {
                 mark_fsmonitor_staged(index, rel);
             }
             index.add_or_replace(entry);
         }
     }
-    if staged_batch_count > 0 && !dry_run && index.fsmonitor_last_update.is_some() {
+    if staged_batch_count > 0 && !dry_run_list_only && index.fsmonitor_last_update.is_some() {
         index.fsmonitor_validity_changed();
     }
 
     for path in deferred {
-        if dry_run {
+        if dry_run_list_only {
             outcome.added.push(path);
             continue;
         }
