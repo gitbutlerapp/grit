@@ -48,20 +48,6 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Dirty worktree on small synth: grit status vs git status -s",
     },
     ScenarioSpec {
-        id: "status/paths@synth-100k",
-        area: Area::Worktree,
-        headline: false,
-        name: None,
-        description: "Path-limited status: grit status -- <dir> vs git status -s -- <dir>",
-    },
-    ScenarioSpec {
-        id: "status/renamed@synth-10k",
-        area: Area::Worktree,
-        headline: false,
-        name: None,
-        description: "Status with staged rename: grit status vs git status -s after git mv",
-    },
-    ScenarioSpec {
         id: "add/all@synth-100k",
         area: Area::Worktree,
         headline: false,
@@ -95,6 +81,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         headline: false,
         name: None,
         description: "Commit pre-staged index: grit commit --staged vs git commit",
+    },
+    ScenarioSpec {
+        id: "commit/dry-run@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Preview commit: grit commit --dry-run vs git commit --dry-run",
     },
     ScenarioSpec {
         id: "commit/paths@synth-10k",
@@ -199,7 +192,7 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
     ScenarioSpec {
         id: "log/json-100@git-git",
         area: Area::Revwalk,
-        headline: false,
+        headline: true,
         name: None,
         description: "Last 100 commits JSON: grit log --limit 100 --json vs git log -100 with verbose --format",
     },

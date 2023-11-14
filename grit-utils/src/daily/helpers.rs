@@ -158,12 +158,6 @@ pub fn finish_git_git_matrix_ctx(headline: &mut DailyHeadlineContext, git: &Path
         .unwrap_or("README.md");
     let blob_spec = format!("HEAD:{path}");
     headline.cat_blob = Some(git_rev_parse(git, &headline.repo, &blob_spec)?);
-    let depth = if headline.smoke { 500 } else { 5000 };
-    let deep_spec = format!("HEAD~{depth}");
-    let deep_hex = git_rev_parse(git, &headline.repo, &deep_spec)?;
-    let deep_oid: grit_lib::objects::ObjectId = deep_hex.parse().context("deep oid")?;
-    let derived = grit_lib::change_id::ChangeId::derived_from_commit_id(&deep_oid);
-    headline.change_id_bench_prefix = Some(derived.short(12).to_string());
     run_git(
         git,
         &headline.repo,
@@ -366,20 +360,6 @@ pub fn status_dirty_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     )
 }
 
-pub fn status_paths_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
-    (
-        sh_devnull(&ctx.grit, &["status", "--", "data/d0000"]),
-        sh_devnull(&ctx.git, &["status", "-s", "--", "data/d0000"]),
-    )
-}
-
-pub fn status_renamed_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
-    (
-        sh_devnull(&ctx.grit, &["status"]),
-        sh_devnull(&ctx.git, &["status", "-s"]),
-    )
-}
-
 pub fn add_modified_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_script(shell_grit_add_modified_set(&ctx.grit)),
@@ -391,6 +371,13 @@ pub fn commit_small_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     (
         sh_devnull(&ctx.grit, &["commit", "bench"]),
         sh_script(shell_git_add_modified_set_and_commit(&ctx.git)),
+    )
+}
+
+pub fn commit_dry_run_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["commit", "--dry-run", "-m", "bench"]),
+        sh_devnull(&ctx.git, &["commit", "--dry-run", "-a", "-m", "bench"]),
     )
 }
 
@@ -774,7 +761,6 @@ mod tests {
         assert_eq!(second, "/tmp/grit-bench-scratch/daily-second");
         assert!(!second.contains("daily-first/daily-second"));
         std::env::remove_var("GRIT_BENCH_DAILY_ROOT");
-        std::env::remove_var("GRIT_BENCH_SCRATCH");
     }
 
     fn sample_ctx() -> DailyHeadlineContext {

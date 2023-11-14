@@ -84,6 +84,7 @@ fn stage_with_hint(
         mode: StageMode::All,
         executable_hint,
         staging_thresholds: None,
+        dry_run: false,
     };
     let outcome = stage_paths(repo, &opts, &mut NullProgress).map_err(map_add_error)?;
     Ok(outcome.total())
