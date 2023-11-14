@@ -3810,6 +3810,7 @@ pub grit_lib::diff::DiffIndexToWorktreeOptions::config: core::option::Option<all
 pub grit_lib::diff::DiffIndexToWorktreeOptions::error_on_broken_gitlinks: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::for_status: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::fsmonitor_query_boundary: core::option::Option<grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary>
+pub grit_lib::diff::DiffIndexToWorktreeOptions::hash_blobs_without_write: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::ignore_submodule_untracked: bool
 pub grit_lib::diff::DiffIndexToWorktreeOptions::index_mtime: core::option::Option<(u32, u32)>
 pub grit_lib::diff::DiffIndexToWorktreeOptions::refresh_fsmonitor: bool
@@ -10466,6 +10467,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::add::Stage
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::add::StageOutcome
 pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
+pub fn grit_lib::porcelain::add::stage_for_commit_in_memory(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink, bool) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub fn grit_lib::porcelain::add::stage_on_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub mod grit_lib::porcelain::branch
 pub struct grit_lib::porcelain::branch::BranchList
@@ -10653,12 +10655,54 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitScope
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitScope
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitScope
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitScope
+pub struct grit_lib::porcelain::commit::CommitAuthorInfo
+pub grit_lib::porcelain::commit::CommitAuthorInfo::date: alloc::string::String
+pub grit_lib::porcelain::commit::CommitAuthorInfo::email: alloc::string::String
+pub grit_lib::porcelain::commit::CommitAuthorInfo::name: alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::commit::CommitAuthorInfo
+pub fn grit_lib::porcelain::commit::CommitAuthorInfo::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::cmp::PartialEq for grit_lib::porcelain::commit::CommitAuthorInfo
+pub fn grit_lib::porcelain::commit::CommitAuthorInfo::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::commit::CommitAuthorInfo
+pub fn grit_lib::porcelain::commit::CommitAuthorInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::marker::Freeze for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::marker::Send for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::marker::Sync for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::marker::Unpin for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitAuthorInfo
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitAuthorInfo
+pub struct grit_lib::porcelain::commit::CommitFile
+pub grit_lib::porcelain::commit::CommitFile::old_path: core::option::Option<alloc::string::String>
+pub grit_lib::porcelain::commit::CommitFile::path: alloc::string::String
+pub grit_lib::porcelain::commit::CommitFile::status: grit_lib::diff::DiffStatus
+impl core::clone::Clone for grit_lib::porcelain::commit::CommitFile
+pub fn grit_lib::porcelain::commit::CommitFile::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::commit::CommitFile
+impl core::cmp::PartialEq for grit_lib::porcelain::commit::CommitFile
+pub fn grit_lib::porcelain::commit::CommitFile::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::commit::CommitFile
+pub fn grit_lib::porcelain::commit::CommitFile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::commit::CommitFile
+impl core::marker::Freeze for grit_lib::porcelain::commit::CommitFile
+impl core::marker::Send for grit_lib::porcelain::commit::CommitFile
+impl core::marker::Sync for grit_lib::porcelain::commit::CommitFile
+impl core::marker::Unpin for grit_lib::porcelain::commit::CommitFile
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitFile
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitFile
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitFile
 pub struct grit_lib::porcelain::commit::CommitOutcome
+pub grit_lib::porcelain::commit::CommitOutcome::author: grit_lib::porcelain::commit::CommitAuthorInfo
 pub grit_lib::porcelain::commit::CommitOutcome::branch: alloc::string::String
 pub grit_lib::porcelain::commit::CommitOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::commit::CommitOutcome::changes: usize
+pub grit_lib::porcelain::commit::CommitOutcome::files: alloc::vec::Vec<grit_lib::porcelain::commit::CommitFile>
+pub grit_lib::porcelain::commit::CommitOutcome::hooks_run: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::commit::CommitOutcome::parent: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::commit::CommitOutcome::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitOutcome
 pub fn grit_lib::porcelain::commit::CommitOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::commit::CommitOutcome
@@ -10674,12 +10718,33 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitOutcome
+pub struct grit_lib::porcelain::commit::CommitPlan
+pub grit_lib::porcelain::commit::CommitPlan::author: grit_lib::porcelain::commit::CommitAuthorInfo
+pub grit_lib::porcelain::commit::CommitPlan::files: alloc::vec::Vec<grit_lib::porcelain::commit::CommitFile>
+pub grit_lib::porcelain::commit::CommitPlan::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::commit::CommitPlan::tree_unchanged: bool
+impl core::clone::Clone for grit_lib::porcelain::commit::CommitPlan
+pub fn grit_lib::porcelain::commit::CommitPlan::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::commit::CommitPlan
+impl core::cmp::PartialEq for grit_lib::porcelain::commit::CommitPlan
+pub fn grit_lib::porcelain::commit::CommitPlan::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::commit::CommitPlan
+pub fn grit_lib::porcelain::commit::CommitPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::commit::CommitPlan
+impl core::marker::Freeze for grit_lib::porcelain::commit::CommitPlan
+impl core::marker::Send for grit_lib::porcelain::commit::CommitPlan
+impl core::marker::Sync for grit_lib::porcelain::commit::CommitPlan
+impl core::marker::Unpin for grit_lib::porcelain::commit::CommitPlan
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitPlan
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitPlan
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitPlan
 pub struct grit_lib::porcelain::commit::CommitRequest
 pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
 pub grit_lib::porcelain::commit::CommitRequest::assume_worktree_synced: bool
 pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
+pub grit_lib::porcelain::commit::CommitRequest::dry_run: bool
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String
 pub grit_lib::porcelain::commit::CommitRequest::sign_override: core::option::Option<bool>
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitRequest
@@ -10698,6 +10763,8 @@ pub fn grit_lib::porcelain::commit::commit_worktree(&grit_lib::repo::Repository,
 pub fn grit_lib::porcelain::commit::create_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
 pub fn grit_lib::porcelain::commit::default_commit_scope(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitScope>
 pub fn grit_lib::porcelain::commit::default_commit_scope_from_config(&grit_lib::config::ConfigSet) -> grit_lib::porcelain::commit::CommitScope
+pub fn grit_lib::porcelain::commit::normalize_commit_message(&str) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::porcelain::commit::plan_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitScope, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitPlan>
 pub fn grit_lib::porcelain::commit::prepare_commit_bytes(&grit_lib::repo::Repository, &grit_lib::config::ConfigSet, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::porcelain::commit::write_commit_object(&grit_lib::repo::Repository, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub mod grit_lib::porcelain::index_mode
