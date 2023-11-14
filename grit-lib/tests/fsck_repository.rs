@@ -120,6 +120,8 @@ fn one_commit(repo: &Repository) -> ObjectId {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: Default::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -372,7 +374,11 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
         create_commit(
             &repo,
             &CommitRequest {
-                message: format!("commit {i}"),
+                message: format!(
+                    "commit {i,
+            dry_run: false,
+        }"
+                ),
                 author: ident.clone(),
                 committer: ident,
                 allow_empty: false,
@@ -381,6 +387,7 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: Default::default(),
             },
             &mut NullProgress,
         )
@@ -424,7 +431,11 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
         create_commit(
             &repo,
             &CommitRequest {
-                message: format!("commit {i}"),
+                message: format!(
+                    "commit {i,
+            dry_run: false,
+        }"
+                ),
                 author: ident.clone(),
                 committer: ident,
                 allow_empty: false,
@@ -433,6 +444,7 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: Default::default(),
             },
             &mut NullProgress,
         )
@@ -1340,6 +1352,8 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: Default::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

@@ -419,11 +419,30 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
+fn short_change_id(id: &str) -> &str {
+    id.get(..7).unwrap_or(id)
+}
+
 /// Result of `grit commit` / `grit commit --amend`.
 pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyhow::Result<()> {
     outln!(w, "## Commit");
     outln!(w);
-    let short = short_hex(&outcome.oid);
+    if outcome.dry_run {
+        outln!(
+            w,
+            "- **Dry run** — would commit **{}** file(s)",
+            outcome.files.len()
+        );
+        for file in outcome.files.iter().take(20) {
+            if let Some(ref old) = file.old_path {
+                outln!(w, "  - `{}` `{}` → `{}`", file.status, old, file.path);
+            } else {
+                outln!(w, "  - `{}` `{}`", file.status, file.path);
+            }
+        }
+        return Ok(());
+    }
+    let short = short_hex(outcome.oid.as_deref().unwrap_or(""));
     if outcome.amended {
         outln!(
             w,
@@ -445,6 +464,12 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
         "changes"
     };
     outln!(w, "- **{}** {word} committed", outcome.changes);
+    if let Some(id) = outcome.change_id.as_deref() {
+        outln!(w, "- change id `{short}`", short = short_change_id(id));
+    }
+    if !outcome.hooks_run.is_empty() {
+        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
+    }
     Ok(())
 }
 

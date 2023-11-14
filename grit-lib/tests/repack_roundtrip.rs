@@ -61,7 +61,11 @@ fn many_commits(repo: &Repository, n: usize) {
         create_commit(
             repo,
             &CommitRequest {
-                message: format!("c{i}"),
+                message: format!(
+                    "c{i,
+            dry_run: false,
+        }"
+                ),
                 author: ident.clone(),
                 committer: ident.clone(),
                 allow_empty: false,
@@ -70,6 +74,7 @@ fn many_commits(repo: &Repository, n: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: Default::default(),
             },
             &mut NullProgress,
         )

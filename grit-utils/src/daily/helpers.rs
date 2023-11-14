@@ -374,6 +374,13 @@ pub fn commit_small_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) 
     )
 }
 
+pub fn commit_dry_run_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["commit", "--dry-run", "-m", "bench"]),
+        sh_devnull(&ctx.git, &["commit", "--dry-run", "-m", "bench"]),
+    )
+}
+
 pub fn commit_staged_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["commit", "--staged", "bench"]),

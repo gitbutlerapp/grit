@@ -2,6 +2,44 @@
   "$id": "https://grit-scm.com/schemas/commit/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "CommitAuthorOutcome": {
+      "description": "Author recorded on the new commit (`--json` / `--markdown`).",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitFileOutcome": {
+      "properties": {
+        "old_path": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
     "CommitScopeJson": {
       "description": "JSON scope label for [`CommitOutcome::scope`].",
       "enum": [
@@ -17,16 +55,46 @@
     "amended": {
       "type": "boolean"
     },
+    "author": {
+      "$ref": "#/definitions/CommitAuthorOutcome"
+    },
     "branch": {
       "type": "string"
+    },
+    "change_id": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "changes": {
       "format": "uint",
       "minimum": 0.0,
       "type": "integer"
     },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/definitions/CommitFileOutcome"
+      },
+      "type": "array"
+    },
+    "hooks_run": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "oid": {
       "type": "string"
+    },
+    "parents": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "scope": {
       "$ref": "#/definitions/CommitScopeJson"
@@ -37,9 +105,13 @@
   },
   "required": [
     "amended",
+    "author",
     "branch",
     "changes",
-    "oid",
+    "dry_run",
+    "files",
+    "hooks_run",
+    "parents",
     "scope",
     "subject"
   ],

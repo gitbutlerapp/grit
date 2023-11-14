@@ -94,7 +94,11 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
         create_commit(
             repo,
             &CommitRequest {
-                message: format!("m {idx}"),
+                message: format!(
+                    "m {idx,
+            dry_run: false,
+        }"
+                ),
                 author: ident.clone(),
                 committer: ident.clone(),
                 allow_empty: false,
@@ -103,6 +107,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                hooks: Default::default(),
             },
             &mut NullProgress,
         )
@@ -1213,6 +1218,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: Default::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -1235,6 +1242,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            hooks: Default::default(),
+            dry_run: false,
         },
         &mut NullProgress,
     )

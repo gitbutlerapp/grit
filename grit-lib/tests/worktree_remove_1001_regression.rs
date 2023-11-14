@@ -35,9 +35,10 @@ fn commit_request(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: Default::default(),
+        dry_run: false,
     }
 }
-
 fn init_main_repo(main: &Path) {
     fs::create_dir_all(main).expect("mkdir main");
     git(main, &["init", "-q", "-b", "main"]);

@@ -38,6 +38,8 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: Default::default(),
+        dry_run: false,
     }
 }
 
@@ -259,6 +261,8 @@ fn commit_worktree_req(message: &str) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
+        hooks: Default::default(),
+        dry_run: false,
     }
 }
 

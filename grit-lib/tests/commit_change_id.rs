@@ -41,9 +41,10 @@ fn commit_req(message: &str) -> CommitRequest {
         assume_worktree_synced: false,
         skip_pre_commit_tree_match: false,
         staged_change_count: None,
+        hooks: Default::default(),
+        dry_run: false,
     }
 }
-
 fn init_repo(root: &Path, config_extra: &str) -> Repository {
     fs::create_dir_all(root.join(".git/objects")).unwrap();
     fs::create_dir_all(root.join(".git/refs/heads")).unwrap();

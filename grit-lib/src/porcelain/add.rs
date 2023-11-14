@@ -71,6 +71,8 @@ pub struct StageOptions {
     /// Override bulk/parallel staging thresholds (integration tests only).
     #[doc(hidden)]
     pub staging_thresholds: Option<IndexStagingThresholds>,
+    /// Hash worktree blobs into the index without writing loose objects (commit `--dry-run`).
+    pub dry_run: bool,
 }
 
 /// Counts returned by [`stage`].
@@ -121,9 +123,11 @@ pub(crate) fn stage_for_commit_on_index(
     repo: &Repository,
     index: &mut Index,
     progress: &mut dyn ProgressSink,
+    dry_run: bool,
 ) -> Result<StageOutcome> {
     let opts = StageOptions {
         mode: StageMode::All,
+        dry_run,
         ..StageOptions::default()
     };
     stage_inner_on_index(repo, &opts, progress, true, index, false)
@@ -236,7 +240,7 @@ fn stage_inner_on_index(
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
 
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
-    let use_tracked_scan = tracked_scan && !index.entries.is_empty();
+    let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !opts.dry_run;
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
         (Vec::new(), std::collections::BTreeMap::new())
@@ -259,6 +263,7 @@ fn stage_inner_on_index(
             config: Some(std::sync::Arc::clone(&rules_config)),
             worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
             thread_policy: Some(repo.thread_policy()),
+            hash_blobs_without_write: opts.dry_run,
             ..DiffIndexToWorktreeOptions::default()
         };
         let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(

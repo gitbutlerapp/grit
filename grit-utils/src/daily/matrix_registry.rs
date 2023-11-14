@@ -83,6 +83,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Commit pre-staged index: grit commit --staged vs git commit",
     },
     ScenarioSpec {
+        id: "commit/dry-run@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Preview commit: grit commit --dry-run vs git commit --dry-run",
+    },
+    ScenarioSpec {
         id: "commit/paths@synth-10k",
         area: Area::Worktree,
         headline: false,
