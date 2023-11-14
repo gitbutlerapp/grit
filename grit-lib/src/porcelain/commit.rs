@@ -173,7 +173,7 @@ pub fn commit_with_scope(
 
 /// Preview a commit for `scope` without mutating the repository (objects, index on disk, refs, hooks).
 ///
-/// Uses in-memory tree hashing ([`WriteTreePersistence::DryRun`]) and returns the same validation
+/// Uses in-memory blob hashing during staging (no new loose objects) and returns the same validation
 /// errors as [`commit_with_scope`] for detached HEAD, unmerged index, and nothing-to-commit.
 ///
 /// # Errors
