@@ -10,7 +10,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::io;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
@@ -222,6 +225,144 @@ pub(crate) fn reflog_entry_count(git_dir: &Path, refname: &str) -> Result<usize>
         Err(e) => return Err(Error::Io(e)),
     };
     Ok(content.lines().filter(|line| !line.is_empty()).count())
+}
+
+const REFLOG_REVERSE_READ_CHUNK: usize = 64 * 1024;
+
+/// True when a loose reflog file exists and contains at least one non-empty line.
+///
+/// Probes only the leading portion of the file (never reads the whole log).
+pub(crate) fn loose_reflog_has_nonempty_line(git_dir: &Path, refname: &str) -> Result<bool> {
+    let path = reflog_path(git_dir, refname);
+    let mut file = match File::open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    let len = file.metadata().map_err(Error::Io)?.len();
+    if len == 0 {
+        return Ok(false);
+    }
+    let probe = len.min(4096) as usize;
+    let mut buf = vec![0u8; probe];
+    file.read_exact(&mut buf).map_err(Error::Io)?;
+    Ok(buf
+        .split(|&b| b == b'\n')
+        .any(|line| !line.is_empty() && line != b"\r"))
+}
+
+/// Whether `refname` has reflog data for DWIM canonicalization (bounded on loose files).
+pub(crate) fn reflog_has_entries_for_dwim(git_dir: &Path, refname: &str) -> Result<bool> {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
+        let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
+        let mut found = false;
+        store.for_each_reflog_entry(refname, false, &mut |_| {
+            found = true;
+            ControlFlow::Break(())
+        })?;
+        return Ok(found);
+    }
+    loose_reflog_has_nonempty_line(git_dir, refname)
+}
+
+/// Reads a loose reflog file from the end in fixed-size chunks (newest line first).
+pub(crate) struct ReverseReflogLineReader {
+    file: File,
+    loaded_from: u64,
+    buffer: Vec<u8>,
+}
+
+impl ReverseReflogLineReader {
+    /// Opens an existing non-empty reflog file for reverse line iteration.
+    ///
+    /// # Errors
+    ///
+    /// Propagates I/O errors other than a missing path (which yields `Ok(None)`).
+    pub fn open(path: &Path) -> Result<Option<Self>> {
+        let mut file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(Error::Io(e)),
+        };
+        let len = file.metadata().map_err(Error::Io)?.len();
+        if len == 0 {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            file,
+            loaded_from: len,
+            buffer: Vec::new(),
+        }))
+    }
+
+    /// `true` when older log bytes may remain (used for `truncated` after an early stop).
+    #[must_use]
+    pub fn has_older_bytes(&self) -> bool {
+        self.loaded_from > 0 || !self.buffer.is_empty()
+    }
+
+    /// Returns the next non-empty line's raw bytes, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Propagates I/O failures while reading.
+    pub fn next_nonempty_line(&mut self) -> Result<Option<Vec<u8>>> {
+        loop {
+            if let Some(line) = take_newest_line(&mut self.buffer)? {
+                if line.is_empty() || line == b"\r" {
+                    continue;
+                }
+                return Ok(Some(line));
+            }
+            if self.loaded_from == 0 {
+                if self.buffer.is_empty() {
+                    return Ok(None);
+                }
+                let mut line = std::mem::take(&mut self.buffer);
+                while line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                if line.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(line));
+            }
+            let read_end = self.loaded_from;
+            let read_start = read_end.saturating_sub(REFLOG_REVERSE_READ_CHUNK as u64);
+            let read_len = (read_end - read_start) as usize;
+            self.file
+                .seek(SeekFrom::Start(read_start))
+                .map_err(Error::Io)?;
+            let mut chunk = vec![0u8; read_len];
+            self.file.read_exact(&mut chunk).map_err(Error::Io)?;
+            self.loaded_from = read_start;
+            let mut merged = chunk;
+            merged.append(&mut self.buffer);
+            self.buffer = merged;
+        }
+    }
+}
+
+fn take_newest_line(buffer: &mut Vec<u8>) -> Result<Option<Vec<u8>>> {
+    loop {
+        if buffer.is_empty() {
+            return Ok(None);
+        }
+        let Some(newline_at) = buffer.iter().rposition(|&b| b == b'\n') else {
+            return Ok(None);
+        };
+        let mut line = buffer.split_off(newline_at + 1);
+        buffer.truncate(newline_at);
+        while line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        if line.is_empty() {
+            continue;
+        }
+        return Ok(Some(line));
+    }
 }
 
 /// Parse a single reflog line.
@@ -1220,6 +1361,60 @@ pub fn mark_stalefix_reachable(repo: &Repository, git_dir: &Path) -> Result<Hash
         }
     }
     Ok(seen)
+}
+
+#[cfg(test)]
+mod reverse_scan_tests {
+    use std::fs;
+    use std::io::Write;
+
+    use super::{reflog_path, ReverseReflogLineReader, REFLOG_REVERSE_READ_CHUNK};
+    use crate::objects::ObjectId;
+
+    fn sample_line(n: usize) -> String {
+        let oid = ObjectId::zero();
+        format!(
+            "{oid} {oid} T <t@example.com> {ts} +0000\tcommit: line{n}\n",
+            ts = 1_700_000_000 + n as i64
+        )
+    }
+
+    #[test]
+    fn reverse_reader_returns_newest_first() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let git_dir = dir.path().join(".git");
+        fs::create_dir_all(git_dir.join("logs/refs/heads")).expect("mkdir");
+        let path = reflog_path(&git_dir, "refs/heads/main");
+        let mut f = fs::File::create(&path).expect("create");
+        write!(f, "{}", sample_line(1)).expect("w");
+        write!(f, "{}", sample_line(2)).expect("w");
+        let mut reader = ReverseReflogLineReader::open(&path)
+            .expect("open")
+            .expect("nonempty");
+        let first = reader.next_nonempty_line().expect("read").expect("line");
+        assert!(first.ends_with(b"line2"));
+        let second = reader.next_nonempty_line().expect("read").expect("line");
+        assert!(second.ends_with(b"line1"));
+        assert!(reader.next_nonempty_line().expect("read").is_none());
+        assert!(!reader.has_older_bytes());
+    }
+
+    #[test]
+    fn reverse_reader_spans_chunk_boundaries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let git_dir = dir.path().join(".git");
+        fs::create_dir_all(git_dir.join("logs")).expect("mkdir");
+        let path = reflog_path(&git_dir, "HEAD");
+        let mut f = fs::File::create(&path).expect("create");
+        let pad = "x".repeat(REFLOG_REVERSE_READ_CHUNK + 128);
+        write!(f, "{pad}\n").expect("pad");
+        write!(f, "{}", sample_line(99)).expect("newest");
+        let mut reader = ReverseReflogLineReader::open(&path)
+            .expect("open")
+            .expect("nonempty");
+        let line = reader.next_nonempty_line().expect("read").expect("line");
+        assert!(line.ends_with(b"line99"));
+    }
 }
 
 #[cfg(test)]

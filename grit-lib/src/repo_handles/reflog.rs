@@ -143,8 +143,7 @@ impl<'repo> RepositoryReflogs<'repo> {
             query,
             entries: Vec::new(),
             stopped_at_limit: false,
-            non_empty_seen_from_newest: 0,
-            total_non_empty: None,
+            more_older_lines_remain: false,
         };
         let storage_format = crate::refs::store::open_ref_store(git_dir)?.format();
         if storage_format == crate::refs::store::RefStorageFormat::Files {
@@ -162,7 +161,7 @@ impl<'repo> RepositoryReflogs<'repo> {
     fn resolve_reflog_canonical(&self, user_ref: &str) -> Result<String> {
         let git_dir = self.repo.git_dir();
         for candidate in dwim_reflog_candidates(user_ref) {
-            if crate::reflog::reflog_entry_count(git_dir, &candidate)? > 0 {
+            if crate::reflog::reflog_has_entries_for_dwim(git_dir, &candidate)? {
                 return Ok(candidate);
             }
         }
@@ -283,19 +282,12 @@ struct QueryScanState<'a> {
     query: &'a ReflogQuery,
     entries: Vec<IndexedReflogEntry>,
     stopped_at_limit: bool,
-    non_empty_seen_from_newest: usize,
-    total_non_empty: Option<usize>,
+    more_older_lines_remain: bool,
 }
 
 impl QueryScanState<'_> {
     fn truncated(&self) -> bool {
-        if !self.stopped_at_limit {
-            return false;
-        }
-        let Some(total) = self.total_non_empty else {
-            return true;
-        };
-        self.non_empty_seen_from_newest < total
+        self.stopped_at_limit && self.more_older_lines_remain
     }
 
     fn visit(&mut self, index: usize, entry: &ReflogEntry) -> ControlFlow<()> {
@@ -348,12 +340,22 @@ fn scan_loose_reflog_newest_first(
     state: &mut QueryScanState<'_>,
 ) -> Result<()> {
     let path = reflog_path(git_dir, refname);
-    let content = match fs::read(&path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(Error::Io(e)),
+    let Some(mut reader) = crate::reflog::ReverseReflogLineReader::open(&path)? else {
+        return Ok(());
     };
-    scan_reflog_bytes_newest_first(&content, state);
+    let mut index_from_newest = 0usize;
+    while let Some(line_bytes) = reader.next_nonempty_line()? {
+        let line = std::str::from_utf8(&line_bytes).unwrap_or("");
+        let index = index_from_newest;
+        index_from_newest += 1;
+        let Some(entry) = parse_reflog_line_for_store(line) else {
+            continue;
+        };
+        if state.visit(index, &entry).is_break() {
+            state.more_older_lines_remain = reader.has_older_bytes();
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -365,51 +367,14 @@ fn scan_store_reflog_newest_first(
     let mut index = 0usize;
     repo.refs()
         .for_each_reflog_entry(refname, true, &mut |entry| {
-            state.non_empty_seen_from_newest += 1;
             let flow = state.visit(index, entry);
             index += 1;
+            if flow.is_break() {
+                state.more_older_lines_remain = true;
+            }
             flow
         })?;
-    state.total_non_empty = Some(index);
     Ok(())
-}
-
-/// Walk non-empty reflog lines newest-first without building a line index vector.
-fn scan_reflog_bytes_newest_first(content: &[u8], state: &mut QueryScanState<'_>) {
-    let mut index_from_newest = 0usize;
-    let mut pos = content.len();
-    while pos > 0 {
-        let start = match content[..pos].iter().rposition(|&b| b == b'\n') {
-            Some(at) => at + 1,
-            None => 0,
-        };
-        let line = std::str::from_utf8(&content[start..pos])
-            .unwrap_or("")
-            .trim_end_matches('\r');
-        pos = start.saturating_sub(1);
-        if line.is_empty() {
-            continue;
-        }
-        state.non_empty_seen_from_newest += 1;
-        let index = index_from_newest;
-        index_from_newest += 1;
-        let Some(entry) = parse_reflog_line_for_store(line) else {
-            continue;
-        };
-        if state.visit(index, &entry).is_break() {
-            break;
-        }
-    }
-    if state.stopped_at_limit {
-        state.total_non_empty = Some(count_nonempty_reflog_lines(content));
-    }
-}
-
-fn count_nonempty_reflog_lines(content: &[u8]) -> usize {
-    content
-        .split(|&b| b == b'\n')
-        .filter(|line| !line.is_empty() && *line != b"\r")
-        .count()
 }
 
 fn dwim_reflog_candidates(user_ref: &str) -> Vec<String> {
