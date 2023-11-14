@@ -36,6 +36,40 @@ pub struct ReflogEntry {
     pub message: String,
 }
 
+impl ReflogEntry {
+    /// Best-effort action prefix parsed from [`Self::message`].
+    ///
+    /// Returns the substring before the first `": "` when present (for example `commit`,
+    /// `commit (amend)`, `checkout`, `reset`, `rebase (finish)`, `merge branch`).
+    /// Reflog messages are free-form text; callers must not rely on this for correctness.
+    #[must_use]
+    pub fn action(&self) -> Option<&str> {
+        self.message.split_once(": ").map(|(prefix, _)| prefix)
+    }
+}
+
+/// Case-sensitive substring filter for reflog message text (`--grep`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageMatcher {
+    needle: String,
+}
+
+impl MessageMatcher {
+    /// Build a matcher that succeeds when the message contains `pattern` verbatim.
+    #[must_use]
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            needle: pattern.into(),
+        }
+    }
+
+    /// Returns whether `message` contains the configured pattern.
+    #[must_use]
+    pub fn matches(&self, message: &str) -> bool {
+        message.contains(&self.needle)
+    }
+}
+
 /// Return the filesystem path for a ref's reflog.
 ///
 /// Uses the same storage rules as [`refs::append_reflog`] (branch reflogs under the
@@ -1508,6 +1542,39 @@ mod default_expire_tests {
     }
 
     #[test]
+    fn reflog_entry_action_prefixes() {
+        let cases = [
+            ("commit: init", Some("commit")),
+            ("commit (initial): init", Some("commit (initial)")),
+            ("commit (amend): tweak", Some("commit (amend)")),
+            ("checkout: moving from main to topic", Some("checkout")),
+            ("reset: moving to HEAD", Some("reset")),
+            (
+                "rebase (finish): refs/heads/main onto abc",
+                Some("rebase (finish)"),
+            ),
+            ("branch: Created from HEAD", Some("branch")),
+            ("branch: Reset to origin/main", Some("branch")),
+            ("merge topic: Merge branch 'topic'", Some("merge topic")),
+            ("pull: Fast-forward", Some("pull")),
+            ("pull: rebase onto origin/main", Some("pull")),
+            ("cherry-pick: subject", Some("cherry-pick")),
+            ("revert: subject", Some("revert")),
+            ("history undo", None),
+            ("rewrite", None),
+            ("prune-me", None),
+        ];
+        for (message, want) in cases {
+            let entry = super::ReflogEntry {
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                identity: String::new(),
+                message: message.into(),
+            };
+            assert_eq!(entry.action(), want, "message={message:?}");
+        }
+    }
+
     fn expire_git_prunes_old_entry_and_reports_action() {
         let (tmp, repo) = seed_repo();
         let git_dir = &repo.git_dir();

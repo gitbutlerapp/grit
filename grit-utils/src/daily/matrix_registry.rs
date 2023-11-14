@@ -341,7 +341,7 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         area: Area::Revwalk,
         headline: false,
         name: None,
-        description: "Reflog for HEAD: grit reflog vs git reflog",
+        description: "Bounded HEAD reflog (10k entries, -n 100 --json): grit reflog vs git reflog",
     },
     ScenarioSpec {
         id: "shortlog/ahead@git-git",

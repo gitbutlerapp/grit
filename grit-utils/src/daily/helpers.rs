@@ -679,10 +679,41 @@ pub fn shell_git_patch_id_stable_from_head(git: &Path) -> String {
     format!("set -eu; {git_q} show HEAD | {git_q} patch-id --stable > /dev/null 2>&1")
 }
 
+/// Ensure `HEAD` has at least `target` reflog lines (synthetic padding for bounded-list benches).
+pub fn pad_head_reflog(repo: &Path, target: usize) -> std::io::Result<()> {
+    use std::io::Write;
+    let log_path = repo.join(".git/logs/HEAD");
+    let content = std::fs::read_to_string(&log_path)?;
+    let existing = content.lines().filter(|l| !l.is_empty()).count();
+    if existing >= target {
+        return Ok(());
+    }
+    let Some(template) = content.lines().rfind(|l| !l.is_empty()) else {
+        return Ok(());
+    };
+    let (head, message) = template
+        .split_once('\t')
+        .map_or((template, "commit: bench pad"), |(h, m)| (h, m));
+    let mut parts = head.splitn(3, ' ');
+    let Some(old) = parts.next() else {
+        return Ok(());
+    };
+    let Some(new) = parts.next() else {
+        return Ok(());
+    };
+    let mut file = std::fs::OpenOptions::new().append(true).open(&log_path)?;
+    for i in existing..target {
+        let ts = 1_700_000_000_i64 - i as i64;
+        writeln!(file, "{old} {new} T <t@e.c> {ts} +0000\t{message}")?;
+    }
+    Ok(())
+}
+
 pub fn reflog_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let _ = pad_head_reflog(&ctx.repo, 10_000);
     (
-        sh_devnull(&ctx.grit, &["reflog"]),
-        sh_devnull(&ctx.git, &["reflog"]),
+        sh_devnull(&ctx.grit, &["reflog", "-n", "100", "--json"]),
+        sh_devnull(&ctx.git, &["reflog", "-n", "100"]),
     )
 }
 

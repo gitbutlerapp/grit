@@ -4,6 +4,9 @@
   "definitions": {
     "ReflogListEntry": {
       "properties": {
+        "action": {
+          "type": "string"
+        },
         "index": {
           "format": "uint",
           "minimum": 0.0,
@@ -38,11 +41,15 @@
     },
     "ref": {
       "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
     }
   },
   "required": [
     "entries",
-    "ref"
+    "ref",
+    "truncated"
   ],
   "title": "ReflogListOutcome",
   "type": "object"

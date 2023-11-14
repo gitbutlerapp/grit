@@ -101,7 +101,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `log/path@git-git` | History for one path: grit log -- <path> vs git log --oneline -- <path> |
 | `merge-base/branches@git-git` | Merge base of two branches: grit merge-base <a> <b> vs git merge-base <a> <b> |
 | `patch-id/commit@git-git` | Stable patch-id for HEAD: grit patch-id HEAD vs git patch-id --stable HEAD |
-| `reflog/list@synth-10k` | Reflog for HEAD: grit reflog vs git reflog |
+| `reflog/list@synth-10k` | Bounded HEAD reflog (10k entries): grit reflog -n 100 --json vs git reflog -n 100 |
 | `resolve/head-n@git-git` | Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD |
 | `resolve/change-id@git-git` | Resolve change-id prefix: grit resolve \<cid\> vs git log --all --format=%H |
 | `revs/count@git-git` | Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD |

@@ -1,12 +1,15 @@
 //! Reflog listing, deletion, and expiry for one [`Repository`](crate::repo::Repository).
 
+use std::fs;
+use std::io;
 use std::ops::ControlFlow;
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::reflog::{
     delete_reflog_entries, delete_reflog_entries_rechain, expire_reflog_git, list_reflog_refs,
-    load_gc_reflog_expire_config, parse_reflog_expire_spec, reflog_exists, ReflogEntry,
+    load_gc_reflog_expire_config, parse_reflog_expire_spec, parse_reflog_line_for_store,
+    reflog_exists, reflog_identity_timestamp, reflog_path, MessageMatcher, ReflogEntry,
     ReflogExpireParams, ReflogExpireResult,
 };
 use crate::refs::resolve_ref_dwim;
@@ -40,6 +43,30 @@ pub struct IndexedReflogEntry {
     pub index: usize,
     /// Parsed reflog fields.
     pub entry: ReflogEntry,
+}
+
+/// Filters for [`RepositoryReflogs::query`].
+#[derive(Debug, Clone, Default)]
+pub struct ReflogQuery {
+    /// Maximum matching entries to return (newest first).
+    pub limit: Option<usize>,
+    /// Exclude entries with identity timestamp strictly before this Unix second.
+    pub since: Option<i64>,
+    /// Exclude entries with identity timestamp strictly after this Unix second.
+    pub until: Option<i64>,
+    /// Optional message substring filter.
+    pub grep: Option<MessageMatcher>,
+    /// Wall-clock anchor passed by the caller (not read from the system clock here).
+    pub now: i64,
+}
+
+/// One page of reflog query results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflogPage {
+    /// Matching entries in newest-first order with global reflog indices.
+    pub entries: Vec<IndexedReflogEntry>,
+    /// `true` when scanning stopped before the oldest entry (typically because `limit` was reached).
+    pub truncated: bool,
 }
 
 /// Reflog read/write helpers scoped to an open repository.
@@ -91,9 +118,62 @@ impl<'repo> RepositoryReflogs<'repo> {
     ///
     /// Returns [`Error::ReflogUnknownRef`] when the ref cannot be resolved and has no reflog.
     pub fn entries(&self, ref_name: &RefName) -> Result<Vec<IndexedReflogEntry>> {
-        let (canonical, raw) = self.load_reflog(ref_name.as_str())?;
-        let _ = canonical;
-        Ok(index_entries_newest_first(&raw))
+        let page = self.query(ref_name, &ReflogQuery::default())?;
+        Ok(page.entries)
+    }
+
+    /// Reflog entries for `ref_name` matching `query`, newest first.
+    ///
+    /// Indices match Git's `ref@{{n}}` numbering on the full reflog (not renumbered after
+    /// filtering). Scanning stops once `limit` matches are collected.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ReflogUnknownRef`] when the ref cannot be resolved and has no reflog.
+    pub fn query(&self, ref_name: &RefName, query: &ReflogQuery) -> Result<ReflogPage> {
+        let (canonical, _) = self.load_reflog(ref_name.as_str())?;
+        let git_dir = self.repo.git_dir();
+        let mut state = QueryScanState {
+            query,
+            entries: Vec::new(),
+            stopped_at_limit: false,
+            last_index: None,
+            total_entries: 0,
+        };
+        let storage_format = crate::refs::store::open_ref_store(git_dir)?.format();
+        if storage_format == crate::refs::store::RefStorageFormat::Files {
+            scan_loose_reflog_newest_first(git_dir, &canonical, &mut state)?;
+        } else {
+            if query.limit.is_some() {
+                let mut count = 0usize;
+                self.repo
+                    .refs()
+                    .for_each_reflog_entry(&canonical, false, &mut |_| {
+                        count += 1;
+                        ControlFlow::Continue(())
+                    })?;
+                state.total_entries = count;
+            }
+            let mut index = 0usize;
+            self.repo
+                .refs()
+                .for_each_reflog_entry(&canonical, true, &mut |entry| {
+                    let flow = state.visit(index, entry);
+                    index += 1;
+                    flow
+                })?;
+            if query.limit.is_none() {
+                state.total_entries = index;
+            }
+        }
+        let truncated = state.stopped_at_limit
+            && state
+                .last_index
+                .is_some_and(|i| i + 1 < state.total_entries);
+        Ok(ReflogPage {
+            entries: state.entries,
+            truncated,
+        })
     }
 
     /// Delete reflog entries by newest-first `indices`.
@@ -201,16 +281,78 @@ fn read_reflog_via_store(repo: &Repository, refname: &str) -> Result<Vec<ReflogE
     Ok(entries)
 }
 
-fn index_entries_newest_first(entries: &[ReflogEntry]) -> Vec<IndexedReflogEntry> {
-    entries
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(index, entry)| IndexedReflogEntry {
+struct QueryScanState<'a> {
+    query: &'a ReflogQuery,
+    entries: Vec<IndexedReflogEntry>,
+    stopped_at_limit: bool,
+    last_index: Option<usize>,
+    total_entries: usize,
+}
+
+impl QueryScanState<'_> {
+    fn visit(&mut self, index: usize, entry: &ReflogEntry) -> ControlFlow<()> {
+        self.last_index = Some(index);
+        if !entry_matches_query(entry, self.query) {
+            return ControlFlow::Continue(());
+        }
+        self.entries.push(IndexedReflogEntry {
             index,
             entry: entry.clone(),
-        })
-        .collect()
+        });
+        if self
+            .query
+            .limit
+            .is_some_and(|limit| self.entries.len() >= limit)
+        {
+            self.stopped_at_limit = true;
+            return ControlFlow::Break(());
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+fn entry_matches_query(entry: &ReflogEntry, query: &ReflogQuery) -> bool {
+    if let Some(since) = query.since {
+        if reflog_identity_timestamp(&entry.identity).is_some_and(|ts| ts < since) {
+            return false;
+        }
+    }
+    if let Some(until) = query.until {
+        if reflog_identity_timestamp(&entry.identity).is_some_and(|ts| ts > until) {
+            return false;
+        }
+    }
+    if let Some(grep) = &query.grep {
+        if !grep.matches(&entry.message) {
+            return false;
+        }
+    }
+    let _ = query.now;
+    true
+}
+
+fn scan_loose_reflog_newest_first(
+    git_dir: &Path,
+    refname: &str,
+    state: &mut QueryScanState<'_>,
+) -> Result<()> {
+    let path = reflog_path(git_dir, refname);
+    let content = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    let lines: Vec<&str> = content.lines().filter(|line| !line.is_empty()).collect();
+    state.total_entries = lines.len();
+    for (rev_pos, line) in lines.iter().rev().enumerate() {
+        let Some(entry) = parse_reflog_line_for_store(line) else {
+            continue;
+        };
+        if state.visit(rev_pos, &entry).is_break() {
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn dwim_reflog_candidates(user_ref: &str) -> Vec<String> {

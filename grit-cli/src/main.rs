@@ -639,8 +639,23 @@ enum Command {
         #[arg(value_name = "REF")]
         reference: Option<String>,
         /// Show at most this many entries (newest first).
-        #[arg(long)]
-        limit: Option<usize>,
+        #[arg(short = 'n', long = "max-count", alias = "limit", value_name = "N")]
+        max_count: Option<usize>,
+        /// Exclude entries older than this date (Git `--since`).
+        #[arg(long = "since", value_name = "DATE")]
+        since: Option<String>,
+        /// Alias for `--since`.
+        #[arg(long = "after", value_name = "DATE")]
+        after: Option<String>,
+        /// Exclude entries newer than this date (Git `--until`).
+        #[arg(long = "until", value_name = "DATE")]
+        until: Option<String>,
+        /// Alias for `--until`.
+        #[arg(long = "before", value_name = "DATE")]
+        before: Option<String>,
+        /// Keep entries whose message contains this substring (case-sensitive).
+        #[arg(long = "grep", value_name = "PAT")]
+        grep: Option<String>,
         #[command(subcommand)]
         action: Option<ReflogAction>,
     },
@@ -1882,10 +1897,29 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         }
         Command::Reflog {
             reference,
-            limit,
+            max_count,
+            since,
+            after,
+            until,
+            before,
+            grep,
             action,
         } => match action {
-            None => emit(&commands::reflog::run_show(reference, limit)?, opts, ctx),
+            None => emit(
+                &commands::reflog::run_show(
+                    reference,
+                    commands::reflog::ReflogListOptions {
+                        max_count,
+                        since,
+                        after,
+                        until,
+                        before,
+                        grep,
+                    },
+                )?,
+                opts,
+                ctx,
+            ),
             Some(ReflogAction::Delete { specs }) => {
                 emit(&commands::reflog::run_delete(specs)?, opts, ctx)
             }
