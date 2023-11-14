@@ -82,6 +82,13 @@ fn reflog_grep_and_since_flags() {
 }
 
 #[test]
+fn reflog_max_count_zero_returns_empty_json() {
+    let dir = init_repo();
+    let v = grit_json(dir.path(), &["reflog", "-n", "0"]);
+    assert!(v["entries"].as_array().expect("entries").is_empty());
+}
+
+#[test]
 fn reflog_limit_alias_still_works() {
     let dir = init_repo();
     let v = grit_json(dir.path(), &["reflog", "--limit", "1"]);

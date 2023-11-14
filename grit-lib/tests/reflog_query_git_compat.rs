@@ -84,7 +84,7 @@ fn reflog_query_limit_matches_git() {
     }
     let repo = seed_reflog_repo();
     let dir = repo.worktree();
-    for n in [1usize, 3, 100] {
+    for n in [0usize, 1, 3, 100] {
         let git_idx = git_reflog_indices(dir, &["--max-count", &n.to_string()]);
         let grit_idx = grit_indices(
             repo.worktree(),
@@ -103,27 +103,21 @@ fn reflog_query_since_until_matches_git() {
         eprintln!("SKIP: git not available");
         return;
     }
-    let repo = seed_reflog_repo();
+    let repo = seed_reflog_repo_with_spread_timestamps();
     let dir = repo.worktree();
-    let now = Command::new("date")
-        .arg("+%s")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(2_000_000_000_i64);
-    let since = committer_cutoff_from_date("1.week.ago", now).expect("since");
-    let until = committer_cutoff_from_date("1.hour.ago", now).expect("until");
+    let now = 1_800_000_000_i64;
+    let since = committer_cutoff_from_date("@1700000000", now).expect("since");
+    let until = committer_cutoff_from_date("@1750000000", now).expect("until");
     for (git_args, query) in [
         (
-            vec!["--since", &format!("@{since}")],
+            vec!["--since", "@1700000000"],
             ReflogQuery {
                 since: Some(since),
                 ..ReflogQuery::default()
             },
         ),
         (
-            vec!["--until", &format!("@{until}")],
+            vec!["--until", "@1750000000"],
             ReflogQuery {
                 until: Some(until),
                 ..ReflogQuery::default()
@@ -132,8 +126,44 @@ fn reflog_query_since_until_matches_git() {
     ] {
         let git_idx = git_reflog_indices(dir, &git_args);
         let grit_idx = grit_indices(repo.worktree(), &query);
+        assert!(
+            !git_idx.is_empty() && git_idx.len() < 20,
+            "expected a proper subset, git={git_idx:?}"
+        );
         assert_eq!(git_idx, grit_idx, "args={git_args:?}");
     }
+}
+
+fn seed_reflog_repo_with_spread_timestamps() -> TestRepo {
+    use grit_lib::objects::ObjectId;
+    use grit_lib::refs::append_reflog;
+
+    let repo = support::files_repo();
+    let tip = support::git_empty_commit_oid(repo.worktree());
+    let git_dir_path = repo.git_dir();
+    let git_dir = git_dir_path.as_path();
+    let zero = ObjectId::zero();
+    let oid = tip;
+    let stamps = [
+        1_600_000_000_i64,
+        1_700_000_000,
+        1_750_000_000,
+        1_800_000_000,
+        1_850_000_000,
+    ];
+    for (i, ts) in stamps.iter().enumerate() {
+        append_reflog(
+            git_dir,
+            "HEAD",
+            &zero,
+            &oid,
+            &format!("T <t@example.com> {ts} +0000"),
+            &format!("commit: spread{i}"),
+            true,
+        )
+        .expect("append");
+    }
+    repo
 }
 
 #[test]

@@ -5,7 +5,11 @@
     "ReflogListEntry": {
       "properties": {
         "action": {
-          "type": "string"
+          "description": "Best-effort action prefix from the message (before the first `\": \"`).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "index": {
           "format": "uint",
@@ -43,6 +47,7 @@
       "type": "string"
     },
     "truncated": {
+      "description": "`true` when the query stopped before the oldest reflog entry (typically due to `-n`).",
       "type": "boolean"
     }
   },

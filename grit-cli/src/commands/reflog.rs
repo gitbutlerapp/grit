@@ -29,6 +29,8 @@ pub struct ReflogListEntry {
     pub relative_date: String,
     pub message: String,
     /// Best-effort action prefix from the message (before the first `": "`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
 }
 
