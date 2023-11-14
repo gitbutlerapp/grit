@@ -2267,14 +2267,39 @@ fn schema_top_level_keys_are_stable() -> TestResult {
         keys(&committed),
         [
             "amended",
+            "author",
             "branch",
             "change_id",
             "changes",
+            "dry_run",
+            "files",
+            "hooks_run",
             "oid",
+            "parents",
             "scope",
             "subject"
         ]
     );
+    write_file(&seed.join("dry.txt"), "dry\n");
+    let dry_preview = gs_json(&seed, &["commit", "--dry-run", "-m", "dry"]);
+    assert_eq!(
+        keys(&dry_preview),
+        [
+            "amended",
+            "author",
+            "branch",
+            "change_id",
+            "changes",
+            "dry_run",
+            "files",
+            "hooks_run",
+            "parents",
+            "scope",
+            "subject"
+        ]
+    );
+    assert!(dry_preview.get("oid").is_none());
+    assert_eq!(dry_preview["dry_run"], Value::Bool(true));
 
     let status = gs_json(&seed, &["status"]);
     assert_eq!(
