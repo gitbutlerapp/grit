@@ -4060,6 +4060,8 @@ pub struct DiffIndexToWorktreeOptions {
     /// refuse the operation when the index has unmerged entries; this filter does not
     /// substitute for a full unmerged scan.
     pub restrict_to_paths: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
+    /// When true with staging materialization, compute blob OIDs without writing loose objects.
+    pub hash_blobs_without_write: bool,
 }
 
 impl Default for DiffIndexToWorktreeOptions {
@@ -4080,6 +4082,7 @@ impl Default for DiffIndexToWorktreeOptions {
             command_runner: None,
             fsmonitor_query_boundary: None,
             restrict_to_paths: None,
+            hash_blobs_without_write: false,
         }
     }
 }
@@ -4101,6 +4104,7 @@ fn parallel_process_blob_worktree_jobs(
     config: &crate::config::ConfigSet,
     trust_filemode: bool,
     materialize_dirty_blobs: bool,
+    hash_blobs_without_write: bool,
     conv: &crate::crlf::ConversionConfig,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     result: &mut Vec<DiffEntry>,
@@ -4130,7 +4134,15 @@ fn parallel_process_blob_worktree_jobs(
                 filter_process,
             )?;
             let worktree_oid = if materialize_dirty_blobs {
-                odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
+                if hash_blobs_without_write {
+                    odb.hash(ObjectKind::Blob, &data)
+                } else {
+                    odb.write_with_options(
+                        ObjectKind::Blob,
+                        &data,
+                        crate::odb::BULK_NEW_LOOSE_WRITE,
+                    )?
+                }
             } else {
                 odb.hash(ObjectKind::Blob, &data)?
             };
@@ -4250,6 +4262,7 @@ fn push_index_blob_worktree_diff(
     file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
     conv: &crate::crlf::ConversionConfig,
     materialize_dirty_blobs: bool,
+    hash_blobs_without_write: bool,
     for_status: bool,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     result: &mut Vec<DiffEntry>,
@@ -4328,7 +4341,11 @@ fn push_index_blob_worktree_diff(
         filter_process,
     )?;
     let worktree_oid = if materialize_dirty_blobs {
-        odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
+        if hash_blobs_without_write {
+            odb.hash(ObjectKind::Blob, &data)
+        } else {
+            odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
+        }
     } else {
         odb.hash(ObjectKind::Blob, &data)?
     };
@@ -4674,6 +4691,7 @@ fn diff_index_to_worktree_inner(
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
+    let hash_blobs_without_write = options.hash_blobs_without_write;
 
     let mut result = Vec::new();
     let refresh_index_stat_in_pass = options.refresh_index_stat_in_pass;
@@ -5023,6 +5041,7 @@ fn diff_index_to_worktree_inner(
                         &file_attrs_for,
                         &conv,
                         materialize_dirty_blobs,
+                        hash_blobs_without_write,
                         options.for_status,
                         filter_fp,
                         &mut result,
@@ -5058,6 +5077,7 @@ fn diff_index_to_worktree_inner(
             &config,
             trust_filemode,
             materialize_dirty_blobs,
+            hash_blobs_without_write,
             &conv,
             filter_fp,
             &mut result,

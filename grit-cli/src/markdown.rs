@@ -123,26 +123,6 @@ pub fn print_untracked(
     Ok(())
 }
 
-/// Print ignored paths under a heading.
-pub fn print_ignored(
-    w: &mut dyn Write,
-    paths: &[String],
-    path_opts: Option<&PathDisplayOptions>,
-) -> anyhow::Result<()> {
-    if paths.is_empty() {
-        return Ok(());
-    }
-    outln!(w, "## Ignored");
-    for path in paths {
-        let shown = path_opts
-            .map(|opts| format_inline_code(&opts.format_path_for_human(path)))
-            .unwrap_or_else(|| format_inline_code(path));
-        outln!(w, "- {shown}");
-    }
-    outln!(w);
-    Ok(())
-}
-
 /// Render a full diff outcome as Markdown (one fenced `diff` block per file).
 pub fn print_diff_files(
     w: &mut dyn Write,
@@ -221,9 +201,6 @@ fn render_file_patch(file: &FileDiff) -> String {
         for line in &hunk.lines {
             out.push_str(&render_patch_line(line));
             out.push('\n');
-            if line.no_newline_at_eof {
-                out.push_str("\\ No newline at end of file\n");
-            }
         }
     }
     out.trim_end_matches('\n').to_owned()
@@ -450,7 +427,22 @@ fn short_change_id(id: &str) -> &str {
 pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyhow::Result<()> {
     outln!(w, "## Commit");
     outln!(w);
-    let short = short_hex(&outcome.oid);
+    if outcome.dry_run {
+        outln!(
+            w,
+            "- **Dry run** — would commit **{}** file(s)",
+            outcome.files.len()
+        );
+        for file in outcome.files.iter().take(20) {
+            if let Some(ref old) = file.old_path {
+                outln!(w, "  - `{}` `{}` → `{}`", file.status, old, file.path);
+            } else {
+                outln!(w, "  - `{}` `{}`", file.status, file.path);
+            }
+        }
+        return Ok(());
+    }
+    let short = short_hex(outcome.oid.as_deref().unwrap_or(""));
     if outcome.amended {
         outln!(
             w,
@@ -475,6 +467,9 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
     if let Some(id) = outcome.change_id.as_deref() {
         outln!(w, "- change id `{short}`", short = short_change_id(id));
     }
+    if !outcome.hooks_run.is_empty() {
+        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
+    }
     Ok(())
 }
 
@@ -489,9 +484,6 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         MergeResult::FastForward => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
             outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
-            if let Some(id) = outcome.change_id.as_deref() {
-                outln!(w, "- change id `{short}`", short = short_change_id(id));
-            }
         }
         MergeResult::Merged => {
             let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
@@ -500,9 +492,6 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
                 "- Merged **`{}`** into the current branch · `{short}`",
                 outcome.branch
             );
-            if let Some(id) = outcome.change_id.as_deref() {
-                outln!(w, "- change id `{short}`", short = short_change_id(id));
-            }
         }
         MergeResult::Conflicts => {
             outln!(w, "- Merge **`{}`** stopped with conflicts", outcome.branch);
@@ -547,9 +536,6 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
     let src = short_hex(&outcome.source);
     let new = short_hex(&outcome.oid);
     outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
-    if let Some(id) = outcome.change_id.as_deref() {
-        outln!(w, "- change id `{short}`", short = short_change_id(id));
-    }
     Ok(())
 }
 
@@ -560,9 +546,6 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
     let src = short_hex(&outcome.source);
     let new = short_hex(&outcome.oid);
     outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
-    if let Some(id) = outcome.change_id.as_deref() {
-        outln!(w, "- change id `{short}`", short = short_change_id(id));
-    }
     Ok(())
 }
 
@@ -588,17 +571,12 @@ fn print_history_rewrite_rows(
 ) -> anyhow::Result<()> {
     for pair in rewritten {
         match &pair.new {
-            Some(new) => {
-                outln!(
-                    w,
-                    "- commit `{}` → `{}`",
-                    short_hex(&pair.old),
-                    short_hex(new)
-                );
-                if let Some(id) = pair.change_id.as_deref() {
-                    outln!(w, "  - change id `{short}`", short = short_change_id(id));
-                }
-            }
+            Some(new) => outln!(
+                w,
+                "- commit `{}` → `{}`",
+                short_hex(&pair.old),
+                short_hex(new)
+            ),
             None => outln!(w, "- commit `{}` → (dropped)", short_hex(&pair.old)),
         }
     }

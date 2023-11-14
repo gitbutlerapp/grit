@@ -103,6 +103,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
                 assume_worktree_synced: false,
                 skip_pre_commit_tree_match: false,
                 staged_change_count: None,
+                dry_run: false,
             },
             &mut NullProgress,
         )
@@ -1213,6 +1214,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )
@@ -1235,6 +1237,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         },
         &mut NullProgress,
     )

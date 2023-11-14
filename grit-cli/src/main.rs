@@ -731,6 +731,9 @@ enum Command {
         /// Record a commit even when the tree matches the parent (same as `git commit --allow-empty`).
         #[arg(long = "allow-empty")]
         allow_empty: bool,
+        /// Compute the commit without writing objects, updating refs, or running hooks.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
         #[command(flatten)]
         paths: crate::pathspec_args::TrailingPathspecArgs,
     },
@@ -1415,10 +1418,12 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             staged,
             amend,
             allow_empty,
+            dry_run,
             paths,
         } => emit(
             &commands::commit::run(
                 message.or(message_flag),
+                dry_run,
                 amend,
                 allow_empty,
                 all,

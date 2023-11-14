@@ -96,6 +96,7 @@ fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
         assume_worktree_synced: true,
         skip_pre_commit_tree_match: true,
         staged_change_count: None,
+        dry_run: false,
     }
 }
 

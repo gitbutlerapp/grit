@@ -601,7 +601,7 @@ impl StatusOutcome {
         let ignored = self.ignored_paths();
         if self.clean {
             outln!(w, "Nothing to commit — working tree clean.");
-            markdown::print_ignored(w, ignored, display)?;
+            crate::ui::print_ignored(w, ignored, display)?;
             return Ok(());
         }
         markdown::print_change_section(w, "Staged", &self.staged_entries, display)?;
@@ -610,7 +610,7 @@ impl StatusOutcome {
             self.render_markdown_conflicts_by_kind(w, display)?;
         }
         markdown::print_untracked(w, &self.untracked, display)?;
-        markdown::print_ignored(w, ignored, display)?;
+        crate::ui::print_ignored(w, ignored, display)?;
         Ok(())
     }
 

@@ -208,6 +208,7 @@ mod tests {
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run: false,
         };
         create_commit(repo, &req, &mut NullProgress)
             .expect("commit")

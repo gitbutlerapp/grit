@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::add::stage_for_commit;
+use grit_lib::porcelain::add::{stage_for_commit, stage_for_commit_in_memory};
 use grit_lib::porcelain::commit::{
     commit_with_scope, default_commit_scope, CommitRequest, CommitScope,
 };
@@ -28,26 +28,69 @@ pub enum CommitScopeJson {
     Paths,
 }
 
+/// Author recorded on the new commit (`--json` / `--markdown`).
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct CommitAuthorOutcome {
+    pub name: String,
+    pub email: String,
+    pub date: String,
+}
+
+/// One path that would be or was included in the commit (`--json`).
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct CommitFileOutcome {
+    pub path: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
+}
+
 /// Result of `grit commit`.
 #[derive(Serialize, JsonSchema)]
 pub struct CommitOutcome {
-    pub oid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oid: Option<String>,
     pub branch: String,
     pub subject: String,
     pub changes: usize,
     pub amended: bool,
-    /// Stored `change-id` header on the new commit, or JSON `null` when absent.
-    pub change_id: Option<String>,
+    pub dry_run: bool,
     pub scope: CommitScopeJson,
+    pub files: Vec<CommitFileOutcome>,
+    /// Stored `change-id` header on the new commit, or JSON `null` when absent or dry-run.
+    pub change_id: Option<String>,
+    pub parents: Vec<String>,
+    pub author: CommitAuthorOutcome,
+    pub hooks_run: Vec<String>,
 }
 
 impl HumanRender for CommitOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.dry_run {
+            outln!(
+                w,
+                "Would commit {} file{}",
+                self.files.len(),
+                if self.files.len() == 1 { "" } else { "s" }
+            );
+            const MAX_LIST: usize = 20;
+            for file in self.files.iter().take(MAX_LIST) {
+                if let Some(ref old) = file.old_path {
+                    outln!(w, "  {} {} -> {}", file.status, old, file.path);
+                } else {
+                    outln!(w, "  {} {}", file.status, file.path);
+                }
+            }
+            if self.files.len() > MAX_LIST {
+                outln!(w, "  … and {} more", self.files.len() - MAX_LIST);
+            }
+            return Ok(());
+        }
         outln!(
             w,
             "[{} {}] {}",
             self.branch,
-            self.oid.get(..7).unwrap_or(&self.oid),
+            self.oid.as_deref().unwrap_or("").get(..7).unwrap_or(""),
             self.subject
         );
         outln!(
@@ -56,6 +99,9 @@ impl HumanRender for CommitOutcome {
             self.changes,
             if self.changes == 1 { "" } else { "s" }
         );
+        if !self.hooks_run.is_empty() {
+            outln!(w, "hooks: {}", self.hooks_run.join(", "));
+        }
         Ok(())
     }
 }
@@ -70,6 +116,7 @@ impl MarkdownRender for CommitOutcome {
 /// Run `grit commit` with the given message, flags, and optional path scope.
 pub fn run(
     message: Option<String>,
+    dry_run: bool,
     amend: bool,
     allow_empty: bool,
     all: bool,
@@ -87,16 +134,7 @@ pub fn run(
     let scope = resolve_commit_scope(&repo, all, staged, &paths)?;
     let scope_json = scope_json(&scope);
 
-    let message = match message {
-        Some(m) if !m.trim().is_empty() => Some(m),
-        None if amend => None,
-        _ => {
-            if matches!(scope, CommitScope::AutoStage) {
-                stage_for_commit(&repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
-            }
-            bail!("provide a commit message, e.g. grit commit \"what changed\"");
-        }
-    };
+    let message = resolve_commit_message(message, amend, &scope, &repo, dry_run)?;
     let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;
@@ -121,28 +159,91 @@ pub fn run(
             assume_worktree_synced: false,
             skip_pre_commit_tree_match: false,
             staged_change_count: None,
+            dry_run,
         },
         scope,
         &mut NullProgress,
     )
     .map_err(map_commit_error)?;
 
-    let subject = if let Some(m) = message.as_ref().filter(|m| !m.trim().is_empty()) {
+    let subject = if dry_run && amend && message.as_ref().is_none_or(|m| m.trim().is_empty()) {
+        let head = resolve_head(repo.git_dir()).context("resolve HEAD")?;
+        if let HeadState::Branch { oid: Some(tip), .. } = head {
+            let obj = repo.odb().read(&tip).context("read HEAD commit")?;
+            subject_line(
+                &parse_commit(&obj.data)
+                    .context("parse HEAD commit")?
+                    .message,
+            )
+        } else {
+            subject_line(&format!("{}\n", message_text.trim()))
+        }
+    } else if dry_run {
+        subject_line(&format!("{}\n", message_text.trim()))
+    } else if let Some(m) = message.as_ref().filter(|m| !m.trim().is_empty()) {
         subject_line(&format!("{}\n", m.trim()))
     } else {
         let obj = repo.odb().read(&outcome.oid).context("read new commit")?;
         subject_line(&parse_commit(&obj.data).context("parse new commit")?.message)
     };
 
+    let files = outcome
+        .files
+        .iter()
+        .map(|f| CommitFileOutcome {
+            path: f.path.clone(),
+            status: f.status.letter().to_string(),
+            old_path: f.old_path.clone(),
+        })
+        .collect();
+
     Ok(CommitOutcome {
-        oid: outcome.oid.to_hex(),
+        oid: if dry_run {
+            None
+        } else {
+            Some(outcome.oid.to_hex())
+        },
         branch: outcome.branch,
         subject,
         changes: outcome.changes,
         amended: amend,
-        change_id: outcome.change_id.as_ref().map(|id| id.as_str().to_owned()),
+        dry_run,
         scope: scope_json,
+        files,
+        change_id: outcome.change_id.as_ref().map(|id| id.as_str().to_owned()),
+        parents: outcome.parents.iter().map(|p| p.to_hex()).collect(),
+        author: CommitAuthorOutcome {
+            name: outcome.author.name,
+            email: outcome.author.email,
+            date: outcome.author.date,
+        },
+        hooks_run: outcome.hooks_run,
     })
+}
+
+fn resolve_commit_message(
+    message: Option<String>,
+    amend: bool,
+    scope: &CommitScope,
+    repo: &grit_lib::repo::Repository,
+    dry_run: bool,
+) -> Result<Option<String>> {
+    match message {
+        Some(m) if !m.trim().is_empty() => Ok(Some(m)),
+        None if amend => Ok(None),
+        _ => {
+            if matches!(scope, CommitScope::AutoStage) {
+                if dry_run {
+                    stage_for_commit_in_memory(repo, &mut NullProgress, true)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                } else {
+                    stage_for_commit(repo, &mut NullProgress)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                }
+            }
+            bail!("provide a commit message, e.g. grit commit \"what changed\"");
+        }
+    }
 }
 
 fn resolve_commit_scope(
