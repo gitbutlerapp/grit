@@ -423,7 +423,10 @@ fn url_decode(s: &str) -> String {
 /// Ordering mode for commit output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderingMode {
-    /// Reverse-chronological by committer date (default `rev-list` / `log` when no ordering flags).
+    /// Ungated committer-date priority queue (default `rev-list` / `log` when no ordering flags).
+    ///
+    /// Matches `git rev-list` without `--date-order`: newest committer date first, equal dates
+    /// broken by tip insertion order, without deferring parents until all children are shown.
     Default,
     /// Commit-date heap walk (`--date-order` without `--topo-order`; matches Git for `t6012`).
     DateOrderWalk,
@@ -1477,7 +1480,28 @@ pub fn rev_list(
     }
 
     let mut ordered = match options.ordering {
-        OrderingMode::Default | OrderingMode::DateOrderWalk | OrderingMode::AuthorDateWalk => {
+        OrderingMode::Default => {
+            if output_filter_active {
+                date_order_walk_through_dropped(
+                    &mut graph,
+                    &include,
+                    &traversable,
+                    &included,
+                    false,
+                )?
+            } else if dense_path_limited && !include.is_empty() {
+                date_order_walk_through_dropped(
+                    &mut graph,
+                    &include,
+                    &dense_traversable,
+                    &included,
+                    false,
+                )?
+            } else {
+                date_order_walk_through_dropped(&mut graph, &include, &included, &included, false)?
+            }
+        }
+        OrderingMode::DateOrderWalk | OrderingMode::AuthorDateWalk => {
             let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
             if output_filter_active {
                 // When parent-count filters (`--max-parents=1` / `--no-merges`, …) drop a commit
@@ -2713,12 +2737,12 @@ fn date_order_walk_through_dropped(
     Ok(out)
 }
 
-/// Git-style default ordering: among commits ready to print, pick the one with the
-/// greatest committer timestamp; a parent becomes ready only after all of its
-/// children that remain in the walk have been emitted.
+/// Topologically gated date ordering used for `--date-order` / `--author-date-order`
+/// (without `--topo-order`): a parent is emitted only after every selected child has
+/// been shown, with committer- or author-date priority among ready commits.
 ///
-/// This matches `git rev-list` behavior (and differs from sorting the whole set by
-/// date, which can surface ancestors before descendants when dates are skewed).
+/// Default `rev-list` order uses the ungated heap in [`streaming_date_walk`] and
+/// [`date_order_walk_through_dropped`] instead (see [`OrderingMode::Default`]).
 pub(crate) fn date_order_walk(
     graph: &mut CommitGraph<'_>,
     selected: &HashSet<ObjectId>,
@@ -6549,8 +6573,14 @@ fn bounded_limit_list_common(options: &RevListOptions) -> bool {
 }
 
 fn bounded_limit_list_common_inner(options: &RevListOptions, graph_topo: bool) -> bool {
-    (options.max_count.is_some() || options.skip > 0 || options.since_cutoff.is_some())
-        && plain_commit_walk(options, graph_topo)
+    let has_cutoff =
+        options.max_count.is_some() || options.skip > 0 || options.since_cutoff.is_some();
+    let plain_unlimited_default = !options.count
+        && options.max_count.is_none()
+        && options.skip == 0
+        && options.since_cutoff.is_none()
+        && options.ordering == OrderingMode::Default;
+    (has_cutoff || plain_unlimited_default) && plain_commit_walk(options, graph_topo)
 }
 
 /// Whether the walk only needs commits in date order, with nothing that forces the full

@@ -12,7 +12,7 @@ use grit_lib::revwalk::rev_list::{
     split_revision_token, ObjectFilter, OrderingMode, RevListOptions, RevListResult,
 };
 use grit_lib::revwalk::rev_list_error::RevListError;
-use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::revwalk::{RevWalkCommitIterOptions, RevWalkListOptions};
 use support::{
     assert_rev_list_commits_match_git, build_commit_dag, commit_file, commit_labeled_with_dates,
     expand_token_for_rev_list, git, git_commit_graph_write, git_merge_base_is_ancestor,
@@ -114,6 +114,152 @@ fn cherry_symmetric_fixture(worktree: &Path) -> (String, String) {
     let _ = commit_file(worktree, "shared.txt", "same\n", "right-patch");
     git(worktree, &["checkout", "main"]);
     ("main".to_owned(), "side".to_owned())
+}
+
+fn equal_date_merge_fanout_fixture(worktree: &Path) {
+    const DATE: &str = "2024-01-01T00:00:00Z";
+    fn run(worktree: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(worktree)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "a")
+            .env("GIT_AUTHOR_EMAIL", "a@b")
+            .env("GIT_COMMITTER_NAME", "a")
+            .env("GIT_COMMITTER_EMAIL", "a@b")
+            .env("GIT_AUTHOR_DATE", DATE)
+            .env("GIT_COMMITTER_DATE", DATE)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {} failed", args.join(" "));
+    }
+    run(worktree, &["commit", "-q", "--allow-empty", "-m", "root"]);
+    for branch in ["x", "y", "z"] {
+        run(worktree, &["checkout", "-q", "-b", branch, "main"]);
+        for i in 1..=3 {
+            run(
+                worktree,
+                &[
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    &format!("{branch}{i}"),
+                ],
+            );
+        }
+    }
+    run(worktree, &["checkout", "-q", "main"]);
+    for branch in ["x", "y", "z"] {
+        run(
+            worktree,
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                &format!("m{branch}"),
+                branch,
+            ],
+        );
+    }
+}
+
+#[test]
+fn default_order_unlimited_matches_bounded_and_git() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    equal_date_merge_fanout_fixture(wt);
+    let git_oids = git_rev_list(wt, &["HEAD"]);
+    let grit = open_grit_repo(wt);
+    let walk = grit.rev_walk();
+
+    let unlimited = walk
+        .commits(&["HEAD"], &RevWalkListOptions::default())
+        .expect("commits unlimited");
+    let huge_limit = RevWalkListOptions {
+        limit: Some(1_000_000),
+        ..RevWalkListOptions::default()
+    };
+    let bounded = walk
+        .commits(&["HEAD"], &huge_limit)
+        .expect("commits huge limit");
+    let rev_walk = walk
+        .walk("HEAD", &RevListOptions::default())
+        .expect("RevWalk::walk")
+        .commits;
+    let iter: Vec<ObjectId> = walk
+        .commits_iter("HEAD", &RevWalkCommitIterOptions::default())
+        .expect("commits_iter")
+        .collect::<Result<_, _>>()
+        .expect("commits_iter items");
+
+    assert_eq!(unlimited, git_oids, "RevWalk::commits limit None");
+    assert_eq!(bounded, git_oids, "RevWalk::commits huge limit");
+    assert_eq!(rev_walk, git_oids, "RevWalk::walk default");
+    assert_eq!(iter, git_oids, "RevWalk::commits_iter");
+
+    assert_rev_list_commits_match_git(
+        wt,
+        &grit,
+        &[],
+        &[String::from("HEAD")],
+        &[],
+        RevListOptions::default(),
+        "equal-date merge fanout rev_list",
+    );
+
+    for n in [1, 3, 5, git_oids.len()] {
+        let prefix: Vec<ObjectId> = unlimited.iter().copied().take(n).collect();
+        let limited = walk
+            .commits(
+                &["HEAD"],
+                &RevWalkListOptions {
+                    limit: Some(n),
+                    ..RevWalkListOptions::default()
+                },
+            )
+            .expect("limited prefix");
+        assert_eq!(prefix, limited, "prefix {n}");
+    }
+}
+
+#[test]
+fn default_order_differs_from_date_order_on_skew_dag() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let (_tip, _oids) = topo_skew_dag(wt);
+    let grit = open_grit_repo(wt);
+
+    let default_git = git_rev_list(wt, &["main"]);
+    let date_git = git_rev_list(wt, &["--date-order", "main"]);
+    assert_ne!(
+        default_git, date_git,
+        "fixture should distinguish default and --date-order"
+    );
+
+    assert_rev_list_commits_match_git(
+        wt,
+        &grit,
+        &[],
+        &[String::from("main")],
+        &[],
+        RevListOptions::default(),
+        "skew dag default unlimited",
+    );
+    assert_rev_list_commits_match_git(
+        wt,
+        &grit,
+        &["--date-order"],
+        &[String::from("main")],
+        &[],
+        RevListOptions {
+            ordering: OrderingMode::DateOrderWalk,
+            ..RevListOptions::default()
+        },
+        "skew dag --date-order",
+    );
 }
 
 #[test]
