@@ -6592,10 +6592,11 @@ fn bounded_limit_list_common_inner(options: &RevListOptions, graph_topo: bool) -
 /// it walks like any other range. The topo walk cannot take one: Git lists the right side
 /// first there, which only the full sort reproduces.
 fn plain_commit_walk(options: &RevListOptions, graph_topo: bool) -> bool {
-    options
-        .commit_filter
-        .as_ref()
-        .is_none_or(|f| !f.is_active())
+    options.filter.is_none()
+        && options
+            .commit_filter
+            .as_ref()
+            .is_none_or(|f| !f.is_active())
         && options.pickaxe.is_none()
         && !options.first_parent
         && !options.objects
@@ -10043,6 +10044,24 @@ mod tests {
         assert_eq!(
             combine,
             ObjectFilter::Combine(vec![ObjectFilter::BlobNone, ObjectFilter::TreeDepth(1),])
+        );
+    }
+
+    #[test]
+    fn plain_commit_walk_rejects_object_filter_for_streaming() {
+        let base = RevListOptions::default();
+        assert!(plain_commit_walk(&base, false));
+        assert!(can_use_bounded_limit_list(&base));
+
+        let mut with_sparse = RevListOptions::default();
+        with_sparse.filter = Some(ObjectFilter::SparseOid("deadbeef:path".into()));
+        assert!(
+            !plain_commit_walk(&with_sparse, false),
+            "object filters need the full rev-list engine"
+        );
+        assert!(
+            !can_use_bounded_limit_list(&with_sparse),
+            "unlimited default must not stream when --filter is set"
         );
     }
 
