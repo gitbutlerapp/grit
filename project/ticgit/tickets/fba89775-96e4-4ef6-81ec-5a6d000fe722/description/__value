@@ -1,0 +1,32 @@
+Upstream test `tests/t5324-split-commit-graph.sh` — "split commit graph"
+
+Fresh run 2026-06-04: 17/42 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 11: add one commit, write a merged graph
+- 13: create fork and chain across alternate
+- 15: test merge strategy constants
+- 16: remove commit-graph-chain file after flattening
+- 17: verify hashes along chain, even in shallow
+- 18: verify notices chain slice which is bogus (base)
+- 19: verify notices chain slice which is bogus (tip)
+- 20: verify --shallow does not check base contents
+- 21: warn on base graph chunk incorrect
+- 22: verify after commit-graph-chain corruption (base)
+- 23: verify after commit-graph-chain corruption (tip)
+- 24: verify notices too-short chain file
+- 25: verify across alternates
+- 26: reader bounds-checks base-graph chunk
+- 27: add octopus merge
+- 31: --split=replace replaces the chain
+- 33: split commit-graph respects core.sharedrepository 0666
+- 34: split commit-graph respects core.sharedrepository 0600
+- 36: prevent regression for duplicate commits across layers
+- 37: setup repo for mixed generation commit-graph-chain
+- 38: do not write generation data chunk if not present on existing tip
+- 39: do not write generation data chunk if the topmost remaining layer does not have generation data chunk
+- 40: write generation data chunk if topmost remaining layer has generation data chunk
+- 41: write generation data chunk when commit-graph chain is replaced
+- 42: temporary graph layer is discarded upon failure
+
+Repro: `./scripts/run-tests.sh t5324-split-commit-graph.sh`
+Full TAP log from this run: `logs/ticket-runs/t5324-split-commit-graph.log`

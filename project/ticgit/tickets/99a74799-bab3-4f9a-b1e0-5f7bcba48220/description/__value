@@ -1,0 +1,13 @@
+Upstream test `tests/t3428-rebase-signoff.sh` — "git rebase --signoff This test runs git rebase --signoff and make sure that it works."
+
+Fresh run 2026-06-04: 1/7 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: rebase --apply --signoff adds a sign-off line
+- 3: rebase --no-signoff does not add a sign-off line
+- 4: rebase --exec --signoff adds a sign-off line
+- 5: rebase --root --signoff adds a sign-off line
+- 6: rebase -m --signoff adds a sign-off line
+- 7: rebase -i --signoff adds a sign-off line when editing commit
+
+Repro: `./scripts/run-tests.sh t3428-rebase-signoff.sh`
+Full TAP log from this run: `logs/ticket-runs/t3428-rebase-signoff.log`

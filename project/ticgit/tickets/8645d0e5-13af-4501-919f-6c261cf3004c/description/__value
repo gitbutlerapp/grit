@@ -1,0 +1,19 @@
+Upstream test `tests/t3425-rebase-topology-merges.sh` — "rebase topology tests with merges"
+
+Fresh run 2026-06-04: 1/13 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: rebase --apply after merge from upstream
+- 3: rebase -m after merge from upstream
+- 4: rebase -i after merge from upstream
+- 5: rebase --apply of non-linear history is linearized in place
+- 6: rebase -m of non-linear history is linearized in place
+- 7: rebase -i of non-linear history is linearized in place
+- 8: rebase --apply of non-linear history is linearized upstream
+- 9: rebase -m of non-linear history is linearized upstream
+- 10: rebase -i of non-linear history is linearized upstream
+- 11: rebase --apply of non-linear history with merges after upstream merge is linearized
+- 12: rebase -m of non-linear history with merges after upstream merge is linearized
+- 13: rebase -i of non-linear history with merges after upstream merge is linearized
+
+Repro: `./scripts/run-tests.sh t3425-rebase-topology-merges.sh`
+Full TAP log from this run: `logs/ticket-runs/t3425-rebase-topology-merges.log`

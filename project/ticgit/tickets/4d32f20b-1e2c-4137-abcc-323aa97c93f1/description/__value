@@ -1,0 +1,10 @@
+Upstream test `tests/t9130-status-porcelain-v2.sh` — "grit status --porcelain and formatting options"
+
+Fresh run 2026-06-04: 23/26 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: status --porcelain on clean repo shows branch header
+- 16: status --porcelain shows branch in header
+- 21: status --porcelain in fresh empty repo has branch header
+
+Repro: `./scripts/run-tests.sh t9130-status-porcelain-v2.sh`
+Full TAP log from this run: `logs/ticket-runs/t9130-status-porcelain-v2.log`

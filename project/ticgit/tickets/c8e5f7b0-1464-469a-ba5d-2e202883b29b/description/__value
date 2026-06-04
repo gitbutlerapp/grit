@@ -1,0 +1,16 @@
+Upstream test `tests/t5335-compact-multi-pack-index.sh` — "multi-pack-index compaction"
+
+Fresh run 2026-06-04: 1/10 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: MIDX compaction with lex-ordered pack names
+- 2: MIDX compaction with non-lex-ordered pack names
+- 4: MIDX compaction with missing endpoints
+- 5: MIDX compaction with reversed endpoints
+- 6: MIDX compaction with identical endpoints
+- 7: MIDX compaction with midx.version=1
+- 8: MIDX compaction preserves pack object selection
+- 9: MIDX compaction with bitmaps
+- 10: MIDX compaction with bitmaps (non-trivial)
+
+Repro: `./scripts/run-tests.sh t5335-compact-multi-pack-index.sh`
+Full TAP log from this run: `logs/ticket-runs/t5335-compact-multi-pack-index.log`

@@ -1,0 +1,19 @@
+Upstream test `tests/t6131-pathspec-icase.sh` — "test case insensitive pathspec limiting"
+
+Fresh run 2026-06-04: 1/9 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: create commits with glob characters
+- 3: tree_entry_interesting matches :(icase)bar
+- 4: tree_entry_interesting matches :(icase)bar with prefix
+- 5: tree_entry_interesting matches :(icase)bar with empty prefix
+- 6: match_pathspec matches :(icase)bar
+- 7: match_pathspec matches :(icase)bar with prefix
+- 8: match_pathspec matches :(icase)bar with empty prefix
+- 9: "git diff" can take magic :(icase) pathspec
+
+Context from retired plan files:
+- (plan.md) - Pathspec: `t6131`, `t6133-pathspec-rev-dwim`, `t6135-pathspec-with-attrs`,
+- (t6-plan.md) - [ ] `t6131-pathspec-icase.sh` — 1/9 passing, 8 failing.
+
+Repro: `./scripts/run-tests.sh t6131-pathspec-icase.sh`
+Full TAP log from this run: `logs/ticket-runs/t6131-pathspec-icase.log`

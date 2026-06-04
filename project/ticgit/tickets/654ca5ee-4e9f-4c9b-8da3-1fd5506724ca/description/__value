@@ -1,0 +1,139 @@
+Upstream test `tests/t1300-config.sh` — "Test git config in different settings"
+
+Fresh run 2026-06-04: 368/497 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 69: get bool variable with empty value
+- 82: rename succeeded
+- 84: rename succeeded
+- 86: rename succeeded
+- 88: rename succeeded
+- 90: renaming to bogus section is rejected
+- 93: renaming a section with an overly-long line
+- 95: section was removed properly
+- 102: invalid stdin config
+- 103: bool
+- 106: set --bool
+- 107: set --int
+- 109: set --bool-or-int
+- 114: get --expiry-date
+- 136: git -c works with aliases of builtins
+- 139: git -c dies on bogus config
+- 141: git -c complains about empty key and value
+- 145: old-fashioned settings are case insensitive
+- 157: GIT_CONFIG_PARAMETERS handles new-style entries
+- 159: old and new bools with ambiguous subsection
+- 160: detect bogus GIT_CONFIG_PARAMETERS
+- 161: git --config-env=key=envvar support
+- 172: git config fails with invalid count
+- 173: git config fails with missing config key
+- 174: git config fails with missing config value
+- 175: git config fails with invalid config pair key
+- 180: git config --edit respects core.editor
+- 181: barf on syntax error
+- 182: barf on incomplete section header
+- 186: urlmatch favors more specific URLs
+- 187: urlmatch with wildcard
+- 188: --unset last key removes section (except if commented)
+- 194: --show-origin with --list --null
+- 196: --show-origin with --get-regexp
+- 202: --show-origin stdin with file include
+- 206: --show-scope with --list
+- 212: override global and system config
+- 214: system override has no effect with GIT_CONFIG_NOSYSTEM
+- 218: identical modern --type specifiers are allowed
+- 219: identical legacy --type specifiers are allowed
+- 221: non-identical modern --type specifiers are not allowed
+- 222: non-identical legacy --type specifiers are not allowed
+- 223: non-identical mixed --type specifiers are not allowed
+- 225: --no-type unsets type specifiers
+- 226: unset type specifiers may be reset to conflicting ones
+- 228: list --type=bool shows only canonicalizable bool values
+- 233: --type rejects unknown specifiers
+- 235: --replace-all does not invent newlines
+- 236: set all config with value-pattern
+- 237: --replace-all and value-pattern
+- 238: refuse --fixed-value for incompatible actions
+- 239: --fixed-value uses exact string matching
+- 240: --get and --get-all with --fixed-value
+- 242: includeIf.hasconfig:remote.*.url
+- 243: includeIf.hasconfig:remote.*.url respects last-config-wins
+- 244: includeIf.hasconfig:remote.*.url globs
+- 245: includeIf.hasconfig:remote.*.url forbids remote url in such included files
+- 246: negated mode causes failure
+- 247: specifying multiple modes causes failure
+- 300: multivar unset
+- 304: hierarchical section value
+- 305: working --list
+- 307: --name-only --list
+- 308: --get-regexp
+- 309: --name-only --get-regexp
+- 310: --add
+- 317: get bool variable with empty value
+- 330: rename succeeded
+- 332: rename succeeded
+- 334: rename succeeded
+- 336: rename succeeded
+- 338: renaming to bogus section is rejected
+- 341: renaming a section with an overly-long line
+- 343: section was removed properly
+- 350: invalid stdin config
+- 351: bool
+- 354: set --bool
+- 355: set --int
+- 357: set --bool-or-int
+- 362: get --expiry-date
+- 373: --null --list
+- 374: --null --get-regexp
+- 384: git -c works with aliases of builtins
+- 387: git -c dies on bogus config
+- 389: git -c complains about empty key and value
+- 393: old-fashioned settings are case insensitive
+- 405: GIT_CONFIG_PARAMETERS handles new-style entries
+- 407: old and new bools with ambiguous subsection
+- 408: detect bogus GIT_CONFIG_PARAMETERS
+- 409: git --config-env=key=envvar support
+- 420: git config fails with invalid count
+- 421: git config fails with missing config key
+- 422: git config fails with missing config value
+- 423: git config fails with invalid config pair key
+- 428: git config --edit respects core.editor
+- 429: barf on syntax error
+- 430: barf on incomplete section header
+- 434: urlmatch favors more specific URLs
+- 435: urlmatch with wildcard
+- 436: --unset last key removes section (except if commented)
+- 437: --unset-all removes section if empty & uncommented
+- 442: --show-origin with --list --null
+- 444: --show-origin with --get-regexp
+- 450: --show-origin stdin with file include
+- 454: --show-scope with --list
+- 460: override global and system config
+- 462: system override has no effect with GIT_CONFIG_NOSYSTEM
+- 466: identical modern --type specifiers are allowed
+- 467: identical legacy --type specifiers are allowed
+- 469: non-identical modern --type specifiers are not allowed
+- 470: non-identical legacy --type specifiers are not allowed
+- 471: non-identical mixed --type specifiers are not allowed
+- 473: --no-type unsets type specifiers
+- 474: unset type specifiers may be reset to conflicting ones
+- 476: list --type=bool shows only canonicalizable bool values
+- 481: --type rejects unknown specifiers
+- 483: --replace-all does not invent newlines
+- 484: set all config with value-pattern
+- 485: --replace-all and value-pattern
+- 486: refuse --fixed-value for incompatible actions
+- 487: --fixed-value uses exact string matching
+- 488: --get and --get-all with --fixed-value
+- 490: includeIf.hasconfig:remote.*.url
+- 491: includeIf.hasconfig:remote.*.url respects last-config-wins
+- 492: includeIf.hasconfig:remote.*.url globs
+- 493: includeIf.hasconfig:remote.*.url forbids remote url in such included files
+- 494: negated mode causes failure
+- 495: specifying multiple modes causes failure
+- 497: writing value with trailing CR not stripped on read
+
+Context from retired plan files:
+- (plan.md) - Current first focus group: config/init/repo setup, with `t1300-config.sh` still non-green (450/497, failing=47 in the latest CSV snapshot).
+
+Repro: `./scripts/run-tests.sh t1300-config.sh`
+Full TAP log from this run: `logs/ticket-runs/t1300-config.log`

@@ -1,0 +1,47 @@
+Upstream test `tests/t7800-difftool.sh` — "git-difftool Testing basic diff tool invocation"
+
+Fresh run 2026-06-04: 55/95 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 6: difftool forwards arguments to diff
+- 44: difftool --extcmd echo arg1
+- 45: difftool --extcmd cat arg1
+- 46: difftool --extcmd cat arg2
+- 54: difftool -d --no-symlinks
+- 55: difftool -d --symlinks
+- 56: difftool --dir-diff --no-symlinks
+- 57: difftool --dir-diff --symlinks
+- 60: difftool --dir-diff ignores --prompt --no-symlinks
+- 61: difftool --dir-diff ignores --prompt --symlinks
+- 62: difftool --dir-diff branch from subdirectory --no-symlinks
+- 63: difftool --dir-diff branch from subdirectory --symlinks
+- 64: difftool --dir-diff v1 from subdirectory --no-symlinks
+- 65: difftool --dir-diff v1 from subdirectory --symlinks
+- 66: difftool --dir-diff branch from subdirectory w/ pathspec --no-symlinks
+- 67: difftool --dir-diff branch from subdirectory w/ pathspec --symlinks
+- 68: difftool --dir-diff v1 from subdirectory w/ pathspec --no-symlinks
+- 69: difftool --dir-diff v1 from subdirectory w/ pathspec --symlinks
+- 70: difftool --dir-diff from subdirectory with GIT_DIR set --no-symlinks
+- 71: difftool --dir-diff from subdirectory with GIT_DIR set --symlinks
+- 72: difftool --dir-diff when worktree file is missing --no-symlinks
+- 73: difftool --dir-diff when worktree file is missing --symlinks
+- 74: difftool --dir-diff with unmerged files --no-symlinks
+- 75: difftool --dir-diff with unmerged files --symlinks
+- 76: difftool --dir-diff --symlinks without unstaged changes
+- 77: difftool --dir-diff syncs worktree with unstaged change --no-symlinks
+- 78: difftool --dir-diff syncs worktree with unstaged change --symlinks
+- 79: difftool --dir-diff syncs worktree without unstaged change --no-symlinks
+- 80: difftool --dir-diff syncs worktree without unstaged change --symlinks
+- 83: difftool --no-symlinks does not overwrite working tree file 
+- 84: difftool --no-symlinks detects conflict 
+- 85: difftool properly honors gitlink and core.worktree
+- 86: difftool --dir-diff symlinked directories
+- 87: difftool --dir-diff handles modified symlinks
+- 88: difftool --dir-diff writes symlinks as raw text
+- 89: add -N and difftool -d
+- 90: difftool --cached with unmerged files
+- 91: outside worktree
+- 93: difftool --rotate-to
+- 94: difftool --skip-to
+
+Repro: `./scripts/run-tests.sh t7800-difftool.sh`
+Full TAP log from this run: `logs/ticket-runs/t7800-difftool.log`

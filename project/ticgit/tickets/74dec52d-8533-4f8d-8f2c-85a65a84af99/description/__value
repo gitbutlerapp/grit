@@ -1,0 +1,29 @@
+Upstream test `tests/t0060-path-utils.sh` — "Test various path utilities"
+
+Fresh run 2026-06-04: 200/219 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 141: git-path GIT_COMMON_DIR=bar logs/refs => bar/logs/refs
+- 142: git-path GIT_COMMON_DIR=bar logs/refs/ => bar/logs/refs/
+- 143: git-path GIT_COMMON_DIR=bar logs/refs/bisec/foo => bar/logs/refs/bisec/foo
+- 144: git-path GIT_COMMON_DIR=bar logs/refs/bisec => bar/logs/refs/bisec
+- 145: git-path GIT_COMMON_DIR=bar logs/refs/bisectfoo => bar/logs/refs/bisectfoo
+- 146: git-path GIT_COMMON_DIR=bar objects => bar/objects
+- 147: git-path GIT_COMMON_DIR=bar objects/bar => bar/objects/bar
+- 148: git-path GIT_COMMON_DIR=bar info/exclude => bar/info/exclude
+- 149: git-path GIT_COMMON_DIR=bar info/grafts => bar/info/grafts
+- 152: git-path GIT_COMMON_DIR=bar remotes/bar => bar/remotes/bar
+- 153: git-path GIT_COMMON_DIR=bar branches/bar => bar/branches/bar
+- 154: git-path GIT_COMMON_DIR=bar logs/refs/heads/main => bar/logs/refs/heads/main
+- 155: git-path GIT_COMMON_DIR=bar refs/heads/main => bar/refs/heads/main
+- 157: git-path GIT_COMMON_DIR=bar hooks/me => bar/hooks/me
+- 158: git-path GIT_COMMON_DIR=bar config => bar/config
+- 159: git-path GIT_COMMON_DIR=bar packed-refs => bar/packed-refs
+- 160: git-path GIT_COMMON_DIR=bar shallow => bar/shallow
+- 161: git-path GIT_COMMON_DIR=bar common => bar/common
+- 162: git-path GIT_COMMON_DIR=bar common/file => bar/common/file
+
+Context from retired plan files:
+- (plan.md) - `t0060-path-utils` 206/219 — `test-tool path-utils` (normalize, relative, dirname, real_path, etc.)
+
+Repro: `./scripts/run-tests.sh t0060-path-utils.sh`
+Full TAP log from this run: `logs/ticket-runs/t0060-path-utils.log`

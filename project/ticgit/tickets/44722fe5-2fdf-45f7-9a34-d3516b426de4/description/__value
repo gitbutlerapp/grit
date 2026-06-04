@@ -1,0 +1,30 @@
+Upstream test `tests/t5511-refspec.sh` — "refspec parsing"
+
+Fresh run 2026-06-04: 24/47 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: push  (invalid)
+- 3: push :: (invalid)
+- 7: fetch :: (invalid)
+- 9: push refs/heads/*:refs/remotes/frotz (invalid)
+- 10: push refs/heads:refs/remotes/frotz/* (invalid)
+- 13: fetch refs/heads/*:refs/remotes/frotz (invalid)
+- 14: fetch refs/heads:refs/remotes/frotz/* (invalid)
+- 16: fetch refs/heads/main::refs/remotes/frotz/xyzzy (invalid)
+- 17: fetch refs/heads/maste :refs/remotes/frotz/xyzzy (invalid)
+- 19: fetch main~1:refs/remotes/frotz/backup (invalid)
+- 21: fetch HEAD~4:refs/remotes/frotz/new (invalid)
+- 26: push refs/heads/ nitfol (invalid)
+- 27: fetch refs/heads/ nitfol (invalid)
+- 28: push HEAD: (invalid)
+- 30: push refs/heads/ nitfol: (invalid)
+- 31: fetch refs/heads/ nitfol: (invalid)
+- 34: push :refs/remotes/frotz/delete me (invalid)
+- 35: fetch :refs/remotes/frotz/HEAD to me (invalid)
+- 40: fetch refs/heads/*/*/for-linus:refs/remotes/mine/* (invalid)
+- 41: push refs/heads/*/*/for-linus:refs/remotes/mine/* (invalid)
+- 42: fetch refs/heads/*g*/for-linus:refs/remotes/mine/* (invalid)
+- 43: push refs/heads/*g*/for-linus:refs/remotes/mine/* (invalid)
+- 47: fetch refs/heads/	tab (invalid)
+
+Repro: `./scripts/run-tests.sh t5511-refspec.sh`
+Full TAP log from this run: `logs/ticket-runs/t5511-refspec.log`

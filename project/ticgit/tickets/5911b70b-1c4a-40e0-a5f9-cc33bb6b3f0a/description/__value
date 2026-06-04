@@ -1,0 +1,11 @@
+Upstream test `tests/t7505-prepare-commit-msg-hook.sh` — "prepare-commit-msg hook"
+
+Fresh run 2026-06-04: 22/23 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 16: with hook (rebase -i)
+
+Context from retired plan files:
+- (plan.md) `t7505-prepare-commit-msg-hook` and larger worktree status/reset/commit/grep blockers.
+
+Repro: `./scripts/run-tests.sh t7505-prepare-commit-msg-hook.sh`
+Full TAP log from this run: `logs/ticket-runs/t7505-prepare-commit-msg-hook.log`

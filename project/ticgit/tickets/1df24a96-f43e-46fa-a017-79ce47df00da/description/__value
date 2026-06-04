@@ -1,0 +1,10 @@
+Upstream test `tests/t4060-diff-submodule-option-diff-format.sh` — "Support for diff format verbose submodule difference in git diff This test tries to verify the sanity of --submodule=diff option of git diff."
+
+Fresh run 2026-06-04: 48/51 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 44: diff --submodule=diff with .git file
+- 50: diff --submodule=diff recurses into nested submodules
+- 51: diff --submodule=diff recurses into deleted nested submodules
+
+Repro: `./scripts/run-tests.sh t4060-diff-submodule-option-diff-format.sh`
+Full TAP log from this run: `logs/ticket-runs/t4060-diff-submodule-option-diff-format.log`

@@ -1,0 +1,15 @@
+Upstream test `tests/t6418-merge-text-auto.sh` — "CRLF merge conflict across text=auto change * [main] remove .gitattributes ! [side] add line from b -- + [side] add line from b * [main] remove .gitattributes * [main^] add line from a * [main~2] normalize file *+ [side^] Initial"
+
+Fresh run 2026-06-04: 7/11 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 6: Detect CRLF/LF conflict after setting text=auto
+- 7: Detect LF/CRLF conflict from addition of text=auto
+- 8: checkout -m after setting text=auto
+- 9: checkout -m addition of text=auto
+
+Context from retired plan files:
+- (plan.md) `t6416`, `t6418`, `t6421`, `t6422`, `t6423`, `t6424`, `t6425`, `t6427`, `t6430`,
+- (t6-plan.md) - [ ] `t6418-merge-text-auto.sh` — 7/11 passing, 4 failing.
+
+Repro: `./scripts/run-tests.sh t6418-merge-text-auto.sh`
+Full TAP log from this run: `logs/ticket-runs/t6418-merge-text-auto.log`

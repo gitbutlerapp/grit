@@ -1,0 +1,26 @@
+Upstream test `tests/t3900-i18n-commit.sh` — "commit and log output encodings"
+
+Fresh run 2026-06-04: 22/38 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 15: ISO8859-1 should be shown in UTF-8 now
+- 16: eucJP should be shown in UTF-8 now
+- 17: ISO-2022-JP should be shown in UTF-8 now
+- 19: ISO8859-1 should be shown in itself now
+- 20: eucJP should be shown in itself now
+- 21: ISO-2022-JP should be shown in itself now
+- 23: ISO8859-1 should be shown in UTF-8 now
+- 24: eucJP should be shown in UTF-8 now
+- 25: ISO-2022-JP should be shown in UTF-8 now
+- 26: eucJP should be shown in eucJP now
+- 27: ISO-2022-JP should be shown in eucJP now
+- 28: eucJP should be shown in ISO-2022-JP now
+- 29: ISO-2022-JP should be shown in ISO-2022-JP now
+- 30: No conversion with ISO8859-1
+- 31: No conversion with eucJP
+- 32: No conversion with ISO-2022-JP
+
+Context from retired plan files:
+- (plan.md) 7. Stash/i18n/precompose/CRLF messages: `t3903`, `t3900`, `t3920`, `t3905`, `t3906`,
+
+Repro: `./scripts/run-tests.sh t3900-i18n-commit.sh`
+Full TAP log from this run: `logs/ticket-runs/t3900-i18n-commit.log`

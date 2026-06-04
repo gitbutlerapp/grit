@@ -1,0 +1,22 @@
+Upstream test `tests/t6030-bisect-porcelain.sh` — "Tests git bisect functionality"
+
+Fresh run 2026-06-04: 85/96 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 39: bisect run & skip: cannot tell between 2
+- 56: restricting bisection on one dir and a file
+- 57: skipping away from skipped commit
+- 65: bisect: --no-checkout - trial commit bad
+- 66: bisect: --no-checkout - target before breakage
+- 67: bisect: --no-checkout - target in breakage
+- 68: bisect: --no-checkout - target after breakage
+- 69: bisect: demonstrate identification of damage boundary
+- 71: bisect log: only skip commits left
+- 72: "git bisect bad HEAD" behaves as "git bisect bad"
+- 89: bisect skip works with --term*
+
+Context from retired plan files:
+- (plan.md) - Bisect: `t6030`, `t6041`.
+- (t6-plan.md) - [ ] `t6030-bisect-porcelain.sh` — 85/96 passing, 11 failing.
+
+Repro: `./scripts/run-tests.sh t6030-bisect-porcelain.sh`
+Full TAP log from this run: `logs/ticket-runs/t6030-bisect-porcelain.log`

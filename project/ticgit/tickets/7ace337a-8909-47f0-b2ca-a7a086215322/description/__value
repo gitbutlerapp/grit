@@ -1,0 +1,22 @@
+Upstream test `tests/t5510-fetch.sh` — "Per branch config variables affects "git fetch"."
+
+Fresh run 2026-06-04: 204/215 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 35: fetch --atomic fails transaction if reference locked
+- 44: header of bundle looks right
+- 48: unbundle 2
+- 56: bundle should record HEAD correctly
+- 59: explicit pull should update tracking
+- 187: all boundary commits are excluded
+- 192: fetching with auto-gc does not lock up
+- 204: existing reference lock in repo
+- 211: FETCH_HEAD is updated even if ref updates fail
+- 213: upstream tracking info is added even with conflicts
+- 214: HEAD is updated even with conflicts
+
+Context from retired plan files:
+- (plans/remote-auth-plan.md) - `t5510-fetch`, `t5512-ls-remote`, `t5700-protocol-v1`: useful for upload-pack behavior over stream transports.
+- (plans/remote-auth-plan.md) - Then run stream-oriented fetch/ls-remote tests such as `t5510-fetch`, `t5512-ls-remote`, and `t5700-protocol-v1`.
+
+Repro: `./scripts/run-tests.sh t5510-fetch.sh`
+Full TAP log from this run: `logs/ticket-runs/t5510-fetch.log`

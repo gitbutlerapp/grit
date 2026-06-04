@@ -1,0 +1,10 @@
+Upstream test `tests/t5558-clone-bundle-uri.sh` — "test fetching bundles with --bundle-uri"
+
+The file hit the 180s driver timeout on the fresh 2026-06-04 run; grit likely hangs or is pathologically slow in one of its subtests. Failures observed before the timeout:
+
+Context from retired plan files:
+- (plans/fetch-plan.md) - **Glob refspecs** on HTTP: **`collect_wants_from_advertised` explicitly bails** (`"glob refspec in HTTP fetch not supported"`). The harness documents this: **`lib-httpd.sh`** uses **real git** for HTTP fetch when refspecs contain `*` (e.g. `t5558` bundle list expansion), and otherwise may use grit for bundle-uri parity.
+- (plans/fetch-plan.md) - **`t5558-clone-bundle-uri.sh`** — **bundle URI** + fetch (already partially grit-driven); **glob** refspec cases still need **real git** until **D.1** lands.
+
+Repro: `./scripts/run-tests.sh t5558-clone-bundle-uri.sh`
+Full TAP log from this run: `logs/ticket-runs/t5558-clone-bundle-uri.log`

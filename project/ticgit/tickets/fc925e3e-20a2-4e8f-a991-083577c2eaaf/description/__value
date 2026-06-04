@@ -1,0 +1,70 @@
+Fresh run 2026-06-04: 54/115 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 30: clone separate gitdir: output
+- 38: clone checking out a tag
+- 39: set up ssh wrapper
+- 40: clone myhost:src uses ssh
+- 41: clone local path foo:bar
+- 42: bracketed hostnames are still ssh
+- 43: OpenSSH variant passes -4
+- 44: variant can be overridden
+- 45: variant=auto picks based on basename
+- 46: simple does not support -4/-6
+- 47: simple does not support port
+- 48: uplink is treated as simple
+- 49: OpenSSH-like uplink is treated as ssh
+- 50: plink is treated specially (as putty)
+- 51: plink.exe is treated specially (as putty)
+- 52: tortoiseplink is like putty, with extra arguments
+- 53: double quoted plink.exe in GIT_SSH_COMMAND
+- 54: single quoted plink.exe in GIT_SSH_COMMAND
+- 55: GIT_SSH_VARIANT overrides plink detection
+- 56: ssh.variant overrides plink detection
+- 57: GIT_SSH_VARIANT overrides plink detection to plink
+- 58: GIT_SSH_VARIANT overrides plink to tortoiseplink
+- 60: clone c:temp is ssl
+- 62: clone host:rep
+- 63: clone host:rep/home/project
+- 64: clone host:123
+- 65: clone [::1]:rep
+- 66: clone [::1]:rep/home/project
+- 67: clone [::1]:123
+- 68: clone host:/~repo
+- 69: clone [::1]:/~repo
+- 73: clone ssh://host.xz/home/user/repo
+- 74: clone ssh://host.xz/~repo
+- 75: clone ssh://host.xz:/home/user/repo
+- 76: clone ssh://host.xz:/~repo
+- 77: clone ssh://host.xz:22/home/user/repo
+- 78: clone ssh://host.xz:22/~repo
+- 79: clone ssh://::1/home/user/repo
+- 80: clone ssh://[::1]/home/user/repo
+- 81: clone ssh://[::1]:/home/user/repo
+- 82: clone ssh://user@::1/home/user/repo
+- 83: clone ssh://user@[::1]/home/user/repo
+- 84: clone ssh://user@[::1]:/home/user/repo
+- 85: clone ssh://[user@::1]/home/user/repo
+- 86: clone ssh://[user@::1]:/home/user/repo
+- 87: clone ssh://::1/~repo
+- 88: clone ssh://[::1]/~repo
+- 89: clone ssh://user@::1/~repo
+- 90: clone ssh://user@[::1]/~repo
+- 91: clone ssh://[user@::1]/~repo
+- 92: clone ssh://[::1]:22/home/user/repo
+- 93: clone ssh://user@[::1]:22/home/user/repo
+- 94: clone ssh://[user@::1]:22/home/user/repo
+- 95: clone ssh://[::1]:22/~repo
+- 96: clone ssh://user@[::1]:22/~repo
+- 97: clone ssh://[user@::1]:22/~repo
+- 105: partial clone
+- 108: batch missing blob request during checkout
+- 113: auto-discover bundle URI from HTTP clone
+- 114: auto-discover multiple bundles from HTTP clone
+- 115: auto-discover multiple bundles from HTTP clone: creationToken heuristic
+
+Context from retired plan files:
+- (plans/remote-auth-plan.md) - `t5601-clone`, `t5603-clone-dirname`, `t5606-clone-options`, `t5611-clone-config`: SSH-adjacent clone behavior and fake-SSH argv compatibility.
+- (plans/remote-auth-plan.md) - Start with fake-SSH argv tests in `t5601-clone`, `t5602-clone-remote-exec`, and `t5603-clone-dirname`.
+
+Repro: `./scripts/run-tests.sh t5601-clone.sh`
+Full TAP log from this run: `logs/ticket-runs/t5601-clone.log`

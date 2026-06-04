@@ -1,0 +1,10 @@
+Upstream test `tests/t7113-post-index-change-hook.sh` — "post index change hook"
+
+Fresh run 2026-06-04: 1/4 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: test status, add, commit, others trigger hook without flags set
+- 3: test checkout and reset trigger the hook
+- 4: test reset --mixed and update-index triggers the hook
+
+Repro: `./scripts/run-tests.sh t7113-post-index-change-hook.sh`
+Full TAP log from this run: `logs/ticket-runs/t7113-post-index-change-hook.log`

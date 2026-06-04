@@ -1,0 +1,13 @@
+Upstream test `tests/t5607-clone-bundle.sh` — "some bundle related tests"
+
+Fresh run 2026-06-04: 10/16 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: "verify" needs a worktree
+- 3: annotated tags can be excluded by rev-list options
+- 8: ridiculously long subject in boundary
+- 10: failed bundle creation does not leave cruft
+- 12: clone bundle with different fsckObjects configurations
+- 15: git bundle v3 rejects unknown capabilities
+
+Repro: `./scripts/run-tests.sh t5607-clone-bundle.sh`
+Full TAP log from this run: `logs/ticket-runs/t5607-clone-bundle.log`

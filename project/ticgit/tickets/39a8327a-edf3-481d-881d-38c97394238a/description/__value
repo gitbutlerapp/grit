@@ -1,0 +1,15 @@
+Upstream test `tests/t5539-fetch-http-shallow.sh` — "fetch/clone from a shallow clone over http"
+
+Fresh run 2026-06-04: 4/8 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 3: no shallow lines after receiving ACK ready
+- 5: fetch shallow since ...
+- 7: fetch exclude tag one
+- 8: fetching deepen
+
+Context from retired plan files:
+- (plans/remote-auth-plan.md) - `t5541-http-push-smart`, `t5551-http-fetch-smart`, `t5539-fetch-http-shallow`, `t5542-push-http-shallow`: broader HTTP transport correctness tests that auth changes should not regress.
+- (plans/remote-auth-plan.md) - Then broader smart HTTP tests: `t5551-http-fetch-smart`, `t5541-http-push-smart`, `t5539-fetch-http-shallow`, `t5542-push-http-shallow`.
+
+Repro: `./scripts/run-tests.sh t5539-fetch-http-shallow.sh`
+Full TAP log from this run: `logs/ticket-runs/t5539-fetch-http-shallow.log`

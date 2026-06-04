@@ -1,0 +1,13 @@
+Upstream test `tests/t5582-fetch-negative-refspec.sh` — ""git fetch" with negative refspecs."
+
+Fresh run 2026-06-04: 10/16 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 6: fetch with negative pattern refspec
+- 7: fetch with negative pattern refspec does not expand prefix
+- 11: fetch --prune with negative refspec
+- 12: push with matching : and negative refspec
+- 13: push with matching +: and negative refspec
+- 14: --prefetch correctly modifies refspecs
+
+Repro: `./scripts/run-tests.sh t5582-fetch-negative-refspec.sh`
+Full TAP log from this run: `logs/ticket-runs/t5582-fetch-negative-refspec.log`

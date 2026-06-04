@@ -1,0 +1,12 @@
+Upstream test `tests/t6402-merge-rename.sh` — "Merge-recursive merging renames"
+
+Fresh run 2026-06-04: 45/46 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 36: avoid unnecessary update, modify/delete
+
+Context from retired plan files:
+- (plan.md) - Merge machinery: `t6400`, `t6402`, `t6404`, `t6406`, `t6411`, `t6414`, `t6415`,
+- (t6-plan.md) - [x] `t6402-merge-rename.sh` — 46/46 passing.
+
+Repro: `./scripts/run-tests.sh t6402-merge-rename.sh`
+Full TAP log from this run: `logs/ticket-runs/t6402-merge-rename.log`

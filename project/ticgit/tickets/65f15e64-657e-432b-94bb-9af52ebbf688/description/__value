@@ -1,0 +1,12 @@
+Upstream test `tests/t3434-rebase-i18n.sh` — "rebase with changing encoding Initial setup: 1 - 2 main \ 3 - 4 first \ 5 - 6 second"
+
+Fresh run 2026-06-04: 1/6 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: rebase --rebase-merges update encoding eucJP to UTF-8
+- 3: rebase --rebase-merges update encoding eucJP to ISO-2022-JP
+- 4: rebase --continue update from ISO-8859-1 to UTF-8
+- 5: rebase --continue update from eucJP to UTF-8
+- 6: rebase --continue update from eucJP to ISO-2022-JP
+
+Repro: `./scripts/run-tests.sh t3434-rebase-i18n.sh`
+Full TAP log from this run: `logs/ticket-runs/t3434-rebase-i18n.log`

@@ -1,0 +1,9 @@
+Upstream test `tests/t4200-rerere.sh` — "git rerere ! [fifth] version1 ! [first] first ! [fourth] version1 ! [main] initial ! [second] prefer first over second ! [third] version2 ------ + [third] version2 + [fifth] version1 + [fourth] version1 + + + [third^] third - [second] prefer first over second + + [first] first + [second^] second ++++++ [main] initial"
+
+Fresh run 2026-06-04: 34/36 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 30: multiple identical conflicts
+- 32: rerere with inner conflict markers
+
+Repro: `./scripts/run-tests.sh t4200-rerere.sh`
+Full TAP log from this run: `logs/ticket-runs/t4200-rerere.log`

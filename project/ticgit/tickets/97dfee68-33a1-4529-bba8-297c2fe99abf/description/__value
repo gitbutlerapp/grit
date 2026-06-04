@@ -1,0 +1,25 @@
+Upstream test `tests/t3432-rebase-fast-forward.sh` — "ensure rebase fast-forwards commits when possible"
+
+Fresh run 2026-06-04: 201/225 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 196: git rebase --apply --keep-base with our and their changes is noop with same HEAD
+- 197: git rebase --apply --no-ff --keep-base with our and their changes is work with diff HEAD
+- 198: git rebase --merge --keep-base with our and their changes is noop with same HEAD
+- 199: git rebase --merge --no-ff --keep-base with our and their changes is work with diff HEAD
+- 200: git rebase --merge --keep-base (rebase.abbreviateCommands = true) with our and their changes is noop with same HEAD
+- 201: git rebase --merge --no-ff --keep-base (rebase.abbreviateCommands = true) with our and their changes is work with diff HEAD
+- 214: git rebase --apply --fork-point --onto main... main with our and their changes is noop with same HEAD
+- 215: git rebase --apply --no-ff --fork-point --onto main... main with our and their changes is work with diff HEAD
+- 216: git rebase --merge --fork-point --onto main... main with our and their changes is noop with same HEAD
+- 217: git rebase --merge --no-ff --fork-point --onto main... main with our and their changes is work with diff HEAD
+- 218: git rebase --merge --fork-point --onto main... main (rebase.abbreviateCommands = true) with our and their changes is noop with same HEAD
+- 219: git rebase --merge --no-ff --fork-point --onto main... main (rebase.abbreviateCommands = true) with our and their changes is work with diff HEAD
+- 220: git rebase --apply --fork-point --keep-base main with our and their changes is noop with same HEAD
+- 221: git rebase --apply --no-ff --fork-point --keep-base main with our and their changes is work with diff HEAD
+- 222: git rebase --merge --fork-point --keep-base main with our and their changes is noop with same HEAD
+- 223: git rebase --merge --no-ff --fork-point --keep-base main with our and their changes is work with diff HEAD
+- 224: git rebase --merge --fork-point --keep-base main (rebase.abbreviateCommands = true) with our and their changes is noop with same HEAD
+- 225: git rebase --merge --no-ff --fork-point --keep-base main (rebase.abbreviateCommands = true) with our and their changes is work with diff HEAD
+
+Repro: `./scripts/run-tests.sh t3432-rebase-fast-forward.sh`
+Full TAP log from this run: `logs/ticket-runs/t3432-rebase-fast-forward.log`

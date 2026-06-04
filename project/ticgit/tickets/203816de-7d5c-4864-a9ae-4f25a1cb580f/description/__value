@@ -1,0 +1,18 @@
+Upstream test `tests/t5509-fetch-push-namespaces.sh` — "fetch/push involving ref namespaces"
+
+Fresh run 2026-06-04: 4/15 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: pushing into a repository using a ref namespace
+- 3: pulling from a repository using a ref namespace
+- 4: mirroring a repository using a ref namespace
+- 5: hide namespaced refs with transfer.hideRefs
+- 6: check that transfer.hideRefs does not match unstripped refs
+- 7: hide full refs with transfer.hideRefs
+- 9: try to update a ref that is not hidden
+- 10: git-receive-pack(1) with transfer.hideRefs does not match unstripped refs during advertisement
+- 13: clone chooses correct HEAD (v0)
+- 14: clone chooses correct HEAD (v2)
+- 15: denyCurrentBranch and unborn branch with ref namespace
+
+Repro: `./scripts/run-tests.sh t5509-fetch-push-namespaces.sh`
+Full TAP log from this run: `logs/ticket-runs/t5509-fetch-push-namespaces.log`

@@ -1,0 +1,15 @@
+Upstream test `tests/t7509-commit-authorship.sh` — "commit tests of various authorhip options."
+
+Fresh run 2026-06-04: 4/12 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 3: -c option copies authorship and message
+- 4: -c option copies only the message with --reset-author
+- 5: --amend option copies authorship
+- 6: --amend option with empty author
+- 7: --amend option with missing author
+- 8: --reset-author makes the commit ours even with --amend option
+- 9: --reset-author and --author are mutually exclusive
+- 10: --reset-author should be rejected without -c/-C/--amend
+
+Repro: `./scripts/run-tests.sh t7509-commit-authorship.sh`
+Full TAP log from this run: `logs/ticket-runs/t7509-commit-authorship.log`

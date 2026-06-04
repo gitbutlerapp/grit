@@ -1,0 +1,8 @@
+Upstream test `tests/t9903-bash-prompt.sh` — "test git-specific bash prompt functions"
+
+Fresh run 2026-06-04: 66/67 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 14: prompt - interactive rebase
+
+Repro: `./scripts/run-tests.sh t9903-bash-prompt.sh`
+Full TAP log from this run: `logs/ticket-runs/t9903-bash-prompt.log`

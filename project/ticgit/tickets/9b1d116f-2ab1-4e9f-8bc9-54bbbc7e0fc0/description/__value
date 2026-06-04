@@ -1,0 +1,87 @@
+Upstream test `tests/t3701-add-interactive.sh` — "add -i basic tests"
+
+Fresh run 2026-06-04: 53/130 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 3: status works (initial)
+- 5: diff works (initial)
+- 6: revert works (initial)
+- 7: add untracked (multiple)
+- 9: status works (commit)
+- 10: update can stage deletions
+- 12: diff works (commit)
+- 13: revert works (commit)
+- 19: bad edit rejected
+- 21: garbage edit rejected
+- 24: real edit works
+- 28: edit can strip spaces from empty context lines
+- 31: stage mode but not hunk
+- 33: different prompts for mode change/deleted
+- 38: add first line works
+- 42: deleting an empty file
+- 43: adding an empty file
+- 45: goto hunk 1 with "g 1"
+- 46: goto hunk 1 with "g1"
+- 47: navigate to hunk via regex /pattern
+- 48: navigate to hunk via regex / pattern
+- 49: print again the hunk
+- 55: edit, adding lines to the first hunk
+- 56: patch mode ignores unmerged entries
+- 58: diffs can be colorized
+- 59: colors can be overridden
+- 60: brackets appear without color
+- 62: colorized diffs respect diff.wsErrorHighlight
+- 63: diff color respects color.diff
+- 64: re-coloring diff without color.interactive
+- 65: diffFilter filters diff
+- 66: detect bogus diffFilter output
+- 67: handle iffy colored hunk headers
+- 69: diff.algorithm is passed to `git diff-files`
+- 70: patch-mode via -i prompts for files
+- 71: add -p handles globs
+- 76: setup different kinds of dirty submodules
+- 77: status ignores dirty submodules (except HEAD)
+- 78: handle submodules
+- 80: add -p works with pathological context lines
+- 81: add -p patch editing works with pathological context lines
+- 82: checkout -p works with pathological context lines
+- 83: add -N followed by add -p patch editing
+- 84: checkout -p patch editing of added file
+- 85: show help from add--helper
+- 86: reset -p with unmerged files
+- 87: hunk splitting works with diff.suppressBlankEmpty
+- 91: add accepts -U and --inter-hunk-context
+- 92: checkout accepts -U and --inter-hunk-context
+- 93: restore accepts -U and --inter-hunk-context
+- 94: commit accepts -U and --inter-hunk-context
+- 95: reset accepts -U and --inter-hunk-context
+- 96: stash accepts -U and --inter-hunk-context
+- 99: add falls back to color.ui
+- 100: checkout rejects invalid context options
+- 101: checkout falls back to color.ui
+- 102: commit rejects invalid context options
+- 103: commit falls back to color.ui
+- 104: reset rejects invalid context options
+- 106: restore rejects invalid context options
+- 107: restore falls back to color.ui
+- 108: stash save rejects invalid context options
+- 110: stash push rejects invalid context options
+- 112: splitting previous hunk marks split hunks as undecided
+- 113: splitting edited hunk
+- 114: options J, K roll over
+- 115: options y, n, a, d, j, k, e roll over to next undecided (1)
+- 116: options y, n, a, d, j, k, e roll over to next undecided (2)
+- 117: invalid option s is rejected
+- 120: checkout rejects invalid --no-auto-advance options
+- 121: reset rejects invalid --no-auto-advance options
+- 122: stash save rejects invalid --no-auto-advance options
+- 123: stash push rejects invalid --no-auto-advance options
+- 124: manual advance (">") moves to next file with --no-auto-advance
+- 126: select y on a hunk, go to another file, come back and change to n does not stage
+- 127: deciding all hunks in a file does not auto advance
+- 129: help text shows HUNK SUMMARY when all hunks have been decided
+
+Context from retired plan files:
+- (plan.md) 6. `rm`, `add`, and interactive patch: `t3701`, `t3600`, `t3700`, `t3702`.
+
+Repro: `./scripts/run-tests.sh t3701-add-interactive.sh`
+Full TAP log from this run: `logs/ticket-runs/t3701-add-interactive.log`

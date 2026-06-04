@@ -1,0 +1,8 @@
+Upstream test `tests/t4215-log-skewed-merges.sh` — "git log --graph of skewed merges"
+
+Fresh run 2026-06-04: 9/10 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 9: log --graph with multiple tips and colors
+
+Repro: `./scripts/run-tests.sh t4215-log-skewed-merges.sh`
+Full TAP log from this run: `logs/ticket-runs/t4215-log-skewed-merges.log`
