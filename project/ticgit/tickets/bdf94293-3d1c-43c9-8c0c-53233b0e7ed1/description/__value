@@ -1,0 +1,56 @@
+Upstream test `tests/t7502-commit-porcelain.sh` — "git commit porcelain-ish"
+
+Fresh run 2026-06-04: 33/82 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 10: commit --trailer with "="
+- 11: commit --trailer with -c and "replace" as ifexists
+- 12: commit --trailer with -c and "add" as ifexists
+- 13: commit --trailer with -c and "donothing" as ifexists
+- 14: commit --trailer with -c and "addIfDifferent" as ifexists
+- 15: commit --trailer with -c and "addIfDifferentNeighbor" as ifexists
+- 16: commit --trailer with -c and "end" as where
+- 17: commit --trailer with -c and "start" as where
+- 18: commit --trailer with -c and "after" as where
+- 19: commit --trailer with -c and "before" as where
+- 20: commit --trailer with -c and "donothing" as ifmissing
+- 21: commit --trailer with -c and "add" as ifmissing
+- 22: commit --trailer with -c ack.key 
+- 23: commit --trailer with -c and ":=#" as separators
+- 24: commit --trailer with -c and command
+- 25: commit --trailer not confused by --- separator
+- 26: commit --trailer with --verbose
+- 31: cleanup commit messages (verbatim option,-t)
+- 34: cleanup commit messages (whitespace option,-F)
+- 35: cleanup commit messages (scissors option,-F,-e)
+- 36: cleanup commit messages (scissors option,-F,-e, scissors on first line)
+- 37: cleanup commit messages (strip option,-F)
+- 39: cleanup commit messages (strip option,-F,-e): output
+- 42: cleanup commit message (no config and no option uses default)
+- 43: cleanup commit message (option overrides default)
+- 44: cleanup commit message (config overrides default)
+- 45: cleanup commit message (option overrides config)
+- 49: message shows author when it is not equal to committer
+- 50: message shows date when it is explicitly set
+- 51: message does not have multiple scissors lines
+- 53: do not fire editor when committer is bogus
+- 60: commit -s places sob on third line after two empty lines
+- 61: commit
+- 62: commit --status
+- 64: commit with commit.status = yes
+- 66: commit --status with commit.status = yes
+- 68: commit --status with commit.status = no
+- 70: commit
+- 71: commit --status
+- 72: commit --no-status
+- 73: commit with commit.status = yes
+- 74: commit with commit.status = no
+- 75: commit --status with commit.status = yes
+- 76: commit --no-status with commit.status = yes
+- 77: commit --status with commit.status = no
+- 78: commit --no-status with commit.status = no
+- 79: commit --status with custom comment character
+- 80: switch core.commentchar
+- 81: switch core.commentchar but out of options
+
+Repro: `./scripts/run-tests.sh t7502-commit-porcelain.sh`
+Full TAP log from this run: `logs/ticket-runs/t7502-commit-porcelain.log`

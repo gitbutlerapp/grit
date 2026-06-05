@@ -1,0 +1,44 @@
+Upstream test `tests/t5526-fetch-submodules.sh` — "Recursive "git fetch" for submodules"
+
+Fresh run 2026-06-04: 19/56 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: fetch --recurse-submodules recurses into submodules
+- 4: submodule.recurse option triggers recursive fetch
+- 5: fetch --recurse-submodules -j2 has the same output behaviour
+- 8: using fetchRecurseSubmodules=true in .gitmodules recurses into submodules
+- 11: --recurse-submodules overrides fetchRecurseSubmodules setting from .git/config
+- 14: --dry-run propagates to submodules
+- 15: Without --dry-run propagates to submodules
+- 16: recurseSubmodules=true propagates into submodules
+- 17: --recurse-submodules overrides config in submodule
+- 20: Recursion stops when no new submodule commits are fetched
+- 21: Recursion doesn't happen when new superproject commits don't change any submodules
+- 22: Recursion picks up config in submodule
+- 23: Recursion picks up all submodules when necessary
+- 25: '--recurse-submodules=on-demand' recurses as deep as necessary (and ignores config)
+- 27: '--recurse-submodules=on-demand' should fetch submodule commits if the submodule is changed but the index has no submodules
+- 28: '--recurse-submodules' should fetch submodule commits if the submodule is changed but the index has no submodules
+- 29: '--recurse-submodules' should ignore changed, inactive submodules
+- 30: setup downstream branch with other submodule
+- 31: '--recurse-submodules' should fetch submodule commits in changed submodules and the index
+- 32: '--recurse-submodules=on-demand' stops when no new submodule commits are found in the superproject (and ignores config)
+- 33: 'fetch.recurseSubmodules=on-demand' overrides global config
+- 34: 'submodule.<sub>.fetchRecurseSubmodules=on-demand' overrides fetch.recurseSubmodules
+- 35: don't fetch submodule when newly recorded commits are already present
+- 36: 'fetch.recurseSubmodules=on-demand' works also without .gitmodules entry
+- 38: fetching submodule into a broken repository
+- 39: fetch new commits when submodule got renamed
+- 40: fetch new submodule commits on-demand outside standard refspec
+- 41: fetch new submodule commit on-demand in FETCH_HEAD
+- 42: fetch new submodule commits on-demand without .gitmodules entry
+- 43: fetch new submodule commit intermittently referenced by superproject
+- 44: fetch new submodule commits on-demand outside standard refspec with custom remote name
+- 45: fetch new submodule commit on-demand in FETCH_HEAD from custom remote
+- 52: fetch --recurse-submodules updates name-conflicted, populated submodule
+- 53: fetch --recurse-submodules updates name-conflicted, unpopulated submodule
+- 54: fetch --all with --recurse-submodules
+- 55: fetch --all with --recurse-submodules with multiple
+- 56: fetch --all with --no-recurse-submodules only fetches superproject
+
+Repro: `./scripts/run-tests.sh t5526-fetch-submodules.sh`
+Full TAP log from this run: `logs/ticket-runs/t5526-fetch-submodules.log`

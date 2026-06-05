@@ -1,0 +1,21 @@
+Upstream test `tests/t5521-pull-options.sh` — "pull options"
+
+Fresh run 2026-06-04: 8/22 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 6: git pull -v --no-rebase
+- 7: git pull -v --rebase
+- 8: git pull -v -q --no-rebase
+- 9: git pull -q -v --no-rebase
+- 12: git pull --force
+- 13: git pull --all
+- 14: git pull --dry-run
+- 15: git pull --all --dry-run
+- 16: git pull --allow-unrelated-histories
+- 17: git pull does not add a sign-off line
+- 18: git pull --no-signoff does not add sign-off line
+- 19: git pull --signoff add a sign-off line
+- 20: git pull --no-signoff flag cancels --signoff flag
+- 21: git pull --no-verify flag passed to merge
+
+Repro: `./scripts/run-tests.sh t5521-pull-options.sh`
+Full TAP log from this run: `logs/ticket-runs/t5521-pull-options.log`

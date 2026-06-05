@@ -1,0 +1,20 @@
+Upstream test `tests/t3452-history-split.sh` — "tests for git-history split subcommand"
+
+Fresh run 2026-06-04: 12/25 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 5: can split up tip commit
+- 6: can split up root commit
+- 7: can split up in-between commit
+- 8: can split HEAD only
+- 9: can split detached HEAD
+- 10: can split commit in unrelated branch
+- 11: updates multiple descendant branches
+- 13: can use only last hunk
+- 14: can split commit with file deletions
+- 16: aborts with empty commit message
+- 17: commit message editor sees split-out changes
+- 21: split with file mode change
+- 23: hooks are not executed for rewritten commits
+
+Repro: `./scripts/run-tests.sh t3452-history-split.sh`
+Full TAP log from this run: `logs/ticket-runs/t3452-history-split.log`

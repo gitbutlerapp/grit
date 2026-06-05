@@ -1,0 +1,19 @@
+Upstream test `tests/t7703-repack-geometric.sh` — "git repack --geometric works correctly"
+
+Fresh run 2026-06-04: 6/18 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 4: --geometric with loose objects
+- 5: --geometric with small-pack rollup
+- 6: --geometric with small- and large-pack rollup
+- 7: --geometric ignores kept packs
+- 9: --geometric chooses largest MIDX preferred pack
+- 11: --geometric --write-midx retains up-to-date MIDX without bitmap index
+- 12: --geometric --write-midx retains up-to-date MIDX with bitmap index
+- 13: --geometric --write-midx with packfiles in main and alternate ODB
+- 15: --geometric with same pack in main and alternate ODB
+- 16: --geometric -l with non-intact geometric sequence across ODBs
+- 17: --geometric -l disables writing bitmaps with non-local packfiles
+- 18: geometric repack works with promisor packs
+
+Repro: `./scripts/run-tests.sh t7703-repack-geometric.sh`
+Full TAP log from this run: `logs/ticket-runs/t7703-repack-geometric.log`

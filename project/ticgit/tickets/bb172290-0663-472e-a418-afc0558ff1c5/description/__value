@@ -1,0 +1,21 @@
+Upstream test `tests/t3421-rebase-topology-linear.sh` — "basic rebase topology tests"
+
+Fresh run 2026-06-04: 49/64 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 20: rebase -i fast-forwards from ancestor of upstream
+- 24: rebase -i drops patches in upstream
+- 27: rebase -i can drop last patch if in upstream
+- 30: rebase -i --onto drops patches in upstream
+- 36: rebase -m keeps begin-empty commits
+- 37: rebase -i keeps begin-empty commits
+- 38: rebase -m --no-keep-empty drops begin-empty commits
+- 39: rebase -i --no-keep-empty drops begin-empty commits
+- 40: rebase -m --keep-empty keeps empty even if already in upstream
+- 42: rebase --rebase-merges --keep-empty keeps empty even if already in upstream
+- 58: rebase -i without --onto --root with disjoint history drops patch in onto
+- 59: rebase  --root on linear history is a no-op
+- 60: rebase -m --root on linear history is a no-op
+- 61: rebase -i --root on linear history is a no-op
+
+Repro: `./scripts/run-tests.sh t3421-rebase-topology-linear.sh`
+Full TAP log from this run: `logs/ticket-runs/t3421-rebase-topology-linear.log`

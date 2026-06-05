@@ -1,0 +1,25 @@
+Upstream test `tests/t3424-rebase-empty.sh` — "git rebase of commits that start or become empty"
+
+Fresh run 2026-06-04: 1/20 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 3: rebase --merge --empty=drop
+- 4: rebase --merge uses default of --empty=drop
+- 5: rebase --merge --empty=keep
+- 6: rebase --merge --empty=stop
+- 7: rebase --merge --empty=ask
+- 8: rebase --interactive --empty=drop
+- 9: rebase --interactive --empty=keep
+- 10: rebase --interactive --empty=stop
+- 11: rebase --interactive uses default of --empty=stop
+- 12: rebase --merge --empty=drop --keep-empty
+- 13: rebase --merge --empty=drop --no-keep-empty
+- 14: rebase --merge --empty=keep --keep-empty
+- 15: rebase --merge --empty=keep --no-keep-empty
+- 16: rebase --merge does not leave state laying around
+- 17: rebase --exec --empty=drop
+- 18: rebase --exec --empty=keep
+- 19: rebase --exec uses default of --empty=keep
+- 20: rebase --exec --empty=stop
+
+Repro: `./scripts/run-tests.sh t3424-rebase-empty.sh`
+Full TAP log from this run: `logs/ticket-runs/t3424-rebase-empty.log`

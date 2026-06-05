@@ -1,0 +1,20 @@
+Upstream test `tests/t5574-fetch-output.sh` — "git fetch output format"
+
+Fresh run 2026-06-04: 1/14 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: fetch with invalid output format configuration
+- 2: fetch aligned output
+- 3: fetch compact output
+- 5: fetch porcelain output 
+- 6: fetch porcelain output (atomic)
+- 7: fetch porcelain with multiple remotes
+- 8: fetch porcelain refuses to work with submodules
+- 9: fetch porcelain overrides fetch.output config
+- 10: fetch --no-porcelain overrides previous --porcelain
+- 11: fetch output with HEAD
+- 12: fetch porcelain output with HEAD
+- 13: fetch output with object ID
+- 14: --no-show-forced-updates
+
+Repro: `./scripts/run-tests.sh t5574-fetch-output.sh`
+Full TAP log from this run: `logs/ticket-runs/t5574-fetch-output.log`

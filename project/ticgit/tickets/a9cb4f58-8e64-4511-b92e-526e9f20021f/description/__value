@@ -1,0 +1,17 @@
+Upstream test `tests/t4205-log-pretty-formats.sh` — "Test pretty formats"
+
+Fresh run 2026-06-04: 113/125 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 17: NUL termination with --reflog --pretty=short
+- 18: NUL termination with --reflog --pretty=medium
+- 19: NUL termination with --reflog --pretty=full
+- 20: NUL termination with --reflog --pretty=fuller
+- 21: NUL termination with --reflog --pretty=email
+- 22: NUL termination with --reflog --pretty=raw
+- 23: NUL termination with --reflog --pretty=oneline
+- 43: right alignment formatting at the nth column with --graph. i18n.logOutputEncoding
+- 101: %S with --bisect labels commits with refs/bisect/bad ref
+- 116: log --pretty with magical wrapping directives
+
+Repro: `./scripts/run-tests.sh t4205-log-pretty-formats.sh`
+Full TAP log from this run: `logs/ticket-runs/t4205-log-pretty-formats.log`

@@ -1,0 +1,20 @@
+Upstream test `tests/t3451-history-reword.sh` — "tests for git-history reword subcommand"
+
+Fresh run 2026-06-04: 1/14 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: can reword tip of a branch
+- 2: can reword commit in the middle
+- 3: can reword commit in the middle even on detached head
+- 4: can reword the detached head
+- 5: can reword root commit
+- 6: can reword in a bare repo
+- 7: can reword a commit on a different branch
+- 8: can reword a merge commit
+- 9: --dry-run prints ref updates without modifying repo
+- 10: --update-refs=head updates only HEAD
+- 11: editor shows proper status
+- 12: hooks are not executed for rewritten commits
+- 13: aborts with empty commit message
+
+Repro: `./scripts/run-tests.sh t3451-history-reword.sh`
+Full TAP log from this run: `logs/ticket-runs/t3451-history-reword.log`

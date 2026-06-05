@@ -1,0 +1,6 @@
+Upstream test `tests/t6419-merge-ignorecase.sh` — "git-merge with case-changing rename on case-insensitive file system"
+
+Fresh run 2026-06-04: the whole file self-skips here — `1..0 # SKIP skipping case insensitive tests - case sensitive file system`. Nothing is implementable on this platform; the file stays not-fully-passing in data because no tests run. Either verify on a platform with the prereq or mark its status TOML `in_scope = "skip"`.
+
+Repro: `./scripts/run-tests.sh t6419-merge-ignorecase.sh`
+Full TAP log from this run: `logs/ticket-runs/t6419-merge-ignorecase.log`

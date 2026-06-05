@@ -1,0 +1,11 @@
+Upstream test `tests/t4216-log-bloom.sh` — "git log for a path with Bloom filters"
+
+Fresh run 2026-06-04: 163/167 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 133: use Bloom filters even if the latest graph does not have Bloom filters
+- 135: Use Bloom filters if they exist in the latest but not all commit graphs in the chain.
+- 165: Bloom reader notices out-of-bounds filter offsets
+- 167: Bloom reader notices out-of-order index offsets
+
+Repro: `./scripts/run-tests.sh t4216-log-bloom.sh`
+Full TAP log from this run: `logs/ticket-runs/t4216-log-bloom.log`

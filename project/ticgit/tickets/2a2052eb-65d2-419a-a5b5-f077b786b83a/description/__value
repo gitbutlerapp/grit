@@ -1,0 +1,31 @@
+Upstream test `tests/t7501-commit-basic-functionality.sh` — "git commit"
+
+Fresh run 2026-06-04: 53/77 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 7: can use paths with --interactive
+- 8: removed files and relative paths
+- 15: fail to commit untracked file (even with --include/--only)
+- 24: -i/--include includes staged changes
+- 25: --include and --only do not mix
+- 27: empty commit message
+- 32: amend --only ignores staged contents
+- 33: allow-empty --only ignores staged contents
+- 36: --amend --edit
+- 37: --amend --edit of empty message
+- 40: -m --edit
+- 42: using message from other commit
+- 43: editing message from other commit
+- 45: overriding author from command line
+- 46: interactive add
+- 52: amend commit to fix author
+- 53: amend commit to fix date
+- 56: commit mentions forced date in output
+- 57: commit complains about completely bogus dates
+- 58: commit --date allows approxidate
+- 61: signoff gap
+- 66: amend commit to fix author
+- 72: amend using the message from a commit named with tag
+- 73: amend can copy notes
+
+Repro: `./scripts/run-tests.sh t7501-commit-basic-functionality.sh`
+Full TAP log from this run: `logs/ticket-runs/t7501-commit-basic-functionality.log`

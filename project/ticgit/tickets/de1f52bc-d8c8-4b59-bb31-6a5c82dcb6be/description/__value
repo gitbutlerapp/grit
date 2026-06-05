@@ -1,0 +1,19 @@
+Upstream test `tests/t3437-rebase-fixup-options.sh` — "git rebase interactive fixup options This test checks the "fixup [-C|-c]" command of rebase interactive. In addition to amending the contents of the commit, "fixup -C" replaces the original commit message with the message of the fixup commit. "fixup -c" also replaces the original message, but opens the editor to allow the user to edit the message before committing. Similar to the "fixup" command that works with "fixup!", "fixup -C" works with "amend!" upon --autosquash."
+
+Fresh run 2026-06-04: 1/13 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: simple fixup -C works
+- 3: simple fixup -c works
+- 4: fixup -C removes amend! from message
+- 5: fixup -C with conflicts gives correct message
+- 6: conflicting fixup -C after fixup with custom comment string
+- 7: skipping fixup -C after fixup gives correct message
+- 8: sequence of fixup, fixup -C & squash --signoff works
+- 9: first fixup -C commented out in sequence fixup fixup -C fixup -C
+- 10: multiple fixup -c opens editor once
+- 11: sequence squash, fixup & fixup -c gives combined message
+- 12: fixup -C works upon --autosquash with amend!
+- 13: fixup -[Cc]<commit> works
+
+Repro: `./scripts/run-tests.sh t3437-rebase-fixup-options.sh`
+Full TAP log from this run: `logs/ticket-runs/t3437-rebase-fixup-options.log`

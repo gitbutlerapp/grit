@@ -1,0 +1,16 @@
+Upstream test `tests/t3440-rebase-trailer.sh` — "git rebase --trailer integration tests We verify that --trailer works with the merge backend, and that it is rejected early when the apply backend is requested."
+
+Fresh run 2026-06-04: 1/10 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: apply backend is rejected with --trailer
+- 3: reject empty --trailer argument
+- 4: reject trailer with missing key before separator
+- 5: allow trailer with missing value after separator
+- 6: CLI trailer duplicates allowed; replace policy keeps last
+- 7: multiple Signed-off-by trailers all preserved
+- 8: rebase --trailer adds trailer after conflicts
+- 9: --trailer handles fixup commands in todo list
+- 10: rebase --root honors trailer.<name>.key
+
+Repro: `./scripts/run-tests.sh t3440-rebase-trailer.sh`
+Full TAP log from this run: `logs/ticket-runs/t3440-rebase-trailer.log`

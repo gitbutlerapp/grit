@@ -1,0 +1,11 @@
+Upstream test `tests/t5537-fetch-shallow.sh` — "fetch/clone from a shallow clone"
+
+Fresh run 2026-06-04: 15/16 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 16: shallow fetches check connectivity before writing shallow file
+
+Context from retired plan files:
+- (plan.md) - Partial progress on `t5537-fetch-shallow.sh`: now 15/16 after fixing update-shallow
+
+Repro: `./scripts/run-tests.sh t5537-fetch-shallow.sh`
+Full TAP log from this run: `logs/ticket-runs/t5537-fetch-shallow.log`

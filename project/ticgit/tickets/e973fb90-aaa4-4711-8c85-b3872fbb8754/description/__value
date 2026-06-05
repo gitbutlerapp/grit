@@ -1,0 +1,8 @@
+Upstream test `tests/t2205-add-worktree-config.sh` — "directory traversal respects user config This test verifies the traversal of the directory tree when the traversal begins outside the repository. Two instances for which this can occur are tested: 1) The user manually sets the worktree. For this instance, the test sets the worktree two levels above the `.git` directory and checks whether we are able to add to the index those files that are in either (1) the manually configured worktree directory or (2) the standard worktree location with respect to the `.git` directory (i.e. ensuring that the encountered `.git` directory is not treated as belonging to a foreign nested repository). 2) The user manually sets the `git_dir` while the working directory is outside the repository. The test checks that files inside the repository can be added to the index."
+
+Fresh run 2026-06-04: 12/13 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 12: 3b: ignored
+
+Repro: `./scripts/run-tests.sh t2205-add-worktree-config.sh`
+Full TAP log from this run: `logs/ticket-runs/t2205-add-worktree-config.log`

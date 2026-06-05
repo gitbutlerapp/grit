@@ -1,0 +1,9 @@
+Upstream test `tests/t7615-diff-algo-with-mergy-operations.sh` — "git merge and other operations that rely on merge Testing the influence of the diff algorithm on the merge output."
+
+Fresh run 2026-06-04: 5/7 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 6: cherry-pick c2 to c1 with recursive merge strategy succeeds with -Xdiff-algorithm=histogram
+- 7: cherry-pick c2 to c1 with recursive merge strategy succeeds with diff.algorithm = histogram
+
+Repro: `./scripts/run-tests.sh t7615-diff-algo-with-mergy-operations.sh`
+Full TAP log from this run: `logs/ticket-runs/t7615-diff-algo-with-mergy-operations.log`

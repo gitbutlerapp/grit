@@ -1,0 +1,22 @@
+Upstream test `tests/t5514-fetch-multiple.sh` — "fetch --all works correctly"
+
+Fresh run 2026-06-04: 10/25 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 4: git fetch --all should continue if a remote has errors
+- 5: git fetch --all does not allow non-option arguments
+- 6: git fetch --multiple (but only one remote)
+- 7: git fetch --multiple (two remotes)
+- 9: git fetch --all (skipFetchAll)
+- 10: git fetch --multiple (ignoring skipFetchAll)
+- 13: parallel
+- 14: git fetch --multiple --jobs=0 picks a default
+- 17: git fetch (fetch all remotes with fetch.all = true)
+- 20: git fetch --no-all (fetch only default remote with fetch.all = true)
+- 21: git fetch --no-all (fetch only default remote with fetch.all = false)
+- 22: git fetch --no-all (fetch only default remote without fetch.all)
+- 23: git fetch --all --no-all (fetch only default remote)
+- 24: git fetch --no-all one (fetch only explicit remote)
+- 25: git fetch --no-all --all (fetch all remotes)
+
+Repro: `./scripts/run-tests.sh t5514-fetch-multiple.sh`
+Full TAP log from this run: `logs/ticket-runs/t5514-fetch-multiple.log`

@@ -1,0 +1,19 @@
+Upstream test `tests/t7061-wtstatus-ignore.sh` — "git-status ignored files"
+
+Fresh run 2026-06-04: 13/25 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: status untracked directory with --ignored
+- 2: same with gitignore starting with BOM
+- 4: status untracked files --ignored with pathspec (literal match)
+- 5: status untracked files --ignored with pathspec (glob match)
+- 6: status untracked directory with --ignored -u
+- 7: status of untracked directory with --ignored works with or without prefix
+- 8: status prefixed untracked sub-directory with --ignored -u
+- 9: status ignored directory with --ignore
+- 10: status ignored directory with --ignore -u
+- 13: status untracked directory with ignored files with --ignore
+- 14: status untracked directory with ignored files with --ignore -u
+- 25: status ignores submodule in excluded directory
+
+Repro: `./scripts/run-tests.sh t7061-wtstatus-ignore.sh`
+Full TAP log from this run: `logs/ticket-runs/t7061-wtstatus-ignore.log`

@@ -1,0 +1,10 @@
+Upstream test `tests/t7001-mv.sh` — "git mv in subdirs"
+
+Fresh run 2026-06-04: 51/54 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 49: checking out a commit before submodule moved needs manual updates
+- 51: moving a submodule in nested directories
+- 52: moving nested submodules
+
+Repro: `./scripts/run-tests.sh t7001-mv.sh`
+Full TAP log from this run: `logs/ticket-runs/t7001-mv.log`

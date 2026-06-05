@@ -1,0 +1,43 @@
+Upstream test `tests/t3903-stash.sh` — "Test git stash"
+
+Fresh run 2026-06-04: 109/142 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 45: unstash must re-create the file
+- 48: unstash must re-create the file
+- 51: unstash must re-create the file
+- 58: stash branch - no stashes on stack, stash-like argument
+- 59: stash branch - stashes on stack, stash-like argument
+- 63: stash show -p - stashes on stack, stash-like argument
+- 65: stash show -p - no stashes on stack, stash-like argument
+- 66: stash show --patience shows diff
+- 67: drop: fail early if specified stash is not a stash ref
+- 68: pop: fail early if specified stash is not a stash ref
+- 72: valid ref of the form "n", n < N
+- 74: branch: should not drop the stash if the apply fails
+- 75: apply: show same status as git status (relative to ./)
+- 80: handle stash specification with spaces
+- 85: push -m shows right message
+- 86: push -m also works without space
+- 91: push -mfoo uses right message
+- 92: push --message foo is synonym for -mfoo
+- 93: push --message=foo is synonym for -mfoo
+- 94: push -m shows right message
+- 95: create stores correct message
+- 98: create in a detached state
+- 100: stash --patch <pathspec> stash and restores the file
+- 101: stash <pathspec> -p is rejected
+- 102: stash -- <pathspec> stashes in subdirectory
+- 108: push: <pathspec> not in the repository errors out
+- 111: push: -q is quiet even if there is no initial commit
+- 118: stash works when user.name and user.email are not set
+- 121: stash export and import round-trip stashes
+- 122: stash import appends commits
+- 123: stash export can accept specified stashes
+- 126: stash rejects invalid attempts to import commits
+- 128: stash handles skip-worktree entries nicely
+
+Context from retired plan files:
+- (plan.md) 7. Stash/i18n/precompose/CRLF messages: `t3903`, `t3900`, `t3920`, `t3905`, `t3906`,
+
+Repro: `./scripts/run-tests.sh t3903-stash.sh`
+Full TAP log from this run: `logs/ticket-runs/t3903-stash.log`

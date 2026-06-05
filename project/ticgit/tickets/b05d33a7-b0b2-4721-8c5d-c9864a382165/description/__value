@@ -1,0 +1,36 @@
+Upstream test `tests/t7810-grep.sh` — "git grep various."
+
+Fresh run 2026-06-04: 234/263 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 39: grep HEAD with grep.patterntype=perl errors without PCRE
+- 59: grep HEAD in subdir should quote unusual relative pathnames
+- 61: grep -z HEAD in subdir with unusual relative pathnames
+- 97: grep in working tree with grep.patterntype=perl errors without PCRE
+- 130: grep --max-count 1 --show-function
+- 131: grep --max-count 2 --show-function
+- 172: grep -p with userdiff
+- 173: grep -p
+- 174: grep -p -B5
+- 175: grep -W
+- 176: grep -W shows no trailing empty lines
+- 178:  includes preceding comment
+- 179:  includes function line
+- 181:  includes last line of the function
+- 197: outside of git repository
+- 198: outside of git repository with fallbackToNoIndex
+- 199: no repository with path outside $cwd
+- 200: inside git repository but with --no-index
+- 210: report bogus rev with dashdash
+- 213: grep --no-index complains of revs
+- 217: grep --perl-regexp pattern errors without PCRE
+- 220: grep -P pattern errors without PCRE
+- 247: grep --color, separator
+- 249: grep --break with context
+- 251: mimic ack-grep --group
+- 254: grep --color -e A -e B with context
+- 255: grep --color -e A --and -e B with context
+- 256: grep --color -e A --and --not -e B with context
+- 257: grep --color -e A --and -e B -p with context
+
+Repro: `./scripts/run-tests.sh t7810-grep.sh`
+Full TAP log from this run: `logs/ticket-runs/t7810-grep.log`

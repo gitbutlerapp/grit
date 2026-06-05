@@ -1,0 +1,8 @@
+Upstream test `tests/t4068-diff-symmetric-merge-base.sh` — "behavior of diff with symmetric-diff setups and --merge-base"
+
+Fresh run 2026-06-04: 35/36 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 8: diff with ranges and extra arg
+
+Repro: `./scripts/run-tests.sh t4068-diff-symmetric-merge-base.sh`
+Full TAP log from this run: `logs/ticket-runs/t4068-diff-symmetric-merge-base.log`

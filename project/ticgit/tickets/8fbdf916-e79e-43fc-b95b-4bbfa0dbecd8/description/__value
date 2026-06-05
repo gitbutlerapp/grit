@@ -1,0 +1,9 @@
+Upstream test `tests/t9850-status-ignored-patterns.sh` — "grit status porcelain output with various file states"
+
+Fresh run 2026-06-04: 34/36 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 28: status --porcelain shows branch header
+- 29: status on new branch shows correct branch
+
+Repro: `./scripts/run-tests.sh t9850-status-ignored-patterns.sh`
+Full TAP log from this run: `logs/ticket-runs/t9850-status-ignored-patterns.log`

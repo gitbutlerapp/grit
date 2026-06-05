@@ -1,0 +1,32 @@
+Upstream test `tests/t5548-push-porcelain.sh` — "Test git push porcelain output"
+
+Fresh run 2026-06-04: 5/25 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: .. git-push --porcelain (builtin protocol)
+- 3: .. git-push --porcelain --force (builtin protocol)
+- 4: .. git push --porcelain --atomic (builtin protocol)
+- 5: .. pre-receive hook declined (builtin protocol)
+- 6: .. non-fastforward push (builtin protocol)
+- 7: .. git push --porcelain --atomic --force (builtin protocol)
+- 9: .. git-push --porcelain --dry-run (builtin protocol)
+- 10: .. git-push --porcelain --dry-run --force (builtin protocol)
+- 11: .. git-push --porcelain --dry-run --atomic (builtin protocol)
+- 12: .. git-push --porcelain --dry-run --atomic --force (builtin protocol)
+- 15: .. git-push --porcelain (HTTP protocol)
+- 16: .. git-push --porcelain --force (HTTP protocol)
+- 17: .. git push --porcelain --atomic (HTTP protocol)
+- 18: .. pre-receive hook declined (HTTP protocol)
+- 19: .. non-fastforward push (HTTP protocol)
+- 20: .. git push --porcelain --atomic --force (HTTP protocol)
+- 22: .. git-push --porcelain --dry-run (HTTP protocol)
+- 23: .. git-push --porcelain --dry-run --force (HTTP protocol)
+- 24: .. git-push --porcelain --dry-run --atomic (HTTP protocol)
+- 25: .. git-push --porcelain --dry-run --atomic --force (HTTP protocol)
+
+Context from retired plan files:
+- (plans/remote-auth-plan.md) - `t5547-push-quarantine`, `t5548-push-porcelain`, `t5545-push-options`: useful after live SSH push is hardened.
+- (plans/remote-auth-plan.md) - `t5548-push-porcelain`.
+- (plans/push-plan.md) - `t5548-push-porcelain.sh` — HTTP porcelain cases.
+
+Repro: `./scripts/run-tests.sh t5548-push-porcelain.sh`
+Full TAP log from this run: `logs/ticket-runs/t5548-push-porcelain.log`

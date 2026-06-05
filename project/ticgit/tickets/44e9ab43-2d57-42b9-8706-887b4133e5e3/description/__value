@@ -1,0 +1,8 @@
+Upstream test `tests/t4041-diff-submodule-option.sh` — "Support for verbose submodule differences in git diff This test tries to verify the sanity of the --submodule option of git diff."
+
+Fresh run 2026-06-04: 46/47 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 46: diff --submodule with .git file
+
+Repro: `./scripts/run-tests.sh t4041-diff-submodule-option.sh`
+Full TAP log from this run: `logs/ticket-runs/t4041-diff-submodule-option.log`

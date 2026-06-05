@@ -1,0 +1,19 @@
+Upstream test `tests/t4207-log-decoration.sh` — "grit log --decorate and --no-decorate Tests decoration display for branches, tags (lightweight and annotated), HEAD, and the --decorate=full/short/auto and --no-decorate flags."
+
+Fresh run 2026-06-04: 11/23 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: log --oneline shows decorations by default
+- 3: decorations include branch name
+- 4: decorations include lightweight tag
+- 5: decorations include annotated tag (not yet shown)
+- 6: decorations include feature branch
+- 7: decoration uses parentheses
+- 8: --decorate=short shows short ref names
+- 13: --decorate after --no-decorate enables decorations (last-wins)
+- 16: decoration only on commit that has refs
+- 18: older commit shows its tag in decoration
+- 19: old-tag appears on correct commit line
+- 21: multiple branches shown in decoration
+
+Repro: `./scripts/run-tests.sh t4207-log-decoration.sh`
+Full TAP log from this run: `logs/ticket-runs/t4207-log-decoration.log`

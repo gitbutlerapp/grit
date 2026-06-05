@@ -1,0 +1,22 @@
+Upstream test `tests/t5553-set-upstream.sh` — ""git fetch/pull --set-upstream" basic tests."
+
+Fresh run 2026-06-04: 6/21 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 5: fetch --set-upstream upstream other sets branch other
+- 6: fetch --set-upstream main:other does not set the branch other2
+- 7: fetch --set-upstream ./does-not-exist fails with invalid url
+- 8: fetch --set-upstream with valid URL sets upstream to URL
+- 9: fetch --set-upstream with a detached HEAD
+- 12: pull --set-upstream upstream main sets branch main but not other
+- 13: pull --set-upstream main:other2 does not set the branch other2
+- 14: pull --set-upstream upstream other sets branch main
+- 15: pull --set-upstream upstream tag does not set the tag
+- 16: pull --set-upstream ./does-not-exist fails with invalid url
+- 17: pull --set-upstream upstream HEAD sets branch HEAD
+- 18: pull --set-upstream upstream with more than one branch does nothing
+- 19: pull --set-upstream with valid URL sets upstream to URL
+- 20: pull --set-upstream with valid URL and branch sets branch
+- 21: pull --set-upstream with a detached HEAD
+
+Repro: `./scripts/run-tests.sh t5553-set-upstream.sh`
+Full TAP log from this run: `logs/ticket-runs/t5553-set-upstream.log`

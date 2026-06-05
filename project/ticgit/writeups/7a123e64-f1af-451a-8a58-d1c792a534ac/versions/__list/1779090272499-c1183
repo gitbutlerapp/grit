@@ -1,0 +1,8 @@
+---
+author: schacon@gmail.com
+date: 2026-05-18T07:44:32.499243Z
+---
+
+The `grit-cli` is the implementation of a git command line copy that is meant to pass the git testing suite. However, not all Git command line UX decisions are necessarily the best.
+
+The `grist-cli` crate is means to be a new UX for git that uses the `grit-lib` library but is not meant to pass the git test suite, but instead be an alternative command line UX (but is compatible with the Git object database, network protocols, etc).

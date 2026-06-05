@@ -1,0 +1,95 @@
+Upstream test `tests/t5310-pack-bitmaps.sh` — "exercise basic bitmap functionality"
+
+Fresh run 2026-06-04: 148/236 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 5: full repack creates bitmaps
+- 14: enumerate --objects (full bitmap, second)
+- 23: enumerate --objects (full bitmap, other)
+- 35: enumerate --objects (partial bitmap, second)
+- 44: enumerate --objects (partial bitmap, other)
+- 47: enumerating progress counts pack-reused objects
+- 48: pack-objects respects --local (non-local loose)
+- 49: pack-objects respects --honor-pack-keep (local non-bitmapped pack)
+- 50: pack-objects respects --local (non-local pack)
+- 51: pack-objects respects --honor-pack-keep (local bitmapped pack)
+- 52: pack-objects respects --local (non-local bitmapped pack)
+- 53: pack-objects to file can use bitmap
+- 57: pack-objects respects --incremental
+- 58: pack with missing blob
+- 59: pack with missing tree
+- 60: pack with missing parent
+- 65: pack reuse respects --honor-pack-keep
+- 66: pack reuse respects --local
+- 67: pack reuse respects --incremental
+- 68: truncated bitmap fails gracefully (ewah)
+- 69: truncated bitmap fails gracefully (cache)
+- 70: set up thin delta-reuse parent
+- 72: fetch with bitmaps can reuse old base
+- 73: pack.preferBitmapTips
+- 74: pack.preferBitmapTips
+- 75: pack.preferBitmapTips interprets patterns as hierarchy
+- 76: complains about multiple pack bitmaps
+- 77: load corrupt bitmap
+- 81: full repack creates bitmaps
+- 90: enumerate --objects (full bitmap, second)
+- 99: enumerate --objects (full bitmap, other)
+- 111: enumerate --objects (partial bitmap, second)
+- 120: enumerate --objects (partial bitmap, other)
+- 123: enumerating progress counts pack-reused objects
+- 124: pack-objects respects --local (non-local loose)
+- 125: pack-objects respects --honor-pack-keep (local non-bitmapped pack)
+- 126: pack-objects respects --local (non-local pack)
+- 127: pack-objects respects --honor-pack-keep (local bitmapped pack)
+- 128: pack-objects respects --local (non-local bitmapped pack)
+- 129: pack-objects to file can use bitmap
+- 133: pack-objects respects --incremental
+- 134: pack with missing blob
+- 135: pack with missing tree
+- 136: pack with missing parent
+- 141: pack reuse respects --honor-pack-keep
+- 142: pack reuse respects --local
+- 143: pack reuse respects --incremental
+- 144: truncated bitmap fails gracefully (ewah)
+- 145: truncated bitmap fails gracefully (cache)
+- 146: set up thin delta-reuse parent
+- 148: fetch with bitmaps can reuse old base
+- 149: pack.preferBitmapTips
+- 150: pack.preferBitmapTips
+- 151: pack.preferBitmapTips interprets patterns as hierarchy
+- 152: complains about multiple pack bitmaps
+- 153: load corrupt bitmap
+- 154: incremental repack fails when bitmaps are requested
+- 156: boundary-based traversal is used when requested
+- 162: full repack creates bitmaps
+- 171: enumerate --objects (full bitmap, second)
+- 180: enumerate --objects (full bitmap, other)
+- 192: enumerate --objects (partial bitmap, second)
+- 201: enumerate --objects (partial bitmap, other)
+- 204: enumerating progress counts pack-reused objects
+- 205: pack-objects respects --local (non-local loose)
+- 206: pack-objects respects --honor-pack-keep (local non-bitmapped pack)
+- 207: pack-objects respects --local (non-local pack)
+- 208: pack-objects respects --honor-pack-keep (local bitmapped pack)
+- 209: pack-objects respects --local (non-local bitmapped pack)
+- 210: pack-objects to file can use bitmap
+- 214: pack-objects respects --incremental
+- 215: pack with missing blob
+- 216: pack with missing tree
+- 217: pack with missing parent
+- 222: pack reuse respects --honor-pack-keep
+- 223: pack reuse respects --local
+- 224: pack reuse respects --incremental
+- 225: truncated bitmap fails gracefully (ewah)
+- 226: truncated bitmap fails gracefully (cache)
+- 227: set up thin delta-reuse parent
+- 229: fetch with bitmaps can reuse old base
+- 230: pack.preferBitmapTips
+- 231: pack.preferBitmapTips
+- 232: pack.preferBitmapTips interprets patterns as hierarchy
+- 233: complains about multiple pack bitmaps
+- 234: load corrupt bitmap
+- 235: verify writing bitmap lookup table when enabled
+- 236: truncated bitmap fails gracefully (lookup table)
+
+Repro: `./scripts/run-tests.sh t5310-pack-bitmaps.sh`
+Full TAP log from this run: `logs/ticket-runs/t5310-pack-bitmaps.log`

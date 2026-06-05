@@ -1,0 +1,20 @@
+Upstream test `tests/t1050-large.sh` — "adding and checking out large blobs"
+
+Fresh run 2026-06-04: 16/29 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 4: add with -c core.compression=0
+- 5: add with -c core.compression=9
+- 6: add with -c core.compression=0 -c pack.compression=0
+- 7: add with -c core.compression=9 -c pack.compression=0
+- 8: add with -c core.compression=0 -c pack.compression=9
+- 9: add with -c core.compression=9 -c pack.compression=9
+- 10: add with -c pack.compression=0
+- 11: add with -c pack.compression=9
+- 12: add a large file or two
+- 14: packsize limit
+- 17: diff
+- 18: diff --cached
+- 23: index-pack
+
+Repro: `./scripts/run-tests.sh t1050-large.sh`
+Full TAP log from this run: `logs/ticket-runs/t1050-large.log`

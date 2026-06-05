@@ -1,0 +1,11 @@
+Upstream test `tests/t5320-delta-islands.sh` — "exercise delta islands"
+
+Fresh run 2026-06-04: 11/15 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 5: separate islands disallows delta
+- 8: island restrictions drop reused deltas
+- 13: deltas allowed against superset islands
+- 14: island core places core objects first
+
+Repro: `./scripts/run-tests.sh t5320-delta-islands.sh`
+Full TAP log from this run: `logs/ticket-runs/t5320-delta-islands.log`

@@ -1,0 +1,12 @@
+Upstream test `tests/t3906-stash-submodule.sh` — "stash can handle submodules"
+
+Fresh run 2026-06-04: 6/16 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 9: git_stash: replace submodule with a file must fail
+- 10: git_stash: replace submodule containing a .git directory with a file must fail
+
+Context from retired plan files:
+- (plan.md) 7. Stash/i18n/precompose/CRLF messages: `t3903`, `t3900`, `t3920`, `t3905`, `t3906`,
+
+Repro: `./scripts/run-tests.sh t3906-stash-submodule.sh`
+Full TAP log from this run: `logs/ticket-runs/t3906-stash-submodule.log`

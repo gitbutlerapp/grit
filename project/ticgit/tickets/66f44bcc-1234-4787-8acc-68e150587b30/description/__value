@@ -1,0 +1,13 @@
+Upstream test `tests/t5407-post-rewrite-hook.sh` — "Test the post-rewrite hook."
+
+Fresh run 2026-06-04: 11/17 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 11: git rebase with failed pick
+- 13: git rebase -i (skip)
+- 14: git rebase -i (squash)
+- 15: git rebase -i (fixup without conflict)
+- 16: git rebase -i (double edit)
+- 17: git rebase -i (exec)
+
+Repro: `./scripts/run-tests.sh t5407-post-rewrite-hook.sh`
+Full TAP log from this run: `logs/ticket-runs/t5407-post-rewrite-hook.log`

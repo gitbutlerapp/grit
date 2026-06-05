@@ -1,0 +1,41 @@
+Upstream test `tests/t7063-status-untracked-cache.sh` — "test untracked cache"
+
+Fresh run 2026-06-04: 27/58 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 5: untracked cache after first status
+- 6: status second time (fully populated cache)
+- 7: untracked cache after second status
+- 9: untracked cache remains after bypass
+- 11: if -uall was configured, untracked cache is populated
+- 12: if -uall is configured, untracked cache is used by default
+- 13: if -uall is configured, untracked cache is bypassed with -unormal
+- 15: modify in root directory, one dir invalidation
+- 16: verify untracked cache dump
+- 17: new .gitignore invalidates recursively
+- 18: verify untracked cache dump
+- 19: new info/exclude invalidates everything
+- 20: verify untracked cache dump
+- 21: move two from tracked to untracked
+- 22: status after the move
+- 23: verify untracked cache dump
+- 24: move two from untracked to tracked
+- 25: status after the move
+- 26: verify untracked cache dump
+- 28: status after commit
+- 29: untracked cache correct after commit
+- 32: test sparse status with untracked cache
+- 33: untracked cache correct after status
+- 34: test sparse status again with untracked cache
+- 36: test sparse status with untracked cache and subdir
+- 37: verify untracked cache dump (sparse/subdirs)
+- 38: test sparse status again with untracked cache and subdir
+- 43: setting core.untrackedCache to true and using git status creates the cache
+- 45: setting core.untrackedCache to false and using git status removes the cache
+- 47: setting core.untrackedCache to keep
+- 56: "status" after file replacement should be clean with UC=true
+
+Context from retired plan files:
+- (plans/status-perf-plan.md) - Existing harness: **`t7508`**, **`t7063`** (untracked cache), **`t0008`** / ignore tests after refactors.
+
+Repro: `./scripts/run-tests.sh t7063-status-untracked-cache.sh`
+Full TAP log from this run: `logs/ticket-runs/t7063-status-untracked-cache.log`

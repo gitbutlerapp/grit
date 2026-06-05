@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"227c0f265; 47/47 passing; Added grit-lib/src/refspec.rs (port of git/refspec.c parse_refspec) and wired ls-remote to validate remote.<name>.fetch/.push refspecs up front (bail on invalid), reusing check_ref_format. All 23 'invalid' subtests now reject as expected. Shared machinery for fetch/push/clone tickets."}

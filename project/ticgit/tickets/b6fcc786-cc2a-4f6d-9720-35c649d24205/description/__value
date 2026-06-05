@@ -1,0 +1,19 @@
+Upstream test `tests/t5560-http-backend-noserver.sh` — "test git-http-backend-noserver"
+
+Fresh run 2026-06-04: 2/14 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: direct refs/heads/main not found
+- 3: static file is ok
+- 4: no export by default
+- 5: export if git-daemon-export-ok
+- 6: static file if http.getanyfile true is ok
+- 7: static file if http.getanyfile false fails
+- 8: http.uploadpack default enabled
+- 9: http.uploadpack true
+- 10: http.uploadpack false
+- 11: http.receivepack default disabled
+- 12: http.receivepack true
+- 13: http.receivepack false
+
+Repro: `./scripts/run-tests.sh t5560-http-backend-noserver.sh`
+Full TAP log from this run: `logs/ticket-runs/t5560-http-backend-noserver.log`

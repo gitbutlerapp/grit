@@ -1,0 +1,71 @@
+Upstream test `tests/t5515-fetch-merge-logic.sh` — "Merge logic in fetch"
+
+Fresh run 2026-06-04: 1/65 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: br-config-explicit
+- 3: br-config-explicit config-explicit
+- 4: br-config-explicit-merge
+- 5: br-config-explicit-merge config-explicit
+- 6: br-config-explicit-octopus
+- 7: br-config-explicit-octopus config-explicit
+- 8: br-config-glob
+- 9: br-config-glob config-glob
+- 10: br-config-glob-merge
+- 11: br-config-glob-merge config-glob
+- 12: br-config-glob-octopus
+- 13: br-config-glob-octopus config-glob
+- 14: br-remote-explicit
+- 15: br-remote-explicit remote-explicit
+- 16: br-remote-explicit-merge
+- 17: br-remote-explicit-merge remote-explicit
+- 18: br-remote-explicit-octopus
+- 19: br-remote-explicit-octopus remote-explicit
+- 20: br-remote-glob
+- 21: br-remote-glob remote-glob
+- 22: br-remote-glob-merge
+- 23: br-remote-glob-merge remote-glob
+- 24: br-remote-glob-octopus
+- 25: br-remote-glob-octopus remote-glob
+- 26: br-branches-default
+- 27: br-branches-default branches-default
+- 28: br-branches-default-merge
+- 29: br-branches-default-merge branches-default
+- 30: br-branches-default-octopus
+- 31: br-branches-default-octopus branches-default
+- 32: br-branches-one
+- 33: br-branches-one branches-one
+- 34: br-branches-one-merge
+- 35: br-branches-one-merge branches-one
+- 36: br-branches-one-octopus
+- 37: br-branches-one-octopus branches-one
+- 38: main
+- 39: main config-explicit
+- 40: main config-glob
+- 41: main remote-explicit
+- 42: main remote-glob
+- 43: main branches-default
+- 44: main branches-one
+- 45: br-unconfig
+- 46: br-unconfig config-explicit
+- 47: br-unconfig config-glob
+- 48: br-unconfig remote-explicit
+- 49: br-unconfig remote-glob
+- 50: br-unconfig branches-default
+- 51: br-unconfig branches-one
+- 52: main ../.git
+- 53: main ../.git one
+- 54: main ../.git one two
+- 55: main --tags ../.git
+- 56: main ../.git tag tag-one tag tag-three
+- 57: main ../.git tag tag-one-tree tag tag-three-file
+- 58: main ../.git one tag tag-one tag tag-three-file
+- 59: br-unconfig ../.git
+- 60: br-unconfig ../.git one
+- 61: br-unconfig ../.git one two
+- 62: br-unconfig --tags ../.git
+- 63: br-unconfig ../.git tag tag-one tag tag-three
+- 64: br-unconfig ../.git tag tag-one-tree tag tag-three-file
+- 65: br-unconfig ../.git one tag tag-one tag tag-three-file
+
+Repro: `./scripts/run-tests.sh t5515-fetch-merge-logic.sh`
+Full TAP log from this run: `logs/ticket-runs/t5515-fetch-merge-logic.log`

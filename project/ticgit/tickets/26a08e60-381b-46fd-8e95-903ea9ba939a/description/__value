@@ -1,0 +1,69 @@
+Upstream test `tests/t5505-remote.sh` — "git remote porcelain-ish"
+
+Fresh run 2026-06-04: 67/130 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 8: filters are listed by git remote -v only
+- 24: show
+- 25: show with negative refspecs
+- 27: show -n
+- 30: set-head --auto
+- 31: set-head --auto failure
+- 32: set-head --auto detects creation
+- 33: set-head --auto to update a non symbolic ref
+- 34: set-head --auto detects no change
+- 35: set-head --auto detects change
+- 36: set-head --auto detects strange ref
+- 37: set-head --auto has no problem w/multiple HEADs
+- 38: set-head changes followRemoteHEAD always to warn
+- 39: set-head explicit
+- 40: set-head --auto reports change
+- 42: add --mirror && prune
+- 43: add --mirror setting HEAD
+- 47: fetch mirrors can prune
+- 50: fetch mirror respects specific branches
+- 54: push mirrors do not allow you to specify refs
+- 55: add alt && prune
+- 56: add with reachable tags (default)
+- 58: add --no-tags
+- 60: update
+- 61: update with arguments
+- 63: update default
+- 68: rename a remote
+- 69: rename a remote renames repo remote.pushDefault
+- 73: rename does not update a non-default fetch refspec
+- 76: rename succeeds with existing remote.<target>.prune
+- 78: remove a remote removes repo remote.pushDefault
+- 79: remove a remote removes repo remote.pushDefault but ignores global
+- 80: remove a remote removes repo remote.pushDefault but keeps global
+- 81: migrate a remote from named file in $GIT_DIR/remotes
+- 82: migrate a remote from named file in $GIT_DIR/branches
+- 83: migrate a remote from named file in $GIT_DIR/branches (2)
+- 84: remote prune to cause a dangling symref
+- 87: remote set-branches
+- 91: remote set-url with locked config
+- 103: remote set-url --push --delete bar
+- 104: remote set-url --push --delete foo
+- 105: remote set-url --add bbb
+- 107: remote set-url --delete .*
+- 108: remote set-url --delete bbb
+- 109: remote set-url --delete baz
+- 110: remote set-url --add ccc
+- 111: remote set-url --delete baz
+- 113: extra args: add nick url
+- 114: extra args: rename origin newname
+- 115: extra args: remove origin
+- 116: extra args: set-head origin main
+- 117: extra args: get-url origin newurl
+- 118: extra args: set-url origin newurl oldurl
+- 120: unqualified <dst> refspec DWIM and advice
+- 121: refs/remotes/* <src> refspec and unqualified <dst> DWIM and advice
+- 122: empty config clears remote.*.url list
+- 123: empty config clears remote.*.pushurl list
+- 126: rename handles unborn HEAD
+- 127: rename can nest a remote into itself
+- 128: rename can nest a remote into itself with a conflicting branch name
+- 129: rename can unnest a remote
+- 130: rename moves around the reflog
+
+Repro: `./scripts/run-tests.sh t5505-remote.sh`
+Full TAP log from this run: `logs/ticket-runs/t5505-remote.log`

@@ -1,0 +1,30 @@
+Upstream test `tests/t4211-line-log.sh` — "test log -L"
+
+Fresh run 2026-06-04: 30/53 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: basic command line parsing
+- 3: -L 4,12:a.c simple
+- 4: -L 4,+9:a.c simple
+- 5: -L '/long f/,/^}/:a.c' simple
+- 6: -L :f:a.c simple
+- 7: -L '/main/,/^}/:a.c' simple
+- 8: -L :main:a.c simple
+- 9: -L 1,+4:a.c simple
+- 10: -L 20:a.c simple
+- 11: -L '/long f/',/^}/:a.c -L /main/,/^}/:a.c simple
+- 12: -L 24,+1:a.c simple
+- 13: -M -L '/long f/,/^}/:b.c' move-support
+- 14: -M -L ':f:b.c' parallel-change
+- 15: -L 4,12:a.c -L :main:a.c simple
+- 16: -L 4,18:a.c -L ^:main:a.c simple
+- 17: -L :main:a.c -L 4,18:a.c simple
+- 18: -L 4:a.c -L 8,12:a.c simple
+- 19: -L 8,12:a.c -L 4:a.c simple
+- 20: -L 10,16:b.c -L 18,26:b.c main
+- 37: -L with --output
+- 41: --raw is forbidden
+- 43: fancy rename following #1
+- 44: fancy rename following #2
+
+Repro: `./scripts/run-tests.sh t4211-line-log.sh`
+Full TAP log from this run: `logs/ticket-runs/t4211-line-log.log`

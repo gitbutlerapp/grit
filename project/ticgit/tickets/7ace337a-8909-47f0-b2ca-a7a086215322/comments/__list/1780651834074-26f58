@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"4adc84d; 207/215 passing; fixed bundle prereq subjects (44), ref cmdline-order (56), and bundle-fetch refspec DWIM so local refs update (48). Remaining: 35,59,187,192,204,211,213,214."}

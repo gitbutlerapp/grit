@@ -1,0 +1,12 @@
+Upstream test `tests/t8950-show-ref-patterns.sh` — "show-ref pattern matching and options"
+
+Fresh run 2026-06-04: 27/29 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 19: show-ref --hash shows only SHAs
+- 21: show-ref --tags --hash lists only SHAs for tags
+
+Context from retired plan files:
+- (plan.md) - [x] `t8950-show-ref-patterns` 29/29 — fixed the synthetic test's expected `master` initial branch.
+
+Repro: `./scripts/run-tests.sh t8950-show-ref-patterns.sh`
+Full TAP log from this run: `logs/ticket-runs/t8950-show-ref-patterns.log`

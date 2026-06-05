@@ -1,0 +1,11 @@
+Upstream test `tests/t8610-checkout-index-modes.sh` — "checkout-index file modes, prefix, temp, stdin"
+
+Fresh run 2026-06-04: 26/27 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 19: checkout-index without --force refuses existing dirty file
+
+Context from retired plan files:
+- (plan.md) - [x] `t8610-checkout-index-modes` 27/27 — corrected synthetic checkout-index failure expectations.
+
+Repro: `./scripts/run-tests.sh t8610-checkout-index-modes.sh`
+Full TAP log from this run: `logs/ticket-runs/t8610-checkout-index-modes.log`

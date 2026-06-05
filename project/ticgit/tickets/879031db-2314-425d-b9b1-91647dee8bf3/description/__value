@@ -1,0 +1,9 @@
+Upstream test `tests/t4000-diff-format.sh` — "Test built-in diff output engine. We happen to know that all diff plumbing and diff Porcelain share the same command line parser, so testing one should be sufficient; pick diff-files as a representative."
+
+Fresh run 2026-06-04: 39/41 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 35: --no-patch in 'git diff --no-patch --patch-with-raw' is a no-op
+- 38: --no-patch in 'git diff --no-patch --patch-with-stat' is a no-op
+
+Repro: `./scripts/run-tests.sh t4000-diff-format.sh`
+Full TAP log from this run: `logs/ticket-runs/t4000-diff-format.log`

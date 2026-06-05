@@ -1,0 +1,22 @@
+Upstream test `tests/t7500-commit-template-squash-signoff.sh` — "git commit Tests for template, signoff, squash and -F functions."
+
+Fresh run 2026-06-04: 42/57 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 10: adding real content to a template should commit
+- 11: existent template marked optional should commit
+- 12: -t option should be short for --template
+- 13: config-specified template should commit
+- 30: commit --fixup --edit
+- 31: commit --fixup=amend: creates amend! commit
+- 32: --fixup=amend: --only ignores staged changes
+- 33: --fixup=reword: ignores staged changes
+- 36: consecutive amend! commits remove amend! line from commit msg body
+- 37: deny to create amend! commit if its commit msg body is empty
+- 38: amend! commit allows empty commit msg body with --allow-empty-message
+- 49: commit --squash works with -c
+- 51: commit --squash works with -c for same commit
+- 52: commit --squash works with editor
+- 54: new line found before status message in commit template
+
+Repro: `./scripts/run-tests.sh t7500-commit-template-squash-signoff.sh`
+Full TAP log from this run: `logs/ticket-runs/t7500-commit-template-squash-signoff.log`

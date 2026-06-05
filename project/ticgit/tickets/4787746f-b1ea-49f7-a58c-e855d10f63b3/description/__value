@@ -1,0 +1,8 @@
+Upstream test `tests/t4014-format-patch.sh` — "various format-patch tests"
+
+Fresh run 2026-06-04: 214/215 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 188: format-patch --base errors out when base commit is not ancestor of revision list
+
+Repro: `./scripts/run-tests.sh t4014-format-patch.sh`
+Full TAP log from this run: `logs/ticket-runs/t4014-format-patch.log`

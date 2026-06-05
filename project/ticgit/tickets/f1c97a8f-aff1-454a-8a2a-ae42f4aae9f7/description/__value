@@ -1,0 +1,36 @@
+Upstream test `tests/t4015-diff-whitespace.sh` — "Test special whitespace in diff engine."
+
+Fresh run 2026-06-04: 107/136 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 46: ignore-blank-lines: after change
+- 47: ignore-blank-lines: before change
+- 48: ignore-blank-lines: between changes
+- 50: ignore-blank-lines: scattered spaces
+- 52: ignore-blank-lines: mix changes and blank lines
+- 99: whitespace-only changes reported across renames
+- 100: rename empty
+- 109: detect moved code, complete file
+- 111: detect malicious moved code, inside file
+- 112: plain moved code, inside file
+- 113: detect blocks of moved code
+- 114: detect permutations inside moved code -- dimmed-zebra
+- 115: zebra alternate color is only used when necessary
+- 116: short lines of opposite sign do not get marked as moved
+- 117: cmd option assumes configured colored-moved
+- 121: move detection ignoring whitespace 
+- 122: move detection ignoring whitespace changes
+- 123: move detection ignoring whitespace at eol
+- 125: --color-moved block at end of diff output respects MIN_ALNUM_COUNT
+- 126: --color-moved respects MIN_ALNUM_COUNT
+- 127: --color-moved treats adjacent blocks as separate for MIN_ALNUM_COUNT
+- 128: --color-moved rewinds for MIN_ALNUM_COUNT
+- 130: only move detection ignores white spaces
+- 131: compare whitespace delta across moved blocks
+- 132: bogus settings in move detection erroring out
+- 133: compare whitespace delta incompatible with other space options
+- 134: compare mixed whitespace delta across moved blocks
+- 135: combine --ignore-blank-lines with --function-context
+- 136: combine --ignore-blank-lines with --function-context 2
+
+Repro: `./scripts/run-tests.sh t4015-diff-whitespace.sh`
+Full TAP log from this run: `logs/ticket-runs/t4015-diff-whitespace.log`

@@ -1,0 +1,15 @@
+Upstream test `tests/t6041-bisect-submodule.sh` — "bisect can handle submodules"
+
+Fresh run 2026-06-04: 10/14 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 7: git_bisect: replace submodule with a directory must fail
+- 8: git_bisect: replace submodule containing a .git directory with a directory must fail
+- 9: git_bisect: replace submodule with a file must fail
+- 10: git_bisect: replace submodule containing a .git directory with a file must fail
+
+Context from retired plan files:
+- (plan.md) - Bisect: `t6030`, `t6041`.
+- (t6-plan.md) - [ ] `t6041-bisect-submodule.sh` — 7/14 passing, 7 failing.
+
+Repro: `./scripts/run-tests.sh t6041-bisect-submodule.sh`
+Full TAP log from this run: `logs/ticket-runs/t6041-bisect-submodule.log`

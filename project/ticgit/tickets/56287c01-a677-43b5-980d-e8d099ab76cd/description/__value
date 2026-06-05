@@ -1,0 +1,61 @@
+Upstream test `tests/t5319-multi-pack-index.sh` — "multi-pack-indexes"
+
+Fresh run 2026-06-04: 44/98 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 5: write midx with one v1 pack
+- 6: write midx with one v2 pack
+- 8: corrupt idx reports errors
+- 10: write midx with two packs
+- 14: write with no objects and preferred pack
+- 16: write force progress on for stderr
+- 20: write midx with twelve packs
+- 22: multi-pack-index *.rev cleanup with --object-dir
+- 23: warn on improper hash version
+- 24: midx picks objects from preferred pack
+- 25: preferred packs must be non-empty
+- 27: preferred pack cannot be determined without bitmap
+- 28: up-to-date multi-pack-index is retained
+- 31: verify force progress on for stderr
+- 36: verify truncated chunk count
+- 37: verify extended chunk count
+- 38: verify missing required chunk
+- 39: verify invalid chunk offset
+- 40: verify missing pack
+- 41: verify oid fanout out of order
+- 42: verify oid lookup out of order
+- 43: verify incorrect pack-int-id
+- 44: verify incorrect offset
+- 45: git-fsck incorrect offset
+- 46: git fsck shows MIDX output with --progress
+- 48: corrupt MIDX is not reused
+- 49: verify incorrect checksum
+- 51: verify packnames out of order (v1)
+- 53: repack force progress on for stderr
+- 56: repack preserves multi-pack-index when creating packs
+- 61: multi-pack-index in an alternate
+- 63: force some 64-bit offsets with pack-objects
+- 64: verify multi-pack-index with 64-bit offsets
+- 65: verify incorrect 64-bit offset
+- 69: expire force progress on for stderr
+- 73: repack respects repack.packKeptObjects=false
+- 74: repack creates a new pack
+- 76: repack (--batch-size) ignores cruft pack
+- 77: expire removes repacked packs
+- 78: expire works when adding new packs
+- 79: expire respects .keep files
+- 81: repack --batch-size=0 repacks everything
+- 83: repack --batch-size=<large> repacks everything
+- 85: load reverse index when missing .idx, .pack
+- 89: reader notices too-small oid fanout chunk
+- 90: reader notices too-small oid lookup chunk
+- 91: reader notices too-small pack names chunk
+- 92: reader handles unaligned chunks
+- 93: reader notices too-small object offset chunk
+- 94: reader bounds-checks large offset table
+- 95: reader notices too-small revindex chunk
+- 96: reader notices out-of-bounds fanout
+- 97: bitmapped packs are stored via the BTMP chunk
+- 98: pack.preferBitmapTips interprets patterns as hierarchy
+
+Repro: `./scripts/run-tests.sh t5319-multi-pack-index.sh`
+Full TAP log from this run: `logs/ticket-runs/t5319-multi-pack-index.log`

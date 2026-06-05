@@ -1,0 +1,14 @@
+Upstream test `tests/t6434-merge-with-no-common-ancestor.sh` — "merge with divergent history"
+
+Fresh run 2026-06-04: 1/3 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 2: merge diverged branches succeeds without conflicts
+- 3: merge-base of diverged branches is base
+
+Context from retired plan files:
+- (plan.md) `t6430-merge-strategy-option`, `t6432-*`, `t6434-merge-with-no-common-ancestor`,
+- (t6-plan.md) - [ ] `t6434-merge-with-no-common-ancestor.sh` — 1/3 passing, 2 failing.
+- (t6-plan.md) `t6432-merge-recursive-space-options`, `t6433`, `t6434-merge-recursive-rename-options`,
+
+Repro: `./scripts/run-tests.sh t6434-merge-with-no-common-ancestor.sh`
+Full TAP log from this run: `logs/ticket-runs/t6434-merge-with-no-common-ancestor.log`

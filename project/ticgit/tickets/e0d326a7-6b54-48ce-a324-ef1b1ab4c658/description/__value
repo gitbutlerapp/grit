@@ -1,0 +1,25 @@
+Upstream test `tests/t3426-rebase-submodule.sh` — "rebase can handle submodules"
+
+Fresh run 2026-06-04: 11/29 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
+
+- 1: git_rebase: added submodule creates empty directory
+- 2: git_rebase: added submodule leaves existing empty directory alone
+- 3: git_rebase: replace tracked file with submodule creates empty directory
+- 4: git_rebase: replace directory with submodule
+- 5: git_rebase: removed submodule leaves submodule directory and its contents in place
+- 6: git_rebase: removed submodule leaves submodule containing a .git directory alone
+- 11: git_rebase: modified submodule does not update submodule work tree
+- 12: git_rebase: modified submodule does not update submodule work tree to invalid commit
+- 13: git_rebase: modified submodule does not update submodule work tree from invalid commit
+- 15: git_rebase_interactive: added submodule creates empty directory
+- 16: git_rebase_interactive: added submodule leaves existing empty directory alone
+- 17: git_rebase_interactive: replace tracked file with submodule creates empty directory
+- 18: git_rebase_interactive: replace directory with submodule
+- 19: git_rebase_interactive: removed submodule leaves submodule directory and its contents in place
+- 20: git_rebase_interactive: removed submodule leaves submodule containing a .git directory alone
+- 25: git_rebase_interactive: modified submodule does not update submodule work tree
+- 26: git_rebase_interactive: modified submodule does not update submodule work tree to invalid commit
+- 27: git_rebase_interactive: modified submodule does not update submodule work tree from invalid commit
+
+Repro: `./scripts/run-tests.sh t3426-rebase-submodule.sh`
+Full TAP log from this run: `logs/ticket-runs/t3426-rebase-submodule.log`
