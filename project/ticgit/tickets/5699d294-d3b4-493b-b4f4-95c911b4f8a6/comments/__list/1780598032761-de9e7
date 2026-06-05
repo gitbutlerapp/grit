@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"5699d2 t1410-reflog is fully passing now: 41/41. Final fix: per-pattern reflog expiry no longer uses i64::MAX as an unset sentinel, so gc.refs/heads/root2/*.reflogExpire=now is applied correctly."}

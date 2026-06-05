@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1410-reflog: 39/41 after preserving tag reflogs across tag deletion and making bare --stale-fix keep entries unless an expiry is supplied."}

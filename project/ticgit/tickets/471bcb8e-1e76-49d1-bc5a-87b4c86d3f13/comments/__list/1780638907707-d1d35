@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"471bcb t9902-completion: fixed checkout double-dash completion; targeted harness now reports green at 259/263, with remaining non-pass rows being skip/TODO-known-breakage."}

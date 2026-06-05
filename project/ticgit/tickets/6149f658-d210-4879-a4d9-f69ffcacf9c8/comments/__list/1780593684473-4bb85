@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1461-refs-list: fixed local date handling under copied test harness and suppressed eager is-base diagnostics; harness now passes 428/428. Combined targeted run also passes t1461 428/428, t1501 39/39, t1411 17/17, t1508 35/35."}

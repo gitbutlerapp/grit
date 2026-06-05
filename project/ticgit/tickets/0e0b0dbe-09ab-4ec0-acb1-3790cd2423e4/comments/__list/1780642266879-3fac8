@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1092: 74/106 after preserving current-branch staged checkout state, clearing sparse D/F descendant skip-worktree bits during path checkout, failing working-copy blame on missing sparse paths, and treating reset <tree> -- nonexistent pathspec as a no-op. Committed as 2268dac."}

@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 80/106 after preserving changed sparse cherry-pick paths and expanding sparse merge/cherry-pick indexes for commit tree writes. Subtest 42 now passes; next failures are conflict-resolution sparse cases."}

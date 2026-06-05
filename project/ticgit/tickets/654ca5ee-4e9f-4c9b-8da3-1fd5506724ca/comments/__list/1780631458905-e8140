@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: implemented fixed-value value-pattern handling and modern --value for get/unset; harness now reports 478/497."}

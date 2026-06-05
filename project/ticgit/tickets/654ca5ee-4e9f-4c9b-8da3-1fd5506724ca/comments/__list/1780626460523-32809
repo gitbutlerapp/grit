@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: accepted duplicate identical config type flags, rejected conflicting type selections, and supported --no-type reset; harness now reports 458/497."}

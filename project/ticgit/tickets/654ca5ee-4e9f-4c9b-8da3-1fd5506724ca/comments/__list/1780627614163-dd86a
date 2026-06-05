@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: boolean config parsing now accepts Git integer syntax such as 1M as non-zero true; harness now reports 460/497."}

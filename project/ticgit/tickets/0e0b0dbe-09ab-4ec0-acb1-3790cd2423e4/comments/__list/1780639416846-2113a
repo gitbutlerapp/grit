@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1092: 67/106 after moving sparse checkout warning detection before the worktree update; this removed false warnings for in-cone files created by checkout."}

@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"5699d2 Verification after formatting: cargo check -p grit-cli passes with the existing diff.rs ext_total warning; ./scripts/run-tests.sh t1410-reflog.sh passes 41/41."}

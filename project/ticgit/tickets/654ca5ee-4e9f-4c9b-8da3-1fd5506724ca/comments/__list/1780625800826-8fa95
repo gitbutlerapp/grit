@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: merged include files inline at include.path entries so --show-scope --list ordering matches Git; harness now reports 438/497."}

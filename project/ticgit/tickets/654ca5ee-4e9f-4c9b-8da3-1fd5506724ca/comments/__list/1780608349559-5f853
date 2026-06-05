@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: 402/497 after internal aliases re-enter global option parsing, so alias expansions beginning with -c apply command-line config before dispatch."}

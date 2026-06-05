@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: implemented includeIf.hasconfig:remote.*.url expansion and remote-url guard; harness now reports 486/497."}

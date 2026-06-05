@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1411-reflog-show: fixed log -g -p separator handling for reflog-walk patch output. Targeted harness now passes 17/17 via ./scripts/run-tests.sh t1411-reflog-show.sh. cargo build --release -p grit-cli passed with existing diff.rs ext_total warning."}

@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 85/106 after checkout-index exit-status fix. checkout-index now exits non-zero when an existing modified path blocks checkout without -f, matching the subtests for inside/outside sparse definitions."}

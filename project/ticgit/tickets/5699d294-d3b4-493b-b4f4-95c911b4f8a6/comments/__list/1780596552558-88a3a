@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1410-reflog: 37/41 after moving fsck missing-object diagnostics to stdout, supporting dotted reflog delete dates, parsing gc reflogExpire=now/all, and using short branch names for log -g --branches."}

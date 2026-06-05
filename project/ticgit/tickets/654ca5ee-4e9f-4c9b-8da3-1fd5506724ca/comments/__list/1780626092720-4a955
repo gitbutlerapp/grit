@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: treat GIT_CONFIG_NOSYSTEM as a boolean so false does not suppress system config; harness now reports 442/497."}

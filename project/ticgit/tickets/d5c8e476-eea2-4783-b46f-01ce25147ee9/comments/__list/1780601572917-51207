@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"Committed t1430 progress as 0db82ade6 on grit-t1-progress. Blocker: subtest 21 uses local test-lib.sh's overridden test_ref_exists (rev-parse --verify -q), which follows dangling symrefs and fails before update-ref runs; upstream test-lib-functions uses show-ref --exists here. Changing rev-parse to pass this would disagree with Git."}

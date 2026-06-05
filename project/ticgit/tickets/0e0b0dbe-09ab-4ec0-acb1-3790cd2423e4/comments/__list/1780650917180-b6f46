@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 87/106 after apply stderr normalization. apply now reports missing outside-cone preimage stat failures with the repo-relative patch path, so sparse-checkout and sparse-index stderr match."}

@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1410-reflog: 29/41 after honoring -c logAllRefUpdates in update-ref, adding worktree-add branch reflogs, listing linked-worktree reflogs correctly, and making mixed reflog drop remove valid refs before failing."}

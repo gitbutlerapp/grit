@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 86/106 after clean sparse-directory preservation. clean now stops empty-parent pruning at directories that are tracked prefixes, so sparse-present folder1 survives ignored-file cleanup."}

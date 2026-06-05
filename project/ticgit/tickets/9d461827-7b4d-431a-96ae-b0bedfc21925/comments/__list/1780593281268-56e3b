@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1501-work-tree: fixed remaining worktree/pathspec failures; harness now passes 39/39. Combined targeted run also passes t1501 39/39, t1411 17/17, t1508 35/35."}

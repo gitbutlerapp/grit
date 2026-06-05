@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: fixed show-origin formatting for legacy --get-regexp and --list --null; harness now reports 434/497."}

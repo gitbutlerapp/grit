@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 83/106 after fixing sparse stash snapshots. Stash tree writes now expand sparse placeholders, absent skip-worktree entries are preserved while creating the stash working-tree tree, and stash apply --index clears skip-worktree for touched paths so sparse status matches full checkout."}

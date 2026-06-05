@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: made display flags global for modern config subcommands and fixed mode-conflict stderr prefix; harness now reports 494/497."}

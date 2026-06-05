@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300: 377/497 after treating explicit empty config values as bool false while preserving bare keys as true."}

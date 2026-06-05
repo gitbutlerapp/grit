@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"Committed investigation log as 8ef17b206 on grit-t1-progress. Blocker: Grit output is correct (both all and --count=100 output 5 refs); failure comes from local tests/test-lib.sh test_line_count comparing expected count with leading spaces from wc -l literally. Upstream helper collapses that whitespace."}

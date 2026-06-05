@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: 406/497 after early validation of command-line config overrides, including invalid core.bare booleans and empty -c keys for commands like rev-parse."}

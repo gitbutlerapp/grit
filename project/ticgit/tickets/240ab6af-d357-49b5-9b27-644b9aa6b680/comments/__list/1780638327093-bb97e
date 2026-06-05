@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"240ab6 t9903-bash-prompt: refreshed harness at 66/67. The failing interactive rebase prompt is caused by the harness VISUAL=: placeholder shadowing test_set_editor's real EDITOR during sequence editor fallback."}

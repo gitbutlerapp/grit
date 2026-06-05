@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 82/106 after resolving subtest 43. add --sparse <dir> now drops absent unmerged entries under the directory, and merge --continue expands sparse placeholders before writing the commit tree."}

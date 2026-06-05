@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1300-config: fixed replace-all/value-pattern positioning and multi-match plain set failure; harness now reports 466/497."}

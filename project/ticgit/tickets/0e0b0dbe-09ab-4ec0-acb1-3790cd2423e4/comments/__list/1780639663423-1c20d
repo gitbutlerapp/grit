@@ -1,0 +1,1 @@
+{"author":"schacon@gmail.com","body":"t1092: 68/106 after recognizing checkout -p/--patch when the option appears after the tree-ish (e.g. checkout HEAD~1 --patch)."}
