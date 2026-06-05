@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 101/106 after add sparse advice and checkout/reset patch trace fixes. Direct --run=1,101 passes; canonical harness reports 101/106. Next blockers begin at subtest 102 advice.sparseIndexExpanded."}

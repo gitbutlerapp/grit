@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 88/106 after narrow sparse-index trace2 hooks. Broad repository-level trace regions regressed later ensure_not_expanded checks, so the committed approach emits only the reset/ls-files/status regions covered by the trace block."}

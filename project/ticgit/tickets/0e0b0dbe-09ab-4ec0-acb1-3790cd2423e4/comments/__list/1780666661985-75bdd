@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 102/106 after status advice.sparseIndexExpanded support. Direct --run=1,102 passes; canonical harness reports 102/106. Next blockers start at subtest 103 cat-file -p."}

@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 99/106 after sparse apply/add-p/reset trace fixes. Direct --run=1,99 and --run=1,100 pass. Next blocker is subtest 101: git add . emits sparse-path advice before checkout/reset patch trace assertions."}

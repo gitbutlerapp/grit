@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 89/106 after fixing subtest 59. restore now expands literal directory pathspecs from a tree source, and reset trace detection ignores trailing-slash directory pathspecs like folder1/. Direct --run=1,59 passes."}

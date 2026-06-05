@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 95/106 after fixing subtest 80. rm now emits index/ensure_full_index trace2 regions when wildcard/pathspec matching may need to inspect sparse-directory placeholders, while in-cone rm cases in subtest 81 remain quiet. Direct --run=1,80,81 passes."}

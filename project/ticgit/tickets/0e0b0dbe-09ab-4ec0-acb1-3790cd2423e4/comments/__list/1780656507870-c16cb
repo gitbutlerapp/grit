@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 96/106 after fixing subtest 84. cached grep --recurse-submodules now descends for superproject wildcard pathspecs like */folder1/* by probing a candidate from the pathspec tail, without emitting index/ensure_full_index. Direct --run=1,84 and --run=1,85 pass."}

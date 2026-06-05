@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 91/106 after fixing subtest 71. ls-files --sparse --modified now expands sparse placeholders only for working-tree comparison and clears skip-worktree on present files, so materialized outside-cone edits such as folder1/a are reported while plain --sparse keeps placeholders. Direct --run=1,71 passes."}

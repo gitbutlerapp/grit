@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 104/106 after tracing sparse cat-file --batch index-path lookups. Direct --run=1,104 passes; canonical ./scripts/run-tests.sh t1092-sparse-checkout-compatibility.sh --verbose --timeout 180 reports 104/106."}

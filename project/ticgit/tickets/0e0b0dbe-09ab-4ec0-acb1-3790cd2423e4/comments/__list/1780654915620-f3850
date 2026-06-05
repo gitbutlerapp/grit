@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 93/106 after fixing subtests 75 and 76. branch checkout now reports Git-compatible D/F staged-change stdout for non-sparse-index cases while keeping sparse-index quiet. Direct --run=1,75,76 passes."}

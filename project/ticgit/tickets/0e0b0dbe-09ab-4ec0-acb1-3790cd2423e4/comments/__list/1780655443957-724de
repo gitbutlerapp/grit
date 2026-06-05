@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 94/106 after fixing subtest 79. git rm --sparse now preserves raw sparse-index directory placeholders as the removal output unit for pathspecs like folder1/* and -r folder1, while still removing the expanded children from the index. Direct --run=1,79 passes."}

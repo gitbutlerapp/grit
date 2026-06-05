@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: direct trace block follow-up passes subtests 57 and 58 together after status detects sparse-index placeholders even when the sparse_directories flag is false. Full harness remains 88/106; next failure is still the broad subtest 59 ensure_not_expanded block."}

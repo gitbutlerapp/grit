@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"t1092: 90/106 after fixing subtest 15. status now keeps sparse-index's short sparse-checkout banner only for clean sparse-directory placeholders; when an expanded sparse path is materialized and skip-worktree is cleared, it reports the same tracked-file percentage as the full index. Direct --run=1,15 passes."}

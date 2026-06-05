@@ -1,0 +1,1 @@
+{"author":"schacon+pi@gmail.com","body":"0e0b0d t1092: 103/106 after cat-file -p sparse-index trace support. Direct --run=1,103 passes; canonical harness reports 103/106. Next blocker starts at subtest 104 cat-file --batch."}
