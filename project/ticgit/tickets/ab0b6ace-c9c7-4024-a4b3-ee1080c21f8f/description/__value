@@ -1,8 +1,0 @@
-Upstream test `tests/t7066-status-ignored.sh` — "status --ignored and .gitignore handling"
-
-Fresh run 2026-06-04: 31/32 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 23: ls-files --ignored shows ignored files
-
-Repro: `./scripts/run-tests.sh t7066-status-ignored.sh`
-Full TAP log from this run: `logs/ticket-runs/t7066-status-ignored.log`

@@ -1,8 +1,0 @@
-Upstream test `tests/t2022-checkout-paths.sh` — "checkout $tree -- $paths"
-
-Fresh run 2026-06-04: 4/5 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 4: do not touch files that are already up-to-date
-
-Repro: `./scripts/run-tests.sh t2022-checkout-paths.sh`
-Full TAP log from this run: `logs/ticket-runs/t2022-checkout-paths.log`

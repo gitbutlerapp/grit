@@ -1,8 +1,0 @@
-Upstream test `tests/t4206-log-follow-harder-copies.sh` — "Test --follow should always find copies hard in git log."
-
-Fresh run 2026-06-04: 6/7 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 5: validate the output.
-
-Repro: `./scripts/run-tests.sh t4206-log-follow-harder-copies.sh`
-Full TAP log from this run: `logs/ticket-runs/t4206-log-follow-harder-copies.log`

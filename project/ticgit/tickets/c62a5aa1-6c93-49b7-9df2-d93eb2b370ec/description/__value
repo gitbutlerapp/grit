@@ -1,8 +1,0 @@
-Upstream test `tests/t9190-for-each-ref-atoms.sh` — "grit for-each-ref format atoms"
-
-Fresh run 2026-06-04: 26/27 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 20: --count larger than ref count returns all
-
-Repro: `./scripts/run-tests.sh t9190-for-each-ref-atoms.sh`
-Full TAP log from this run: `logs/ticket-runs/t9190-for-each-ref-atoms.log`

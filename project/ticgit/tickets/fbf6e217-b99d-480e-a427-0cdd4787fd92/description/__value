@@ -1,9 +1,0 @@
-Upstream test `tests/t4301-merge-tree-write-tree.sh` — "git merge-tree --write-tree"
-
-Fresh run 2026-06-04: 42/44 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 17: rename/rename(2to1)/delete/delete conflict
-- 19: directory rename + rename/delete + modify/delete + directory/file conflict
-
-Repro: `./scripts/run-tests.sh t4301-merge-tree-write-tree.sh`
-Full TAP log from this run: `logs/ticket-runs/t4301-merge-tree-write-tree.log`

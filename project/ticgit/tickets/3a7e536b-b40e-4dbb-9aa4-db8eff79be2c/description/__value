@@ -1,9 +1,0 @@
-Upstream test `tests/t3431-rebase-fork-point.sh` — "git rebase --fork-point test"
-
-Fresh run 2026-06-04: 24/26 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 12: git rebase --fork-point --keep-base refs/heads/main
-- 13: git rebase --fork-point --keep-base main
-
-Repro: `./scripts/run-tests.sh t3431-rebase-fork-point.sh`
-Full TAP log from this run: `logs/ticket-runs/t3431-rebase-fork-point.log`

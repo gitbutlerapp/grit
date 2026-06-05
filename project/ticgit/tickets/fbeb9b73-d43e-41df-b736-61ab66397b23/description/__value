@@ -1,7 +1,0 @@
-The harness produced no `# Tests:` summary on the fresh run — the file aborts before completing (setup failure, crash, or unimplemented command killing the script). Investigate the log below.
-
-Context from retired plan files:
-- (plan.md) - [ ] `t0090-cache-tree` 16/22 — cache-tree index extension build/invalidate/write; remaining failures are partial/interactive commit patch semantics and checkout cache-tree shape edge cases
-
-Repro: `./scripts/run-tests.sh t0090-cache-tree.sh`
-Full TAP log from this run: `logs/ticket-runs/t0090-cache-tree.log`

@@ -1,9 +1,0 @@
-Upstream test `tests/t3427-rebase-subtree.sh` — "git rebase tests for -Xsubtree This test runs git rebase and tests the subtree strategy."
-
-Fresh run 2026-06-04: 1/3 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 2: Rebase -Xsubtree --empty=ask --onto commit
-- 3: Rebase -Xsubtree --empty=ask --rebase-merges --onto commit
-
-Repro: `./scripts/run-tests.sh t3427-rebase-subtree.sh`
-Full TAP log from this run: `logs/ticket-runs/t3427-rebase-subtree.log`

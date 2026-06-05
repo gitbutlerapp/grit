@@ -1,9 +1,0 @@
-Upstream test `tests/t4210-log-i18n.sh` — "test log with i18n features"
-
-Fresh run 2026-06-04: 19/21 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 3: log --grep searches in log output encoding (latin1)
-- 5: log --grep does not find non-reencoded values (latin1)
-
-Repro: `./scripts/run-tests.sh t4210-log-i18n.sh`
-Full TAP log from this run: `logs/ticket-runs/t4210-log-i18n.log`

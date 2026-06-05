@@ -1,8 +1,0 @@
-Upstream test `tests/t1411-reflog-show.sh` — "Test reflog display routines"
-
-Fresh run 2026-06-04: 16/17 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 17: git log -g -p shows diffs vs. parents
-
-Repro: `./scripts/run-tests.sh t1411-reflog-show.sh`
-Full TAP log from this run: `logs/ticket-runs/t1411-reflog-show.log`

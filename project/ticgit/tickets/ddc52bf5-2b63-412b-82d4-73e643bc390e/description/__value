@@ -1,9 +1,0 @@
-Upstream test `tests/t7516-commit-races.sh` — "git commit races"
-
-Fresh run 2026-06-04: 0/2 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 1: race to create orphan commit
-- 2: race to create non-orphan commit
-
-Repro: `./scripts/run-tests.sh t7516-commit-races.sh`
-Full TAP log from this run: `logs/ticket-runs/t7516-commit-races.log`

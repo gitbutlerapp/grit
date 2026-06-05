@@ -1,9 +1,0 @@
-Upstream test `tests/t7600-merge.sh` — "git merge Testing basic merge operations/option parsing. ! [c0] commit 0 ! [c1] commit 1 ! [c2] commit 2 ! [c3] commit 3 ! [c4] c4 ! [c5] c5 ! [c6] c6 * [main] Merge commit"
-
-Fresh run 2026-06-04: 81/83 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 28: merge c1 with c2 and c3 (squash)
-- 70: merge --no-ff --edit
-
-Repro: `./scripts/run-tests.sh t7600-merge.sh`
-Full TAP log from this run: `logs/ticket-runs/t7600-merge.log`

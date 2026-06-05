@@ -1,9 +1,0 @@
-Upstream test `tests/t2407-worktree-heads.sh` — "test operations trying to overwrite refs at worktree HEAD"
-
-Fresh run 2026-06-04: 10/12 pass. To close this ticket, implement/fix grit behavior so these subtests pass:
-
-- 11: refuse to overwrite during rebase with --update-refs
-- 12: $EDITOR and friends are unchanged
-
-Repro: `./scripts/run-tests.sh t2407-worktree-heads.sh`
-Full TAP log from this run: `logs/ticket-runs/t2407-worktree-heads.log`
