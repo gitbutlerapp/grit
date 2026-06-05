@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"92277ce; 213/215 passing; fixed ref-lock detection in write_ref via create_new (35,204,211,213,214) and opportunistic tracking-ref update on explicit local-path pull (59). Remaining: 187 (bundle --since boundary object count: emits 7 not 3), 192 (fetch auto-gc)."}

@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"Re-verified fresh run: 15/15 passing. Prior fix (commit d3d085e7a, merged via PR #796) is in main; delta_islands.rs present, TOML reflects 15/15. No further changes needed."}

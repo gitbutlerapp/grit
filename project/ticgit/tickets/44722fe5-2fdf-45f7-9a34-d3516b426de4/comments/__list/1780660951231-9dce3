@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"Fresh re-run 2026-06-05: 47/47 passing (committed 227c0f265). Verified after rebuild; TOML data/tests/t5/t5511-refspec.toml shows fully_passing=true, no uncommitted work. Closing."}

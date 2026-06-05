@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"e49aa78; 214/215 passing; fixed auto-gc-after-fetch (192) by running maintenance foreground when gc/maintenance.autoDetach=false so 'Auto packing' notice is captured. Remaining: 187 (bundle create --since over a merge tip emits 7-object pack, expects 3-object thin pack)."}

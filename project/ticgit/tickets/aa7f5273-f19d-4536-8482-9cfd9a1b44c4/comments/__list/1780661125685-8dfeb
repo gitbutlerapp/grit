@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"Re-verified on fresh run: 16/16 passing. Prior fix de14075ad is an ancestor of HEAD (merged via PR #796); data/tests/t5/t5582-fetch-negative-refspec.toml shows passed_last=16 status=ok. No new changes needed."}
