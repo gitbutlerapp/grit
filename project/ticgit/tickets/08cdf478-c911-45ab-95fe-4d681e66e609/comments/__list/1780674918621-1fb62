@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"90ddd3a; 51/65 passing. Round 3: first-refspec for-merge head (match by refname, not advertised idx) + add_merge_config (branch.merge refs not in refspec fetched FETCH_HEAD-only for-merge). Remaining 14: all CLI ../.git url cases (52-65)."}

@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"17c1c8a; 187/236 (was 181). force_include now respects --honor-pack-keep/--incremental/--local; rev-list --all --objects (lib) now keeps blob/tree ref targets so repack packs lightweight-tag blobs. No regressions in t6000/t5300/t5301/t5510/t7700/t6112."}

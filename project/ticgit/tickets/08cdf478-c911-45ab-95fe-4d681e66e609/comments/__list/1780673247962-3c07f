@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"9ebe5d4; 39/65 passing. Round 2: legacy .git/remotes & .git/branches remotes now honored (default-remote resolution + tracking refspecs + branches-file refs/heads/<frag>:refs/heads/<name> shape). Remaining: branches-one (#frag), branches-default merge/octopus, CLI ../.git url cases."}

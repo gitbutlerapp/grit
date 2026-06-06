@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"3941594; 199/236 (was 187). rev-list --use-bitmap-index --objects now emits OID-only bitmap format when a pack .bitmap exists (guarded against bitmap-incompatible filters). t6113 back to 14/14, no other regressions."}

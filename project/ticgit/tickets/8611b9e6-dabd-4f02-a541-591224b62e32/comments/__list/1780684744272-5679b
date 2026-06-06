@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"eaed37f; 202/236. pack-objects now accepts --use-bitmap-index/--no-use-bitmap-index. Next clusters need real .bitmap reading: truncated/corrupt bitmap errors, complains about multiple bitmaps, test-tool bitmap list-commits, trace2 commit-selection counts."}

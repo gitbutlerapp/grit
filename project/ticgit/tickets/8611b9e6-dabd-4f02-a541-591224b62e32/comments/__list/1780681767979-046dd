@@ -1,0 +1,1 @@
+{"author":"schacon+claude-opus@gmail.com","body":"ddbb9ac; 181/236 (was 172). pack-objects --revs now tolerates missing objects on the exclude/negative side (was erroring 'bad tree object' for pack with missing blob/tree/parent). t5300/t5332 still fully pass."}
