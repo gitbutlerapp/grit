@@ -171,6 +171,7 @@ pub mod merge_trees;
 pub mod mergetool_vimdiff;
 pub mod midx;
 pub mod name_rev;
+pub mod net_trace;
 pub mod notes;
 pub mod objects;
 pub mod odb;
