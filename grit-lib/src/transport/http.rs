@@ -476,6 +476,11 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
         // `Git-Protocol` header (a v2 server only returns its v2 capability
         // advertisement when it sees `version=2`); fall back to the client's
         // default header otherwise. The server may still downgrade.
+        crate::net_trace::net_trace!(
+            "http(s) discover {url} (service={}, request protocol v{})",
+            service.wire_name(),
+            opts.protocol_version
+        );
         let gp = git_protocol_for_version(opts.protocol_version);
         let disc = self.discover(url, service, gp.as_deref())?;
         let adv_refs: Vec<(String, ObjectId)> = disc
@@ -485,6 +490,11 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
             .map(|r| (r.name.clone(), r.oid))
             .collect();
         let caps: Vec<String> = disc.caps.iter().cloned().collect();
+        crate::net_trace::net_trace!(
+            "http(s) discovered: protocol v{}, {} ref(s) advertised",
+            disc.protocol_version,
+            adv_refs.len()
+        );
         Ok(Box::new(SmartHttpConnection {
             repo_url: url.to_owned(),
             adv_refs,
@@ -1032,6 +1042,13 @@ pub fn http_fetch(
     opts: &FetchOptions,
     progress: &mut dyn Progress,
 ) -> Result<FetchOutcome> {
+    use crate::net_trace::net_trace;
+    net_trace!(
+        "http_fetch: begin — {} ({} refspec(s), tags={:?})",
+        repo_url,
+        opts.refspecs.len(),
+        opts.tags
+    );
     // 1. Discovery (request v2 via the client's default `Git-Protocol` header;
     // a v0/v1 server ignores it and returns the classic advertisement).
     let disc = {
@@ -1040,7 +1057,13 @@ pub fn http_fetch(
         let stripped = strip_service_advertisement(&body)?;
         parse_advertisement(stripped)?
     };
+    net_trace!(
+        "http_fetch: discovered protocol v{}, {} ref(s)",
+        disc.protocol_version,
+        disc.refs.len()
+    );
     if disc.protocol_version >= 2 {
+        net_trace!("http_fetch: delegating to v2 stateless fetch");
         return http_fetch_v2(client, local_git_dir, repo_url, &disc, opts, progress);
     }
 
@@ -1217,6 +1240,7 @@ pub fn http_fetch(
         });
     }
 
+    net_trace!("http_fetch: done — {} ref update(s)", updates.len());
     Ok(FetchOutcome {
         updates,
         default_branch,
@@ -1429,6 +1453,7 @@ fn http_fetch_v2(
         });
     }
 
+    crate::net_trace::net_trace!("http_fetch (v2): done — {} ref update(s)", updates.len());
     Ok(FetchOutcome {
         updates,
         default_branch,

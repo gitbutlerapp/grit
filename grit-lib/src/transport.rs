@@ -430,6 +430,11 @@ impl Transport for GitDaemonTransport {
         service: Service,
         opts: &ConnectOptions,
     ) -> Result<Box<dyn Connection>> {
+        crate::net_trace::net_trace!(
+            "git:// connect {url} (service={}, request protocol v{})",
+            service.wire_name(),
+            opts.protocol_version
+        );
         let parsed = parse_git_url(url)?;
         let addr = format!("{}:{}", parsed.host, parsed.port)
             .to_socket_addrs()
@@ -469,6 +474,11 @@ impl Transport for GitDaemonTransport {
 
         let mut reader = stream;
         let adv = read_advertisement(&mut reader)?;
+        crate::net_trace::net_trace!(
+            "git:// connected: protocol v{}, {} ref(s) advertised",
+            adv.protocol_version,
+            adv.refs.len()
+        );
 
         Ok(Box::new(GitDaemonConnection {
             reader,
@@ -1006,6 +1016,11 @@ impl Transport for SshTransport {
         service: Service,
         opts: &ConnectOptions,
     ) -> Result<Box<dyn Connection>> {
+        crate::net_trace::net_trace!(
+            "ssh connect {url} (service={}, request protocol v{})",
+            service.wire_name(),
+            opts.protocol_version
+        );
         let spec = parse_ssh_url(url)?;
         let mut child = self.spawn(&spec, service, opts)?;
 
@@ -1019,6 +1034,11 @@ impl Transport for SshTransport {
             .ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?;
 
         let adv = read_advertisement(&mut reader)?;
+        crate::net_trace::net_trace!(
+            "ssh connected: protocol v{}, {} ref(s) advertised",
+            adv.protocol_version,
+            adv.refs.len()
+        );
 
         Ok(Box::new(SshConnection {
             child,

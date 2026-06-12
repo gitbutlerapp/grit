@@ -88,6 +88,13 @@ pub fn push_remote(
     opts: &PushOptions,
     progress: &mut dyn Progress,
 ) -> Result<PushOutcome> {
+    use crate::net_trace::net_trace;
+    net_trace!(
+        "push_remote: begin — {} ref update(s), protocol v{}, {} push-option(s)",
+        refs.len(),
+        conn.protocol_version(),
+        opts.push_options.len()
+    );
     if conn.protocol_version() >= 2 {
         return Err(Error::Message(
             "push_remote: protocol v2 not supported in this phase (use v0/v1)".to_owned(),
@@ -100,6 +107,10 @@ pub fn push_remote(
     // 1. Advertisement: split the connection's parsed advertisement into the
     //    remote ref map and the `.have` hints, and read the negotiated caps.
     let adv = AdvertisedState::from_connection(conn);
+    net_trace!(
+        "push_remote: remote advertised {} ref(s)",
+        adv.remote_refs.len()
+    );
 
     // Push-options require the server's `push-options` capability; fail typed
     // (matching Git) before sending anything if the server lacks it.
@@ -118,12 +129,19 @@ pub fn push_remote(
     //    does not read one after a delete-only command block, so sending an empty
     //    pack would leave unread bytes on the wire and reset the connection.
     let commands = build_command_block(&plan, &adv, algo, &opts.push_options)?;
+    net_trace!(
+        "push_remote: sending {} command(s)…",
+        plan.decisions.len()
+    );
     conn.writer().write_all(&commands)?;
     conn.writer().flush()?;
 
     if let Some(pack) = build_push_pack(&plan, &local_odb, &adv)? {
+        net_trace!("push_remote: sending pack ({} bytes)…", pack.len());
         conn.writer().write_all(&pack)?;
         conn.writer().flush()?;
+    } else {
+        net_trace!("push_remote: no pack (deletion-only / up-to-date)");
     }
 
     // 5. Read the server's report. With side-band, band 1 carries the
@@ -149,9 +167,9 @@ pub fn push_remote(
 
     apply_report_status(&report, &mut plan.decisions);
 
-    Ok(PushOutcome {
-        results: plan.decisions.into_iter().map(|d| d.result).collect(),
-    })
+    let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
+    net_trace!("push_remote: done — {} result(s)", results.len());
+    Ok(PushOutcome { results })
 }
 
 /// Push refs to a remote over smart HTTP (`git-receive-pack`), returning a
@@ -191,11 +209,23 @@ pub fn push_http(
     opts: &PushOptions,
     progress: &mut dyn Progress,
 ) -> Result<PushOutcome> {
+    use crate::net_trace::net_trace;
+    net_trace!(
+        "push_http: begin — {} ref update(s) to {}, {} push-option(s)",
+        refs.len(),
+        repo_url,
+        opts.push_options.len()
+    );
     let local_odb = open_odb(local_git_dir);
     let algo = local_odb.hash_algo();
 
     // 1. Discovery: GET info/refs?service=git-receive-pack.
     let adv = discover_receive_pack(client, repo_url)?;
+    net_trace!(
+        "push_http: remote advertised {} ref(s) (protocol v{})",
+        adv.state.remote_refs.len(),
+        adv.protocol_version
+    );
     if adv.protocol_version >= 2 {
         return Err(Error::Message(
             "push_http: protocol v2 receive-pack not supported in this phase (use v0/v1)"
@@ -225,6 +255,11 @@ pub fn push_http(
     let service_url = receive_pack_url(repo_url);
     let content_type = format!("application/x-{RECEIVE_PACK}-request");
     let accept = format!("application/x-{RECEIVE_PACK}-result");
+    net_trace!(
+        "push_http: POST git-receive-pack ({} command(s), {} body bytes)…",
+        plan.decisions.len(),
+        body.len()
+    );
     let resp = client.post(&service_url, &content_type, &accept, &body, None)?;
 
     let report = if adv.state.server_sideband {
@@ -234,6 +269,10 @@ pub fn push_http(
     };
 
     apply_report_status(&report, &mut plan.decisions);
+    net_trace!(
+        "push_http: done — {} result(s)",
+        plan.decisions.len()
+    );
 
     Ok(PushOutcome {
         results: plan.decisions.into_iter().map(|d| d.result).collect(),

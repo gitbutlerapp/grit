@@ -1115,6 +1115,14 @@ pub fn fetch_remote(
     opts: &FetchOptions,
     progress: &mut dyn Progress,
 ) -> Result<FetchOutcome> {
+    use crate::net_trace::net_trace;
+    net_trace!(
+        "fetch_remote: begin — protocol v{}, {} refspec(s), tags={:?}, depth={:?}",
+        conn.protocol_version(),
+        opts.refspecs.len(),
+        opts.tags,
+        opts.depth
+    );
     let local_odb = open_odb(local_git_dir);
 
     // 1. Remote refs + default branch.
@@ -1151,6 +1159,14 @@ pub fn fetch_remote(
             .collect();
         (remote_refs, default_branch, None)
     };
+    net_trace!(
+        "fetch_remote: remote advertised {} ref(s){}",
+        remote_refs.len(),
+        v2_caps
+            .as_ref()
+            .map(|_| " (via v2 ls-refs)")
+            .unwrap_or(" (v0/v1 advertisement)")
+    );
 
     // 2. Parse refspecs.
     let mut positive: Vec<RefspecItem> = Vec::new();
@@ -1241,7 +1257,15 @@ pub fn fetch_remote(
     // to the local `shallow` file and surfaced in the outcome.
     let mut shallow_update = ShallowUpdate::default();
 
+    net_trace!(
+        "fetch_remote: {} matched ref(s), want {} object(s){}",
+        matched.len(),
+        wants.len(),
+        if shallow_request { " (shallow request)" } else { "" }
+    );
+
     if !wants.is_empty() && !opts.dry_run {
+        net_trace!("fetch_remote: negotiating + fetching pack…");
         let (pack, su) = if let Some(caps) = v2_caps.as_ref() {
             let deepen = V2DeepenArgs::from_opts(opts, &local_shallow);
             negotiate_pack_v2(local_git_dir, conn, caps, &local_odb, &wants, &deepen, progress)?
@@ -1249,6 +1273,10 @@ pub fn fetch_remote(
             negotiate_pack(local_git_dir, conn, &wants, opts, &local_shallow, progress)?
         };
         shallow_update = su;
+        net_trace!(
+            "fetch_remote: received pack ({} bytes), unpacking…",
+            pack.len()
+        );
         if !pack.is_empty() {
             let mut cursor = std::io::Cursor::new(pack);
             crate::unpack_objects::unpack_objects(
@@ -1341,6 +1369,14 @@ pub fn fetch_remote(
         });
     }
 
+    net_trace!(
+        "fetch_remote: done — {} ref update(s){}",
+        updates.len(),
+        default_branch
+            .as_deref()
+            .map(|b| format!(", default branch '{b}'"))
+            .unwrap_or_default()
+    );
     Ok(FetchOutcome {
         updates,
         default_branch,
