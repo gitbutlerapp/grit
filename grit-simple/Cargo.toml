@@ -17,4 +17,4 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-grit-lib = { version = "0.3", path = "../grit-lib" }
+grit-lib = { version = "0.4", path = "../grit-lib" }

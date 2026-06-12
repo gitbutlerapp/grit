@@ -15,7 +15,7 @@ name = "grit-http-server"
 path = "src/main.rs"
 
 [dependencies]
-grit-protocol = { version = "0.3", path = "../grit-protocol" }
+grit-protocol = { version = "0.4", path = "../grit-protocol" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 anyhow.workspace = true
