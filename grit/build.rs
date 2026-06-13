@@ -22,21 +22,13 @@ fn main() {
     let docs_dir = manifest_dir.join("../git/Documentation");
     let bundled = manifest_dir.join("upstream_help_synopsis.rs");
 
-    if script.is_file() && docs_dir.is_dir() {
-        let out_file = std::fs::File::create(&dst).unwrap_or_else(|e| {
-            panic!("create {}: {e}", dst.display());
-        });
-
-        let status = Command::new("python3")
-            .arg(&script)
-            .stdout(out_file)
-            .status()
-            .unwrap_or_else(|e| panic!("spawn python3 for {}: {e}", script.display()));
-
-        if !status.success() {
-            panic!("generate-upstream-help-synopsis.py failed with {status}");
-        }
-
+    // Regenerate from the vendored git docs only when the full source tree AND a
+    // usable `python3` are present. Otherwise fall back to the copy checked into
+    // this crate. This covers crates.io tarball builds (no `scripts/` /
+    // `git/Documentation`) and cross-builds in a container that has the source
+    // tree but no `python3` (e.g. the musl release built with `cross`) — there we
+    // must NOT hard-fail, since the bundled copy is the source of truth anyway.
+    if script.is_file() && docs_dir.is_dir() && try_generate(&script, &dst) {
         println!("cargo:rerun-if-changed={}", script.display());
         println!("cargo:rerun-if-changed={}", docs_dir.display());
     } else {
@@ -51,6 +43,40 @@ fn main() {
     }
 
     install_shell_libs(&manifest_dir);
+}
+
+/// Run `python3 <script>` to (re)generate `dst`. Returns `true` on success.
+///
+/// Returns `false` — emitting a `cargo:warning` rather than panicking — when
+/// `python3` is unavailable (e.g. a `cross` musl container) or the script fails,
+/// so the caller can fall back to the bundled, checked-in copy. The synopsis file
+/// only feeds a git-compatibility test, so the bundled copy is a correct,
+/// reproducible substitute for a release build.
+fn try_generate(script: &Path, dst: &Path) -> bool {
+    let out_file = match fs::File::create(dst) {
+        Ok(f) => f,
+        Err(e) => {
+            println!("cargo:warning=create {}: {e}", dst.display());
+            return false;
+        }
+    };
+    match Command::new("python3").arg(script).stdout(out_file).status() {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            println!(
+                "cargo:warning=generate-upstream-help-synopsis.py failed with {status}; \
+                 using bundled upstream_help_synopsis.rs"
+            );
+            false
+        }
+        Err(e) => {
+            println!(
+                "cargo:warning=python3 unavailable ({e}); \
+                 using bundled upstream_help_synopsis.rs"
+            );
+            false
+        }
+    }
 }
 
 /// Writes `git-sh-setup` and `git-sh-i18n` into `target/<profile>/` (same directory as `grit`).
