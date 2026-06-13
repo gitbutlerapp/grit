@@ -2155,7 +2155,27 @@ fn build_pull_merge_args(
 }
 
 fn remote_token_looks_like_path(token: &str) -> bool {
+    // A non-local remote URL (`http(s)://`, `git://`, `ssh://`, `git+ssh://`, or
+    // scp-style `host:path`) also contains `/`, but must NOT be treated as a
+    // local filesystem path — otherwise it gets joined onto the work tree and
+    // opened as a local repo. Those go through the regular fetch transport path
+    // (`fetch::run`); only `file://` and genuine paths are "local" here.
+    if is_non_local_remote_url(token) {
+        return false;
+    }
     token == "." || token == ".." || token.contains('/') || token.starts_with("file://")
+}
+
+/// Whether `token` is a remote URL reached over a network transport (not a local
+/// path or `file://`). Such URLs are handled by the fetch transport layer.
+fn is_non_local_remote_url(token: &str) -> bool {
+    token.starts_with("http://")
+        || token.starts_with("https://")
+        || token.starts_with("git://")
+        || token.starts_with("ssh://")
+        || token.starts_with("git+ssh://")
+        // scp-style `[user@]host:path` (which also contains `/` in the path part).
+        || grit_lib::transport::is_ssh_url(token)
 }
 
 fn resolve_local_remote_path(
