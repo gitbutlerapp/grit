@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grit-lib transport stack — embed Git fetch/push in Rust</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  padding: 2rem;
+  max-width: 980px;
+  margin: 0 auto;
+  line-height: 1.55;
+}
+a { color: #58a6ff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 1.9rem; margin-bottom: 0.3rem; color: #f0f6fc; letter-spacing: -0.02em; }
+.sub { color: #7d8590; font-size: 0.95rem; margin-bottom: 1.5rem; }
+.sub code { color: #9da7b3; }
+h2 {
+  font-size: 1.25rem;
+  color: #f0f6fc;
+  margin: 2.4rem 0 0.85rem;
+  font-weight: 600;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #21262d;
+}
+h3 { font-size: 1.02rem; color: #f0f6fc; margin: 1.5rem 0 0.6rem; font-weight: 600; }
+p { margin-bottom: 1rem; color: #c9d1d9; font-size: 0.95rem; }
+ul, ol { margin: 0 0 1rem 1.4rem; color: #c9d1d9; font-size: 0.95rem; }
+li { margin-bottom: 0.35rem; }
+code {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+  color: #d2a8ff;
+}
+pre {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  margin-bottom: 1.2rem;
+  font-size: 0.83rem;
+  line-height: 1.5;
+}
+pre code { background: none; border: none; padding: 0; color: #c9d1d9; font-size: inherit; }
+.tok-kw { color: #ff7b72; }
+.tok-fn { color: #d2a8ff; }
+.tok-ty { color: #79c0ff; }
+.tok-str { color: #a5d6ff; }
+.tok-cmt { color: #8b949e; font-style: italic; }
+.tok-mac { color: #ffa657; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin-bottom: 1.2rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid #21262d;
+  vertical-align: top;
+}
+th {
+  color: #7d8590;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+td code { font-size: 0.82em; }
+.yes { color: #3fb950; font-weight: 600; }
+.matrix td { text-align: center; }
+.matrix td:first-child { text-align: left; color: #7d8590; font-weight: 600; }
+.lead {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-left: 3px solid #388bfd;
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin-bottom: 1.5rem;
+}
+.lead p { margin-bottom: 0; }
+.note {
+  background: #12233a;
+  border: 1px solid #1f3a5f;
+  border-radius: 8px;
+  padding: 0.8rem 1.1rem;
+  margin-bottom: 1.2rem;
+  font-size: 0.9rem;
+  color: #b9d2f0;
+}
+.note strong { color: #cfe2fb; }
+.pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #1f6feb22;
+  border: 1px solid #1f6feb55;
+  color: #79c0ff;
+  vertical-align: middle;
+}
+footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #21262d; color: #7d8590; font-size: 0.85rem; }
+.toc { columns: 2; column-gap: 2rem; font-size: 0.9rem; margin-bottom: 1rem; }
+.toc a { display: block; padding: 0.15rem 0; }
+@media (max-width: 640px) { .toc { columns: 1; } body { padding: 1.2rem; } }
+</style>
+</head>
+<body>
+
+<h1>Embedding Git fetch &amp; push with <code>grit-lib</code></h1>
+<p class="sub">The transport stack from <a href="https://github.com/gitbutlerapp/grit/pull/838">PR #838</a> · <span class="pill">grit-lib 0.4+</span></p>
+
+<div class="lead">
+<p>grit has always implemented every Git transport and the full wire protocol — but that code lived inside the CLI crate, shaped around argv, subprocesses, and stdout, so no other program could call it. <a href="https://github.com/gitbutlerapp/grit/pull/838">PR #838</a> lifts that core into reusable, embedder-shaped <code>grit-lib</code> APIs behind a <code>Transport</code> trait. You can now <strong>fetch and push over <code>git://</code>, <code>ssh</code>, <code>http(s)</code>, and local repositories entirely in-process</strong> — no <code>gix</code>, and no <code>git</code> subprocess on the wire — from any Rust program.</p>
+</div>
+
+<div class="toc">
+<a href="#whats-new">1. What PR #838 introduced</a>
+<a href="#matrix">2. The transport matrix</a>
+<a href="#install">3. Adding the dependency</a>
+<a href="#concepts">4. Core concepts</a>
+<a href="#fetch">5. Fetching</a>
+<a href="#push">6. Pushing</a>
+<a href="#unified">7. One helper for every transport</a>
+<a href="#http">8. HTTP clients &amp; credentials</a>
+<a href="#reference">9. API reference</a>
+<a href="#examples">10. Runnable examples</a>
+</div>
+
+<h2 id="whats-new">1. What PR #838 introduced</h2>
+<p>The PR adds four cooperating pieces to <code>grit-lib</code>, all designed so that the public surface is plain data and traits — the I/O lives inside the transport implementations, not in your call sites.</p>
+<ul>
+<li><strong><code>grit_lib::transport</code></strong> — a <code>Transport</code> / <code>Connection</code> trait pair plus three wire transports: <code>GitDaemonTransport</code> (<code>git://</code>), <code>SshTransport</code> (with a pluggable ssh command), and <code>SmartHttpTransport&lt;C&gt;</code> over a pluggable <code>HttpClient</code> trait.</li>
+<li><strong><code>grit_lib::fetch</code></strong> — <code>fetch_remote</code> drives the negotiation over any <code>Connection</code>; <code>transport::http::http_fetch</code> does the stateless-HTTP equivalent. Both return a structured <code>FetchOutcome</code>.</li>
+<li><strong><code>grit_lib::push</code></strong> — <code>push_remote</code> (streaming) and <code>push_http</code>, returning a <code>PushOutcome</code> with per-ref status (<code>report-status</code> parsed for you).</li>
+<li><strong><code>grit_lib::credentials</code></strong> — a <code>CredentialProvider</code> trait and a Git-compatible default that runs configured <code>credential.helper</code> programs, with <em>typed non-interactive failure</em> (it never blocks on a TTY prompt).</li>
+</ul>
+<p>Fetch negotiates <strong>protocol v2</strong> (streaming and over HTTP, with transparent downgrade to v0/v1); push uses v0/v1 (Git has no v2 receive-pack). Everything is hash-algorithm aware (SHA-1 and SHA-256), and packs are built from the negotiated want/have set, so a push never packs the whole object graph.</p>
+
+<h2 id="matrix">2. The transport matrix</h2>
+<p>The same two operations — fetch and push — work across all four transports. You pick the transport by constructing the matching type (or, more often, by letting a small helper choose from the URL scheme); the rest of your code is identical.</p>
+<table class="matrix">
+<thead><tr><th>Operation</th><th><code>file://</code></th><th><code>git://</code></th><th><code>ssh</code></th><th><code>http(s)</code></th></tr></thead>
+<tbody>
+<tr><td>fetch</td><td class="yes">✓</td><td class="yes">✓ v2</td><td class="yes">✓ v2</td><td class="yes">✓ v2 ↓ v0/1</td></tr>
+<tr><td>push</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+</tbody>
+</table>
+<table>
+<thead><tr><th>Transport</th><th>Type</th><th>Authentication</th></tr></thead>
+<tbody>
+<tr><td>Local</td><td><code>transfer::fetch_local</code> / <code>push_local</code></td><td>none</td></tr>
+<tr><td><code>git://</code></td><td><code>transport::GitDaemonTransport</code></td><td>none (anonymous daemon)</td></tr>
+<tr><td><code>ssh</code></td><td><code>transport::SshTransport</code></td><td>SSH keys/agent (the ssh child)</td></tr>
+<tr><td><code>http(s)</code></td><td><code>transport::http::SmartHttpTransport&lt;C&gt;</code></td><td><code>CredentialProvider</code> → HTTP Basic on 401</td></tr>
+</tbody>
+</table>
+
+<h2 id="install">3. Adding the dependency</h2>
+<p>Add <code>grit-lib</code> to your <code>Cargo.toml</code>. The <code>http-ureq</code> feature gives you a ready-made HTTP client (<code>UreqHttpClient</code>); leave it off if you want to plug in your own HTTP stack instead.</p>
+<pre><code><span class="tok-cmt"># Cargo.toml</span>
+[dependencies]
+grit-lib = { version = <span class="tok-str">"0.4"</span>, features = [<span class="tok-str">"http-ureq"</span>] }</code></pre>
+
+<h2 id="concepts">4. Core concepts</h2>
+<p>There are two layers. The <strong>transport</strong> layer opens a <code>Connection</code> to a remote; the <strong>operation</strong> layer (<code>fetch_remote</code> / <code>push_remote</code>) runs the protocol over that connection. For local and HTTP remotes there are direct entry points that bundle both.</p>
+<h3>The <code>Transport</code> trait</h3>
+<pre><code><span class="tok-kw">pub trait</span> <span class="tok-ty">Transport</span> {
+    <span class="tok-kw">fn</span> <span class="tok-fn">connect</span>(&<span class="tok-kw">self</span>, url: &<span class="tok-ty">str</span>, service: <span class="tok-ty">Service</span>, opts: &<span class="tok-ty">ConnectOptions</span>)
+        -&gt; <span class="tok-ty">Result</span>&lt;<span class="tok-ty">Box</span>&lt;<span class="tok-kw">dyn</span> <span class="tok-ty">Connection</span>&gt;&gt;;
+}
+
+<span class="tok-kw">pub enum</span> <span class="tok-ty">Service</span> { <span class="tok-ty">UploadPack</span>, <span class="tok-ty">ReceivePack</span> }  <span class="tok-cmt">// fetch, push</span>
+
+<span class="tok-kw">pub struct</span> <span class="tok-ty">ConnectOptions</span> {
+    <span class="tok-kw">pub</span> protocol_version: <span class="tok-ty">u8</span>,        <span class="tok-cmt">// 0/1/2; the server may downgrade</span>
+    <span class="tok-kw">pub</span> server_options: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">String</span>&gt;,
+}</code></pre>
+<h3>Inputs &amp; outputs</h3>
+<p>Every operation takes a typed options struct and returns a typed outcome — no parsing of porcelain, no stdout scraping.</p>
+<pre><code><span class="tok-kw">pub struct</span> <span class="tok-ty">FetchOptions</span> {
+    <span class="tok-kw">pub</span> refspecs: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">String</span>&gt;,           <span class="tok-cmt">// e.g. "+refs/heads/*:refs/remotes/origin/*"</span>
+    <span class="tok-kw">pub</span> negative_refspecs: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">String</span>&gt;,
+    <span class="tok-kw">pub</span> tags: <span class="tok-ty">TagMode</span>,                  <span class="tok-cmt">// All / None / Following</span>
+    <span class="tok-kw">pub</span> prune: <span class="tok-ty">bool</span>,
+    <span class="tok-kw">pub</span> dry_run: <span class="tok-ty">bool</span>,
+    <span class="tok-kw">pub</span> depth: <span class="tok-ty">Option</span>&lt;<span class="tok-ty">u32</span>&gt;,            <span class="tok-cmt">// shallow fetch</span>
+    <span class="tok-kw">pub</span> deepen_since: <span class="tok-ty">Option</span>&lt;<span class="tok-ty">String</span>&gt;,
+    <span class="tok-kw">pub</span> deepen_not: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">String</span>&gt;,
+    <span class="tok-kw">pub</span> unshallow: <span class="tok-ty">bool</span>,
+}  <span class="tok-cmt">// implements Default</span>
+
+<span class="tok-kw">pub struct</span> <span class="tok-ty">FetchOutcome</span> {
+    <span class="tok-kw">pub</span> updates: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">RefUpdate</span>&gt;,         <span class="tok-cmt">// remote_ref, local_ref, old/new oid, mode</span>
+    <span class="tok-kw">pub</span> default_branch: <span class="tok-ty">Option</span>&lt;<span class="tok-ty">String</span>&gt;,   <span class="tok-cmt">// from HEAD symref</span>
+    <span class="tok-kw">pub</span> new_shallow: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">ObjectId</span>&gt;,
+    <span class="tok-kw">pub</span> new_unshallow: <span class="tok-ty">Vec</span>&lt;<span class="tok-ty">ObjectId</span>&gt;,
+}</code></pre>
+<div class="note"><strong>Progress.</strong> Every operation takes a <code>&amp;mut dyn Progress</code>. Pass <code>grit_lib::fetch::NoProgress</code> to ignore sideband messages, or implement the one-method <code>Progress</code> trait to surface them.</div>
+
+<h2 id="fetch">5. Fetching</h2>
+<p>The pattern for a wire transport is always: build the transport, <code>connect</code> for <code>UploadPack</code>, then call <code>fetch_remote</code> with the connection. Here is a complete <code>git://</code> fetch into an existing local repository:</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::fetch::{fetch_remote, NoProgress};
+<span class="tok-kw">use</span> grit_lib::transfer::{FetchOptions, TagMode};
+<span class="tok-kw">use</span> grit_lib::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
+<span class="tok-kw">use</span> std::path::Path;
+
+<span class="tok-kw">fn</span> <span class="tok-fn">fetch_git_daemon</span>(git_dir: &<span class="tok-ty">Path</span>, url: &<span class="tok-ty">str</span>) -&gt; grit_lib::error::<span class="tok-ty">Result</span>&lt;()&gt; {
+    <span class="tok-kw">let</span> transport = <span class="tok-ty">GitDaemonTransport</span>::<span class="tok-fn">new</span>();
+    <span class="tok-kw">let</span> opts = <span class="tok-ty">ConnectOptions</span> { protocol_version: <span class="tok-ty">2</span>, ..<span class="tok-ty">Default</span>::<span class="tok-fn">default</span>() };
+    <span class="tok-kw">let mut</span> conn = transport.<span class="tok-fn">connect</span>(url, <span class="tok-ty">Service</span>::<span class="tok-ty">UploadPack</span>, &opts)?;
+
+    <span class="tok-kw">let</span> fetch_opts = <span class="tok-ty">FetchOptions</span> {
+        refspecs: <span class="tok-kw">vec!</span>[<span class="tok-str">"+refs/heads/*:refs/remotes/origin/*"</span>.<span class="tok-fn">to_owned</span>()],
+        tags: <span class="tok-ty">TagMode</span>::<span class="tok-ty">Following</span>,
+        ..<span class="tok-ty">Default</span>::<span class="tok-fn">default</span>()
+    };
+
+    <span class="tok-kw">let</span> outcome = <span class="tok-fn">fetch_remote</span>(git_dir, conn.<span class="tok-fn">as_mut</span>(), &fetch_opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)?;
+    <span class="tok-kw">for</span> u <span class="tok-kw">in</span> &outcome.updates {
+        <span class="tok-kw">if let</span> <span class="tok-ty">Some</span>(local) = &u.local_ref {
+            <span class="tok-fn">println!</span>(<span class="tok-str">"{:?}  {}"</span>, u.mode, local);
+        }
+    }
+    <span class="tok-ty">Ok</span>(())
+}</code></pre>
+<p>Over <strong>ssh</strong> the only change is the transport — <code>SshTransport::new()</code> spawns <code>ssh</code> from your environment (override it with <code>SshTransport::with_program(...)</code> or <code>::with_shell_command(...)</code>):</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::transport::SshTransport;
+
+<span class="tok-kw">let</span> transport = <span class="tok-ty">SshTransport</span>::<span class="tok-fn">new</span>();
+<span class="tok-kw">let mut</span> conn = transport.<span class="tok-fn">connect</span>(<span class="tok-str">"git@github.com:owner/repo.git"</span>, <span class="tok-ty">Service</span>::<span class="tok-ty">UploadPack</span>, &opts)?;
+<span class="tok-kw">let</span> outcome = <span class="tok-fn">fetch_remote</span>(git_dir, conn.<span class="tok-fn">as_mut</span>(), &fetch_opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)?;</code></pre>
+<p>For <strong>HTTP</strong> there is a direct entry point that handles discovery and the stateless POST loop for you — pass an <code>HttpClient</code> instead of a connection:</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::transport::http::http_fetch;
+<span class="tok-kw">use</span> grit_lib::transport::http::ureq_client::UreqHttpClient;
+
+<span class="tok-cmt">// `.with_git_protocol("version=2")` asks the server for protocol v2.</span>
+<span class="tok-kw">let</span> client = <span class="tok-ty">UreqHttpClient</span>::<span class="tok-fn">new</span>().<span class="tok-fn">with_git_protocol</span>(<span class="tok-str">"version=2"</span>);
+<span class="tok-kw">let</span> outcome = <span class="tok-fn">http_fetch</span>(&client, git_dir, <span class="tok-str">"https://github.com/owner/repo.git"</span>,
+                         &fetch_opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)?;</code></pre>
+<p>And a <strong>local</strong> (<code>file://</code> or path) fetch skips the transport entirely:</p>
+<pre><code><span class="tok-kw">let</span> outcome = grit_lib::transfer::<span class="tok-fn">fetch_local</span>(git_dir, remote_git_dir, &fetch_opts)?;</code></pre>
+
+<h2 id="push">6. Pushing</h2>
+<p>Push takes a slice of <code>PushRefSpec</code> (one per ref you want to update or delete) and a <code>PushOptions</code>, and returns a <code>PushOutcome</code> whose <code>results</code> carry a per-ref status you can inspect — fast-forward, forced, rejected (non-fast-forward / stale lease), or remote-rejected.</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::push::push_remote;
+<span class="tok-kw">use</span> grit_lib::fetch::NoProgress;
+<span class="tok-kw">use</span> grit_lib::transfer::{PushOptions, PushRefSpec};
+<span class="tok-kw">use</span> grit_lib::push_report::PushRefStatus;
+<span class="tok-kw">use</span> grit_lib::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
+
+<span class="tok-cmt">// Resolve the local commit we want to publish.</span>
+<span class="tok-kw">let</span> oid = grit_lib::refs::<span class="tok-fn">resolve_ref</span>(git_dir, <span class="tok-str">"refs/heads/main"</span>)?;
+
+<span class="tok-kw">let</span> spec = <span class="tok-ty">PushRefSpec</span> {
+    src: <span class="tok-ty">Some</span>(oid),
+    dst: <span class="tok-str">"refs/heads/main"</span>.<span class="tok-fn">to_owned</span>(),
+    force: <span class="tok-kw">false</span>,
+    delete: <span class="tok-kw">false</span>,
+    expected_old: <span class="tok-ty">None</span>,    <span class="tok-cmt">// Some(oid) ⇒ force-with-lease (compare-and-swap)</span>
+    expect_absent: <span class="tok-kw">false</span>,  <span class="tok-cmt">// true ⇒ lease that the ref must not yet exist</span>
+};
+
+<span class="tok-cmt">// receive-pack is v0/v1, so connect with the default protocol version.</span>
+<span class="tok-kw">let</span> transport = <span class="tok-ty">GitDaemonTransport</span>::<span class="tok-fn">new</span>();
+<span class="tok-kw">let mut</span> conn = transport.<span class="tok-fn">connect</span>(url, <span class="tok-ty">Service</span>::<span class="tok-ty">ReceivePack</span>, &<span class="tok-ty">ConnectOptions</span>::<span class="tok-fn">default</span>())?;
+
+<span class="tok-kw">let</span> outcome = <span class="tok-fn">push_remote</span>(git_dir, conn.<span class="tok-fn">as_mut</span>(), &[spec],
+                          &<span class="tok-ty">PushOptions</span>::<span class="tok-fn">default</span>(), &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)?;
+
+<span class="tok-kw">for</span> r <span class="tok-kw">in</span> &outcome.results {
+    <span class="tok-kw">match</span> r.status {
+        <span class="tok-ty">PushRefStatus</span>::<span class="tok-ty">Ok</span> | <span class="tok-ty">PushRefStatus</span>::<span class="tok-ty">UpToDate</span> =&gt;
+            <span class="tok-fn">println!</span>(<span class="tok-str">"pushed {}"</span>, r.remote_ref),
+        _ =&gt; <span class="tok-fn">eprintln!</span>(<span class="tok-str">"rejected {}: {:?} {}"</span>,
+                       r.remote_ref, r.status, r.message.<span class="tok-fn">as_deref</span>().<span class="tok-fn">unwrap_or</span>(<span class="tok-str">""</span>)),
+    }
+}</code></pre>
+<p>The same <code>PushRefSpec</code> / <code>PushOutcome</code> shapes are used everywhere. For <strong>ssh</strong>, swap in <code>SshTransport</code>. For <strong>HTTP</strong>, use the convenience method on the transport (or <code>push::push_http</code> directly):</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::transport::http::{SmartHttpTransport, ureq_client::UreqHttpClient};
+
+<span class="tok-kw">let</span> transport = <span class="tok-ty">SmartHttpTransport</span>::<span class="tok-fn">new</span>(<span class="tok-ty">UreqHttpClient</span>::<span class="tok-fn">new</span>());  <span class="tok-cmt">// receive-pack is v0/v1: no version header</span>
+<span class="tok-kw">let</span> outcome = transport.<span class="tok-fn">push</span>(git_dir, <span class="tok-str">"https://github.com/owner/repo.git"</span>,
+                            &[spec], &<span class="tok-ty">PushOptions</span>::<span class="tok-fn">default</span>(), &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)?;</code></pre>
+<p>And local: <code>grit_lib::transfer::push_local(git_dir, remote_git_dir, &amp;[spec], &amp;opts)?</code>.</p>
+<div class="note"><strong>Server-side push options</strong> (<code>git push --push-option</code>) go in <code>PushOptions::push_options</code>; they are sent only when the remote advertises the capability, otherwise the push fails with a typed <code>Error::PushOptionsUnsupported</code>.</div>
+
+<h2 id="unified">7. One helper for every transport</h2>
+<p>Because every transport produces the same <code>FetchOutcome</code> / <code>PushOutcome</code>, you can hide the choice behind a single function that dispatches on the URL scheme. This is exactly what the bundled <code>gritx-fetch</code> / <code>gritx-push</code> examples do — discover the transport (and therefore the authentication) from the remote URL, then run the operation:</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::fetch::{fetch_remote, NoProgress};
+<span class="tok-kw">use</span> grit_lib::transfer::{FetchOptions, FetchOutcome};
+<span class="tok-kw">use</span> grit_lib::transport::http::{http_fetch, ureq_client::UreqHttpClient};
+<span class="tok-kw">use</span> grit_lib::transport::{ConnectOptions, GitDaemonTransport, Service, SshTransport, Transport};
+<span class="tok-kw">use</span> std::path::{Path, PathBuf};
+
+<span class="tok-kw">fn</span> <span class="tok-fn">fetch_any</span>(git_dir: &<span class="tok-ty">Path</span>, url: &<span class="tok-ty">str</span>, opts: &<span class="tok-ty">FetchOptions</span>)
+    -&gt; grit_lib::error::<span class="tok-ty">Result</span>&lt;<span class="tok-ty">FetchOutcome</span>&gt;
+{
+    <span class="tok-kw">let</span> v2 = <span class="tok-ty">ConnectOptions</span> { protocol_version: <span class="tok-ty">2</span>, ..<span class="tok-ty">Default</span>::<span class="tok-fn">default</span>() };
+    <span class="tok-kw">if</span> url.<span class="tok-fn">starts_with</span>(<span class="tok-str">"http://"</span>) || url.<span class="tok-fn">starts_with</span>(<span class="tok-str">"https://"</span>) {
+        <span class="tok-kw">let</span> client = <span class="tok-ty">UreqHttpClient</span>::<span class="tok-fn">new</span>().<span class="tok-fn">with_git_protocol</span>(<span class="tok-str">"version=2"</span>);
+        <span class="tok-fn">http_fetch</span>(&client, git_dir, url, opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)
+    } <span class="tok-kw">else if</span> url.<span class="tok-fn">starts_with</span>(<span class="tok-str">"git://"</span>) {
+        <span class="tok-kw">let mut</span> c = <span class="tok-ty">GitDaemonTransport</span>::<span class="tok-fn">new</span>().<span class="tok-fn">connect</span>(url, <span class="tok-ty">Service</span>::<span class="tok-ty">UploadPack</span>, &v2)?;
+        <span class="tok-fn">fetch_remote</span>(git_dir, c.<span class="tok-fn">as_mut</span>(), opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)
+    } <span class="tok-kw">else if</span> grit_lib::transport::<span class="tok-fn">is_ssh_url</span>(url) {
+        <span class="tok-kw">let mut</span> c = <span class="tok-ty">SshTransport</span>::<span class="tok-fn">new</span>().<span class="tok-fn">connect</span>(url, <span class="tok-ty">Service</span>::<span class="tok-ty">UploadPack</span>, &v2)?;
+        <span class="tok-fn">fetch_remote</span>(git_dir, c.<span class="tok-fn">as_mut</span>(), opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)
+    } <span class="tok-kw">else</span> {
+        <span class="tok-kw">let</span> remote = <span class="tok-ty">PathBuf</span>::<span class="tok-fn">from</span>(url.<span class="tok-fn">strip_prefix</span>(<span class="tok-str">"file://"</span>).<span class="tok-fn">unwrap_or</span>(url));
+        grit_lib::transfer::<span class="tok-fn">fetch_local</span>(git_dir, &remote, opts)
+    }
+}</code></pre>
+<p>The push side mirrors this with <code>push_remote</code> / <code>SmartHttpTransport::push</code> / <code>push_local</code>. See the example crate for the full version, including pushurl handling and remote-name resolution.</p>
+
+<h2 id="http">8. HTTP clients &amp; credentials</h2>
+<p>The HTTP transport is generic over an <code>HttpClient</code> — grit-lib owns the smart-HTTP protocol, you supply the transport. The trait is deliberately tiny, so you can wrap any HTTP stack:</p>
+<pre><code><span class="tok-kw">pub trait</span> <span class="tok-ty">HttpClient</span>: <span class="tok-ty">Send</span> + <span class="tok-ty">Sync</span> {
+    <span class="tok-kw">fn</span> <span class="tok-fn">get</span>(&<span class="tok-kw">self</span>, url: &<span class="tok-ty">str</span>, git_protocol: <span class="tok-ty">Option</span>&lt;&<span class="tok-ty">str</span>&gt;) -&gt; <span class="tok-ty">Result</span>&lt;<span class="tok-ty">Vec</span>&lt;<span class="tok-ty">u8</span>&gt;&gt;;
+    <span class="tok-kw">fn</span> <span class="tok-fn">post</span>(&<span class="tok-kw">self</span>, url: &<span class="tok-ty">str</span>, content_type: &<span class="tok-ty">str</span>, accept: &<span class="tok-ty">str</span>,
+            body: &[<span class="tok-ty">u8</span>], git_protocol: <span class="tok-ty">Option</span>&lt;&<span class="tok-ty">str</span>&gt;) -&gt; <span class="tok-ty">Result</span>&lt;<span class="tok-ty">Vec</span>&lt;<span class="tok-ty">u8</span>&gt;&gt;;
+    <span class="tok-kw">fn</span> <span class="tok-fn">git_protocol_header</span>(&<span class="tok-kw">self</span>) -&gt; <span class="tok-ty">Option</span>&lt;&<span class="tok-ty">str</span>&gt; { <span class="tok-ty">None</span> }
+    <span class="tok-kw">fn</span> <span class="tok-fn">smart_http_enabled</span>(&<span class="tok-kw">self</span>) -&gt; <span class="tok-ty">bool</span> { <span class="tok-kw">true</span> }
+}</code></pre>
+<p>With the <code>http-ureq</code> feature you get <code>UreqHttpClient</code> for free. To authenticate against a private remote, wire a <code>CredentialProvider</code>; the default <code>HelperCredentialProvider</code> runs the repo's configured <code>credential.helper</code> programs (e.g. <code>osxkeychain</code>) and is filled on a <code>401</code> then retried as HTTP Basic:</p>
+<pre><code><span class="tok-kw">use</span> grit_lib::config::ConfigSet;
+<span class="tok-kw">use</span> grit_lib::credentials::HelperCredentialProvider;
+<span class="tok-kw">use</span> grit_lib::transport::http::ureq_client::UreqHttpClient;
+
+<span class="tok-cmt">// Load the repo's git config (system + global + local), build the helper-backed</span>
+<span class="tok-cmt">// provider, and also honor http.proxy / http.cookieFile / http.extraHeader.</span>
+<span class="tok-kw">let</span> config = <span class="tok-ty">ConfigSet</span>::<span class="tok-fn">load</span>(<span class="tok-ty">Some</span>(git_dir), <span class="tok-kw">true</span>)?;
+<span class="tok-kw">let</span> provider = <span class="tok-ty">HelperCredentialProvider</span>::<span class="tok-fn">new</span>(config.<span class="tok-fn">clone</span>());
+<span class="tok-kw">let</span> client = <span class="tok-ty">UreqHttpClient</span>::<span class="tok-fn">from_config</span>(&config)?
+    .<span class="tok-fn">with_credential_provider</span>(<span class="tok-ty">Box</span>::<span class="tok-fn">new</span>(provider))
+    .<span class="tok-fn">with_git_protocol</span>(<span class="tok-str">"version=2"</span>);</code></pre>
+<div class="note"><strong>Non-interactive by design.</strong> When no helper can supply a credential, the provider returns a typed <code>Error::Auth</code> — it never opens a TTY prompt or hangs. Interactive prompting, if you want it, is an embedder concern you layer on top.</div>
+
+<h2 id="reference">9. API reference</h2>
+<table>
+<thead><tr><th>Item</th><th>Path</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>Transport</code> / <code>Connection</code></td><td><code>grit_lib::transport</code></td><td>open a connection to a remote</td></tr>
+<tr><td><code>Service</code>, <code>ConnectOptions</code></td><td><code>grit_lib::transport</code></td><td><code>UploadPack</code>/<code>ReceivePack</code>; protocol version</td></tr>
+<tr><td><code>GitDaemonTransport</code></td><td><code>grit_lib::transport</code></td><td><code>git://</code> transport</td></tr>
+<tr><td><code>SshTransport</code></td><td><code>grit_lib::transport</code></td><td>ssh transport (pluggable command)</td></tr>
+<tr><td><code>SmartHttpTransport&lt;C&gt;</code>, <code>HttpClient</code></td><td><code>grit_lib::transport::http</code></td><td>smart-HTTP over a pluggable client</td></tr>
+<tr><td><code>UreqHttpClient</code></td><td><code>grit_lib::transport::http::ureq_client</code></td><td>default HTTP client (<code>http-ureq</code> feature)</td></tr>
+<tr><td><code>fetch_remote</code>, <code>Progress</code>, <code>NoProgress</code></td><td><code>grit_lib::fetch</code></td><td>fetch over a <code>Connection</code></td></tr>
+<tr><td><code>http_fetch</code></td><td><code>grit_lib::transport::http</code></td><td>fetch over HTTP (no explicit connection)</td></tr>
+<tr><td><code>push_remote</code>, <code>push_http</code></td><td><code>grit_lib::push</code></td><td>push over a connection / over HTTP</td></tr>
+<tr><td><code>fetch_local</code>, <code>push_local</code></td><td><code>grit_lib::transfer</code></td><td>local (<code>file://</code>) fetch/push</td></tr>
+<tr><td><code>FetchOptions</code>, <code>PushOptions</code>, <code>PushRefSpec</code></td><td><code>grit_lib::transfer</code></td><td>operation inputs</td></tr>
+<tr><td><code>FetchOutcome</code>, <code>PushOutcome</code></td><td><code>grit_lib::transfer</code></td><td>operation results</td></tr>
+<tr><td><code>PushRefStatus</code>, <code>PushRefResult</code></td><td><code>grit_lib::push_report</code></td><td>per-ref push status</td></tr>
+<tr><td><code>CredentialProvider</code>, <code>HelperCredentialProvider</code></td><td><code>grit_lib::credentials</code></td><td>HTTP auth</td></tr>
+<tr><td><code>ConfigSet</code></td><td><code>grit_lib::config</code></td><td>git config (helpers, proxy, cookies)</td></tr>
+</tbody>
+</table>
+
+<h2 id="examples">10. Runnable examples</h2>
+<p>The <code>grit-examples</code> crate ships two complete CLIs built entirely on these APIs:</p>
+<ul>
+<li><strong><code>gritx-fetch</code></strong> — fetch from a repo's default remote, auto-discovering the transport and authentication from its URL.</li>
+<li><strong><code>gritx-push</code></strong> — the push counterpart, with <code>[+]&lt;src&gt;[:&lt;dst&gt;]</code> refspecs, <code>--force</code>, and <code>--push-option</code>.</li>
+</ul>
+<pre><code><span class="tok-cmt"># from a checkout of grit</span>
+cargo run -p grit-examples --bin gritx-fetch -- origin
+cargo run -p grit-examples --bin gritx-push  -- origin</code></pre>
+<p>Their shared <code>src/remote.rs</code> is a compact, real-world reference for the scheme-dispatch and credential wiring sketched above.</p>
+
+<footer>
+Part of the <a href="https://github.com/gitbutlerapp/grit">grit</a> project · transport stack introduced in <a href="https://github.com/gitbutlerapp/grit/pull/838">PR #838</a>, shipped in grit-lib 0.4.
+</footer>
+
+</body>
+</html>
