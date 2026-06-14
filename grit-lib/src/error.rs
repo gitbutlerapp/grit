@@ -85,6 +85,10 @@ pub enum Error {
     #[error("path error: {0}")]
     PathError(String),
 
+    /// A tree/index path component is forbidden (`.git`, HFS/NTFS aliases, etc.).
+    #[error("invalid path '{0}'")]
+    InvalidPath(String),
+
     /// A configuration file parsing or access error.
     #[error("config error: {0}")]
     ConfigError(String),

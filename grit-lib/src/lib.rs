@@ -182,6 +182,7 @@ pub mod pack_rev;
 #[cfg(feature = "test-tools")]
 pub mod parse_options_test_tool;
 pub mod patch_ids;
+pub mod path;
 pub mod path_walk;
 pub mod pathspec;
 pub mod pkt_line;

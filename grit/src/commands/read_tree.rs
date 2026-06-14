@@ -13,6 +13,7 @@ use grit_lib::ignore::IgnoreMatcher;
 use grit_lib::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_SYMLINK, MODE_TREE};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
+use grit_lib::path::{verify_path_component, PathProtection};
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
@@ -81,129 +82,6 @@ pub struct Args {
 
     /// Tree-ish arguments (1 for reset, 2 for 2-way merge, 3 for 3-way merge).
     pub trees: Vec<String>,
-}
-
-/// Path protection settings from core.protectHFS / core.protectNTFS.
-#[derive(Clone, Copy)]
-struct PathProtection {
-    protect_hfs: bool,
-    protect_ntfs: bool,
-}
-
-impl PathProtection {
-    fn load(git_dir: &Path) -> Self {
-        let config = ConfigSet::load(Some(git_dir), true).unwrap_or_else(|_| ConfigSet::new());
-        let protect_hfs = config
-            .get("core.protectHFS")
-            .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        let protect_ntfs = config
-            .get("core.protectNTFS")
-            .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        Self {
-            protect_hfs,
-            protect_ntfs,
-        }
-    }
-}
-
-/// Check whether a single path component (file or directory name) is
-/// forbidden.  Returns `Err` with a message when the name is rejected.
-fn verify_path_component(name: &[u8], prot: PathProtection) -> Result<()> {
-    // Always reject "." and ".."
-    if name == b"." {
-        bail!("invalid path '.'");
-    }
-    if name == b".." {
-        bail!("invalid path '..'");
-    }
-
-    // Always reject ".git" (exact lowercase — matches C git's verify_dotfile)
-    if name == b".git" {
-        bail!("invalid path '.git'");
-    }
-
-    // HFS / NTFS case-insensitive ".git" checks.
-    if (prot.protect_hfs || prot.protect_ntfs) && name.len() == 4 && name[0] == b'.' {
-        let rest = &name[1..];
-        if rest.eq_ignore_ascii_case(b"git") {
-            bail!("invalid path '{}'", String::from_utf8_lossy(name));
-        }
-    }
-    if prot.protect_hfs && hfs_equivalent_to_dotgit(name) {
-        bail!("invalid path '{}'", String::from_utf8_lossy(name));
-    }
-
-    // NTFS short-name check: "git~1" (case-insensitive)
-    if prot.protect_ntfs && name.eq_ignore_ascii_case(b"git~1") {
-        bail!("invalid path '{}'", String::from_utf8_lossy(name));
-    }
-
-    if prot.protect_ntfs {
-        // Backslashes are treated as path separators on NTFS, so reject
-        // confusing names that rely on '\' being a regular byte.
-        if name.contains(&b'\\') {
-            bail!("invalid path '{}'", String::from_utf8_lossy(name));
-        }
-
-        // Reject NTFS-equivalent ".git" names such as ".git ", ".git...",
-        // and alternate stream forms like ".git...:stream".
-        if ntfs_equivalent_to_dotgit(name) {
-            bail!("invalid path '{}'", String::from_utf8_lossy(name));
-        }
-    }
-
-    if prot.protect_hfs || prot.protect_ntfs {
-        let Ok(s) = std::str::from_utf8(name) else {
-            return Ok(());
-        };
-        if grit_lib::dotfile::is_hfs_dot_gitmodules(s)
-            || grit_lib::dotfile::is_ntfs_dot_gitmodules(s)
-            || grit_lib::dotfile::is_hfs_dot_gitattributes(s)
-            || grit_lib::dotfile::is_ntfs_dot_gitattributes(s)
-            || grit_lib::dotfile::is_hfs_dot_gitignore(s)
-            || grit_lib::dotfile::is_ntfs_dot_gitignore(s)
-            || grit_lib::dotfile::is_hfs_dot_mailmap(s)
-            || grit_lib::dotfile::is_ntfs_dot_mailmap(s)
-        {
-            bail!("invalid path '{}'", String::from_utf8_lossy(name));
-        }
-    }
-
-    Ok(())
-}
-
-fn ntfs_equivalent_to_dotgit(name: &[u8]) -> bool {
-    if name.len() < 4 || !name[..4].eq_ignore_ascii_case(b".git") {
-        return false;
-    }
-
-    let rest = &name[4..];
-    if rest.is_empty() {
-        return true;
-    }
-
-    let head = rest.split(|b| *b == b':').next().unwrap_or(rest);
-    let mut trimmed_len = head.len();
-    while trimmed_len > 0 && matches!(head[trimmed_len - 1], b'.' | b' ') {
-        trimmed_len -= 1;
-    }
-
-    trimmed_len == 0
-}
-
-fn hfs_equivalent_to_dotgit(name: &[u8]) -> bool {
-    let Ok(path) = std::str::from_utf8(name) else {
-        return false;
-    };
-
-    let folded: String = path
-        .chars()
-        .filter(|ch| !matches!(*ch, '\u{200c}' | '\u{200d}'))
-        .flat_map(char::to_lowercase)
-        .collect();
-    folded == ".git"
 }
 
 /// Run `grit read-tree`.
@@ -668,7 +546,7 @@ fn tree_to_index_entries(
             let name = String::from_utf8_lossy(&te.name);
             bail!("entry '{}' has a null sha1", name);
         }
-        verify_path_component(&te.name, prot)?;
+        verify_path_component(&te.name, prot, te.mode == MODE_SYMLINK)?;
 
         let name = String::from_utf8_lossy(&te.name).into_owned();
         let path = if prefix.is_empty() {

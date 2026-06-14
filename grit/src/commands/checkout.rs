@@ -36,6 +36,7 @@ use grit_lib::merge_trees::{
 };
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
+use grit_lib::path::{verify_path, PathProtection};
 use grit_lib::porcelain::checkout::{
     apply_index_file_mode, glob_matches, is_glob_pattern, remove_empty_parent_dirs,
     write_to_worktree,
@@ -417,6 +418,26 @@ thread_local! {
     /// (matches Git's `o->internal.dir` populated from `setup_standard_excludes`).
     static OVERWRITE_IGNORE: Cell<bool> = const { Cell::new(false) };
     static CHECKOUT_SMUDGE_CONTEXT: RefCell<Option<(Option<String>, String)>> = const { RefCell::new(None) };
+    /// Memoized `core.protectHFS`/`core.protectNTFS` resolution, keyed by `git_dir`, so the
+    /// per-entry path verification in [`write_blob_to_worktree`] doesn't re-read config for
+    /// every file in a large checkout. Keyed (not a single slot) so submodule recursion, which
+    /// switches `git_dir`, picks up the right settings.
+    static PATH_PROTECTION: RefCell<Option<(PathBuf, PathProtection)>> = const { RefCell::new(None) };
+}
+
+/// Resolve [`PathProtection`] for `git_dir`, memoized per thread (see [`PATH_PROTECTION`]).
+fn cached_path_protection(git_dir: &Path) -> PathProtection {
+    PATH_PROTECTION.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if let Some((dir, prot)) = slot.as_ref() {
+            if dir == git_dir {
+                return *prot;
+            }
+        }
+        let prot = PathProtection::load(git_dir);
+        *slot = Some((git_dir.to_path_buf(), prot));
+        prot
+    })
 }
 
 fn with_checkout_smudge_context<T>(
@@ -7391,6 +7412,7 @@ fn checkout_index_to_worktree_inner(
     }
 
     // Write new/modified entries
+    let prot = cached_path_protection(&repo.git_dir);
     for entry in &new_index.entries {
         if entry.stage() != 0 {
             continue;
@@ -7398,6 +7420,13 @@ fn checkout_index_to_worktree_inner(
         if entry.skip_worktree() {
             continue;
         }
+
+        // Refuse to materialize a path whose components alias `.git` (or `.`/`..`,
+        // or an HFS/NTFS fold of `.git`). A crafted tree could otherwise have
+        // `checkout`/`clone` write into the repository's own `.git` directory
+        // (CVE-2014-9390). This covers both gitlink directory creation below and
+        // the blob write further down.
+        verify_path(&entry.path, prot, entry.mode == MODE_SYMLINK)?;
 
         // Skip gitlink (submodule) entries — their OIDs reference commits
         // in the submodule's object store, not blobs in ours.
@@ -7605,6 +7634,15 @@ fn write_blob_to_worktree(
     full_smudge_meta: bool,
     delayed_checkout: Option<&mut DelayedProcessCheckout>,
 ) -> Result<bool> {
+    // Universal safety net: every checkout write path funnels through here, so reject
+    // `.git`-aliasing components before touching disk (CVE-2014-9390). Cheap after the
+    // first call thanks to the thread-local config memo.
+    verify_path(
+        rel_path.as_bytes(),
+        cached_path_protection(&repo.git_dir),
+        mode == MODE_SYMLINK,
+    )?;
+
     if mode == MODE_GITLINK {
         // Path checkout from index: always materialize (may follow symlinked submodule paths).
         checkout_gitlink_worktree_entry(repo, work_tree, rel_path, oid, false)?;
