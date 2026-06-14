@@ -452,7 +452,7 @@ pub fn run(args: Args) -> Result<()> {
     if let Err(message) = grit_lib::pathspec::validate_attr_pathspecs(&pathspec_display) {
         anyhow::bail!("{message}");
     }
-    if pathspec_filter.is_empty() && !cwd_prefix.is_empty() && !args.full_name {
+    if pathspec_filter.is_empty() && !cwd_prefix.is_empty()  {
         pathspec_filter.push(Pathspec::Literal(cwd_prefix.clone()));
         pathspec_display.push(".".to_string());
     }
