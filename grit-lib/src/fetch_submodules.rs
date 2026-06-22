@@ -217,7 +217,7 @@ pub fn collect_changed_submodules_for_fetch(
                 if !is_gitlink_mode(&e.new_mode) {
                     continue;
                 }
-                record_gitlink(e.path().to_string(), e.new_oid, &commit.tree)?;
+                record_gitlink(e.path().to_string_lossy().into_owned(), e.new_oid, &commit.tree)?;
             }
         } else if parents.len() == 1 {
             let pobj = odb.read(&parents[0])?;
@@ -247,8 +247,8 @@ pub fn collect_changed_submodules_for_fetch(
                     .new_path
                     .as_deref()
                     .or(e.old_path.as_deref())
-                    .unwrap_or("")
-                    .to_string();
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if path.is_empty() {
                     continue;
                 }

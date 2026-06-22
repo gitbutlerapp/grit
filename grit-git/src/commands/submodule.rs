@@ -176,6 +176,7 @@ fn run_with_top_opts(top: SubmoduleTopOpts, args: Args) -> Result<()> {
 }
 use grit_lib::config::{canonical_key, ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::{diff_index_to_tree, format_mode, head_path_states, DiffEntry, DiffStatus};
+use grit_lib::repo_path::RepoPathBuf;
 use grit_lib::error::Error as LibError;
 use grit_lib::gitmodules::check_submodule_name;
 use grit_lib::index::{Index, IndexEntry, MODE_GITLINK};
@@ -4490,8 +4491,12 @@ fn resolve_summary_base_tree(repo: &Repository, commit_spec: &str) -> Result<Opt
     }
 }
 
-fn summary_display_path(entry: &DiffEntry) -> &str {
-    entry.old_path.as_deref().unwrap_or_else(|| entry.path())
+fn summary_display_path(entry: &DiffEntry) -> std::borrow::Cow<'_, str> {
+    entry
+        .old_path
+        .as_deref()
+        .unwrap_or_else(|| entry.path())
+        .to_string_lossy()
 }
 
 fn pathspec_selected(pathspecs: &[String], sm_path: &str) -> bool {
@@ -4736,8 +4741,8 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
                 }
                 out.push(DiffEntry {
                     status: DiffStatus::Modified,
-                    old_path: Some(path_str.clone()),
-                    new_path: Some(path_str),
+                    old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
+                    new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                     old_mode: format_mode(MODE_GITLINK),
                     new_mode: format_mode(MODE_GITLINK),
                     old_oid: ie.oid,
@@ -4747,8 +4752,8 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
             } else if let Some(dst_oid) = grit_lib::diff::read_submodule_head_oid(&sub_path) {
                 out.push(DiffEntry {
                     status: DiffStatus::TypeChanged,
-                    old_path: Some(path_str.clone()),
-                    new_path: Some(path_str),
+                    old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
+                    new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                     old_mode: format_mode(ie.mode),
                     new_mode: format_mode(MODE_GITLINK),
                     old_oid: ie.oid,
@@ -4790,8 +4795,8 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
                     }
                     extra.push(DiffEntry {
                         status: DiffStatus::Modified,
-                        old_path: Some(path_str.clone()),
-                        new_path: Some(path_str),
+                        old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
+                        new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                         old_mode: format!("{:o}", MODE_GITLINK),
                         new_mode: format!("{:o}", MODE_GITLINK),
                         old_oid: ie.oid,
@@ -4828,8 +4833,9 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
                     };
                     replacements.push(DiffEntry {
                         status,
-                        old_path: (old_mode != 0).then_some(path_str.clone()),
-                        new_path: Some(path_str),
+                        old_path: (old_mode != 0)
+                            .then(|| RepoPathBuf::from_bytes(ie.path.clone())),
+                        new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                         old_mode: format_mode(old_mode),
                         new_mode: format_mode(MODE_GITLINK),
                         old_oid,
@@ -4839,7 +4845,7 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
                 } else if ie.mode == MODE_GITLINK && !work_tree.join(&path_str).exists() {
                     replacements.push(DiffEntry {
                         status: DiffStatus::Deleted,
-                        old_path: Some(path_str.clone()),
+                        old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                         new_path: None,
                         old_mode: format_mode(MODE_GITLINK),
                         new_mode: "000000".to_owned(),
@@ -4850,8 +4856,8 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
                 }
             }
             for replacement in replacements {
-                let key = replacement.path().to_string();
-                entries.retain(|e| e.path() != key);
+                let key = replacement.path().to_owned();
+                entries.retain(|e| e.path() != &*key);
                 entries.push(replacement);
             }
             entries.sort_by(|a, b| a.path().cmp(b.path()));
@@ -4867,17 +4873,17 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
             continue;
         }
         let sm_path = summary_display_path(e);
-        if !pathspec_selected(&pathspecs, sm_path) {
+        if !pathspec_selected(&pathspecs, &sm_path) {
             continue;
         }
-        let display_path = summary_display_path_from_cwd(work_tree, &cwd, sm_path);
+        let display_path = summary_display_path_from_cwd(work_tree, &cwd, &sm_path);
 
         if args.for_status
             && e.status != DiffStatus::Added
             && submodule_ignore_all_for_summary(
                 local_cfg_for_ignore.as_ref(),
                 &ignore_all_for_status,
-                sm_path,
+                &sm_path,
             )
         {
             continue;
@@ -4888,7 +4894,7 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
         let src_gitlink = mode_is_gitlink(&e.old_mode);
         let dst_gitlink = mode_is_gitlink(&e.new_mode);
 
-        let sub_path = submodule_work_tree_for_summary(work_tree, sm_path);
+        let sub_path = submodule_work_tree_for_summary(work_tree, &sm_path);
         if !args.cached
             && !sub_path.join(".git").exists()
             && !oid_dst.is_zero()
@@ -4908,10 +4914,10 @@ fn run_summary(args: &SummaryArgs, _quiet: bool) -> Result<()> {
 
         if src_gitlink && dst_gitlink {
             let _ = submodule_fetch_gitlink_if_missing(
-                &grit_bin, work_tree, sm_path, &sub_path, &src_hex,
+                &grit_bin, work_tree, &sm_path, &sub_path, &src_hex,
             );
             let _ = submodule_fetch_gitlink_if_missing(
-                &grit_bin, work_tree, sm_path, &sub_path, &dst_hex,
+                &grit_bin, work_tree, &sm_path, &sub_path, &dst_hex,
             );
         }
 

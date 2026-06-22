@@ -877,14 +877,12 @@ fn stash_is_intent_to_add_only(
         return false;
     }
     for e in staged {
-        let p = e.path().to_owned();
-        if !ita_paths.contains(&p) {
+        if !ita_paths.contains(e.path().to_string_lossy().as_ref()) {
             return false;
         }
     }
     for e in unstaged {
-        let p = e.path().to_owned();
-        if !ita_paths.contains(&p) {
+        if !ita_paths.contains(e.path().to_string_lossy().as_ref()) {
             return false;
         }
     }
@@ -1150,18 +1148,18 @@ fn do_stash_patch_push(
     let mut candidate_paths: BTreeSet<String> = BTreeSet::new();
     for e in &staged {
         if let Some(p) = e.new_path.as_ref().or(e.old_path.as_ref()) {
-            if has_pathspec && !matches_pathspec(p, &normalized_pathspec) {
+            if has_pathspec && !matches_pathspec(&p.to_string_lossy(), &normalized_pathspec) {
                 continue;
             }
-            candidate_paths.insert(p.clone());
+            candidate_paths.insert(p.to_string_lossy().into_owned());
         }
     }
     for e in &unstaged {
         if let Some(p) = e.new_path.as_ref().or(e.old_path.as_ref()) {
-            if has_pathspec && !matches_pathspec(p, &normalized_pathspec) {
+            if has_pathspec && !matches_pathspec(&p.to_string_lossy(), &normalized_pathspec) {
                 continue;
             }
-            candidate_paths.insert(p.clone());
+            candidate_paths.insert(p.to_string_lossy().into_owned());
         }
     }
 
@@ -1742,11 +1740,15 @@ fn do_push_pathspec(
     // Filter by pathspec
     let matching_staged: Vec<_> = staged
         .iter()
-        .filter(|e| stash_pathspec_matches_worktree(repo, index, work_tree, e.path(), pathspec))
+        .filter(|e| {
+            stash_pathspec_matches_worktree(repo, index, work_tree, &e.path().to_string_lossy(), pathspec)
+        })
         .collect();
     let matching_unstaged: Vec<_> = unstaged
         .iter()
-        .filter(|e| stash_pathspec_matches_worktree(repo, index, work_tree, e.path(), pathspec))
+        .filter(|e| {
+            stash_pathspec_matches_worktree(repo, index, work_tree, &e.path().to_string_lossy(), pathspec)
+        })
         .collect();
 
     let mut matched_untracked: Vec<String> = untracked_files.to_vec();
@@ -1768,12 +1770,12 @@ fn do_push_pathspec(
     let mut matched_paths: BTreeSet<String> = BTreeSet::new();
     for e in &matching_staged {
         if let Some(p) = e.new_path.as_ref().or(e.old_path.as_ref()) {
-            matched_paths.insert(p.clone());
+            matched_paths.insert(p.to_string_lossy().into_owned());
         }
     }
     for e in &matching_unstaged {
         if let Some(p) = e.new_path.as_ref().or(e.old_path.as_ref()) {
-            matched_paths.insert(p.clone());
+            matched_paths.insert(p.to_string_lossy().into_owned());
         }
     }
     for u in &matched_untracked {
@@ -2043,8 +2045,8 @@ fn do_push_staged(
     // Revert staged changes in the worktree
     for change in &staged {
         if let Some(path) = change.new_path.as_ref().or(change.old_path.as_ref()) {
-            let file_path = work_tree.join(path);
-            if !head_paths.contains(path) {
+            let file_path = path.to_fs_path(work_tree);
+            if !head_paths.contains(path.to_string_lossy().as_ref()) {
                 // New file (added) — remove from worktree
                 let _ = fs::remove_file(&file_path);
                 if let Some(parent) = file_path.parent() {
@@ -2053,7 +2055,7 @@ fn do_push_staged(
             } else {
                 // Modified file — restore HEAD content
                 for te in &head_tree_entries {
-                    if te.path == *path {
+                    if *path == te.path {
                         let blob = repo.odb.read(&te.oid)?;
                         if te.mode == MODE_SYMLINK {
                             let target = String::from_utf8(blob.data)
@@ -2644,13 +2646,22 @@ fn do_show(repo: &Repository, parsed: ParsedStashShow) -> Result<()> {
 }
 
 fn stash_stat_path_display(entry: &DiffEntry) -> String {
-    let old_path = entry.old_path.as_deref().unwrap_or("");
-    let new_path = entry.new_path.as_deref().unwrap_or("");
+    // TODO(byte-paths): stat display path is lossy (Phase 3 quoting).
+    let old_path = entry
+        .old_path
+        .as_deref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let new_path = entry
+        .new_path
+        .as_deref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     match entry.status {
         DiffStatus::Renamed | DiffStatus::Copied => {
-            grit_lib::diff::format_rename_path(old_path, new_path)
+            grit_lib::diff::format_rename_path(&old_path, &new_path)
         }
-        _ => new_path.to_string(),
+        _ => new_path,
     }
 }
 

@@ -2820,7 +2820,7 @@ fn run_test_tool_bloom(rest: &[String]) -> Result<()> {
                 std::collections::BTreeSet::new();
             for d in diffs {
                 if let Some(path) = d.new_path.or(d.old_path) {
-                    bloom_collect_paths_with_prefixes(&path, &mut changed_paths);
+                    bloom_collect_paths_with_prefixes(&path.to_string_lossy(), &mut changed_paths);
                 }
             }
 

@@ -69,7 +69,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
     let mut staged = 0;
     for entry in &model.unstaged {
         let path = entry_path(entry);
-        if !matches(path) {
+        if !matches(&path) {
             continue;
         }
         if entry.status == DiffStatus::Deleted {
@@ -77,7 +77,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
                 staged += 1;
             }
         } else {
-            stage_worktree_file(repo, &work_tree, path, &mut index)?;
+            stage_worktree_file(repo, &work_tree, &path, &mut index)?;
             staged += 1;
         }
     }

@@ -48,7 +48,10 @@ pub fn checkout_between_trees(
     for change in &changes {
         if change.status == DiffStatus::Deleted {
             if let Some(path) = &change.old_path {
-                let abs = work_tree.join(path);
+                // TODO(byte-paths): worktree write/stat paths route through the &str
+                // worktree API and stay lossy until Phase 2 migrates working-tree I/O.
+                let path = path.to_string_lossy();
+                let abs = work_tree.join(&*path);
                 let _ = std::fs::remove_file(&abs);
                 remove_empty_parent_dirs(&work_tree, &abs);
                 index.remove(path.as_bytes());
@@ -59,10 +62,11 @@ pub fn checkout_between_trees(
         let Some(path) = &change.new_path else {
             continue;
         };
+        let path = path.to_string_lossy();
         let mode = u32::from_str_radix(&change.new_mode, 8).unwrap_or(MODE_REGULAR);
         let object = repo.odb.read(&change.new_oid)?;
-        write_to_worktree(&work_tree, path, &object.data, mode)?;
-        let entry = entry_from_stat(&work_tree.join(path), path.as_bytes(), change.new_oid, mode)?;
+        write_to_worktree(&work_tree, &path, &object.data, mode)?;
+        let entry = entry_from_stat(&work_tree.join(&*path), path.as_bytes(), change.new_oid, mode)?;
         index.add_or_replace(entry);
     }
 

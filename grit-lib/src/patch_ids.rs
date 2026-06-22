@@ -22,6 +22,7 @@ use crate::error::Result;
 use crate::merge_file;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::repo_path::RepoPath;
 
 /// How to compute a patch-ID from unified diff text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,12 +467,12 @@ fn compute_patch_id_filtered(
             .old_path
             .as_deref()
             .or(entry.new_path.as_deref())
-            .unwrap_or("");
+            .unwrap_or(RepoPath::from_str(""));
         let new_path = entry
             .new_path
             .as_deref()
             .or(entry.old_path.as_deref())
-            .unwrap_or("");
+            .unwrap_or(RepoPath::from_str(""));
         let mut old_path_buf = old_path.as_bytes().to_vec();
         let mut new_path_buf = new_path.as_bytes().to_vec();
         let len1 = remove_space_bytes(&mut old_path_buf);
@@ -559,7 +560,7 @@ fn diff_entry_matches_paths(entry: &DiffEntry, paths: &[String]) -> bool {
         .as_deref()
         .into_iter()
         .chain(entry.new_path.as_deref())
-        .any(|path| crate::pathspec::matches_pathspec_list(path, paths))
+        .any(|path| crate::pathspec::matches_pathspec_list(&path.to_string_lossy(), paths))
 }
 
 fn parse_mode_u32(mode: &str) -> u32 {

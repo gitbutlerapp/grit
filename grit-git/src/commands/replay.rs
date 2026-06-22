@@ -1197,13 +1197,12 @@ fn detect_side_renames(
     all_paths.extend(base.keys());
     all_paths.extend(side.keys());
     for path in all_paths {
-        let path_str = String::from_utf8_lossy(path).to_string();
         match (base.get(path), side.get(path)) {
             (Some(be), None) => {
                 if !rename_sources.contains(path) {
                     diff_entries.push(DiffEntry {
                         status: DiffStatus::Deleted,
-                        old_path: Some(path_str),
+                        old_path: Some(grit_lib::repo_path::RepoPathBuf::from_bytes(path.to_vec())),
                         new_path: None,
                         old_mode: format!("{:06o}", be.mode),
                         new_mode: String::new(),
@@ -1218,7 +1217,7 @@ fn detect_side_renames(
                     diff_entries.push(DiffEntry {
                         status: DiffStatus::Added,
                         old_path: None,
-                        new_path: Some(path_str),
+                        new_path: Some(grit_lib::repo_path::RepoPathBuf::from_bytes(path.to_vec())),
                         old_mode: String::new(),
                         new_mode: format!("{:06o}", se.mode),
                         old_oid: zero_oid,
@@ -1231,7 +1230,7 @@ fn detect_side_renames(
                 if rename_sources.contains(path) && be.oid != se.oid {
                     diff_entries.push(DiffEntry {
                         status: DiffStatus::Deleted,
-                        old_path: Some(path_str),
+                        old_path: Some(grit_lib::repo_path::RepoPathBuf::from_bytes(path.to_vec())),
                         new_path: None,
                         old_mode: format!("{:06o}", be.mode),
                         new_mode: String::new(),

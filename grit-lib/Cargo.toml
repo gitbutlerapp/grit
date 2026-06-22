@@ -33,6 +33,7 @@ time.workspace = true
 hex.workspace = true
 tempfile.workspace = true
 similar.workspace = true
+bstr.workspace = true
 merge3.workspace = true
 imara-diff.workspace = true
 regex.workspace = true

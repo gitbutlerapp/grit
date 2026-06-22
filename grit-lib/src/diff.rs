@@ -31,7 +31,9 @@ use crate::error::{Error, Result};
 use crate::index::{Index, IndexEntry};
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
+use crate::repo_path::{RepoPath, RepoPathBuf};
 use crate::userdiff::FuncnameMatcher;
+use std::borrow::Cow;
 
 /// Splits imara-diff unified body (concatenated hunks) into per-hunk slices for post-processing.
 fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
@@ -1369,10 +1371,11 @@ impl DiffStatus {
 pub struct DiffEntry {
     /// The status of this change.
     pub status: DiffStatus,
-    /// Path in the "old" side (None for Added).
-    pub old_path: Option<String>,
-    /// Path in the "new" side (None for Deleted).
-    pub new_path: Option<String>,
+    /// Path in the "old" side (None for Added). Byte-true (Git paths are not
+    /// guaranteed UTF-8); use [`RepoPath::display`]/[`RepoPath::to_str`] to render.
+    pub old_path: Option<RepoPathBuf>,
+    /// Path in the "new" side (None for Deleted). Byte-true.
+    pub new_path: Option<RepoPathBuf>,
     /// Old file mode (as octal string, e.g. "100644").
     pub old_mode: String,
     /// New file mode.
@@ -1386,32 +1389,45 @@ pub struct DiffEntry {
 }
 
 impl DiffEntry {
-    /// The primary path for display (new_path for adds, old_path for deletes).
+    /// The primary path for this entry (new_path for adds, old_path for
+    /// deletes), as byte-true [`RepoPath`]. Empty if neither side is set.
     #[must_use]
-    pub fn path(&self) -> &str {
+    pub fn path(&self) -> &RepoPath {
         self.new_path
             .as_deref()
             .or(self.old_path.as_deref())
-            .unwrap_or("")
+            .unwrap_or(RepoPath::from_str(""))
+    }
+
+    /// The primary path rendered lossily as a UTF-8 string. Convenience for the
+    /// many display/format call sites; non-UTF-8 bytes become U+FFFD. For
+    /// round-trip-safe output use `quote_path`.
+    #[must_use]
+    pub fn path_str(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(self.path().as_bytes())
     }
 
     /// Return a human-oriented path display for this entry.
     ///
     /// For renames and copies this returns `old -> new`; for all other entry
-    /// kinds this returns the primary path.
+    /// kinds this returns the primary path. Lossy for non-UTF-8 paths.
     #[must_use]
     pub fn display_path(&self) -> String {
         match self.status {
             DiffStatus::Renamed | DiffStatus::Copied => {
-                let old = self.old_path.as_deref().unwrap_or("");
-                let new = self.new_path.as_deref().unwrap_or("");
+                let old = self.old_path.as_deref().map(RepoPath::as_bytes).unwrap_or(b"");
+                let new = self.new_path.as_deref().map(RepoPath::as_bytes).unwrap_or(b"");
                 if old.is_empty() || new.is_empty() {
-                    self.path().to_owned()
+                    self.path_str().into_owned()
                 } else {
-                    format!("{old} -> {new}")
+                    format!(
+                        "{} -> {}",
+                        String::from_utf8_lossy(old),
+                        String::from_utf8_lossy(new)
+                    )
                 }
             }
-            _ => self.path().to_owned(),
+            _ => self.path_str().into_owned(),
         }
     }
 }
@@ -1457,7 +1473,7 @@ pub fn diff_trees(
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
 ) -> Result<Vec<DiffEntry>> {
-    diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, false)
+    diff_trees_opts(odb, old_tree_oid, new_tree_oid, RepoPath::from_str(prefix), false)
 }
 
 /// Like `diff_trees` but with `show_trees` flag: when true, emit entries for
@@ -1469,14 +1485,14 @@ pub fn diff_trees_show_tree_entries(
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
 ) -> Result<Vec<DiffEntry>> {
-    diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, true)
+    diff_trees_opts(odb, old_tree_oid, new_tree_oid, RepoPath::from_str(prefix), true)
 }
 
 fn diff_trees_opts(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
-    prefix: &str,
+    prefix: &RepoPath,
     show_trees: bool,
 ) -> Result<Vec<DiffEntry>> {
     let old_entries = match old_tree_oid {
@@ -1517,7 +1533,7 @@ fn diff_tree_entries_opts(
     odb: &Odb,
     old: &[TreeEntry],
     new: &[TreeEntry],
-    prefix: &str,
+    prefix: &RepoPath,
     show_trees: bool,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
@@ -1547,8 +1563,7 @@ fn diff_tree_entries_opts(
                     std::cmp::Ordering::Equal => {
                         // Both present — check for changes
                         if o.oid != n.oid || o.mode != n.mode {
-                            let name_str = String::from_utf8_lossy(&o.name);
-                            let path = format_path(prefix, &name_str);
+                            let path = format_path(prefix, &o.name);
                             if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 // Both are trees
                                 if show_trees {
@@ -1625,12 +1640,11 @@ fn diff_tree_entries_opts(
 fn emit_deleted_opts(
     odb: &Odb,
     entry: &TreeEntry,
-    prefix: &str,
+    prefix: &RepoPath,
     show_trees: bool,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
-    let name_str = String::from_utf8_lossy(&entry.name);
-    let path = format_path(prefix, &name_str);
+    let path = format_path(prefix, &entry.name);
     if is_tree_mode(entry.mode) {
         if show_trees {
             result.push(DiffEntry {
@@ -1665,12 +1679,11 @@ fn emit_deleted_opts(
 fn emit_added_opts(
     odb: &Odb,
     entry: &TreeEntry,
-    prefix: &str,
+    prefix: &RepoPath,
     show_trees: bool,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
-    let name_str = String::from_utf8_lossy(&entry.name);
-    let path = format_path(prefix, &name_str);
+    let path = format_path(prefix, &entry.name);
     if is_tree_mode(entry.mode) {
         if show_trees {
             result.push(DiffEntry {
@@ -1780,8 +1793,8 @@ pub fn diff_index_to_tree(
                 if te.oid != ie.oid || te.mode != ie.mode {
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
-                        old_path: Some(path.clone()),
-                        new_path: Some(path),
+                        old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
+                        new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                         old_mode: format_mode(te.mode),
                         new_mode: format_mode(ie.mode),
                         old_oid: te.oid,
@@ -1795,7 +1808,7 @@ pub fn diff_index_to_tree(
                 result.push(DiffEntry {
                     status: DiffStatus::Added,
                     old_path: None,
-                    new_path: Some(path),
+                    new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                     old_mode: "000000".to_owned(),
                     new_mode: format_mode(ie.mode),
                     old_oid: zero_oid(),
@@ -1811,10 +1824,11 @@ pub fn diff_index_to_tree(
             continue;
         }
         tree_map.remove(path.as_str());
+        // TODO(byte-paths): lossy until index/worktree sources migrate (Phase 2/4)
         result.push(DiffEntry {
             status: DiffStatus::Unmerged,
-            old_path: Some(path.clone()),
-            new_path: Some(path.clone()),
+            old_path: Some(RepoPathBuf::from_string(path.clone())),
+            new_path: Some(RepoPathBuf::from_string(path.clone())),
             old_mode: "000000".to_owned(),
             new_mode: format_mode(*mode),
             old_oid: zero_oid(),
@@ -1828,9 +1842,10 @@ pub fn diff_index_to_tree(
         if ignore_submodules && te.mode == 0o160000 {
             continue;
         }
+        // TODO(byte-paths): lossy until index/worktree sources migrate (Phase 2/4)
         result.push(DiffEntry {
             status: DiffStatus::Deleted,
-            old_path: Some(path.to_owned()),
+            old_path: Some(RepoPathBuf::from_string(path.to_owned())),
             new_path: None,
             old_mode: format_mode(te.mode),
             new_mode: "000000".to_owned(),
@@ -1988,7 +2003,7 @@ pub fn diff_index_to_worktree_with_options(
             // a placeholder and stays unchanged. Skipped when `simplify_gitlinks` so callers that
             // only compare recorded HEADs keep their behaviour. (t4060 #50/#51.)
             if !simplify_gitlinks && sub_head_oid.is_none() && !sub_dir.exists() {
-                let path_owned = path_str_ref.to_owned();
+                let path_owned = RepoPathBuf::from_bytes(ie.path.clone());
                 result.push(DiffEntry {
                     status: DiffStatus::Deleted,
                     old_path: Some(path_owned.clone()),
@@ -2017,7 +2032,7 @@ pub fn diff_index_to_worktree_with_options(
             };
             if simplify_gitlinks {
                 if !ref_matches {
-                    let path_owned = path_str_ref.to_owned();
+                    let path_owned = RepoPathBuf::from_bytes(ie.path.clone());
                     let new_oid = sub_head_oid.unwrap_or_else(zero_oid);
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
@@ -2047,7 +2062,7 @@ pub fn diff_index_to_worktree_with_options(
             }
             let inner_dirty = flags.modified || flags.untracked;
             if !ref_matches || inner_dirty {
-                let path_owned = path_str_ref.to_owned();
+                let path_owned = RepoPathBuf::from_bytes(ie.path.clone());
                 let new_oid = if !ref_matches {
                     sub_head_oid.unwrap_or_else(zero_oid)
                 } else {
@@ -2086,7 +2101,7 @@ pub fn diff_index_to_worktree_with_options(
                     result.push(DiffEntry {
                         status: DiffStatus::Added,
                         old_path: None,
-                        new_path: Some(path_str_ref.to_owned()),
+                        new_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                         old_mode: "000000".to_owned(),
                         new_mode: format_mode(worktree_mode),
                         // `ita_invisible_in_index`: null OID on the index side for patch output
@@ -2102,7 +2117,7 @@ pub fn diff_index_to_worktree_with_options(
                 {
                     result.push(DiffEntry {
                         status: DiffStatus::Deleted,
-                        old_path: Some(path_str_ref.to_owned()),
+                        old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                         new_path: None,
                         old_mode: format_mode(ie.mode),
                         new_mode: "000000".to_owned(),
@@ -2121,7 +2136,7 @@ pub fn diff_index_to_worktree_with_options(
         if dir_symlinks.has_symlink_in_path(work_tree, path_str_ref) {
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
-                old_path: Some(path_str_ref.to_owned()),
+                old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                 new_path: None,
                 old_mode: format_mode(ie.mode),
                 new_mode: "000000".to_owned(),
@@ -2140,7 +2155,7 @@ pub fn diff_index_to_worktree_with_options(
                 // deleted. See t4041/t4060 #13.
                 if file_path.join(".git").exists() {
                     let head = read_submodule_head_oid(&file_path).unwrap_or_else(zero_oid);
-                    let path_owned = path_str_ref.to_owned();
+                    let path_owned = RepoPathBuf::from_bytes(ie.path.clone());
                     result.push(DiffEntry {
                         status: DiffStatus::TypeChanged,
                         old_path: Some(path_owned.clone()),
@@ -2155,7 +2170,7 @@ pub fn diff_index_to_worktree_with_options(
                 }
                 result.push(DiffEntry {
                     status: DiffStatus::Deleted,
-                    old_path: Some(path_str_ref.to_owned()),
+                    old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                     new_path: None,
                     old_mode: format_mode(ie.mode),
                     new_mode: String::new(),
@@ -2169,7 +2184,7 @@ pub fn diff_index_to_worktree_with_options(
                 let stat_same = stat_matches(ie, &meta);
                 // Mode-only change: stat still matches the index entry but executable bit differs.
                 if stat_same && worktree_mode != ie.mode {
-                    let path_owned = path_str_ref.to_owned();
+                    let path_owned = RepoPathBuf::from_bytes(ie.path.clone());
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
                         old_path: Some(path_owned.clone()),
@@ -2215,7 +2230,7 @@ pub fn diff_index_to_worktree_with_options(
                 }
 
                 if eff_oid != ie.oid || worktree_mode != ie.mode {
-                    let path_owned = path_str_ref.to_owned();
+                    let path_owned = RepoPathBuf::from_bytes(ie.path.clone());
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
                         old_path: Some(path_owned.clone()),
@@ -2233,7 +2248,7 @@ pub fn diff_index_to_worktree_with_options(
                 // File deleted from working tree (or parent replaced by a file)
                 result.push(DiffEntry {
                     status: DiffStatus::Deleted,
-                    old_path: Some(path_str_ref.to_owned()),
+                    old_path: Some(RepoPathBuf::from_bytes(ie.path.clone())),
                     new_path: None,
                     old_mode: format_mode(ie.mode),
                     new_mode: "000000".to_owned(),
@@ -2263,10 +2278,11 @@ pub fn diff_index_to_worktree_with_options(
             || "000000".to_owned(),
             |meta| format_mode(mode_from_metadata(meta)),
         );
+        // TODO(byte-paths): lossy until index/worktree sources migrate (Phase 2/4)
         result.push(DiffEntry {
             status: DiffStatus::Unmerged,
-            old_path: Some(path.clone()),
-            new_path: Some(path.clone()),
+            old_path: Some(RepoPathBuf::from_string(path.clone())),
+            new_path: Some(RepoPathBuf::from_string(path.clone())),
             old_mode: "000000".to_owned(),
             new_mode,
             old_oid: zero_oid(),
@@ -2287,10 +2303,11 @@ pub fn diff_index_to_worktree_with_options(
             )?;
             let wt_mode = mode_from_metadata(&meta);
             if wt_oid != base_entry.oid || wt_mode != base_entry.mode {
+                // TODO(byte-paths): lossy until index/worktree sources migrate (Phase 2/4)
                 result.push(DiffEntry {
                     status: DiffStatus::Modified,
-                    old_path: Some(path.clone()),
-                    new_path: Some(path),
+                    old_path: Some(RepoPathBuf::from_string(path.clone())),
+                    new_path: Some(RepoPathBuf::from_string(path)),
                     old_mode: format_mode(base_entry.mode),
                     new_mode: format_mode(wt_mode),
                     old_oid: base_entry.oid,
@@ -2762,8 +2779,8 @@ pub fn diff_tree_to_worktree(
                     if sub_head.is_none() && !sub_dir.exists() {
                         result.push(DiffEntry {
                             status: DiffStatus::Deleted,
-                            old_path: Some(path.clone()),
-                            new_path: Some(path.clone()),
+                            old_path: Some(RepoPathBuf::from_string(path.clone())),
+                            new_path: Some(RepoPathBuf::from_string(path.clone())),
                             old_mode: format_mode(te.mode),
                             new_mode: "000000".to_string(),
                             old_oid: te.oid,
@@ -2784,8 +2801,8 @@ pub fn diff_tree_to_worktree(
                         let new_oid = if head_differs { zero_oid() } else { te.oid };
                         result.push(DiffEntry {
                             status: DiffStatus::Modified,
-                            old_path: Some(path.clone()),
-                            new_path: Some(path.clone()),
+                            old_path: Some(RepoPathBuf::from_string(path.clone())),
+                            new_path: Some(RepoPathBuf::from_string(path.clone())),
                             old_mode: format_mode(te.mode),
                             new_mode: format_mode(te.mode),
                             old_oid: te.oid,
@@ -2802,8 +2819,8 @@ pub fn diff_tree_to_worktree(
                     let new_oid = read_submodule_head_oid(&sub_dir).unwrap_or(idx_oid);
                     result.push(DiffEntry {
                         status: DiffStatus::Added,
-                        old_path: Some(path.clone()),
-                        new_path: Some(path.clone()),
+                        old_path: Some(RepoPathBuf::from_string(path.clone())),
+                        new_path: Some(RepoPathBuf::from_string(path.clone())),
                         old_mode: "000000".to_string(),
                         new_mode: format_mode(0o160000),
                         old_oid: zero_oid(),
@@ -2833,8 +2850,8 @@ pub fn diff_tree_to_worktree(
                 if wt_oid != te.oid || wt_mode != te.mode {
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
-                        old_path: Some(path.clone()),
-                        new_path: Some(path.clone()),
+                        old_path: Some(RepoPathBuf::from_string(path.clone())),
+                        new_path: Some(RepoPathBuf::from_string(path.clone())),
                         old_mode: format_mode(te.mode),
                         new_mode: format_mode(wt_mode),
                         old_oid: te.oid,
@@ -2867,8 +2884,8 @@ pub fn diff_tree_to_worktree(
                 if ie.oid == te.oid && ie.mode != te.mode {
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
-                        old_path: Some(path.clone()),
-                        new_path: Some(path.clone()),
+                        old_path: Some(RepoPathBuf::from_string(path.clone())),
+                        new_path: Some(RepoPathBuf::from_string(path.clone())),
                         old_mode: format_mode(te.mode),
                         new_mode: format_mode(ie.mode),
                         old_oid: te.oid,
@@ -2902,8 +2919,8 @@ pub fn diff_tree_to_worktree(
                     if eff_oid != te.oid {
                         result.push(DiffEntry {
                             status: DiffStatus::Modified,
-                            old_path: Some(path.clone()),
-                            new_path: Some(path.clone()),
+                            old_path: Some(RepoPathBuf::from_string(path.clone())),
+                            new_path: Some(RepoPathBuf::from_string(path.clone())),
                             old_mode: format_mode(te.mode),
                             new_mode: format_mode(wt_mode),
                             old_oid: te.oid,
@@ -2913,8 +2930,8 @@ pub fn diff_tree_to_worktree(
                     } else if wt_mode != te.mode {
                         result.push(DiffEntry {
                             status: DiffStatus::Modified,
-                            old_path: Some(path.clone()),
-                            new_path: Some(path.clone()),
+                            old_path: Some(RepoPathBuf::from_string(path.clone())),
+                            new_path: Some(RepoPathBuf::from_string(path.clone())),
                             old_mode: format_mode(te.mode),
                             new_mode: format_mode(wt_mode),
                             old_oid: te.oid,
@@ -2940,8 +2957,8 @@ pub fn diff_tree_to_worktree(
                 if eff_oid != te.oid || wt_mode != te.mode {
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
-                        old_path: Some(path.clone()),
-                        new_path: Some(path.clone()),
+                        old_path: Some(RepoPathBuf::from_string(path.clone())),
+                        new_path: Some(RepoPathBuf::from_string(path.clone())),
                         old_mode: format_mode(te.mode),
                         new_mode: format_mode(wt_mode),
                         old_oid: te.oid,
@@ -2954,7 +2971,7 @@ pub fn diff_tree_to_worktree(
                 // In tree but missing from worktree
                 result.push(DiffEntry {
                     status: DiffStatus::Deleted,
-                    old_path: Some(path.clone()),
+                    old_path: Some(RepoPathBuf::from_string(path.clone())),
                     new_path: None,
                     old_mode: format_mode(te.mode),
                     new_mode: "000000".to_owned(),
@@ -2979,7 +2996,7 @@ pub fn diff_tree_to_worktree(
                 result.push(DiffEntry {
                     status: DiffStatus::Added,
                     old_path: None,
-                    new_path: Some(path.clone()),
+                    new_path: Some(RepoPathBuf::from_string(path.clone())),
                     old_mode: "000000".to_owned(),
                     new_mode: format_mode(wt_mode),
                     old_oid: zero_oid(),
@@ -3009,7 +3026,7 @@ fn read_added_entry_bytes(
     }
     let path = entry.new_path.as_deref()?;
     let root = work_root?;
-    fs::read(root.join(path)).ok()
+    fs::read(path.to_fs_path(root)).ok()
 }
 
 fn modified_as_copy_from_sources(
@@ -3040,7 +3057,7 @@ fn modified_as_copy_from_sources(
         if *is_deleted {
             continue;
         }
-        if e.new_path.as_deref() == Some(src_path.as_str()) {
+        if e.new_path.as_deref().map(RepoPath::as_bytes) == Some(src_path.as_bytes()) {
             continue;
         }
         let src_mode_str = source_tree_entries
@@ -3081,7 +3098,8 @@ fn modified_as_copy_from_sources(
 
     Some(DiffEntry {
         status: DiffStatus::Copied,
-        old_path: Some(src_path.clone()),
+        // TODO(byte-paths): source paths are lossy String until rename/copy sources migrate (Phase 4)
+        old_path: Some(RepoPathBuf::from_string(src_path.clone())),
         new_path: e.new_path.clone(),
         old_mode: src_mode,
         new_mode: e.new_mode.clone(),
@@ -3285,8 +3303,10 @@ pub fn detect_copies(
 
     for entry in &deleted {
         if let Some(ref path) = entry.old_path {
-            deleted_source_idx.insert(path.clone(), sources.len());
-            sources.push((path.clone(), entry.old_oid, true));
+            // TODO(byte-paths): source keys are lossy String until rename/copy sources migrate (Phase 4)
+            let key = path.to_string_lossy().into_owned();
+            deleted_source_idx.insert(key.clone(), sources.len());
+            sources.push((key, entry.old_oid, true));
         }
     }
 
@@ -3295,8 +3315,8 @@ pub fn detect_copies(
     for entry in &others {
         if matches!(entry.status, DiffStatus::Modified | DiffStatus::TypeChanged) {
             if let Some(ref old_path) = entry.old_path {
-                if !sources.iter().any(|(p, _, _)| p == old_path) {
-                    sources.push((old_path.clone(), entry.old_oid, false));
+                if !sources.iter().any(|(p, _, _)| p.as_bytes() == old_path.as_bytes()) {
+                    sources.push((old_path.to_string_lossy().into_owned(), entry.old_oid, false));
                 }
             }
         }
@@ -3342,7 +3362,7 @@ pub fn detect_copies(
             for (ai, add) in added.iter().enumerate() {
                 // Never pair a path with itself as copy source (matches Git; avoids
                 // arbitrary tie-breaking when several sources share the same blob).
-                if add.new_path.as_deref() == Some(src_path.as_str()) {
+                if add.new_path.as_deref().map(RepoPath::as_bytes) == Some(src_path.as_bytes()) {
                     continue;
                 }
                 let add_oid = if add.new_oid != zero_oid() {
@@ -3388,7 +3408,7 @@ pub fn detect_copies(
                 // Git tends to pick the rename as the last alphabetically.
                 let rename_ai = assignments_for_src
                     .iter()
-                    .max_by_key(|(ai, _score)| added[*ai].path().to_string())
+                    .max_by_key(|(ai, _score)| added[*ai].path().as_bytes().to_vec())
                     .map(|(ai, _)| *ai);
 
                 for &(ai, score) in assignments_for_src {
@@ -3401,13 +3421,14 @@ pub fn detect_copies(
                         .unwrap_or_else(|| add.old_mode.clone());
 
                     let is_rename = Some(ai) == rename_ai;
+                    // TODO(byte-paths): source paths lossy until rename/copy sources migrate (Phase 4)
                     result_entries.push(DiffEntry {
                         status: if is_rename {
                             DiffStatus::Renamed
                         } else {
                             DiffStatus::Copied
                         },
-                        old_path: Some(src_path.clone()),
+                        old_path: Some(RepoPathBuf::from_string(src_path.clone())),
                         new_path: add.new_path.clone(),
                         old_mode: src_mode,
                         new_mode: add.new_mode.clone(),
@@ -3429,9 +3450,10 @@ pub fn detect_copies(
                         .map(|(_, m, _)| m.clone())
                         .unwrap_or_else(|| add.old_mode.clone());
 
+                    // TODO(byte-paths): source paths lossy until rename/copy sources migrate (Phase 4)
                     result_entries.push(DiffEntry {
                         status: DiffStatus::Copied,
-                        old_path: Some(src_path.clone()),
+                        old_path: Some(RepoPathBuf::from_string(src_path.clone())),
                         new_path: add.new_path.clone(),
                         old_mode: src_mode,
                         new_mode: add.new_mode.clone(),
@@ -3448,7 +3470,7 @@ pub fn detect_copies(
     // Keep deleted entries that weren't consumed by a rename.
     for entry in deleted.into_iter() {
         if let Some(ref path) = entry.old_path {
-            if let Some(&si) = deleted_source_idx.get(path) {
+            if let Some(&si) = deleted_source_idx.get(path.to_string_lossy().as_ref()) {
                 if renamed_deleted.contains(&si) {
                     // This deletion was consumed by a rename; skip it.
                     continue;
@@ -3622,11 +3644,12 @@ pub fn format_rename_path(old: &str, new: &str) -> String {
 
 /// Check if two entries share the same filename (basename).
 fn same_basename(del: &DiffEntry, add: &DiffEntry) -> bool {
-    let old = del.old_path.as_deref().unwrap_or("");
-    let new = add.new_path.as_deref().unwrap_or("");
-    let old_base = old.rsplit('/').next().unwrap_or(old);
-    let new_base = new.rsplit('/').next().unwrap_or(new);
-    old_base == new_base && !old_base.is_empty()
+    let old_base = del.old_path.as_deref().and_then(RepoPath::file_name);
+    let new_base = add.new_path.as_deref().and_then(RepoPath::file_name);
+    match (old_base, new_base) {
+        (Some(o), Some(n)) => o == n && !o.is_empty(),
+        _ => false,
+    }
 }
 
 /// Compute a similarity percentage (0–100) between two byte slices.
@@ -3689,11 +3712,11 @@ pub fn format_raw(entry: &DiffEntry) -> String {
         DiffStatus::Renamed | DiffStatus::Copied => {
             format!(
                 "{}\t{}",
-                entry.old_path.as_deref().unwrap_or(""),
-                entry.new_path.as_deref().unwrap_or("")
+                entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default(),
+                entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default()
             )
         }
-        _ => entry.path().to_owned(),
+        _ => entry.path_str().into_owned(),
     };
 
     let status_str = match (entry.status, entry.score) {
@@ -3750,10 +3773,10 @@ pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize) -> String {
     let path = match entry.status {
         DiffStatus::Renamed | DiffStatus::Copied => format!(
             "{}\t{}",
-            entry.old_path.as_deref().unwrap_or(""),
-            entry.new_path.as_deref().unwrap_or("")
+            entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default(),
+            entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default()
         ),
-        _ => entry.path().to_owned(),
+        _ => entry.path_str().into_owned(),
     };
     let status_str = match (entry.status, entry.score) {
         (DiffStatus::Renamed, Some(s)) => format!("R{s:03}"),
@@ -5640,7 +5663,11 @@ fn flatten_tree(odb: &Odb, tree_oid: &ObjectId, prefix: &str) -> Result<Vec<Flat
 
     for entry in entries {
         let name_str = String::from_utf8_lossy(&entry.name);
-        let path = format_path(prefix, &name_str);
+        let path = if prefix.is_empty() {
+            name_str.into_owned()
+        } else {
+            format!("{prefix}/{name_str}")
+        };
         if is_tree_mode(entry.mode) {
             let nested = flatten_tree(odb, &entry.oid, &path)?;
             result.extend(nested);
@@ -5677,12 +5704,8 @@ fn is_tree_mode(mode: u32) -> bool {
 }
 
 /// Build a path with an optional prefix.
-fn format_path(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() {
-        name.to_owned()
-    } else {
-        format!("{prefix}/{name}")
-    }
+fn format_path(prefix: &RepoPath, name: &[u8]) -> RepoPathBuf {
+    prefix.join(RepoPath::from_bytes(name))
 }
 
 /// Format a numeric mode as a zero-padded octal string.
@@ -6059,7 +6082,7 @@ fn apply_orderfile(
             .cloned()
             .unwrap_or_default();
         for (i, pat) in patterns.iter().enumerate() {
-            if orderfile_pattern_matches(pat, &path) {
+            if orderfile_pattern_matches(pat, &path.to_string_lossy()) {
                 return i;
             }
         }
@@ -6165,7 +6188,7 @@ fn apply_rotate_skip_ordered_paths(
     use std::collections::HashMap;
     let mut by_path: HashMap<String, DiffEntry> = HashMap::new();
     for e in entries {
-        by_path.insert(e.path().to_string(), e);
+        by_path.insert(e.path().to_string_lossy().into_owned(), e);
     }
 
     // `git log --skip-to`: only list changed paths from the skip point onward (unmodified paths

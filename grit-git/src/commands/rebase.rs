@@ -7076,7 +7076,8 @@ fn print_diffstat_from_entries(repo: &Repository, entries: &[DiffEntry]) {
             .new_path
             .as_deref()
             .or(entry.old_path.as_deref())
-            .unwrap_or("unknown");
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "unknown".to_string());
         let is_new = entry.old_oid == diff::zero_oid();
         let is_deleted = entry.new_oid == diff::zero_oid();
 

@@ -1830,8 +1830,8 @@ fn rev_list_reflog_transition_touches_paths(
     let tree_diff_touches = |from_tree: Option<ObjectId>, to_tree: &ObjectId| -> Result<bool> {
         let entries = diff_trees(odb, from_tree.as_ref(), Some(to_tree), "")?;
         Ok(entries.iter().any(|e| {
-            let path = e.path();
-            pathspecs.iter().any(|ps| matches_pathspec(ps, path))
+            let path = e.path().to_string_lossy();
+            pathspecs.iter().any(|ps| matches_pathspec(ps, &path))
         }))
     };
 

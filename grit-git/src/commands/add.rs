@@ -1046,7 +1046,8 @@ fn maybe_emit_interactive_add_sparse_index_trace(
 ) -> Result<()> {
     let entries = diff_index_to_worktree(&repo.odb, index, work_tree, false, false)?;
     if entries.iter().any(|entry| {
-        entry.status != DiffStatus::Unmerged && path_under_sparse_index_dir(raw_index, entry.path())
+        entry.status != DiffStatus::Unmerged
+            && path_under_sparse_index_dir(raw_index, &entry.path().to_string_lossy())
     }) {
         emit_index_trace_region("ensure_full_index");
     }

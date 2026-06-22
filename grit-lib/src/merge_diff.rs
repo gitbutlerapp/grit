@@ -38,7 +38,7 @@ pub fn combined_diff_paths(odb: &Odb, commit_tree: &ObjectId, parents: &[ObjectI
             continue;
         };
         let paths: std::collections::HashSet<String> =
-            entries.iter().map(|e| e.path().to_string()).collect();
+            entries.iter().map(|e| e.path().to_string_lossy().into_owned()).collect();
         per_parent.push(paths);
     }
     if per_parent.is_empty() {
@@ -105,11 +105,14 @@ pub fn combined_merge_parent_blob_paths(
             if e.status != DiffStatus::Renamed {
                 continue;
             }
-            let new_p = e.new_path.as_deref().unwrap_or("");
+            let Some(new_p) = e.new_path.as_deref() else {
+                continue;
+            };
             if new_p != merge_path {
                 continue;
             }
-            let old_p = e.old_path.clone()?;
+            // TODO(byte-paths): merge path interop stays lossy until rename sources migrate (Phase 4)
+            let old_p = e.old_path.as_ref()?.to_string_lossy().into_owned();
             if blob_oid_at_path(odb, t, &old_p).is_some() {
                 if found.is_some() {
                     return None;

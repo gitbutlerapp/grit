@@ -13,6 +13,7 @@ use grit_lib::index::{
     Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
 };
 use grit_lib::merge_base::{merge_base_for_diff_index, MergeBaseForDiffError};
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pathspec::context_from_mode_bits;
@@ -171,8 +172,9 @@ pub fn run(mut args: Args) -> Result<()> {
                 }
                 diff_entries.push(DiffEntry {
                     status: DiffStatus::Modified,
-                    old_path: Some(path.clone()),
-                    new_path: Some(path.clone()),
+                    // TODO(byte-paths): lossy until index_map keys migrate (Phase 2/4)
+                    old_path: Some(RepoPathBuf::from_string(path.clone())),
+                    new_path: Some(RepoPathBuf::from_string(path.clone())),
                     old_mode: "160000".to_owned(),
                     new_mode: "160000".to_owned(),
                     old_oid: snap.oid,
@@ -290,14 +292,16 @@ pub fn run(mut args: Args) -> Result<()> {
             // `D`/`R`. Copy detection may still attribute new blobs to an unmerged source (`-C`).
             let unmerged_ref = &unmerged_paths;
             diff_entries.retain(|e| {
-                if unmerged_ref.contains(e.path()) && e.status == DiffStatus::Deleted {
+                if unmerged_ref.contains(&*e.path().to_string_lossy())
+                    && e.status == DiffStatus::Deleted
+                {
                     return false;
                 }
                 true
             });
             for e in &mut diff_entries {
                 let src = e.old_path.as_deref();
-                if src.is_some_and(|p| unmerged_ref.contains(p)) {
+                if src.is_some_and(|p| unmerged_ref.contains(&*p.to_string_lossy())) {
                     if options.find_copies {
                         // Git `-C`: paths still show as copies from the unmerged source (not renames).
                         if e.status == DiffStatus::Renamed {
@@ -346,10 +350,11 @@ pub fn run(mut args: Args) -> Result<()> {
             .into_iter()
             .filter_map(|mut e| {
                 let path = e.path().to_owned();
-                if !path.starts_with(&rel_prefix) {
+                if !path.starts_with_bytes(rel_prefix.as_bytes()) {
                     return None;
                 }
-                let stripped = path[rel_prefix.len()..].to_owned();
+                let stripped =
+                    RepoPathBuf::from_bytes(path.as_bytes()[rel_prefix.len()..].to_vec());
                 if e.old_path.is_some() {
                     e.old_path = Some(stripped.clone());
                 }
@@ -429,7 +434,11 @@ pub fn run(mut args: Args) -> Result<()> {
                 if options.nul_terminated {
                     out.write_all(entry.path().as_bytes())?;
                 } else {
-                    write!(out, "{}", quote_c_style(entry.path(), quote_fully))?;
+                    write!(
+                        out,
+                        "{}",
+                        quote_c_style(&entry.path().to_string_lossy(), quote_fully)
+                    )?;
                 }
                 out.write_all(&[term])?;
             }
@@ -443,7 +452,7 @@ pub fn run(mut args: Args) -> Result<()> {
                 ignore_dirty: options.ignore_dirty_submodules,
             };
             for entry in &diff_entries {
-                let p = entry.path();
+                let p = entry.path().to_string_lossy();
                 write_patch_entry(
                     &mut out,
                     &repo,
@@ -453,7 +462,7 @@ pub fn run(mut args: Args) -> Result<()> {
                     wt,
                     options.submodule_format,
                     sm_ignore,
-                    p,
+                    &p,
                     options.indent_heuristic,
                 )?;
             }
@@ -553,7 +562,7 @@ fn read_entry_raw_contents(repo: &Repository, entry: &DiffEntry) -> (Vec<u8>, Ve
     {
         if let Some(wt) = repo.work_tree.as_ref() {
             let path = entry.new_path.as_deref().unwrap_or(entry.path());
-            read_worktree_path_raw(&wt.join(path))
+            read_worktree_path_raw(&path.to_fs_path(wt))
         } else {
             Vec::new()
         }
@@ -572,7 +581,7 @@ fn worktree_side_is_placeholder(repo: &Repository, entry: &DiffEntry) -> bool {
         return false;
     };
     let path = entry.new_path.as_deref().unwrap_or(entry.path());
-    let abs = wt.join(path);
+    let abs = path.to_fs_path(wt);
     match fs::symlink_metadata(&abs) {
         Ok(meta) => {
             let mode = canonicalize_mode(meta.permissions().mode());
@@ -1216,8 +1225,9 @@ fn collect_unmerged_index_paths(index: &Index) -> BTreeSet<String> {
 fn diff_entry_unmerged(path: &str) -> DiffEntry {
     DiffEntry {
         status: DiffStatus::Unmerged,
-        old_path: Some(path.to_owned()),
-        new_path: Some(path.to_owned()),
+        // TODO(byte-paths): caller passes a lossy &str (Phase 2/4)
+        old_path: Some(RepoPathBuf::from_string(path.to_owned())),
+        new_path: Some(RepoPathBuf::from_string(path.to_owned())),
         old_mode: "000000".to_owned(),
         new_mode: "000000".to_owned(),
         old_oid: zero_oid(),
@@ -1766,7 +1776,7 @@ fn apply_diffcore_break_rewrites_split(
                 out.push(e);
                 continue;
             };
-            match fs::read(wt.join(path)) {
+            match fs::read(path.to_fs_path(wt)) {
                 Ok(b) => b,
                 Err(_) => {
                     out.push(e);
@@ -1797,7 +1807,7 @@ fn apply_diffcore_break_rewrites_split(
             out.push(e);
             continue;
         };
-        broken_paths.insert(path.clone());
+        broken_paths.insert(path.to_string_lossy().into_owned());
         out.push(DiffEntry {
             status: DiffStatus::Deleted,
             old_path: Some(path.clone()),
@@ -1828,8 +1838,8 @@ fn drop_break_delete_superseded_by_rename_dest(entries: Vec<DiffEntry>) -> Vec<D
     let mut targets: HashSet<String> = HashSet::new();
     for e in &entries {
         if matches!(e.status, DiffStatus::Renamed | DiffStatus::Copied) {
-            if let Some(p) = e.new_path.clone() {
-                targets.insert(p);
+            if let Some(p) = e.new_path.as_deref() {
+                targets.insert(p.to_string_lossy().into_owned());
             }
         }
     }
@@ -1842,7 +1852,7 @@ fn drop_break_delete_superseded_by_rename_dest(entries: Vec<DiffEntry>) -> Vec<D
             let Some(p) = e.old_path.as_deref() else {
                 return true;
             };
-            !targets.contains(p)
+            !targets.contains(&*p.to_string_lossy())
         })
         .collect();
     out.sort_by(|a, b| a.path().cmp(b.path()));
@@ -1859,17 +1869,19 @@ fn merge_broken_rewrite_pairs(
     let mut others = Vec::new();
     for e in entries {
         if e.status == DiffStatus::Deleted {
-            if let Some(p) = e.old_path.clone() {
-                if broken_paths.contains(p.as_str()) {
-                    slots.entry(p).or_default().0 = Some(e);
+            if let Some(p) = e.old_path.as_deref() {
+                let key = p.to_string_lossy().into_owned();
+                if broken_paths.contains(&key) {
+                    slots.entry(key).or_default().0 = Some(e);
                     continue;
                 }
             }
         }
         if e.status == DiffStatus::Added {
-            if let Some(p) = e.new_path.clone() {
-                if broken_paths.contains(p.as_str()) {
-                    slots.entry(p).or_default().1 = Some(e);
+            if let Some(p) = e.new_path.as_deref() {
+                let key = p.to_string_lossy().into_owned();
+                if broken_paths.contains(&key) {
+                    slots.entry(key).or_default().1 = Some(e);
                     continue;
                 }
             }
@@ -1882,8 +1894,9 @@ fn merge_broken_rewrite_pairs(
             (Some(d), Some(a)) => {
                 merged.push(DiffEntry {
                     status: DiffStatus::Modified,
-                    old_path: Some(path.clone()),
-                    new_path: Some(path),
+                    // TODO(byte-paths): slots keyed by lossy String (Phase 2/4)
+                    old_path: Some(RepoPathBuf::from_string(path.clone())),
+                    new_path: Some(RepoPathBuf::from_string(path)),
                     old_mode: d.old_mode,
                     new_mode: a.new_mode,
                     old_oid: d.old_oid,
@@ -1931,15 +1944,16 @@ fn raw_change_to_diff_entry(change: &RawChange) -> DiffEntry {
 
     DiffEntry {
         status,
+        // TODO(byte-paths): RawChange.path is a lossy String (Phase 2/4)
         old_path: if change.status == 'A' {
             None
         } else {
-            Some(change.path.clone())
+            Some(RepoPathBuf::from_string(change.path.clone()))
         },
         new_path: if change.status == 'D' {
             None
         } else {
-            Some(change.path.clone())
+            Some(RepoPathBuf::from_string(change.path.clone()))
         },
         old_mode: format!("{old_mode:06o}"),
         new_mode: format!("{new_mode:06o}"),
@@ -1947,6 +1961,23 @@ fn raw_change_to_diff_entry(change: &RawChange) -> DiffEntry {
         new_oid: change.new.map_or_else(zero_oid, |s| s.oid),
         score: None,
     }
+}
+
+fn old_path_bytes(e: &DiffEntry) -> &[u8] {
+    e.old_path.as_deref().map(RepoPath::as_bytes).unwrap_or(b"")
+}
+fn new_path_bytes(e: &DiffEntry) -> &[u8] {
+    e.new_path.as_deref().map(RepoPath::as_bytes).unwrap_or(b"")
+}
+fn old_path_lossy(e: &DiffEntry) -> std::borrow::Cow<'_, str> {
+    e.old_path
+        .as_deref()
+        .map_or(std::borrow::Cow::Borrowed(""), RepoPath::to_string_lossy)
+}
+fn new_path_lossy(e: &DiffEntry) -> std::borrow::Cow<'_, str> {
+    e.new_path
+        .as_deref()
+        .map_or(std::borrow::Cow::Borrowed(""), RepoPath::to_string_lossy)
 }
 
 pub(crate) fn write_diff_index_name_status(
@@ -1960,32 +1991,32 @@ pub(crate) fn write_diff_index_name_status(
             (DiffStatus::Renamed, Some(s)) => {
                 if nul {
                     write!(out, "R{s:03}\0")?;
-                    out.write_all(entry.old_path.as_deref().unwrap_or("").as_bytes())?;
+                    out.write_all(old_path_bytes(entry))?;
                     out.write_all(b"\0")?;
-                    out.write_all(entry.new_path.as_deref().unwrap_or("").as_bytes())?;
+                    out.write_all(new_path_bytes(entry))?;
                     out.write_all(b"\0")?;
                 } else {
                     writeln!(
                         out,
                         "R{s:03}\t{}\t{}",
-                        quote_c_style(entry.old_path.as_deref().unwrap_or(""), quote_fully),
-                        quote_c_style(entry.new_path.as_deref().unwrap_or(""), quote_fully),
+                        quote_c_style(&old_path_lossy(entry), quote_fully),
+                        quote_c_style(&new_path_lossy(entry), quote_fully),
                     )?;
                 }
             }
             (DiffStatus::Copied, Some(s)) => {
                 if nul {
                     write!(out, "C{s:03}\0")?;
-                    out.write_all(entry.old_path.as_deref().unwrap_or("").as_bytes())?;
+                    out.write_all(old_path_bytes(entry))?;
                     out.write_all(b"\0")?;
-                    out.write_all(entry.new_path.as_deref().unwrap_or("").as_bytes())?;
+                    out.write_all(new_path_bytes(entry))?;
                     out.write_all(b"\0")?;
                 } else {
                     writeln!(
                         out,
                         "C{s:03}\t{}\t{}",
-                        quote_c_style(entry.old_path.as_deref().unwrap_or(""), quote_fully),
-                        quote_c_style(entry.new_path.as_deref().unwrap_or(""), quote_fully),
+                        quote_c_style(&old_path_lossy(entry), quote_fully),
+                        quote_c_style(&new_path_lossy(entry), quote_fully),
                     )?;
                 }
             }
@@ -2001,7 +2032,7 @@ pub(crate) fn write_diff_index_name_status(
                     writeln!(
                         out,
                         "{letter}{s:03}\t{}",
-                        quote_c_style(entry.path(), quote_fully)
+                        quote_c_style(&entry.path().to_string_lossy(), quote_fully)
                     )?;
                 }
             }
@@ -2015,7 +2046,7 @@ pub(crate) fn write_diff_index_name_status(
                         out,
                         "{}\t{}",
                         entry.status.letter(),
-                        quote_c_style(entry.path(), quote_fully)
+                        quote_c_style(&entry.path().to_string_lossy(), quote_fully)
                     )?;
                 }
             }
@@ -2127,9 +2158,9 @@ fn write_raw_diff_entry_z(
 
     match entry.status {
         DiffStatus::Renamed | DiffStatus::Copied => {
-            out.write_all(entry.old_path.as_deref().unwrap_or("").as_bytes())?;
+            out.write_all(old_path_bytes(entry))?;
             out.write_all(b"\0")?;
-            out.write_all(entry.new_path.as_deref().unwrap_or("").as_bytes())?;
+            out.write_all(new_path_bytes(entry))?;
             out.write_all(b"\0")?;
         }
         _ => {
@@ -2186,11 +2217,11 @@ fn render_raw_diff_entry(
         DiffStatus::Renamed | DiffStatus::Copied => {
             format!(
                 "{}\t{}",
-                quote_c_style(entry.old_path.as_deref().unwrap_or(""), quote_fully),
-                quote_c_style(entry.new_path.as_deref().unwrap_or(""), quote_fully),
+                quote_c_style(&old_path_lossy(entry), quote_fully),
+                quote_c_style(&new_path_lossy(entry), quote_fully),
             )
         }
-        _ => quote_c_style(entry.path(), quote_fully),
+        _ => quote_c_style(&entry.path().to_string_lossy(), quote_fully),
     };
 
     Ok(format!(
@@ -2838,14 +2869,15 @@ pub(crate) fn write_patch_entry_inner(
         .unwrap_or_default()
         .quote_path_fully();
 
+    let empty = RepoPath::from_str("");
     let old_path = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.new_path.as_deref().unwrap_or(empty));
     let new_path = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.old_path.as_deref().unwrap_or(empty));
 
     let (disp_old, disp_new) = if path_prefix.is_empty() {
         (old_path.to_string(), new_path.to_string())
@@ -2863,7 +2895,7 @@ pub(crate) fn write_patch_entry_inner(
         && entry.new_oid == zero_oid()
     {
         if let Some(wt) = work_tree {
-            let new_raw = read_worktree_path_raw(&wt.join(new_path));
+            let new_raw = read_worktree_path_raw(&new_path.to_fs_path(wt));
             if read_blob_raw(odb, &entry.old_oid) == new_raw {
                 return Ok(());
             }
@@ -3067,8 +3099,16 @@ pub(crate) fn write_patch_entry_inner(
             }
             let sim = entry.score.unwrap_or(100);
             writeln!(out, "similarity index {sim}%")?;
-            writeln!(out, "rename from {}", quote_c_style(old_path, quote_fully))?;
-            writeln!(out, "rename to {}", quote_c_style(new_path, quote_fully))?;
+            writeln!(
+                out,
+                "rename from {}",
+                quote_c_style(&old_path.to_string_lossy(), quote_fully)
+            )?;
+            writeln!(
+                out,
+                "rename to {}",
+                quote_c_style(&new_path.to_string_lossy(), quote_fully)
+            )?;
             if entry.old_oid != entry.new_oid {
                 writeln!(
                     out,
@@ -3081,8 +3121,16 @@ pub(crate) fn write_patch_entry_inner(
         DiffStatus::Copied => {
             let sim = entry.score.unwrap_or(100);
             writeln!(out, "similarity index {sim}%")?;
-            writeln!(out, "copy from {}", quote_c_style(old_path, quote_fully))?;
-            writeln!(out, "copy to {}", quote_c_style(new_path, quote_fully))?;
+            writeln!(
+                out,
+                "copy from {}",
+                quote_c_style(&old_path.to_string_lossy(), quote_fully)
+            )?;
+            writeln!(
+                out,
+                "copy to {}",
+                quote_c_style(&new_path.to_string_lossy(), quote_fully)
+            )?;
             if entry.old_oid != entry.new_oid {
                 writeln!(
                     out,
@@ -3111,7 +3159,7 @@ pub(crate) fn write_patch_entry_inner(
         // Zero OID for non-deleted entries means worktree content
         if let Some(wt) = work_tree {
             let path = entry.new_path.as_deref().unwrap_or(new_path);
-            read_worktree_path_raw(&wt.join(path))
+            read_worktree_path_raw(&path.to_fs_path(wt))
         } else {
             Vec::new()
         }
@@ -3126,7 +3174,7 @@ pub(crate) fn write_patch_entry_inner(
         {
             if let Some(wt) = work_tree {
                 let path = entry.new_path.as_deref().unwrap_or(new_path);
-                read_worktree_path_raw(&wt.join(path))
+                read_worktree_path_raw(&path.to_fs_path(wt))
             } else {
                 blob
             }
@@ -3138,18 +3186,18 @@ pub(crate) fn write_patch_entry_inner(
     // Check for binary content
     let treat_as_binary_by_driver = !mode_is_symlink(&entry.old_mode)
         && !mode_is_symlink(&entry.new_mode)
-        && (is_binary_driver_path(repo, work_tree, old_path)
-            || is_binary_driver_path(repo, work_tree, new_path));
+        && (is_binary_driver_path(repo, work_tree, &old_path.to_string_lossy())
+            || is_binary_driver_path(repo, work_tree, &new_path.to_string_lossy()));
     if treat_as_binary_by_driver || is_binary(&old_raw) || is_binary(&new_raw) {
         let bo = if entry.status == DiffStatus::Added {
             "/dev/null".to_owned()
         } else {
-            format_diff_path_with_prefix("a/", old_path, quote_fully)
+            format_diff_path_with_prefix("a/", &old_path.to_string_lossy(), quote_fully)
         };
         let bn = if entry.status == DiffStatus::Deleted {
             "/dev/null".to_owned()
         } else {
-            format_diff_path_with_prefix("b/", new_path, quote_fully)
+            format_diff_path_with_prefix("b/", &new_path.to_string_lossy(), quote_fully)
         };
         writeln!(out, "Binary files {bo} and {bn} differ")?;
         return Ok(());
@@ -3252,7 +3300,7 @@ fn validate_patch_entry_oids(entry: &DiffEntry) -> Result<()> {
 
 /// Write --stat output for diff-index.
 fn write_diff_index_stat(entries: &[DiffEntry], odb: &Odb) -> Result<()> {
-    let mut file_stats: Vec<(&str, usize, usize, bool)> = Vec::new();
+    let mut file_stats: Vec<(std::borrow::Cow<str>, usize, usize, bool)> = Vec::new();
     let mut total_ins = 0usize;
     let mut total_del = 0usize;
     let mut files_changed = 0usize;
@@ -3268,7 +3316,7 @@ fn write_diff_index_stat(entries: &[DiffEntry], odb: &Odb) -> Result<()> {
             let new_content = String::from_utf8_lossy(&new_raw).into_owned();
             count_line_changes(&old_content, &new_content)
         };
-        file_stats.push((entry.path(), ins, del, binary));
+        file_stats.push((entry.path().to_string_lossy(), ins, del, binary));
         total_ins += ins;
         total_del += del;
         files_changed += 1;

@@ -555,7 +555,7 @@ fn filter_paths(entries: Vec<DiffEntry>, paths: &[String]) -> Vec<DiffEntry> {
             let p = e.path();
             paths
                 .iter()
-                .any(|f| p == f || p.starts_with(&format!("{f}/")))
+                .any(|f| p == f || p.starts_with_bytes(format!("{f}/").as_bytes()))
         })
         .collect()
 }
@@ -615,7 +615,7 @@ fn launch_file_diff(
 
     if should_prompt {
         writeln!(stdout)?;
-        writeln!(stdout, "Viewing ({counter}/{total}): '{merged}'")?;
+        writeln!(stdout, "Viewing ({counter}/{total}): '{}'", merged.display())?;
         let prompt_label = tool.extcmd.as_deref().unwrap_or(&tool.tool_name);
         write!(stdout, "Launch '{prompt_label}' [Y/n]? ")?;
         stdout.flush().map_err(Error::Io)?;
@@ -629,7 +629,7 @@ fn launch_file_diff(
         }
     }
 
-    let status = run_tool(tool, &local_path, &remote_path, merged, counter, total)?;
+    let status = run_tool(tool, &local_path, &remote_path, &merged.to_string_lossy(), counter, total)?;
     let mut code = status.code().unwrap_or(1);
     if code == 127 {
         code = 128;
@@ -649,7 +649,7 @@ fn materialize_pair(
     work_tree: &Path,
     tmp_dir: &Path,
 ) -> Result<(PathBuf, PathBuf)> {
-    let safe_name = entry.path().replace('/', "_");
+    let safe_name = entry.path().to_string_lossy().replace('/', "_");
     let local_tmp = tmp_dir.join(format!("local_{safe_name}"));
     let remote_tmp = tmp_dir.join(format!("remote_{safe_name}"));
 
@@ -665,7 +665,7 @@ fn materialize_pair(
         }
         _ => {
             write_blob_or_empty(&repo.odb, &entry.old_oid, &local_tmp)?;
-            let wt = work_tree.join(entry.path());
+            let wt = entry.path().to_fs_path(work_tree);
             if wt.exists() {
                 Ok((local_tmp, wt))
             } else {
@@ -876,7 +876,10 @@ fn capture_dir_diff_baseline(
         let Some(path) = entry.new_path.as_deref().or(entry.old_path.as_deref()) else {
             continue;
         };
-        baseline.insert(path.to_string(), std::fs::read(right.join(path)).ok());
+        baseline.insert(
+            path.to_string_lossy().into_owned(),
+            std::fs::read(path.to_fs_path(right)).ok(),
+        );
     }
     baseline
 }
@@ -931,7 +934,7 @@ fn populate_dir_side(
     let Some(rel) = path else {
         return Ok(());
     };
-    let dest = dir.join(rel);
+    let dest = rel.to_fs_path(dir);
 
     let mode_str = if is_left {
         &entry.old_mode
@@ -961,9 +964,9 @@ fn populate_dir_side(
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        let wt_symlink = work_tree.join(rel);
+        let wt_symlink = rel.to_fs_path(work_tree);
         let target = if oid.is_zero() || (!is_left && use_symlinks && wt_symlink.is_symlink()) {
-            std::fs::read_link(work_tree.join(rel))
+            std::fs::read_link(rel.to_fs_path(work_tree))
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default()
         } else {
@@ -991,7 +994,7 @@ fn populate_dir_side(
     // through to copying the work-tree file into the temp dir below.
     #[cfg(unix)]
     if !is_left && use_symlinks {
-        let wt = work_tree.join(rel);
+        let wt = rel.to_fs_path(work_tree);
         if wt.is_file() {
             let _ = std::fs::remove_file(&dest);
             std::os::unix::fs::symlink(&wt, &dest).map_err(Error::Io)?;
@@ -1002,7 +1005,7 @@ fn populate_dir_side(
     let _ = use_symlinks;
 
     if !is_left {
-        let wt = work_tree.join(rel);
+        let wt = rel.to_fs_path(work_tree);
         if wt.is_file() {
             std::fs::copy(wt, &dest).map_err(Error::Io)?;
             return Ok(());
@@ -1014,7 +1017,7 @@ fn populate_dir_side(
 
     // Copy working-tree modifications for right side when applicable.
     if !is_left {
-        let wt = work_tree.join(rel);
+        let wt = rel.to_fs_path(work_tree);
         if wt.exists() {
             if let Ok(bytes) = std::fs::read(&wt) {
                 std::fs::write(&dest, bytes).map_err(Error::Io)?;

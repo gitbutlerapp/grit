@@ -158,7 +158,7 @@ fn worktree_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
         .map(|e| {
             let (old_text, old_bin) = blob_text(&repo.odb, &e.old_oid)?;
             let (new_text, new_bin) = match &e.new_path {
-                Some(p) => file_text(&work_tree.join(p)),
+                Some(p) => file_text(&p.to_fs_path(work_tree)),
                 None => (String::new(), false),
             };
             Ok(file_change(e, old_text, new_text, old_bin || new_bin))
@@ -194,15 +194,21 @@ fn sort_entries(entries: &mut [DiffEntry]) {
 }
 
 fn file_change(e: DiffEntry, old_text: String, new_text: String, binary: bool) -> FileChange {
+    // CLI display boundary: render byte paths lossily into the text-diff model.
     let path = e
         .new_path
-        .clone()
-        .or_else(|| e.old_path.clone())
+        .as_deref()
+        .or(e.old_path.as_deref())
+        .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
     // Record the pre-rename path only on a true rename (old differs from the
     // displayed path). For a deletion the displayed path *is* the old path, so
     // this must not treat it as a rename.
-    let old_path = e.old_path.filter(|op| *op != path);
+    let old_path = e
+        .old_path
+        .as_deref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|op| *op != path);
     FileChange {
         path,
         old_path,

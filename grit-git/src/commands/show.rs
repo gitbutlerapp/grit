@@ -19,6 +19,7 @@ use grit_lib::diff::{
     parse_indent_heuristic_cli_flags, resolve_indent_heuristic, unified_diff, zero_oid, DiffEntry,
     DiffStatus,
 };
+use grit_lib::repo_path::RepoPath;
 use grit_lib::diffstat::{terminal_columns, write_diffstat_block, DiffstatOptions, FileStatInput};
 use grit_lib::merge_base::merge_bases_first_vs_rest;
 use grit_lib::merge_diff::{
@@ -1053,7 +1054,8 @@ fn expand_typechange_entries_for_porcelain(entries: Vec<DiffEntry>) -> Vec<DiffE
     let mut out = Vec::with_capacity(entries.len() + 4);
     for e in entries {
         if e.status == DiffStatus::TypeChanged {
-            let path = e.path().to_string();
+            // Byte-true: clone the original path bytes for both synthetic halves.
+            let path = e.path().to_owned();
             out.push(DiffEntry {
                 status: DiffStatus::Deleted,
                 old_path: Some(path.clone()),
@@ -1151,7 +1153,7 @@ fn show_commit_separate_merge(
                 git_dir,
                 config,
                 odb,
-                entry.path(),
+                &entry.path().to_string_lossy(),
                 &parent_commit.tree,
                 &commit.tree,
                 abbrev_len,
@@ -1604,7 +1606,7 @@ fn show_commit(
             let old_t = parent_commit.tree;
             let mut entries =
                 diff_trees(odb, Some(&old_t), Some(&commit.tree), "").context("computing diff")?;
-            entries.retain(|e| unmerged.contains(e.path()));
+            entries.retain(|e| unmerged.contains(&*e.path().to_string_lossy()));
             (Some(old_t), entries)
         } else {
             let new_tree = Some(&commit.tree);
@@ -1688,12 +1690,19 @@ fn show_commit(
         diff_entries
             .into_iter()
             .filter(|e| {
-                let new_p = e.new_path.as_deref().unwrap_or("");
-                let old_p = e.old_path.as_deref().unwrap_or("");
+                let new_p = e.new_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                let old_p = e.old_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                // TODO(byte-paths): pathspec matching is &str-based until Phase 3.
                 (!new_p.is_empty()
-                    && grit_lib::pathspec::path_allowed_by_pathspec_list(pathspecs, new_p))
+                    && grit_lib::pathspec::path_allowed_by_pathspec_list(
+                        pathspecs,
+                        &new_p.to_string_lossy(),
+                    ))
                     || (!old_p.is_empty()
-                        && grit_lib::pathspec::path_allowed_by_pathspec_list(pathspecs, old_p))
+                        && grit_lib::pathspec::path_allowed_by_pathspec_list(
+                            pathspecs,
+                            &old_p.to_string_lossy(),
+                        ))
             })
             .collect()
     };
@@ -1720,7 +1729,7 @@ fn show_commit(
                 .new_path
                 .as_deref()
                 .or(entry.old_path.as_deref())
-                .unwrap_or("");
+                .unwrap_or(RepoPath::from_str(""));
             writeln!(out, "{path}")?;
         }
         return Ok(());
@@ -1733,7 +1742,7 @@ fn show_commit(
                 .new_path
                 .as_deref()
                 .or(entry.old_path.as_deref())
-                .unwrap_or("");
+                .unwrap_or(RepoPath::from_str(""));
             let status = match entry.status {
                 grit_lib::diff::DiffStatus::Added => 'A',
                 grit_lib::diff::DiffStatus::Deleted => 'D',
@@ -1785,12 +1794,12 @@ fn show_commit(
                 .old_path
                 .as_deref()
                 .or(entry.new_path.as_deref())
-                .unwrap_or("");
+                .unwrap_or(RepoPath::from_str(""));
             let new_path = entry
                 .new_path
                 .as_deref()
                 .or(entry.old_path.as_deref())
-                .unwrap_or("");
+                .unwrap_or(RepoPath::from_str(""));
             let status_char = match entry.status {
                 grit_lib::diff::DiffStatus::Added => 'A',
                 grit_lib::diff::DiffStatus::Deleted => 'D',
@@ -1898,7 +1907,7 @@ fn show_commit(
                         git_dir,
                         &config,
                         odb,
-                        entry.path(),
+                        &entry.path().to_string_lossy(),
                         ptree,
                         &commit.tree,
                         abbrev_len,
@@ -2000,8 +2009,17 @@ fn show_commit(
 
     // Default: full unified diff (first parent or root)
     for entry in &diff_entries {
-        let old_path = entry.old_path.as_deref().unwrap_or("/dev/null");
-        let new_path = entry.new_path.as_deref().unwrap_or("/dev/null");
+        // TODO(byte-paths): patch headers are &str-based until quote_path/Phase 3.
+        let old_path_buf = entry
+            .old_path
+            .as_deref()
+            .map_or_else(|| "/dev/null".to_string(), |p| p.to_string_lossy().into_owned());
+        let new_path_buf = entry
+            .new_path
+            .as_deref()
+            .map_or_else(|| "/dev/null".to_string(), |p| p.to_string_lossy().into_owned());
+        let old_path: &str = &old_path_buf;
+        let new_path: &str = &new_path_buf;
 
         // Print the diff header
         write_diff_header(out, entry)?;
@@ -2029,7 +2047,8 @@ fn show_commit(
                 .unwrap_or_default()
         };
 
-        let path_for_attrs = entry.path();
+        let path_for_attrs_buf = entry.path().to_string_lossy();
+        let path_for_attrs: &str = &path_for_attrs_buf;
         let textconv_patch = use_textconv && diff_textconv_active(git_dir, &config, path_for_attrs);
         if !textconv_patch
             && (is_binary_for_diff(git_dir, path_for_attrs, &old_raw)
@@ -2134,8 +2153,8 @@ fn write_show_summary_lines(
                 writeln!(
                     out,
                     " rename {} => {} ({sim}%)",
-                    entry.old_path.as_deref().unwrap_or(""),
-                    entry.new_path.as_deref().unwrap_or("")
+                    entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                    entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                 )?;
             }
             DiffStatus::Copied => {
@@ -2143,8 +2162,8 @@ fn write_show_summary_lines(
                 writeln!(
                     out,
                     " copy {} => {} ({sim}%)",
-                    entry.old_path.as_deref().unwrap_or(""),
-                    entry.new_path.as_deref().unwrap_or("")
+                    entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                    entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                 )?;
             }
             _ => {}
@@ -2189,12 +2208,15 @@ fn write_numstat_line(
 
 /// Format path for numstat/stat display (with rename arrow notation).
 fn format_rename_path(entry: &grit_lib::diff::DiffEntry) -> String {
-    let old_path = entry.old_path.as_deref().unwrap_or("");
-    let new_path = entry.new_path.as_deref().unwrap_or("");
+    let old_path = entry.old_path.as_deref().unwrap_or(RepoPath::from_str(""));
+    let new_path = entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""));
     match entry.status {
         grit_lib::diff::DiffStatus::Renamed | grit_lib::diff::DiffStatus::Copied => {
             // Use compact rename format: common_prefix/{old => new}/common_suffix
-            grit_lib::diff::format_rename_path(old_path, new_path)
+            grit_lib::diff::format_rename_path(
+                &old_path.to_string_lossy(),
+                &new_path.to_string_lossy(),
+            )
         }
         _ => new_path.to_string(),
     }
@@ -2309,11 +2331,11 @@ pub(crate) fn write_diff_header_with_remerge(
     let old_path = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")));
     let new_path = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")));
 
     writeln!(out, "diff --git a/{old_path} b/{new_path}")?;
     if let Some(line) = remerge_line {

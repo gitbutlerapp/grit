@@ -180,7 +180,7 @@ pub fn collect_changed_gitlinks_for_push(
                 if !is_gitlink_mode(&e.new_mode) {
                     continue;
                 }
-                let path = e.path().to_string();
+                let path = e.path().to_string_lossy().into_owned();
                 by_path.entry(path).or_default().push(e.new_oid);
             }
         } else if parents.len() == 1 {
@@ -211,11 +211,12 @@ pub fn collect_changed_gitlinks_for_push(
                     .new_path
                     .as_deref()
                     .or(e.old_path.as_deref())
-                    .unwrap_or("");
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if path.is_empty() {
                     continue;
                 }
-                by_path.entry(path.to_string()).or_default().push(oid);
+                by_path.entry(path).or_default().push(oid);
             }
         } else {
             let paths =

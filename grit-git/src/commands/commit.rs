@@ -1046,8 +1046,8 @@ pub fn run(mut args: Args) -> Result<()> {
     };
     let unmerged_full = crate::commands::status::unmerged_paths_and_mask(&index);
     let unmerged_keys: BTreeSet<String> = unmerged_full.keys().cloned().collect();
-    staged.retain(|e| !unmerged_keys.contains(e.path()));
-    unstaged.retain(|e| !unmerged_keys.contains(e.path()));
+    staged.retain(|e| !unmerged_keys.contains(&*e.path().to_string_lossy()));
+    unstaged.retain(|e| !unmerged_keys.contains(&*e.path().to_string_lossy()));
     // `-u<mode>` / `--untracked-files`: `no` suppresses the untracked listing entirely (Git prints
     // "Untracked files not listed (use -u option to show untracked files)" instead). The default
     // and `normal`/`all` collect untracked files (t7508 commit -uno --dry-run).
@@ -2100,7 +2100,7 @@ fn print_dry_run(
         let mut u = unstaged.to_vec();
         let mut extra_ut = Vec::new();
         for e in staged_out {
-            if unstaged_paths.contains(e.path()) {
+            if unstaged_paths.contains(&*e.path().to_string_lossy()) {
                 continue;
             }
             // Git: fully staged paths excluded from the commit are listed like untracked in
@@ -2121,7 +2121,7 @@ fn print_dry_run(
         .into_iter()
         .filter(|e| {
             submodule_decisions
-                .get(e.path())
+                .get(&*e.path().to_string_lossy())
                 .map(|(_, _, suppress_staged)| !suppress_staged)
                 .unwrap_or(true)
         })
@@ -2130,7 +2130,7 @@ fn print_dry_run(
         .into_iter()
         .filter(|e| {
             submodule_decisions
-                .get(e.path())
+                .get(&*e.path().to_string_lossy())
                 .map(|(_, suppress_unstaged, _)| !suppress_unstaged)
                 .unwrap_or(true)
         })
@@ -2185,7 +2185,7 @@ fn print_dry_run(
         for entry in &unstaged_show {
             let label = status_label_unstaged(entry.status);
             let suffix = submodule_decisions
-                .get(entry.path())
+                .get(&*entry.path().to_string_lossy())
                 .map(|(annotation, _, _)| annotation.as_str())
                 .unwrap_or("");
             writeln!(out, "\t{label}:   {}{suffix}", entry.path())?;

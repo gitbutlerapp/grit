@@ -999,7 +999,7 @@ fn filter_entries_for_paths(entries: Vec<DiffEntry>, paths: &[String]) -> Vec<Di
         .filter(|e| {
             e.new_path
                 .as_deref()
-                .map(|p| set.contains(p))
+                .map(|p| set.contains(p.to_string_lossy().as_ref()))
                 .unwrap_or(false)
         })
         .collect()
@@ -1059,7 +1059,7 @@ fn load_pair_content(
         .new_path
         .as_deref()
         .ok_or_else(|| Error::CorruptObject("diff entry missing path".to_owned()))?;
-    let rg = range_files.iter().find(|f| f.path == new_path);
+    let rg = range_files.iter().find(|f| new_path == f.path.as_str());
     let Some(rg) = rg else {
         return Ok(None);
     };
@@ -1083,11 +1083,12 @@ fn load_pair_content(
     let diff = collect_diff_ranges(&old_text, &new_text);
     let old_path = entry
         .old_path
-        .clone()
+        .as_deref()
+        .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| "/dev/null".to_owned());
     Ok(Some(FileDiffArtifacts {
         old_path,
-        new_path: new_path.to_owned(),
+        new_path: new_path.to_string_lossy().into_owned(),
         old_text,
         new_text,
         diff,

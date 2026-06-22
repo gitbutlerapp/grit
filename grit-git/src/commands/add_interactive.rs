@@ -69,7 +69,7 @@ fn read_new_side(odb: &Odb, entry: &DiffEntry, work_tree: &Path, from_worktree: 
         return Vec::new();
     }
     if from_worktree {
-        let p = work_tree.join(entry.path());
+        let p = entry.path().to_fs_path(work_tree);
         std::fs::read(&p).unwrap_or_default()
     } else {
         read_blob(odb, &entry.new_oid)
@@ -832,7 +832,7 @@ fn emit_cached_diff(ctx: &mut AddIContext, out: &mut impl Write, paths: &[String
     let entries = diff_index_to_tree(&ctx.repo.odb, &ctx.index, ctx.head_tree.as_ref(), false)?;
     let filtered: Vec<DiffEntry> = entries
         .into_iter()
-        .filter(|e| paths.iter().any(|p| p == e.path()))
+        .filter(|e| paths.iter().any(|p| e.path() == p))
         .collect();
     let mut buf: Vec<u8> = Vec::new();
     crate::commands::diff::write_patch_from_pairs(&mut buf, &filtered, ctx.repo)

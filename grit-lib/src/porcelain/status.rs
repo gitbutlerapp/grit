@@ -735,7 +735,7 @@ pub fn status(
     let mut staged: Vec<DiffEntry> =
         crate::diff::diff_index_to_tree(&repo.odb, &index, head_tree.as_ref(), false)?
             .into_iter()
-            .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
+            .filter(|e| status_path_matches(&e.path().to_string_lossy(), &opts.pathspecs))
             .collect();
 
     // Unstaged: worktree vs index, narrowed before rename detection.
@@ -749,7 +749,7 @@ pub fn status(
         },
     )?
     .into_iter()
-    .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
+    .filter(|e| status_path_matches(&e.path().to_string_lossy(), &opts.pathspecs))
     .collect();
 
     if let Some(rd) = opts.renames {

@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
 use grit_lib::config::{parse_bool, ConfigSet};
 use grit_lib::diff::{count_changes, diff_trees, unified_diff_with_prefix, zero_oid, DiffStatus};
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::diffstat::{
     write_diffstat_block, DiffstatOptions, FileStatInput, FORMAT_PATCH_STAT_WIDTH,
 };
@@ -1492,9 +1493,9 @@ fn diffstat_for_patch_entries(
         // Renames/copies are displayed in the diffstat as `old => new` (pretty-printed).
         let path = match entry.status {
             DiffStatus::Renamed | DiffStatus::Copied => {
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                grit_lib::diff::format_rename_path(old, new)
+                let old = entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let new = entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                grit_lib::diff::format_rename_path(&old, &new)
             }
             _ => entry.path().to_string(),
         };
@@ -1539,9 +1540,9 @@ fn diffstat_for_patch_entries(
         for (file, entry) in files.iter().zip(entries.iter()) {
             let display = match entry.status {
                 DiffStatus::Renamed | DiffStatus::Copied => {
-                    let old = entry.old_path.as_deref().unwrap_or("");
-                    let new = entry.new_path.as_deref().unwrap_or("");
-                    let pretty = grit_lib::diff::format_rename_path(old, new);
+                    let old = entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                    let new = entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                    let pretty = grit_lib::diff::format_rename_path(&old, &new);
                     grit_lib::quote_path::quote_c_style(&pretty, false)
                 }
                 _ => file.path_display.clone(),
@@ -1655,16 +1656,16 @@ fn format_summary_lines(entries: &[grit_lib::diff::DiffEntry]) -> String {
                 let sim = entry.score.unwrap_or(100);
                 out.push_str(&format!(
                     " rename {} => {} ({sim}%)\n",
-                    entry.old_path.as_deref().unwrap_or(""),
-                    entry.new_path.as_deref().unwrap_or("")
+                    entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                    entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                 ));
             }
             DiffStatus::Copied => {
                 let sim = entry.score.unwrap_or(100);
                 out.push_str(&format!(
                     " copy {} => {} ({sim}%)\n",
-                    entry.old_path.as_deref().unwrap_or(""),
-                    entry.new_path.as_deref().unwrap_or("")
+                    entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                    entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                 ));
             }
             _ => {}
@@ -1799,7 +1800,7 @@ fn format_cover_letter(
             patch_opts
                 .pathspec
                 .iter()
-                .any(|ps| path_matches_spec(e.path(), ps))
+                .any(|ps| path_matches_spec(&e.path().to_string_lossy(), ps))
         });
     }
     let diff_entries = apply_relative_filter(diff_entries, patch_opts.relative.as_deref());
@@ -2037,7 +2038,7 @@ fn format_single_patch(
         diff_entries_raw.retain(|e| {
             opts.pathspec
                 .iter()
-                .any(|ps| path_matches_spec(e.path(), ps))
+                .any(|ps| path_matches_spec(&e.path().to_string_lossy(), ps))
         });
     }
     let diff_entries_raw = apply_relative_filter(diff_entries_raw, opts.relative.as_deref());
@@ -2057,15 +2058,23 @@ fn format_single_patch(
     }
 
     for entry in &diff_entries {
-        let old_path = entry.old_path.as_deref().unwrap_or("/dev/null");
-        let new_path = entry.new_path.as_deref().unwrap_or("/dev/null");
+        let old_path = entry
+            .old_path
+            .as_deref()
+            .map_or(std::borrow::Cow::Borrowed("/dev/null"), RepoPath::to_string_lossy);
+        let new_path = entry
+            .new_path
+            .as_deref()
+            .map_or(std::borrow::Cow::Borrowed("/dev/null"), RepoPath::to_string_lossy);
         write_diff_header_to_string(
             &mut diff_text,
             entry,
             opts.diff_src_prefix,
             opts.diff_dst_prefix,
         );
-        let path_for_attrs = entry.path();
+        // TODO(byte-paths): attribute/textconv lookup is still str-keyed (Phase 3).
+        let path_for_attrs_owned = entry.path().to_string_lossy();
+        let path_for_attrs: &str = &path_for_attrs_owned;
         let use_textconv = !no_binary;
         let textconv_patch = use_textconv && diff_textconv_active(git_dir, &config, path_for_attrs);
         let old_raw = read_blob_bytes(odb, &entry.old_oid);
@@ -2118,8 +2127,8 @@ fn format_single_patch(
         let patch = unified_diff_with_prefix(
             &old_content,
             &new_content,
-            old_path,
-            new_path,
+            &old_path,
+            &new_path,
             opts.context_lines,
             0,
             opts.diff_src_prefix,
@@ -2389,11 +2398,11 @@ fn write_diff_header_to_string(
     let old_path = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")));
     let new_path = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")));
 
     if src_prefix.is_empty() && dst_prefix.is_empty() {
         let _ = writeln!(out, "diff --git {old_path} {new_path}");
@@ -2753,18 +2762,18 @@ fn apply_relative_filter(
     };
     let mut out = Vec::new();
     for mut e in entries {
-        let keep = e.path().starts_with(prefix);
+        let keep = e.path().starts_with_bytes(prefix.as_bytes());
         if !keep {
             continue;
         }
         if let Some(ref p) = e.old_path {
-            if let Some(stripped) = p.strip_prefix(prefix) {
-                e.old_path = Some(stripped.to_string());
+            if let Some(stripped) = p.as_bytes().strip_prefix(prefix.as_bytes()) {
+                e.old_path = Some(RepoPathBuf::from_bytes(stripped.to_vec()));
             }
         }
         if let Some(ref p) = e.new_path {
-            if let Some(stripped) = p.strip_prefix(prefix) {
-                e.new_path = Some(stripped.to_string());
+            if let Some(stripped) = p.as_bytes().strip_prefix(prefix.as_bytes()) {
+                e.new_path = Some(RepoPathBuf::from_bytes(stripped.to_vec()));
             }
         }
         out.push(e);
@@ -2787,7 +2796,7 @@ fn commit_touches_pathspec(repo: &Repository, commit: &CommitData, pathspec: &[S
     };
     entries
         .iter()
-        .any(|e| pathspec.iter().any(|ps| path_matches_spec(e.path(), ps)))
+        .any(|e| pathspec.iter().any(|ps| path_matches_spec(&e.path().to_string_lossy(), ps)))
 }
 
 /// Cover-letter subject/blurb resolved from description settings.
@@ -3222,16 +3231,22 @@ fn compute_interdiff(
         .context("computing interdiff")?;
     let mut out = String::new();
     for entry in &entries {
-        let old_path = entry.old_path.as_deref().unwrap_or("/dev/null");
-        let new_path = entry.new_path.as_deref().unwrap_or("/dev/null");
+        let old_path = entry
+            .old_path
+            .as_deref()
+            .map_or(std::borrow::Cow::Borrowed("/dev/null"), RepoPath::to_string_lossy);
+        let new_path = entry
+            .new_path
+            .as_deref()
+            .map_or(std::borrow::Cow::Borrowed("/dev/null"), RepoPath::to_string_lossy);
         write_diff_header_to_string(&mut out, entry, opts.diff_src_prefix, opts.diff_dst_prefix);
         let old_content = read_blob_content(&repo.odb, &entry.old_oid);
         let new_content = read_blob_content(&repo.odb, &entry.new_oid);
         let patch = unified_diff_with_prefix(
             &old_content,
             &new_content,
-            old_path,
-            new_path,
+            &old_path,
+            &new_path,
             opts.context_lines,
             0,
             opts.diff_src_prefix,
