@@ -23,6 +23,7 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 hex = "0.4"
 tempfile = "3"
 similar = "3"
+bstr = "1"
 imara-diff = { version = "0.2", features = ["unified_diff"] }
 merge3 = "0.2"
 regex = "1"
