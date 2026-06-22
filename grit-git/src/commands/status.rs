@@ -11,6 +11,7 @@ use grit_lib::diff::{
     DiffIndexToWorktreeOptions, DiffStatus,
 };
 use grit_lib::error::Error;
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::index::{Index, IndexEntry, MODE_GITLINK, MODE_TREE};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::status::{
@@ -385,7 +386,14 @@ fn should_advise_sparse_index_expanded(
     }
     unstaged
         .iter()
-        .any(|entry| status_path_outside_sparse_checkout(repo, config, work_tree, entry.path()))
+        .any(|entry| {
+            status_path_outside_sparse_checkout(
+                repo,
+                config,
+                work_tree,
+                &entry.path().to_string_lossy(),
+            )
+        })
         || untracked
             .iter()
             .chain(ignored_files.iter())
@@ -622,7 +630,7 @@ pub fn run(mut args: Args) -> Result<()> {
     let staged_raw = diff_index_to_tree(&repo.odb, &index, head_tree.as_ref(), false)?;
     let staged_raw: Vec<grit_lib::diff::DiffEntry> = staged_raw
         .into_iter()
-        .filter(|entry| status_path_matches(entry.path(), &user_pathspecs))
+        .filter(|entry| status_path_matches(&entry.path().to_string_lossy(), &user_pathspecs))
         .collect();
     // Detect renames among staged entries when enabled.
     let staged = if let Some(settings) = status_rename_settings {
@@ -644,11 +652,13 @@ pub fn run(mut args: Args) -> Result<()> {
     )?;
     let unstaged_raw: Vec<grit_lib::diff::DiffEntry> = unstaged_raw
         .into_iter()
-        .filter(|entry| status_path_matches(entry.path(), &user_pathspecs))
+        .filter(|entry| status_path_matches(&entry.path().to_string_lossy(), &user_pathspecs))
         .filter(|entry| {
             fsmonitor_query
                 .as_ref()
-                .is_none_or(|(_, reported)| fsmonitor_reported_path_matches(entry.path(), reported))
+                .is_none_or(|(_, reported)| {
+                    fsmonitor_reported_path_matches(&entry.path().to_string_lossy(), reported)
+                })
         })
         .collect();
     let unstaged = if let Some(settings) = status_rename_settings {
@@ -1453,8 +1463,8 @@ fn format_porcelain_v2(
         let qpath = quote_status_path(path, config, nul);
 
         let v2_rename_line = |e: &grit_lib::diff::DiffEntry| -> String {
-            let old_p = e.old_path.as_deref().unwrap_or("");
-            let qold = quote_status_path(old_p, config, nul);
+            let old_p = e.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+            let qold = quote_status_path(&old_p, config, nul);
             let score = e.score.unwrap_or(100);
             let rch = if e.status == DiffStatus::Renamed {
                 'R'
@@ -1750,11 +1760,11 @@ fn format_short(
             continue;
         }
         if entry.status == DiffStatus::Renamed || entry.status == DiffStatus::Copied {
-            let key = entry.path().to_owned();
+            let key = entry.path().to_string_lossy().into_owned();
             staged_map.insert(key.clone(), entry.status.letter());
             paths.insert(key);
         } else {
-            let path = entry.path().to_owned();
+            let path = entry.path().to_string_lossy().into_owned();
             staged_map.insert(path.clone(), entry.status.letter());
             paths.insert(path);
         }
@@ -1764,7 +1774,7 @@ fn format_short(
         if entry.status == DiffStatus::Unmerged {
             continue;
         }
-        let path = entry.path().to_owned();
+        let path = entry.path().to_string_lossy().into_owned();
         if let Some(ie) = index.get(path.as_bytes(), 0) {
             if ie.mode == MODE_GITLINK && submodule_suppressed(&path, ie.oid) {
                 continue;
@@ -1832,8 +1842,10 @@ fn format_short(
                 && (e.status == DiffStatus::Renamed || e.status == DiffStatus::Copied)
         });
         if let Some(e) = rename_or_copy {
-            let old_p = e.old_path.as_deref().unwrap_or("");
-            let new_p = e.new_path.as_deref().unwrap_or("");
+            let old_p = e.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+            let old_p: &str = &old_p;
+            let new_p = e.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+            let new_p: &str = &new_p;
             if args.null_terminated {
                 let new_disp = disp(new_p);
                 let old_disp = disp(old_p);
@@ -1851,7 +1863,7 @@ fn format_short(
                     writeln!(
                         out,
                         "{}",
-                        quote_status_short_path(&disp(e.path()), quote_path_cfg)
+                        quote_status_short_path(&disp(&e.path().to_string_lossy()), quote_path_cfg)
                     )?;
                 }
             }
@@ -2910,17 +2922,20 @@ fn format_long(
         .filter(|e| e.status != DiffStatus::Unmerged)
         .filter(|e| {
             submodule_decisions
-                .get(e.path())
+                .get(&*e.path().to_string_lossy())
                 .map(|(_, _, suppress_staged)| !suppress_staged)
                 .unwrap_or(true)
         })
         .collect();
     let unstaged_normal: Vec<&DiffEntry> = unstaged
         .iter()
-        .filter(|e| e.status != DiffStatus::Unmerged && !unmerged_map.contains_key(e.path()))
+        .filter(|e| {
+            e.status != DiffStatus::Unmerged
+                && !unmerged_map.contains_key(&*e.path().to_string_lossy())
+        })
         .filter(|e| {
             submodule_decisions
-                .get(e.path())
+                .get(&*e.path().to_string_lossy())
                 .map(|(_, suppress_unstaged, _)| !suppress_unstaged)
                 .unwrap_or(true)
         })
@@ -3034,7 +3049,7 @@ fn format_long(
                 _ => "changed",
             };
             let suffix = submodule_decisions
-                .get(entry.path())
+                .get(&*entry.path().to_string_lossy())
                 .map(|(annotation, _, _)| annotation.as_str())
                 .unwrap_or("");
             cpw(
@@ -3721,10 +3736,10 @@ fn remap_diff_paths(
         .map(|e| {
             let mut new_entry = e.clone();
             if let Some(ref p) = e.old_path {
-                new_entry.old_path = Some(f(p));
+                new_entry.old_path = Some(RepoPathBuf::from_string(f(&p.to_string_lossy())));
             }
             if let Some(ref p) = e.new_path {
-                new_entry.new_path = Some(f(p));
+                new_entry.new_path = Some(RepoPathBuf::from_string(f(&p.to_string_lossy())));
             }
             new_entry
         })

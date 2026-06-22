@@ -37,6 +37,7 @@ use grit_lib::diff::{
     DiffStatus,
 };
 use grit_lib::diffstat::{terminal_columns, write_diffstat_block, DiffstatOptions, FileStatInput};
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::error::Error;
 use grit_lib::index::{Index, MODE_GITLINK};
 use grit_lib::merge_base::{
@@ -363,7 +364,7 @@ fn submodule_head_oid_for_gitlink_patch(entry: &DiffEntry, work_tree: Option<&Pa
         return entry.new_oid;
     }
     work_tree
-        .and_then(|wt| grit_lib::diff::read_submodule_head_oid(&wt.join(entry.path())))
+        .and_then(|wt| grit_lib::diff::read_submodule_head_oid(&entry.path().to_fs_path(wt)))
         .unwrap_or_else(zero_oid)
 }
 
@@ -490,7 +491,13 @@ fn gitlink_suppressed_ignore_all(
     if cli.is_some() {
         return false;
     }
-    submodule_effective_ignore_token(entry.path(), path_to_name, gm_name_ignore, cfg).as_deref()
+    submodule_effective_ignore_token(
+        &entry.path().to_string_lossy(),
+        path_to_name,
+        gm_name_ignore,
+        cfg,
+    )
+    .as_deref()
         == Some("all")
 }
 
@@ -512,8 +519,8 @@ fn gitlink_same_oid_suppressed(
     if cli.is_some() {
         return false;
     }
-    let path = entry.path();
-    let token = submodule_effective_ignore_token(path, path_to_name, gm_name_ignore, cfg);
+    let path = entry.path().to_string_lossy();
+    let token = submodule_effective_ignore_token(&path, path_to_name, gm_name_ignore, cfg);
     if token.as_deref() == Some("none") {
         return false;
     }
@@ -523,7 +530,7 @@ fn gitlink_same_oid_suppressed(
     let Some(wt) = work_tree else {
         return false;
     };
-    let flags = grit_lib::diff::submodule_porcelain_flags(wt, path, entry.old_oid);
+    let flags = grit_lib::diff::submodule_porcelain_flags(wt, &path, entry.old_oid);
     if token.as_deref() == Some("untracked") {
         return !flags.modified && flags.untracked;
     }
@@ -545,9 +552,9 @@ fn submodule_gitlink_patch_plus_suffix(
     let Some(wt) = work_tree else {
         return String::new();
     };
-    let path = entry.path();
-    let flags = grit_lib::diff::submodule_porcelain_flags(wt, path, entry.old_oid);
-    let eff = submodule_effective_ignore_token(path, path_to_name, gm_name_ignore, diff_cfg);
+    let path = entry.path().to_string_lossy();
+    let flags = grit_lib::diff::submodule_porcelain_flags(wt, &path, entry.old_oid);
+    let eff = submodule_effective_ignore_token(&path, path_to_name, gm_name_ignore, diff_cfg);
     let cli_none = ignore_submodules_cli.is_some_and(|s| s.eq_ignore_ascii_case("none"));
     let count_untracked =
         !submodule_ignore.ignore_untracked && (cli_none || eff.as_deref() == Some("none"));
@@ -610,7 +617,9 @@ fn write_submodule_log_lines(
         writeln!(out, "Submodule {} {}..{}:", entry.path(), old_a, new_a)?;
         return Ok(());
     };
-    let Some(sub_repo) = open_submodule_repo_for_log(&repo.git_dir, Some(wt), entry.path()) else {
+    let Some(sub_repo) =
+        open_submodule_repo_for_log(&repo.git_dir, Some(wt), &entry.path().to_string_lossy())
+    else {
         writeln!(
             out,
             "Submodule {} {}...{} (commits not present)",
@@ -2995,10 +3004,11 @@ pub fn run(mut args: Args) -> Result<()> {
         let z = zero_oid();
         names
             .into_iter()
+            // TODO(byte-paths): combined_diff_paths yields lossy String paths (Phase 2/4).
             .map(|p| DiffEntry {
                 status: DiffStatus::Modified,
-                old_path: Some(p.clone()),
-                new_path: Some(p),
+                old_path: Some(RepoPathBuf::from_string(p.clone())),
+                new_path: Some(RepoPathBuf::from_string(p)),
                 old_mode: "100644".to_string(),
                 new_mode: "100644".to_string(),
                 old_oid: z,
@@ -3041,8 +3051,9 @@ pub fn run(mut args: Args) -> Result<()> {
                         } else {
                             vec![DiffEntry {
                                 status: DiffStatus::Modified,
-                                old_path: Some(a.path),
-                                new_path: Some(b.path),
+                                // TODO(byte-paths): blob-diff spec paths are lossy String (Phase 2/4).
+                                old_path: Some(RepoPathBuf::from_string(a.path)),
+                                new_path: Some(RepoPathBuf::from_string(b.path)),
                                 old_mode: a.mode,
                                 new_mode: b.mode,
                                 old_oid: a.oid,
@@ -3302,24 +3313,29 @@ pub fn run(mut args: Args) -> Result<()> {
                     let old_match = e
                         .old_path
                         .as_ref()
-                        .is_some_and(|p| p.starts_with(pfx.as_str()));
+                        .is_some_and(|p| p.starts_with_bytes(pfx.as_bytes()));
                     let new_match = e
                         .new_path
                         .as_ref()
-                        .is_some_and(|p| p.starts_with(pfx.as_str()));
+                        .is_some_and(|p| p.starts_with_bytes(pfx.as_bytes()));
                     if !old_match && !new_match {
                         return None;
                     }
-                    // Strip prefix from paths, then strip leading '/'
-                    if let Some(ref mut p) = e.old_path {
-                        if let Some(stripped) = p.strip_prefix(pfx.as_str()) {
-                            *p = stripped.trim_start_matches('/').to_owned();
+                    // Strip prefix from paths, then strip leading '/' (byte-wise).
+                    let strip = |p: &mut RepoPathBuf| {
+                        if let Some(stripped) = p.as_bytes().strip_prefix(pfx.as_bytes()) {
+                            let mut t = stripped;
+                            while let Some(rest) = t.strip_prefix(b"/") {
+                                t = rest;
+                            }
+                            *p = RepoPathBuf::from_bytes(t.to_vec());
                         }
+                    };
+                    if let Some(ref mut p) = e.old_path {
+                        strip(p);
                     }
                     if let Some(ref mut p) = e.new_path {
-                        if let Some(stripped) = p.strip_prefix(pfx.as_str()) {
-                            *p = stripped.trim_start_matches('/').to_owned();
-                        }
+                        strip(p);
                     }
                     Some(e)
                 })
@@ -3509,7 +3525,7 @@ pub fn run(mut args: Args) -> Result<()> {
             // combined `diff --cc` replaces them only when unified patch is the sole format.
             let strip_conflict_index_lines = show_unified_patch && !format_besides_unified_patch;
             if strip_conflict_index_lines {
-                entries.retain(|e| !conflict_paths.iter().any(|p| p == e.path()));
+                entries.retain(|e| !conflict_paths.iter().any(|p| e.path() == p.as_str()));
             }
         }
     }
@@ -3870,8 +3886,12 @@ pub fn run(mut args: Args) -> Result<()> {
         let env_cfg_ext = resolve_env_config_external_diff(&diff_config);
         // Run when env/config OR any attribute driver could apply.
         let any_attr_driver = entries.iter().any(|e| {
-            grit_lib::merge_diff::diff_attr_external_driver(&repo.git_dir, &diff_config, e.path())
-                .is_some()
+            grit_lib::merge_diff::diff_attr_external_driver(
+                &repo.git_dir,
+                &diff_config,
+                &e.path().to_string_lossy(),
+            )
+            .is_some()
         });
         if env_cfg_ext.is_some() || any_attr_driver {
             let mut sink = io::sink();
@@ -3990,8 +4010,9 @@ fn run_diff_blob_vs_file(
 
     let entries = vec![DiffEntry {
         status: DiffStatus::Modified,
-        old_path: Some(old_path),
-        new_path: Some(file_path.to_owned()),
+        // TODO(byte-paths): blob-diff display paths are lossy String (Phase 2/4).
+        old_path: Some(RepoPathBuf::from_string(old_path)),
+        new_path: Some(RepoPathBuf::from_string(file_path.to_owned())),
         old_mode,
         new_mode: wt_mode,
         old_oid,
@@ -5865,8 +5886,10 @@ fn repo_relative_path_for_relative_display(display: &str, prefix: Option<&str>) 
 /// Repository-relative path for attributes / worktree reads when `--relative` stripped display paths.
 fn repo_path_for_diff_entry(entry: &DiffEntry, relative_prefix: Option<&str>) -> String {
     match relative_prefix {
-        Some(p) if !p.is_empty() => repo_relative_path_for_relative_display(entry.path(), Some(p)),
-        _ => entry.path().to_owned(),
+        Some(p) if !p.is_empty() => {
+            repo_relative_path_for_relative_display(&entry.path().to_string_lossy(), Some(p))
+        }
+        _ => entry.path().to_string_lossy().into_owned(),
     }
 }
 
@@ -6212,7 +6235,8 @@ fn filter_by_paths(entries: Vec<DiffEntry>, paths: &[String]) -> Vec<DiffEntry> 
     entries
         .into_iter()
         .filter(|e| {
-            let path = e.path();
+            // TODO(byte-paths): lossy pathspec matching until Phase 3 byte-correct matchers.
+            let path = e.path().to_string_lossy();
             // Classify the entry from its modes so `dir/` style pathspecs match
             // gitlinks (t4010: `submod/` must match submodule entry `submod`).
             let old_ctx = grit_lib::pathspec::context_from_mode_octal(&e.old_mode);
@@ -6225,11 +6249,11 @@ fn filter_by_paths(entries: Vec<DiffEntry>, paths: &[String]) -> Vec<DiffEntry> 
                 if spec == &"." || spec.is_empty() {
                     return true;
                 }
-                grit_lib::pathspec::matches_pathspec_with_context(spec, path, ctx)
+                grit_lib::pathspec::matches_pathspec_with_context(spec, &path, ctx)
             });
             let excluded = exclude_inners
                 .iter()
-                .any(|inner| grit_lib::pathspec::matches_pathspec_with_context(inner, path, ctx));
+                .any(|inner| grit_lib::pathspec::matches_pathspec_with_context(inner, &path, ctx));
             included && !excluded
         })
         .collect()
@@ -6237,7 +6261,7 @@ fn filter_by_paths(entries: Vec<DiffEntry>, paths: &[String]) -> Vec<DiffEntry> 
 
 /// Read content for a diff entry side, falling back to the working tree if
 /// the OID is not in the ODB (worktree files are hashed but not stored).
-fn read_content(odb: &Odb, oid: &ObjectId, work_tree: Option<&Path>, path: &str) -> String {
+fn read_content(odb: &Odb, oid: &ObjectId, work_tree: Option<&Path>, path: &RepoPath) -> String {
     let raw = read_content_raw_or_worktree(odb, oid, work_tree, path);
     String::from_utf8_lossy(&raw).into_owned()
 }
@@ -6416,8 +6440,8 @@ fn read_content_raw(odb: &Odb, oid: &ObjectId) -> Vec<u8> {
 ///
 /// For symlinks, returns the link target as UTF-8 bytes (same as blob hashing), not the
 /// dereferenced file contents (t4011: `git diff` for intent-to-add symlinks vs `*.bin` rules).
-fn read_worktree_file_raw(wt: &Path, path: &str) -> Option<Vec<u8>> {
-    let full = wt.join(path);
+fn read_worktree_file_raw(wt: &Path, path: &RepoPath) -> Option<Vec<u8>> {
+    let full = path.to_fs_path(wt);
     let meta = std::fs::symlink_metadata(&full).ok()?;
     if meta.file_type().is_symlink() {
         std::fs::read_link(&full)
@@ -6433,13 +6457,13 @@ fn read_content_raw_or_worktree(
     odb: &Odb,
     oid: &ObjectId,
     work_tree: Option<&Path>,
-    path: &str,
+    path: &RepoPath,
 ) -> Vec<u8> {
     if *oid == zero_oid() {
         // Empty tree / new file side: read from the work tree when available (t1501 tree diffs).
         if let Some(wt) = work_tree {
-            if path != "/dev/null" {
-                let p = wt.join(path);
+            if path.as_bytes() != b"/dev/null" {
+                let p = path.to_fs_path(wt);
                 if std::fs::symlink_metadata(&p)
                     .map(|m| m.is_dir())
                     .unwrap_or(false)
@@ -6459,8 +6483,8 @@ fn read_content_raw_or_worktree(
     }
     // Fall back to reading from working tree
     if let Some(wt) = work_tree {
-        if path != "/dev/null" {
-            let p = wt.join(path);
+        if path.as_bytes() != b"/dev/null" {
+            let p = path.to_fs_path(wt);
             if std::fs::symlink_metadata(&p)
                 .map(|m| m.is_dir())
                 .unwrap_or(false)
@@ -6541,7 +6565,7 @@ fn stat_ins_del_for_entry(
         old_content = ws_mode.normalize(&old_content);
         new_content = ws_mode.normalize(&new_content);
     }
-    let (algo, hist) = diff_algorithm_for_path(entry.path(), algo_cli, algo_ctx);
+    let (algo, hist) = diff_algorithm_for_path(&entry.path().to_string_lossy(), algo_cli, algo_ctx);
     count_changes_with_algorithm(&old_content, &new_content, algo, hist)
 }
 
@@ -6677,11 +6701,11 @@ fn write_diff_header_with_prefix(
     let old_path = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")));
     let new_path = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")));
 
     let (b, r) = if use_color { (BOLD, RESET) } else { ("", "") };
     let old_git = if old_path.is_empty() {
@@ -6689,14 +6713,14 @@ fn write_diff_header_with_prefix(
     } else if old_path == "/dev/null" {
         "/dev/null".to_string()
     } else {
-        format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully)
+        format_diff_path_with_prefix(src_prefix, &old_path.to_string_lossy(), quote_path_fully)
     };
     let new_git = if new_path.is_empty() {
         format!("{dst_prefix}")
     } else if new_path == "/dev/null" {
         "/dev/null".to_string()
     } else {
-        format_diff_path_with_prefix(dst_prefix, new_path, quote_path_fully)
+        format_diff_path_with_prefix(dst_prefix, &new_path.to_string_lossy(), quote_path_fully)
     };
     writeln!(out, "{b}diff --git {old_git} {new_git}{r}")?;
 
@@ -6776,12 +6800,12 @@ fn write_diff_header_with_prefix(
             writeln!(
                 out,
                 "{b}rename from {}{r}",
-                quote_c_style(old_path, quote_path_fully)
+                quote_c_style(&old_path.to_string_lossy(), quote_path_fully)
             )?;
             writeln!(
                 out,
                 "{b}rename to {}{r}",
-                quote_c_style(new_path, quote_path_fully)
+                quote_c_style(&new_path.to_string_lossy(), quote_path_fully)
             )?;
             if entry.old_oid != entry.new_oid {
                 // Git appends the (shared) mode to the rename's `index` line when both
@@ -6810,12 +6834,12 @@ fn write_diff_header_with_prefix(
             writeln!(
                 out,
                 "{b}copy from {}{r}",
-                quote_c_style(old_path, quote_path_fully)
+                quote_c_style(&old_path.to_string_lossy(), quote_path_fully)
             )?;
             writeln!(
                 out,
                 "{b}copy to {}{r}",
-                quote_c_style(new_path, quote_path_fully)
+                quote_c_style(&new_path.to_string_lossy(), quote_path_fully)
             )?;
             if entry.old_oid != entry.new_oid {
                 if entry.old_mode == entry.new_mode {
@@ -7565,8 +7589,8 @@ fn write_patch_with_prefix(
     let mut ext_died: Option<String> = None;
     let mut ext_counter: usize = 0;
     for entry in entries {
-        let old_path = entry.old_path.as_deref().unwrap_or("/dev/null");
-        let new_path = entry.new_path.as_deref().unwrap_or("/dev/null");
+        let old_path = entry.old_path.as_deref().unwrap_or(RepoPath::from_str("/dev/null"));
+        let new_path = entry.new_path.as_deref().unwrap_or(RepoPath::from_str("/dev/null"));
         let path_for_attrs = repo_path_for_diff_entry(entry, relative_prefix);
 
         // `git diff --cached` reports an unmerged (conflicted) index entry as a single
@@ -7589,7 +7613,7 @@ fn write_patch_with_prefix(
                 {
                     let head = work_tree
                         .and_then(|wt| {
-                            grit_lib::diff::read_submodule_head_oid(&wt.join(entry.path()))
+                            grit_lib::diff::read_submodule_head_oid(&entry.path().to_fs_path(wt))
                         })
                         .unwrap_or_else(zero_oid);
                     if head == zero_oid() {
@@ -7646,15 +7670,15 @@ fn write_patch_with_prefix(
             }
         }
 
-        let old_wt_path = repo_path_for_diff_side(old_path, relative_prefix);
+        let old_wt_path = repo_path_for_diff_side(&old_path.to_string_lossy(), relative_prefix);
         let old_content_raw = if entry.old_oid == zero_oid() {
-            read_content_raw_or_worktree(odb, &entry.old_oid, work_tree, &old_wt_path)
+            read_content_raw_or_worktree(odb, &entry.old_oid, work_tree, RepoPath::from_str(&old_wt_path))
         } else {
             read_content_raw(odb, &entry.old_oid)
         };
         let wt_path = path_for_attrs.clone();
         let new_content_raw =
-            read_content_raw_or_worktree(odb, &entry.new_oid, work_tree, &wt_path);
+            read_content_raw_or_worktree(odb, &entry.new_oid, work_tree, RepoPath::from_str(&wt_path));
 
         if !no_ext_diff && entry.status != DiffStatus::Unmerged {
             // Git precedence: a path's `diff=<name>` attribute driver
@@ -7693,7 +7717,7 @@ fn write_patch_with_prefix(
                 let new_zero_hex = new_is_worktree;
                 let new_borrow: Option<String> =
                     if new_is_worktree && mode_is_regular_blob_mode_str(&entry.new_mode) {
-                        let p = repo_path_for_diff_side(new_path, relative_prefix);
+                        let p = repo_path_for_diff_side(&new_path.to_string_lossy(), relative_prefix);
                         work_tree.and_then(|wt| {
                             let full = wt.join(&p);
                             full.symlink_metadata().ok().map(|_| p.clone())
@@ -7742,8 +7766,8 @@ fn write_patch_with_prefix(
                 match run_external_diff_for_patch(
                     out,
                     ext,
-                    display,
-                    other,
+                    &display.to_string_lossy(),
+                    other.map(|o| o.to_string_lossy()).as_deref(),
                     &old_conv,
                     &new_conv,
                     &entry.old_oid,
@@ -7818,8 +7842,8 @@ fn write_patch_with_prefix(
                     abbrev_len,
                     src_prefix,
                     dst_prefix,
-                    old_path,
-                    new_path,
+                    &old_path.to_string_lossy(),
+                    &new_path.to_string_lossy(),
                     &old_t,
                     &new_t,
                     suppress_blank_empty,
@@ -7837,8 +7861,8 @@ fn write_patch_with_prefix(
                     abbrev_len,
                     src_prefix,
                     dst_prefix,
-                    old_path,
-                    new_path,
+                    &old_path.to_string_lossy(),
+                    &new_path.to_string_lossy(),
                     &old_t,
                     &new_t,
                     suppress_blank_empty,
@@ -7869,15 +7893,15 @@ fn write_patch_with_prefix(
             let (old_label, new_label) = match entry.status {
                 DiffStatus::Added => (
                     "/dev/null".to_owned(),
-                    format_diff_path_with_prefix(dst_prefix, new_path, quote_path_fully),
+                    format_diff_path_with_prefix(dst_prefix, &new_path.to_string_lossy(), quote_path_fully),
                 ),
                 DiffStatus::Deleted => (
-                    format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully),
+                    format_diff_path_with_prefix(src_prefix, &old_path.to_string_lossy(), quote_path_fully),
                     "/dev/null".to_owned(),
                 ),
                 _ => (
-                    format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully),
-                    format_diff_path_with_prefix(dst_prefix, new_path, quote_path_fully),
+                    format_diff_path_with_prefix(src_prefix, &old_path.to_string_lossy(), quote_path_fully),
+                    format_diff_path_with_prefix(dst_prefix, &new_path.to_string_lossy(), quote_path_fully),
                 ),
             };
             writeln!(out, "--- {old_label}")?;
@@ -7979,19 +8003,19 @@ fn write_patch_with_prefix(
                     out,
                     &old_content_raw,
                     &new_content_raw,
-                    old_path,
-                    new_path,
+                    &old_path.to_string_lossy(),
+                    &new_path.to_string_lossy(),
                 )?;
             } else {
                 let bo = if old_path == "/dev/null" {
                     "/dev/null".to_string()
                 } else {
-                    format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully)
+                    format_diff_path_with_prefix(src_prefix, &old_path.to_string_lossy(), quote_path_fully)
                 };
                 let bn = if new_path == "/dev/null" {
                     "/dev/null".to_string()
                 } else {
-                    format_diff_path_with_prefix(dst_prefix, new_path, quote_path_fully)
+                    format_diff_path_with_prefix(dst_prefix, &new_path.to_string_lossy(), quote_path_fully)
                 };
                 writeln!(out, "Binary files {bo} and {bn} differ")?;
             }
@@ -8069,15 +8093,17 @@ fn write_patch_with_prefix(
         }
 
         // For Added files, show --- /dev/null; for Deleted files, show +++ /dev/null
-        let display_old = if entry.status == DiffStatus::Added {
+        let old_path_lossy = old_path.to_string_lossy();
+        let new_path_lossy = new_path.to_string_lossy();
+        let display_old: &str = if entry.status == DiffStatus::Added {
             "/dev/null"
         } else {
-            old_path
+            &old_path_lossy
         };
-        let display_new = if entry.status == DiffStatus::Deleted {
+        let display_new: &str = if entry.status == DiffStatus::Deleted {
             "/dev/null"
         } else {
-            new_path
+            &new_path_lossy
         };
 
         if break_rewrites
@@ -10150,7 +10176,7 @@ fn mode_str_has_executable_bit(mode_str: &str) -> bool {
 }
 
 fn compact_summary_display_path(entry: &DiffEntry, quote_path_fully: bool) -> String {
-    let path = grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully);
+    let path = grit_lib::quote_path::quote_c_style(&entry.path().to_string_lossy(), quote_path_fully);
     match entry.status {
         DiffStatus::Added => format!("{path} (new)"),
         DiffStatus::Deleted => format!("{path} (gone)"),
@@ -10389,11 +10415,11 @@ fn write_stat(
         .iter()
         .map(|e| match e.status {
             DiffStatus::Renamed | DiffStatus::Copied => {
-                let old = e.old_path.as_deref().unwrap_or("");
-                let new = e.new_path.as_deref().unwrap_or("");
-                format_rename_display(old, new, quote_path_fully)
+                let old = e.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let new = e.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                format_rename_display(&old, &new, quote_path_fully)
             }
-            _ => grit_lib::quote_path::quote_c_style(e.path(), quote_path_fully),
+            _ => grit_lib::quote_path::quote_c_style(&e.path().to_string_lossy(), quote_path_fully),
         })
         .collect();
 
@@ -10536,9 +10562,9 @@ fn write_numstat(
                     algo_ctx,
                     algo_cli,
                 );
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                let display = format_rename_display(old, new, false);
+                let old = entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let new = entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let display = format_rename_display(&old, &new, false);
                 writeln!(out, "{ins}\t{del}\t{display}")?;
             }
             _ if binary_rewrite_numstat => {
@@ -10573,16 +10599,16 @@ pub(crate) fn write_diff_summary(
     for entry in entries {
         match entry.status {
             DiffStatus::Renamed => {
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                let display = format_rename_display(old, new, quote_path_fully);
+                let old = entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let new = entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let display = format_rename_display(&old, &new, quote_path_fully);
                 let sim = entry.score.unwrap_or(100);
                 writeln!(out, " rename {display} ({sim}%)")?;
             }
             DiffStatus::Copied => {
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                let display = format_rename_display(old, new, quote_path_fully);
+                let old = entry.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let new = entry.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+                let display = format_rename_display(&old, &new, quote_path_fully);
                 let sim = entry.score.unwrap_or(100);
                 writeln!(out, " copy {display} ({sim}%)")?;
             }
@@ -10591,7 +10617,7 @@ pub(crate) fn write_diff_summary(
                     out,
                     " create mode {} {}",
                     entry.new_mode,
-                    grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
+                    grit_lib::quote_path::quote_c_style(&entry.path().to_string_lossy(), quote_path_fully)
                 )?;
             }
             DiffStatus::Deleted => {
@@ -10599,7 +10625,7 @@ pub(crate) fn write_diff_summary(
                     out,
                     " delete mode {} {}",
                     entry.old_mode,
-                    grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
+                    grit_lib::quote_path::quote_c_style(&entry.path().to_string_lossy(), quote_path_fully)
                 )?;
             }
             DiffStatus::Modified => {
@@ -10608,7 +10634,7 @@ pub(crate) fn write_diff_summary(
                         writeln!(
                             out,
                             " rewrite {} ({pct}%)",
-                            grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
+                            grit_lib::quote_path::quote_c_style(&entry.path().to_string_lossy(), quote_path_fully)
                         )?;
                     }
                 }
@@ -10628,7 +10654,7 @@ fn write_name_only(
         writeln!(
             out,
             "{}",
-            grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
+            grit_lib::quote_path::quote_c_style(&entry.path().to_string_lossy(), quote_path_fully)
         )?;
     }
     Ok(())
@@ -10692,8 +10718,8 @@ fn write_raw(
         match entry.status {
             DiffStatus::Renamed | DiffStatus::Copied => {
                 let score = entry.score.unwrap_or(100);
-                let old_path = entry.old_path.as_deref().unwrap_or("");
-                let new_path = entry.new_path.as_deref().unwrap_or("");
+                let old_path = entry.old_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                let new_path = entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""));
                 writeln!(out, ":{old_mode} {new_mode} {old_oid} {new_oid} {status}{score:03}\t{old_path}\t{new_path}")?;
             }
             DiffStatus::Modified => {
@@ -10742,11 +10768,11 @@ fn write_name_status(
                     "R{:03}\t{}\t{}",
                     s,
                     grit_lib::quote_path::quote_c_style(
-                        entry.old_path.as_deref().unwrap_or(""),
+                        &entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")).to_string_lossy(),
                         quote_path_fully,
                     ),
                     grit_lib::quote_path::quote_c_style(
-                        entry.new_path.as_deref().unwrap_or(""),
+                        &entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")).to_string_lossy(),
                         quote_path_fully,
                     ),
                 )?;
@@ -10758,11 +10784,11 @@ fn write_name_status(
                     "C{:03}\t{}\t{}",
                     s,
                     grit_lib::quote_path::quote_c_style(
-                        entry.old_path.as_deref().unwrap_or(""),
+                        &entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")).to_string_lossy(),
                         quote_path_fully,
                     ),
                     grit_lib::quote_path::quote_c_style(
-                        entry.new_path.as_deref().unwrap_or(""),
+                        &entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")).to_string_lossy(),
                         quote_path_fully,
                     ),
                 )?;
@@ -10772,7 +10798,7 @@ fn write_name_status(
                     out,
                     "{}\t{}",
                     entry.status.letter(),
-                    grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
+                    grit_lib::quote_path::quote_c_style(&entry.path().to_string_lossy(), quote_path_fully)
                 )?;
             }
         }
@@ -11047,10 +11073,11 @@ pub(crate) fn check_whitespace_errors(
             continue;
         }
         let path = entry.path();
-        let marker_size = conflict_marker_size_for_path(merged_attrs, path, ignore_case_attrs);
+        let path_str = path.to_string_lossy();
+        let marker_size = conflict_marker_size_for_path(merged_attrs, &path_str, ignore_case_attrs);
         let ws_rule = match effective_ws_rule_for_path(
             merged_attrs,
-            path,
+            &path_str,
             &entry.new_mode,
             config,
             ignore_case_attrs,
@@ -11088,8 +11115,8 @@ pub(crate) fn check_whitespace_errors(
         let patch = unified_diff_with_prefix_and_funcname_and_algorithm(
             &old_content,
             &new_content,
-            path,
-            path,
+            &path_str,
+            &path_str,
             1,
             0,
             "",

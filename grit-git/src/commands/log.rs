@@ -35,6 +35,7 @@ use grit_lib::merge_diff::{
 };
 use grit_lib::objects::{parse_commit, parse_tag, CommitData, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
+use grit_lib::repo_path::RepoPath;
 use grit_lib::porcelain::log::{
     collect_decorations, collect_decorations_inner, current_branch_decoration_index,
     normalize_glob_ref, DecorationFilter, DecorationKind, DecorationMap,
@@ -3772,7 +3773,7 @@ fn treesame_parent_for_path_rewrite(
         let entries = diff_trees(&repo.odb, Some(&parent.tree), Some(&commit.tree), "")?;
         let differs = entries
             .iter()
-            .any(|entry| path_matches(entry.path(), pathspecs));
+            .any(|entry| path_matches(&entry.path().to_string_lossy(), pathspecs));
         if !differs {
             treesame.push(*parent_oid);
         }
@@ -7176,8 +7177,8 @@ fn reflog_transition_touches_paths(
         };
         let entries = diff_trees(odb, old_t.as_ref(), Some(to_tree), "")?;
         Ok(entries.iter().any(|e| {
-            let path = e.path();
-            path_matches(path, pathspecs)
+            let path = e.path().to_string_lossy();
+            path_matches(&path, pathspecs)
         }))
     };
 
@@ -8863,8 +8864,8 @@ fn commit_touches_paths(
         }
         let entries = diff_trees(odb, None, Some(&info.tree), "")?;
         let touches = entries.iter().any(|e| {
-            let path = e.path();
-            path_matches(path, pathspecs)
+            let path = e.path().to_string_lossy();
+            path_matches(&path, pathspecs)
         });
         if bloom_ret == BloomPrecheck::Maybe && !touches {
             if let Some(stats) = bloom_stats {
@@ -8905,8 +8906,8 @@ fn commit_touches_paths(
         let parent_commit = parse_commit(&parent_obj.data)?;
         let entries = diff_trees(odb, Some(&parent_commit.tree), Some(&info.tree), "")?;
         let touches = entries.iter().any(|e| {
-            let path = e.path();
-            path_matches(path, pathspecs)
+            let path = e.path().to_string_lossy();
+            path_matches(&path, pathspecs)
         });
         if bloom_ret == BloomPrecheck::Maybe && !touches {
             if let Some(stats) = bloom_stats {
@@ -8923,8 +8924,8 @@ fn commit_touches_paths(
         let parent_commit = parse_commit(&parent_obj.data)?;
         let entries = diff_trees(odb, Some(&parent_commit.tree), Some(&info.tree), "")?;
         if entries.iter().any(|e| {
-            let path = e.path();
-            path_matches(path, pathspecs)
+            let path = e.path().to_string_lossy();
+            path_matches(&path, pathspecs)
         }) {
             return Ok(true);
         }
@@ -9687,7 +9688,9 @@ fn commit_pickaxe_matches(
     };
 
     for entry in &entries {
-        let path = entry.path();
+        let path_rp = entry.path();
+        let path_owned = path_rp.to_string_lossy();
+        let path: &str = &path_owned;
         let old_raw = read_blob_bytes(odb, &entry.old_oid);
         let new_raw = read_blob_bytes(odb, &entry.new_oid);
 
@@ -9709,8 +9712,8 @@ fn commit_pickaxe_matches(
             let patch = unified_diff(
                 old_text.as_str(),
                 new_text.as_str(),
-                entry.old_path.as_deref().unwrap_or(path),
-                entry.new_path.as_deref().unwrap_or(path),
+                &entry.old_path.as_deref().unwrap_or(path_rp).to_string_lossy(),
+                &entry.new_path.as_deref().unwrap_or(path_rp).to_string_lossy(),
                 3,
                 indent_heuristic_from_config(&config),
                 config.quote_path_fully(),
@@ -9790,7 +9793,9 @@ fn pickaxe_matching_paths(
     };
 
     for entry in entries {
-        let path = entry.path();
+        let path_rp = entry.path();
+        let path_owned = path_rp.to_string_lossy();
+        let path: &str = &path_owned;
         let old_raw = read_blob_bytes(odb, &entry.old_oid);
         let new_raw = read_blob_bytes(odb, &entry.new_oid);
 
@@ -9811,8 +9816,8 @@ fn pickaxe_matching_paths(
             let patch = unified_diff(
                 old_text.as_str(),
                 new_text.as_str(),
-                entry.old_path.as_deref().unwrap_or(path),
-                entry.new_path.as_deref().unwrap_or(path),
+                &entry.old_path.as_deref().unwrap_or(path_rp).to_string_lossy(),
+                &entry.new_path.as_deref().unwrap_or(path_rp).to_string_lossy(),
                 3,
                 indent_heuristic_from_config(&config),
                 config.quote_path_fully(),
@@ -12805,7 +12810,7 @@ fn compute_combined_diff_entries(odb: &Odb, info: &CommitInfo) -> Result<Vec<Dif
     let entries = diff_trees(odb, Some(&first_parent_commit.tree), Some(&info.tree), "")?;
     Ok(entries
         .into_iter()
-        .filter(|e| common.contains(e.path()))
+        .filter(|e| common.contains(&*e.path().to_string_lossy()))
         .collect())
 }
 
@@ -13011,7 +13016,7 @@ fn write_commit_diff(
         && (args.pickaxe_string.is_some() || args.pickaxe_grep.is_some())
     {
         let matched = pickaxe_matching_paths(git_dir, odb, &entries, args)?;
-        entries.retain(|e| matched.contains(e.path()));
+        entries.retain(|e| matched.contains(&*e.path().to_string_lossy()));
         if entries.is_empty() {
             return Ok(());
         }
@@ -13083,12 +13088,18 @@ fn diff_entry_matches_any_pathspec(entry: &DiffEntry, specs: &[String]) -> bool 
         return true;
     }
     let paths = [
-        entry.path(),
-        entry.old_path.as_deref().unwrap_or(""),
-        entry.new_path.as_deref().unwrap_or(""),
+        entry.path().to_string_lossy(),
+        entry
+            .old_path
+            .as_deref()
+            .map_or(Cow::Borrowed(""), RepoPath::to_string_lossy),
+        entry
+            .new_path
+            .as_deref()
+            .map_or(Cow::Borrowed(""), RepoPath::to_string_lossy),
     ];
     for spec in specs {
-        for p in paths {
+        for p in &paths {
             if !p.is_empty() && grit_lib::pathspec::matches_pathspec(spec, p) {
                 return true;
             }
@@ -13251,8 +13262,8 @@ fn write_commit_diff_body(
                         "{}{:03}\t{}\t{}",
                         entry.status.letter(),
                         score,
-                        entry.old_path.as_deref().unwrap_or(""),
-                        entry.new_path.as_deref().unwrap_or(""),
+                        entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                        entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")),
                     )?;
                 }
                 _ => {
@@ -13339,14 +13350,14 @@ fn log_write_combined_patches(
         let path = entry.path();
         let parent_sides = cpaths
             .iter()
-            .find(|p| p.path == path)
+            .find(|p| path == &p.path)
             .map(|p| p.parents.clone())
             .unwrap_or_default();
         if let Some(patch) = format_combined_textconv_patch(
             git_dir,
             config,
             odb,
-            path,
+            &path.to_string_lossy(),
             &parent_trees,
             merge_tree,
             abbrev,
@@ -13428,14 +13439,18 @@ fn log_write_patch_entry(
     context_lines: usize,
     indent_heuristic: bool,
 ) -> Result<()> {
-    let old_path = entry
+    let old_path_owned = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
-    let new_path = entry
+        .or(entry.new_path.as_deref())
+        .map_or(Cow::Borrowed(""), RepoPath::to_string_lossy);
+    let old_path: &str = &old_path_owned;
+    let new_path_owned = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .or(entry.old_path.as_deref())
+        .map_or(Cow::Borrowed(""), RepoPath::to_string_lossy);
+    let new_path: &str = &new_path_owned;
 
     if args.no_prefix {
         writeln!(out, "diff --git {old_path} {new_path}")?;
@@ -13544,7 +13559,8 @@ fn log_write_patch_entry(
         return Ok(());
     }
 
-    let path_for_attrs = entry.path();
+    let path_for_attrs_owned = entry.path().to_string_lossy();
+    let path_for_attrs: &str = &path_for_attrs_owned;
     let use_textconv = !args.no_textconv;
     let textconv_patch = use_textconv && diff_textconv_active(git_dir, config, path_for_attrs);
     let old_raw = read_blob_bytes(odb, &entry.old_oid);
@@ -13737,9 +13753,15 @@ fn log_print_stat_summary(
     for entry in entries {
         let path_display = match entry.status {
             DiffStatus::Renamed | DiffStatus::Copied => {
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                grit_lib::diff::format_rename_path(old, new)
+                let old = entry
+                    .old_path
+                    .as_deref()
+                    .map_or(Cow::Borrowed(""), RepoPath::to_string_lossy);
+                let new = entry
+                    .new_path
+                    .as_deref()
+                    .map_or(Cow::Borrowed(""), RepoPath::to_string_lossy);
+                grit_lib::diff::format_rename_path(&old, &new)
             }
             _ => entry.path().to_string(),
         };
@@ -14174,24 +14196,27 @@ fn follow_filter(
             match entry.status {
                 DiffStatus::Renamed | DiffStatus::Copied => {
                     // The new path is the copy/rename destination; follow it back to the source.
-                    if entry.new_path.as_deref() == Some(tracked_path.as_str()) {
+                    if entry.new_path.as_deref().map(RepoPath::as_bytes)
+                        == Some(tracked_path.as_bytes())
+                    {
                         touches = true;
                         display_entry = Some(entry.clone());
                         if let Some(old_path) = entry.old_path.as_deref() {
-                            retarget = Some(old_path.to_string());
+                            retarget = Some(old_path.to_string_lossy().into_owned());
                         }
                     }
                     // A *rename* away from the tracked path is a change to it (the
                     // file disappears under this name). A *copy* from the tracked
                     // path leaves the source unchanged, so it does not count.
                     if entry.status == DiffStatus::Renamed
-                        && entry.old_path.as_deref() == Some(tracked_path.as_str())
+                        && entry.old_path.as_deref().map(RepoPath::as_bytes)
+                            == Some(tracked_path.as_bytes())
                     {
                         touches = true;
                     }
                 }
                 _ => {
-                    if entry.path() == tracked_path {
+                    if entry.path().as_bytes() == tracked_path.as_bytes() {
                         touches = true;
                         if display_entry.is_none() {
                             display_entry = Some(entry.clone());

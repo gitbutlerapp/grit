@@ -6288,14 +6288,13 @@ fn detect_merge_renames(
         for path in all_paths {
             let b = base.get(path);
             let s = side.get(path);
-            let path_str = String::from_utf8_lossy(path).to_string();
             match (b, s) {
                 (Some(be), None) => {
                     // Deleted in side
                     if !rename_sources.contains(path) {
                         entries.push(DiffEntry {
                             status: DiffStatus::Deleted,
-                            old_path: Some(path_str),
+                            old_path: Some(grit_lib::repo_path::RepoPathBuf::from_bytes(path.to_vec())),
                             new_path: None,
                             old_mode: format!("{:06o}", be.mode),
                             new_mode: String::new(),
@@ -6312,7 +6311,7 @@ fn detect_merge_renames(
                         entries.push(DiffEntry {
                             status: DiffStatus::Added,
                             old_path: None,
-                            new_path: Some(path_str),
+                            new_path: Some(grit_lib::repo_path::RepoPathBuf::from_bytes(path.to_vec())),
                             old_mode: String::new(),
                             new_mode: format!("{:06o}", se.mode),
                             old_oid: zero_oid,
@@ -6329,7 +6328,7 @@ fn detect_merge_renames(
                         // The old content moved away → emit Deleted for rename detection
                         entries.push(DiffEntry {
                             status: DiffStatus::Deleted,
-                            old_path: Some(path_str.clone()),
+                            old_path: Some(grit_lib::repo_path::RepoPathBuf::from_bytes(path.to_vec())),
                             new_path: None,
                             old_mode: format!("{:06o}", be.mode),
                             new_mode: String::new(),
@@ -11692,8 +11691,8 @@ fn print_diffstat(repo: &Repository, entries: &[DiffEntry], compact: bool) {
             .new_path
             .as_deref()
             .or(entry.old_path.as_deref())
-            .unwrap_or("unknown")
-            .to_string();
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "unknown".to_string());
         let is_new = entry.old_oid == zero_oid();
         let is_deleted = entry.new_oid == zero_oid();
 

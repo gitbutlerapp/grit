@@ -104,8 +104,11 @@ fn guard_untracked(
             continue;
         }
         if let Some(path) = &change.new_path {
-            if untracked.contains(path.as_str()) {
-                bail!("untracked file '{path}' would be overwritten — move or remove it first");
+            if path.to_str().is_some_and(|s| untracked.contains(s)) {
+                bail!(
+                    "untracked file '{}' would be overwritten — move or remove it first",
+                    path.to_string_lossy()
+                );
             }
         }
     }

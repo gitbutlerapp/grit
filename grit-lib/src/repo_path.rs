@@ -61,6 +61,18 @@ impl RepoPath {
         self.0.is_empty()
     }
 
+    /// Length of the path in bytes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// `true` if the path begins with the given byte prefix (raw, not component-aware).
+    #[must_use]
+    pub fn starts_with_bytes(&self, prefix: &[u8]) -> bool {
+        self.0.starts_with(prefix)
+    }
+
     /// The path as `&str` iff it is valid UTF-8, else `None`. Use this for
     /// programmatic comparison; never for human display (see [`RepoPath::display`]).
     #[must_use]
@@ -74,6 +86,14 @@ impl RepoPath {
     #[must_use]
     pub fn display(&self) -> RepoPathDisplay<'_> {
         RepoPathDisplay(&self.0)
+    }
+
+    /// Lossy UTF-8 view as a `Cow<str>` (invalid bytes become U+FFFD). For
+    /// String-keyed maps and other interop where a byte path must be stringified;
+    /// prefer [`RepoPath::as_bytes`]/[`RepoPath::to_str`] when losslessness matters.
+    #[must_use]
+    pub fn to_string_lossy(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.0)
     }
 
     /// The final component (after the last `/`), or `None` if empty or ends in `/`.
@@ -214,12 +234,69 @@ impl AsRef<RepoPath> for RepoPathBuf {
     }
 }
 
+// Byte-exact equality against UTF-8 string types. Comparing path bytes to a
+// `str`'s UTF-8 bytes is lossless (not a `from_utf8_lossy`), so these are safe
+// conveniences for the many `entry.path() == "foo"` call sites.
+impl PartialEq<str> for RepoPath {
+    fn eq(&self, other: &str) -> bool {
+        &self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<&str> for RepoPath {
+    fn eq(&self, other: &&str) -> bool {
+        &self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<String> for RepoPath {
+    fn eq(&self, other: &String) -> bool {
+        &self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<str> for RepoPathBuf {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<&str> for RepoPathBuf {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<String> for RepoPathBuf {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == other.as_bytes()
+    }
+}
+
 /// Lossy `Display`/`Debug` adapter returned by [`RepoPath::display`].
 pub struct RepoPathDisplay<'a>(&'a [u8]);
 
 impl fmt::Display for RepoPathDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // `BStr`'s Display renders invalid UTF-8 as U+FFFD without allocating.
+        fmt::Display::fmt(self.0.as_bstr(), f)
+    }
+}
+
+// Lossy `Display` for the path types themselves (invalid UTF-8 → U+FFFD).
+// `std::path::Path` deliberately omits `Display`, but Git paths are displayed
+// in hundreds of call sites (diff/log/show/status output); a lossy `Display`
+// matches `bstr::BStr` and keeps those sites ergonomic. It does NOT weaken the
+// newtype's identity — there is still no implicit coercion *to* a path, and
+// round-trip-safe output must still go through `quote_path`/`as_bytes`.
+impl fmt::Display for RepoPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.0.as_bstr(), f)
+    }
+}
+
+impl fmt::Display for RepoPathBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self.0.as_bstr(), f)
     }
 }

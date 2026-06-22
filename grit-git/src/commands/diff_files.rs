@@ -16,6 +16,7 @@ use grit_lib::diff::{
     rewrite_dissimilarity_index_percent, should_break_rewrite_for_stat, stat_matches,
     submodule_porcelain_flags, unified_diff, zero_oid, DiffEntry, DiffStatus,
 };
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::diffstat::{terminal_columns, write_diffstat_block, DiffstatOptions, FileStatInput};
 use grit_lib::index::{
     Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
@@ -85,7 +86,7 @@ pub fn run(mut args: Args) -> Result<()> {
                 Vec::new()
             } else {
                 let path = entry.new_path.as_deref().unwrap_or(entry.path());
-                let abs = work_tree.join(path);
+                let abs = path.to_fs_path(&work_tree);
                 match fs::read(&abs) {
                     Ok(b) => b,
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -332,15 +333,15 @@ pub fn run(mut args: Args) -> Result<()> {
                                 (DiffStatus::Renamed, Some(s)) => {
                                     println!(
                                         "R{s:03}\t{}\t{}",
-                                        entry.old_path.as_deref().unwrap_or(""),
-                                        entry.new_path.as_deref().unwrap_or("")
+                                        entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                                        entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                                     );
                                 }
                                 (DiffStatus::Copied, Some(s)) => {
                                     println!(
                                         "C{s:03}\t{}\t{}",
-                                        entry.old_path.as_deref().unwrap_or(""),
-                                        entry.new_path.as_deref().unwrap_or("")
+                                        entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                                        entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                                     );
                                 }
                                 _ => {
@@ -468,16 +469,18 @@ fn print_diff_files_summary(entries: &[DiffEntry]) -> Result<()> {
     for entry in entries {
         match entry.status {
             DiffStatus::Renamed => {
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                let display = format_rename_summary_display(old, new);
+                let old = entry.old_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                let new = entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                let display =
+                    format_rename_summary_display(&old.to_string_lossy(), &new.to_string_lossy());
                 let sim = entry.score.unwrap_or(100);
                 println!(" rename {display} ({sim}%)");
             }
             DiffStatus::Copied => {
-                let old = entry.old_path.as_deref().unwrap_or("");
-                let new = entry.new_path.as_deref().unwrap_or("");
-                let display = format_rename_summary_display(old, new);
+                let old = entry.old_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                let new = entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""));
+                let display =
+                    format_rename_summary_display(&old.to_string_lossy(), &new.to_string_lossy());
                 let sim = entry.score.unwrap_or(100);
                 println!(" copy {display} ({sim}%)");
             }
@@ -485,14 +488,14 @@ fn print_diff_files_summary(entries: &[DiffEntry]) -> Result<()> {
                 println!(
                     " create mode {} {}",
                     entry.new_mode,
-                    quote_c_style_path(entry.path())
+                    quote_c_style_path(&entry.path().to_string_lossy())
                 );
             }
             DiffStatus::Deleted => {
                 println!(
                     " delete mode {} {}",
                     entry.old_mode,
-                    quote_c_style_path(entry.path())
+                    quote_c_style_path(&entry.path().to_string_lossy())
                 );
             }
             DiffStatus::TypeChanged => {
@@ -500,7 +503,7 @@ fn print_diff_files_summary(entries: &[DiffEntry]) -> Result<()> {
                     " mode change {} => {} {}",
                     entry.old_mode,
                     entry.new_mode,
-                    quote_c_style_path(entry.path())
+                    quote_c_style_path(&entry.path().to_string_lossy())
                 );
             }
             DiffStatus::Modified => {
@@ -509,11 +512,11 @@ fn print_diff_files_summary(entries: &[DiffEntry]) -> Result<()> {
                         " mode change {} => {} {}",
                         entry.old_mode,
                         entry.new_mode,
-                        quote_c_style_path(entry.path())
+                        quote_c_style_path(&entry.path().to_string_lossy())
                     );
                 }
                 if let Some(pct) = entry.score {
-                    println!(" rewrite {} ({pct}%)", quote_c_style_path(entry.path()));
+                    println!(" rewrite {} ({pct}%)", quote_c_style_path(&entry.path().to_string_lossy()));
                 }
             }
             DiffStatus::Unmerged => {}
@@ -1236,7 +1239,7 @@ fn change_to_diff_entry(c: &Change) -> DiffEntry {
         return DiffEntry {
             status: DiffStatus::Added,
             old_path: None,
-            new_path: Some(c.path.clone()),
+            new_path: Some(RepoPathBuf::from_string(c.path.clone())),
             old_mode: "000000".to_owned(),
             new_mode: new_mode_str,
             old_oid: zero_oid(),
@@ -1249,7 +1252,8 @@ fn change_to_diff_entry(c: &Change) -> DiffEntry {
     match c.status {
         'D' => DiffEntry {
             status: DiffStatus::Deleted,
-            old_path: Some(c.path.clone()),
+            // TODO(byte-paths): Change.path is a lossy String; migrate its source (Phase 2/4).
+            old_path: Some(RepoPathBuf::from_string(c.path.clone())),
             new_path: None,
             old_mode: old_mode_str,
             new_mode: new_mode_str,
@@ -1259,8 +1263,9 @@ fn change_to_diff_entry(c: &Change) -> DiffEntry {
         },
         'U' => DiffEntry {
             status: DiffStatus::Unmerged,
-            old_path: Some(c.path.clone()),
-            new_path: Some(c.path.clone()),
+            // TODO(byte-paths): Change.path is a lossy String; migrate its source (Phase 2/4).
+            old_path: Some(RepoPathBuf::from_string(c.path.clone())),
+            new_path: Some(RepoPathBuf::from_string(c.path.clone())),
             old_mode: old_mode_str,
             new_mode: new_mode_str,
             old_oid: c.old_oid,
@@ -1269,8 +1274,9 @@ fn change_to_diff_entry(c: &Change) -> DiffEntry {
         },
         'T' => DiffEntry {
             status: DiffStatus::TypeChanged,
-            old_path: Some(c.path.clone()),
-            new_path: Some(c.path.clone()),
+            // TODO(byte-paths): Change.path is a lossy String; migrate its source (Phase 2/4).
+            old_path: Some(RepoPathBuf::from_string(c.path.clone())),
+            new_path: Some(RepoPathBuf::from_string(c.path.clone())),
             old_mode: old_mode_str,
             new_mode: new_mode_str,
             old_oid: c.old_oid,
@@ -1279,8 +1285,9 @@ fn change_to_diff_entry(c: &Change) -> DiffEntry {
         },
         _ => DiffEntry {
             status: DiffStatus::Modified,
-            old_path: Some(c.path.clone()),
-            new_path: Some(c.path.clone()),
+            // TODO(byte-paths): Change.path is a lossy String; migrate its source (Phase 2/4).
+            old_path: Some(RepoPathBuf::from_string(c.path.clone())),
+            new_path: Some(RepoPathBuf::from_string(c.path.clone())),
             old_mode: old_mode_str,
             new_mode: new_mode_str,
             old_oid: c.old_oid,
@@ -1344,10 +1351,10 @@ fn render_raw_diff_entry(
     let path = match entry.status {
         DiffStatus::Renamed | DiffStatus::Copied => format!(
             "{}\t{}",
-            entry.old_path.as_deref().unwrap_or(""),
-            entry.new_path.as_deref().unwrap_or("")
+            entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+            entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
         ),
-        _ => entry.path().to_owned(),
+        _ => entry.path().to_string(),
     };
 
     Ok(format!(
@@ -1393,11 +1400,11 @@ fn print_patch_from_diff_entry(
     let old_path = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")));
     let new_path = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .unwrap_or(entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")));
 
     let (src_prefix, dst_prefix) = if no_prefix { ("", "") } else { ("a/", "b/") };
     let old_label = match entry.status {
@@ -1409,7 +1416,7 @@ fn print_patch_from_diff_entry(
         _ => format!("{dst_prefix}{new_path}"),
     };
 
-    let display_path = entry.path();
+    let display_path = entry.path().to_string_lossy();
     let mut header = format!("diff --git {src_prefix}{old_path} {dst_prefix}{new_path}");
     match entry.status {
         DiffStatus::Deleted => {
@@ -1485,8 +1492,8 @@ fn print_patch_from_diff_entry(
             let patch = unified_diff(
                 &old_content,
                 &new_content,
-                display_path,
-                display_path,
+                &display_path,
+                &display_path,
                 3,
                 indent_heuristic,
                 quote_path_fully,
@@ -1527,7 +1534,10 @@ fn print_stat_from_diff_entries(
         let (ins, del) = count_changes(&old, &new);
         total_ins += ins;
         total_del += del;
-        println!("{}", format_stat_line(entry.path(), ins, del, max_len));
+        println!(
+            "{}",
+            format_stat_line(&entry.path().to_string_lossy(), ins, del, max_len)
+        );
     }
     let files = entries.len();
     let mut summary = format!(
@@ -1629,7 +1639,7 @@ fn mode_has_executable_bit(mode_str: &str) -> bool {
 }
 
 fn compact_summary_path_display(entry: &DiffEntry) -> String {
-    let path = entry.path().to_owned();
+    let path = entry.path().to_string();
     match entry.status {
         DiffStatus::Added => format!("{path} (new)"),
         DiffStatus::Deleted => format!("{path} (gone)"),
@@ -1666,7 +1676,7 @@ fn load_patch_bytes_for_diff_entry(
         Vec::new()
     } else {
         let path = entry.new_path.as_deref().unwrap_or(entry.path());
-        let abs = work_tree.join(path);
+        let abs = path.to_fs_path(work_tree);
         match fs::read(&abs) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
@@ -1764,7 +1774,7 @@ fn load_patch_contents_for_diff_entry(
         String::new()
     } else {
         let path = entry.new_path.as_deref().unwrap_or(entry.path());
-        let abs = work_tree.join(path);
+        let abs = path.to_fs_path(work_tree);
         match fs::symlink_metadata(&abs) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 let target = fs::read_link(&abs)?;

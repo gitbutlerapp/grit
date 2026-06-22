@@ -1084,7 +1084,7 @@ pub fn diff_changed_paths_for_bloom(
     let raw_len = entries.len();
     let mut paths = Vec::new();
     for e in entries {
-        let p = e.path().to_string();
+        let p = e.path().to_string_lossy().into_owned();
         if !p.is_empty() {
             paths.push(p);
         }

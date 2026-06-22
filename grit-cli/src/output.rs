@@ -170,7 +170,7 @@ pub fn change_status_str(status: &DiffStatus) -> &'static str {
 /// Serialize a [`DiffEntry`] as a [`ChangeJson`].
 pub fn change_json(entry: &DiffEntry) -> ChangeJson {
     ChangeJson {
-        path: entry_path(entry).to_owned(),
+        path: entry_path(entry).into_owned(),
         status: change_status_str(&entry.status).to_owned(),
     }
 }

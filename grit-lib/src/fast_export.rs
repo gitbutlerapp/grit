@@ -348,11 +348,11 @@ fn diff_entry_matches_paths(entry: &DiffEntry, paths: &[String]) -> bool {
     if paths.is_empty() {
         return true;
     }
-    matches_pathspec_list(entry.path(), paths)
+    matches_pathspec_list(&entry.path().to_string_lossy(), paths)
         || entry
             .old_path
             .as_deref()
-            .is_some_and(|path| matches_pathspec_list(path, paths))
+            .is_some_and(|path| matches_pathspec_list(&path.to_string_lossy(), paths))
 }
 
 fn export_ref_for_non_all(repo: &Repository) -> Result<String> {
@@ -541,28 +541,32 @@ pub fn export_stream(
             match e.status {
                 DiffStatus::Deleted => {
                     let path = if let Some(a) = anon.as_mut() {
-                        a.anonymize_path(e.path())
+                        a.anonymize_path(&e.path().to_string_lossy())
                     } else {
-                        e.path().to_string()
+                        e.path().to_string_lossy().into_owned()
                     };
                     writeln!(writer, "D {path}")?;
-                    changed.insert(e.path().to_string());
+                    changed.insert(e.path().to_string_lossy().into_owned());
                 }
                 DiffStatus::Renamed | DiffStatus::Copied => {
-                    let old_p = e.old_path.as_deref().unwrap_or("");
+                    let old_p = e
+                        .old_path
+                        .as_deref()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     let skip_modify = e.old_oid == e.new_oid
                         && e.old_mode == e.new_mode
-                        && !changed.contains(old_p);
-                    if !changed.contains(old_p) {
+                        && !changed.contains(&old_p);
+                    if !changed.contains(&old_p) {
                         let op = if let Some(a) = anon.as_mut() {
-                            a.anonymize_path(old_p)
+                            a.anonymize_path(&old_p)
                         } else {
-                            old_p.to_string()
+                            old_p.clone()
                         };
                         let np = if let Some(a) = anon.as_mut() {
-                            a.anonymize_path(e.path())
+                            a.anonymize_path(&e.path().to_string_lossy())
                         } else {
-                            e.path().to_string()
+                            e.path().to_string_lossy().into_owned()
                         };
                         writeln!(writer, "{} {op} {np}", e.status.letter())?;
                     }
@@ -577,8 +581,8 @@ pub fn export_stream(
                             options.no_data,
                         )?;
                     }
-                    changed.insert(old_p.to_string());
-                    changed.insert(e.path().to_string());
+                    changed.insert(old_p);
+                    changed.insert(e.path().to_string_lossy().into_owned());
                 }
                 DiffStatus::Added | DiffStatus::Modified | DiffStatus::TypeChanged => {
                     fallthrough_modify(
@@ -590,7 +594,7 @@ pub fn export_stream(
                         options.anonymize,
                         options.no_data,
                     )?;
-                    changed.insert(e.path().to_string());
+                    changed.insert(e.path().to_string_lossy().into_owned());
                 }
                 _ => {}
             }
@@ -673,9 +677,9 @@ fn fallthrough_modify(
 ) -> Result<()> {
     let mode = u32::from_str_radix(e.new_mode.trim(), 8).unwrap_or(0);
     let path = if let Some(a) = anon.as_mut() {
-        a.anonymize_path(e.path())
+        a.anonymize_path(&e.path().to_string_lossy())
     } else {
-        e.path().to_string()
+        e.path().to_string_lossy().into_owned()
     };
     if mode == MODE_GITLINK {
         let hex = e.new_oid.to_hex();

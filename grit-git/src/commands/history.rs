@@ -555,8 +555,8 @@ fn split_commit_interactive(
             .new_path
             .as_deref()
             .or(entry.old_path.as_deref())
-            .unwrap_or("");
-        if !path_matches_any_pathspec(path, pathspecs) {
+            .unwrap_or(grit_lib::repo_path::RepoPath::from_str(""));
+        if !path_matches_any_pathspec(&path.to_string_lossy(), pathspecs) {
             continue;
         }
 
@@ -989,12 +989,12 @@ fn append_tree_diff_status(
             .new_path
             .as_deref()
             .or(a.old_path.as_deref())
-            .unwrap_or("");
+            .unwrap_or(grit_lib::repo_path::RepoPath::from_str(""));
         let pb = b
             .new_path
             .as_deref()
             .or(b.old_path.as_deref())
-            .unwrap_or("");
+            .unwrap_or(grit_lib::repo_path::RepoPath::from_str(""));
         pa.cmp(pb)
     });
     for e in paths {
@@ -1002,7 +1002,7 @@ fn append_tree_diff_status(
             .new_path
             .as_deref()
             .or(e.old_path.as_deref())
-            .unwrap_or("?");
+            .unwrap_or(grit_lib::repo_path::RepoPath::from_str("?"));
         let label = match e.status {
             DiffStatus::Added => "new file",
             DiffStatus::Deleted => "deleted",

@@ -17,6 +17,7 @@ use grit_lib::combined_tree_diff::{
 };
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::delta_encode::{encode_lcp_delta, encode_prefix_extension_delta};
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::diff::{
     count_changes, detect_copies as lib_detect_copies, detect_renames, diff_trees,
     diff_trees_show_tree_entries, format_raw, format_raw_abbrev,
@@ -1511,7 +1512,8 @@ fn filter_max_depth(
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
     for entry in entries {
-        let path = entry.path().to_owned();
+        // TODO(byte-paths): depth-collapse logic runs on the lossy string form (Phase 3).
+        let path = entry.path().to_string_lossy().into_owned();
         // Find the deepest directory-prefix of `path` that git would refuse to
         // recurse into; if found, the entry collapses to that directory name.
         match collapse_boundary(&path, &specs, max_depth) {
@@ -1519,8 +1521,8 @@ fn filter_max_depth(
             Some(dir) => {
                 if seen.insert(dir.clone()) {
                     let mut collapsed = entry;
-                    collapsed.old_path = Some(dir.clone());
-                    collapsed.new_path = Some(dir);
+                    collapsed.old_path = Some(RepoPathBuf::from_string(dir.clone()));
+                    collapsed.new_path = Some(RepoPathBuf::from_string(dir));
                     result.push(collapsed);
                 }
             }
@@ -1625,13 +1627,12 @@ fn diff_trees_toplevel(
     while oi < old_entries.len() || ni < new_entries.len() {
         match (old_entries.get(oi), new_entries.get(ni)) {
             (Some(o), Some(n)) => {
-                let o_name = String::from_utf8_lossy(&o.name);
-                let n_name = String::from_utf8_lossy(&n.name);
-                match o_name.cmp(&n_name) {
+                // Byte-true ordering and paths (Git tree names are raw bytes).
+                match o.name.cmp(&n.name) {
                     std::cmp::Ordering::Less => {
                         result.push(DiffEntry {
                             status: DiffStatus::Deleted,
-                            old_path: Some(o_name.into_owned()),
+                            old_path: Some(RepoPathBuf::from_bytes(o.name.clone())),
                             new_path: None,
                             old_mode: format!("{:06o}", o.mode),
                             new_mode: "000000".to_owned(),
@@ -1645,7 +1646,7 @@ fn diff_trees_toplevel(
                         result.push(DiffEntry {
                             status: DiffStatus::Added,
                             old_path: None,
-                            new_path: Some(n_name.into_owned()),
+                            new_path: Some(RepoPathBuf::from_bytes(n.name.clone())),
                             old_mode: "000000".to_owned(),
                             new_mode: format!("{:06o}", n.mode),
                             old_oid: zero,
@@ -1656,7 +1657,7 @@ fn diff_trees_toplevel(
                     }
                     std::cmp::Ordering::Equal => {
                         if o.oid != n.oid || o.mode != n.mode {
-                            let path = o_name.into_owned();
+                            let path = RepoPathBuf::from_bytes(o.name.clone());
                             let old_type = o.mode & 0o170000;
                             let new_type = n.mode & 0o170000;
                             let old_is_tree = old_type == 0o040000;
@@ -1713,7 +1714,7 @@ fn diff_trees_toplevel(
             (Some(o), None) => {
                 result.push(DiffEntry {
                     status: DiffStatus::Deleted,
-                    old_path: Some(String::from_utf8_lossy(&o.name).into_owned()),
+                    old_path: Some(RepoPathBuf::from_bytes(o.name.clone())),
                     new_path: None,
                     old_mode: format!("{:06o}", o.mode),
                     new_mode: "000000".to_owned(),
@@ -1727,7 +1728,7 @@ fn diff_trees_toplevel(
                 result.push(DiffEntry {
                     status: DiffStatus::Added,
                     old_path: None,
-                    new_path: Some(String::from_utf8_lossy(&n.name).into_owned()),
+                    new_path: Some(RepoPathBuf::from_bytes(n.name.clone())),
                     old_mode: "000000".to_owned(),
                     new_mode: format!("{:06o}", n.mode),
                     old_oid: zero,
@@ -1897,7 +1898,7 @@ fn print_submodule_log_for_entry(
         message = Some("(submodule deleted)");
     }
 
-    let sub_repo = open_submodule_repo(super_git_dir, work_tree, path);
+    let sub_repo = open_submodule_repo(super_git_dir, work_tree, &path.to_string_lossy());
     if sub_repo.is_none() && message.is_none() {
         message = Some("(commits not present)");
     }
@@ -2051,8 +2052,9 @@ fn combined_paths_to_first_parent_entries(
         };
         out.push(DiffEntry {
             status,
-            old_path: Some(p.path.clone()),
-            new_path: Some(p.path.clone()),
+            // TODO(byte-paths): CombinedDiffPath.path is a lossy String (Phase 3/4).
+            old_path: Some(RepoPathBuf::from_string(p.path.clone())),
+            new_path: Some(RepoPathBuf::from_string(p.path.clone())),
             old_mode,
             new_mode,
             old_oid,
@@ -2358,9 +2360,9 @@ fn write_raw_diff_tree_z(
     )?;
     match entry.status {
         DiffStatus::Renamed | DiffStatus::Copied => {
-            out.write_all(entry.old_path.as_deref().unwrap_or("").as_bytes())?;
+            out.write_all(entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")).as_bytes())?;
             out.write_all(b"\0")?;
-            out.write_all(entry.new_path.as_deref().unwrap_or("").as_bytes())?;
+            out.write_all(entry.new_path.as_deref().unwrap_or(RepoPath::from_str("")).as_bytes())?;
             out.write_all(b"\0")?;
         }
         _ => {
@@ -2476,7 +2478,8 @@ fn break_then_detect(
             prepared.push(entry);
             continue;
         }
-        let path = entry.path().to_owned();
+        // TODO(byte-paths): break/rename bookkeeping keyed on lossy string (Phase 3).
+        let path = entry.path().to_string_lossy().into_owned();
         broken_paths.insert(path.clone());
         // Deleted half (old side).
         let del = DiffEntry {
@@ -2530,13 +2533,13 @@ fn break_then_detect(
     let surviving_add: HashSet<String> = detected
         .iter()
         .filter(|e| e.status == DiffStatus::Added)
-        .filter_map(|e| e.new_path.clone())
+        .filter_map(|e| e.new_path.as_deref().map(|p| p.to_string_lossy().into_owned()))
         .filter(|p| broken_paths.contains(p))
         .collect();
     let surviving_del: HashSet<String> = detected
         .iter()
         .filter(|e| e.status == DiffStatus::Deleted)
-        .filter_map(|e| e.old_path.clone())
+        .filter_map(|e| e.old_path.as_deref().map(|p| p.to_string_lossy().into_owned()))
         .filter(|p| broken_paths.contains(p))
         .collect();
 
@@ -2550,7 +2553,7 @@ fn break_then_detect(
                 if entry
                     .old_path
                     .as_deref()
-                    .is_some_and(|p| surviving_add.contains(p)) =>
+                    .is_some_and(|p| surviving_add.contains(p.to_string_lossy().as_ref())) =>
             {
                 let mut e = entry;
                 e.status = DiffStatus::Copied;
@@ -2564,9 +2567,13 @@ fn break_then_detect(
                 if entry
                     .new_path
                     .as_deref()
-                    .is_some_and(|p| broken_paths.contains(p)) =>
+                    .is_some_and(|p| broken_paths.contains(p.to_string_lossy().as_ref())) =>
             {
-                let path = entry.new_path.clone().unwrap_or_default();
+                let path = entry
+                    .new_path
+                    .as_deref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if merged_paths.insert(path.clone()) {
                     if let (Some(del), Some(add)) = (broken_old.get(&path), broken_new.get(&path)) {
                         result.push(merge_broken_pair(del, add));
@@ -2577,9 +2584,13 @@ fn break_then_detect(
                 if entry
                     .old_path
                     .as_deref()
-                    .is_some_and(|p| broken_paths.contains(p)) =>
+                    .is_some_and(|p| broken_paths.contains(p.to_string_lossy().as_ref())) =>
             {
-                let path = entry.old_path.clone().unwrap_or_default();
+                let path = entry
+                    .old_path
+                    .as_deref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 // Only emit here if the add-half did NOT survive (otherwise the
                 // Added arm above handles the merge); this covers the symmetric
                 // case where the delete half is the survivor.
@@ -2784,7 +2795,7 @@ fn print_diff(
                     out.write_all(entry.path().as_bytes())?;
                     out.write_all(b"\0")?;
                 } else {
-                    writeln!(out, "{}", quote_c_style(entry.path(), quote_fully))?;
+                    writeln!(out, "{}", quote_c_style(&entry.path().to_string_lossy(), quote_fully))?;
                 }
             }
         }
@@ -2851,8 +2862,8 @@ fn write_summary(out: &mut impl Write, entries: &[DiffEntry]) -> Result<()> {
                 writeln!(
                     out,
                     " rename {} => {} ({sim}%)",
-                    entry.old_path.as_deref().unwrap_or(""),
-                    entry.new_path.as_deref().unwrap_or("")
+                    entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                    entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                 )?;
             }
             DiffStatus::Copied => {
@@ -2860,8 +2871,8 @@ fn write_summary(out: &mut impl Write, entries: &[DiffEntry]) -> Result<()> {
                 writeln!(
                     out,
                     " copy {} => {} ({sim}%)",
-                    entry.old_path.as_deref().unwrap_or(""),
-                    entry.new_path.as_deref().unwrap_or("")
+                    entry.old_path.as_deref().unwrap_or(RepoPath::from_str("")),
+                    entry.new_path.as_deref().unwrap_or(RepoPath::from_str(""))
                 )?;
             }
             _ => {}
@@ -2982,14 +2993,21 @@ pub(crate) fn write_patch_entry(
 ) -> Result<bool> {
     let (old_content, new_content) = read_blob_pair(odb, entry)?;
 
-    let old_path = entry
+    // TODO(byte-paths): diff-header path quoting is lossy until quote_path goes byte-based (Phase 3).
+    let old_lossy = entry
         .old_path
         .as_deref()
-        .unwrap_or(entry.new_path.as_deref().unwrap_or(""));
-    let new_path = entry
+        .or(entry.new_path.as_deref())
+        .map(RepoPath::to_string_lossy)
+        .unwrap_or(std::borrow::Cow::Borrowed(""));
+    let old_path: &str = &old_lossy;
+    let new_lossy = entry
         .new_path
         .as_deref()
-        .unwrap_or(entry.old_path.as_deref().unwrap_or(""));
+        .or(entry.old_path.as_deref())
+        .map(RepoPath::to_string_lossy)
+        .unwrap_or(std::borrow::Cow::Borrowed(""));
+    let new_path: &str = &new_lossy;
 
     let old_hex = entry.old_oid.to_hex();
     let new_hex = entry.new_oid.to_hex();
@@ -3052,11 +3070,12 @@ pub(crate) fn write_patch_entry(
         DiffStatus::Unmerged => {}
     }
 
-    let path_for_attrs = entry.path();
+    // TODO(byte-paths): attribute lookup uses the lossy path until pathspec/attrs go byte-based (Phase 3).
+    let path_for_attrs = entry.path().to_string_lossy();
     let old_raw = old_content.as_bytes();
     let new_raw = new_content.as_bytes();
-    if is_binary_for_diff(git_dir, path_for_attrs, old_raw)
-        || is_binary_for_diff(git_dir, path_for_attrs, new_raw)
+    if is_binary_for_diff(git_dir, &path_for_attrs, old_raw)
+        || is_binary_for_diff(git_dir, &path_for_attrs, new_raw)
     {
         if binary_patch {
             emit_git_binary_patch(out, old_raw, new_raw)?;
@@ -3113,7 +3132,7 @@ fn stat_mode_has_executable_bit(mode_str: &str) -> bool {
 /// Quote `entry`'s path and, for `--compact-summary`, append git's
 /// `(new)` / `(gone)` / `(mode +x)` / `(mode -x)` annotation.
 fn stat_display_path(entry: &DiffEntry, quote_fully: bool, compact: bool) -> String {
-    let path = quote_c_style(entry.path(), quote_fully);
+    let path = quote_c_style(&entry.path().to_string_lossy(), quote_fully);
     if !compact {
         return path;
     }
@@ -3798,15 +3817,16 @@ fn diff_entry_pathspec_context(entry: &DiffEntry) -> grit_lib::pathspec::Pathspe
 }
 
 fn diff_entry_matches_pathspecs(entry: &DiffEntry, pathspecs: &[String]) -> bool {
+    // TODO(byte-paths): pathspec matching runs on the lossy string form (Phase 3).
     let ctx = diff_entry_pathspec_context(entry);
     if let Some(ref p) = entry.new_path {
-        if matches_pathspec_list_with_context(p, pathspecs, ctx) {
+        if matches_pathspec_list_with_context(&p.to_string_lossy(), pathspecs, ctx) {
             return true;
         }
     }
     if let Some(ref p) = entry.old_path {
         if entry.new_path.as_ref() != Some(p)
-            && matches_pathspec_list_with_context(p, pathspecs, ctx)
+            && matches_pathspec_list_with_context(&p.to_string_lossy(), pathspecs, ctx)
         {
             return true;
         }

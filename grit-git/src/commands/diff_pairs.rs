@@ -188,8 +188,15 @@ fn render_raw_entry(pair: &ParsedPair, out: &mut impl std::io::Write) -> Result<
 fn to_diff_entry(pair: &ParsedPair) -> DiffEntry {
     DiffEntry {
         status: pair.status,
-        old_path: pair.old_path.clone(),
-        new_path: pair.new_path.clone(),
+        // TODO(byte-paths): ParsedPair stores lossy String paths; migrate its source to bytes (Phase 2/4).
+        old_path: pair
+            .old_path
+            .clone()
+            .map(grit_lib::repo_path::RepoPathBuf::from_string),
+        new_path: pair
+            .new_path
+            .clone()
+            .map(grit_lib::repo_path::RepoPathBuf::from_string),
         old_mode: pair.old_mode.clone(),
         new_mode: pair.new_mode.clone(),
         old_oid: pair.old_oid,

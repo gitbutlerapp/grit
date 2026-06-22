@@ -880,13 +880,13 @@ pub(crate) fn run_add_patch_with_reader(
         if e.status == DiffStatus::Unmerged {
             return false;
         }
-        patch_path_filter_matches(e.path(), &filter_paths)
+        patch_path_filter_matches(&e.path().to_string_lossy(), &filter_paths)
     });
     entries.sort_by(|a, b| a.path().cmp(b.path()));
 
     if entries
         .iter()
-        .any(|entry| path_under_sparse_index_dir(&raw_index, entry.path()))
+        .any(|entry| path_under_sparse_index_dir(&raw_index, &entry.path().to_string_lossy()))
     {
         emit_index_trace_region("ensure_full_index");
     }
@@ -930,7 +930,8 @@ pub(crate) fn run_add_patch_with_reader(
     let mut binary_count = 0usize;
 
     for entry in entries {
-        let path_str = entry.path().to_owned();
+        // TODO(byte-paths): lossy worktree path until add-patch FS I/O migrates (Phase 2).
+        let path_str = entry.path().to_string_lossy().into_owned();
         let path_bytes = path_str.as_bytes();
 
         let Some(ie) = index.get(path_bytes, 0).cloned() else {

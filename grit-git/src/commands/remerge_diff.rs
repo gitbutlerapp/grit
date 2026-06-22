@@ -6,6 +6,7 @@ use anyhow::{bail, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{detect_renames, diff_trees, unified_diff, zero_oid, DiffEntry, DiffStatus};
 use grit_lib::merge_diff::{blob_text_for_diff, is_binary_for_diff};
+use grit_lib::repo_path::{RepoPath, RepoPathBuf};
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::repo::Repository;
@@ -52,9 +53,9 @@ fn conflict_desc_matches_pathspecs(d: &ConflictDescription, pathspecs: &[String]
 }
 
 fn entry_matches_pathspecs(e: &DiffEntry, pathspecs: &[String]) -> bool {
-    let old = e.old_path.as_deref().unwrap_or("");
-    let new = e.new_path.as_deref().unwrap_or("");
-    path_matches_pathspecs(pathspecs, old) || path_matches_pathspecs(pathspecs, new)
+    let old = e.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+    let new = e.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+    path_matches_pathspecs(pathspecs, &old) || path_matches_pathspecs(pathspecs, &new)
 }
 
 fn parse_diff_filter(filter: &str) -> (Vec<char>, Vec<char>) {
@@ -168,7 +169,8 @@ fn conflict_header_for_entry<'a>(
     descs: &'a [ConflictDescription],
     e: &DiffEntry,
 ) -> Option<&'a ConflictDescription> {
-    let primary = e.path();
+    let primary_owned = e.path().to_string_lossy();
+    let primary: &str = &primary_owned;
     for d in descs {
         let anchor = d
             .remerge_anchor_path
@@ -183,9 +185,10 @@ fn conflict_header_for_entry<'a>(
             return Some(d);
         }
         for p in [
-            e.old_path.as_deref().unwrap_or(""),
-            e.new_path.as_deref().unwrap_or(""),
+            e.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default(),
+            e.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default(),
         ] {
+            let p: &str = &p;
             if path_matches_remerge_anchor(anchor, p) || p == d.subject_path.as_str() {
                 return Some(d);
             }
@@ -331,8 +334,9 @@ pub(crate) fn write_remerge_diff(
             .remerge_anchor_path
             .as_deref()
             .unwrap_or(d.subject_path.as_str());
-        let old = e.old_path.as_deref().unwrap_or("");
-        let _new = e.new_path.as_deref().unwrap_or("");
+        let old = e.old_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
+        let old: &str = &old;
+        let _new = e.new_path.as_deref().map(RepoPath::to_string_lossy).unwrap_or_default();
         match d.kind {
             "file/directory" => {
                 e.status == DiffStatus::Renamed
@@ -391,8 +395,9 @@ pub(crate) fn write_remerge_diff(
             };
             let pseudo = DiffEntry {
                 status: pseudo_status,
-                old_path: Some(pseudo_old),
-                new_path: Some(pseudo_new),
+                // TODO(byte-paths): anchor/subject paths are still String (Phase 2/4).
+                old_path: Some(RepoPathBuf::from_string(pseudo_old)),
+                new_path: Some(RepoPathBuf::from_string(pseudo_new)),
                 old_mode: "100644".to_string(),
                 new_mode: "100644".to_string(),
                 old_oid: zero_oid(),
@@ -513,7 +518,7 @@ pub(crate) fn write_remerge_diff(
                     continue;
                 }
                 if e.status == DiffStatus::Deleted
-                    && e.old_path.as_deref() == Some(theirs_path.as_str())
+                    && e.old_path.as_deref().is_some_and(|p| p == theirs_path.as_str())
                 {
                     used_entry[i] = true;
                     break;
@@ -525,7 +530,8 @@ pub(crate) fn write_remerge_diff(
                 if let Ok(blob_oid) = blob_oid_at_path_in_tree(repo, &remerge_tree, &theirs_path) {
                     let del = DiffEntry {
                         status: DiffStatus::Deleted,
-                        old_path: Some(theirs_path.clone()),
+                        // TODO(byte-paths): theirs_path is still String (Phase 2/4).
+                        old_path: Some(RepoPathBuf::from_string(theirs_path.clone())),
                         new_path: None,
                         old_mode: "100644".to_string(),
                         new_mode: "000000".to_string(),
@@ -580,14 +586,15 @@ pub(crate) fn write_remerge_diff(
         }
         if e.status == DiffStatus::Added {
             if let Some(np) = e.new_path.as_deref() {
-                if rename_rr_ours_dests.contains(np) {
+                if rename_rr_ours_dests.contains(&*np.to_string_lossy()) {
                     continue;
                 }
             }
         }
         if e.status == DiffStatus::Renamed {
             if let Some(o) = e.old_path.as_deref() {
-                if has_rename_rename.contains(o)
+                let o = o.to_string_lossy();
+                if has_rename_rename.contains(&*o)
                     || has_rename_rename
                         .iter()
                         .any(|a| o.starts_with(&format!("{a}~")))
@@ -641,8 +648,14 @@ fn emit_patch_for_entry(
     context_lines: usize,
     indent_heuristic: bool,
 ) -> Result<()> {
-    let old_path = e.old_path.as_deref().unwrap_or("/dev/null");
-    let new_path = e.new_path.as_deref().unwrap_or("/dev/null");
+    let old_path = e
+        .old_path
+        .as_deref()
+        .map_or(std::borrow::Cow::Borrowed("/dev/null"), RepoPath::to_string_lossy);
+    let new_path = e
+        .new_path
+        .as_deref()
+        .map_or(std::borrow::Cow::Borrowed("/dev/null"), RepoPath::to_string_lossy);
     let old_raw = if e.old_oid.is_zero() {
         Vec::new()
     } else {
@@ -659,7 +672,9 @@ fn emit_patch_for_entry(
             .map(|o| o.data)
             .unwrap_or_default()
     };
-    let path_for_attrs = e.path();
+    // TODO(byte-paths): attribute/textconv lookup is still str-keyed (Phase 3).
+    let path_for_attrs_owned = e.path().to_string_lossy();
+    let path_for_attrs: &str = &path_for_attrs_owned;
     if is_binary_for_diff(git_dir, path_for_attrs, &old_raw)
         || is_binary_for_diff(git_dir, path_for_attrs, &new_raw)
     {
@@ -671,8 +686,8 @@ fn emit_patch_for_entry(
     let patch = unified_diff(
         &old_content,
         &new_content,
-        old_path,
-        new_path,
+        &old_path,
+        &new_path,
         context_lines,
         indent_heuristic,
         config.quote_path_fully(),

@@ -1,8 +1,10 @@
 //! Small output-formatting helpers shared by `grit` commands.
 
+use std::borrow::Cow;
 use std::io::IsTerminal;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::repo_path::RepoPath;
 
 use crate::context::{self, CommitSummary};
 
@@ -96,13 +98,15 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-/// The path a diff entry refers to (prefers the new side, falls back to old).
-pub fn entry_path(entry: &DiffEntry) -> &str {
+/// The path a diff entry refers to (prefers the new side, falls back to old),
+/// rendered lossily for display/matching.
+pub fn entry_path(entry: &DiffEntry) -> Cow<'_, str> {
     entry
         .new_path
         .as_deref()
         .or(entry.old_path.as_deref())
-        .unwrap_or("?")
+        .map(RepoPath::to_string_lossy)
+        .unwrap_or(Cow::Borrowed("?"))
 }
 
 /// A single-character glyph summarizing a change.
