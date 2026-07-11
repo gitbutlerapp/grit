@@ -10,7 +10,7 @@ The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https:
 
 ## Motivation
 
-Why rewrite Git functionality into Rust? It's not about replacing Git, it's about having a feature-complete linkable library. It's similar to Gitoxide or libgit2/git2-rs, but using LLMs to try to acheive total feature parity by targeting the Git testing suite.
+Why rewrite Git functionality into Rust? It's not about replacing Git, it's about having a feature-complete linkable library. It's similar to Gitoxide or libgit2/git2-rs, but using LLMs to try to achieve total feature parity by targeting the Git testing suite.
 
 ## Approach
 
@@ -22,7 +22,7 @@ The headline CLI shipped by the install script is `grit`, a simpler, opinionated
 
 ## Usability
 
-While the `grit-git` command emulates `git` functionality enough to successfully run over 42k of it's tests, it has been nearly entirely written by agents and has not been used for realsies. It's probably currently unusably slow or completely broken in ways that are not exercised in the test suite.
+While the `grit-git` command emulates `git` functionality enough to successfully run over 42k of its tests, it has been nearly entirely written by agents and has not been used for realsies. It's probably currently unusably slow or completely broken in ways that are not exercised in the test suite.
 
 Our current goal is to get all the tests to pass and then refactor to real usability (speed, API surface, etc) while being able to successfully test for regression easily. Try it out and either send a fix or report an issue for anything you find or ways you want to use it that it doesn't successfully do.
 
@@ -34,7 +34,7 @@ To install the `grit` CLI via Bash, you can run our install script:
 $ curl -fsSL https://grit-scm.com/install | sh
 ```
 
-There are builds for Mac and Linux, (aarch64 and x86_64 for both). Linux ships both glibc and statically-linked musl binaries, so the installer works on distros like Alpine too — it auto-detects which one your system needs. Windows installs the same `grit` CLI. The Git-compatible `grit-git` binary is not installed by the script — install it with `cargo install grit-git`.
+There are builds for Mac and Linux (aarch64 and x86_64 for both). Linux ships both glibc and statically-linked musl binaries, so the installer works on distros like Alpine too — it auto-detects which one your system needs. Windows installs the same `grit` CLI. The Git-compatible `grit-git` binary is not installed by the script — install it with `cargo install grit-git`.
 
 ## Updating
 
@@ -77,6 +77,6 @@ The Windows version also comes with `grit manager` which works as an interface t
 
 ## License
 
-The `grit-git` code is GPL-2.0, all other code and crates, including `grit-lib` are MIT licensed.
+The `grit-git` code is GPL-2.0; all other code and crates, including `grit-lib` are MIT licensed.
 
 testing
