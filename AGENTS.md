@@ -4,7 +4,7 @@ alwaysApply: true
 ---
 
 ---
-description: "Functionally complete Git reimplmentation in idiomatic, library focused Rust"
+description: "Functionally complete Git reimplementation in idiomatic, library-focused Rust"
 alwaysApply: true
 ---
 
@@ -57,9 +57,9 @@ you've fixed the underlying bug.
 
 The canonical Git source code we're targeting to replicate the functionality of is in the `git/` subdirectory.
 
-The tests we're trying to make pass with our new implementation is in the `git/t/` directory.
+The tests we're trying to make pass with our new implementation are in the `git/t/` directory.
 
-Manpage documentation is located in `git/Documentation` directory as `*.doc` files.
+Manpage documentation is located in the `git/Documentation` directory as `*.doc` files.
 
 ## Licensing Hard Rule — No Copied Expression in `grit-lib`
 
