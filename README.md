@@ -42,11 +42,6 @@ To update your version of Grit, you can run `grit update` and it will re-run the
 
 ## The `grit` CLI
 
-test
-line two
-line three
-omg, more lines
-
 The `grit` binary (from the `grit-cli` crate) is what the install script ships. It is not a Git-identical CLI; it is a simpler interface for common developer workflows built on `grit-lib`, portable to Windows.
 
 `grit` treats status as the home screen and keeps the common path terse:
@@ -78,5 +73,3 @@ The Windows version also comes with `grit manager` which works as an interface t
 ## License
 
 The `grit-git` code is GPL-2.0; all other code and crates, including `grit-lib` are MIT licensed.
-
-testing
