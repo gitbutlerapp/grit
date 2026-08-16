@@ -478,7 +478,26 @@ mod pack_cache {
 
     /// Get the raw bytes of a pack file from cache, re-reading from disk when the
     /// file's mtime/size changes.
+    /// Whether `path` names a final, content-addressed pack file (`pack-<hash>.pack`).
+    /// For such paths the name pins the content, so a cached copy cannot silently
+    /// go stale; temporary packs (`tmp_pack_*`) keep the stat-stamp revalidation.
+    fn is_content_addressed_pack(path: &Path) -> bool {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("pack-") && n.ends_with(".pack"))
+    }
+
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
+        // Content-addressed packs are immutable in practice: in-process rewrites go
+        // through `repack`/`gc`, which clear this cache, and cross-process mutation
+        // cannot outlive the process boundary. Serving the cached copy without a
+        // stat removes one syscall per packed-object read on hot walks.
+        if is_content_addressed_pack(pack_path) {
+            let g = lock();
+            if let Some(c) = g.by_pack.get(pack_path) {
+                return Ok(Arc::clone(&c.bytes));
+            }
+        }
         let sig = file_signature(pack_path);
         if let Some((mtime, size)) = sig {
             {
