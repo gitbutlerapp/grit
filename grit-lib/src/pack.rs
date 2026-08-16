@@ -1395,6 +1395,12 @@ fn read_pack_base_cached(
     Ok((kind, data))
 }
 
+/// Deepest delta chain a read will follow before treating the pack as corrupt.
+///
+/// This is a safety valve against cyclic ref-delta chains and unbounded recursion,
+/// not a format limit: Git itself reads chains of any depth.
+const MAX_DELTA_CHAIN_READ_DEPTH: usize = 4096;
+
 fn read_pack_object_at(
     pack_bytes: &[u8],
     offset: u64,
@@ -1402,10 +1408,15 @@ fn read_pack_object_at(
     objects_dir: Option<&Path>,
     depth: usize,
 ) -> Result<(ObjectKind, Vec<u8>)> {
-    if depth > 50 {
-        return Err(Error::CorruptObject(
-            "delta chain too deep (>50)".to_owned(),
-        ));
+    // Git imposes no read-side delta-chain limit (`pack.depth` caps only what the
+    // writer produces, default 50). Reads must therefore handle chains far deeper
+    // than 50 — both packs written with an explicit `--depth`, and historical grit
+    // packs written before the writer capped chains. The bound below exists only
+    // to terminate corrupt cyclic ref-delta chains and bound recursion stack use.
+    if depth > MAX_DELTA_CHAIN_READ_DEPTH {
+        return Err(Error::CorruptObject(format!(
+            "delta chain too deep (>{MAX_DELTA_CHAIN_READ_DEPTH})"
+        )));
     }
     let mut pos = offset as usize;
     let (packed_type, size) = parse_pack_object_header(pack_bytes, &mut pos)?;
