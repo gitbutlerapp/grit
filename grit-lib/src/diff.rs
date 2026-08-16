@@ -2566,6 +2566,62 @@ pub fn refresh_index_stat_content_verified(
     changed
 }
 
+/// Smudge racily-clean index entries before an index write (Git `ce_smudge_racily_clean_entry`).
+///
+/// An entry written to the worktree in the same filesystem-timestamp tick as the index file
+/// cannot be proven unchanged by stat data alone. When such an entry's stat still matches the
+/// worktree but the content no longer matches the recorded OID, its cached size is zeroed so
+/// every future stat comparison fails and readers re-hash the file. Without this, rewriting the
+/// index (which advances the index mtime) would make the stale entry look trustworthy again.
+///
+/// # Parameters
+/// - `index` — the in-memory index about to be written.
+/// - `work_tree` — path to the working tree root.
+/// - `index_mtime` — `(mtime_sec, mtime_nsec)` of the index file that was read (racy reference
+///   point); pass `None` when the index file did not previously exist.
+///
+/// Returns `true` when at least one entry was smudged.
+pub fn smudge_racily_clean_entries(
+    index: &mut Index,
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+) -> bool {
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    if index_mtime.is_none() {
+        return false;
+    }
+    let mut changed = false;
+    for ie in &mut index.entries {
+        if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+            continue;
+        }
+        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+            continue;
+        }
+        // A zero-size entry cannot be smudged further; Git accepts that residual race.
+        if ie.size == 0 || !entry_is_racy(ie, index_mtime) {
+            continue;
+        }
+        let Ok(path) = std::str::from_utf8(&ie.path) else {
+            continue;
+        };
+        let abs = work_tree.join(path);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        // Only a stat-clean entry is dangerous: a stat-dirty entry already forces a re-hash.
+        if !stat_matches(ie, &meta) {
+            continue;
+        }
+        if worktree_content_matches_index_oid(ie, &abs, &meta) {
+            continue;
+        }
+        ie.size = 0;
+        changed = true;
+    }
+    changed
+}
+
 /// Symlink target as the byte string Git hashes for the blob OID.
 ///
 /// On Unix the raw `OsStr` bytes are used verbatim. On Windows `OsStr` is WTF-8
