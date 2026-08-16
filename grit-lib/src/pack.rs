@@ -1682,22 +1682,18 @@ pub fn packed_ref_delta_reuse_slice(
     oid: &ObjectId,
     packed_set: &HashSet<ObjectId>,
 ) -> Result<Option<(ObjectId, Vec<u8>)>> {
-    let mut indexes = read_local_pack_indexes(objects_dir)?;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_oldest_first(&mut indexes);
     for idx in indexes {
-        let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| e.oid.len() == 20 && e.oid.as_slice() == oid.as_bytes())
-        else {
-            continue;
-        };
         let hb = idx.hash_bytes;
         if hb != 20 {
             continue;
         }
-        let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-        let mut p = entry.offset as usize;
+        let Some(entry_offset) = idx.find_offset(oid) else {
+            continue;
+        };
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let mut p = entry_offset as usize;
         let (packed_type, _size) = parse_pack_object_header(&pack_bytes, &mut p)?;
         let base = match packed_type {
             PackedType::RefDelta => {
@@ -1711,7 +1707,7 @@ pub fn packed_ref_delta_reuse_slice(
                 bo
             }
             PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry.offset)?;
+                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
                 let Some(base_entry) = idx.entries.iter().find(|e| e.offset == base_off) else {
                     continue;
                 };
@@ -1731,7 +1727,7 @@ pub fn packed_ref_delta_reuse_slice(
         }
         let zlib_start = p;
         let mut end_pos = zlib_start;
-        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry.offset, hb).is_err() {
+        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry_offset, hb).is_err() {
             continue;
         }
         let compressed = &pack_bytes[zlib_start..end_pos];
@@ -1747,7 +1743,7 @@ pub fn packed_ref_delta_reuse_slice(
 
 /// Prefer older packs when the same OID exists as a full object in a fresh repack and as a delta
 /// in an earlier thin pack (t5316).
-fn sort_pack_indexes_oldest_first(indexes: &mut [PackIndex]) {
+fn sort_pack_indexes_oldest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -1759,7 +1755,7 @@ fn sort_pack_indexes_oldest_first(indexes: &mut [PackIndex]) {
     });
 }
 
-fn sort_pack_indexes_newest_first(indexes: &mut [PackIndex]) {
+fn sort_pack_indexes_newest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -1772,21 +1768,17 @@ fn sort_pack_indexes_newest_first(indexes: &mut [PackIndex]) {
 }
 
 pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectId>> {
-    let mut indexes = read_local_pack_indexes(objects_dir)?;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_newest_first(&mut indexes);
     for idx in &indexes {
         if idx.hash_bytes != 20 {
             continue;
         }
-        let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| e.oid.len() == 20 && e.oid.as_slice() == oid.as_bytes())
-        else {
+        let Some(entry_offset) = idx.find_offset(oid) else {
             continue;
         };
-        let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-        let mut p = entry.offset as usize;
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let mut p = entry_offset as usize;
         let (packed_type, _) = parse_pack_object_header(&pack_bytes, &mut p)?;
         match packed_type {
             PackedType::RefDelta => {
@@ -1797,7 +1789,7 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
                 return Ok(Some(ObjectId::from_bytes(&pack_bytes[p..p + hb])?));
             }
             PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry.offset)?;
+                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
                 return Ok(idx
                     .entries
                     .iter()
