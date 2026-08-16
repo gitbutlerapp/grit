@@ -914,7 +914,7 @@ pub fn run(mut args: Args) -> Result<()> {
         order_all_commits_first_parent_chain(&repo, &mut entries)?;
     }
 
-    let max_delta_depth = pack_delta_depth_limit(&args);
+    let max_delta_depth = pack_delta_depth_limit(&args, &repo);
     let window_zero_cli = {
         let mut args = std::env::args();
         let mut z = false;
@@ -1756,7 +1756,7 @@ fn warn_pack_threads(args: &Args) {
     }
 }
 
-fn pack_delta_depth_limit(args: &Args) -> Option<usize> {
+fn pack_delta_depth_limit(args: &Args, repo: &Repository) -> Option<usize> {
     let _ = (
         args.path_walk,
         args.no_path_walk,
@@ -1775,7 +1775,19 @@ fn pack_delta_depth_limit(args: &Args) -> Option<usize> {
     };
     let d_opt = args.depth.or_else(from_extra);
     match d_opt {
-        None => None,
+        // Git's default chain cap is `pack.depth` (50 when unset); an uncapped
+        // writer produces arbitrarily deep chains that every later reader pays for.
+        None => {
+            let from_config = ConfigSet::load(Some(&repo.git_dir), true)
+                .ok()
+                .and_then(|cfg| cfg.get("pack.depth"))
+                .and_then(|v| v.trim().parse::<i64>().ok());
+            match from_config {
+                Some(d) if d <= 0 => Some(0),
+                Some(d) => Some(d as usize),
+                None => Some(50),
+            }
+        }
         Some(d) if d <= 0 => Some(0),
         Some(d) => Some(d as usize),
     }
@@ -4598,29 +4610,8 @@ fn read_object_from_repo(repo: &Repository, oid: &ObjectId) -> Result<grit_lib::
         return Odb::read_loose_verify_oid(&loose_path, oid).map_err(|e| anyhow::anyhow!("{e}"));
     }
 
-    // Try pack files.
-    let indexes = grit_lib::pack::read_local_pack_indexes(repo.odb.objects_dir())
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    for idx in &indexes {
-        if let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| grit_lib::pack::pack_index_entry_matches_sha1_oid(e, oid))
-        {
-            let pack_bytes = std::fs::read(&idx.pack_path)?;
-            match read_object_from_pack(&pack_bytes, entry.offset, &indexes, idx.hash_bytes) {
-                Ok(obj) => return Ok(obj),
-                Err(_) if pack_index_is_v1(&idx.idx_path) => {
-                    return Ok(grit_lib::objects::Object::new(ObjectKind::Blob, Vec::new()));
-                }
-                Err(_) => {
-                    if let Ok(obj) = repo.odb.read(oid) {
-                        return Ok(obj);
-                    }
-                    continue;
-                }
-            }
-        }
+    if let Some(obj) = read_object_from_local_packs_cached(repo, oid)? {
+        return Ok(obj);
     }
 
     // The local loose store and local packs do not have the object. Before treating
@@ -4638,30 +4629,45 @@ fn read_object_from_repo(repo: &Repository, oid: &ObjectId) -> Result<grit_lib::
     if loose_path.is_file() {
         return Odb::read_loose_verify_oid(&loose_path, oid).map_err(|e| anyhow::anyhow!("{e}"));
     }
-    let indexes = grit_lib::pack::read_local_pack_indexes(repo.odb.objects_dir())
+    if let Some(obj) = read_object_from_local_packs_cached(repo, oid)? {
+        return Ok(obj);
+    }
+    bail!("object not found: {}", oid.to_hex())
+}
+
+/// Resolve `oid` from the repository's local packs via the process-wide pack cache
+/// (cached `.idx` parses, cached pack bytes, fanout binary search, delta-base cache).
+///
+/// Returns `Ok(None)` when no local pack holds the object. Preserves the historical
+/// fallbacks of the enumeration path: a pack copy that fails to decode from a v1
+/// (legacy) index yields an empty blob placeholder, and any other decode failure
+/// retries the full ODB read before moving on to the next pack.
+fn read_object_from_local_packs_cached(
+    repo: &Repository,
+    oid: &ObjectId,
+) -> Result<Option<grit_lib::objects::Object>> {
+    let indexes = grit_lib::pack::read_local_pack_indexes_cached(repo.odb.objects_dir())
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     for idx in &indexes {
-        if let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| grit_lib::pack::pack_index_entry_matches_sha1_oid(e, oid))
-        {
-            let pack_bytes = std::fs::read(&idx.pack_path)?;
-            match read_object_from_pack(&pack_bytes, entry.offset, &indexes, idx.hash_bytes) {
-                Ok(obj) => return Ok(obj),
-                Err(_) if pack_index_is_v1(&idx.idx_path) => {
-                    return Ok(grit_lib::objects::Object::new(ObjectKind::Blob, Vec::new()));
-                }
-                Err(_) => {
-                    if let Ok(obj) = repo.odb.read(oid) {
-                        return Ok(obj);
-                    }
-                    continue;
+        if idx.find_offset(oid).is_none() {
+            continue;
+        }
+        match grit_lib::pack::read_object_from_pack(idx, oid) {
+            Ok(obj) => return Ok(Some(obj)),
+            Err(_) if pack_index_is_v1(&idx.idx_path) => {
+                return Ok(Some(grit_lib::objects::Object::new(
+                    ObjectKind::Blob,
+                    Vec::new(),
+                )));
+            }
+            Err(_) => {
+                if let Ok(obj) = repo.odb.read(oid) {
+                    return Ok(Some(obj));
                 }
             }
         }
     }
-    bail!("object not found: {}", oid.to_hex())
+    Ok(None)
 }
 
 fn read_object_from_repo_no_lazy(
