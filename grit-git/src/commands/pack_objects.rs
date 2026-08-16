@@ -108,6 +108,10 @@ pub struct Args {
     #[arg(long = "no-reuse-delta")]
     pub no_reuse_delta: bool,
 
+    /// Do not copy already-compressed object data from existing packs (Git `--no-reuse-object`).
+    #[arg(long = "no-reuse-object")]
+    pub no_reuse_object: bool,
+
     /// Restrict cross-island deltas (Git `--delta-islands`; driven by `pack.island` config).
     #[arg(long = "delta-islands")]
     pub delta_islands: bool,
@@ -1010,6 +1014,27 @@ pub fn run(mut args: Args) -> Result<()> {
         }
     }
 
+    // Per-object data reuse (Git pack-objects without bitmaps): an object that stays full in the
+    // output pack and is already stored full in a local pack is copied verbatim — position-
+    // independent varint header plus zlib stream — skipping both inflate and deflate.
+    let mut slice_reused_objects = 0usize;
+    if !args.no_reuse_object {
+        let objects_dir = repo.odb.objects_dir();
+        for entry in &mut write_entries {
+            let PackWriteEntry::Full(pe) = entry else {
+                continue;
+            };
+            if let Ok(Some(raw)) = grit_lib::pack::packed_full_object_slice(objects_dir, &pe.oid) {
+                *entry = PackWriteEntry::ReusedSlice {
+                    oid: pe.oid,
+                    pack_id: std::mem::take(&mut pe.pack_id),
+                    raw,
+                };
+                slice_reused_objects += 1;
+            }
+        }
+    }
+
     if let Some(ref path) = std::env::var_os("GIT_TRACE2_EVENT") {
         if let Some(p) = path.to_str() {
             if let (Some(a), Some(b)) = (trace_pack_reused, trace_packs_reused) {
@@ -1062,7 +1087,9 @@ pub fn run(mut args: Args) -> Result<()> {
 
     if args.stdout {
         if !args.quiet {
-            let reused_pack = trace_pack_reused.unwrap_or(0);
+            // Like Git, "reused" counts every object whose packed data was copied instead of
+            // recompressed: bitmap/MIDX chunk reuse plus per-object slice reuse.
+            let reused_pack = trace_pack_reused.unwrap_or(0) as usize + slice_reused_objects;
             let total_delta = new_deltas + reused_deltas;
             let total: usize = chunks.iter().map(|c| c.len()).sum();
             eprintln!(
@@ -5273,8 +5300,10 @@ fn build_pack(
                 buf.extend_from_slice(&compressed);
                 oid_to_offset.insert(*oid, start);
             }
-            PackWriteEntry::ReusedSlice { raw, .. } => {
+            PackWriteEntry::ReusedSlice { oid, raw, .. } => {
                 buf.extend_from_slice(raw);
+                // Register the offset so later OFS_DELTA entries can reference a reused base.
+                oid_to_offset.insert(*oid, start);
             }
         }
     }

@@ -23,6 +23,9 @@ pub struct PackIndexEntry {
     pub oid: Vec<u8>,
     /// Byte offset of the object in the corresponding `.pack`.
     pub offset: u64,
+    /// CRC32 of the raw packed entry bytes (header + payload), from the v2 index CRC table.
+    /// `None` for version-1 indexes, which do not record CRCs.
+    pub crc32: Option<u32>,
 }
 
 /// Parsed data from a `.idx` file (version 2).
@@ -749,7 +752,11 @@ fn read_pack_index_v1(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
                 idx_path.display()
             )));
         }
-        entries.push(PackIndexEntry { oid, offset });
+        entries.push(PackIndexEntry {
+            oid,
+            offset,
+            crc32: None,
+        });
     }
 
     if verify {
@@ -833,7 +840,10 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
         oids.push(slice.to_vec());
     }
 
-    pos += object_count * 4;
+    let mut crcs = Vec::with_capacity(object_count);
+    for _ in 0..object_count {
+        crcs.push(read_u32_be(bytes, &mut pos)?);
+    }
 
     let mut offsets32 = Vec::with_capacity(object_count);
     let mut large_count = 0usize;
@@ -869,7 +879,11 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
             next_large += 1;
             off
         };
-        entries.push(PackIndexEntry { oid, offset });
+        entries.push(PackIndexEntry {
+            oid,
+            offset,
+            crc32: Some(crcs[i]),
+        });
     }
 
     let mut pack_path = idx_path.to_path_buf();
@@ -1798,6 +1812,75 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
             }
             _ => continue,
         }
+    }
+    Ok(None)
+}
+
+/// When `oid` is stored as a full (non-delta) object in a local pack, return its verbatim packed
+/// bytes: the varint type+size header followed by the zlib stream.
+///
+/// The header of a non-delta pack entry is position-independent, so the returned slice can be
+/// copied into a new pack unchanged — skipping both inflate and deflate. This is Git
+/// pack-objects' object reuse for objects that stay full in the output pack.
+///
+/// # Parameters
+/// - `objects_dir` — the repository's `objects/` directory.
+/// - `oid` — the object to look up.
+///
+/// Returns `None` when the object is loose only, stored as a delta, or the repository uses a
+/// hash width other than SHA-1.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when pack files cannot be read; a malformed candidate entry is skipped
+/// rather than reported so another pack (or the recompression path) can serve the object.
+pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Option<Vec<u8>>> {
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
+    sort_pack_indexes_newest_first(&mut indexes);
+    for idx in &indexes {
+        if idx.hash_bytes != 20 {
+            continue;
+        }
+        let Some(entry_offset) = idx.find_offset(oid) else {
+            continue;
+        };
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let start = entry_offset as usize;
+        let mut p = start;
+        let Ok((packed_type, _size)) = parse_pack_object_header(&pack_bytes, &mut p) else {
+            continue;
+        };
+        if matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta) {
+            // The same OID may be a full object in another pack; keep scanning.
+            continue;
+        }
+        let mut end = start;
+        if skip_one_pack_object(&pack_bytes, &mut end, entry_offset, idx.hash_bytes).is_err() {
+            continue;
+        }
+        let slice = &pack_bytes[start..end];
+        // Git `check_pack_crc`: verbatim reuse copies bytes unparsed, so guard with the pack
+        // index's CRC32. A corrupt copy is skipped, letting a redundant pack or the normal
+        // (validating) read path serve the object instead (t5303).
+        let recorded_crc = idx
+            .entries
+            .iter()
+            .find(|e| e.offset == entry_offset)
+            .and_then(|e| e.crc32);
+        match recorded_crc {
+            Some(crc) if crc32fast::hash(slice) != crc => continue,
+            // v1 indexes carry no CRC; verify by inflating and re-hashing the content.
+            None => {
+                if read_object_from_pack(idx, oid)
+                    .map(|obj| crate::odb::Odb::hash_object_data(obj.kind, &obj.data) != *oid)
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        return Ok(Some(slice.to_vec()));
     }
     Ok(None)
 }
