@@ -3036,24 +3036,47 @@ fn auto_stage_tracked(repo: &Repository, work_tree: &Path) -> Result<()> {
         Err(e) => return Err(e.into()),
     };
 
-    let path_keys: std::collections::HashSet<Vec<u8>> =
-        index.entries.iter().map(|e| e.path.clone()).collect();
+    // The index file's own mtime bounds racy-timestamp detection (Git `is_racy_timestamp`):
+    // an entry written in the same instant the index was saved cannot be trusted by stat alone.
+    let index_mtime = {
+        use std::os::unix::fs::MetadataExt;
+        fs::symlink_metadata(&index_path)
+            .ok()
+            .map(|m| (m.mtime() as u32, m.mtime_nsec() as u32))
+    };
+
+    // One pass over the (sorted) index instead of a linear scan per path: which paths have
+    // conflict stages, and a snapshot of each stage-0 entry for stat/oid comparisons below.
+    // Snapshots stay valid because the loop only mutates entries for the path it is visiting.
+    let mut path_keys: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+    let mut unmerged_paths: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+    let mut stage0: std::collections::HashMap<Vec<u8>, grit_lib::index::IndexEntry> =
+        std::collections::HashMap::new();
+    for e in &index.entries {
+        path_keys.insert(e.path.clone());
+        if e.stage() != 0 {
+            unmerged_paths.insert(e.path.clone());
+        } else {
+            stage0.insert(e.path.clone(), e.clone());
+        }
+    }
+
+    // Memoize per-directory symlink-parent answers so N files in one directory cost one
+    // ancestor walk, not N.
+    let mut symlink_parent_cache: std::collections::HashMap<PathBuf, bool> =
+        std::collections::HashMap::new();
 
     let mut changed = false;
     for raw_path in path_keys {
         let path_str = String::from_utf8_lossy(&raw_path).to_string();
         let abs_path = work_tree.join(&path_str);
-        if path_has_symlink_parent_for_commit(work_tree, &abs_path) {
+        if path_has_symlink_parent_cached(work_tree, &abs_path, &mut symlink_parent_cache) {
             index.remove(&raw_path);
             changed = true;
             continue;
         }
 
-        let unmerged = index
-            .entries
-            .iter()
-            .any(|e| e.path == raw_path && e.stage() != 0);
-        if unmerged {
+        if unmerged_paths.contains(&raw_path) {
             // Merge conflicts list multiple index rows per path. Refresh once from the
             // worktree and collapse to a single stage-0 entry (matches `git commit -a`).
             let idx_mode = index
@@ -3116,15 +3139,13 @@ fn auto_stage_tracked(repo: &Repository, work_tree: &Path) -> Result<()> {
             continue;
         }
 
-        let Some(idx_e) = index
-            .entries
-            .iter()
-            .find(|e| e.path == raw_path && e.stage() == 0)
-        else {
+        let Some(idx_e) = stage0.get(&raw_path) else {
             continue;
         };
         let idx_mode = idx_e.mode;
         let idx_skip_worktree = idx_e.skip_worktree();
+        let idx_intent_to_add = idx_e.intent_to_add();
+        let idx_oid = idx_e.oid;
 
         // Use `symlink_metadata`, not `exists()`: `Path::exists` follows symlinks, so
         // dangling symlinks look "missing" and would be dropped from the index (t1006).
@@ -3198,6 +3219,21 @@ fn auto_stage_tracked(repo: &Repository, work_tree: &Path) -> Result<()> {
                 }
                 continue;
             }
+            // Fast path (Git `ie_match_stat`): an unchanged stat tuple with an unchanged mode
+            // proves the blob is unchanged — unless the entry is racy — so skip both the
+            // re-hash and the object-database write for the common "file untouched" case.
+            let wt_mode = if meta.file_type().is_symlink() {
+                grit_lib::index::MODE_SYMLINK
+            } else {
+                grit_lib::index::normalize_mode(meta.mode())
+            };
+            if !idx_intent_to_add
+                && wt_mode == idx_mode
+                && grit_lib::diff::stat_matches(idx_e, &meta)
+                && !grit_lib::diff::entry_is_racy(idx_e, index_mtime)
+            {
+                continue;
+            }
             let data = if meta.file_type().is_symlink() {
                 let target = fs::read_link(&abs_path)?;
                 target.to_string_lossy().into_owned().into_bytes()
@@ -3205,17 +3241,9 @@ fn auto_stage_tracked(repo: &Repository, work_tree: &Path) -> Result<()> {
                 fs::read(&abs_path)?
             };
             let oid = repo.odb.write(ObjectKind::Blob, &data)?;
-            let has_unmerged_for_path = index
-                .entries
-                .iter()
-                .any(|e| e.path == raw_path && e.stage() != 0);
-            if !has_unmerged_for_path
-                && index
-                    .entries
-                    .iter()
-                    .find(|e| e.path == raw_path)
-                    .is_some_and(|e| !e.intent_to_add() && e.oid == oid)
-            {
+            // Unmerged paths were handled above, so the only index row for this path is the
+            // stage-0 snapshot taken before the loop.
+            if !idx_intent_to_add && idx_oid == oid {
                 continue;
             }
             let mode = grit_lib::index::normalize_mode(meta.mode());
@@ -3239,25 +3267,40 @@ fn auto_stage_tracked(repo: &Repository, work_tree: &Path) -> Result<()> {
     Ok(())
 }
 
-fn path_has_symlink_parent_for_commit(work_tree: &Path, abs_path: &Path) -> bool {
-    let Ok(rel) = abs_path.strip_prefix(work_tree) else {
+/// Whether any parent directory of `abs_path` (below `work_tree`) is a symlink, memoizing
+/// per-directory answers in `cache` so staging many files in one directory costs a single
+/// ancestor walk instead of one lstat per component per file.
+fn path_has_symlink_parent_cached(
+    work_tree: &Path,
+    abs_path: &Path,
+    cache: &mut std::collections::HashMap<PathBuf, bool>,
+) -> bool {
+    let Some(parent) = abs_path.parent() else {
         return false;
     };
-    let mut cur = work_tree.to_path_buf();
-    let mut comps = rel.components().peekable();
-    while let Some(component) = comps.next() {
-        if comps.peek().is_none() {
-            break;
-        }
-        cur.push(component.as_os_str());
-        if fs::symlink_metadata(&cur)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-        {
-            return true;
-        }
+    dir_or_ancestor_is_symlink(work_tree, parent, cache)
+}
+
+/// Whether `dir` itself or any of its ancestors below `work_tree` is a symlink (memoized).
+fn dir_or_ancestor_is_symlink(
+    work_tree: &Path,
+    dir: &Path,
+    cache: &mut std::collections::HashMap<PathBuf, bool>,
+) -> bool {
+    if dir == work_tree || !dir.starts_with(work_tree) {
+        return false;
     }
-    false
+    if let Some(&answer) = cache.get(dir) {
+        return answer;
+    }
+    let answer = match dir.parent() {
+        Some(parent) if dir_or_ancestor_is_symlink(work_tree, parent, cache) => true,
+        _ => fs::symlink_metadata(dir)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false),
+    };
+    cache.insert(dir.to_path_buf(), answer);
+    answer
 }
 
 /// Result of building a commit message — may be UTF-8 or raw bytes.

@@ -2345,7 +2345,18 @@ impl SymlinkDirCache {
     }
 }
 
-fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
+/// Whether an index entry's cached mtime is "racy" relative to the index file's own mtime.
+///
+/// A racy entry was written to the worktree at (or after) the moment the index was saved, so a
+/// matching stat tuple cannot prove the content is unchanged — callers must re-hash. This is
+/// Git's `is_racy_timestamp` rule.
+///
+/// # Parameters
+/// - `ie` — the index entry to test.
+/// - `index_mtime` — the on-disk index file's `(mtime_sec, mtime_nsec)`; when `None` (or the
+///   seconds value is zero) racy detection is skipped and this returns `false`.
+#[must_use]
+pub fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
     let Some((index_mtime_sec, index_mtime_nsec)) = index_mtime else {
         return false;
     };
