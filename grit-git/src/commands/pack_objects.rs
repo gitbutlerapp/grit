@@ -108,6 +108,10 @@ pub struct Args {
     #[arg(long = "no-reuse-delta")]
     pub no_reuse_delta: bool,
 
+    /// Do not copy already-compressed object data from existing packs (Git `--no-reuse-object`).
+    #[arg(long = "no-reuse-object")]
+    pub no_reuse_object: bool,
+
     /// Restrict cross-island deltas (Git `--delta-islands`; driven by `pack.island` config).
     #[arg(long = "delta-islands")]
     pub delta_islands: bool,
@@ -914,7 +918,7 @@ pub fn run(mut args: Args) -> Result<()> {
         order_all_commits_first_parent_chain(&repo, &mut entries)?;
     }
 
-    let max_delta_depth = pack_delta_depth_limit(&args);
+    let max_delta_depth = pack_delta_depth_limit(&args, &repo);
     let window_zero_cli = {
         let mut args = std::env::args();
         let mut z = false;
@@ -1010,6 +1014,27 @@ pub fn run(mut args: Args) -> Result<()> {
         }
     }
 
+    // Per-object data reuse (Git pack-objects without bitmaps): an object that stays full in the
+    // output pack and is already stored full in a local pack is copied verbatim — position-
+    // independent varint header plus zlib stream — skipping both inflate and deflate.
+    let mut slice_reused_objects = 0usize;
+    if !args.no_reuse_object {
+        let objects_dir = repo.odb.objects_dir();
+        for entry in &mut write_entries {
+            let PackWriteEntry::Full(pe) = entry else {
+                continue;
+            };
+            if let Ok(Some(raw)) = grit_lib::pack::packed_full_object_slice(objects_dir, &pe.oid) {
+                *entry = PackWriteEntry::ReusedSlice {
+                    oid: pe.oid,
+                    pack_id: std::mem::take(&mut pe.pack_id),
+                    raw,
+                };
+                slice_reused_objects += 1;
+            }
+        }
+    }
+
     if let Some(ref path) = std::env::var_os("GIT_TRACE2_EVENT") {
         if let Some(p) = path.to_str() {
             if let (Some(a), Some(b)) = (trace_pack_reused, trace_packs_reused) {
@@ -1062,7 +1087,9 @@ pub fn run(mut args: Args) -> Result<()> {
 
     if args.stdout {
         if !args.quiet {
-            let reused_pack = trace_pack_reused.unwrap_or(0);
+            // Like Git, "reused" counts every object whose packed data was copied instead of
+            // recompressed: bitmap/MIDX chunk reuse plus per-object slice reuse.
+            let reused_pack = trace_pack_reused.unwrap_or(0) as usize + slice_reused_objects;
             let total_delta = new_deltas + reused_deltas;
             let total: usize = chunks.iter().map(|c| c.len()).sum();
             eprintln!(
@@ -1756,7 +1783,7 @@ fn warn_pack_threads(args: &Args) {
     }
 }
 
-fn pack_delta_depth_limit(args: &Args) -> Option<usize> {
+fn pack_delta_depth_limit(args: &Args, repo: &Repository) -> Option<usize> {
     let _ = (
         args.path_walk,
         args.no_path_walk,
@@ -1775,7 +1802,19 @@ fn pack_delta_depth_limit(args: &Args) -> Option<usize> {
     };
     let d_opt = args.depth.or_else(from_extra);
     match d_opt {
-        None => None,
+        // Git's default chain cap is `pack.depth` (50 when unset); an uncapped
+        // writer produces arbitrarily deep chains that every later reader pays for.
+        None => {
+            let from_config = ConfigSet::load(Some(&repo.git_dir), true)
+                .ok()
+                .and_then(|cfg| cfg.get("pack.depth"))
+                .and_then(|v| v.trim().parse::<i64>().ok());
+            match from_config {
+                Some(d) if d <= 0 => Some(0),
+                Some(d) => Some(d as usize),
+                None => Some(50),
+            }
+        }
         Some(d) if d <= 0 => Some(0),
         Some(d) => Some(d as usize),
     }
@@ -4598,29 +4637,8 @@ fn read_object_from_repo(repo: &Repository, oid: &ObjectId) -> Result<grit_lib::
         return Odb::read_loose_verify_oid(&loose_path, oid).map_err(|e| anyhow::anyhow!("{e}"));
     }
 
-    // Try pack files.
-    let indexes = grit_lib::pack::read_local_pack_indexes(repo.odb.objects_dir())
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    for idx in &indexes {
-        if let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| grit_lib::pack::pack_index_entry_matches_sha1_oid(e, oid))
-        {
-            let pack_bytes = std::fs::read(&idx.pack_path)?;
-            match read_object_from_pack(&pack_bytes, entry.offset, &indexes, idx.hash_bytes) {
-                Ok(obj) => return Ok(obj),
-                Err(_) if pack_index_is_v1(&idx.idx_path) => {
-                    return Ok(grit_lib::objects::Object::new(ObjectKind::Blob, Vec::new()));
-                }
-                Err(_) => {
-                    if let Ok(obj) = repo.odb.read(oid) {
-                        return Ok(obj);
-                    }
-                    continue;
-                }
-            }
-        }
+    if let Some(obj) = read_object_from_local_packs_cached(repo, oid)? {
+        return Ok(obj);
     }
 
     // The local loose store and local packs do not have the object. Before treating
@@ -4638,30 +4656,45 @@ fn read_object_from_repo(repo: &Repository, oid: &ObjectId) -> Result<grit_lib::
     if loose_path.is_file() {
         return Odb::read_loose_verify_oid(&loose_path, oid).map_err(|e| anyhow::anyhow!("{e}"));
     }
-    let indexes = grit_lib::pack::read_local_pack_indexes(repo.odb.objects_dir())
+    if let Some(obj) = read_object_from_local_packs_cached(repo, oid)? {
+        return Ok(obj);
+    }
+    bail!("object not found: {}", oid.to_hex())
+}
+
+/// Resolve `oid` from the repository's local packs via the process-wide pack cache
+/// (cached `.idx` parses, cached pack bytes, fanout binary search, delta-base cache).
+///
+/// Returns `Ok(None)` when no local pack holds the object. Preserves the historical
+/// fallbacks of the enumeration path: a pack copy that fails to decode from a v1
+/// (legacy) index yields an empty blob placeholder, and any other decode failure
+/// retries the full ODB read before moving on to the next pack.
+fn read_object_from_local_packs_cached(
+    repo: &Repository,
+    oid: &ObjectId,
+) -> Result<Option<grit_lib::objects::Object>> {
+    let indexes = grit_lib::pack::read_local_pack_indexes_cached(repo.odb.objects_dir())
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     for idx in &indexes {
-        if let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| grit_lib::pack::pack_index_entry_matches_sha1_oid(e, oid))
-        {
-            let pack_bytes = std::fs::read(&idx.pack_path)?;
-            match read_object_from_pack(&pack_bytes, entry.offset, &indexes, idx.hash_bytes) {
-                Ok(obj) => return Ok(obj),
-                Err(_) if pack_index_is_v1(&idx.idx_path) => {
-                    return Ok(grit_lib::objects::Object::new(ObjectKind::Blob, Vec::new()));
-                }
-                Err(_) => {
-                    if let Ok(obj) = repo.odb.read(oid) {
-                        return Ok(obj);
-                    }
-                    continue;
+        if idx.find_offset(oid).is_none() {
+            continue;
+        }
+        match grit_lib::pack::read_object_from_pack(idx, oid) {
+            Ok(obj) => return Ok(Some(obj)),
+            Err(_) if pack_index_is_v1(&idx.idx_path) => {
+                return Ok(Some(grit_lib::objects::Object::new(
+                    ObjectKind::Blob,
+                    Vec::new(),
+                )));
+            }
+            Err(_) => {
+                if let Ok(obj) = repo.odb.read(oid) {
+                    return Ok(Some(obj));
                 }
             }
         }
     }
-    bail!("object not found: {}", oid.to_hex())
+    Ok(None)
 }
 
 fn read_object_from_repo_no_lazy(
@@ -5071,6 +5104,9 @@ fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usi
 
     let modulus = max_depth.saturating_add(1);
     let mut snip: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
+    // Only chains that actually exceed the limit are restructured; a chain already within
+    // `max_depth` keeps its natural delta topology (t5303 relies on the created structure).
+    let mut over_limit: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
 
     for tip in tips {
         let mut chain: Vec<ObjectId> = Vec::new();
@@ -5085,9 +5121,10 @@ fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usi
         }
 
         let n = chain.len();
-        if n < 2 {
+        if n < 2 || n - 1 <= max_depth {
             continue;
         }
+        over_limit.extend(chain.iter().copied());
 
         // Match `break_delta_chains`: after walking `DELTA` links from tip to base, `total_depth`
         // equals the number of edges (objects minus one).
@@ -5105,11 +5142,16 @@ fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usi
         map.remove(&oid);
     }
 
+    // Flatten the segments of the broken (over-limit) chains so no remaining edge chains through
+    // another delta; untouched chains keep their original bases.
     let mut changed = true;
     while changed {
         changed = false;
         let targets: Vec<ObjectId> = map.keys().copied().collect();
         for t in targets {
+            if !over_limit.contains(&t) {
+                continue;
+            }
             let Some(&b) = map.get(&t) else {
                 continue;
             };
@@ -5258,8 +5300,10 @@ fn build_pack(
                 buf.extend_from_slice(&compressed);
                 oid_to_offset.insert(*oid, start);
             }
-            PackWriteEntry::ReusedSlice { raw, .. } => {
+            PackWriteEntry::ReusedSlice { oid, raw, .. } => {
                 buf.extend_from_slice(raw);
+                // Register the offset so later OFS_DELTA entries can reference a reused base.
+                oid_to_offset.insert(*oid, start);
             }
         }
     }

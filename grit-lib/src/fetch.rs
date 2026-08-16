@@ -1600,4 +1600,3 @@ fn peel_tag_target(odb: &crate::odb::Odb, oid: ObjectId) -> ObjectId {
     }
     current
 }
-

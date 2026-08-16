@@ -2345,7 +2345,18 @@ impl SymlinkDirCache {
     }
 }
 
-fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
+/// Whether an index entry's cached mtime is "racy" relative to the index file's own mtime.
+///
+/// A racy entry was written to the worktree at (or after) the moment the index was saved, so a
+/// matching stat tuple cannot prove the content is unchanged — callers must re-hash. This is
+/// Git's `is_racy_timestamp` rule.
+///
+/// # Parameters
+/// - `ie` — the index entry to test.
+/// - `index_mtime` — the on-disk index file's `(mtime_sec, mtime_nsec)`; when `None` (or the
+///   seconds value is zero) racy detection is skipped and this returns `false`.
+#[must_use]
+pub fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
     let Some((index_mtime_sec, index_mtime_nsec)) = index_mtime else {
         return false;
     };
@@ -2550,6 +2561,62 @@ pub fn refresh_index_stat_content_verified(
         ie.uid = refreshed.uid;
         ie.gid = refreshed.gid;
         ie.size = refreshed.size;
+        changed = true;
+    }
+    changed
+}
+
+/// Smudge racily-clean index entries before an index write (Git `ce_smudge_racily_clean_entry`).
+///
+/// An entry written to the worktree in the same filesystem-timestamp tick as the index file
+/// cannot be proven unchanged by stat data alone. When such an entry's stat still matches the
+/// worktree but the content no longer matches the recorded OID, its cached size is zeroed so
+/// every future stat comparison fails and readers re-hash the file. Without this, rewriting the
+/// index (which advances the index mtime) would make the stale entry look trustworthy again.
+///
+/// # Parameters
+/// - `index` — the in-memory index about to be written.
+/// - `work_tree` — path to the working tree root.
+/// - `index_mtime` — `(mtime_sec, mtime_nsec)` of the index file that was read (racy reference
+///   point); pass `None` when the index file did not previously exist.
+///
+/// Returns `true` when at least one entry was smudged.
+pub fn smudge_racily_clean_entries(
+    index: &mut Index,
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+) -> bool {
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    if index_mtime.is_none() {
+        return false;
+    }
+    let mut changed = false;
+    for ie in &mut index.entries {
+        if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+            continue;
+        }
+        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+            continue;
+        }
+        // A zero-size entry cannot be smudged further; Git accepts that residual race.
+        if ie.size == 0 || !entry_is_racy(ie, index_mtime) {
+            continue;
+        }
+        let Ok(path) = std::str::from_utf8(&ie.path) else {
+            continue;
+        };
+        let abs = work_tree.join(path);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        // Only a stat-clean entry is dangerous: a stat-dirty entry already forces a re-hash.
+        if !stat_matches(ie, &meta) {
+            continue;
+        }
+        if worktree_content_matches_index_oid(ie, &abs, &meta) {
+            continue;
+        }
+        ie.size = 0;
         changed = true;
     }
     changed

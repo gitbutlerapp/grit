@@ -622,6 +622,19 @@ impl Repository {
         // index written through the repository is consistent, regardless of how
         // the in-memory `Index` was constructed (e.g. a fresh `Index::new`).
         index.hash_algo = self.odb.hash_algo();
+        // Racy-git protection (Git `ce_smudge_racily_clean_entry`): before overwriting the index,
+        // zero the cached size of entries whose worktree file changed in the same timestamp tick
+        // as the previous index write, so the rewritten (newer-mtime) index cannot make them look
+        // clean. The pre-overwrite mtime of `path` is the racy reference point.
+        if let Some(work_tree) = self.work_tree.as_deref() {
+            let prev_index_mtime = {
+                use std::os::unix::fs::MetadataExt;
+                std::fs::symlink_metadata(path)
+                    .ok()
+                    .map(|m| (m.mtime() as u32, m.mtime_nsec() as u32))
+            };
+            crate::diff::smudge_racily_clean_entries(index, work_tree, prev_index_mtime);
+        }
         self.finalize_sparse_index_if_needed(index)?;
         let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
         let skip_hash = crate::index::index_skip_hash_for_write(Some(&cfg));

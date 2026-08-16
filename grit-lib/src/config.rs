@@ -1792,6 +1792,42 @@ impl ConfigSet {
         Ok(pack_level)
     }
 
+    /// Zlib deflate level for loose objects (Git's `zlib_compression_level`).
+    ///
+    /// `core.looseCompression` wins; otherwise `core.compression` applies; when neither is set
+    /// Git defaults loose objects to `Z_BEST_SPEED` (1), trading disk for write throughput.
+    /// `-1` means zlib default (level 6). Valid values are `-1` or `0..=9`; out-of-range or
+    /// non-numeric values fall back to the default rather than erroring (matching how the
+    /// object writer must not fail on odd config).
+    #[must_use]
+    pub fn loose_objects_zlib_level(&self) -> u32 {
+        const Z_BEST_SPEED: u32 = 1;
+        const Z_DEFAULT_COMPRESSION: u32 = 6;
+        let parse_level = |raw: &str| -> Option<u32> {
+            let v = parse_git_config_int_strict(raw.trim()).ok()?;
+            match v {
+                -1 => Some(Z_DEFAULT_COMPRESSION),
+                0..=9 => Some(v as u32),
+                _ => None,
+            }
+        };
+        if let Some(level) = self
+            .get("core.looseCompression")
+            .as_deref()
+            .and_then(parse_level)
+        {
+            return level;
+        }
+        if let Some(level) = self
+            .get("core.compression")
+            .as_deref()
+            .and_then(parse_level)
+        {
+            return level;
+        }
+        Z_BEST_SPEED
+    }
+
     /// Get all entries matching a key pattern (regex).
     ///
     /// Used by `git config --get-regexp`. Returns an error if the pattern

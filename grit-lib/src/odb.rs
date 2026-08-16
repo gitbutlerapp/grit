@@ -106,6 +106,9 @@ pub struct Odb {
     /// detected lazily from the config and cached. Determines the hash used
     /// when writing objects. Defaults to SHA-1 when no config is available.
     hash_algo_cache: Arc<OnceLock<HashAlgo>>,
+    /// Zlib level for loose-object writes (`core.looseCompression` falling back to
+    /// `core.compression`, Git default `Z_BEST_SPEED`), resolved lazily and cached.
+    loose_zlib_cache: Arc<OnceLock<Compression>>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -134,6 +137,7 @@ impl Odb {
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
+            loose_zlib_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -148,6 +152,7 @@ impl Odb {
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
+            loose_zlib_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -166,6 +171,11 @@ impl Odb {
         if let Ok(mut guard) = self.mem_overlay.lock() {
             *guard = None;
         }
+    }
+
+    /// Whether the in-memory write overlay is currently enabled.
+    fn overlay_active(&self) -> bool {
+        self.mem_overlay.lock().is_ok_and(|g| g.is_some())
     }
 
     /// If the in-memory overlay is active, store `(kind, data)` under `oid` there and return
@@ -256,6 +266,25 @@ impl Odb {
             cfg.get("extensions.objectformat")
                 .and_then(|v| HashAlgo::from_name(&v))
                 .unwrap_or(HashAlgo::Sha1)
+        })
+    }
+
+    /// Zlib compression used for loose-object writes, resolved from
+    /// `core.looseCompression` / `core.compression` (Git `zlib_compression_level`, default
+    /// `Z_BEST_SPEED`) and cached for the lifetime of this `Odb`.
+    fn loose_compression(&self) -> Compression {
+        *self.loose_zlib_cache.get_or_init(|| {
+            let git_dir = self
+                .config_git_dir
+                .clone()
+                .or_else(|| self.objects_dir.parent().map(Path::to_path_buf));
+            let level = match git_dir {
+                Some(git_dir) => ConfigSet::load(Some(&git_dir), true)
+                    .unwrap_or_default()
+                    .loose_objects_zlib_level(),
+                None => 1,
+            };
+            Compression::new(level)
         })
     }
 
@@ -600,17 +629,20 @@ impl Odb {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
-        // When the in-memory overlay is active, keep the object in memory only (unless it is
-        // already present on disk, in which case nothing new needs to be written anyway).
-        if !self.exists(&oid) && self.overlay_store(oid, kind, data) {
-            return Ok(oid);
-        }
-
+        // Cheapest check first: a loose copy in this store answers every case below with a
+        // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
         let path = self.object_path(&oid);
         if path.exists() {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
         }
+
+        // When the in-memory overlay is active, keep the object in memory only (unless it is
+        // already present on disk, in which case nothing new needs to be written anyway).
+        if self.overlay_active() && !self.exists(&oid) && self.overlay_store(oid, kind, data) {
+            return Ok(oid);
+        }
+
         if self.exists(&oid) {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
@@ -625,7 +657,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -678,7 +710,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -717,7 +749,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -765,7 +797,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -810,7 +842,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;

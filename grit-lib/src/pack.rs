@@ -23,6 +23,9 @@ pub struct PackIndexEntry {
     pub oid: Vec<u8>,
     /// Byte offset of the object in the corresponding `.pack`.
     pub offset: u64,
+    /// CRC32 of the raw packed entry bytes (header + payload), from the v2 index CRC table.
+    /// `None` for version-1 indexes, which do not record CRCs.
+    pub crc32: Option<u32>,
 }
 
 /// Parsed data from a `.idx` file (version 2).
@@ -475,7 +478,26 @@ mod pack_cache {
 
     /// Get the raw bytes of a pack file from cache, re-reading from disk when the
     /// file's mtime/size changes.
+    /// Whether `path` names a final, content-addressed pack file (`pack-<hash>.pack`).
+    /// For such paths the name pins the content, so a cached copy cannot silently
+    /// go stale; temporary packs (`tmp_pack_*`) keep the stat-stamp revalidation.
+    fn is_content_addressed_pack(path: &Path) -> bool {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("pack-") && n.ends_with(".pack"))
+    }
+
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
+        // Content-addressed packs are immutable in practice: in-process rewrites go
+        // through `repack`/`gc`, which clear this cache, and cross-process mutation
+        // cannot outlive the process boundary. Serving the cached copy without a
+        // stat removes one syscall per packed-object read on hot walks.
+        if is_content_addressed_pack(pack_path) {
+            let g = lock();
+            if let Some(c) = g.by_pack.get(pack_path) {
+                return Ok(Arc::clone(&c.bytes));
+            }
+        }
         let sig = file_signature(pack_path);
         if let Some((mtime, size)) = sig {
             {
@@ -749,7 +771,11 @@ fn read_pack_index_v1(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
                 idx_path.display()
             )));
         }
-        entries.push(PackIndexEntry { oid, offset });
+        entries.push(PackIndexEntry {
+            oid,
+            offset,
+            crc32: None,
+        });
     }
 
     if verify {
@@ -833,7 +859,10 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
         oids.push(slice.to_vec());
     }
 
-    pos += object_count * 4;
+    let mut crcs = Vec::with_capacity(object_count);
+    for _ in 0..object_count {
+        crcs.push(read_u32_be(bytes, &mut pos)?);
+    }
 
     let mut offsets32 = Vec::with_capacity(object_count);
     let mut large_count = 0usize;
@@ -869,7 +898,11 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
             next_large += 1;
             off
         };
-        entries.push(PackIndexEntry { oid, offset });
+        entries.push(PackIndexEntry {
+            oid,
+            offset,
+            crc32: Some(crcs[i]),
+        });
     }
 
     let mut pack_path = idx_path.to_path_buf();
@@ -1305,13 +1338,16 @@ fn read_alternates_inner(
     if depth > MAX_ALTERNATE_DEPTH {
         return Ok(());
     }
-    let canonical = canonical_or_self(objects_dir);
-    let alt_file = canonical.join("info").join("alternates");
+    // Read the alternates file before canonicalizing: the canonical form is only needed to
+    // resolve relative entries and deduplicate, and canonicalize walks every path component
+    // (a readlink per ancestor) — pure waste in the overwhelmingly common no-alternates case.
+    let alt_file = objects_dir.join("info").join("alternates");
     let text = match fs::read_to_string(&alt_file) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(Error::Io(err)),
     };
+    let canonical = canonical_or_self(objects_dir);
 
     for raw in text.lines() {
         let line = raw.trim();
@@ -1395,6 +1431,12 @@ fn read_pack_base_cached(
     Ok((kind, data))
 }
 
+/// Deepest delta chain a read will follow before treating the pack as corrupt.
+///
+/// This is a safety valve against cyclic ref-delta chains and unbounded recursion,
+/// not a format limit: Git itself reads chains of any depth.
+const MAX_DELTA_CHAIN_READ_DEPTH: usize = 4096;
+
 fn read_pack_object_at(
     pack_bytes: &[u8],
     offset: u64,
@@ -1402,10 +1444,15 @@ fn read_pack_object_at(
     objects_dir: Option<&Path>,
     depth: usize,
 ) -> Result<(ObjectKind, Vec<u8>)> {
-    if depth > 50 {
-        return Err(Error::CorruptObject(
-            "delta chain too deep (>50)".to_owned(),
-        ));
+    // Git imposes no read-side delta-chain limit (`pack.depth` caps only what the
+    // writer produces, default 50). Reads must therefore handle chains far deeper
+    // than 50 — both packs written with an explicit `--depth`, and historical grit
+    // packs written before the writer capped chains. The bound below exists only
+    // to terminate corrupt cyclic ref-delta chains and bound recursion stack use.
+    if depth > MAX_DELTA_CHAIN_READ_DEPTH {
+        return Err(Error::CorruptObject(format!(
+            "delta chain too deep (>{MAX_DELTA_CHAIN_READ_DEPTH})"
+        )));
     }
     let mut pos = offset as usize;
     let (packed_type, size) = parse_pack_object_header(pack_bytes, &mut pos)?;
@@ -1671,22 +1718,18 @@ pub fn packed_ref_delta_reuse_slice(
     oid: &ObjectId,
     packed_set: &HashSet<ObjectId>,
 ) -> Result<Option<(ObjectId, Vec<u8>)>> {
-    let mut indexes = read_local_pack_indexes(objects_dir)?;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_oldest_first(&mut indexes);
     for idx in indexes {
-        let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| e.oid.len() == 20 && e.oid.as_slice() == oid.as_bytes())
-        else {
-            continue;
-        };
         let hb = idx.hash_bytes;
         if hb != 20 {
             continue;
         }
-        let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-        let mut p = entry.offset as usize;
+        let Some(entry_offset) = idx.find_offset(oid) else {
+            continue;
+        };
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let mut p = entry_offset as usize;
         let (packed_type, _size) = parse_pack_object_header(&pack_bytes, &mut p)?;
         let base = match packed_type {
             PackedType::RefDelta => {
@@ -1700,7 +1743,7 @@ pub fn packed_ref_delta_reuse_slice(
                 bo
             }
             PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry.offset)?;
+                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
                 let Some(base_entry) = idx.entries.iter().find(|e| e.offset == base_off) else {
                     continue;
                 };
@@ -1720,7 +1763,7 @@ pub fn packed_ref_delta_reuse_slice(
         }
         let zlib_start = p;
         let mut end_pos = zlib_start;
-        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry.offset, hb).is_err() {
+        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry_offset, hb).is_err() {
             continue;
         }
         let compressed = &pack_bytes[zlib_start..end_pos];
@@ -1736,7 +1779,7 @@ pub fn packed_ref_delta_reuse_slice(
 
 /// Prefer older packs when the same OID exists as a full object in a fresh repack and as a delta
 /// in an earlier thin pack (t5316).
-fn sort_pack_indexes_oldest_first(indexes: &mut [PackIndex]) {
+fn sort_pack_indexes_oldest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -1748,7 +1791,7 @@ fn sort_pack_indexes_oldest_first(indexes: &mut [PackIndex]) {
     });
 }
 
-fn sort_pack_indexes_newest_first(indexes: &mut [PackIndex]) {
+fn sort_pack_indexes_newest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -1761,21 +1804,17 @@ fn sort_pack_indexes_newest_first(indexes: &mut [PackIndex]) {
 }
 
 pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectId>> {
-    let mut indexes = read_local_pack_indexes(objects_dir)?;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_newest_first(&mut indexes);
     for idx in &indexes {
         if idx.hash_bytes != 20 {
             continue;
         }
-        let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| e.oid.len() == 20 && e.oid.as_slice() == oid.as_bytes())
-        else {
+        let Some(entry_offset) = idx.find_offset(oid) else {
             continue;
         };
-        let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-        let mut p = entry.offset as usize;
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let mut p = entry_offset as usize;
         let (packed_type, _) = parse_pack_object_header(&pack_bytes, &mut p)?;
         match packed_type {
             PackedType::RefDelta => {
@@ -1786,7 +1825,7 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
                 return Ok(Some(ObjectId::from_bytes(&pack_bytes[p..p + hb])?));
             }
             PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry.offset)?;
+                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
                 return Ok(idx
                     .entries
                     .iter()
@@ -1795,6 +1834,75 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
             }
             _ => continue,
         }
+    }
+    Ok(None)
+}
+
+/// When `oid` is stored as a full (non-delta) object in a local pack, return its verbatim packed
+/// bytes: the varint type+size header followed by the zlib stream.
+///
+/// The header of a non-delta pack entry is position-independent, so the returned slice can be
+/// copied into a new pack unchanged — skipping both inflate and deflate. This is Git
+/// pack-objects' object reuse for objects that stay full in the output pack.
+///
+/// # Parameters
+/// - `objects_dir` — the repository's `objects/` directory.
+/// - `oid` — the object to look up.
+///
+/// Returns `None` when the object is loose only, stored as a delta, or the repository uses a
+/// hash width other than SHA-1.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when pack files cannot be read; a malformed candidate entry is skipped
+/// rather than reported so another pack (or the recompression path) can serve the object.
+pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Option<Vec<u8>>> {
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
+    sort_pack_indexes_newest_first(&mut indexes);
+    for idx in &indexes {
+        if idx.hash_bytes != 20 {
+            continue;
+        }
+        let Some(entry_offset) = idx.find_offset(oid) else {
+            continue;
+        };
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let start = entry_offset as usize;
+        let mut p = start;
+        let Ok((packed_type, _size)) = parse_pack_object_header(&pack_bytes, &mut p) else {
+            continue;
+        };
+        if matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta) {
+            // The same OID may be a full object in another pack; keep scanning.
+            continue;
+        }
+        let mut end = start;
+        if skip_one_pack_object(&pack_bytes, &mut end, entry_offset, idx.hash_bytes).is_err() {
+            continue;
+        }
+        let slice = &pack_bytes[start..end];
+        // Git `check_pack_crc`: verbatim reuse copies bytes unparsed, so guard with the pack
+        // index's CRC32. A corrupt copy is skipped, letting a redundant pack or the normal
+        // (validating) read path serve the object instead (t5303).
+        let recorded_crc = idx
+            .entries
+            .iter()
+            .find(|e| e.offset == entry_offset)
+            .and_then(|e| e.crc32);
+        match recorded_crc {
+            Some(crc) if crc32fast::hash(slice) != crc => continue,
+            // v1 indexes carry no CRC; verify by inflating and re-hashing the content.
+            None => {
+                if read_object_from_pack(idx, oid)
+                    .map(|obj| crate::odb::Odb::hash_object_data(obj.kind, &obj.data) != *oid)
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        return Ok(Some(slice.to_vec()));
     }
     Ok(None)
 }

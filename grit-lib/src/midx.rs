@@ -272,6 +272,11 @@ mod midx_cache {
     struct State {
         bytes: HashMap<PathBuf, (Stamp, Arc<Vec<u8>>)>,
         hash_version: HashMap<PathBuf, (Option<Stamp>, u8)>,
+        /// Tip-MIDX resolution per pack dir, held for the process lifetime and
+        /// evicted by in-process MIDX writers. Only the object-read hot path may
+        /// use this: a stale entry there degrades to the regular pack lookup,
+        /// which stays correct, whereas midx subcommands need the live state.
+        tip_path: HashMap<PathBuf, Option<PathBuf>>,
     }
 
     static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
@@ -328,9 +333,25 @@ mod midx_cache {
         v
     }
 
-    /// Drop cached MIDX bytes under `pack_dir` (called by in-process writers).
+    /// Cached tip-MIDX resolution for `pack_dir`, computing it with `resolve` on
+    /// first use. Object-read hot path only (see [`State::tip_path`]): resolving
+    /// the tip costs two filesystem probes per call (root file + chain), which
+    /// history walks and pack building would otherwise pay per object.
+    pub fn tip_path(pack_dir: &Path, resolve: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+        if let Some(tip) = lock().tip_path.get(pack_dir) {
+            return tip.clone();
+        }
+        let tip = resolve();
+        lock().tip_path.insert(pack_dir.to_path_buf(), tip.clone());
+        tip
+    }
+
+    /// Drop cached MIDX bytes and tip resolutions under `pack_dir` (called by
+    /// in-process writers).
     pub fn evict_pack_dir(pack_dir: &Path) {
-        lock().bytes.retain(|p, _| !p.starts_with(pack_dir));
+        let mut g = lock();
+        g.bytes.retain(|p, _| !p.starts_with(pack_dir));
+        g.tip_path.retain(|p, _| !p.starts_with(pack_dir));
     }
 }
 
@@ -1782,10 +1803,17 @@ pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result
 /// [`None`] means there is no MIDX at the pack tip. [`Some`] is the lookup result when a MIDX exists.
 pub fn midx_oid_listed_in_tip(objects_dir: &Path, oid: &ObjectId) -> Result<Option<bool>> {
     let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = resolve_tip_midx_path(&pack_dir) else {
+    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
+    else {
         return Ok(None);
     };
-    let data = midx_cache::get_bytes(&midx_path)?;
+    let data = match midx_cache::get_bytes(&midx_path) {
+        Ok(data) => data,
+        // A tip cached before another process removed the MIDX: fall back to
+        // the regular pack lookup instead of failing the read.
+        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
     let hash_len = midx_hash_len(&data);
     let MidxReadView {
         oidf_off,
@@ -2087,10 +2115,17 @@ pub fn try_read_object_via_midx(
     oid: &ObjectId,
 ) -> Result<Option<crate::objects::Object>> {
     let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = resolve_tip_midx_path(&pack_dir) else {
+    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
+    else {
         return Ok(None);
     };
-    let data = midx_cache::get_bytes(&midx_path)?;
+    let data = match midx_cache::get_bytes(&midx_path) {
+        Ok(data) => data,
+        // A tip cached before another process removed the MIDX: fall back to
+        // the regular pack lookup instead of failing the read.
+        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
 
     // Load-time validation, mirroring `load_multi_pack_index` in git/midx.c.
     // Fatal corruptions `die()` (print error + fatal, exit 128); recoverable
@@ -2242,6 +2277,7 @@ pub fn clear_pack_midx_state(pack_dir: &Path) -> Result<()> {
     if midx_d.exists() {
         let _ = fs::remove_dir_all(&midx_d);
     }
+    midx_cache::evict_pack_dir(pack_dir);
     Ok(())
 }
 

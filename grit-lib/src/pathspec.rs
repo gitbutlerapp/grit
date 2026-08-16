@@ -1632,7 +1632,20 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
         Some(p) if !p.is_empty() => {
             normalize_relative_path_str(&PathBuf::from(p).join(pathspec).to_string_lossy())
         }
-        _ => pathspec.to_owned(),
+        _ => {
+            // Git's `prefix_path` normalizes away leading `./` segments, so index and tree
+            // paths never contain a `.` component (`git add ./-` stages `-`, not `./-`,
+            // which would otherwise write an invalid `.` tree entry).
+            let mut spec = pathspec;
+            while let Some(rest) = spec.strip_prefix("./") {
+                spec = rest.trim_start_matches('/');
+            }
+            if spec.is_empty() {
+                ".".to_owned()
+            } else {
+                spec.to_owned()
+            }
+        }
     }
 }
 
