@@ -5077,6 +5077,9 @@ fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usi
 
     let modulus = max_depth.saturating_add(1);
     let mut snip: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
+    // Only chains that actually exceed the limit are restructured; a chain already within
+    // `max_depth` keeps its natural delta topology (t5303 relies on the created structure).
+    let mut over_limit: std::collections::HashSet<ObjectId> = std::collections::HashSet::new();
 
     for tip in tips {
         let mut chain: Vec<ObjectId> = Vec::new();
@@ -5091,9 +5094,10 @@ fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usi
         }
 
         let n = chain.len();
-        if n < 2 {
+        if n < 2 || n - 1 <= max_depth {
             continue;
         }
+        over_limit.extend(chain.iter().copied());
 
         // Match `break_delta_chains`: after walking `DELTA` links from tip to base, `total_depth`
         // equals the number of edges (objects minus one).
@@ -5111,11 +5115,16 @@ fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usi
         map.remove(&oid);
     }
 
+    // Flatten the segments of the broken (over-limit) chains so no remaining edge chains through
+    // another delta; untouched chains keep their original bases.
     let mut changed = true;
     while changed {
         changed = false;
         let targets: Vec<ObjectId> = map.keys().copied().collect();
         for t in targets {
+            if !over_limit.contains(&t) {
+                continue;
+            }
             let Some(&b) = map.get(&t) else {
                 continue;
             };
