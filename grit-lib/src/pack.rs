@@ -1319,13 +1319,16 @@ fn read_alternates_inner(
     if depth > MAX_ALTERNATE_DEPTH {
         return Ok(());
     }
-    let canonical = canonical_or_self(objects_dir);
-    let alt_file = canonical.join("info").join("alternates");
+    // Read the alternates file before canonicalizing: the canonical form is only needed to
+    // resolve relative entries and deduplicate, and canonicalize walks every path component
+    // (a readlink per ancestor) — pure waste in the overwhelmingly common no-alternates case.
+    let alt_file = objects_dir.join("info").join("alternates");
     let text = match fs::read_to_string(&alt_file) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(Error::Io(err)),
     };
+    let canonical = canonical_or_self(objects_dir);
 
     for raw in text.lines() {
         let line = raw.trim();

@@ -173,6 +173,11 @@ impl Odb {
         }
     }
 
+    /// Whether the in-memory write overlay is currently enabled.
+    fn overlay_active(&self) -> bool {
+        self.mem_overlay.lock().is_ok_and(|g| g.is_some())
+    }
+
     /// If the in-memory overlay is active, store `(kind, data)` under `oid` there and return
     /// `true`; otherwise return `false` so the caller falls through to the on-disk path.
     fn overlay_store(&self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> bool {
@@ -624,17 +629,20 @@ impl Odb {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
-        // When the in-memory overlay is active, keep the object in memory only (unless it is
-        // already present on disk, in which case nothing new needs to be written anyway).
-        if !self.exists(&oid) && self.overlay_store(oid, kind, data) {
-            return Ok(oid);
-        }
-
+        // Cheapest check first: a loose copy in this store answers every case below with a
+        // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
         let path = self.object_path(&oid);
         if path.exists() {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
         }
+
+        // When the in-memory overlay is active, keep the object in memory only (unless it is
+        // already present on disk, in which case nothing new needs to be written anyway).
+        if self.overlay_active() && !self.exists(&oid) && self.overlay_store(oid, kind, data) {
+            return Ok(oid);
+        }
+
         if self.exists(&oid) {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
