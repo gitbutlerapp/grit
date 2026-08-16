@@ -106,6 +106,9 @@ pub struct Odb {
     /// detected lazily from the config and cached. Determines the hash used
     /// when writing objects. Defaults to SHA-1 when no config is available.
     hash_algo_cache: Arc<OnceLock<HashAlgo>>,
+    /// Zlib level for loose-object writes (`core.looseCompression` falling back to
+    /// `core.compression`, Git default `Z_BEST_SPEED`), resolved lazily and cached.
+    loose_zlib_cache: Arc<OnceLock<Compression>>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -134,6 +137,7 @@ impl Odb {
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
+            loose_zlib_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -148,6 +152,7 @@ impl Odb {
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
+            loose_zlib_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -256,6 +261,25 @@ impl Odb {
             cfg.get("extensions.objectformat")
                 .and_then(|v| HashAlgo::from_name(&v))
                 .unwrap_or(HashAlgo::Sha1)
+        })
+    }
+
+    /// Zlib compression used for loose-object writes, resolved from
+    /// `core.looseCompression` / `core.compression` (Git `zlib_compression_level`, default
+    /// `Z_BEST_SPEED`) and cached for the lifetime of this `Odb`.
+    fn loose_compression(&self) -> Compression {
+        *self.loose_zlib_cache.get_or_init(|| {
+            let git_dir = self
+                .config_git_dir
+                .clone()
+                .or_else(|| self.objects_dir.parent().map(Path::to_path_buf));
+            let level = match git_dir {
+                Some(git_dir) => ConfigSet::load(Some(&git_dir), true)
+                    .unwrap_or_default()
+                    .loose_objects_zlib_level(),
+                None => 1,
+            };
+            Compression::new(level)
         })
     }
 
@@ -625,7 +649,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -678,7 +702,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -717,7 +741,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -765,7 +789,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -810,7 +834,7 @@ impl Odb {
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, self.loose_compression());
             encoder
                 .write_all(store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
