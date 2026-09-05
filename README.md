@@ -10,7 +10,7 @@ The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https:
 
 ## Motivation
 
-Why rewrite Git functionality into Rust? It's not about replacing Git, it's about having a feature-complete linkable library. It's similar to Gitoxide or libgit2/git2-rs, but using LLMs to try to acheive total feature parity by targeting the Git testing suite.
+Why rewrite Git functionality into Rust? It's not about replacing Git, it's about having a feature-complete linkable library. It's similar to Gitoxide or libgit2/git2-rs, but using LLMs to try to achieve total feature parity by targeting the Git testing suite.
 
 ## Approach
 
