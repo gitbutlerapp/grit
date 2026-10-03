@@ -68,10 +68,11 @@ pub struct UreqHttpClient {
     credentials: Option<Box<dyn CredentialProvider + Send + Sync>>,
     /// Cached `Authorization: Basic …` header from a successful auth, reused on
     /// subsequent requests (mirrors Git's per-connection auth cache).
-    cached_auth: Mutex<Option<String>>,
+    cached_auth: Mutex<Option<CachedAuthHeader>>,
     /// Parsed cookies (from `http.cookieFile`), sent as a `Cookie:` header on
     /// matching URLs. Empty when no cookie file was configured.
     cookies: Vec<CookieSpec>,
+    host_only_cookie_domain: Mutex<Option<String>>,
     /// The cookie file path (for `http.saveCookies` persistence), if configured.
     cookie_file_path: Option<PathBuf>,
     /// Whether to append `Set-Cookie` response headers back to the cookie file
@@ -81,6 +82,29 @@ pub struct UreqHttpClient {
     extra_headers: Vec<ExtraHeaderRule>,
     /// Merged Git config used for credential URL matching.
     credential_config: ConfigSet,
+}
+
+struct CachedAuthHeader {
+    scope: AuthScope,
+    header: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AuthScope {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
+}
+
+impl AuthScope {
+    fn from_url(url: &str) -> Option<Self> {
+        let parsed = url::Url::parse(url).ok()?;
+        Some(Self {
+            scheme: parsed.scheme().to_ascii_lowercase(),
+            host: parsed.host_str()?.to_ascii_lowercase(),
+            port: parsed.port_or_known_default(),
+        })
+    }
 }
 
 impl UreqHttpClient {
@@ -98,6 +122,7 @@ impl UreqHttpClient {
             credentials: None,
             cached_auth: Mutex::new(None),
             cookies: Vec::new(),
+            host_only_cookie_domain: Mutex::new(None),
             cookie_file_path: None,
             save_cookies: false,
             extra_headers: Vec::new(),
@@ -176,13 +201,21 @@ impl UreqHttpClient {
         self
     }
 
-    fn cached_auth_header(&self) -> Option<String> {
-        self.cached_auth.lock().ok().and_then(|g| g.clone())
+    fn cached_auth_header(&self, url: &str) -> Option<String> {
+        let scope = AuthScope::from_url(url)?;
+        self.cached_auth.lock().ok().and_then(|g| {
+            g.as_ref()
+                .filter(|cached| cached.scope == scope)
+                .map(|cached| cached.header.clone())
+        })
     }
 
-    fn store_auth_header(&self, header: String) {
+    fn store_auth_header(&self, url: &str, header: String) {
+        let Some(scope) = AuthScope::from_url(url) else {
+            return;
+        };
         if let Ok(mut g) = self.cached_auth.lock() {
-            *g = Some(header);
+            *g = Some(CachedAuthHeader { scope, header });
         }
     }
 
@@ -198,14 +231,27 @@ impl UreqHttpClient {
         if self.cookies.is_empty() {
             return None;
         }
-        let parsed = url::Url::parse(url).ok();
+        let parsed = url::Url::parse(url).ok()?;
+        let host_only_domain = self.host_only_cookie_domain_for_url(&parsed);
         let parts = self
             .cookies
             .iter()
-            .filter(|cookie| cookie.matches_url(parsed.as_ref()))
+            .filter(|cookie| cookie.matches_url(&parsed, host_only_domain.as_deref()))
             .map(|cookie| cookie.name_value.clone())
             .collect::<Vec<_>>();
         (!parts.is_empty()).then(|| parts.join("; "))
+    }
+
+    fn host_only_cookie_domain_for_url(&self, url: &url::Url) -> Option<String> {
+        if !self.cookies.iter().any(|cookie| cookie.domain.is_none()) {
+            return None;
+        }
+        let host = url.host_str()?.to_ascii_lowercase();
+        let mut guard = self.host_only_cookie_domain.lock().ok()?;
+        if guard.is_none() {
+            *guard = Some(host);
+        }
+        guard.clone()
     }
 
     /// The ordered `(name, value)` extra headers to send for `url`. Lifts the
@@ -446,7 +492,7 @@ impl UreqHttpClient {
     where
         F: Fn(Option<&str>) -> Result<RawResponse>,
     {
-        let initial_auth = self.cached_auth_header();
+        let initial_auth = self.cached_auth_header(url);
         let first = attempt(initial_auth.as_deref())?;
         if first.status != 401 {
             self.save_response_cookies(&first.set_cookie);
@@ -500,7 +546,7 @@ impl UreqHttpClient {
         }
         // Success: approve + cache the working auth header.
         let _ = provider.approve(&cred);
-        self.store_auth_header(header);
+        self.store_auth_header(url, header);
         self.save_response_cookies(&retry.set_cookie);
         Ok((retry.body, retry.final_url))
     }
@@ -698,20 +744,17 @@ impl CookieSpec {
     /// Whether this cookie should be sent on a request to `url`. Lifts the CLI's
     /// `CookieSpec::matches_url`: honors expiry, `secure` (https-only), the
     /// domain (with optional subdomain inclusion), and the path prefix.
-    fn matches_url(&self, url: Option<&url::Url>) -> bool {
+    fn matches_url(&self, url: &url::Url, host_only_domain: Option<&str>) -> bool {
         if self.is_expired() {
             return false;
         }
-        let Some(url) = url else {
-            return self.domain.is_none() && self.path.is_none() && !self.secure;
-        };
         if self.secure && url.scheme() != "https" {
             return false;
         }
+        let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
+            return false;
+        };
         if let Some(domain) = self.domain.as_deref() {
-            let Some(host) = url.host_str() else {
-                return false;
-            };
             if self.include_subdomains {
                 if host != domain && !host.ends_with(&format!(".{domain}")) {
                     return false;
@@ -719,6 +762,8 @@ impl CookieSpec {
             } else if host != domain {
                 return false;
             }
+        } else if host_only_domain != Some(host.as_str()) {
+            return false;
         }
         if let Some(path) = self.path.as_deref() {
             if !url.path().starts_with(path) {
@@ -846,10 +891,10 @@ mod tests {
         let spec = parse_cookie_spec(line).expect("parse netscape cookie");
         assert_eq!(spec.name_value, "SID=abc123");
         let url = url::Url::parse("http://example.com/repo.git/info/refs").unwrap();
-        assert!(spec.matches_url(Some(&url)));
+        assert!(spec.matches_url(&url, None));
         // Different host does not match.
         let other = url::Url::parse("http://other.test/").unwrap();
-        assert!(!spec.matches_url(Some(&other)));
+        assert!(!spec.matches_url(&other, None));
     }
 
     #[test]
@@ -859,11 +904,11 @@ mod tests {
         let http = url::Url::parse("http://example.com/").unwrap();
         let https = url::Url::parse("https://example.com/").unwrap();
         assert!(
-            !spec.matches_url(Some(&http)),
+            !spec.matches_url(&http, None),
             "secure cookie must skip http"
         );
         assert!(
-            spec.matches_url(Some(&https)),
+            spec.matches_url(&https, None),
             "secure cookie matches https"
         );
     }
@@ -878,10 +923,21 @@ mod tests {
         assert!(spec.secure);
         // Subdomain inclusion (Domain attribute set).
         let sub = url::Url::parse("https://api.example.com/git/info/refs").unwrap();
-        assert!(spec.matches_url(Some(&sub)));
+        assert!(spec.matches_url(&sub, None));
         // Path that does not match the prefix is rejected.
         let wrong_path = url::Url::parse("https://example.com/other").unwrap();
-        assert!(!spec.matches_url(Some(&wrong_path)));
+        assert!(!spec.matches_url(&wrong_path, None));
+    }
+
+    #[test]
+    fn header_cookie_without_domain_matches_only_bound_host() {
+        let spec = parse_cookie_spec("Set-Cookie: token=zzz; Path=/").expect("parse");
+        let original = url::Url::parse("http://127.0.0.1/repo.git/info/refs").unwrap();
+        let redirected = url::Url::parse("http://localhost/repo.git/info/refs").unwrap();
+
+        assert!(spec.matches_url(&original, Some("127.0.0.1")));
+        assert!(!spec.matches_url(&redirected, Some("127.0.0.1")));
+        assert!(!spec.matches_url(&original, None));
     }
 
     #[test]
@@ -895,7 +951,19 @@ mod tests {
             expires_at: Some(1), // 1970 — long expired
         };
         let url = url::Url::parse("http://example.com/").unwrap();
-        assert!(!spec.matches_url(Some(&url)));
+        assert!(!spec.matches_url(&url, None));
+    }
+
+    #[test]
+    fn auth_scope_tracks_authority() {
+        let base = AuthScope::from_url("http://example.com/repo.git").unwrap();
+        let explicit_default = AuthScope::from_url("http://example.com:80/other.git").unwrap();
+        let other_port = AuthScope::from_url("http://example.com:8080/repo.git").unwrap();
+        let other_scheme = AuthScope::from_url("https://example.com/repo.git").unwrap();
+
+        assert_eq!(base, explicit_default);
+        assert_ne!(base, other_port);
+        assert_ne!(base, other_scheme);
     }
 
     #[test]
