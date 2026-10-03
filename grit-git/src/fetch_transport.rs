@@ -10,6 +10,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use grit_lib::check_ref_format::is_valid_advertised_refname;
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::zero_oid;
 use grit_lib::fetch_negotiator::SkippingNegotiator;
@@ -510,6 +511,9 @@ pub(crate) fn read_advertisement(
                 if refname == "HEAD" {
                     for cap in caps.split_whitespace() {
                         if let Some(target) = cap.strip_prefix("symref=HEAD:") {
+                            if !is_valid_advertised_refname(target) {
+                                bail!("invalid ref advertisement: {target}");
+                            }
                             head_symref = Some(target.to_string());
                         }
                     }
@@ -526,6 +530,9 @@ pub(crate) fn read_advertisement(
                 // GIT_TEST_PROTOCOL_VERSION=0). The real ref already preceded this peeled line.
                 if refname.ends_with("^{}") {
                     continue;
+                }
+                if !is_valid_advertised_refname(&refname) {
+                    bail!("invalid ref advertisement: {refname}");
                 }
                 out.push((refname, oid));
             }

@@ -32,6 +32,7 @@ use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use crate::check_ref_format::is_valid_advertised_refname;
 use crate::error::{Error, Result};
 use crate::fetch_negotiator::SkippingNegotiator;
 use crate::objects::ObjectId;
@@ -664,6 +665,16 @@ pub(crate) fn parse_v2_ls_refs_response(
                 let Some((name, oid, symref_target)) = parse_ls_refs_v2_line(line) else {
                     continue;
                 };
+                if !is_valid_advertised_refname(&name) {
+                    return Err(Error::Message(format!("invalid ref advertisement: {name}")));
+                }
+                if let Some(target) = &symref_target {
+                    if !is_valid_advertised_refname(target) {
+                        return Err(Error::Message(format!(
+                            "invalid ref advertisement: {target}"
+                        )));
+                    }
+                }
                 if name.contains("^{") || name.ends_with("^{}") {
                     continue;
                 }
@@ -1601,3 +1612,23 @@ fn peel_tag_target(odb: &crate::odb::Odb, oid: ObjectId) -> ObjectId {
     current
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_v2_ls_refs_response_rejects_traversal_refname() {
+        let mut data = Vec::new();
+        crate::pkt_line::write_line(
+            &mut data,
+            "369f281a169bb120fd5905fe0c0677993350b6bf refs/heads/../../../config",
+        )
+        .unwrap();
+        crate::pkt_line::write_flush(&mut data).unwrap();
+
+        let err = parse_v2_ls_refs_response(&mut std::io::Cursor::new(data))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid ref advertisement"));
+    }
+}

@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{bail, Context, Result};
+use grit_lib::check_ref_format::is_valid_advertised_refname;
 use grit_lib::fetch_negotiator::SkippingNegotiator;
 use grit_lib::merge_base;
 use grit_lib::objects::ObjectId;
@@ -373,6 +374,12 @@ fn parse_v0_v1_advertisement(
                 // it is not a real ref, and a non-SHA-1-width zero OID would fail `from_hex`.
                 if oid_hex.bytes().all(|b| b == b'0') {
                     continue;
+                }
+                if refname.ends_with("^{}") {
+                    continue;
+                }
+                if !is_valid_advertised_refname(refname) {
+                    bail!("invalid ref advertisement: {refname}");
                 }
                 let oid = ObjectId::from_hex(oid_hex)
                     .with_context(|| format!("bad oid in v0/v1 advertisement: {oid_hex}"))?;
@@ -824,6 +831,9 @@ fn parse_ls_refs_v2_response(data: &[u8]) -> Result<Vec<LsRefEntry>> {
         let name = rest.split_whitespace().next().unwrap_or(rest).to_string();
         if name.is_empty() {
             continue;
+        }
+        if !is_valid_advertised_refname(&name) {
+            bail!("invalid ref advertisement: {name}");
         }
         out.push(LsRefEntry { name, oid });
     }
@@ -1963,4 +1973,23 @@ pub fn remote_default_branch_from_advertised(adv: &[LsRefEntry]) -> Option<Strin
         .find(|e| e.name.starts_with("refs/heads/"))
         .and_then(|e| e.name.strip_prefix("refs/heads/"))
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v2_ls_refs_rejects_traversal_refname() {
+        let mut data = Vec::new();
+        pkt_line::write_line_to_vec(
+            &mut data,
+            "369f281a169bb120fd5905fe0c0677993350b6bf refs/heads/../../../config",
+        )
+        .unwrap();
+        pkt_line::write_flush(&mut data).unwrap();
+
+        let err = parse_ls_refs_v2_response(&data).unwrap_err().to_string();
+        assert!(err.contains("invalid ref advertisement"));
+    }
 }

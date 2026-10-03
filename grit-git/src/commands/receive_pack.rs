@@ -6,6 +6,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
+use grit_lib::check_ref_format::{check_refname_format, RefNameOptions};
 use grit_lib::config::{parse_bool, ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::connectivity::{diagnose_push_connectivity_failure, push_tip_connected_to_refs};
 use grit_lib::hide_refs;
@@ -127,8 +128,26 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     let zero_oid_early = "0".repeat(40);
+    let invalid_refnames: Vec<String> = updates
+        .iter()
+        .filter_map(|(_old_h, _new_h, refname)| {
+            if receive_refname_is_valid(refname) {
+                None
+            } else {
+                Some(refname.clone())
+            }
+        })
+        .collect();
+    for refname in &invalid_refnames {
+        diag.line(&format!(
+            "error: refusing to create funny ref '{refname}' remotely"
+        ));
+    }
     let mut hidden_rejects: Vec<String> = Vec::new();
     for (_old_h, new_h, refname) in &updates {
+        if invalid_refnames.iter().any(|r| r == refname) {
+            continue;
+        }
         let full = ref_namespace::storage_ref_name(refname);
         if hide_refs::ref_is_hidden(refname, &full, &hide_patterns) {
             if new_h == &zero_oid_early {
@@ -182,7 +201,10 @@ pub fn run(args: Args) -> Result<()> {
     if !args.skip_connectivity_check {
         if let Some(ref err) = pack_parse_err {
             for (_old_hex, new_hex, refname) in &updates {
-                if new_hex != &zero_oid && !hidden_rejects.iter().any(|r| r == refname) {
+                if new_hex != &zero_oid
+                    && !invalid_refnames.iter().any(|r| r == refname)
+                    && !hidden_rejects.iter().any(|r| r == refname)
+                {
                     connectivity_failed.push(refname.clone());
                 }
             }
@@ -191,6 +213,9 @@ pub fn run(args: Args) -> Result<()> {
             let pack_ref = pack_map.as_ref();
             for (_old_hex, new_hex, refname) in &updates {
                 if new_hex == &zero_oid {
+                    continue;
+                }
+                if invalid_refnames.iter().any(|r| r == refname) {
                     continue;
                 }
                 if hidden_rejects.iter().any(|r| r == refname) {
@@ -253,7 +278,10 @@ pub fn run(args: Args) -> Result<()> {
 
     if let Some(ref e) = unpack_to_odb_err {
         for (_old_hex, new_hex, refname) in &updates {
-            if new_hex != &zero_oid && !hidden_rejects.iter().any(|r| r == refname) {
+            if new_hex != &zero_oid
+                && !invalid_refnames.iter().any(|r| r == refname)
+                && !hidden_rejects.iter().any(|r| r == refname)
+            {
                 if !connectivity_failed.iter().any(|r| r == refname) {
                     connectivity_failed.push(refname.clone());
                 }
@@ -292,10 +320,13 @@ pub fn run(args: Args) -> Result<()> {
         let _ = err.flush();
     }
 
-    // Refs already rejected by connectivity/hidden checks never reach the hook stage.
+    // Refs already rejected by refname/connectivity/hidden checks never reach the hook stage.
     let pre_rejected: Vec<(String, &'static str)> = updates
         .iter()
         .filter_map(|(_o, new_hex, refname)| {
+            if invalid_refnames.iter().any(|r| r == refname) {
+                return Some((refname.clone(), "funny refname"));
+            }
             if new_hex == &zero_oid {
                 return None;
             }
@@ -310,23 +341,25 @@ pub fn run(args: Args) -> Result<()> {
         .collect();
 
     // When any ref already failed an earlier gate, do not run hooks/update refs: report and exit.
-    let ref_outcomes: Vec<RefOutcome> =
-        if !connectivity_failed.is_empty() || !hidden_rejects.is_empty() {
-            updates
-                .iter()
-                .map(|(_o, new_hex, refname)| {
-                    let is_delete = new_hex == &zero_oid;
-                    match pre_rejected.iter().find(|(r, _)| r == refname) {
-                        Some((_, reason)) => {
-                            RefOutcome::rejected(refname, reason).with_delete(is_delete)
-                        }
-                        None => RefOutcome::accepted(refname).with_delete(is_delete),
+    let ref_outcomes: Vec<RefOutcome> = if !invalid_refnames.is_empty()
+        || !connectivity_failed.is_empty()
+        || !hidden_rejects.is_empty()
+    {
+        updates
+            .iter()
+            .map(|(_o, new_hex, refname)| {
+                let is_delete = new_hex == &zero_oid;
+                match pre_rejected.iter().find(|(r, _)| r == refname) {
+                    Some((_, reason)) => {
+                        RefOutcome::rejected(refname, reason).with_delete(is_delete)
                     }
-                })
-                .collect()
-        } else {
-            run_hooks_and_update_refs(&repo, &config, &updates, &zero_oid, &mut diag)?
-        };
+                    None => RefOutcome::accepted(refname).with_delete(is_delete),
+                }
+            })
+            .collect()
+    } else {
+        run_hooks_and_update_refs(&repo, &config, &updates, &zero_oid, &mut diag)?
+    };
 
     write_status_lines(&ref_outcomes, &zero_oid, &unpack_status, &mut diag)?;
     diag.finish()?;
@@ -474,6 +507,10 @@ fn parse_update_line(line: &str, first: bool) -> Option<(String, String, String)
         parts[1].to_owned(),
         parts[2].to_owned(),
     ))
+}
+
+fn receive_refname_is_valid(refname: &str) -> bool {
+    check_refname_format(refname, &RefNameOptions::default()).is_ok()
 }
 
 fn demux_input_tail(data: &[u8]) -> (Vec<u8>, Vec<u8>) {

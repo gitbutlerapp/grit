@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
+use grit_lib::check_ref_format::is_valid_advertised_refname;
 use grit_lib::config::ConfigSet;
 use grit_lib::ls_remote::{ls_remote, Options, RefEntry};
 use grit_lib::objects::ObjectId;
@@ -1021,12 +1022,14 @@ pub(crate) fn parse_ls_refs_v2_line(
 
     if let Some(pos) = after_oid.find(PEEL) {
         let name = after_oid[..pos].to_owned();
+        ensure_valid_ls_refs_v2_name(&name)?;
         let tail = &after_oid[pos + PEEL.len()..];
         let hex_end = tail.find(' ').unwrap_or(tail.len());
         let ph = &tail[..hex_end];
         peeled = Some(ObjectId::from_hex(ph).with_context(|| format!("bad peeled oid: {ph}"))?);
         let rest = tail[hex_end..].trim_start();
         if let Some(s) = rest.strip_prefix("symref-target:") {
+            ensure_valid_ls_refs_v2_name(s)?;
             symref_target = Some(s.to_owned());
         }
         return Ok((name, oid, peeled, symref_target));
@@ -1035,11 +1038,22 @@ pub(crate) fn parse_ls_refs_v2_line(
     if let Some(pos) = after_oid.find(SYM) {
         let name = after_oid[..pos].to_owned();
         let target = after_oid[pos + SYM.len()..].to_owned();
+        ensure_valid_ls_refs_v2_name(&name)?;
+        ensure_valid_ls_refs_v2_name(&target)?;
         symref_target = Some(target);
         return Ok((name, oid, peeled, symref_target));
     }
 
+    ensure_valid_ls_refs_v2_name(after_oid)?;
     Ok((after_oid.to_owned(), oid, None, None))
+}
+
+fn ensure_valid_ls_refs_v2_name(name: &str) -> Result<()> {
+    if is_valid_advertised_refname(name) {
+        Ok(())
+    } else {
+        bail!("invalid ref advertisement: {name}")
+    }
 }
 
 /// Open a local repository given a user-supplied path.
