@@ -474,6 +474,13 @@ use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::wildmatch::wildmatch;
 
+/// Cached copy-detection blame lookup: source path, lines by content, use counts.
+type CopySourceBlameCache = (
+    String,
+    HashMap<String, Vec<BlameLine>>,
+    HashMap<String, usize>,
+);
+
 /// Hook the CLI installs so blame can lazily hydrate missing objects from a
 /// promisor remote (partial clone). The lib does no transport itself; the CLI
 /// supplies a function that performs the fetch.
@@ -805,12 +812,13 @@ fn read_blob_content_for_blame(
         Some(&oid_hex),
         None,
     )
-    .map_err(|e| LibError::Message(format!("{e}")))?;
+    .map_err(|e| LibError::Message(e.to_string()))?;
     let converted = run_textconv_command(&command, &worktree_data)
         .or_else(|_| run_textconv_command(&command, &obj.data))?;
     Ok(String::from_utf8_lossy(&converted).into_owned())
 }
 
+#[expect(clippy::too_many_arguments)]
 /// Core blame: walk history (all parents at merges unless `first_parent_only`), diff blobs, attribute lines.
 pub fn compute_blame(
     odb: &Odb,
@@ -1089,7 +1097,7 @@ pub fn compute_blame(
 
             let mut used_in_parent: Vec<HashSet<usize>> = vec![HashSet::new(); parents.len()];
 
-            let mut remaining: Vec<TrackedLine> = pending.drain(..).collect();
+            let mut remaining = std::mem::take(&mut pending);
             for i in 0..parents.len() {
                 if remaining.is_empty() {
                     break;
@@ -1365,11 +1373,7 @@ pub fn compute_blame(
                 if is_ignored {
                     line_map = build_fuzzy_line_map(&par_lines, &cur_lines, &line_map);
                 }
-                let mut inserted_copy_source: Option<(
-                    String,
-                    HashMap<String, Vec<BlameLine>>,
-                    HashMap<String, usize>,
-                )> = None;
+                let mut inserted_copy_source: Option<CopySourceBlameCache> = None;
                 if copy_depth >= 3 {
                     if let Some((source_path, source_blame)) = find_copy_source_blame(
                         odb,
@@ -1574,6 +1578,7 @@ fn find_path_by_oid_in_tree(
     Ok(None)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn find_copy_source_blame(
     odb: &Odb,
     parent_oid: ObjectId,
@@ -1695,7 +1700,7 @@ pub fn apply_annotate_huge_graft_fixup(
     start_oid: ObjectId,
     file_path: &str,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    blame_lines: &mut Vec<BlameLine>,
+    blame_lines: &mut [BlameLine],
 ) -> Result<()> {
     if file_path != "file" {
         return Ok(());
@@ -1790,6 +1795,7 @@ pub fn peel_to_commit_oid(odb: &Odb, mut oid: ObjectId) -> Result<Option<ObjectI
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 pub fn build_uncommitted_blame(
     odb: &Odb,
     start_oid: ObjectId,
@@ -1806,11 +1812,7 @@ pub fn build_uncommitted_blame(
     let zero = crate::diff::zero_oid();
     let final_lines = content_lines(content);
 
-    let mut by_content_source: Option<(
-        String,
-        HashMap<String, Vec<BlameLine>>,
-        HashMap<String, usize>,
-    )> = None;
+    let mut by_content_source: Option<CopySourceBlameCache> = None;
     if copy_depth >= 2 {
         let head_obj = read_object_for_blame(odb, &start_oid)?;
         let head_commit = parse_commit(&head_obj.data)?;
@@ -1904,6 +1906,7 @@ fn read_commit_lines_for_blame(
         .collect())
 }
 
+#[expect(clippy::too_many_arguments)]
 pub fn compute_reverse_blame(
     odb: &Odb,
     range_start: ObjectId,
@@ -1912,18 +1915,14 @@ pub fn compute_reverse_blame(
     diff_algorithm: BlameDiffAlgorithm,
     textconv_ctx: Option<&BlameTextconvContext>,
     use_textconv: bool,
-    first_parent_only: bool,
+    _first_parent_only: bool,
 ) -> Result<Vec<BlameLine>> {
     let mut commit_cache: HashMap<ObjectId, CommitData> = HashMap::new();
     let mut chain_rev = vec![range_end];
     let mut cur = range_end;
     while cur != range_start {
         let commit = get_commit(odb, cur, &mut commit_cache)?;
-        let next_parent = if first_parent_only {
-            commit.parents.first().copied()
-        } else {
-            commit.parents.first().copied()
-        };
+        let next_parent = commit.parents.first().copied();
         let Some(parent) = next_parent else {
             return Err(LibError::Message(
                 "--reverse range end is not reachable from start".to_string(),

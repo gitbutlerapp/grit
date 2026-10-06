@@ -41,6 +41,9 @@ pub struct NotesTreeEntry {
     pub oid: ObjectId,
 }
 
+/// One annotated object's note change: `(object_id, old_blob, new_blob)`.
+type NoteBlobChange = (ObjectId, Option<ObjectId>, Option<ObjectId>);
+
 enum NotesTreeChild {
     Blob { mode: u32, oid: ObjectId },
     Tree(Vec<NotesTreeEntry>),
@@ -209,9 +212,7 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
         .sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
 
     let tree_data = serialize_tree(&tree_entries);
-    repo.odb
-        .write(ObjectKind::Tree, &tree_data)
-        .map_err(Into::into)
+    repo.odb.write(ObjectKind::Tree, &tree_data)
 }
 
 /// Write a new notes tree and commit, updating the notes ref.
@@ -423,7 +424,7 @@ fn diff_note_blob_changes(
     repo: &Repository,
     old_tree: Option<&ObjectId>,
     new_tree: Option<&ObjectId>,
-) -> Result<Vec<(ObjectId, Option<ObjectId>, Option<ObjectId>)>> {
+) -> Result<Vec<NoteBlobChange>> {
     let old_map = match old_tree {
         Some(t) => notes_tree_blob_by_object(repo, t)?,
         None => HashMap::new(),
@@ -491,7 +492,7 @@ fn build_merge_pairs(
     }
 
     let mut v: Vec<_> = map.into_values().collect();
-    v.sort_by(|a, b| a.obj.cmp(&b.obj));
+    v.sort_by_key(|a| a.obj);
     Ok(v)
 }
 
@@ -542,7 +543,7 @@ pub fn combine_notes_concatenate(
     };
 
     if cur_data.is_empty() {
-        return Ok(repo.odb.write(ObjectKind::Blob, &new_data)?);
+        return repo.odb.write(ObjectKind::Blob, &new_data);
     }
 
     let mut cur_len = cur_data.len();
@@ -554,7 +555,7 @@ pub fn combine_notes_concatenate(
     buf.push(b'\n');
     buf.push(b'\n');
     buf.extend_from_slice(&new_data);
-    Ok(repo.odb.write(ObjectKind::Blob, &buf)?)
+    repo.odb.write(ObjectKind::Blob, &buf)
 }
 
 fn note_blob_lines(data: &[u8]) -> Vec<String> {
@@ -586,7 +587,7 @@ pub fn combine_notes_cat_sort_uniq(
         buf.push_str(l);
         buf.push('\n');
     }
-    Ok(repo.odb.write(ObjectKind::Blob, buf.as_bytes())?)
+    repo.odb.write(ObjectKind::Blob, buf.as_bytes())
 }
 
 fn blob_to_lines(data: &[u8]) -> Vec<String> {
@@ -653,6 +654,7 @@ fn write_note_conflict_file(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn merge_one_note_change(
     repo: &Repository,
     pair: &NotesMergePair,
@@ -791,6 +793,7 @@ fn adopt_remote_note(entries: &mut Vec<NotesTreeEntry>, obj_hex: &str, remote: O
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn merge_changes_into_entries(
     repo: &Repository,
     pairs: &[NotesMergePair],
@@ -892,7 +895,7 @@ pub fn write_notes_commit_with_parents(
         raw_message: None,
     };
     let commit_data = serialize_commit(&commit);
-    Ok(repo.odb.write(ObjectKind::Commit, &commit_data)?)
+    repo.odb.write(ObjectKind::Commit, &commit_data)
 }
 
 pub fn notes_merge_inner(
@@ -904,11 +907,9 @@ pub fn notes_merge_inner(
     let local_commit = resolve_notes_commit_optional(repo, local_ref)?;
     let remote_commit = resolve_notes_commit_optional(repo, remote_ref)?;
     match (local_commit, remote_commit) {
-        (None, None) => {
-            return Err(Error::Message(format!(
-                "Cannot merge empty notes ref ({remote_ref}) into empty notes ref ({local_ref})"
-            )))
-        }
+        (None, None) => Err(Error::Message(format!(
+            "Cannot merge empty notes ref ({remote_ref}) into empty notes ref ({local_ref})"
+        ))),
         (None, Some(r)) => Ok(Ok(r)),
         (Some(l), None) => Ok(Ok(l)),
         (Some(local_oid), Some(remote_oid)) => {
