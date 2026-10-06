@@ -11,14 +11,12 @@ use std::path::Path;
 use crate::config::ConfigSet;
 use crate::crlf;
 use crate::diff::{
-    mode_from_metadata, read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
+    materialize_worktree_blob, mode_from_metadata, read_submodule_head_oid, DiffEntry,
+    DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::index::{
-    entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
-};
-use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
-use crate::odb::Odb;
+use crate::index::{entry_from_metadata, index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
+use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
 use crate::progress::ProgressSink;
@@ -31,7 +29,7 @@ pub enum StageMode {
     /// Stage tracked changes and untracked files (default `git add`).
     #[default]
     All,
-    /// Stage tracked changes only (`git add -u` / `--update`).
+    /// Stage tracked changes only (`git add -u` / `--update`); untracked paths are ignored.
     Update,
 }
 
@@ -46,14 +44,18 @@ pub struct StageOptions {
     pub pathspecs: Vec<String>,
     /// Original pathspec argv fragments; defaults to `pathspecs` when empty.
     pub pathspec_sources: Vec<String>,
+    /// Whether to include untracked paths ([`StageMode::All`]) or only tracked changes ([`StageMode::Update`]).
     pub mode: StageMode,
 }
 
 /// Counts returned by [`stage`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StageOutcome {
+    /// New untracked paths staged at stage 0.
     pub added: usize,
+    /// Tracked paths updated in the index (including conflict resolution and gitlinks).
     pub modified: usize,
+    /// Tracked paths removed from the index because they are absent from the work tree.
     pub removed: usize,
 }
 
@@ -93,12 +95,19 @@ pub fn stage(
     let index_mtime = index_file_mtime(&index_path);
     let mut index = repo.load_index()?;
 
+    let convert = StagingConvertContext::load(repo, work_tree);
+
     let diff_opts = DiffIndexToWorktreeOptions {
         index_mtime,
         ..DiffIndexToWorktreeOptions::default()
     };
-    let unstaged =
-        crate::diff::diff_index_to_worktree_with_options(&repo.odb, &index, work_tree, diff_opts)?;
+    let unstaged = crate::diff::diff_index_to_worktree_for_staging(
+        &repo.odb,
+        &repo.git_dir,
+        &index,
+        work_tree,
+        diff_opts,
+    )?;
 
     let untracked = if opts.mode == StageMode::All {
         let (untracked, _) = collect_untracked_and_ignored(
@@ -123,26 +132,23 @@ pub fn stage(
 
     let mut outcome = StageOutcome::default();
 
-    let worktree_updates = collect_worktree_updates(&unstaged, &matches);
-    for (path, update) in worktree_updates {
-        match update {
-            WorktreeUpdate::Remove => {
-                if index.remove(path.as_bytes()) {
-                    outcome.removed += 1;
-                }
+    let worktree_updates = collect_tracked_stage_plans(&unstaged, &matches);
+    for (path, plan) in worktree_updates {
+        if plan.remove {
+            if index.remove(path.as_bytes()) {
+                outcome.removed += 1;
             }
-            WorktreeUpdate::StageContent => {
-                stage_worktree_path(repo, work_tree, &path, &mut index)?;
-                outcome.modified += 1;
-            }
+            continue;
         }
+        apply_tracked_stage_plan(repo, work_tree, &path, &plan, &mut index)?;
+        outcome.modified += 1;
     }
 
     for path in &untracked {
         if !matches(path) {
             continue;
         }
-        stage_worktree_path(repo, work_tree, path, &mut index)?;
+        stage_untracked_path(repo, work_tree, path, &convert, &mut index)?;
         outcome.added += 1;
     }
 
@@ -155,37 +161,171 @@ pub fn stage(
     Ok(outcome)
 }
 
-enum WorktreeUpdate {
-    Remove,
-    StageContent,
+struct TrackedStagePlan {
+    remove: bool,
+    oid: ObjectId,
+    mode: u32,
+    gitlink: bool,
 }
 
-/// Merge unstaged diff rows into one action per path (unmerged paths may appear twice).
-fn collect_worktree_updates(
+struct StagingConvertContext {
+    config: ConfigSet,
+    conv: crlf::ConversionConfig,
+    attrs: crlf::GitAttributes,
+}
+
+impl StagingConvertContext {
+    fn load(repo: &Repository, work_tree: &Path) -> Self {
+        let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+        let conv = crlf::ConversionConfig::from_config(&config);
+        let attrs = crlf::load_gitattributes(work_tree);
+        Self {
+            config,
+            conv,
+            attrs,
+        }
+    }
+}
+
+/// Merge unstaged diff rows into one staging action per path (unmerged paths may appear twice).
+fn collect_tracked_stage_plans(
     unstaged: &[DiffEntry],
     matches: &impl Fn(&str) -> bool,
-) -> BTreeMap<String, WorktreeUpdate> {
-    let mut changes = BTreeMap::<String, WorktreeUpdate>::new();
+) -> BTreeMap<String, TrackedStagePlan> {
+    let mut changes = BTreeMap::<String, TrackedStagePlan>::new();
     for entry in unstaged {
         let path = entry.path();
         if !matches(path) {
             continue;
         }
-        let path = path.to_owned();
-        match entry.status {
-            DiffStatus::Deleted => {
-                changes.insert(path, WorktreeUpdate::Remove);
-            }
-            DiffStatus::Modified | DiffStatus::TypeChanged | DiffStatus::Added => {
-                changes.entry(path).or_insert(WorktreeUpdate::StageContent);
-            }
-            DiffStatus::Unmerged if entry.new_mode != "000000" => {
-                changes.entry(path).or_insert(WorktreeUpdate::StageContent);
-            }
-            _ => {}
-        }
+        merge_tracked_stage_plan(&mut changes, path.to_owned(), entry);
     }
     changes
+}
+
+fn merge_tracked_stage_plan(
+    changes: &mut BTreeMap<String, TrackedStagePlan>,
+    path: String,
+    entry: &DiffEntry,
+) {
+    match entry.status {
+        DiffStatus::Deleted => {
+            changes.insert(
+                path,
+                TrackedStagePlan {
+                    remove: true,
+                    oid: ObjectId::zero(),
+                    mode: 0,
+                    gitlink: false,
+                },
+            );
+        }
+        DiffStatus::Modified | DiffStatus::TypeChanged | DiffStatus::Added => {
+            let mode = mode_from_diff_octal(&entry.new_mode).unwrap_or(0);
+            changes.insert(
+                path,
+                TrackedStagePlan {
+                    remove: false,
+                    oid: entry.new_oid,
+                    mode,
+                    gitlink: mode == MODE_GITLINK,
+                },
+            );
+        }
+        DiffStatus::Unmerged if entry.new_mode != "000000" => {
+            let mode = mode_from_diff_octal(&entry.new_mode).unwrap_or(0);
+            changes.entry(path).or_insert(TrackedStagePlan {
+                remove: false,
+                oid: entry.new_oid,
+                mode,
+                gitlink: mode == MODE_GITLINK,
+            });
+        }
+        _ => {}
+    }
+}
+
+fn mode_from_diff_octal(mode: &str) -> Result<u32> {
+    if mode.is_empty() || mode == "000000" {
+        return Ok(0);
+    }
+    u32::from_str_radix(mode, 8).map_err(|e| Error::Message(format!("invalid mode '{mode}': {e}")))
+}
+
+fn apply_tracked_stage_plan(
+    _repo: &Repository,
+    work_tree: &Path,
+    rel_path: &str,
+    plan: &TrackedStagePlan,
+    index: &mut Index,
+) -> Result<()> {
+    let abs = work_tree.join(rel_path);
+    let meta = fs::symlink_metadata(&abs).map_err(|e| {
+        Error::Io(std::io::Error::new(
+            e.kind(),
+            format!("could not read {rel_path}: {e}"),
+        ))
+    })?;
+
+    if plan.gitlink {
+        let oid = if plan.oid.is_zero() {
+            read_submodule_head_oid(&abs).ok_or_else(|| {
+                Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
+            })?
+        } else {
+            plan.oid
+        };
+        return stage_gitlink_at(rel_path, &meta, oid, index);
+    }
+
+    let oid = plan.oid;
+    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, plan.mode);
+    entry.mode = plan.mode;
+    index.stage_file(entry);
+    mark_fsmonitor_staged(index, rel_path);
+    Ok(())
+}
+
+fn stage_untracked_path(
+    repo: &Repository,
+    work_tree: &Path,
+    rel_path: &str,
+    ctx: &StagingConvertContext,
+    index: &mut Index,
+) -> Result<()> {
+    let abs = work_tree.join(rel_path);
+    let meta = fs::symlink_metadata(&abs).map_err(|e| {
+        Error::Io(std::io::Error::new(
+            e.kind(),
+            format!("could not read {rel_path}: {e}"),
+        ))
+    })?;
+
+    if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
+        let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
+            Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
+        })?;
+        return stage_gitlink_at(rel_path, &meta, head_oid, index);
+    }
+
+    let file_attrs = crlf::get_file_attrs(&ctx.attrs, rel_path, false, &ctx.config);
+    let mode = mode_from_metadata(&meta);
+    let oid = materialize_worktree_blob(
+        &repo.odb,
+        &abs,
+        &meta,
+        &ctx.conv,
+        &file_attrs,
+        rel_path,
+        None,
+    )
+    .map_err(|e| Error::Message(format!("could not store {rel_path}: {e}")))?;
+
+    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode);
+    entry.mode = mode;
+    index.stage_file(entry);
+    mark_fsmonitor_staged(index, rel_path);
+    Ok(())
 }
 
 fn validate_pathspecs(
@@ -300,88 +440,6 @@ fn selector_matches_known(resolved: &str, known: &[String], work_tree: &Path) ->
     Ok(false)
 }
 
-fn stage_worktree_path(
-    repo: &Repository,
-    work_tree: &Path,
-    rel_path: &str,
-    index: &mut Index,
-) -> Result<()> {
-    let abs = work_tree.join(rel_path);
-    let meta = fs::symlink_metadata(&abs).map_err(|e| {
-        Error::Io(std::io::Error::new(
-            e.kind(),
-            format!("could not read {rel_path}: {e}"),
-        ))
-    })?;
-
-    if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
-        let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
-            Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
-        })?;
-        return stage_gitlink_at(rel_path, &meta, head_oid, index);
-    }
-
-    let git_dir = work_tree.join(".git");
-    let config = ConfigSet::load(Some(&git_dir), true).unwrap_or_default();
-    let conv = crlf::ConversionConfig::from_config(&config);
-    let attrs = crlf::load_gitattributes(work_tree);
-    let file_attrs = crlf::get_file_attrs(&attrs, rel_path, false, &config);
-    let index_entry = index
-        .get(rel_path.as_bytes(), 0)
-        .or_else(|| index.get(rel_path.as_bytes(), 2))
-        .or_else(|| index.get(rel_path.as_bytes(), 3));
-
-    let mode = mode_from_metadata(&meta);
-    let blob_bytes = worktree_bytes_for_staging(
-        &repo.odb,
-        &abs,
-        &meta,
-        rel_path,
-        &conv,
-        &file_attrs,
-        index_entry,
-    )?;
-    let oid = repo
-        .odb
-        .write(ObjectKind::Blob, &blob_bytes)
-        .map_err(|e| Error::Message(format!("could not store {rel_path}: {e}")))?;
-
-    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode);
-    entry.mode = mode;
-    index.stage_file(entry);
-    mark_fsmonitor_staged(index, rel_path);
-    Ok(())
-}
-
-fn worktree_bytes_for_staging(
-    odb: &Odb,
-    abs: &Path,
-    meta: &fs::Metadata,
-    rel_path: &str,
-    conv: &crlf::ConversionConfig,
-    file_attrs: &crlf::FileAttrs,
-    index_entry: Option<&IndexEntry>,
-) -> Result<Vec<u8>> {
-    if meta.file_type().is_symlink() {
-        let target = fs::read_link(abs)?;
-        return Ok(target.to_string_lossy().into_owned().into_bytes());
-    }
-    if meta.is_dir() {
-        return Ok(Vec::new());
-    }
-    let raw = fs::read(abs)?;
-    let prior_blob = index_entry
-        .filter(|e| !e.oid.is_zero())
-        .and_then(|e| odb.read(&e.oid).ok())
-        .map(|o| o.data);
-    let opts = crlf::ConvertToGitOpts {
-        index_blob: prior_blob.as_deref(),
-        renormalize: false,
-        check_safecrlf: false,
-    };
-    Ok(crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts).unwrap_or(raw))
-}
-
 fn stage_gitlink_at(
     rel_path: &str,
     meta: &fs::Metadata,
@@ -408,7 +466,8 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::index::{entry_from_stat, MODE_GITLINK, MODE_REGULAR};
+    use crate::index::{entry_from_stat, IndexEntry, MODE_GITLINK, MODE_REGULAR};
+    use crate::objects::ObjectKind;
     use crate::progress::NullProgress;
     use std::fs;
     use std::path::Path;
@@ -649,6 +708,68 @@ mod tests {
         let staged = index.get(b"f.txt", 0).expect("stage 0 entry");
         let blob = repo.odb.read(&staged.oid).unwrap();
         assert_eq!(blob.data, b"resolved\n");
+    }
+
+    #[test]
+    fn stage_linked_worktree_uses_common_repository_config() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let main = root.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(&main)
+            .status()
+            .expect("git init")
+            .success());
+        for args in [
+            ["config", "user.email", "t@example.com"],
+            ["config", "user.name", "t"],
+            ["config", "core.autocrlf", "true"],
+        ] {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&main)
+                .status()
+                .unwrap();
+        }
+        std::fs::write(main.join("README"), b"seed\n").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "README"])
+            .current_dir(&main)
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-qm", "seed"])
+            .current_dir(&main)
+            .status()
+            .unwrap();
+
+        let linked = root.join("linked");
+        assert!(std::process::Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                "linked-branch",
+                linked.to_str().unwrap(),
+                "HEAD",
+            ])
+            .current_dir(&main)
+            .status()
+            .expect("worktree add")
+            .success());
+
+        let repo = Repository::discover(Some(&linked)).unwrap();
+        std::fs::write(linked.join("grit.txt"), b"grit\r\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let index = repo.load_index().unwrap();
+        let oid = index.get(b"grit.txt", 0).unwrap().oid;
+        assert_eq!(
+            repo.odb.read(&oid).unwrap().data,
+            b"grit\n",
+            "linked worktree must use common repo autocrlf config"
+        );
     }
 
     #[test]

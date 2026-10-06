@@ -2389,6 +2389,37 @@ pub fn diff_index_to_worktree_with_options(
     work_tree: &Path,
     options: DiffIndexToWorktreeOptions,
 ) -> Result<Vec<DiffEntry>> {
+    diff_index_to_worktree_inner(
+        odb,
+        index,
+        work_tree,
+        &work_tree.join(".git"),
+        options,
+        false,
+    )
+}
+
+/// Like [`diff_index_to_worktree_with_options`], but loads config from `repository_git_dir`
+/// (the main repository for linked worktrees) and persists each hashed worktree blob into `odb`
+/// so staging can update the index without re-reading file contents.
+pub fn diff_index_to_worktree_for_staging(
+    odb: &Odb,
+    repository_git_dir: &Path,
+    index: &Index,
+    work_tree: &Path,
+    options: DiffIndexToWorktreeOptions,
+) -> Result<Vec<DiffEntry>> {
+    diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
+}
+
+fn diff_index_to_worktree_inner(
+    odb: &Odb,
+    index: &Index,
+    work_tree: &Path,
+    repository_git_dir: &Path,
+    options: DiffIndexToWorktreeOptions,
+    materialize_dirty_blobs: bool,
+) -> Result<Vec<DiffEntry>> {
     use crate::config::ConfigSet;
     use crate::crlf;
 
@@ -2397,8 +2428,8 @@ pub fn diff_index_to_worktree_with_options(
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
     let simplify_gitlinks = options.simplify_gitlinks;
 
-    let git_dir = work_tree.join(".git");
-    let config = ConfigSet::load(Some(&git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let config =
+        ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new());
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
     let precompose_unicode = config
@@ -2541,7 +2572,7 @@ pub fn diff_index_to_worktree_with_options(
             match fs::symlink_metadata(&file_path) {
                 Ok(meta) => {
                     let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref, false, &config);
-                    let worktree_oid = hash_worktree_file(
+                    let worktree_oid = worktree_file_oid(
                         odb,
                         &file_path,
                         &meta,
@@ -2549,6 +2580,7 @@ pub fn diff_index_to_worktree_with_options(
                         &file_attrs,
                         path_str_ref,
                         None,
+                        materialize_dirty_blobs,
                     )?;
                     let worktree_mode = mode_from_metadata(&meta);
                     result.push(DiffEntry {
@@ -2659,7 +2691,7 @@ pub fn diff_index_to_worktree_with_options(
 
                 // Hash the worktree blob for uncertain/racy entries.
                 let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref, false, &config);
-                let worktree_oid = hash_worktree_file(
+                let worktree_oid = worktree_file_oid(
                     odb,
                     &file_path,
                     &meta,
@@ -2667,6 +2699,7 @@ pub fn diff_index_to_worktree_with_options(
                     &file_attrs,
                     path_str_ref,
                     Some(ie),
+                    materialize_dirty_blobs,
                 )?;
 
                 // If clean conversion disagrees with the index but raw bytes match the
@@ -2744,7 +2777,7 @@ pub fn diff_index_to_worktree_with_options(
 
         if let Some(meta) = wt_meta {
             let file_attrs = crlf::get_file_attrs(&attrs, &path, false, &config);
-            let wt_oid = hash_worktree_file(
+            let wt_oid = worktree_file_oid(
                 odb,
                 &file_path,
                 &meta,
@@ -2752,6 +2785,7 @@ pub fn diff_index_to_worktree_with_options(
                 &file_attrs,
                 &path,
                 Some(base_entry),
+                materialize_dirty_blobs,
             )?;
             let wt_mode = mode_from_metadata(&meta);
             if wt_oid != base_entry.oid || wt_mode != base_entry.mode {
@@ -3391,6 +3425,57 @@ pub(crate) fn symlink_target_bytes(target: &Path) -> Vec<u8> {
     }
 }
 
+fn worktree_blob_bytes(
+    odb: &Odb,
+    path: &Path,
+    meta: &fs::Metadata,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+) -> Result<Vec<u8>> {
+    let prior_blob: Option<Vec<u8>> = index_entry
+        .filter(|e| e.oid != zero_oid())
+        .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data));
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(path)?;
+        return Ok(target.to_string_lossy().into_owned().into_bytes());
+    }
+    if meta.is_dir() {
+        return Ok(Vec::new());
+    }
+    let raw = fs::read(path)?;
+    let opts = crate::crlf::ConvertToGitOpts {
+        index_blob: prior_blob.as_deref(),
+        renormalize: false,
+        check_safecrlf: false,
+    };
+    Ok(
+        crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
+            .unwrap_or(raw),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn worktree_file_oid(
+    odb: &Odb,
+    path: &Path,
+    meta: &fs::Metadata,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+    materialize: bool,
+) -> Result<ObjectId> {
+    let data = worktree_blob_bytes(odb, path, meta, conv, file_attrs, rel_path, index_entry)?;
+    if materialize {
+        odb.write(ObjectKind::Blob, &data)
+    } else {
+        Ok(odb.hash(ObjectKind::Blob, &data))
+    }
+}
+
+/// Hash normalized worktree bytes for a path (does not write to the object database).
 pub fn hash_worktree_file(
     odb: &Odb,
     path: &Path,
@@ -3400,29 +3485,30 @@ pub fn hash_worktree_file(
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
 ) -> Result<ObjectId> {
-    let prior_blob: Option<Vec<u8>> = index_entry
-        .filter(|e| e.oid != zero_oid())
-        .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data));
-    let data = if meta.file_type().is_symlink() {
-        let target = fs::read_link(path)?;
-        symlink_target_bytes(&target)
-    } else if meta.is_dir() {
-        // `read()` on a directory fails with EISDIR; unmerged paths may leave an empty
-        // placeholder directory (e.g. t4027 combined submodule conflict).
-        Vec::new()
-    } else {
-        let raw = fs::read(path)?;
-        // Apply clean conversion (CRLF→LF) so hash matches index blob.
-        // Do not run safecrlf here: diff/commit use this for hashing and must not print warnings.
-        let opts = crate::crlf::ConvertToGitOpts {
-            index_blob: prior_blob.as_deref(),
-            renormalize: false,
-            check_safecrlf: false,
-        };
-        crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts).unwrap_or(raw)
-    };
-
+    let data = worktree_blob_bytes(odb, path, meta, conv, file_attrs, rel_path, index_entry)?;
     Ok(odb.hash(ObjectKind::Blob, &data))
+}
+
+/// Read, normalize (CRLF/attributes), and store a worktree blob once.
+pub fn materialize_worktree_blob(
+    odb: &Odb,
+    path: &Path,
+    meta: &fs::Metadata,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+) -> Result<ObjectId> {
+    worktree_file_oid(
+        odb,
+        path,
+        meta,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        true,
+    )
 }
 
 /// Derive a Git file mode from filesystem metadata.

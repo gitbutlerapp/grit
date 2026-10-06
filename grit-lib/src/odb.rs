@@ -384,7 +384,7 @@ impl Odb {
 
     /// Number of objects stored in the active mem overlay (tests only).
     #[cfg(test)]
-    pub fn mem_overlay_len_for_tests(&self) -> Option<usize> {
+    pub(crate) fn mem_overlay_len_for_tests(&self) -> Option<usize> {
         self.mem_overlay
             .lock()
             .ok()
