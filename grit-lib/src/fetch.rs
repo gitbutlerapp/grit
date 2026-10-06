@@ -734,7 +734,7 @@ pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result
 /// and `done`). Multi-round: round 1 sends the first batch of haves *without*
 /// `done`, reads the `acknowledgments` section (looking for `ready`); if not yet
 /// ready it sends the remaining haves + `done`. Then reads the response sections
-/// (`acknowledgments`, optional `shallow-info`/`wanted-refs`, then `packfile`) and
+/// (`acknowledgments`, optional `shallow-info`, then `wanted-refs`, then `packfile`) and
 /// demuxes the side-band-64k pack. Lifted from `write_v2_fetch_request` +
 /// `read_v2_acknowledgments` / `read_v2_fetch_pack_response`.
 fn negotiate_pack_v2(
@@ -1020,7 +1020,7 @@ pub(crate) fn read_v2_acknowledgments(reader: &mut dyn Read) -> Result<Option<V2
 
 /// Read a v2 `command=fetch` response: capture the `shallow-info` section's
 /// `shallow`/`unshallow` lines into `shallow_out`, skip the other non-pack
-/// sections (`acknowledgments`/`wanted-refs`/`packfile-uris`), and demux the
+/// sections (`acknowledgments`/`shallow-info`/`wanted-refs`/`packfile-uris`), and demux the
 /// side-band-64k pack from the `packfile` section into `out`. Lifted from the
 /// CLI's `read_v2_fetch_pack_response`, extended to surface shallow updates.
 pub(crate) fn read_v2_fetch_pack_response(
@@ -1045,7 +1045,7 @@ pub(crate) fn read_v2_fetch_pack_response(
             return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
         }
         match hdr {
-            "shallow-info" => {
+            h if h == crate::protocol_v2::FetchResponseSection::ShallowInfo.header() => {
                 // Capture the shallow/unshallow boundary updates. The section is
                 // delim-terminated (before the `packfile` header), which
                 // `read_shallow_info_section` stops at, leaving the header intact.
@@ -1053,10 +1053,13 @@ pub(crate) fn read_v2_fetch_pack_response(
                 shallow_out.shallow.extend(sh);
                 shallow_out.unshallow.extend(unsh);
             }
-            "acknowledgments" | "wanted-refs" | "packfile-uris" => {
+            h if h == crate::protocol_v2::FetchResponseSection::Acknowledgments.header()
+                || h == crate::protocol_v2::FetchResponseSection::WantedRefs.header()
+                || h == crate::protocol_v2::FetchResponseSection::PackfileUris.header() =>
+            {
                 skip_v2_section_until_boundary(&mut *reader)?;
             }
-            "packfile" => {
+            h if h == crate::protocol_v2::FetchResponseSection::Packfile.header() => {
                 // The `packfile` section body is side-band-64k framed; reuse the
                 // shared demuxer (channel 1 = pack, channel 2 = progress, 3 = err).
                 read_sideband_pack(&mut *reader, out, progress)?;

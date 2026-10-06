@@ -668,7 +668,7 @@ fn cmd_fetch(
             // the `packfile` section. Matches `upload-pack.c`'s state machine, where
             // `UPLOAD_SEND_ACKS` transitions to `UPLOAD_SEND_PACK` without reading another request.
             // A stateful client does not send a follow-up after `ready`, so returning here would
-            // deadlock the connection. Fall through to send wanted-refs / shallow-info / packfile.
+            // deadlock the connection. Fall through to send shallow-info / wanted-refs / packfile.
         } else {
             // Not ready yet: end the round with a flush so the client sends more haves.
             pkt_line::write_flush(out)?;
@@ -676,17 +676,8 @@ fn cmd_fetch(
         }
     }
 
-    // `wanted-refs` resolves the client's `want-ref` requests to concrete OIDs.
-    // Sent only once the server is ready to stream the pack, immediately before
-    // `shallow-info` / `packfile` (matches `upload-pack.c` `send_wanted_ref_info`).
-    if !wanted_refs.is_empty() {
-        pkt_line::write_line(out, "wanted-refs")?;
-        for (refname, oid) in &wanted_refs {
-            pkt_line::write_line(out, &format!("{} {}", oid.to_hex(), refname))?;
-        }
-        pkt_line::write_delim(out)?;
-    }
-
+    // `shallow-info` then `wanted-refs` before `packfile` (gitprotocol-v2 and `upload-pack.c`
+    // after rr/upload-pack-swap-shallow-wanted-ref). Clients parse sections in this order.
     let client_shallow_vec = client_shallow_oids.iter().copied().collect::<Vec<_>>();
     let mut new_shallow = Vec::new();
     if let Some(depth) = depth_request {
@@ -707,7 +698,10 @@ fn cmd_fetch(
     }
     if depth_request.is_some() || deepen_since.is_some() || !deepen_not.is_empty() {
         let new_shallow_set: HashSet<ObjectId> = new_shallow.iter().copied().collect();
-        pkt_line::write_line(out, "shallow-info")?;
+        pkt_line::write_line(
+            out,
+            grit_lib::protocol_v2::FetchResponseSection::ShallowInfo.header(),
+        )?;
         for oid in &new_shallow {
             pkt_line::write_line(out, &format!("shallow {}", oid.to_hex()))?;
         }
@@ -715,6 +709,18 @@ fn cmd_fetch(
             if !new_shallow_set.contains(oid) {
                 pkt_line::write_line(out, &format!("unshallow {}", oid.to_hex()))?;
             }
+        }
+        pkt_line::write_delim(out)?;
+    }
+
+    // `wanted-refs` resolves the client's `want-ref` requests to concrete OIDs.
+    if !wanted_refs.is_empty() {
+        pkt_line::write_line(
+            out,
+            grit_lib::protocol_v2::FetchResponseSection::WantedRefs.header(),
+        )?;
+        for (refname, oid) in &wanted_refs {
+            pkt_line::write_line(out, &format!("{} {}", oid.to_hex(), refname))?;
         }
         pkt_line::write_delim(out)?;
     }

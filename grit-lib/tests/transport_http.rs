@@ -440,7 +440,7 @@ impl RecordingClient {
             let header = text.trim_end();
             if matches!(
                 header,
-                "acknowledgments" | "packfile" | "wanted-refs" | "shallow-info" | "packfile-uris"
+                "acknowledgments" | "shallow-info" | "wanted-refs" | "packfile-uris" | "packfile"
             ) {
                 in_packfile = header == "packfile";
                 continue;

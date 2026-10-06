@@ -568,7 +568,7 @@ fn drain_v2_fetch_response(stdout: &mut impl Read, sideband_all: bool) -> Result
         };
         trace_packet_git('<', &hdr);
         match hdr.as_str() {
-            "acknowledgments" | "wanted-refs" | "shallow-info" | "packfile-uris" => {
+            "acknowledgments" | "shallow-info" | "wanted-refs" | "packfile-uris" => {
                 skip_v2_section_until_boundary(stdout)?;
             }
             "packfile" => {
