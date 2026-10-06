@@ -190,7 +190,7 @@ cargo build --release -p grit-git
 ./scripts/run-tests.sh --strict --list data/ci/smoke-tests.txt --data-dir /tmp/smoke --no-catalog
 ```
 
-- **`--strict`** — exit non-zero if any explicit **`--list`** (or argv) target does not resolve to a runnable harness file, if the resolved explicit list is empty, if any selected file has failing tests, a timeout/error status, or zero tests executed; print each failing file stem and its TAP `not ok` lines (works with or without **`--data-dir`**). With **`--data-dir`**, full harness output for each file is also written under `<data-dir>/logs/<stem>.log` for CI artifact upload. Regression: `python3 scripts/test_run_tests_strict_list.py`.
+- **`--strict`** — exit non-zero if **`--list`** was used with an empty or comment-only file, if any explicit **`--list`** (or argv) target does not resolve to a runnable harness file, if the resolved explicit list is empty, if any selected file has failing tests, a timeout/error status, or zero tests executed; print each failing file stem and its TAP `not ok` lines (works with or without **`--data-dir`**). With **`--data-dir`**, full harness output for each file is also written under `<data-dir>/logs/<stem>.log` for CI artifact upload. Regression: `python3 scripts/test_run_tests_strict_list.py`.
 - **`--list`** — read harness file names from the path (one per line; `#` starts a comment).
 - **`--data-dir`** — write status TOMLs and logs under an isolated directory so tracked `data/tests/` and dashboards stay unchanged.
 - **`--no-catalog`** — skip refreshing the full status catalog (the smoke list names files explicitly).

@@ -225,6 +225,15 @@ GRIT_RUN_TESTS_STRICT=0
 [[ "$STRICT" == true ]] && GRIT_RUN_TESTS_STRICT=1
 export GRIT_RUN_TESTS_STRICT
 
+# Explicit list mode: --list was passed and/or argv named test files. Distinct from
+# whether any lines survived comment/blank stripping (empty smoke list must not
+# fall through to the full in-scope suite).
+GRIT_RUN_TESTS_EXPLICIT_LIST=0
+if [[ -n "$LIST_FILE" || ${#POS[@]} -gt 0 ]]; then
+  GRIT_RUN_TESTS_EXPLICIT_LIST=1
+fi
+export GRIT_RUN_TESTS_EXPLICIT_LIST
+
 # Build list of files to run: skip in_scope=skip. Use a read loop instead of
 # Bash 4 `mapfile` so the runner works with macOS' default Bash 3.
 # Scope is always read from the canonical data/tests tree; --data-dir only
@@ -237,7 +246,7 @@ import os, sys, glob, tomllib
 data_dir, tests_dir, from_stem = sys.argv[1], sys.argv[2], sys.argv[3]
 targets = sys.argv[4:]
 strict = os.environ.get("GRIT_RUN_TESTS_STRICT") == "1"
-explicit = bool(targets)
+explicit_list = os.environ.get("GRIT_RUN_TESTS_EXPLICIT_LIST") == "1"
 if from_stem.endswith(".sh"):
     from_stem = from_stem[:-3]
 
@@ -292,6 +301,14 @@ def expand_one(target):
 
 
 candidates = []
+if explicit_list and not targets:
+    print(
+        "ERROR: %sexplicit test list has no runnable entries (empty or comment-only --list file)."
+        % ("strict mode: " if strict else ""),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 if targets:
     seen = set()
     unmatched = []
@@ -301,7 +318,7 @@ if targets:
             continue
         got = expand_one(t)
         if not got:
-            if strict and explicit:
+            if strict and explicit_list:
                 unmatched.append(raw)
             else:
                 print(
@@ -314,7 +331,7 @@ if targets:
             if fn not in seen:
                 seen.add(fn)
                 candidates.append(fn)
-    if strict and explicit and unmatched:
+    if strict and explicit_list and unmatched:
         for raw in unmatched:
             print(
                 "ERROR: strict mode: no test files matched %r (typo, missing, or in_scope=skip under %s)"
@@ -366,7 +383,7 @@ if want:
         if rows.get(c[:-3] if c.endswith(".sh") else c, {}).get("group", "") == want
     ]
 
-if strict and explicit and not candidates:
+if strict and explicit_list and not candidates:
     print(
         "ERROR: strict mode: explicit test list resolved to zero runnable files.",
         file=sys.stderr,

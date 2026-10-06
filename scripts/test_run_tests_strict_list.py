@@ -50,6 +50,22 @@ def _run_strict_list(list_body: str, *, extra_args: list[str] | None = None) -> 
 
 
 class StrictListResolution(unittest.TestCase):
+    def _assert_fails_without_running(self, proc: subprocess.CompletedProcess[str]) -> None:
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+        combined = proc.stdout + proc.stderr
+        self.assertNotIn("Running ", combined)
+        self.assertIn("strict mode", proc.stderr.lower())
+
+    def test_empty_list_file_fails(self) -> None:
+        proc = _run_strict_list("")
+        self._assert_fails_without_running(proc)
+        self.assertIn("no runnable entries", proc.stderr.lower())
+
+    def test_comment_only_list_file_fails(self) -> None:
+        proc = _run_strict_list("# CI smoke subset\n\n# t0000-basic.sh\n")
+        self._assert_fails_without_running(proc)
+        self.assertIn("no runnable entries", proc.stderr.lower())
+
     def test_unmatched_list_entry_fails(self) -> None:
         proc = _run_strict_list("t999999-no-such-harness-file.sh\n")
         self.assertNotEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
