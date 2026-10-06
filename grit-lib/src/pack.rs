@@ -1805,6 +1805,50 @@ pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Obje
     Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
 }
 
+/// Whether `idx_path` uses the legacy v1 pack-index format (no `PACK` signature).
+#[must_use]
+pub fn pack_index_is_v1(idx_path: &Path) -> bool {
+    fs::read(idx_path)
+        .ok()
+        .is_some_and(|bytes| bytes.len() >= 4 && bytes[0..4] != [0xff, b't', b'O', b'c'])
+}
+
+/// Resolve `oid` from local packs via the process-wide pack cache (cached `.idx`
+/// parses, cached pack bytes, fanout binary search, delta-base cache).
+///
+/// Returns [`Ok(None)`] when no local pack index names the object. When a pack
+/// copy fails to decode from a v1 (legacy) index, returns an empty blob placeholder
+/// (historical pack-objects behavior). Any other decode failure invokes
+/// `alternate_read` once before trying the next pack.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when pack indexes cannot be enumerated.
+pub fn try_read_object_from_local_packs_cached(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    mut alternate_read: impl FnMut() -> Result<Object>,
+) -> Result<Option<Object>> {
+    let indexes = read_local_pack_indexes_cached(objects_dir)?;
+    for idx in &indexes {
+        if idx.find_offset(oid).is_none() {
+            continue;
+        }
+        match read_object_from_pack(idx, oid) {
+            Ok(obj) => return Ok(Some(obj)),
+            Err(_) if pack_index_is_v1(&idx.idx_path) => {
+                return Ok(Some(Object::new(ObjectKind::Blob, Vec::new())));
+            }
+            Err(_) => {
+                if let Ok(obj) = alternate_read() {
+                    return Ok(Some(obj));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// When `oid` is stored as a delta in a pack, return its delta base object id.
 /// Returns [`None`] for loose objects and for non-delta packed objects.
 /// If `oid` is stored as `REF_DELTA` or `OFS_DELTA` in a local pack and its base OID is in
@@ -1820,22 +1864,18 @@ pub fn packed_ref_delta_reuse_slice(
     oid: &ObjectId,
     packed_set: &HashSet<ObjectId>,
 ) -> Result<Option<(ObjectId, Vec<u8>)>> {
-    let mut indexes = read_local_pack_indexes(objects_dir)?;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_oldest_first(&mut indexes);
     for idx in indexes {
-        let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| e.oid.len() == 20 && e.oid.as_slice() == oid.as_bytes())
-        else {
-            continue;
-        };
         let hb = idx.hash_bytes;
         if hb != 20 {
             continue;
         }
-        let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-        let mut p = entry.offset as usize;
+        let Some(entry_offset) = idx.find_offset(oid) else {
+            continue;
+        };
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let mut p = entry_offset as usize;
         let (packed_type, _size) = parse_pack_object_header(&pack_bytes, &mut p)?;
         let base = match packed_type {
             PackedType::RefDelta => {
@@ -1849,7 +1889,7 @@ pub fn packed_ref_delta_reuse_slice(
                 bo
             }
             PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry.offset)?;
+                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
                 let Some(base_entry) = idx.entries.iter().find(|e| e.offset == base_off) else {
                     continue;
                 };
@@ -1869,7 +1909,7 @@ pub fn packed_ref_delta_reuse_slice(
         }
         let zlib_start = p;
         let mut end_pos = zlib_start;
-        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry.offset, hb).is_err() {
+        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry_offset, hb).is_err() {
             continue;
         }
         let compressed = &pack_bytes[zlib_start..end_pos];
@@ -1885,7 +1925,7 @@ pub fn packed_ref_delta_reuse_slice(
 
 /// Prefer older packs when the same OID exists as a full object in a fresh repack and as a delta
 /// in an earlier thin pack (t5316).
-fn sort_pack_indexes_oldest_first(indexes: &mut [PackIndex]) {
+fn sort_pack_indexes_oldest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -1897,7 +1937,7 @@ fn sort_pack_indexes_oldest_first(indexes: &mut [PackIndex]) {
     });
 }
 
-fn sort_pack_indexes_newest_first(indexes: &mut [PackIndex]) {
+fn sort_pack_indexes_newest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -1910,21 +1950,17 @@ fn sort_pack_indexes_newest_first(indexes: &mut [PackIndex]) {
 }
 
 pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectId>> {
-    let mut indexes = read_local_pack_indexes(objects_dir)?;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_newest_first(&mut indexes);
     for idx in &indexes {
         if idx.hash_bytes != 20 {
             continue;
         }
-        let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| e.oid.len() == 20 && e.oid.as_slice() == oid.as_bytes())
-        else {
+        let Some(entry_offset) = idx.find_offset(oid) else {
             continue;
         };
-        let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-        let mut p = entry.offset as usize;
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let mut p = entry_offset as usize;
         let (packed_type, _) = parse_pack_object_header(&pack_bytes, &mut p)?;
         match packed_type {
             PackedType::RefDelta => {
@@ -1935,7 +1971,7 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
                 return Ok(Some(ObjectId::from_bytes(&pack_bytes[p..p + hb])?));
             }
             PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry.offset)?;
+                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
                 return Ok(idx
                     .entries
                     .iter()
@@ -2137,43 +2173,6 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
     }
     Ok(out)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::delta_encode::encode_lcp_delta;
-    use crate::odb::Odb;
-    use crate::transfer::{build_pack, PackBuildOptions};
-    use flate2::write::ZlibEncoder;
-    use flate2::Compression;
-    use std::io::Write;
-    use std::process::Command;
-
-    fn git_try(dir: &std::path::Path, args: &[&str]) -> bool {
-        Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_AUTHOR_NAME", "T")
-            .env("GIT_AUTHOR_EMAIL", "t@example.com")
-            .env("GIT_COMMITTER_NAME", "T")
-            .env("GIT_COMMITTER_EMAIL", "t@example.com")
-            .env("GIT_AUTHOR_DATE", "2005-04-07T22:13:13 +0200")
-            .env("GIT_COMMITTER_DATE", "2005-04-07T22:13:13 +0200")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .expect("git");
         assert!(
             out.status.success(),
             "git {:?}: {}",
@@ -2505,5 +2504,277 @@ mod tests {
         let got = read_object_from_pack(&idx, &oid_tip).expect("rescue read");
         assert_eq!(got.kind, ObjectKind::Blob);
         assert_eq!(got.data, tip);
+    }
+}
+#[cfg(test)]
+mod cached_lookup_tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn repack_all(dir: &Path) {
+        git(dir, &["repack", "-a", "-d"]);
+    }
+
+    fn init_repo_with_pack(dir: &Path) -> ObjectId {
+        git(dir, &["init", "-q"]);
+        std::fs::write(dir.join("blob.txt"), b"pack cached lookup fixture\n").unwrap();
+        git(dir, &["add", "blob.txt"]);
+        git(dir, &["commit", "-qm", "c"]);
+        repack_all(dir);
+        let hex = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD^{tree}"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        let tree_hex = String::from_utf8(hex.stdout).unwrap();
+        ObjectId::from_hex(tree_hex.trim()).unwrap()
+    }
+
+    fn pack_dir(objects: &Path) -> PathBuf {
+        objects.join("pack")
+    }
+
+    fn v2_idx_path(objects: &Path) -> PathBuf {
+        pack_dir(objects)
+            .read_dir()
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "idx"))
+            .expect("pack idx")
+    }
+
+    /// Replace the repository's v2 `.idx` with an equivalent v1-format index.
+    fn convert_pack_idx_to_v1(objects: &Path) -> PathBuf {
+        let idx_path = v2_idx_path(objects);
+        let parsed = read_pack_index(&idx_path).expect("v2 idx");
+        let mut body = Vec::new();
+        for slot in parsed.fanout {
+            body.extend_from_slice(&slot.to_be_bytes());
+        }
+        for entry in &parsed.entries {
+            body.extend_from_slice(&(entry.offset as u32).to_be_bytes());
+            body.extend_from_slice(&entry.oid);
+        }
+        let mut hasher = Sha1::new();
+        Digest::update(&mut hasher, &body);
+        body.extend_from_slice(&hasher.finalize());
+        let mut perms = fs::metadata(&idx_path).unwrap().permissions();
+        perms.set_readonly(false);
+        fs::set_permissions(&idx_path, perms).unwrap();
+        fs::write(&idx_path, body).unwrap();
+        clear_pack_cache();
+        idx_path
+    }
+
+    fn synthetic_fanout_index(entries: &[(Vec<u8>, u64)]) -> PackIndex {
+        let mut pack_entries: Vec<PackIndexEntry> = entries
+            .iter()
+            .map(|(oid, off)| PackIndexEntry {
+                oid: oid.clone(),
+                offset: *off,
+            })
+            .collect();
+        pack_entries.sort_by(|a, b| a.oid.cmp(&b.oid));
+        PackIndex {
+            idx_path: PathBuf::from("synthetic.idx"),
+            pack_path: PathBuf::from("synthetic.pack"),
+            hash_bytes: 20,
+            fanout: compute_fanout_from_entries(&pack_entries),
+            entries: pack_entries,
+        }
+    }
+
+    #[test]
+    fn find_offset_fanout_bucket_first_last_and_miss() {
+        let first = vec![0x05u8; 20];
+        let mut mid = vec![0x05u8; 20];
+        mid[19] = 1;
+        let mut last = vec![0x05u8; 20];
+        last[19] = 2;
+        let miss = vec![0x06u8; 20];
+        let idx =
+            synthetic_fanout_index(&[(first.clone(), 12), (mid.clone(), 24), (last.clone(), 36)]);
+
+        let oid_first = ObjectId::from_bytes(&first).unwrap();
+        let oid_mid = ObjectId::from_bytes(&mid).unwrap();
+        let oid_last = ObjectId::from_bytes(&last).unwrap();
+        let oid_miss = ObjectId::from_bytes(&miss).unwrap();
+
+        assert_eq!(idx.find_offset(&oid_first), Some(12));
+        assert_eq!(idx.find_offset(&oid_mid), Some(24));
+        assert_eq!(idx.find_offset(&oid_last), Some(36));
+        assert_eq!(idx.find_offset(&oid_miss), None);
+    }
+
+    #[test]
+    fn cached_lookup_hit_v2_idx() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let tree = init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let got = read_object_from_packs(&objects, &tree).expect("read tree from v2 pack");
+        assert_eq!(got.kind, ObjectKind::Tree);
+        // Second read must hit the in-memory cache (same result, no reparsing).
+        let again = read_object_from_packs(&objects, &tree).expect("cached read");
+        assert_eq!(again.data, got.data);
+    }
+
+    #[test]
+    fn cached_lookup_hit_v1_idx() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let tree = init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let v1 = convert_pack_idx_to_v1(&objects);
+        assert!(pack_index_is_v1(&v1));
+        let idx = read_pack_index_cached(&v1).expect("parse v1 idx");
+        let off = idx.find_offset(&tree).expect("fanout lookup in v1 idx");
+        assert!(off > 0);
+        let obj = read_object_from_pack(&idx, &tree).expect("read via v1 index");
+        assert_eq!(obj.kind, ObjectKind::Tree);
+    }
+
+    #[test]
+    fn cached_lookup_miss() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let miss = ObjectId::from_hex("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef").unwrap();
+        assert!(read_object_from_packs(&objects, &miss).is_err());
+        assert!(
+            try_read_object_from_local_packs_cached(&objects, &miss, || {
+                Err(Error::ObjectNotFound(miss.to_hex()))
+            })
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn cached_lookup_loose_only() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        git(dir.path(), &["init", "-q"]);
+        let out = Command::new("git")
+            .current_dir(dir.path())
+            .args(["hash-object", "-w", "--stdin"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write;
+                c.stdin
+                    .as_mut()
+                    .unwrap()
+                    .write_all(b"loose-only\n")
+                    .unwrap();
+                c.wait_with_output()
+            })
+            .unwrap();
+        assert!(out.status.success());
+        let oid = ObjectId::from_hex(String::from_utf8(out.stdout).unwrap().trim()).unwrap();
+        let objects = dir.path().join(".git").join("objects");
+        assert!(try_read_object_from_local_packs_cached(&objects, &oid, || {
+            Err(Error::ObjectNotFound(oid.to_hex()))
+        })
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn cached_lookup_multiple_packs() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        git(dir.path(), &["init", "-q"]);
+        std::fs::write(dir.path().join("a.txt"), b"a").unwrap();
+        git(dir.path(), &["add", "a.txt"]);
+        git(dir.path(), &["commit", "-qm", "a"]);
+        repack_all(dir.path());
+        let oid_a = ObjectId::from_hex(
+            String::from_utf8(
+                Command::new("git")
+                    .current_dir(dir.path())
+                    .args(["rev-parse", "HEAD:a.txt"])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"b").unwrap();
+        git(dir.path(), &["add", "b.txt"]);
+        git(dir.path(), &["commit", "-qm", "b"]);
+        git(dir.path(), &["repack", "-d"]);
+        let oid_b = ObjectId::from_hex(
+            String::from_utf8(
+                Command::new("git")
+                    .current_dir(dir.path())
+                    .args(["rev-parse", "HEAD:b.txt"])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim(),
+        )
+        .unwrap();
+        let objects = dir.path().join(".git").join("objects");
+        let pack_count = pack_dir(&objects)
+            .read_dir()
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .count();
+        assert!(
+            pack_count >= 2,
+            "expected multiple pack files, got {pack_count}"
+        );
+        let obj_a = read_object_from_packs(&objects, &oid_a).expect("pack a");
+        let obj_b = read_object_from_packs(&objects, &oid_b).expect("pack b");
+        assert_eq!(obj_a.kind, ObjectKind::Blob);
+        assert_eq!(obj_b.kind, ObjectKind::Blob);
+    }
+
+    #[test]
+    fn packed_delta_base_oid_uses_cached_index() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let miss = ObjectId::from_hex("0101010101010101010101010101010101010101").unwrap();
+        assert!(packed_delta_base_oid(&objects, &miss).unwrap().is_none());
     }
 }

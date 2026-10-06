@@ -4598,29 +4598,13 @@ fn read_object_from_repo(repo: &Repository, oid: &ObjectId) -> Result<grit_lib::
         return Odb::read_loose_verify_oid(&loose_path, oid).map_err(|e| anyhow::anyhow!("{e}"));
     }
 
-    // Try pack files.
-    let indexes = grit_lib::pack::read_local_pack_indexes(repo.odb.objects_dir())
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    for idx in &indexes {
-        if let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| grit_lib::pack::pack_index_entry_matches_sha1_oid(e, oid))
-        {
-            let pack_bytes = std::fs::read(&idx.pack_path)?;
-            match read_object_from_pack(&pack_bytes, entry.offset, &indexes, idx.hash_bytes) {
-                Ok(obj) => return Ok(obj),
-                Err(_) if pack_index_is_v1(&idx.idx_path) => {
-                    return Ok(grit_lib::objects::Object::new(ObjectKind::Blob, Vec::new()));
-                }
-                Err(_) => {
-                    if let Ok(obj) = repo.odb.read(oid) {
-                        return Ok(obj);
-                    }
-                    continue;
-                }
-            }
-        }
+    if let Some(obj) =
+        grit_lib::pack::try_read_object_from_local_packs_cached(repo.odb.objects_dir(), oid, || {
+            repo.odb.read(oid)
+        })
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+    {
+        return Ok(obj);
     }
 
     // The local loose store and local packs do not have the object. Before treating
@@ -4638,28 +4622,13 @@ fn read_object_from_repo(repo: &Repository, oid: &ObjectId) -> Result<grit_lib::
     if loose_path.is_file() {
         return Odb::read_loose_verify_oid(&loose_path, oid).map_err(|e| anyhow::anyhow!("{e}"));
     }
-    let indexes = grit_lib::pack::read_local_pack_indexes(repo.odb.objects_dir())
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    for idx in &indexes {
-        if let Some(entry) = idx
-            .entries
-            .iter()
-            .find(|e| grit_lib::pack::pack_index_entry_matches_sha1_oid(e, oid))
-        {
-            let pack_bytes = std::fs::read(&idx.pack_path)?;
-            match read_object_from_pack(&pack_bytes, entry.offset, &indexes, idx.hash_bytes) {
-                Ok(obj) => return Ok(obj),
-                Err(_) if pack_index_is_v1(&idx.idx_path) => {
-                    return Ok(grit_lib::objects::Object::new(ObjectKind::Blob, Vec::new()));
-                }
-                Err(_) => {
-                    if let Ok(obj) = repo.odb.read(oid) {
-                        return Ok(obj);
-                    }
-                    continue;
-                }
-            }
-        }
+    if let Some(obj) =
+        grit_lib::pack::try_read_object_from_local_packs_cached(repo.odb.objects_dir(), oid, || {
+            repo.odb.read(oid)
+        })
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+    {
+        return Ok(obj);
     }
     bail!("object not found: {}", oid.to_hex())
 }
@@ -4669,12 +4638,6 @@ fn read_object_from_repo_no_lazy(
     oid: &ObjectId,
 ) -> Result<grit_lib::objects::Object> {
     repo.odb.read(oid).map_err(|e| anyhow::anyhow!("{e}"))
-}
-
-fn pack_index_is_v1(path: &Path) -> bool {
-    std::fs::read(path)
-        .ok()
-        .is_some_and(|bytes| !bytes.starts_with(&[0xff, b't', b'O', b'c']))
 }
 
 fn maybe_lazy_fetch_missing_object(repo: &Repository, oid: &ObjectId) -> Result<()> {
