@@ -1251,3 +1251,5 @@ test_expect_success 'test_must_fail rejects a non-git command with env' '
 '
 
 test_done
+
+test_expect_success "CI smoke failure demo (throwaway)" "false"
