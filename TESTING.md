@@ -2,7 +2,11 @@
 
 ## Overview
 
-Grit uses the upstream Git test suite as ground truth. Harness files live under `tests/` (ported from `git/t/`) and run through `scripts/run-tests.sh` with the grit binary copied into `tests/grit` and exposed as `git` via the harness.
+**Regression gate.** The upstream-style harness under `tests/` (ported from `git/t/`) is the **compatibility regression gate** for `grit-git`: in-scope pass counts must not regress when you change behavior it covers. It is no longer the primary way we grow coverage.
+
+**Rust tests.** New and refactored **`grit-lib`** behavior is validated with **Rust integration and unit tests** against the public API, plus **coverage tests** for public items. Core upstream cases from `git/t/` are converted over time (see **ROADMAP.md** testing items); mapping tables will live in this file as those land.
+
+Harness files run through `scripts/run-tests.sh` with `target/release/grit-git` copied to `tests/grit` and exposed as `git` via the harness.
 
 The **single source of truth** for per-file harness status is the per-test TOML tree **`data/tests/<group>/<stem>.toml`** (e.g. `data/tests/t0/t0000-basic.toml`). There are no intermediate TSVs and no aggregate CSV. Dashboards — **`docs/index.html`** (homepage progress card), **`docs/progress/index.html`** (summary + progress by group), **`docs/testfiles.html`** (per-file table, filterable by group), and **`docs/test-progress.svg`** (overall pass-rate badge for the README) — are generated from that tree, but **only when requested**: pass `--dashboard` to `run-tests.sh` or run `python3 scripts/generate-dashboard-from-test-files.py` directly.
 

@@ -1,6 +1,6 @@
 # Grit — Git in Rust
 
-Grit is a **from-scratch reimplementation of Git** in idiomatic Rust. The goal is to match Git's behavior closely enough that the upstream test suite (under `git/t/`) can be ported and run against this tool.
+Grit is a **from-scratch Git engine in idiomatic Rust**: a fast, linkable **`grit-lib`**, a modern **`grit`** CLI, and **`grit-git`** as a Git-compatible compatibility bed. See **ROADMAP.md** for the ordered plan.
 
 The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https://gitbutler.com).
 
@@ -10,13 +10,11 @@ The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https:
 
 ## Motivation
 
-Why rewrite Git functionality into Rust? It's not about replacing Git, it's about having a feature-complete linkable library. It's similar to Gitoxide or libgit2/git2-rs, but using LLMs to try to achieve total feature parity by targeting the Git testing suite.
+We want a **fast, clean Git library** you can embed in tools and agents—not a wholesale replacement for the `git` binary on every machine. **`grit-lib`** holds core semantics; **`grit-cli`** ships a modern workflow with **`--json`** / **`--markdown`** on every command; **`grit-git`** keeps upstream-style compatibility so we can catch regressions.
 
 ## Approach
 
-This implementation has been written nearly entirely by AI coding agents with the goal of entirely passing the C Git testing suite. For details on how we accomplished this, see our [blog post](https://blog.gitbutler.com/true-grit).
-
-The implementation is entirely in Rust, with most of the generic logic in the [grit-lib](https://crates.io/crates/grit-lib) library crate, and the Git-compatible CLI in the [grit-git](https://crates.io/crates/grit-git) crate (binary `grit-git`), which uses the library to provide a UI that passes the Git tests.
+Most logic lives in [grit-lib](https://crates.io/crates/grit-lib). The install script ships [grit-cli](https://crates.io/crates/grit-cli) as **`grit`**; [grit-git](https://crates.io/crates/grit-git) exercises the same library against the ported upstream harness as a **regression gate**, while new coverage moves into **Rust tests** on the library API. Performance is measured against real `git` in **`bench/`**. For background on how the project started, see the [True Grit](https://blog.gitbutler.com/true-grit) post.
 
 The headline CLI shipped by the install script is `grit`, a simpler, opinionated interface from the [grit-cli](https://crates.io/crates/grit-cli) crate. It is the only binary the install script installs, on every platform including Windows.
 
