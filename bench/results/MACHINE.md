@@ -5,7 +5,7 @@
 - **RAM:** 16 GiB
 - **OS / kernel:** Linux 6.12.94+ x86_64 (Cursor cloud VM)
 - **Git:** `git version 2.43.0` (`/usr/bin/git`)
-- **Grit source commit:** `7967f0c3b1ba7052f5840c56d3099f560f75f1d7` (reviewed branch tip; used to build `target/release/grit-git` via `cargo build --release -p grit-git`)
+- **Grit source commit:** `7967f0c3bc90060cd57ef030c8320693878adf4a` (branch tip at measurement time; used to build `target/release/grit-git` via `cargo build --release -p grit-git`)
 - **Rust:** `rustc 1.99.0 (b940084d7 2026-09-28)`
 - **Hyperfine:** 1.18.0 (Ubuntu package)
 
@@ -13,7 +13,7 @@
 
 ```bash
 rustup default stable
-git checkout 7967f0c3b1ba7052f5840c56d3099f560f75f1d7  # grit source tree for the measured binary
+git checkout 7967f0c3bc90060cd57ef030c8320693878adf4a  # grit source tree for the measured binary
 cargo build --release -p grit-git -p grit-cli
 bash bench/run-everyday.sh --scales S,M,L,H
 bash bench/run.sh
