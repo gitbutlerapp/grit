@@ -53,7 +53,10 @@ Untracked
 
 Stage changes. With no paths, stages **everything** that `grit status` reports as
 changed — modifications, deletions, and untracked files alike. Pass paths to
-stage a subset.
+stage a subset. Path arguments are resolved from your **current directory** (like
+Git): from a subdirectory, `grit add g` stages `g` in that folder, and
+`../other` or absolute paths under the repository work too. A path that matches
+nothing is an error (non-zero exit).
 
 ```sh
 grit add            # stage all changes

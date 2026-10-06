@@ -158,6 +158,37 @@ fn init_checked_out_submodule(parent: &Path, name: &str) -> Result<String, Box<d
 }
 
 #[test]
+fn add_pathspec_from_subdirectory() -> TestResult {
+    let scratch = Scratch::new("add-subdir")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    write_file(&repo.join("a"), "a\n")?;
+    gs_ok(&repo, ["commit", "one"])?;
+
+    let deep = repo.join("sub/deep");
+    fs::create_dir_all(&deep)?;
+    write_file(&deep.join("g"), "g\n")?;
+    write_file(&deep.join("h"), "h\n")?;
+    write_file(&deep.join("i"), "i\n")?;
+
+    gs_ok(&deep, ["add", "g"])?;
+    let status = gs_ok(&deep, ["status"])?;
+    assert!(
+        status.stdout.contains("Staged") && status.stdout.contains("g"),
+        "expected g staged from subdir:\n{}",
+        status.dump()
+    );
+
+    let missing = gs(&deep, ["add", "nonexist"])?;
+    assert_ne!(missing.status, Some(0), "{}", missing.dump());
+
+    gs_ok(&deep, ["add", "../deep/h"])?;
+    gs_ok(&deep, ["add", &path_arg(&deep.join("i"))?])?;
+    Ok(())
+}
+
+#[test]
 fn local_edit_config_commit_status_and_log_workflow() -> TestResult {
     let scratch = Scratch::new("local")?;
     let repo = scratch.child("repo");

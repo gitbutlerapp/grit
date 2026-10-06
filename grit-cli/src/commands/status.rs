@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::context::{self, CommitSummary};
 use crate::output::{change_json, ChangeJson, CommitJson, HumanRender};
-use crate::ui;
+use crate::ui::{self, PathDisplayContext};
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
 const SHORTLOG_LIMIT: usize = 10;
@@ -55,6 +55,8 @@ pub struct StatusOutcome {
     staged_entries: Vec<DiffEntry>,
     #[serde(skip)]
     unstaged_entries: Vec<DiffEntry>,
+    #[serde(skip)]
+    path_display: Option<PathDisplayContext>,
 }
 
 impl HumanRender for StatusOutcome {
@@ -113,9 +115,10 @@ impl StatusOutcome {
             println!("Nothing to commit — working tree clean.");
             return;
         }
-        ui::print_change_group("Staged", &self.staged_entries);
-        ui::print_change_group("Changed (not staged)", &self.unstaged_entries);
-        ui::print_untracked(&self.untracked);
+        let display = self.path_display.as_ref();
+        ui::print_change_group("Staged", &self.staged_entries, display);
+        ui::print_change_group("Changed (not staged)", &self.unstaged_entries, display);
+        ui::print_untracked(&self.untracked, display);
     }
 
     fn render_hints(&self) {
@@ -151,6 +154,12 @@ pub fn run() -> Result<StatusOutcome> {
     let unstaged: Vec<ChangeJson> = model.unstaged.iter().map(change_json).collect();
     let clean = model.staged.is_empty() && model.unstaged.is_empty() && model.untracked.is_empty();
 
+    let cwd = std::env::current_dir().context("could not read the current directory")?;
+    let path_display = repo
+        .work_tree
+        .as_ref()
+        .and_then(|wt| PathDisplayContext::from_cwd_and_work_tree(cwd, wt.clone()));
+
     Ok(StatusOutcome {
         branch,
         detached,
@@ -166,6 +175,7 @@ pub fn run() -> Result<StatusOutcome> {
         commit_rows: ahead_commits,
         staged_entries: model.staged,
         unstaged_entries: model.unstaged,
+        path_display,
     })
 }
 

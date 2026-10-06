@@ -4,10 +4,11 @@
 //! stages exactly what `grit status` reports as changed — including deletions and
 //! untracked files — without reimplementing worktree walking or ignore rules.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use grit_lib::diff::{mode_from_metadata, DiffStatus};
 use grit_lib::index::{entry_from_stat, Index};
 use grit_lib::objects::ObjectKind;
+use grit_lib::pathspec::{matches_pathspec_list, pathdiff, resolve_pathspec_in_worktree};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -54,6 +55,24 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
         .work_tree
         .clone()
         .context("grit add needs a working tree")?;
+    let cwd = std::env::current_dir().context("could not read the current directory")?;
+    let prefix = pathdiff(&cwd, &work_tree);
+
+    let resolved_specs: Option<Vec<String>> = if selectors.is_empty() {
+        None
+    } else {
+        let mut specs = Vec::with_capacity(selectors.len());
+        for sel in selectors {
+            if sel.is_empty() {
+                bail!("invalid path ''");
+            }
+            let resolved = resolve_pathspec_in_worktree(sel, sel, &work_tree, prefix.as_deref())
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            specs.push(resolved);
+        }
+        Some(specs)
+    };
+
     // Enumerate untracked *files* (not collapsed directories like `sub/`), so we
     // can hash each one rather than trying to read a directory as a blob.
     let opts = StatusOptions {
@@ -63,8 +82,11 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
     let model = status(repo, &opts, &mut NullProgress).context("could not compute status")?;
     let mut index = repo.load_index().context("could not load the index")?;
 
-    let matches =
-        |path: &str| selectors.is_empty() || selectors.iter().any(|s| path_matches(s, path));
+    let matches = |path: &str| {
+        resolved_specs
+            .as_ref()
+            .is_none_or(|specs| matches_pathspec_list(path, specs))
+    };
 
     let mut staged = 0;
     for entry in &model.unstaged {
@@ -93,6 +115,9 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
         index.sort();
         repo.write_index(&mut index)
             .context("could not write the index")?;
+    } else if resolved_specs.is_some() {
+        let pathspec = selectors.first().map(String::as_str).unwrap_or("");
+        bail!("pathspec '{pathspec}' did not match any files");
     }
     Ok(staged)
 }
@@ -125,13 +150,4 @@ fn stage_worktree_file(
         .with_context(|| format!("could not stage {rel_path}"))?;
     index.add_or_replace(entry);
     Ok(())
-}
-
-/// Whether a worktree `path` is covered by a user-provided `selector`.
-fn path_matches(selector: &str, path: &str) -> bool {
-    let selector = selector.trim_start_matches("./").trim_end_matches('/');
-    if selector.is_empty() || selector == "." {
-        return true;
-    }
-    path == selector || path.starts_with(&format!("{selector}/"))
 }
