@@ -1,5 +1,6 @@
 //! `grit ls-tree` — list the contents of a tree object.
 
+#![allow(clippy::collapsible_match)]
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use std::io::{self, Write};

@@ -3,6 +3,14 @@
 //! Displays the commit history starting from HEAD (or specified revisions),
 //! with configurable formatting and filtering.
 
+#![allow(
+    clippy::collapsible_if,
+    clippy::manual_map,
+    clippy::match_like_matches_macro,
+    clippy::needless_borrow,
+    clippy::unnecessary_sort_by,
+    clippy::useless_conversion
+)]
 use crate::explicit_exit::ExplicitExit;
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
@@ -10947,6 +10955,7 @@ fn apply_format_string(
         Right,
         Center,
     }
+    #[allow(clippy::enum_variant_names)]
     #[derive(Clone, Copy)]
     enum Trunc {
         None,

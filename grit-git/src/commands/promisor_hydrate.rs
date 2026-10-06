@@ -2,6 +2,7 @@
 //!
 //! Used by partial-clone hydration, `sparse-checkout` updates, and `backfill`.
 
+#![allow(clippy::if_same_then_else)]
 use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::diff::{zero_oid, DiffEntry, DiffStatus};
@@ -58,10 +59,8 @@ pub(crate) fn prefetch_promisor_for_diff_entries(
                         add_oids.insert(e.new_oid);
                     }
                 }
-                DiffStatus::Deleted => {
-                    if e.old_oid != z {
-                        del_oids.insert(e.old_oid);
-                    }
+                DiffStatus::Deleted if e.old_oid != z => {
+                    del_oids.insert(e.old_oid);
                 }
                 _ => {}
             }
@@ -74,10 +73,8 @@ pub(crate) fn prefetch_promisor_for_diff_entries(
                         want.insert(e.new_oid);
                     }
                 }
-                DiffStatus::Deleted => {
-                    if e.old_oid != z && !skip.contains(&e.old_oid) {
-                        want.insert(e.old_oid);
-                    }
+                DiffStatus::Deleted if e.old_oid != z && !skip.contains(&e.old_oid) => {
+                    want.insert(e.old_oid);
                 }
                 _ => {}
             }

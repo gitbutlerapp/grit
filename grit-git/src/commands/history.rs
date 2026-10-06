@@ -1,5 +1,6 @@
 //! `grit history` — history rewriting (reword, split, etc.).
 
+#![allow(clippy::if_same_then_else, clippy::needless_question_mark)]
 use crate::commands::commit::{cleanup_edited_commit_message, comment_line_prefix_full};
 use crate::commands::replay::replay_commits_onto;
 use crate::commands::update_ref::resolve_reflog_identity;

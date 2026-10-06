@@ -4,6 +4,7 @@
 //! (or a custom namespace via `--ref`).  Each entry in the notes tree is
 //! named by the full hex SHA of the annotated object.
 
+#![allow(clippy::if_same_then_else, clippy::redundant_pattern_matching)]
 use anyhow::{bail, Context, Result};
 use clap::{Args as ClapArgs, Subcommand};
 use std::fs;

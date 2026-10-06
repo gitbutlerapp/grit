@@ -2,6 +2,7 @@
 //!
 //! Native push support targets local transports and smart HTTP receive-pack.
 
+#![allow(clippy::manual_retain, clippy::question_mark)]
 use crate::commands::pack_objects;
 use crate::protocol_wire;
 use crate::wire_trace;

@@ -2061,13 +2061,8 @@ fn grep_is_binary(
         BinaryOverride::ForceBinary => true,
         BinaryOverride::ForceText => false,
         BinaryOverride::None => {
-            if !content_is_binary {
-                false
-            } else if path_has_active_textconv(repo, path_for_attrs, args, binary_override) {
-                false
-            } else {
-                true
-            }
+            content_is_binary
+                && !path_has_active_textconv(repo, path_for_attrs, args, binary_override)
         }
     }
 }
@@ -2537,10 +2532,12 @@ fn build_one_regex(pat: &str, args: &Args) -> Result<Regex> {
 
     let use_bre = !args.extended_regexp && !args.fixed_strings && !args.perl_regexp;
     // Git ERE does not accept PCRE `\p{...}` / `\P{...}`; Rust's engine does — reject for parity.
-    if args.extended_regexp && !args.perl_regexp && !args.fixed_strings {
-        if pat.contains("\\p{") || pat.contains("\\P{") {
-            bail!("invalid pattern: '{pat}'");
-        }
+    if args.extended_regexp
+        && !args.perl_regexp
+        && !args.fixed_strings
+        && (pat.contains("\\p{") || pat.contains("\\P{"))
+    {
+        bail!("invalid pattern: '{pat}'");
     }
     let effective = if args.fixed_strings {
         regex::escape(pat)
@@ -3174,12 +3171,9 @@ fn grep_content(
             let mut bol = 0usize;
             let mut cno = 0usize;
             let mut first = true;
-            loop {
-                let Some((abs_s, abs_e)) =
-                    next_match_from_bol(line, bol, args, compiled, &atom_indices_all)
-                else {
-                    break;
-                };
+            while let Some((abs_s, abs_e)) =
+                next_match_from_bol(line, bol, args, compiled, &atom_indices_all)
+            {
                 if first {
                     cno = abs_s + 1;
                     first = false;

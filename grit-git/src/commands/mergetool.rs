@@ -3,6 +3,7 @@
 //! Scans the index for unmerged entries (stage > 0) and invokes the
 //! configured merge tool on each conflicted file.
 
+#![allow(clippy::useless_asref)]
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
 use grit_lib::config::ConfigSet;

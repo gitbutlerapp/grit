@@ -3,6 +3,21 @@
 //! Implements fast-forward, three-way merge with conflict handling,
 //! `--squash`, `--no-ff`, `--ff-only`, `--abort`, and `--continue`.
 
+#![allow(
+    clippy::collapsible_if,
+    clippy::collapsible_match,
+    clippy::field_reassign_with_default,
+    clippy::filter_map_bool_then,
+    clippy::for_kv_map,
+    clippy::if_same_then_else,
+    clippy::manual_map,
+    clippy::needless_borrow,
+    clippy::redundant_closure,
+    clippy::single_match,
+    clippy::unnecessary_get_then_check,
+    clippy::unnecessary_map_or,
+    clippy::useless_conversion
+)]
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use std::collections::{BTreeMap, BTreeSet, HashMap};

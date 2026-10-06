@@ -3,6 +3,12 @@
 //! Reads object IDs (or revisions with `--revs`) from stdin and writes a
 //! `.pack` file and corresponding `.idx` index file.
 
+#![allow(
+    clippy::field_reassign_with_default,
+    clippy::for_kv_map,
+    clippy::if_same_then_else,
+    clippy::redundant_locals
+)]
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use filetime::FileTime;
@@ -3043,6 +3049,7 @@ fn mark_trees_uninteresting_sparse(
     Ok(())
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn walk_tree_respecting_uninteresting(
     repo: &Repository,
     tree_oid: &ObjectId,

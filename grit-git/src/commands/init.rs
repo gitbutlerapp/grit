@@ -1,5 +1,10 @@
 //! `grit init` — initialise or reinitialise a Git repository.
 
+#![allow(
+    clippy::if_same_then_else,
+    clippy::needless_option_as_deref,
+    clippy::unnecessary_lazy_evaluations
+)]
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use std::fs;

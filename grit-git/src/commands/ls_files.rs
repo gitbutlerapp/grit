@@ -1,5 +1,6 @@
 //! `grit ls-files` — list information about files in the index and working tree.
 
+#![allow(clippy::if_same_then_else)]
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
 use std::borrow::Cow;
