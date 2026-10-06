@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>status-long — Grit vs Git</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+         max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  a { color: #0969da; }
+  .meta { color: #656d76; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .bench { margin-bottom: 2rem; }
+  .bench h2 { font-size: 1.1rem; margin-bottom: 0.25rem; font-family: monospace; }
+  .desc { color: #656d76; font-size: 0.85rem; margin-bottom: 0.75rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #d0d7de; }
+  .ratio { font-weight: 600; border-bottom: none; padding-top: 0.5rem; }
+  .much-faster, .faster { color: #1a7f37; }
+  .similar { color: #9a6700; }
+  .slower, .much-slower { color: #cf222e; }
+</style>
+</head>
+<body>
+<p><a href="../bench.html">← All benchmarks</a></p>
+<h1>status-long</h1>
+<p class="meta">- **Date (UTC):** 2026-10-06 · - **CPU:** Intel(R) Xeon(R) Processor (4 vCPUs, 1 thread/core) · - **RAM:** 16 GiB · - **OS / kernel:** Linux 6.12.94+ x86_64 (Cursor cloud VM) · - **Git:** `git version 2.43.0` (`/usr/bin/git`) · - **Grit commit:** `bb7404251fc6da01804a5fb7a682cddf7084b3a3` (repo HEAD at measurement time)</p>
+
+  <section class="bench">
+    <h2>status-long@S</h2>
+    <p class="desc">100 files (S)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>1.8 ms</td><td>352.3 µs</td></tr>
+      <tr><td>Grit</td><td>4.0 ms</td><td>636.8 µs</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">2.2× slower (git/grit)</td></tr>
+    </table>
+  </section>
+  <section class="bench">
+    <h2>status-long@M</h2>
+    <p class="desc">1,000 files (M)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>2.6 ms</td><td>358.6 µs</td></tr>
+      <tr><td>Grit</td><td>6.3 ms</td><td>742.9 µs</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">2.4× slower (git/grit)</td></tr>
+    </table>
+  </section>
+  <section class="bench">
+    <h2>status-long@L</h2>
+    <p class="desc">10,000 files (L)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>10.9 ms</td><td>1.7 ms</td></tr>
+      <tr><td>Grit</td><td>39.7 ms</td><td>3.8 ms</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">3.7× slower (git/grit)</td></tr>
+    </table>
+  </section>
+</body>
+</html>
