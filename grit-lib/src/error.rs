@@ -42,6 +42,11 @@ pub enum Error {
     #[error("corrupt object: {0}")]
     CorruptObject(String),
 
+    /// In-pack delta resolution exceeded the read-side chain depth limit (guards
+    /// against cyclic ref-delta chains and unbounded recursion; Git has no read limit).
+    #[error("delta chain too deep (limit {limit})")]
+    DeltaChainTooDeep { limit: usize },
+
     /// An unsupported or unknown object type was encountered.
     #[error("unknown object type '{0}'")]
     UnknownObjectType(String),
