@@ -4,7 +4,56 @@
   <title>project notes from Grit</title>
   <link>https://grit-scm.com/blog/</link>
   <description>Short deep dives into building a Git-compatible, library-oriented Rust implementation.</description>
-  <lastBuildDate>Sat, 20 Jun 2026 00:00:00 +0000</lastBuildDate>
+  <lastBuildDate>Tue, 06 Oct 2026 00:00:00 +0000</lastBuildDate>
+  <item>
+    <title>A new site, and a new focus</title>
+    <link>https://grit-scm.com/blog/a-new-site-and-a-new-focus/</link>
+    <guid isPermaLink="true">https://grit-scm.com/blog/a-new-site-and-a-new-focus/</guid>
+    <pubDate>Tue, 06 Oct 2026 00:00:00 +0000</pubDate>
+    <description>Grit got far enough on Git's own test suite that the next problem isn't compatibility. It's speed and a library worth linking. Here's what changes.</description>
+    <content:encoded><![CDATA[<p>If you&#x27;ve been here before, you&#x27;ll notice the site looks different. The new homepage is laid out as a commit graph: each section is a commit, the library work branches off and merges back in, and the whole thing ends at the root commit. It&#x27;s a small visual joke, but it&#x27;s also a fair summary of where the project is. We&#x27;ve reached a point where it makes sense to look back at the history and decide what the next branch is.</p>
+<h2 id="where-we-are">Where we are</h2>
+<p>Grit started with one goal: reimplement Git in Rust well enough to pass Git&#x27;s own test suite. As of today, the compatibility CLI, <code>grit-git</code>, passes more than 41,700 of the 42,001 upstream tests we run.</p>
+<p>That number is real, but it hides a lot. Getting there meant workarounds, slow paths, and faithful support for every odd subcommand and legacy interface Git has picked up over twenty years. Passing the tests showed that the on-disk formats and wire protocols are right. It didn&#x27;t make Grit a library you&#x27;d want to put in your product, or a client you&#x27;d want to use every day.</p>
+<h2 id="the-new-focus">The new focus</h2>
+<p>The project is now organized around three crates with distinct jobs:</p>
+<ul>
+<li><strong><code>grit-lib</code></strong> is a clean, linkable Git library that any Rust project can use. This is the heart of the project.</li>
+<li><strong><code>grit-cli</code></strong> is the <code>grit</code> binary: a Git client with a modern command line. It&#x27;s what the installer gives you.</li>
+<li><strong><code>grit-git</code></strong> stays a command-for-command Git mirror, but its job is now to be our <strong>compatibility test bed</strong>, not our product.</li>
+</ul>
+<p>The upstream harness doesn&#x27;t go away. It becomes a regression gate: in-scope tests must not get worse, and nobody gets to weaken a test to make a change pass.</p>
+<h2 id="performance-comes-first">Performance comes first</h2>
+<p>The library and CLI need to be as fast as we can make them, and we want to prove it with measurements, not claims. That means benchmarks for core operations in <code>grit-lib</code>, plus real-world scenarios compared directly against <code>git</code>. Those scenarios cover large repositories, deep history, big packs, many refs and network operations.</p>
+<p>Some of the planned work:</p>
+<ul>
+<li>Fix the super-linear hot paths where we reload attributes and config inside per-file loops.</li>
+<li>Move to a single hashing abstraction with hardware-accelerated SHA-1. We&#x27;re deliberately not implementing sha1dc.</li>
+<li>Rework the object database read path: no reading whole packs into memory, a delta-base cache, faster index lookups.</li>
+<li>Add reachability bitmaps, and parallelize status, checkout, index-pack and delta search.</li>
+</ul>
+<p>Most targets are written as ratios against Git, usually within 1.2× or better on the same machine and the same repository.</p>
+<h2 id="a-library-worth-linking">A library worth linking</h2>
+<p>A library that prints to stdout, calls <code>process::exit</code>, reads environment variables deep inside, or keeps state in process-wide globals isn&#x27;t really a library. Cleaning that up is explicit roadmap work:</p>
+<ul>
+<li>Caches and config are owned by a <code>Repository</code> value.</li>
+<li>The environment is read only at the CLI boundary.</li>
+<li>Errors are typed, and the Git-formatted text is rendered in <code>grit-git</code>.</li>
+<li>The library doesn&#x27;t shell out.</li>
+</ul>
+<p>We&#x27;re also adding pluggable backends: an object database abstraction like the one Git core is introducing, and ref backends for loose, packed and reftable refs.</p>
+<p>Alongside that, the relevant upstream tests get converted into Rust tests against the library API, covering core behavior and edge cases rather than command-line UX. Every public interface gets coverage.</p>
+<h2 id="what-we-re-dropping">What we&#x27;re dropping</h2>
+<p>Some parts of Git are rarely used and expensive to carry. Archive, the email workflow (<code>am</code>, <code>format-patch</code>, <code>send-email</code>, <code>imap-send</code>, <code>request-pull</code>) and the foreign-VCS bridges get no CLI and no further work. Where removing them simplifies <code>grit-lib</code>, they come out of the library too, and the matching harness files are marked out of scope with a reason.</p>
+<h2 id="the-cli-contract">The CLI contract</h2>
+<p>Every <code>grit</code> command should work well for three audiences. By default it prints clean output for people. With <code>--json</code> it prints stable, documented output for scripts. With <code>--markdown</code> it prints output that&#x27;s easy for agents to read. Today&#x27;s commands already support <code>--json</code>; <code>--markdown</code> and published schemas are next.</p>
+<h2 id="following-along">Following along</h2>
+<p>The full plan is in <a href="https://github.com/gitbutlerapp/grit/blob/main/ROADMAP.md">ROADMAP.md</a>, and the live version is on the <a href="https://maint.grit-scm.com/roadmap">Grit Factory dashboard</a>. The items are worked one at a time, in order. The first few are a CI gate for every change, a benchmark baseline against Git, and a real documentation site that has to stay current with every change.</p>
+<p>If you want to try it:</p>
+<pre><code>curl -fsSL https://grit-scm.com/install | sh
+cargo add grit-lib</code></pre>
+<p>Compatibility got us here. Speed and a clean library are what come next.</p>]]></content:encoded>
+  </item>
   <item>
     <title>grit is now the simple CLI</title>
     <link>https://grit-scm.com/blog/grit-is-now-the-simple-cli/</link>
