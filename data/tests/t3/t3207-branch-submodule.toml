@@ -1,7 +1,0 @@
-in_scope = "yes"
-tests_total = 20
-passed_last = 20
-failing = 0
-fully_passing = true
-status = "ok"
-expect_failure = 0

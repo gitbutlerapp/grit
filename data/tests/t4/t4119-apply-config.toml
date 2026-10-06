@@ -1,7 +1,0 @@
-in_scope = "skip"
-tests_total = 11
-passed_last = 7
-failing = 4
-fully_passing = false
-status = "ok"
-expect_failure = 0
