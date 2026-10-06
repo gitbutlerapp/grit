@@ -1,6 +1,6 @@
 # Grit — Git in Rust
 
-Grit is a **from-scratch Git engine in idiomatic Rust**: a fast, linkable **`grit-lib`**, a modern **`grit`** CLI, and **`grit-git`** as a Git-compatible compatibility bed. See **ROADMAP.md** for the ordered plan.
+Grit is a **Git engine in idiomatic Rust**. It started as a test-suite reimplementation; the focus is now a linkable **`grit-lib`**, a modern **`grit`** client (**`grit-cli`**), and **`grit-git`** as a compatibility test bed. See **ROADMAP.md** for the plan.
 
 The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https://gitbutler.com).
 
@@ -10,11 +10,11 @@ The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https:
 
 ## Motivation
 
-We want a **fast, clean Git library** you can embed in tools and agents—not a wholesale replacement for the `git` binary on every machine. **`grit-lib`** holds core semantics; **`grit-cli`** ships a modern workflow with **`--json`** / **`--markdown`** on every command; **`grit-git`** keeps upstream-style compatibility so we can catch regressions.
+Grit reached much of Git's upstream test coverage, but carried workarounds, slow paths, and every legacy subcommand. **The new focus:** [grit-lib](https://crates.io/crates/grit-lib) as a clean, **linkable** library for Rust embedders; [grit-cli](https://crates.io/crates/grit-cli) as a **modern Git client** with human, **`--json`**, and **`--markdown`** output; [grit-git](https://crates.io/crates/grit-git) kept as a **compatibility test bed**. **Performance is the top priority**, measured against real `git` on large-repo scenarios.
 
 ## Approach
 
-Most logic lives in [grit-lib](https://crates.io/crates/grit-lib). The install script ships [grit-cli](https://crates.io/crates/grit-cli) as **`grit`**; [grit-git](https://crates.io/crates/grit-git) exercises the same library against the ported upstream harness as a **regression gate**, while new coverage moves into **Rust tests** on the library API. Performance is measured against real `git` in **`bench/`**. For background on how the project started, see the [True Grit](https://blog.gitbutler.com/true-grit) post.
+Core Git semantics live in **`grit-lib`** (pluggable ODB and ref backends over time). The install script ships **`grit`** from **`grit-cli`**; **`grit-git`** runs the ported harness as a **regression gate** while **relevant upstream tests convert to Rust** on the library API. Unused areas (archive, email workflow, foreign-VCS bridges) are dropped from active development. Docs and benchmarks stay in sync with each change. Background: [True Grit](https://blog.gitbutler.com/true-grit).
 
 The headline CLI shipped by the install script is `grit`, a simpler, opinionated interface from the [grit-cli](https://crates.io/crates/grit-cli) crate. It is the only binary the install script installs, on every platform including Windows.
 
@@ -22,7 +22,7 @@ The headline CLI shipped by the install script is `grit`, a simpler, opinionated
 
 While the `grit-git` command emulates `git` functionality enough to successfully run over 42k of it's tests, it has been nearly entirely written by agents and has not been used for realsies. It's probably currently unusably slow or completely broken in ways that are not exercised in the test suite.
 
-Our current goal is to get all the tests to pass and then refactor to real usability (speed, API surface, etc) while being able to successfully test for regression easily. Try it out and either send a fix or report an issue for anything you find or ways you want to use it that it doesn't successfully do.
+The current goal is **speed and a clean library API** while keeping on-disk and wire compatibility with Git and using the harness to catch regressions. Try it out and send a fix or report an issue for gaps you hit.
 
 ## Installation
 

@@ -14,25 +14,70 @@ Durable build contract for autonomous runs. Long-term plan: **ROADMAP.md** (snap
 
 ## Project direction
 
-Grit is a from-scratch Git engine in idiomatic Rust. Three deliverables:
+Grit began as a Rust reimplementation of Git aimed at passing Git's own test suite. It largely got there, but with workarounds, inefficient code, and support for every odd subcommand and legacy interface. **The project now has a new focus:**
 
-| Piece | Role |
+| Crate | Role |
 | ----- | ---- |
-| **`grit-lib`** | Fast, clean, **linkable** library: typed APIs, no process globals, no stdout/stderr in library code. This is the product. |
-| **`grit-cli`** | Modern **`grit`** client for daily workflows. **Every command** supports human output, **`--json`**, and **`--markdown`** (stable schemas). |
-| **`grit-git`** | Git-compatible CLI (`grit-git` binary). Kept as a **compatibility and regression test bed**, not the primary UX goal. |
+| **`grit-cli`** | Git client with a **modern CLI** (`grit` binary). Primary UX. |
+| **`grit-lib`** | Clean, well-designed, **linkable** library any Rust project can use. |
+| **`grit-git`** | Git-compatible CLI — **compatibility test bed** for the harness. |
 
-**What `grit-lib` must do.** Core Git semantics: object model and ODB (loose, pack, MIDX, alternates), refs and reflog, index and worktree, diff and merge, revwalk and rev-parse, config / ignore / attributes, transport and pack protocol, bundles, maintenance (gc, commit-graph, bitmaps). Pluggable ODB and ref backends over time. Behavior matches Git where compatibility matters; errors are **typed** in the library and rendered at CLI boundaries.
+Ordered work: **ROADMAP.md** (live plan on the [factory dashboard](https://maint.grit-scm.com/roadmap)).
 
-**What we drop.** Out-of-scope surface area leaves **`grit-lib`** (email/`am`/`send-email`, archive-only paths, SCM bridges, daemon/http-backend/instaweb, etc.). `grit-git` may keep thin shims; harness files for dropped commands are **`in_scope = "skip"`** with a reason (see ROADMAP item 5 and `docs/v1-scope.md`).
+### What `grit-lib` must do
 
-**Performance-first.** Measure before optimizing (`bench/`). Hot paths should track Git within roadmap targets; super-linear reloads (config, attributes, ignore in per-file loops) are bugs.
+Cover **most of what core Git does:**
 
-**Hashing.** One abstraction; **plain SHA-1 only — never sha1dc**. Prefer hardware acceleration (SHA-NI / aarch64 SHA extensions).
+- Object database: loose objects, packs, `.idx`, multi-pack-index, commit-graph
+- Network push, fetch, and ls-remote
+- Refs; the index; stash (read/write); reflog (read/write)
+- Diffing, revwalking, revparsing
+- Config (read/write); ignore rules; hooks; patch-ids; notes; bundles; fsck; worktrees
 
-**Testing.** The upstream-style **harness is a regression gate** — in-scope pass counts must not regress. **New library behavior is tested in Rust** (integration tests on the public API; coverage tests for every public item). Convert core upstream cases from `git/t/` where they exercise library semantics; skip pure UX/flag-matrix tests. Details evolve in **TESTING.md** and ROADMAP testing items.
+**Pluggable storage:** an ODB backend abstraction (like the one Git core is introducing); ref backends — loose, packed, and reftable.
 
-**Documentation.** Public API items get doc comments and examples. User-facing CLI and library docs stay in sync with each change (see ROADMAP item 3). Do not ship behavior without updating docs in the same change.
+On-disk formats and wire protocols must stay **correct and compatible with Git**.
+
+### What we drop
+
+Relatively unused commands get **no CLI and no further work:** archive; the email workflow (`am`, `format-patch`, `send-email`, `imap-send`, `request-pull`); foreign-VCS bridges. Remove from **`grit-lib`** where that simplifies the library. Mark related harness files **`in_scope = "skip"`** with a reason (ROADMAP item 5, `docs/v1-scope.md`).
+
+### The CLI (`grit-cli`)
+
+Every command implemented in **`grit-cli`** must be friendly for users, agents, and scripts:
+
+- **Default** — clean, modern output for humans.
+- **`--json`** — stable, documented, scripting-friendly output.
+- **`--markdown`** — agent-friendly output.
+
+### Performance is the top priority
+
+The library and CLI must be **as fast as possible.**
+
+- Benchmark widely; speed up everything you touch.
+- Build and benchmark **real-world scenarios** (`bench/`): large repos, deep history, big packs, many refs, wide trees, network operations — no shortcuts that sacrifice compatibility.
+- Compare core operations against the equivalent **Git core** commands.
+- **Do not implement sha1dc.** Use plain SHA-1 and accelerate it (hardware SHA extensions, SIMD, parallel hashing).
+
+### Testing
+
+- Convert all **relevant** Git unit tests to Rust — core functionality and edge cases, **not** command UX or option compatibility.
+- Write **coverage tests for every public library interface**.
+- The upstream harness (`tests/*.sh` via **`grit-git`**) stays a **regression gate**. Do not weaken tests.
+
+Detail: **TESTING.md** and ROADMAP testing items.
+
+### Documentation
+
+- Build and maintain a **documentation site** (usage docs + API guides); keep it up to date **with every change**.
+- Include a **benchmarking section** comparing core functionality to equivalent Git core actions; regenerate as performance work lands.
+
+### How work is judged
+
+1. Correctness and compatibility of on-disk formats and wire protocols with Git.
+2. Speed, measured.
+3. Clean library API: typed errors, no stringly-typed matching, no printing from the library, no global state, no shelling out (in **`grit-lib`**).
+4. Tests and docs land in the **same change** as the code.
 
 ## Quick Start
 
@@ -53,14 +98,7 @@ cargo build --release -p grit-cli
 
 ## Testing pipeline (harness)
 
-Upstream-style tests live in `tests/` and are driven by **`scripts/run-tests.sh`**. Per-file status and last-run counts live in per-test TOML files at **`data/tests/<group>/<stem>.toml`**. Dashboards under **`docs/`** regenerate when you pass **`--dashboard`** to `run-tests.sh` or run `scripts/generate-dashboard-from-test-files.py`.
-
-**Flow:**
-
-1. **`scripts/run-tests.sh`** — Runs requested files. Rows with **`in_scope=skip`** are never run.
-2. **`scripts/generate-dashboard-from-test-files.py`** — Refreshes progress dashboards from `data/tests/`.
-
-To skip a file manually, set **`in_scope = "skip"`** in that test's TOML. Full detail: **TESTING.md**.
+`tests/` + **`scripts/run-tests.sh`**; per-file status in **`data/tests/<group>/<stem>.toml`**. **`in_scope=skip`** excludes a file. Dashboards: **`--dashboard`** or `scripts/generate-dashboard-from-test-files.py`. **TESTING.md** has full detail.
 
 ## Do not weaken tests
 
@@ -116,13 +154,13 @@ grit/
 
 ## Definition of done
 
-Before calling work complete:
+Aligns with **how work is judged** above:
 
-- [ ] **Rust tests** added or updated for new/changed library or CLI behavior.
-- [ ] **Harness**: any in-scope files you touched still pass at least as well as before (no regressions).
-- [ ] **Benchmarks**: for hot-path changes, before/after vs `git` recorded when applicable (`bench/`).
-- [ ] **`grit-cli`**: new/changed commands expose **`--json`** and **`--markdown`** with stable shapes.
-- [ ] **Docs** updated in the same change (rustdoc, TESTING.md mapping tables, user docs as they exist).
+- [ ] **Compatibility** — formats/protocols match Git; harness files you affect do not regress.
+- [ ] **Speed** — benchmarks before/after vs `git` for hot-path or performance work (`bench/`).
+- [ ] **Library hygiene** — typed errors, no lib printing/globals/shell-out; **`grit-cli`** adds **`--json`** and **`--markdown`** when touched.
+- [ ] **Rust tests** + **coverage tests** for new/changed public API; relevant upstream cases converted over time.
+- [ ] **Docs** (site + rustdoc) updated in the same change.
 - [ ] **`cargo fmt`**, **`cargo clippy`** (no warnings), **`cargo test -p grit-lib --lib`** (and relevant workspace tests).
 
 ## Rust style and idioms
@@ -164,8 +202,7 @@ The Git-compatible engine lives in **`grit-lib`**. Binaries stay thin: parse CLI
 ### When to use one crate vs several
 
 - **Start with one library crate** plus binary crates in a workspace unless a split is clearly needed. Prefer **modules** (`objects`, `index`, `refs`, `odb`, `tree`, `worktree`, …) for boundaries before adding more crates.
-- **Split into additional library crates** when there is a stable boundary that yields real benefit: faster incremental builds, optional `#[cfg(feature = …)]` surfaces, or a subsystem that tests/tools want without pulling the whole repo stack.
-- **Integration tests** and future callers (benchmarks, fuzz targets) should depend on the **library**, not on private modules of the binary.
+- Split crates only when a stable boundary clearly helps builds or optional surfaces. Integration tests depend on the **library**, not binary internals.
 
 ### What the library API should look like
 
@@ -184,11 +221,7 @@ The Git-compatible engine lives in **`grit-lib`**. Binaries stay thin: parse CLI
 
 ## Testing (agents)
 
-- Harness files under **`tests/`** are the **regression gate**; run affected files via **`./scripts/run-tests.sh`** before and after substantive changes.
-- Add **Rust integration tests** against **`grit-lib`** for new semantics; add **coverage tests** for new public API surface.
-- Do not write or run ad-hoc tests outside the repo's documented strategy.
-- **Never run harness tests inside the main repo** — use `/tmp/` scratch directories.
-- Dashboards: `./scripts/run-tests.sh --dashboard` or `python3 scripts/generate-dashboard-from-test-files.py`.
+Run affected harness files before/after substantive changes. Add Rust integration + **coverage tests** for new **`grit-lib`** API. Never run harness inside the main repo — use `/tmp/`. See **Project direction → Testing** above.
 
 ## Do not
 

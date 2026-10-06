@@ -2,11 +2,15 @@
 
 ## Overview
 
-**Regression gate.** The upstream-style harness under `tests/` (ported from `git/t/`) is the **compatibility regression gate** for `grit-git`: in-scope pass counts must not regress when you change behavior it covers. It is no longer the primary way we grow coverage.
+Testing follows **AGENTS.md — Project direction**:
 
-**Rust tests.** New and refactored **`grit-lib`** behavior is validated with **Rust integration and unit tests** against the public API, plus **coverage tests** for public items. Core upstream cases from `git/t/` are converted over time (see **ROADMAP.md** testing items); mapping tables will live in this file as those land.
+1. **Convert relevant Git unit tests to Rust** — core functionality and edge cases from `git/t` / harness knowledge, exercised against the **`grit-lib`** public API. Skip command UX and option-compatibility matrices.
+2. **Coverage tests for every public library interface** — each public API surface gets explicit tests; line coverage targets are in **ROADMAP.md** (testing items).
+3. **Upstream harness as regression gate** — `tests/*.sh` run via **`grit-git`** (`scripts/run-tests.sh`). In-scope pass counts **must not regress**; **do not weaken** harness tests to green a change.
 
-Harness files run through `scripts/run-tests.sh` with `target/release/grit-git` copied to `tests/grit` and exposed as `git` via the harness.
+The harness is not the primary way we grow new coverage anymore; it guards **`grit-git`** compatibility. Mapping tables from upstream tests to Rust tests will live in this file as conversion work lands (ROADMAP items 9, 11, 16).
+
+Harness execution: `target/release/grit-git` is copied to `tests/grit` and exposed as `git` by the runner.
 
 The **single source of truth** for per-file harness status is the per-test TOML tree **`data/tests/<group>/<stem>.toml`** (e.g. `data/tests/t0/t0000-basic.toml`). There are no intermediate TSVs and no aggregate CSV. Dashboards — **`docs/index.html`** (homepage progress card), **`docs/progress/index.html`** (summary + progress by group), **`docs/testfiles.html`** (per-file table, filterable by group), and **`docs/test-progress.svg`** (overall pass-rate badge for the README) — are generated from that tree, but **only when requested**: pass `--dashboard` to `run-tests.sh` or run `python3 scripts/generate-dashboard-from-test-files.py` directly.
 
