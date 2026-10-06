@@ -1637,6 +1637,7 @@ fn read_gitlink_oid_from_index(repo: &Repository, submodule_path: &str) -> Resul
 /// Check out `oid` in the submodule at `path` (separate git dir under `.git/modules/<name>/` or in-tree `.git`).
 ///
 /// `submodule_name_for_modules` is the `.gitmodules` key (Git's submodule name), which may differ from `path`.
+#[expect(clippy::too_many_arguments)]
 fn checkout_submodule_worktree(
     grit_bin: &Path,
     repo: &Repository,
@@ -1893,6 +1894,7 @@ fn submodule_describe_rev_name(sub_worktree: &Path, oid_hex: &str) -> Option<Str
     None
 }
 
+#[expect(clippy::too_many_arguments)]
 fn emit_submodule_status_lines(
     super_repo: &Repository,
     super_index: &Index,
@@ -2212,16 +2214,10 @@ fn submodule_fetch_origin_local_path(
     roots.sort_by_key(|o| o.to_hex());
     roots.dedup();
 
-    if let Ok(head) = resolve_head(remote_git) {
-        match head {
-            grit_lib::state::HeadState::Branch { short_name, .. } => {
-                let sym = format!("refs/remotes/origin/{short_name}");
-                if refs::resolve_ref(&sub_git_dir, &sym).is_ok() {
-                    let _ =
-                        refs::write_symbolic_ref(&sub_git_dir, "refs/remotes/origin/HEAD", &sym);
-                }
-            }
-            _ => {}
+    if let Ok(grit_lib::state::HeadState::Branch { short_name, .. }) = resolve_head(remote_git) {
+        let sym = format!("refs/remotes/origin/{short_name}");
+        if refs::resolve_ref(&sub_git_dir, &sym).is_ok() {
+            let _ = refs::write_symbolic_ref(&sub_git_dir, "refs/remotes/origin/HEAD", &sym);
         }
     }
 
@@ -2911,7 +2907,7 @@ fn run_add(args: &AddArgs) -> Result<()> {
         .map(|m| m.path.replace('\\', "/"))
         .collect();
     let path_norm = path.replace('\\', "/");
-    let is_registered_path = registered_paths.iter().any(|p| *p == path_norm);
+    let is_registered_path = registered_paths.contains(&path_norm);
     let nested_under_registered = registered_paths
         .iter()
         .any(|p| path_norm.starts_with(&format!("{p}/")));
@@ -3356,6 +3352,7 @@ fn run_foreach(args: &ForeachArgs, quiet: bool) -> Result<()> {
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_foreach_in(
     super_repo: &Repository,
     super_work_tree: &Path,
@@ -3663,10 +3660,9 @@ fn git_relative_url(remote_url: &str, url: &str, up_path: Option<&str>) -> Resul
     if out.ends_with('/') {
         out.pop();
     }
-    let mut out = if out.starts_with("./") {
-        out[2..].to_string()
-    } else {
-        out
+    let mut out = match out.strip_prefix("./") {
+        Some(rest) => rest.to_string(),
+        None => out,
     };
     if let Some(up) = up_path {
         if is_relative {
@@ -4496,7 +4492,7 @@ fn resolve_summary_base_tree(repo: &Repository, commit_spec: &str) -> Result<Opt
             if commit_spec == "HEAD" {
                 Ok(None)
             } else {
-                return Err(e).context("could not resolve summary base revision");
+                Err(e).context("could not resolve summary base revision")
             }
         }
     }

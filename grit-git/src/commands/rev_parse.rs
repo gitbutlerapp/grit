@@ -1192,12 +1192,12 @@ pub fn run(args: Args) -> Result<()> {
             }
             Action::MaxAge(date) => {
                 let mut err = 0;
-                let ts = approxidate_careful(&date, Some(&mut err));
+                let ts = approxidate_careful(date, Some(&mut err));
                 println!("--max-age={ts}");
             }
             Action::MinAge(date) => {
                 let mut err = 0;
-                let ts = approxidate_careful(&date, Some(&mut err));
+                let ts = approxidate_careful(date, Some(&mut err));
                 println!("--min-age={ts}");
             }
             Action::GitPath(fmt, path_arg) => {

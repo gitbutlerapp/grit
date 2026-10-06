@@ -1195,7 +1195,7 @@ fn validate_rebase_instruction_format(config: &ConfigSet) -> Result<()> {
                 }
             }
             '(' => {
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ')' {
                         break;
                     }
@@ -1470,6 +1470,7 @@ fn reset_comment_subject(repo: &Repository, oid: &ObjectId, config: &ConfigSet) 
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn generate_rebase_merge_script(
     repo: &Repository,
     head_oid: ObjectId,
@@ -2078,14 +2079,9 @@ fn rearrange_autosquash(
                 }
             }
             if target_idx.is_none() {
-                for j in 0..i {
-                    if let Some(ref sj) = subjects[j] {
-                        if sj.starts_with(key) {
-                            target_idx = Some(j);
-                            break;
-                        }
-                    }
-                }
+                target_idx = subjects[..i]
+                    .iter()
+                    .position(|sj| sj.as_ref().is_some_and(|sj| sj.starts_with(key)));
             }
         }
         if let Some(i2) = target_idx {
@@ -2788,6 +2784,7 @@ fn reword_fast_forwarded_merge(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn rebase_merge_reuse_message(
     repo: &Repository,
     git_dir: &Path,
@@ -3539,6 +3536,7 @@ fn update_squash_message_file(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn commit_from_merged_index(
     repo: &Repository,
     _git_dir: &Path,
@@ -3883,8 +3881,8 @@ fn parse_merge_todo_arg_list(arg: &str) -> (Vec<String>, Option<String>) {
     let mut oneline: Option<String> = None;
     let mut cur = arg.trim();
     while !cur.is_empty() {
-        if cur.starts_with('#') {
-            let rest = cur[1..].trim_start();
+        if let Some(rest) = cur.strip_prefix('#') {
+            let rest = rest.trim_start();
             if !rest.is_empty() {
                 oneline = Some(rest.to_owned());
             }
@@ -3898,8 +3896,8 @@ fn parse_merge_todo_arg_list(arg: &str) -> (Vec<String>, Option<String>) {
             heads.push(tok.to_owned());
         }
         cur = cur[token_end..].trim_start();
-        if cur.starts_with('#') {
-            let rest = cur[1..].trim_start();
+        if let Some(rest) = cur.strip_prefix('#') {
+            let rest = rest.trim_start();
             if !rest.is_empty() {
                 oneline = Some(rest.to_owned());
             }
@@ -4220,14 +4218,14 @@ fn hex_encode_bytes(bytes: &[u8]) -> String {
 }
 
 fn hex_decode_string(hex: &str) -> Option<String> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     let mut bytes = Vec::with_capacity(hex.len() / 2);
-    let mut iter = hex.as_bytes().chunks_exact(2);
-    for pair in &mut iter {
-        let hi = (pair[0] as char).to_digit(16)? as u8;
-        let lo = (pair[1] as char).to_digit(16)? as u8;
+    let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+    for &[hi, lo] in pairs {
+        let hi = (hi as char).to_digit(16)? as u8;
+        let lo = (lo as char).to_digit(16)? as u8;
         bytes.push((hi << 4) | lo);
     }
     String::from_utf8(bytes).ok()
@@ -5308,7 +5306,7 @@ fn commit_subject_for_oid(repo: &Repository, oid: ObjectId) -> String {
 /// Returns trimmed non-comment todo lines as edited (for replay), and pick/fixup/squash entries for
 /// empty-list / up-to-date checks, plus the original (with-help) and raw-edited todo bodies for the
 /// post-state static check.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn run_interactive_rebase(
     repo: &Repository,
     git_dir: &Path,
@@ -5499,6 +5497,7 @@ To continue rebase after editing, run:\n    git rebase --continue\n\n",
     out
 }
 
+#[expect(clippy::type_complexity)]
 fn run_interactive_rebase_with_initial_todo(
     repo: &Repository,
     git_dir: &Path,
@@ -5749,9 +5748,7 @@ fn do_rebase(
         false
     } else if args.fork_point {
         true
-    } else if args.no_fork_point {
-        false
-    } else if args.keep_base > 0 {
+    } else if args.no_fork_point || args.keep_base > 0 {
         false
     } else {
         let cfg_default = config
@@ -5761,7 +5758,7 @@ fn do_rebase(
             .unwrap_or(true);
         let upstream_arg = upstream_spec_before_branch_checkout
             .as_deref()
-            .or_else(|| args.upstream.as_deref())
+            .or(args.upstream.as_deref())
             .unwrap_or("HEAD");
         let implicit_upstream = upstream_suffix_info(upstream_arg).is_some();
         cfg_default && implicit_upstream
@@ -5778,7 +5775,7 @@ fn do_rebase(
     if !args.root {
         let us_for_ambiguous = upstream_spec_before_branch_checkout
             .as_deref()
-            .or_else(|| args.upstream.as_deref())
+            .or(args.upstream.as_deref())
             .unwrap_or("HEAD");
         if args.fork_point && fork_point_upstream_name_is_ambiguous(&repo, us_for_ambiguous)? {
             bail!(
@@ -6030,7 +6027,7 @@ Use '--' to separate paths from revisions, like this:\n\
 
     let hook_upstream = pre_rebase_upstream_label
         .as_deref()
-        .unwrap_or_else(|| upstream_spec.as_str());
+        .unwrap_or(upstream_spec.as_str());
     let hook_arg1: &str = if args.root { "--root" } else { hook_upstream };
     let hook_arg2: Option<&str> = pre_rebase_hook_second.as_deref();
     let hook_args: Vec<&str> = match hook_arg2 {
@@ -6394,14 +6391,13 @@ Use '--' to separate paths from revisions, like this:\n\
     if args.no_rerere_autoupdate {
         fs::write(rb_dir.join("no-rerere-autoupdate"), "")?;
     }
-    if args.reschedule_failed_exec {
-        fs::write(rb_dir.join("reschedule-failed-exec"), "")?;
-    } else if !args.no_reschedule_failed_exec
-        && !args.exec.is_empty()
-        && config
-            .get_bool("rebase.rescheduleFailedExec")
-            .and_then(|r| r.ok())
-            .unwrap_or(false)
+    if args.reschedule_failed_exec
+        || (!args.no_reschedule_failed_exec
+            && !args.exec.is_empty()
+            && config
+                .get_bool("rebase.rescheduleFailedExec")
+                .and_then(|r| r.ok())
+                .unwrap_or(false))
     {
         fs::write(rb_dir.join("reschedule-failed-exec"), "")?;
     }
@@ -6864,8 +6860,10 @@ fn collect_commits_for_root_rebase(
     filter_redundant: bool,
     exclude_merges: bool,
 ) -> Result<Vec<ObjectId>> {
-    let mut opts = RevListOptions::default();
-    opts.reverse = true;
+    let mut opts = RevListOptions {
+        reverse: true,
+        ..Default::default()
+    };
     if exclude_merges {
         opts.max_parents = Some(1);
         opts.ordering = OrderingMode::Topo;
@@ -7439,20 +7437,18 @@ fn replay_remaining(
                     if let Ok(sq_hex) = fs::read_to_string(rb_dir.join("squash-onto")) {
                         if let Ok(sq_oid) = ObjectId::from_hex(sq_hex.trim()) {
                             let (heads, _) = parse_merge_todo_arg_list(&merge_args);
-                            if heads.len() == 1 {
-                                if head_before.oid().copied() == Some(sq_oid) {
-                                    let only = commit_oid_for_rebase_label(repo, &heads[0])?;
-                                    reset_worktree_to_commit(
-                                        repo,
-                                        git_dir,
-                                        &head_before,
-                                        only,
-                                        &heads[0],
-                                    )?;
-                                    let rest: Vec<&str> = todo[i + 1..].to_vec();
-                                    write_rebase_todo_slice(rb_dir, &rest)?;
-                                    continue 'rebase_loop;
-                                }
+                            if heads.len() == 1 && head_before.oid().copied() == Some(sq_oid) {
+                                let only = commit_oid_for_rebase_label(repo, &heads[0])?;
+                                reset_worktree_to_commit(
+                                    repo,
+                                    git_dir,
+                                    &head_before,
+                                    only,
+                                    &heads[0],
+                                )?;
+                                let rest: Vec<&str> = todo[i + 1..].to_vec();
+                                write_rebase_todo_slice(rb_dir, &rest)?;
+                                continue 'rebase_loop;
                             }
                         }
                     }
@@ -7786,12 +7782,12 @@ fn replay_remaining(
                             // in `stopped-sha`, so the two must be tracked separately.
                             let _ =
                                 fs::write(rb_dir.join("amend"), format!("{}\n", new_oid.to_hex()));
-                            let _ = write_rebase_patch_file(&repo, &rb_dir, &commit_oid);
+                            let _ = write_rebase_patch_file(repo, rb_dir, &commit_oid);
                             let _ = fs::write(rb_dir.join("rebase-amend-continue"), "1\n");
                             let _ = fs::write(rb_dir.join("rebase-edit-continue"), "1\n");
                             // Git's `do_pick_commit` prints the amend hint when stopping for `edit`,
                             // echoing the `-S<key>` signing option (t3404 "rebase -i --gpg-sign").
-                            let gpg_opt = gpg_sign_opt_quoted(&rb_dir);
+                            let gpg_opt = gpg_sign_opt_quoted(rb_dir);
                             eprintln!(
                                 "You can amend the commit now, with\n\n  git commit --amend {gpg_opt}\n\nOnce you are satisfied with your changes, run\n\n  git rebase --continue"
                             );
@@ -7820,7 +7816,7 @@ fn replay_remaining(
                                 rb_dir.join("stopped-sha"),
                                 format!("{}\n", commit_oid.to_hex()),
                             );
-                            let _ = write_rebase_patch_file(&repo, &rb_dir, &commit_oid);
+                            let _ = write_rebase_patch_file(repo, rb_dir, &commit_oid);
 
                             let obj = repo.odb.read(&commit_oid)?;
                             let commit = parse_commit(&obj.data)?;
@@ -8328,6 +8324,7 @@ fn write_rebase_patch_file(repo: &Repository, rb_dir: &Path, commit_oid: &Object
 ///
 /// `rb_dir` is the active state directory (`rebase-apply` or `rebase-merge`), not `rebase_dir()`
 /// (which wrongly prefers `rebase-merge` whenever that path exists).
+#[expect(clippy::too_many_arguments)]
 fn cherry_pick_for_rebase(
     repo: &Repository,
     rb_dir: &Path,
@@ -9323,7 +9320,7 @@ fn cherry_pick_for_rebase(
             now,
         )?;
         fs::write(git_dir.join("HEAD"), format!("{}\n", new_oid.to_hex()))?;
-        clear_squash_ctx(&rb_dir);
+        clear_squash_ctx(rb_dir);
         if record_rewrite {
             record_rebase_in_rewritten_pending(git_dir, rb_dir, commit_oid, next_after_line)?;
         }
@@ -11714,6 +11711,7 @@ fn three_way_merge_with_content(
     })
 }
 
+#[expect(clippy::too_many_arguments)]
 fn content_merge_or_conflict(
     repo: &Repository,
     index: &mut Index,

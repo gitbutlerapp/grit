@@ -1318,6 +1318,7 @@ fn set_refresh_fsmonitor_valid(
 }
 
 /// Re-stat all tracked files, updating mtime/ctime/size.
+#[expect(clippy::too_many_arguments)]
 fn refresh_index(
     index: &mut Index,
     work_tree: &std::path::Path,
@@ -1672,6 +1673,7 @@ fn is_missing_lstat_error(err: &std::io::Error) -> bool {
 }
 
 /// `git update-index --again` / `-g`: refresh index entries that differ from `HEAD` (see Git's `do_reupdate`).
+#[expect(clippy::too_many_arguments)]
 fn run_update_index_again(
     repo: &Repository,
     work_tree: &Path,
@@ -1840,7 +1842,7 @@ fn run_update_index_again(
                 } else {
                     let raw = std::fs::read(&abs_path)
                         .with_context(|| format!("cannot read '{}'", abs_path.display()))?;
-                    let file_attrs = crlf::get_file_attrs(attrs, rel_path.as_ref(), false, &config);
+                    let file_attrs = crlf::get_file_attrs(attrs, rel_path.as_ref(), false, config);
                     crlf::convert_to_git(&raw, rel_path.as_ref(), conv, &file_attrs)
                         .map_err(|msg| anyhow::anyhow!("{msg}"))?
                 };

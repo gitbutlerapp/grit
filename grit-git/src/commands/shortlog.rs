@@ -501,7 +501,7 @@ fn output(log: &mut Shortlog) -> Result<()> {
         // We must first establish the alphabetical base order git relies on (string_list
         // is sorted), then stable-sort by counter.
         log.entries.sort_by(|a, b| a.key.cmp(&b.key));
-        log.entries.sort_by(|a, b| b.count.cmp(&a.count));
+        log.entries.sort_by_key(|e| std::cmp::Reverse(e.count));
     } else {
         log.entries.sort_by(|a, b| a.key.cmp(&b.key));
     }
@@ -680,7 +680,7 @@ fn add_commit(log: &mut Shortlog, oid: &ObjectId, commit: &CommitData, raw_body:
             _ => None,
         })
         .collect();
-    trailer_keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    trailer_keys.sort_by_key(|k| k.to_lowercase());
 
     if !trailer_keys.is_empty() {
         let body_str = String::from_utf8_lossy(&body_bytes);

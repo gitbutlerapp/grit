@@ -763,10 +763,10 @@ pub fn run(mut args: Args) -> Result<()> {
 
     // `status.relativePaths` (default true): when false, paths stay worktree-relative
     // from repo root even when cwd is a subdirectory (Git `wt_status_collect`).
-    let status_relative_paths = match config.get("status.relativePaths") {
-        Some(v) if v == "false" || v == "no" || v == "off" || v == "0" => false,
-        _ => true,
-    };
+    let status_relative_paths = !matches!(
+        config.get("status.relativePaths"),
+        Some(v) if v == "false" || v == "no" || v == "off" || v == "0"
+    );
 
     // Compute the cwd prefix relative to work_tree so paths are displayed
     // relative to the user's current directory (matching git behavior).
@@ -1196,6 +1196,7 @@ fn index_stage_entry<'a>(index: &'a Index, path: &str, stage: u8) -> Option<&'a 
     index.get(path.as_bytes(), stage)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn format_porcelain_v2(
     out: &mut impl Write,
     args: &Args,
@@ -1382,7 +1383,7 @@ fn format_porcelain_v2(
                 if !ita_rename {
                     mode_index = 0;
                     oid_index = ObjectId::zero();
-                    if head_map.get(path).is_none() {
+                    if !head_map.contains_key(path) {
                         mode_head = 0;
                         oid_head = ObjectId::zero();
                     }
@@ -1673,6 +1674,7 @@ fn format_submodule_token(f: grit_lib::diff::SubmodulePorcelainFlags) -> String 
 /// `staged` / `unstaged` / `untracked` / `ignored_files` use **work tree root** paths for
 /// ordering (Git sorts by repo-relative path). `relativize` maps those to cwd-relative strings
 /// for display when `status.relativePaths` applies.
+#[expect(clippy::too_many_arguments)]
 fn format_short(
     out: &mut impl Write,
     args: &Args,
@@ -1749,15 +1751,9 @@ fn format_short(
         if entry.status == DiffStatus::Unmerged {
             continue;
         }
-        if entry.status == DiffStatus::Renamed || entry.status == DiffStatus::Copied {
-            let key = entry.path().to_owned();
-            staged_map.insert(key.clone(), entry.status.letter());
-            paths.insert(key);
-        } else {
-            let path = entry.path().to_owned();
-            staged_map.insert(path.clone(), entry.status.letter());
-            paths.insert(path);
-        }
+        let path = entry.path().to_owned();
+        staged_map.insert(path.clone(), entry.status.letter());
+        paths.insert(path);
     }
 
     for entry in unstaged {
@@ -1939,6 +1935,7 @@ fn sparse_checkout_banner(
 }
 
 /// Write the long-format branch / upstream lines, shared by `status` and `commit --dry-run`.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn write_status_branch_header(
     out: &mut impl Write,
     head: &HeadState,
@@ -2118,7 +2115,7 @@ pub(crate) fn print_unmerged_long_section(
     let mut both_deleted = false;
     let mut del_mod_conflict = false;
     let mut not_deleted = false;
-    for (_, mask) in unmerged {
+    for mask in unmerged.values() {
         match *mask {
             0 => {}
             1 => both_deleted = true,
@@ -2238,11 +2235,11 @@ fn long_status_print_rebase_information(
     } else {
         let n = have_done.len();
         if n == 1 {
-            cpw(out, cp, &format!("Last command done (1 command done):"))?;
+            cpw(out, cp, "Last command done (1 command done):")?;
         } else {
             cpw(out, cp, &format!("Last commands done ({n} commands done):"))?;
         }
-        let start = if n > NR_SHOW { n - NR_SHOW } else { 0 };
+        let start = n.saturating_sub(NR_SHOW);
         for line in have_done.iter().skip(start) {
             cpw(out, cp, &format!("   {line}"))?;
         }
@@ -2549,6 +2546,7 @@ pub(crate) fn run_submodule_summary_text(
 }
 
 /// Long format (default), matching Git `wt-status.c` layout and advice text.
+#[expect(clippy::too_many_arguments)]
 fn format_long(
     out: &mut impl Write,
     head: &HeadState,
@@ -2579,10 +2577,10 @@ fn format_long(
         ""
     };
 
-    let config_hints = match config.get("advice.statusHints") {
-        Some(v) if v == "false" || v == "no" || v == "off" || v == "0" => false,
-        _ => true,
-    };
+    let config_hints = !matches!(
+        config.get("advice.statusHints"),
+        Some(v) if v == "false" || v == "no" || v == "off" || v == "0"
+    );
     let show_hints = std::env::var("GIT_ADVICE")
         .ok()
         .and_then(|v| parse_bool_str(&v))
@@ -2717,6 +2715,20 @@ fn format_long(
             long_status_print_rebase_information(out, cp, show_hints, repo, git_dir)?;
         }
         let has_um = long_status_has_unmerged(expanded_index);
+        // Mirror wt-status.c `split_commit_in_progress`: a clean working tree
+        // (no staged or unstaged changes to tracked files) during an `edit`
+        // stop means the commit is "being edited", not "being split", even when
+        // the rebase-merge amend/orig-head bookkeeping would otherwise look like
+        // a split (e.g. after splitting an earlier commit and continuing). git
+        // bails out of split detection up front unless the work tree is dirty
+        // (or status is in amend/nowarn mode, which this plain-status path is
+        // not).
+        let splitting_commit = || {
+            let workdir_dirty = !staged.is_empty() || !unstaged.is_empty();
+            workdir_dirty
+                && (split_commit_in_progress(git_dir, head)
+                    || long_status_split_commit_in_progress(git_dir, head, unstaged))
+        };
         if has_um {
             long_status_print_rebase_state(out, cp, repo, git_dir, head, state)?;
             if show_hints {
@@ -2743,20 +2755,7 @@ fn format_long(
                 )?;
             }
             cpw(out, cp, "")?;
-        } else if {
-            // Mirror wt-status.c `split_commit_in_progress`: a clean working tree
-            // (no staged or unstaged changes to tracked files) during an `edit`
-            // stop means the commit is "being edited", not "being split", even when
-            // the rebase-merge amend/orig-head bookkeeping would otherwise look like
-            // a split (e.g. after splitting an earlier commit and continuing). git
-            // bails out of split detection up front unless the work tree is dirty
-            // (or status is in amend/nowarn mode, which this plain-status path is
-            // not).
-            let workdir_dirty = !staged.is_empty() || !unstaged.is_empty();
-            workdir_dirty
-                && (split_commit_in_progress(git_dir, head)
-                    || long_status_split_commit_in_progress(git_dir, head, unstaged))
-        } {
+        } else if splitting_commit() {
             long_status_print_splitting(out, cp, show_hints, repo, git_dir, head, state)?;
         } else {
             long_status_print_editing(out, cp, show_hints, repo, git_dir, head, state)?;
@@ -2985,7 +2984,7 @@ fn format_long(
         for (path, mask) in &unmerged_paths {
             let how = long_status_unmerged_label(*mask);
             let pad = label_w.saturating_sub(how.len());
-            let spaces: String = std::iter::repeat(' ').take(pad).collect();
+            let spaces = " ".repeat(pad);
             cpw(out, cp, &format!("\t{how}{spaces}{path}"))?;
         }
         cpw(out, cp, "")?;

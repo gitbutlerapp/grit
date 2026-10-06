@@ -108,10 +108,7 @@ fn read_packet_line<R: Read>(r: &mut R) -> io::Result<Option<String>> {
 
 fn read_packetized<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
     let mut out = Vec::new();
-    loop {
-        let Some(chunk) = read_packet_payload(r)? else {
-            break;
-        };
+    while let Some(chunk) = read_packet_payload(r)? {
         out.extend_from_slice(&chunk);
     }
     Ok(out)
@@ -241,10 +238,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     stdout.flush()?;
 
     let mut remote: HashSet<String> = HashSet::new();
-    loop {
-        let Some(line) = read_packet_line(&mut stdin)? else {
-            break;
-        };
+    while let Some(line) = read_packet_line(&mut stdin)? {
         if let Some(v) = line.strip_prefix("capability=") {
             remote.insert(v.to_string());
         }
@@ -320,10 +314,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             .to_string();
         write!(log, " {pathname}")?;
 
-        loop {
-            let Some(buf) = read_packet_line(&mut stdin)? else {
-                break;
-            };
+        while let Some(buf) = read_packet_line(&mut stdin)? {
             if buf == "can-delay=1" {
                 if always_delay {
                     // Match C `test-rot13-filter.c`: `always_delay` calls `add_delay_entry` for any
@@ -363,10 +354,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 o.clone()
             } else if pathname == "error.r" || pathname == "abort.r" {
                 Vec::new()
-            } else if command == "clean" && has_clean {
-                rot13_bytes(&mut input);
-                input
-            } else if command == "smudge" && has_smudge {
+            } else if (command == "clean" && has_clean) || (command == "smudge" && has_smudge) {
                 rot13_bytes(&mut input);
                 input
             } else {
@@ -374,10 +362,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             }
         } else if pathname == "error.r" || pathname == "abort.r" {
             Vec::new()
-        } else if command == "clean" && has_clean {
-            rot13_bytes(&mut input);
-            input
-        } else if command == "smudge" && has_smudge {
+        } else if (command == "clean" && has_clean) || (command == "smudge" && has_smudge) {
             rot13_bytes(&mut input);
             input
         } else {

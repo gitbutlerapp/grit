@@ -857,7 +857,7 @@ fn submodule_dir_has_untracked_paths(
         &sub_dir,
         &sub_dir,
         rel_sub,
-        &tracked,
+        tracked,
         repo,
         super_index,
         &mut matcher,
@@ -1798,6 +1798,7 @@ fn checkout_index_entries(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn validate_worktree_updates(
     repo: &Repository,
     old_index: &Index,

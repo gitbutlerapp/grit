@@ -79,11 +79,11 @@ fn is_permission_denied_error(err: &anyhow::Error) -> bool {
                 return true;
             }
         }
-        if let Some(grit_err) = cause.downcast_ref::<grit_lib::error::Error>() {
-            if let grit_lib::error::Error::Io(ioe) = grit_err {
-                if ioe.kind() == std::io::ErrorKind::PermissionDenied {
-                    return true;
-                }
+        if let Some(grit_lib::error::Error::Io(ioe)) =
+            cause.downcast_ref::<grit_lib::error::Error>()
+        {
+            if ioe.kind() == std::io::ErrorKind::PermissionDenied {
+                return true;
             }
         }
     }

@@ -1076,7 +1076,7 @@ fn sanitize_set_paths(
     prefix: String,
     cone: bool,
     skip_checks: bool,
-    args: &mut Vec<String>,
+    args: &mut [String],
 ) -> Result<()> {
     if args.is_empty() {
         return Ok(());
@@ -1123,7 +1123,7 @@ fn sanitize_add_paths(
     repo: &Repository,
     prefix: String,
     skip_checks: bool,
-    args: &mut Vec<String>,
+    args: &mut [String],
 ) -> Result<()> {
     let config = load_merged_config(repo);
     let cone = config
@@ -1757,7 +1757,6 @@ fn remove_untracked_outside_sparse(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn clean_tracked_sparse_dirs(
     work_tree: &Path,
     current: &Path,

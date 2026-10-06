@@ -733,9 +733,8 @@ fn resolve_revert_editor(git_dir: &Path) -> String {
             return e;
         }
     }
-    if std::env::var("VISUAL").is_ok() || std::env::var("EDITOR").is_ok() {
-        "true".to_owned()
-    } else if !stdin().is_terminal() {
+    if std::env::var("VISUAL").is_ok() || std::env::var("EDITOR").is_ok() || !stdin().is_terminal()
+    {
         "true".to_owned()
     } else {
         "vi".to_owned()

@@ -163,11 +163,7 @@ pub(crate) fn read_head_content(admin_dir: &Path) -> Option<String> {
     if head_path.is_symlink() {
         let target = fs::read_link(&head_path).ok()?;
         let s = target.to_string_lossy();
-        if s.starts_with("refs/") {
-            Some(format!("ref: {s}"))
-        } else {
-            Some(format!("ref: {s}"))
-        }
+        Some(format!("ref: {s}"))
     } else {
         fs::read_to_string(&head_path).ok()
     }

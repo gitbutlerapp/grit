@@ -201,10 +201,8 @@ fn effective_write_bitmaps_int(
             };
         }
     }
-    if wb < 0 {
-        if !args.write_midx && (!full_repack || !bare_repo) {
-            wb = 0;
-        }
+    if wb < 0 && !args.write_midx && (!full_repack || !bare_repo) {
+        wb = 0;
     }
     wb
 }
@@ -366,7 +364,7 @@ pub fn run(args: Args) -> Result<()> {
     let mut quiet_pack_objects_local_alt = false;
     if args.local
         && grit_lib::pack::read_alternates_recursive(&objects_dir_for_warn)
-            .map_or(false, |v| !v.is_empty())
+            .is_ok_and(|v| !v.is_empty())
         && !args.no_write_bitmap_index
         && write_bitmaps != 0
     {
@@ -906,7 +904,7 @@ pub fn run(args: Args) -> Result<()> {
                 && !args.no_write_bitmap_index
                 && !(args.local
                     && grit_lib::pack::read_alternates_recursive(&objects_dir_for_warn)
-                        .map_or(false, |v| !v.is_empty()));
+                        .is_ok_and(|v| !v.is_empty()));
             write_multi_pack_index_with_options(
                 &pack_dir_abs,
                 &WriteMultiPackIndexOptions {
@@ -950,7 +948,7 @@ fn run_geometric(
     let bare_repo = repo.work_tree.is_none();
     let mut write_bitmaps = effective_write_bitmaps_int(args, &cfg, false, bare_repo);
     if args.local
-        && grit_lib::pack::read_alternates_recursive(&objects_dir).map_or(false, |v| !v.is_empty())
+        && grit_lib::pack::read_alternates_recursive(&objects_dir).is_ok_and(|v| !v.is_empty())
         && !args.no_write_bitmap_index
         && write_bitmaps != 0
     {
@@ -1131,7 +1129,7 @@ fn run_geometric(
             && !args.no_write_bitmap_index
             && !(args.local
                 && grit_lib::pack::read_alternates_recursive(&objects_dir)
-                    .map_or(false, |v| !v.is_empty()));
+                    .is_ok_and(|v| !v.is_empty()));
         let wrote_pack = !normal_written.is_empty() || !promisor_written.is_empty();
         let midx_path = pack_dir.join("multi-pack-index");
         let needs_bitmap = bitmap && !pack_dir_has_midx_bitmap(&pack_dir);
@@ -1445,6 +1443,7 @@ fn build_stdin_packs_lines(packs: &[GeometricPack], split: usize) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_pack_objects_stdin(
     grit_bin: &Path,
     work_dir: &Path,
@@ -1544,7 +1543,7 @@ fn run_pack_objects_stdin(
 /// # Returns
 /// The `*.idx` basenames to pass as the MIDX `--stdin-packs` subset, in git's order. Names
 /// whose pack no longer exists are dropped downstream by the writer.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn geometric_midx_included_idx_names(
     pack_dir: &Path,
     normal: &[GeometricPack],
@@ -1623,6 +1622,7 @@ fn geometric_midx_included_idx_names(
     include
 }
 
+#[expect(clippy::too_many_arguments)]
 fn remove_geometry_redundant(
     pack_dir: &Path,
     normal: &[GeometricPack],
@@ -1680,6 +1680,7 @@ fn remove_geometry_redundant(
 /// Upstream `write_filtered_pack` runs `pack-objects --stdin-packs` **without** `--filter` (Git
 /// forbids combining those options). The first pass already applied the filter; this pass packs
 /// objects present in older packs but omitted from the new main pack.
+#[expect(clippy::too_many_arguments)]
 fn run_filtered_followup_pack_objects(
     grit_bin: &Path,
     work_dir: &Path,
@@ -2080,7 +2081,7 @@ fn remove_superseded_packs_after_full_repack(
         }
     }
 
-    for (name, _) in &by_name {
+    for name in by_name.keys() {
         if retained.contains(name) {
             continue;
         }

@@ -746,10 +746,7 @@ fn cmd_fetch(
     // The client accepted one or more advertised promisor remotes: it will lazily fetch any
     // omitted objects from them, so the server may omit locally-missing promisor objects from the
     // filtered pack instead of back-filling its ODB to serve them.
-    let accepted_promisor = accepted_promisor_remotes
-        .as_deref()
-        .map(|r| !r.trim().is_empty())
-        .unwrap_or(false);
+    let accepted_promisor = accepted_promisor_remotes.is_some_and(|r| !r.trim().is_empty());
     let omit_missing_promisor = accepted_promisor && filter_spec.is_some();
     // `upload-pack` pins `GIT_NO_LAZY_FETCH=1` by default, so the server-side `pack-objects` never
     // lazily fetches missing objects from a promisor remote — it just fails if it cannot read an

@@ -412,6 +412,7 @@ fn cmd_clone(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_git_clone_passthrough(
     git: &PathBuf,
     url: &str,
@@ -780,7 +781,7 @@ fn cmd_reconfigure(args: &[String]) -> Result<()> {
         set_scalar_config(&repo_path)?;
 
         match maintenance_mode {
-            "start" | _ if maintenance_mode != "disable" && maintenance_mode != "keep" => {
+            _ if maintenance_mode != "disable" && maintenance_mode != "keep" => {
                 let _ = Command::new(&git)
                     .args(["maintenance", "start"])
                     .current_dir(&repo_path)

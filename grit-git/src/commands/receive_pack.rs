@@ -254,10 +254,11 @@ pub fn run(args: Args) -> Result<()> {
 
     if let Some(ref e) = unpack_to_odb_err {
         for (_old_hex, new_hex, refname) in &updates {
-            if new_hex != &zero_oid && !hidden_rejects.iter().any(|r| r == refname) {
-                if !connectivity_failed.iter().any(|r| r == refname) {
-                    connectivity_failed.push(refname.clone());
-                }
+            if new_hex != &zero_oid
+                && !hidden_rejects.iter().any(|r| r == refname)
+                && !connectivity_failed.iter().any(|r| r == refname)
+            {
+                connectivity_failed.push(refname.clone());
             }
         }
         if traverse_err.is_none() {
@@ -862,7 +863,7 @@ fn run_hooks_and_update_refs(
             continue;
         }
 
-        match check_receive_update_policy(
+        if let Some(reason) = check_receive_update_policy(
             repo,
             remote_config,
             refname,
@@ -873,11 +874,8 @@ fn run_hooks_and_update_refs(
             head_ref_for_delete.as_deref(),
             diag,
         )? {
-            Some(reason) => {
-                outcomes.push(RefOutcome::rejected(refname, reason).with_delete(is_delete));
-                continue;
-            }
-            None => {}
+            outcomes.push(RefOutcome::rejected(refname, reason).with_delete(is_delete));
+            continue;
         }
 
         let old_for_update = refs::resolve_ref(&repo.git_dir, refname)
@@ -1059,7 +1057,7 @@ fn checkout_worktree_to_commit(wt: &Path, oid: ObjectId) -> Result<()> {
 /// `ng` reason when this single ref is rejected (matching `git receive-pack`'s per-command
 /// rejection), or `Err` only for genuine internal errors. Human-readable diagnostics are routed
 /// through `diag` (band 2 under side-band, otherwise stderr).
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn check_receive_update_policy(
     repo: &Repository,
     cfg: &ConfigSet,

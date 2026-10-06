@@ -381,13 +381,6 @@ fn delete_tag(repo: &Repository, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// List tags, optionally filtered by a glob pattern.
-///
-/// - `pattern` — shell glob pattern; `None` means list all.
-/// - `lines` — number of annotation lines to show with each tag.
-/// - `sort` — sort key.
-/// - `ignore_case` — sort case-insensitively.
-/// - `contains` — only list tags that contain this commit.
 /// Verify a tag: check it exists and print its contents if annotated.
 ///
 /// For unsigned annotated tags, git tag -v fails because there is no
@@ -416,6 +409,14 @@ fn verify_tag(repo: &Repository, name: &str) -> Result<()> {
     }
 }
 
+/// List tags, optionally filtered by a glob pattern.
+///
+/// - `pattern` — shell glob pattern; `None` means list all.
+/// - `lines` — number of annotation lines to show with each tag.
+/// - `sort` — sort key.
+/// - `ignore_case` — sort case-insensitively.
+/// - `contains` — only list tags that contain this commit.
+#[expect(clippy::too_many_arguments)]
 fn list_tags(
     repo: &Repository,
     patterns: &[&str],
@@ -564,10 +565,9 @@ fn sort_tags(
     ignore_case: bool,
 ) {
     let key = sort.unwrap_or("");
-    let (descending, bare_key) = if key.starts_with('-') {
-        (true, &key[1..])
-    } else {
-        (false, key)
+    let (descending, bare_key) = match key.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, key),
     };
 
     match bare_key {
@@ -610,7 +610,7 @@ fn sort_tags(
         _ if key.is_empty() => {
             // Default: ascending alphabetical
             if ignore_case {
-                tags.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                tags.sort_by_key(|t| t.0.to_lowercase());
             }
             // Already sorted lexicographically from collect step
         }
@@ -623,7 +623,7 @@ fn sort_tags(
         _unreachable => {
             // Unknown key — fallback to alphabetical
             if ignore_case {
-                tags.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                tags.sort_by_key(|t| t.0.to_lowercase());
             }
         }
     }
