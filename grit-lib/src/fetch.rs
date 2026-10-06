@@ -664,7 +664,7 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
                 }
                 if name == "HEAD" {
                     if let Some(t) =
-                        symref_target.filter(|t| crate::refs::is_valid_fetch_advertised_ref(t))
+                        symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t))
                     {
                         head_symref = Some(t);
                     }
@@ -1621,5 +1621,19 @@ mod fetch_advertised_ref_tests {
 
         let (refs, _) = parse_v2_ls_refs_response(&mut Cursor::new(body)).unwrap();
         assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn refspec_maps_traversal_to_non_storable_local_name() {
+        use crate::refs::is_valid_storable_ref_name;
+        use crate::refspec::parse_fetch_refspec;
+        use crate::transfer::match_positive;
+
+        let spec = parse_fetch_refspec("+refs/heads/*:refs/remotes/origin/*").unwrap();
+        let positive = vec![spec];
+        let local = match_positive("refs/heads/../../../config", &positive)
+            .flatten()
+            .expect("wildcard matches malicious remote name");
+        assert!(!is_valid_storable_ref_name(&local));
     }
 }

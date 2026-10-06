@@ -296,7 +296,9 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                     if let Some(raw_caps) = cap_part {
                         for cap in raw_caps.split_whitespace() {
                             if let Some(target) = cap.strip_prefix("symref=HEAD:") {
-                                head_symref = Some(target.to_owned());
+                                if crate::refs::is_valid_advertised_symref_target(target) {
+                                    head_symref = Some(target.to_owned());
+                                }
                             }
                             caps.insert(cap.to_owned());
                         }
@@ -1902,6 +1904,24 @@ mod tests {
         assert_eq!(disc.refs.len(), 1);
         assert_eq!(disc.refs[0].name, "refs/heads/main");
         assert!(disc.caps.contains("side-band-64k"));
+    }
+
+    #[test]
+    fn parse_advertisement_drops_malicious_ref_and_symref() {
+        let oid = "aabbccddeeff00112233445566778899aabbccdd";
+        let malicious = "refs/heads/../../../config";
+        let mut body = Vec::new();
+        let head = format!("{oid} HEAD\0symref=HEAD:{malicious}");
+        pkt_line::write_line_to_vec(&mut body, &head).unwrap();
+        pkt_line::write_line_to_vec(&mut body, &format!("{oid} {malicious}")).unwrap();
+        body.extend_from_slice(b"0000");
+
+        let disc = parse_advertisement(&body).unwrap();
+        assert!(disc.head_symref.is_none());
+        assert!(
+            !disc.refs.iter().any(|r| r.name.contains("../")),
+            "malicious ref must not appear in HTTP discovery"
+        );
     }
 
     #[test]

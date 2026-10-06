@@ -432,6 +432,12 @@ pub fn is_valid_storable_ref_name(name: &str) -> bool {
     is_valid_fetch_advertised_ref(name)
 }
 
+/// Whether a symref target from a ref advertisement is safe to record.
+#[must_use]
+pub fn is_valid_advertised_symref_target(name: &str) -> bool {
+    crate::check_ref_format::is_valid_advertised_symref_target(name)
+}
+
 /// Verify that `refname` can be created without directory/file conflicts with the ref store
 /// and with other refnames queued in the same transaction (`extras`).
 ///

@@ -311,6 +311,22 @@ pub fn is_valid_fetch_advertised_ref(name: &str) -> bool {
     check_refname_format(name, &RefNameOptions::default()).is_ok()
 }
 
+/// Whether a `symref=HEAD:<target>` (or v2 `symref-target:`) value is safe to record.
+///
+/// Matches Git's `parse_symref_capability` in `connect.c`, which validates both
+/// sides with [`RefNameOptions::allow_onelevel`].
+#[must_use]
+pub fn is_valid_advertised_symref_target(name: &str) -> bool {
+    check_refname_format(
+        name,
+        &RefNameOptions {
+            allow_onelevel: true,
+            ..Default::default()
+        },
+    )
+    .is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,5 +515,13 @@ mod tests {
         assert!(!is_valid_fetch_advertised_ref("refs/heads/../../../config"));
         assert!(!is_valid_fetch_advertised_ref("heads/main"));
         assert!(!is_valid_fetch_advertised_ref("refs/heads/foo..bar"));
+    }
+
+    #[test]
+    fn symref_target_rejects_traversal() {
+        assert!(is_valid_advertised_symref_target("refs/heads/main"));
+        assert!(!is_valid_advertised_symref_target(
+            "refs/heads/../../../config"
+        ));
     }
 }

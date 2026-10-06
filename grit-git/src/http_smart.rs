@@ -377,10 +377,12 @@ fn parse_v0_v1_advertisement(
                 }
                 let oid = ObjectId::from_hex(oid_hex)
                     .with_context(|| format!("bad oid in v0/v1 advertisement: {oid_hex}"))?;
-                refs.push(LsRefEntry {
-                    name: refname.to_string(),
-                    oid,
-                });
+                if refname == "HEAD" || grit_lib::refs::is_valid_fetch_advertised_ref(refname) {
+                    refs.push(LsRefEntry {
+                        name: refname.to_string(),
+                        oid,
+                    });
+                }
             }
             Some(other) => bail!("unexpected packet in v0/v1 advertisement: {other:?}"),
         }
@@ -1967,4 +1969,39 @@ pub fn remote_default_branch_from_advertised(adv: &[LsRefEntry]) -> Option<Strin
         .find(|e| e.name.starts_with("refs/heads/"))
         .and_then(|e| e.name.strip_prefix("refs/heads/"))
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod parse_v0_v1_advertisement_tests {
+    use super::*;
+    use grit_lib::objects::ObjectId;
+    use grit_lib::pkt_line;
+
+    #[test]
+    fn drops_malicious_traversal_ref() {
+        let oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let mut body = Vec::new();
+        pkt_line::write_line_to_vec(&mut body, &format!("{oid} refs/heads/../../../config"))
+            .unwrap();
+        body.extend_from_slice(b"0000");
+
+        let (refs, _caps) = parse_v0_v1_advertisement(&body).unwrap();
+        assert!(refs.is_empty(), "malformed ref must not be advertised");
+    }
+
+    #[test]
+    fn keeps_valid_head_and_branch() {
+        let oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let mut body = Vec::new();
+        let head = format!("{oid} HEAD\0multi_ack symref=HEAD:refs/heads/main object-format=sha1");
+        pkt_line::write_line_to_vec(&mut body, &head).unwrap();
+        pkt_line::write_line_to_vec(&mut body, &format!("{oid} refs/heads/main")).unwrap();
+        body.extend_from_slice(b"0000");
+
+        let (refs, caps) = parse_v0_v1_advertisement(&body).unwrap();
+        assert!(caps.contains("object-format=sha1"));
+        assert_eq!(refs.len(), 2);
+        assert!(refs.iter().any(|r| r.name == "HEAD"));
+        assert!(refs.iter().any(|r| r.name == "refs/heads/main"));
+    }
 }

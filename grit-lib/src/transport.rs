@@ -204,7 +204,9 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
                 if refname == "HEAD" {
                     for cap in caps.split_whitespace() {
                         if let Some(target) = cap.strip_prefix("symref=HEAD:") {
-                            adv.head_symref = Some(target.to_string());
+                            if crate::refs::is_valid_advertised_symref_target(target) {
+                                adv.head_symref = Some(target.to_string());
+                            }
                         }
                     }
                 }

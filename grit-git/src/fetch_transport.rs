@@ -356,7 +356,7 @@ fn v2_ls_refs_for_fetch(
         }
         if name == "HEAD" {
             if let Some(t) =
-                symref_target.filter(|t| grit_lib::refs::is_valid_fetch_advertised_ref(t))
+                symref_target.filter(|t| grit_lib::refs::is_valid_advertised_symref_target(t))
             {
                 head_symref = Some(t);
             }
@@ -512,7 +512,9 @@ pub(crate) fn read_advertisement(
                 if refname == "HEAD" {
                     for cap in caps.split_whitespace() {
                         if let Some(target) = cap.strip_prefix("symref=HEAD:") {
-                            head_symref = Some(target.to_string());
+                            if grit_lib::refs::is_valid_advertised_symref_target(target) {
+                                head_symref = Some(target.to_string());
+                            }
                         }
                     }
                 }
