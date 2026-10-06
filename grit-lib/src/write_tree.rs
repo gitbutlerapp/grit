@@ -47,6 +47,8 @@ impl WriteTreeFlags {
         }
     }
 
+    /// Like [`Self::default`], but tree writes use [`WriteOptions::silent`] so existing
+    /// objects are not freshened (used when refreshing the index cache-tree after commit).
     #[must_use]
     pub fn silent() -> Self {
         Self {
@@ -54,6 +56,26 @@ impl WriteTreeFlags {
             ..Self::default()
         }
     }
+}
+
+/// Returns whether `left` and `right` have the same stage-0 rows that feed cache-tree / write-tree.
+///
+/// Used after commit when the on-disk index may have been mutated by hooks while the in-memory
+/// index (and its cache-tree) reflects the tree that was actually committed.
+#[must_use]
+pub fn index_cache_tree_inputs_match(left: &Index, right: &Index) -> bool {
+    let rows_left = cache_tree_index_rows(left);
+    let rows_right = cache_tree_index_rows(right);
+    if rows_left.len() != rows_right.len() {
+        return false;
+    }
+    rows_left.iter().zip(rows_right.iter()).all(|(a, b)| {
+        a.path == b.path
+            && a.mode == b.mode
+            && a.oid == b.oid
+            && a.intent_to_add() == b.intent_to_add()
+            && a.is_sparse_directory_placeholder() == b.is_sparse_directory_placeholder()
+    })
 }
 
 /// Returns whether every node in `node` is valid and its tree object exists in `odb`.
@@ -339,7 +361,7 @@ fn rebuild_directory_node(
             let oid = child
                 .oid
                 .ok_or_else(|| Error::IndexError("cache-tree child oid missing".to_owned()))?;
-            if pending && is_empty_tree_oid(&oid) {
+            if pending && is_empty_tree_oid(odb, &oid) {
                 pos += covered as usize;
                 continue;
             }
@@ -399,7 +421,7 @@ fn rebuild_directory_node(
 }
 
 fn cached_node_still_good(node: &CacheTreeNode, odb: &Odb) -> bool {
-    node.entry_count >= 0 && node.oid.is_some_and(|oid| odb.exists(&oid))
+    cache_tree_fully_valid(odb, Some(node))
 }
 
 fn entry_matches_prefix(path: &[u8], anchor: &[u8], prefix_len: usize) -> bool {
@@ -429,11 +451,20 @@ fn store_tree_payload(
     }
 }
 
-fn is_empty_tree_oid(oid: &ObjectId) -> bool {
-    const EMPTY_TREE_CANON: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-    const EMPTY_TREE_LEGACY: &str = "4b825dc642cb6eb9a060e54bf899d69f7c6948d4";
-    let hex = oid.to_hex();
-    hex == EMPTY_TREE_CANON || hex == EMPTY_TREE_LEGACY
+fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
+    if *oid == odb.hash(ObjectKind::Tree, b"") {
+        return true;
+    }
+    // Legacy SHA-1 empty-tree OIDs can appear in cache-trees on SHA-1 repositories.
+    if odb.hash_algo() == crate::objects::HashAlgo::Sha1 {
+        let hex = oid.to_hex();
+        const EMPTY_TREE_CANON: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        const EMPTY_TREE_LEGACY: &str = "4b825dc642cb6eb9a060e54bf899d69f7c6948d4";
+        if hex == EMPTY_TREE_CANON || hex == EMPTY_TREE_LEGACY {
+            return true;
+        }
+    }
+    false
 }
 
 fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> Result<()> {
@@ -1405,13 +1436,64 @@ mod tests {
         let odb = Odb::new(dir.path());
         let mut index = build_nested_index(&odb);
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let beta_oid = cache_tree_child_oid(&index, b"beta");
         let root_oid = index.cache_tree.as_ref().unwrap().oid.unwrap();
-        std::fs::remove_file(odb.object_path(&root_oid)).unwrap();
-        assert!(!odb.exists(&root_oid));
+        std::fs::remove_file(odb.object_path(&beta_oid)).unwrap();
+        assert!(!odb.exists(&beta_oid));
+        assert!(
+            odb.exists(&root_oid),
+            "root tree remains while child is missing"
+        );
 
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
-        assert!(odb.exists(&index.cache_tree.as_ref().unwrap().oid.unwrap()));
+        assert!(odb.exists(&cache_tree_child_oid(&index, b"beta")));
         assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+    }
+
+    #[test]
+    fn write_tree_update_recreates_missing_child_with_valid_root() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = Index::new();
+        let blob = odb.write(ObjectKind::Blob, b"x").unwrap();
+        index.add_or_replace(entry("dir/x", MODE_REGULAR, blob));
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let dir_oid = cache_tree_child_oid(&index, b"dir");
+        std::fs::remove_file(odb.object_path(&dir_oid)).unwrap();
+
+        write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
+        assert!(odb.exists(&cache_tree_child_oid(&index, b"dir")));
+    }
+
+    fn sha256_odb(temp: &TempDir) -> Odb {
+        let git_dir = temp.path().join(".git");
+        std::fs::create_dir_all(git_dir.join("objects")).unwrap();
+        std::fs::write(
+            git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n",
+        )
+        .unwrap();
+        Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir)
+    }
+
+    #[test]
+    fn nested_intent_to_add_omits_empty_directory_sha256() {
+        let temp = TempDir::new().unwrap();
+        let odb = sha256_odb(&temp);
+        assert_eq!(odb.hash_algo(), crate::objects::HashAlgo::Sha256);
+
+        let keep = odb.write(ObjectKind::Blob, b"keep").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("keep", MODE_REGULAR, keep));
+        let mut ita = entry("ita/new", MODE_REGULAR, ObjectId::zero());
+        ita.set_intent_to_add(true);
+        index.add_or_replace(ita);
+
+        let root =
+            write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
+        let entries = parse_tree(&odb.read(&root).unwrap().data).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, b"keep");
     }
 
     #[test]
