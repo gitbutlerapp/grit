@@ -249,5 +249,10 @@ fn stage_worktree_file(
     let entry = grit_lib::index::entry_from_stat(&abs, rel_path.as_bytes(), oid, mode)
         .with_context(|| format!("could not stage {rel_path}"))?;
     index.add_or_replace(entry);
+    if index.fsmonitor_last_update.is_some() {
+        if let Some(staged) = index.get_mut(rel_path.as_bytes(), 0) {
+            staged.set_fsmonitor_valid(true);
+        }
+    }
     Ok(())
 }
