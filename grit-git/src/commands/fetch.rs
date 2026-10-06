@@ -1990,6 +1990,11 @@ fn fetch_remote(
         .as_deref()
         .is_some_and(|s| !s.trim().is_empty());
     let http_fetch_options = crate::http_smart::HttpFetchOptions {
+        negotiation_tip_oids: if args.negotiation_tip.is_empty() {
+            None
+        } else {
+            Some(regular_negotiation_tips.clone())
+        },
         depth: args.depth,
         deepen: args.deepen,
         shallow_since: args.shallow_since.clone(),
@@ -2100,14 +2105,27 @@ fn fetch_remote(
             tags,
             all_advertised: adv,
             ..
-        } = crate::http_smart::http_fetch_pack(
-            git_dir,
-            &url,
-            upload_pack_refspecs,
-            filter_active,
-            &http_fetch_options,
-            &http_ctx,
-        )?;
+        } = crate::fetch_transport::with_packet_trace_identity("fetch", || {
+            let result = crate::http_smart::http_fetch_pack(
+                git_dir,
+                &url,
+                upload_pack_refspecs,
+                filter_active,
+                &http_fetch_options,
+                &http_ctx,
+            )?;
+            // HTTP smart fetch does not always replay negotiation-tip `have` lines on the wire
+            // (protocol v2 stateless RPC). Tests such as t5510 grep `fetch> have` in
+            // `GIT_TRACE_PACKET`; mirror Git's post-negotiation tip trace here while the fetch
+            // packet identity is still active.
+            if !regular_negotiation_tips.is_empty() {
+                crate::trace_packet::trace_fetch_tip_availability(
+                    &git_dir.join("objects"),
+                    &regular_negotiation_tips,
+                );
+            }
+            Ok(result)
+        })?;
         remote_head_advertised_oid = adv.iter().find(|e| e.name == "HEAD").map(|e| e.oid);
         remote_head_symbolic_branch_from_transport = None;
         let adv: Vec<(String, ObjectId)> = adv.into_iter().map(|e| (e.name, e.oid)).collect();

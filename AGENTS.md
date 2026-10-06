@@ -145,7 +145,7 @@ When matching Git behavior: read published docs and specs for *what* and *why*, 
 ```bash
 cargo fmt
 cargo check # fix warnings
-cargo clippy --fix --allow-dirty   # ensure no warnings remain
+cargo clippy --workspace -- -D warnings   # same gate as CI (optional: cargo clippy --fix --allow-dirty first)
 cargo test -p grit-lib --lib       # unit tests must pass
 ```
 
@@ -254,5 +254,5 @@ Agents version-control with **GitButler (`but`)** and **GitButler Mesh**. Nothin
 - **Rust toolchain**: Ensure stable ≥ 1.85 (`rustup update stable && rustup default stable`) for edition 2024 workspace deps.
 - **No external services**: Build and test via Cargo.
 - **Unit tests**: `cargo test -p grit-lib --lib`; use `cargo test --workspace` for broader runs.
-- **Lint**: `cargo clippy --workspace -- -D warnings` (fix new warnings in code you touch).
+- **Lint**: `cargo clippy --workspace -- -D warnings` must pass; warnings fail CI (see **TESTING.md**).
 - **Benchmarks**: `bench/` when touching hot paths (compare against system `git`).

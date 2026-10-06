@@ -1,4 +1,4 @@
-# Stage 1 CI: format, unit tests, harness smoke (no workspace clippy gate yet).
+# CI: format, clippy, unit tests, harness smoke.
 #
 # Toolchain bump: change every `uses: dtolnay/rust-toolchain@…` pin below to the
 # same new version and document it in TESTING.md "Continuous integration".
@@ -36,6 +36,27 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: cargo clippy --workspace -- -D warnings
 
   test:
     name: test

@@ -2434,6 +2434,7 @@ fn run_http_clone(args: Args) -> Result<()> {
     let http_config = clone_http_client_config(&args)?;
     let http_ctx = crate::http_client::HttpClientContext::from_config_set(&http_config)?;
     let fetch_options = crate::http_smart::HttpFetchOptions {
+        negotiation_tip_oids: None,
         depth: args.depth,
         deepen: None,
         shallow_since: args.shallow_since.clone(),
