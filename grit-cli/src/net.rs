@@ -7,7 +7,6 @@
 //! `grit` rather than in the shared library.
 
 use anyhow::{bail, Context, Result};
-use std::path::PathBuf;
 
 use grit_lib::config::ConfigSet;
 use grit_lib::credentials::HelperCredentialProvider;
@@ -23,6 +22,7 @@ use grit_lib::transport::http::{http_fetch, SmartHttpTransport};
 use grit_lib::transport::{
     is_ssh_url, ConnectOptions, Connection, GitDaemonTransport, Service, SshTransport, Transport,
 };
+use grit_lib::transport_path::resolve_local_remote_git_dir;
 
 /// The remote `grit` uses when none is named or configured.
 pub const DEFAULT_REMOTE: &str = "origin";
@@ -68,18 +68,6 @@ fn http_client(config: &ConfigSet) -> Result<UreqHttpClient> {
     Ok(client)
 }
 
-/// Resolve the git directory of a local remote (a path or `file://` URL).
-fn local_git_dir(url: &str) -> PathBuf {
-    let path = url.strip_prefix("file://").unwrap_or(url);
-    let path = PathBuf::from(path);
-    let dot_git = path.join(".git");
-    if dot_git.is_dir() {
-        dot_git
-    } else {
-        path
-    }
-}
-
 fn connect(url: &str, service: Service) -> Result<Box<dyn Connection>> {
     let opts = ConnectOptions::default();
     let conn = if url.starts_with("git://") {
@@ -107,7 +95,8 @@ pub fn fetch(
     };
 
     let outcome = if !is_url_scheme(&url) {
-        fetch_local(&repo.git_dir, &local_git_dir(&url), &opts)?
+        let remote_git_dir = resolve_local_remote_git_dir(&url, &repo.git_dir);
+        fetch_local(&repo.git_dir, &remote_git_dir, &opts)?
     } else if is_http(&url) {
         let client = http_client(config)?;
         http_fetch(&client, &repo.git_dir, &url, &opts, &mut NoProgress)?
@@ -132,7 +121,8 @@ pub fn push(
     };
 
     let outcome = if !is_url_scheme(&url) {
-        push_local(&repo.git_dir, &local_git_dir(&url), refs, &opts)?
+        let remote_git_dir = resolve_local_remote_git_dir(&url, &repo.git_dir);
+        push_local(&repo.git_dir, &remote_git_dir, refs, &opts)?
     } else if is_http(&url) {
         let client = http_client(config)?;
         SmartHttpTransport::new(client).push(&repo.git_dir, &url, refs, &opts, &mut NoProgress)?

@@ -13,43 +13,18 @@ use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::refs;
 use crate::repo::Repository;
+use crate::transport_path::{is_local_path_remote_url, resolve_local_remote_git_dir};
 
-fn resolve_remote_url_to_local_git_dir(url: &str, base_for_relative: &Path) -> Option<PathBuf> {
-    let url = url.trim();
-    if url.starts_with("git://")
-        || url.starts_with("http://")
-        || url.starts_with("https://")
-        || is_ssh_transport_url(url)
-    {
+fn resolve_remote_url_to_local_git_dir(url: &str, git_dir: &Path) -> Option<PathBuf> {
+    if !is_local_path_remote_url(url) {
         return None;
     }
-    let path_str = url.strip_prefix("file://").unwrap_or(url);
-    let mut p = PathBuf::from(path_str);
-    if p.is_relative() {
-        p = base_for_relative.join(p);
-    }
-    let p = if p.ends_with(".git") || p.join("HEAD").exists() {
-        p
-    } else {
-        p.join(".git")
-    };
-    if p.join("HEAD").exists() {
+    let p = resolve_local_remote_git_dir(url, git_dir);
+    if p.join("HEAD").is_file() {
         Some(p)
     } else {
         None
     }
-}
-
-fn is_ssh_transport_url(url: &str) -> bool {
-    if url.starts_with("ssh://") || url.starts_with("git+ssh://") {
-        return true;
-    }
-    if url.contains("://") {
-        return false;
-    }
-    let colon = url.find(':');
-    let slash = url.find('/');
-    colon.is_some_and(|ci| slash.is_none_or(|si| ci < si))
 }
 
 /// True when `rev-list <oids> --not <remote_tip_oids>` is non-empty: some gitlink commit is not on the remote.
@@ -436,7 +411,7 @@ pub fn submodule_needs_push_to_remote(
         let Some(val) = entry.value.as_deref() else {
             continue;
         };
-        let Some(remote_git_dir) = resolve_remote_url_to_local_git_dir(val, &wd) else {
+        let Some(remote_git_dir) = resolve_remote_url_to_local_git_dir(val, &sub.git_dir) else {
             continue;
         };
         if oids_not_on_remote_repo(&sub, oids, &remote_git_dir)? {

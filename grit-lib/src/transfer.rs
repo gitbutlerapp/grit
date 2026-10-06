@@ -1199,6 +1199,13 @@ pub fn push_local(
     refs: &[PushRefSpec],
     opts: &PushOptions,
 ) -> Result<PushOutcome> {
+    if !remote_git_dir.join("objects").is_dir() {
+        return Err(Error::Message(format!(
+            "could not find repository at '{}'",
+            remote_git_dir.display()
+        )));
+    }
+
     let local_odb = open_odb(local_git_dir);
     let remote_odb = open_odb(remote_git_dir);
 

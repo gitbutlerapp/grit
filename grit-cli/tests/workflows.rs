@@ -381,6 +381,61 @@ fn local_remote_clone_push_fetch_and_pull_workflow() -> TestResult {
     Ok(())
 }
 
+/// GitHub issue #909: relative local clone URLs must be stored absolute and push must reach
+/// the real remote, not create a bare repo inside the worktree.
+#[test]
+fn relative_local_clone_push_reaches_real_remote() -> TestResult {
+    let scratch = Scratch::new("rel-clone-909")?;
+    let remote = scratch.child("origin.git");
+    let clone = scratch.child("c");
+    let seed = scratch.child("seed");
+    fs::create_dir_all(&seed)?;
+
+    gs_ok(
+        scratch.path(),
+        ["init", "--bare", path_arg(&remote)?.as_str()],
+    )?;
+    gs_ok(&seed, ["init", "."])?;
+    write_file(&seed.join("f"), "1\n")?;
+    gs_ok(&seed, ["commit", "-m", "seed"])?;
+    git_in(
+        &seed,
+        &["remote", "add", "origin", path_arg(&remote)?.as_str()],
+    )?;
+    git_in(&seed, &["push", "-q", "origin", "HEAD:refs/heads/main"])?;
+
+    gs_ok(
+        scratch.path(),
+        ["clone", "origin.git", path_arg(&clone)?.as_str()],
+    )?;
+
+    let remote_abs = path_arg(&remote.canonicalize().unwrap_or(remote.clone()))?;
+    let remotes = gs_ok(&clone, ["remote"])?;
+    assert!(
+        remotes.stdout.contains(&format!("origin\t{remote_abs}")),
+        "origin URL should be absolute path to real remote, got:\n{}",
+        remotes.dump()
+    );
+
+    write_file(&clone.join("g"), "x\n")?;
+    gs_ok(&clone, ["commit", "-am", "two"])?;
+    gs_ok(&clone, ["push"])?;
+
+    assert!(
+        !clone.join("origin.git").exists(),
+        "push must not create origin.git inside the clone worktree"
+    );
+
+    let remote_log = git_in(&remote, &["log", "--oneline", "main"])?;
+    assert_eq!(remote_log.status, Some(0));
+    assert!(
+        remote_log.stdout.contains("two"),
+        "real remote should have commit 'two':\n{}",
+        remote_log.stdout
+    );
+    Ok(())
+}
+
 /// Mirrors GitHub issue #903: a gitlink whose commit object is not in the superproject ODB
 /// must not make `grit diff` fail on a clean tree.
 #[test]

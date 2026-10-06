@@ -503,3 +503,38 @@ fn push_local_honors_custom_fetch_refspec_for_tracking() {
         "must not write the conventional refs/remotes path when fetch maps elsewhere"
     );
 }
+
+#[test]
+fn push_local_missing_remote_is_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    std::fs::write(local.join("a.txt"), "one\n").unwrap();
+    git(&local, &["add", "a.txt"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    let c1 = rev_parse(&local, "HEAD");
+
+    let missing = tmp.path().join("no-such-remote.git");
+    let err = push_local(
+        &local_git,
+        &missing,
+        &[PushRefSpec {
+            src: Some(c1),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+    )
+    .expect_err("push to missing remote must fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("could not find repository"),
+        "unexpected error: {msg}"
+    );
+    assert!(!missing.exists(), "must not create a new repository path");
+}

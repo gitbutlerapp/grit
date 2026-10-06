@@ -203,17 +203,8 @@ fn ssh_command() -> String {
         .unwrap_or_else(|| "ssh".to_owned())
 }
 
-/// Resolve a `file://` URL or bare path to the remote's git directory
-/// (`<path>/.git` for a work tree, otherwise the path itself for a bare repo).
-fn local_git_dir(url: &str) -> PathBuf {
-    let raw = url.strip_prefix("file://").unwrap_or(url);
-    let path = PathBuf::from(raw);
-    let dot_git = path.join(".git");
-    if dot_git.is_dir() {
-        dot_git
-    } else {
-        path
-    }
+fn local_git_dir(url: &str, git_dir: &Path) -> PathBuf {
+    grit_lib::transport_path::resolve_local_remote_git_dir(url, git_dir)
 }
 
 /// Build an HTTP client honoring the repo's request-shaping config
@@ -258,7 +249,9 @@ pub fn fetch(git_dir: &Path, remote: &Remote, opts: &FetchOptions) -> Result<Fet
             let mut conn = SshTransport::new().connect(&remote.url, Service::UploadPack, &v2)?;
             fetch_remote(git_dir, &mut *conn, opts, &mut NoProgress)?
         }
-        RemoteKind::Local => transfer::fetch_local(git_dir, &local_git_dir(&remote.url), opts)?,
+        RemoteKind::Local => {
+            transfer::fetch_local(git_dir, &local_git_dir(&remote.url, git_dir), opts)?
+        }
     };
     Ok(outcome)
 }
@@ -288,7 +281,7 @@ pub fn push(
             push_remote(git_dir, &mut *conn, refs, opts, &mut NoProgress)?
         }
         RemoteKind::Local => {
-            transfer::push_local(git_dir, &local_git_dir(&remote.url), refs, opts)?
+            transfer::push_local(git_dir, &local_git_dir(&remote.url, git_dir), refs, opts)?
         }
     };
     Ok(outcome)

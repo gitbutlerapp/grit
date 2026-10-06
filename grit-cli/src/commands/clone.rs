@@ -3,13 +3,14 @@
 //! Composed from the pieces `grit` already has: initialize a repo, point `origin`
 //! at the source, fetch, then check out the remote's default branch.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
+use grit_lib::transport_path::{absolute_local_clone_source_url, is_local_path_remote_url};
 use serde::Serialize;
 
 use crate::context;
@@ -48,10 +49,11 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
     let repo = init_repository(&path, false, "main", None, "files")
         .with_context(|| format!("could not initialize '{dir}'"))?;
 
+    let origin_url = stored_clone_remote_url(url);
     set_config(
         &repo,
         &[
-            ("remote.origin.url", url.to_owned()),
+            ("remote.origin.url", origin_url),
             (
                 "remote.origin.fetch",
                 "+refs/heads/*:refs/remotes/origin/*".to_owned(),
@@ -97,6 +99,16 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
         path: dir,
         branch: default,
     })
+}
+
+/// URL stored in `remote.origin.url` after clone — absolute for local paths so later
+/// fetch/push resolve against the repository, not the process cwd.
+fn stored_clone_remote_url(url: &str) -> String {
+    if is_local_path_remote_url(url) {
+        absolute_local_clone_source_url(Path::new(url.trim()))
+    } else {
+        url.to_owned()
+    }
 }
 
 /// Derive a destination directory from a clone URL (the last path component,

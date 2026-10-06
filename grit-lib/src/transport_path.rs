@@ -1,4 +1,6 @@
-//! Safety checks for local transport URLs (matches Git `connect.c` / `path.c`).
+//! Safety checks and path resolution for local transport URLs (matches Git `connect.c` / `path.c`).
+
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -21,6 +23,89 @@ pub fn looks_like_command_line_option(s: &str) -> bool {
 ///
 /// Git dies with `strange pathname '%s' blocked` when the parsed local path starts with `-`.
 /// Absolute paths like `/tmp/-repo.git` are allowed because the path string begins with `/`.
+/// Repository root used to resolve relative `remote.<name>.url` values — the worktree
+/// directory for a linked worktree, or the bare repo path itself.
+#[must_use]
+pub fn configured_remote_base(git_dir: &Path) -> PathBuf {
+    if git_dir.file_name().is_some_and(|name| name == ".git") {
+        git_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| git_dir.to_path_buf())
+    } else {
+        git_dir.to_path_buf()
+    }
+}
+
+/// Absolute form of a local clone source path, matching Git's `absolute_pathdup`: prepend the
+/// current directory when relative, but leave `.`/`..`/`./` components untouched (no
+/// normalization). The parent of `source_path` is canonicalized when possible (Git resolves
+/// the cwd via `getcwd`).
+#[must_use]
+pub fn absolute_local_clone_source_url(source_path: &Path) -> String {
+    if source_path.is_absolute() {
+        return source_path.to_string_lossy().to_string();
+    }
+    let cwd = match std::env::current_dir() {
+        Ok(c) => c.canonicalize().unwrap_or(c),
+        Err(_) => return source_path.to_string_lossy().to_string(),
+    };
+    cwd.join(source_path).to_string_lossy().to_string()
+}
+
+/// True when `url` names a local filesystem remote (not `http(s)://`, `git://`, `ssh`, or `ext::`).
+#[must_use]
+pub fn is_local_path_remote_url(url: &str) -> bool {
+    let url = url.trim();
+    !(url.starts_with("git://")
+        || url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("ext::")
+        || crate::transport::is_ssh_url(url))
+}
+
+/// Resolve a local remote URL to the remote repository's git directory.
+///
+/// Relative paths are interpreted from [`configured_remote_base`] (`git_dir`), not from the
+/// process current working directory. This matches Git's handling of configured
+/// `remote.<name>.url` during fetch and push.
+#[must_use]
+pub fn resolve_local_remote_git_dir(url: &str, git_dir: &Path) -> PathBuf {
+    let path_str = url.strip_prefix("file://").unwrap_or(url.trim());
+    let mut remote_path = PathBuf::from(path_str);
+    if remote_path.is_relative() {
+        let base = configured_remote_base(git_dir);
+        remote_path = base.join(&remote_path);
+        if !remote_path.exists() {
+            let mut trimmed = url.trim();
+            let mut stripped_any_parent = false;
+            while let Some(rest) = trimmed.strip_prefix("../") {
+                stripped_any_parent = true;
+                trimmed = rest;
+            }
+            if stripped_any_parent {
+                let fallback = base.join(trimmed);
+                if fallback.exists() {
+                    remote_path = fallback;
+                }
+            }
+        }
+    }
+    local_git_dir_from_filesystem_path(&remote_path)
+}
+
+fn local_git_dir_from_filesystem_path(path: &Path) -> PathBuf {
+    if path.ends_with(".git") || path.join("HEAD").is_file() {
+        return path.to_path_buf();
+    }
+    let dot_git = path.join(".git");
+    if dot_git.is_dir() {
+        dot_git
+    } else {
+        path.to_path_buf()
+    }
+}
+
 pub fn check_local_url_path_not_option_like(url: &str) -> Result<(), TransportPathError> {
     let path = url
         .strip_prefix("file://")
@@ -262,5 +347,35 @@ mod tests {
     fn empty_name_is_error() {
         assert_eq!(git_url_basename("/", false, false), Err(NoDirectoryName));
         assert_eq!(git_url_basename("", false, false), Err(NoDirectoryName));
+    }
+
+    #[test]
+    fn configured_remote_base_worktree_and_bare() {
+        assert_eq!(
+            configured_remote_base(Path::new("/tmp/wt/.git")),
+            PathBuf::from("/tmp/wt")
+        );
+        assert_eq!(
+            configured_remote_base(Path::new("/tmp/remote.git")),
+            PathBuf::from("/tmp/remote.git")
+        );
+    }
+
+    #[test]
+    fn resolve_local_remote_git_dir_from_relative_url() {
+        let base = PathBuf::from("/tmp/parent/clone");
+        let git_dir = base.join(".git");
+        let resolved = resolve_local_remote_git_dir("origin.git", &git_dir);
+        assert_eq!(resolved, base.join("origin.git"));
+    }
+
+    #[test]
+    fn is_local_path_remote_url_classification() {
+        assert!(is_local_path_remote_url("./foo.git"));
+        assert!(is_local_path_remote_url("/abs/foo.git"));
+        assert!(is_local_path_remote_url("file:///tmp/x"));
+        assert!(!is_local_path_remote_url("https://example.com/x.git"));
+        assert!(!is_local_path_remote_url("git://host/x.git"));
+        assert!(!is_local_path_remote_url("host:repo.git"));
     }
 }
