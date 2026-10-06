@@ -832,8 +832,7 @@ fn fetch_bundles_by_token(
     if bundles.is_empty() {
         return Ok(());
     }
-    bundles.sort_by_key(|b| b.token);
-    bundles.reverse();
+    sort_token_bundles_by_creation_token(&mut bundles);
 
     if bundles[0].token <= max_creation_token {
         return Ok(());
@@ -953,4 +952,41 @@ pub fn maybe_apply_bundle_uri_after_http_fetch_with_client(
     let list_uri = bundle_list_uri_for_config(git_dir, remote_url);
     let (mode, heuristic, entries) = parse_bundle_list_ini(&list_text)?;
     apply_bundle_list_for_fetch(git_dir, &list_uri, &list_text, mode, heuristic, &entries)
+}
+
+fn sort_token_bundles_by_creation_token(bundles: &mut [TokenBundleWork]) {
+    bundles.sort_by_key(|b| std::cmp::Reverse(b.token));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sort_token_bundles_desc_preserves_equal_token_relative_order() {
+        let mut bundles = vec![
+            TokenBundleWork {
+                token: 3,
+                uri: "first".into(),
+                file: None,
+                unbundled: false,
+            },
+            TokenBundleWork {
+                token: 9,
+                uri: "max".into(),
+                file: None,
+                unbundled: false,
+            },
+            TokenBundleWork {
+                token: 3,
+                uri: "second".into(),
+                file: None,
+                unbundled: false,
+            },
+        ];
+        sort_token_bundles_by_creation_token(&mut bundles);
+        assert_eq!(bundles[0].uri, "max");
+        assert_eq!(bundles[1].uri, "first");
+        assert_eq!(bundles[2].uri, "second");
+    }
 }

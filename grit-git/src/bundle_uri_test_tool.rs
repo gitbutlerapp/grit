@@ -302,8 +302,8 @@ fn validate_git_config_entry_line(raw: &str, line_no: usize, path: &Path) -> boo
 /// Strip `#` / `;` comments not inside double quotes (Git config semantics, simplified).
 fn strip_inline_comment_config(s: &str) -> &str {
     let mut in_quote = false;
-    let mut chars = s.char_indices().peekable();
-    while let Some((i, ch)) = chars.next() {
+    let chars = s.char_indices().peekable();
+    for (i, ch) in chars {
         match ch {
             '"' => in_quote = !in_quote,
             '#' | ';' if !in_quote => return &s[..i],
@@ -398,12 +398,9 @@ pub(crate) fn parse_config_file(uri_param: &str, path: &str) -> Result<i32> {
             continue;
         };
 
-        match bundle_list_update(&full_key, &value, &mut list) {
-            BundleUpdateOutcome::DuplicateUri => {
-                err = 1;
-                eprintln!("error: bad line: '{trimmed}'");
-            }
-            _ => {}
+        if bundle_list_update(&full_key, &value, &mut list) == BundleUpdateOutcome::DuplicateUri {
+            err = 1;
+            eprintln!("error: bad line: '{trimmed}'");
         }
     }
 
