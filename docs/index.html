@@ -3,2177 +3,437 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>grit - Git reimplementation in Rust</title>
+    <title>Grit - Git, minus the weight</title>
     <meta
       name="description"
-      content="Grit is an agent-driven Rust reimplementation of Git in a library-oriented manner."
+      content="A simpler Git that works on every repo you already have, and a Rust library fast enough to put inside your product."
     />
     <link rel="canonical" href="https://grit-scm.com/" />
-    <meta property="og:title" content="grit - Git internals in Rust" />
+    <meta property="og:title" content="Grit - Git, minus the weight" />
     <meta
       property="og:description"
-      content="Grit is an agent-driven Rust reimplementation of Git in a library-oriented manner."
+      content="A simpler Git that works on every repo you already have, and a Rust library fast enough to put inside your product."
     />
     <meta property="og:url" content="https://grit-scm.com/" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Grit - Git, minus the weight" />
+    <meta
+      name="twitter:description"
+      content="A simpler Git that works on every repo you already have, and a Rust library fast enough to put inside your product."
+    />
     <script
       async
       src="https://u.gitbutler.com/script.js"
       data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"
     ></script>
-    <meta name="twitter:title" content="grit - Git in Rust" />
-    <meta
-      name="twitter:description"
-      content="Grit is an agent-driven Rust reimplementation of Git in a library-oriented manner."
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
     />
     <style>
       :root {
-        --bg: #f8f2e8;
-        --paper: #fffaf2;
-        --panel: #fff6e9;
-        --ink: #17120d;
-        --muted: #6c6258;
-        --soft: #3f372f;
-        --line: #e2d6c7;
-        --line-strong: #cfbea8;
-        --accent: #f05a28;
-        --accent-dark: #bf3d17;
-        --blue: #3157d5;
-        --green: #247a45;
-        --code-bg: #211914;
-        --code-fg: #f8ead8;
-        --shadow: 0 18px 50px rgba(63, 45, 24, 0.12);
+        --bg: #f4f1ea;
+        --ink: #1b1915;
+        --soft: #3d3830;
+        --muted: #7b7466;
+        --line: #d9d3c5;
+        --accent: #e2481f;
+        --code-fg: #e9e4d8;
+        --code-kw: #ff8a5c;
+        --code-str: #b9d98f;
+        --rail: clamp(48px, 8vw, 120px);
+        --mono: "JetBrains Mono", ui-monospace, monospace;
       }
       * {
         box-sizing: border-box;
       }
-      html {
-        scroll-behavior: smooth;
-      }
       body {
         margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
         color: var(--ink);
-        background:
-          radial-gradient(
-            circle at 8% 0%,
-            rgba(240, 90, 40, 0.13),
-            transparent 24rem
-          ),
-          radial-gradient(
-            circle at 92% 5%,
-            rgba(49, 87, 213, 0.08),
-            transparent 24rem
-          ),
-          var(--bg);
-        font-family:
-          ui-sans-serif,
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          sans-serif;
-        font-size: 14px;
-        line-height: 1.65;
+        font-family: "Space Grotesk", system-ui, sans-serif;
       }
       a {
         color: inherit;
-        text-decoration: none;
       }
       a:hover {
-        color: var(--accent-dark);
+        opacity: 0.7;
       }
       .wrap {
-        width: min(980px, calc(100% - 3rem));
+        max-width: 1200px;
         margin: 0 auto;
+        padding: 0 clamp(20px, 4vw, 56px);
       }
+      .mono {
+        font-family: var(--mono);
+      }
+
       .topbar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 1.15rem;
-        padding: 1.15rem 0 1.35rem;
-        color: var(--muted);
-        font-size: 0.84rem;
+        flex-wrap: wrap;
+        gap: 16px;
+        padding: 24px 0;
       }
       .brand {
         display: flex;
         align-items: center;
-        gap: 0.62rem;
-        color: var(--accent-dark);
-        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-        font-size: 1.22rem;
+        gap: 10px;
+        font-size: 20px;
         font-weight: 700;
-        letter-spacing: -0.018em;
-        transform: translateY(0.35rem);
+        text-decoration: none;
       }
-      .mark {
-        display: block;
-        width: 3.7rem;
-        height: 3.7rem;
-        object-fit: contain;
-        margin: -0.45rem 0 -0.9rem;
-        filter: drop-shadow(0 8px 14px rgba(63, 45, 24, 0.14));
-      }
-      .brand-subtle {
-        color: #746a61;
-        font-weight: 600;
-      }
-      .brand-grit {
-        color: var(--accent-dark);
-        font-weight: 760;
-      }
-      .brand-byline {
-        display: block;
-        width: fit-content;
-        margin: 0.16rem 0 0 calc(3.7rem + 0.62rem);
-        color: #9a8b7d;
-        font-size: 0.62rem;
-        font-weight: 550;
-        letter-spacing: 0.02em;
-        line-height: 1.1;
-      }
-      .brand-byline:hover {
-        color: var(--accent-dark);
+      .brand::before {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--accent);
       }
       .nav {
         display: flex;
         flex-wrap: wrap;
-        justify-content: flex-end;
         align-items: center;
-        gap: 1rem;
+        gap: 28px;
+        font-size: 15px;
       }
-      .nav-github {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.42rem;
-        margin-left: 0.15rem;
-        padding: 0.42rem 0.62rem;
-        border: 1px solid var(--line-strong);
-        border-radius: 999px;
-        background: rgba(255, 250, 242, 0.72);
-        color: var(--ink);
-        font-weight: 760;
-        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset;
+      .nav a {
+        text-decoration: none;
       }
-      .nav-github:hover {
-        border-color: rgba(191, 61, 23, 0.38);
-        color: var(--accent-dark);
-      }
-      .nav-github svg {
-        width: 1rem;
-        height: 1rem;
-        fill: currentColor;
-      }
-      .hero {
-        padding: 1.55rem 0 4rem;
-      }
-      .hero-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr);
-        gap: 3.2rem;
-        align-items: start;
-      }
-      .eyebrow {
-        display: inline-flex;
-        align-items: center;
-        color: var(--accent-dark);
-        background: rgba(240, 90, 40, 0.09);
-        border: 1px solid rgba(240, 90, 40, 0.22);
-        border-radius: 999px;
-        padding: 0.28rem 0.62rem;
-        font-size: 0.75rem;
-        font-weight: 720;
-      }
-      h1 {
-        max-width: 12.5em;
-        margin: 0 0 1.1rem;
-        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-        font-size: clamp(1.58rem, 3.6vw, 2.72rem);
-        font-weight: 650;
-        line-height: 1.1;
-        letter-spacing: -0.026em;
-      }
-      .h-git {
-        color: #bf3d17;
-      }
-      .h-agents {
-        color: #746a61;
-      }
-      .h-rust {
-        color: #7f3d24;
-      }
-      .h-library {
-        color: #a14a22;
-      }
-      .lead {
-        max-width: 34rem;
-        margin: 0;
-        color: var(--soft);
-        line-height: 1.7;
-      }
-      .lead-primary {
-        font-size: clamp(0.98rem, 1.55vw, 1.14rem);
-      }
-      .lead-secondary {
-        max-width: 33rem;
-        margin-top: 0.75rem;
-        color: var(--muted);
-        font-size: clamp(0.86rem, 1.2vw, 0.94rem);
-      }
-      .lead a {
-        color: var(--accent-dark);
-        font-weight: 700;
-        text-decoration: underline;
-        text-decoration-color: rgba(191, 61, 23, 0.28);
-        text-underline-offset: 0.16em;
-      }
-      .cta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.78rem;
-        margin-top: 1.9rem;
-      }
-      .button {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid var(--line-strong);
-        border-radius: 999px;
-        padding: 0.56rem 0.82rem;
-        background: rgba(255, 250, 242, 0.68);
-        color: var(--ink);
-        font-size: 0.82rem;
-        font-weight: 720;
-      }
-      .button.primary {
-        border-color: var(--ink);
+      .nav .pill {
         background: var(--ink);
-        color: var(--paper);
+        color: var(--bg);
+        padding: 9px 16px;
+        border-radius: 999px;
       }
-      .button:hover {
-        transform: translateY(-1px);
-        color: var(--accent-dark);
-      }
-      .button.primary:hover {
-        color: #fff;
-        background: var(--accent-dark);
-        border-color: var(--accent-dark);
-      }
-      .terminal {
-        overflow: hidden;
-        border: 1px solid #2d231d;
-        border-radius: 0.95rem;
-        background: var(--code-bg);
-        box-shadow: var(--shadow);
-      }
-      .terminal-head {
-        display: flex;
-        align-items: stretch;
-        min-height: 2.6rem;
-        padding: 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.11);
-        background: #1a1824;
-      }
-      .terminal-lights {
-        display: flex;
-        gap: 0.38rem;
-        align-items: center;
-        flex: 0 0 auto;
-        padding: 0 0.72rem;
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
-      }
-      .terminal-tabs {
+
+      /* Each section is a commit: a graph rail on the left, content on the right. */
+      .commit {
         display: grid;
-        grid-template-columns: repeat(2, minmax(7.4rem, 1fr));
-        flex: 1 1 auto;
-        margin-left: 0;
+        grid-template-columns: var(--rail) minmax(0, 1fr);
       }
-      .tab-button {
+      .commit + .commit {
+        border-top: 1px solid var(--line);
+      }
+      .rail {
         position: relative;
-        overflow: hidden;
-        border: 0;
-        border-left: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 0;
-        padding: 0.82rem 0.9rem 0.78rem;
-        background: #0e0d13;
-        color: #9d96a8;
-        cursor: pointer;
-        font:
-          720 0.82rem/1 ui-sans-serif,
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          sans-serif;
-        letter-spacing: 0.01em;
       }
-      .tab-button[aria-selected="true"] {
-        background: #1a1824;
-        color: #ece7f8;
-      }
-      .tab-progress {
+      .rail > span {
         position: absolute;
-        left: 0;
-        bottom: 0;
-        width: 0;
-        height: 2px;
-        background: linear-gradient(90deg, #f05a28, #7c5cff);
-      }
-      .terminal.is-auto .tab-button[aria-selected="true"] .tab-progress {
-        animation: tab-progress 8.5s linear forwards;
-      }
-      @keyframes tab-progress {
-        from {
-          width: 0;
-        }
-        to {
-          width: 100%;
-        }
-      }
-      .tab-panel {
-        display: none;
-        height: 18rem;
-        overflow: hidden;
-      }
-      .tab-panel.active {
         display: block;
       }
-      .tab-panel pre {
-        height: 18rem;
-        overflow: auto;
-      }
-      .dot {
-        width: 0.6rem;
-        height: 0.6rem;
-        border-radius: 50%;
-        background: #ee6a4a;
-      }
-      .dot:nth-child(2) {
-        background: #e8b44d;
-      }
-      .dot:nth-child(3) {
-        background: #5bbf74;
-      }
-      pre {
-        margin: 0;
-        padding: 1.15rem;
-        overflow-x: auto;
-        color: var(--code-fg);
-        font:
-          0.76rem/1.72 ui-monospace,
-          SFMono-Regular,
-          Menlo,
-          Consolas,
-          monospace;
-      }
-      .comment {
-        color: #a39182;
-      }
-      .kw {
-        color: #83b5ff;
-      }
-      .string {
-        color: #f2c46d;
-      }
-      .prompt {
-        color: #f05a28;
-        font-weight: 850;
-      }
-      .cmd {
-        color: #fff6e8;
-        font-weight: 780;
-      }
-      .output {
-        color: #a39182;
-      }
-      .section {
-        padding: 3.8rem 0;
-      }
-      .section h2 {
-        margin: 0 0 0.85rem;
-        font-size: clamp(1.35rem, 2.55vw, 2.1rem);
-        line-height: 1.12;
-        letter-spacing: -0.04em;
-      }
-      .section-intro {
-        max-width: 34rem;
-        margin: 0 0 1.9rem;
-        color: var(--muted);
-        font-size: 0.9rem;
-        line-height: 1.75;
-      }
-      .grid {
-        display: grid;
-        gap: 1.15rem;
-      }
-      .features {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-      }
-      .cards-3 {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-      .capabilities {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-      }
-      .capability-card {
-        display: grid;
-        gap: 0.72rem;
-      }
-      .cap-head {
-        display: flex;
-        align-items: center;
-        gap: 0.72rem;
-      }
-      .cap-icon {
-        display: grid;
-        place-items: center;
-        width: 2.05rem;
-        height: 2.05rem;
-        border-radius: 0.62rem;
-        background: rgba(240, 90, 40, 0.08);
-        color: var(--accent-dark);
-      }
-      .cap-icon svg {
-        width: 1.18rem;
-        height: 1.18rem;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 1.9;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-      }
-      .cap-letter {
-        font-size: 1.05rem;
-        font-weight: 900;
-        line-height: 1;
-      }
-      .capability-card h3 {
-        margin: 0;
-      }
-      .capability-card ul {
-        display: grid;
-        gap: 0.42rem;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        color: var(--muted);
-        font-size: 0.8rem;
-        line-height: 1.65;
-      }
-      .capability-card li {
-        display: flex;
-        gap: 0.42rem;
-      }
-      .capability-card li::before {
-        content: "";
-        flex: 0 0 0.32rem;
-        width: 0.32rem;
-        height: 0.32rem;
-        margin-top: 0.5rem;
-        border-radius: 50%;
-        background: rgba(191, 61, 23, 0.55);
-      }
-      .capability-card li a {
-        color: inherit;
-        text-decoration: underline;
-        text-decoration-color: rgba(191, 61, 23, 0.24);
-        text-underline-offset: 0.14em;
-      }
-      .capability-card li a:hover {
-        color: var(--accent-dark);
-        text-decoration-color: rgba(191, 61, 23, 0.5);
-      }
-      .example-modal[hidden] {
-        display: none;
-      }
-      .example-modal {
-        position: fixed;
-        inset: 0;
-        z-index: 20;
-        display: grid;
-        align-items: start;
-        justify-items: center;
-        padding: clamp(0.7rem, 2.5vh, 1.2rem) 1.25rem 1.25rem;
-      }
-      .example-modal-backdrop {
-        position: absolute;
-        inset: 0;
-        background: rgba(57, 44, 31, 0.22);
-        backdrop-filter: blur(2px);
-      }
-      .example-modal-panel {
-        position: relative;
-        z-index: 1;
-        width: min(1040px, 100%);
-        max-height: min(780px, calc(100vh - 1.5rem));
-        overflow: hidden;
-        border: 1px solid rgba(112, 92, 70, 0.2);
-        border-radius: 0.28rem;
-        background: #fffaf2;
-        box-shadow: 0 22px 65px rgba(63, 45, 24, 0.22);
-        color: #312820;
-      }
-      .example-modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding: 0.72rem 0.9rem;
-        border-bottom: 1px solid rgba(112, 92, 70, 0.16);
-        background: #fff6e9;
-        color: #312820;
-      }
-      .example-modal-title {
-        margin: 0;
-        font-size: 0.86rem;
-      }
-      .example-modal-close {
-        border: 1px solid rgba(112, 92, 70, 0.22);
-        border-radius: 0.18rem;
-        background: rgba(255, 255, 255, 0.72);
-        color: #5c4735;
-        cursor: pointer;
-        font-size: 1.1rem;
-        line-height: 1;
-        padding: 0.32rem 0.5rem;
-      }
-      .example-modal-close:hover {
-        border-color: rgba(191, 61, 23, 0.38);
-        color: var(--accent-dark);
-      }
-      .example-modal-body {
-        display: grid;
-        grid-template-columns: minmax(180px, 230px) 1fr;
-        min-height: 0;
-      }
-      .example-sidebar {
-        max-height: calc(min(780px, 100vh - 1.5rem) - 3.25rem);
-        overflow: auto;
-        padding: 0.85rem;
-        border-right: 1px solid rgba(112, 92, 70, 0.14);
-        background: rgba(249, 237, 219, 0.56);
-      }
-      .example-sidebar-title {
-        margin: 0 0 0.55rem;
-        color: #7b6755;
-        font-size: 0.68rem;
-        font-weight: 900;
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
-      }
-      .example-list {
-        display: grid;
-        gap: 0.18rem;
-      }
-      .example-list button {
-        width: 100%;
-        border: 1px solid transparent;
-        border-radius: 0.18rem;
-        background: transparent;
-        color: #5c4735;
-        cursor: pointer;
-        font: inherit;
-        font-size: 0.76rem;
-        line-height: 1.25;
-        padding: 0.4rem 0.45rem;
-        text-align: left;
-      }
-      .example-list button:hover {
-        background: rgba(191, 61, 23, 0.07);
-        color: var(--accent-dark);
-      }
-      .example-list button.active {
-        border-color: rgba(191, 61, 23, 0.24);
-        background: #fffaf2;
-        color: var(--accent-dark);
-        font-weight: 800;
-      }
-      .example-code {
-        max-height: calc(min(780px, 100vh - 1.5rem) - 3.25rem);
-        margin: 0;
-        overflow: auto;
-        padding: 0.85rem 0 1rem;
-        border: 0;
-        background: transparent;
-        color: #242830;
-        font-family:
-          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        font-size: 0.88rem;
-        line-height: 1.72;
-        white-space: pre;
-      }
-      .example-code code {
-        position: relative;
-        display: block;
-        min-width: max-content;
-        padding: 0;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        color: inherit;
-        font: inherit;
-      }
-      .example-code code::before {
-        content: "";
-        position: absolute;
+      .line {
+        left: 20px;
         top: 0;
         bottom: 0;
-        left: 3.1rem;
-        border-left: 1px solid rgba(91, 102, 115, 0.16);
+        width: 3px;
+        background: var(--ink);
       }
-      .code-line {
-        display: grid;
-        grid-template-columns: 3.1rem max-content;
-        min-width: 100%;
-        white-space: pre;
+      .dot {
+        left: 15px;
+        top: 48px;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--ink);
       }
-      .line-num {
-        padding-right: 0.82rem;
-        color: #98a0aa;
-        text-align: right;
-        user-select: none;
-      }
-      .line-text {
-        padding: 0 1.2rem 0 1rem;
-        white-space: pre;
-      }
-      .example-code .kw {
-        color: #df1f2d;
-      }
-      .example-code .type {
-        color: #9b4200;
-      }
-      .example-code .fn-name {
-        color: #8457e5;
-      }
-      .example-code .str {
-        color: #123d74;
-      }
-      .example-code .com {
-        color: #7f8894;
-      }
-      .example-code .numlit {
-        color: #0969da;
-      }
-      .example-code .punct {
-        color: #0f6ddf;
-      }
-      .example-code a {
-        color: #0969da;
-        text-decoration: underline;
-        text-underline-offset: 0.16em;
-      }
-      .example-code a:hover {
-        color: var(--accent-dark);
-      }
-      @media (max-width: 720px) {
-        .example-modal-body {
-          grid-template-columns: 1fr;
-        }
-        .example-sidebar {
-          max-height: 10rem;
-          border-right: 0;
-          border-bottom: 1px solid rgba(112, 92, 70, 0.14);
-        }
-        .example-code {
-          max-height: calc(100vh - 15rem);
-        }
-      }
-      .editor-letter-wrap {
-        display: grid;
-        place-items: center;
-      }
-      .editor-letter {
-        position: relative;
-        width: min(760px, 100%);
-        padding: 2.4rem 2.55rem 2.3rem;
-        border: 1px solid rgba(112, 92, 70, 0.24);
-        border-radius: 0.18rem;
-        background:
-          linear-gradient(90deg, rgba(23, 18, 13, 0.035) 1px, transparent 1px) 0
-            0 / 1.9rem 1.9rem,
-          #fffaf2;
+      .head-dot {
+        left: 8px;
+        top: 96px;
+        width: 27px;
+        height: 27px;
+        border-radius: 50%;
+        background: var(--accent);
         box-shadow:
-          0 20px 45px rgba(63, 45, 24, 0.13),
-          0 2px 0 rgba(255, 255, 255, 0.8) inset;
-        color: #312820;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        transform: rotate(-0.7deg);
+          0 0 0 4px var(--bg),
+          0 0 0 7px var(--ink);
       }
-      .editor-letter::before {
-        content: "";
-        position: absolute;
-        left: 50%;
-        top: -0.95rem;
-        width: 7.2rem;
-        height: 1.65rem;
-        border: 1px solid rgba(191, 61, 23, 0.15);
-        background: rgba(240, 90, 40, 0.12);
-        transform: translateX(-50%) rotate(2deg);
-        box-shadow: 0 6px 14px rgba(63, 45, 24, 0.08);
+      .branch-out,
+      .branch-in {
+        left: 20px;
+        width: 22px;
+        height: 22px;
+        border-right: 3px solid var(--accent);
       }
-      .editor-letter .num {
-        display: block;
-        margin-bottom: 0.7rem;
+      .branch-out {
+        top: 16px;
+        border-top: 3px solid var(--accent);
+        border-top-right-radius: 14px;
       }
-      .editor-letter h2 {
-        margin: 0 0 1.35rem;
-        font-family: inherit;
-        font-weight: 850;
-        letter-spacing: -0.02em;
+      .branch-in {
+        bottom: 16px;
+        border-bottom: 3px solid var(--accent);
+        border-bottom-right-radius: 14px;
       }
-      .editor-letter p {
-        margin: 0 0 1.15rem;
-        color: #4c4036;
-        font-size: 0.86rem;
-        line-height: 1.85;
+      .branch-line {
+        left: 39px;
+        top: 36px;
+        bottom: 36px;
+        width: 3px;
+        background: var(--accent);
       }
-      .editor-letter p:last-child {
-        margin-bottom: 0;
-      }
-      .editor-letter a {
-        color: #9f3d22;
-        font-weight: 700;
-        text-decoration: underline;
-        text-decoration-color: rgba(159, 61, 34, 0.34);
-        text-underline-offset: 0.16em;
-      }
-      .editor-letter a:hover {
-        color: #bf3d17;
-        text-decoration-color: rgba(191, 61, 23, 0.6);
-      }
-      .card {
-        border: 1px solid var(--line);
-        border-radius: 0.16rem;
-        padding: 0.9rem;
-        background: rgba(255, 250, 242, 0.72);
-        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
-      }
-      .num {
-        color: var(--accent-dark);
-        font-weight: 820;
-        font-size: 0.73rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-      .card h3 {
-        margin: 0.5rem 0 0.42rem;
-        font-size: 0.9rem;
-        letter-spacing: -0.01em;
-      }
-      .card p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 0.82rem;
-        line-height: 1.7;
-      }
-      .split {
-        display: grid;
-        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-        gap: 1.8rem;
-        align-items: start;
-      }
-      .list {
-        display: grid;
-        gap: 0.82rem;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        color: var(--soft);
-        font-size: 0.85rem;
-        line-height: 1.72;
-      }
-      .list li {
-        position: relative;
-        padding-left: 1.05rem;
-      }
-      .list li::before {
-        content: "";
-        position: absolute;
-        left: 0;
-        top: 0.55rem;
-        width: 0.38rem;
-        height: 0.38rem;
+      .branch-dot {
+        left: 34px;
+        top: 62px;
+        width: 13px;
+        height: 13px;
         border-radius: 50%;
         background: var(--accent);
       }
-      .list a {
-        color: var(--accent-dark);
-        text-decoration: underline;
-        text-decoration-color: rgba(191, 61, 23, 0.28);
-        text-underline-offset: 0.14em;
+      .root-dot {
+        left: 14px;
+        top: 44px;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        background: var(--bg);
+        box-shadow: 0 0 0 3px var(--ink);
       }
-      .list a:hover {
-        text-decoration-color: rgba(191, 61, 23, 0.58);
+
+      .hero {
+        padding: 56px 0 80px;
       }
-      .progress-section {
-        margin-top: -0.7rem;
-        margin-bottom: 0.8rem;
-        padding: 1.55rem;
-        border: 1px solid rgba(36, 122, 69, 0.28);
-        border-radius: 1.1rem;
-        background: linear-gradient(
-          135deg,
-          rgba(36, 122, 69, 0.16),
-          rgba(247, 252, 241, 0.94)
-        );
-        box-shadow: 0 18px 50px rgba(36, 89, 52, 0.12);
-      }
-      .progress-section .eyebrow {
-        color: #1f6b3a;
-        background: rgba(36, 122, 69, 0.1);
-        border-color: rgba(36, 122, 69, 0.24);
-      }
-      .progress-section .num {
-        color: #1f6b3a;
-      }
-      .progress-section .list li::before {
-        background: var(--green);
-      }
-      .progress-section .list a,
-      .progress-section code {
-        color: #1f6b3a;
-        text-decoration-color: rgba(36, 122, 69, 0.28);
-      }
-      .progress-section code {
-        background: rgba(36, 122, 69, 0.08);
-        border-color: rgba(36, 122, 69, 0.16);
-      }
-      .progress-section h2 {
-        max-width: none;
-        font-size: clamp(1.35rem, 2.35vw, 1.95rem);
-        font-weight: 760;
-        letter-spacing: -0.035em;
-        white-space: nowrap;
-      }
-      .progress-section .section-intro {
-        color: var(--soft);
-      }
-      .progress-card {
-        display: grid;
-        gap: 1rem;
-        border: 1px solid rgba(36, 122, 69, 0.24);
-        border-radius: 0.95rem;
-        padding: 1.35rem;
-        background: linear-gradient(180deg, #ffffff, #fbfff7);
-        box-shadow: 0 18px 50px rgba(36, 89, 52, 0.1);
-      }
-      .progress-card p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 0.82rem;
-        line-height: 1.7;
-      }
-      .big-stat {
-        font-size: clamp(2.2rem, 5vw, 3.85rem);
-        line-height: 1;
-        letter-spacing: -0.048em;
-        font-weight: 870;
-        transition: color 0.18s ease;
-      }
-      .progress-card:hover .big-stat {
-        color: var(--green);
-      }
-      .bar {
-        height: 0.62rem;
-        border: 1px solid rgba(36, 122, 69, 0.28);
-        border-radius: 999px;
-        background: #e8f2df;
-        overflow: hidden;
-      }
-      .bar span {
-        display: block;
-        width: 50%;
-        height: 100%;
-        background: linear-gradient(90deg, #95c56e, #5f9f55 62%, var(--green));
-        border-radius: inherit;
-      }
-      .suite-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.5rem 1rem;
-        margin-top: 0.25rem;
-        padding-top: 0.9rem;
-        border-top: 1px solid rgba(36, 122, 69, 0.2);
-      }
-      .suite-stat {
-        position: relative;
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 0.7rem;
-        min-width: 0;
-        overflow: hidden;
-        border-radius: 0.38rem;
-        padding: 0.24rem 0.38rem;
-        color: var(--muted);
-        font-size: 0.76rem;
-        background:
-          linear-gradient(
-              90deg,
-              rgba(149, 197, 110, 0.14),
-              rgba(36, 122, 69, 0.14)
-            )
-            0 0 / var(--pct) 100% no-repeat,
-          rgba(247, 252, 241, 0.55);
-      }
-      .suite-stat strong {
-        color: var(--ink);
-        font-size: 0.8rem;
-        font-weight: 820;
-      }
-      .suite-stat span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      code {
-        color: var(--accent-dark);
-        background: rgba(240, 90, 40, 0.08);
-        border: 1px solid rgba(240, 90, 40, 0.15);
-        border-radius: 0.3rem;
-        padding: 0.08rem 0.25rem;
-      }
-      .footer {
+      .refs {
         display: flex;
         flex-wrap: wrap;
-        justify-content: space-between;
-        gap: 1rem;
-        border-top: 1px solid var(--line);
-        margin-top: 2.9rem;
-        padding: 1.8rem 0 2.8rem;
+        gap: 14px;
+        font-size: 14px;
         color: var(--muted);
-        font-size: 0.8rem;
       }
-      @media (max-width: 860px) {
-        .hero-grid,
-        .split {
-          grid-template-columns: 1fr;
-        }
-        .features,
-        .cards-3,
-        .capabilities {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .hero {
-          padding-top: 1rem;
-        }
+      .refs .ref {
+        color: var(--accent);
       }
-      .install-section {
+      h1 {
+        margin: 20px 0 0;
+        font-size: clamp(96px, 18vw, 240px);
+        line-height: 0.85;
+        letter-spacing: -0.06em;
+        font-weight: 700;
+      }
+      .tagline {
+        margin: 24px 0 0;
+        font-size: clamp(26px, 3.4vw, 40px);
+        line-height: 1.1;
+        letter-spacing: -0.025em;
+        font-weight: 500;
+      }
+      .lede {
+        max-width: 600px;
+        margin: 20px 0 0;
+        font-size: clamp(17px, 1.6vw, 20px);
+        line-height: 1.5;
+        color: var(--soft);
+        text-wrap: pretty;
+      }
+      .install {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        margin-top: 36px;
+        font-size: 15px;
+      }
+      .install code {
+        font-family: var(--mono);
+        border-radius: 10px;
+        max-width: 100%;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .install .primary {
         background: var(--ink);
-        box-shadow: 0 0 0 100vmax var(--ink);
-        clip-path: inset(0 -100vmax);
-        color: var(--paper);
-        text-align: center;
+        color: var(--bg);
+        padding: 16px 20px;
       }
-      .install-section h2 {
-        color: var(--paper);
+      .install .secondary {
+        padding: 14px 20px;
+        border: 2px solid var(--ink);
       }
-      .install-section .section-intro {
+
+      .body {
         display: grid;
-        gap: 0.34rem;
-        max-width: none;
-        margin-right: auto;
-        margin-left: auto;
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+        gap: 24px 56px;
+        padding: 40px 0;
       }
-      .install-primary {
-        color: var(--paper);
-        font-size: clamp(1rem, 1.7vw, 1.24rem);
-        font-weight: 650;
+      .body.branched {
+        gap: 32px 56px;
+        padding: 48px 0;
       }
-      .install-secondary {
-        color: #c9b9a4;
-        font-size: 0.88rem;
-      }
-      .install-section code {
-        color: #f47a4f;
-        background: rgba(240, 90, 40, 0.14);
-        border-color: rgba(240, 90, 40, 0.28);
-      }
-      .install-block {
-        display: grid;
-        justify-items: center;
-        width: 100%;
-      }
-      .install-cmd {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.8rem;
-        box-sizing: border-box;
-        padding: 0.9rem 1.05rem 0.9rem 1.3rem;
-        border: 1px solid rgba(255, 250, 242, 0.18);
-        border-radius: 0.65rem;
-        background: #3b3834;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 0.92rem;
-      }
-      .install-cmd code {
-        color: #f3eadf;
-        background: none;
-        border: none;
-        padding: 0;
-      }
-      .copy-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 2rem;
-        height: 2rem;
-        border: 1px solid rgba(255, 250, 242, 0.14);
-        border-radius: 0.4rem;
-        background: rgba(255, 250, 242, 0.08);
-        color: #c9b9a4;
-        cursor: pointer;
-        transition: all 0.15s ease;
-      }
-      .copy-btn:hover {
-        background: rgba(255, 250, 242, 0.14);
-        color: var(--paper);
-      }
-      .copy-btn.copied {
-        color: #5bbf74;
-        border-color: rgba(91, 191, 116, 0.3);
-      }
-      .install-alt {
-        margin-top: 0.55rem;
+      .sha {
+        font-size: 13px;
         color: var(--muted);
-        font-size: 0.88rem;
       }
-      .install-alt code {
-        font-size: 0.85rem;
+      .branched .sha {
+        color: var(--accent);
       }
-      .install-tabs {
-        display: inline-flex;
-        gap: 0.3rem;
-        margin-bottom: 0.95rem;
-        padding: 0.25rem;
-        border-radius: 0.6rem;
-        background: rgba(255, 250, 242, 0.06);
+      h2 {
+        margin: 12px 0 0;
+        font-size: clamp(32px, 4vw, 44px);
+        line-height: 1;
+        letter-spacing: -0.03em;
       }
-      .install-tab {
-        border: 0;
-        border-radius: 0.45rem;
-        padding: 0.45rem 1.05rem;
-        background: transparent;
-        color: #c9b9a4;
-        cursor: pointer;
-        font:
-          640 0.85rem/1 ui-sans-serif,
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          sans-serif;
+      .body p {
+        margin: 0;
+        font-size: 19px;
+        line-height: 1.55;
+        color: var(--soft);
+        text-wrap: pretty;
       }
-      .install-tab[aria-selected="true"] {
-        background: #3b3834;
-        color: var(--paper);
+      .body h2 + p {
+        margin-top: 20px;
       }
-      .install-panel {
-        display: none;
-        justify-items: center;
+      pre {
+        margin: 0;
+        background: var(--ink);
+        color: var(--code-fg);
+        border-radius: 14px;
+        padding: 24px 26px;
+        font-family: var(--mono);
+        font-size: 14px;
+        line-height: 1.75;
+        overflow-x: auto;
       }
-      .install-panel.active {
-        display: grid;
+      .kw {
+        color: var(--code-kw);
       }
-      @media (max-width: 560px) {
-        body {
-          font-size: 13.5px;
-        }
-        .wrap {
-          width: min(980px, calc(100% - 1.5rem));
-        }
-        .topbar {
-          align-items: flex-start;
-          flex-direction: column;
-          gap: 0.5rem;
-          padding: 0.75rem 0;
-        }
-        .brand {
-          gap: 0.5rem;
-          font-size: 1.1rem;
-          transform: none;
-        }
-        .mark {
-          width: 3rem;
-          height: 3rem;
-          margin: -0.25rem 0 -0.45rem;
-        }
-        .brand-byline {
-          margin-left: calc(3rem + 0.5rem);
-        }
-        .nav {
-          justify-content: flex-start;
-          gap: 0.6rem;
-          font-size: 0.82rem;
-        }
-        .hero {
-          padding: 1.2rem 0 2rem;
-        }
-        h1 {
-          margin: 0.7rem 0 0.6rem;
-        }
-        .lead-secondary {
-          margin-top: 0.3rem;
-        }
-        .cta {
-          margin-top: 1.1rem;
-        }
-        .terminal {
-          margin-top: 0.5rem;
-        }
-        .tab-panel {
-          height: 14rem;
-        }
-        .tab-panel pre {
-          height: 14rem;
-        }
-        .terminal-head {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-        .terminal-tabs {
-          margin-left: 0;
-        }
-        .features,
-        .cards-3,
-        .capabilities {
-          grid-template-columns: 1fr;
-        }
-        .progress-section h2 {
-          white-space: normal;
-        }
-        pre {
-          font-size: 0.76rem;
-        }
-        .install-cmd {
-          flex-wrap: wrap;
-          font-size: 0.78rem;
-        }
-        .progress-section h2 {
-          white-space: normal;
-        }
+      .str {
+        color: var(--code-str);
+      }
+
+      .footer {
+        padding: 40px 0 64px;
+      }
+      .footer .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 28px;
+        margin-top: 14px;
+        font-size: 17px;
       }
     </style>
   </head>
   <body>
-    <header class="wrap topbar">
-      <div>
-        <a class="brand" href="/" aria-label="grit homepage"
-          ><img class="mark" src="grit-logo.svg" alt="" /><span
-            ><span class="brand-subtle">the</span>
-            <span class="brand-grit">Grit</span>
-            <span class="brand-subtle">project</span></span
-          ></a
-        >
-        <a class="brand-byline" href="https://gitbutler.com">(by gitbutler)</a>
-      </div>
-      <nav class="nav" aria-label="Primary">
-        <a href="blog/">Blog</a>
-        <a href="#install">Use it</a>
-        <a href="#why">Why</a>
-        <a href="#progress">Progress</a>
-        <a
-          class="nav-github"
-          href="https://github.com/gitbutlerapp/grit"
-          aria-label="Grit on GitHub"
-          ><svg viewBox="0 0 16 16" aria-hidden="true">
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.6 7.6 0 0 1 8 3.86c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
-            /></svg
-          ><span>GitHub</span></a
-        >
-      </nav>
-    </header>
+    <div class="wrap">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="grit homepage">grit</a>
+        <nav class="nav" aria-label="Primary">
+          <a href="https://docs.rs/grit-lib">Docs</a>
+          <a href="https://crates.io/crates/grit-lib">Library</a>
+          <a href="blog/">Blog</a>
+          <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
+        </nav>
+      </header>
 
-    <main>
-      <section class="wrap hero">
-        <div class="hero-grid">
-          <div>
-            <h1>
-              <span class="h-git">Git,</span>
-              <span class="h-agents">rewritten by agents,</span>
-              <span class="h-rust">in Rust,</span>
-              <span class="h-library">as a library.</span>
-            </h1>
-            <p class="lead lead-primary">
-              Grit is an agent-driven, library-oriented reimplementation of Git
-              in Rust. Brought to you by
-              <a href="https://gitbutler.com">GitButler ⧓</a>.
+      <main>
+        <section class="commit">
+          <div class="rail" aria-hidden="true">
+            <span class="line" style="top: 110px"></span>
+            <span class="head-dot"></span>
+          </div>
+          <div class="hero">
+            <div class="refs mono">
+              <span class="ref">HEAD → main</span><span>c0ffee1</span>
+            </div>
+            <h1>Grit</h1>
+            <p class="tagline">Git, minus the weight.</p>
+            <p class="lede">
+              A simpler Git that works on every repo you already have, and a
+              Rust library fast enough to put inside your product.
             </p>
-            <p class="lead lead-secondary">
-              <span
-                ><a href="https://crates.io/crates/grit-lib">grit-lib</a>
-                provides Git behavior as typed Rust modules;</span
-              ><br />
-              <span
-                ><a href="https://crates.io/crates/grit-cli">grit-cli</a> is a
-                simple Git-compatible CLI using the library.</span
-              >
-            </p>
-            <div class="cta">
-              <a class="button primary" href="#install">Try the CLI</a>
-              <a class="button" href="https://docs.rs/grit-lib">Library docs</a>
-              <a class="button" href="progress/">Track progress</a>
+            <div class="install">
+              <code class="primary">$ curl -fsSL grit-scm.com/install | sh</code>
+              <code class="secondary">cargo add grit-lib</code>
             </div>
           </div>
-          <div
-            class="terminal is-auto"
-            aria-label="Grit code examples"
-            data-code-tabs
-          >
-            <div class="terminal-head">
-              <div class="terminal-lights" aria-hidden="true">
-                <span class="dot"></span><span class="dot"></span
-                ><span class="dot"></span>
-              </div>
-              <div
-                class="terminal-tabs"
-                role="tablist"
-                aria-label="Example type"
-              >
-                <button
-                  class="tab-button"
-                  id="tab-grit"
-                  role="tab"
-                  type="button"
-                  aria-selected="true"
-                  aria-controls="panel-grit"
-                  data-tab="grit"
-                >
-                  grit<span class="tab-progress" aria-hidden="true"></span>
-                </button>
-                <button
-                  class="tab-button"
-                  id="tab-grit-lib"
-                  role="tab"
-                  type="button"
-                  aria-selected="false"
-                  aria-controls="panel-grit-lib"
-                  data-tab="grit-lib"
-                >
-                  grit-lib<span class="tab-progress" aria-hidden="true"></span>
-                </button>
-              </div>
-            </div>
-            <div
-              class="tab-panel active"
-              id="panel-grit"
-              role="tabpanel"
-              aria-labelledby="tab-grit"
-            >
-              <pre><span class="comment"># install via shell script (macOS / Linux)</span>
-<span class="prompt">$</span> <span class="cmd">curl -fsSL https://grit-scm.com/install | sh</span>
+        </section>
 
-<span class="prompt">$</span> <span class="cmd">grit status</span>
-<span class="output">Changed (not staged)
-  ~  docs/index.html                    modified
-</span>
-<span class="prompt">$</span> <span class="cmd">grit commit -am "update index"</span>
-<span class="output">[feature/example 9f2a1c0] update index
-  1 file changed</span></pre>
-            </div>
-            <div
-              class="tab-panel"
-              id="panel-grit-lib"
-              role="tabpanel"
-              aria-labelledby="tab-grit-lib"
-            >
-              <pre><span class="comment">// Cargo.toml</span>
-grit-lib = <span class="string">"0.5"</span>
-
-<span class="kw">use</span> grit_lib::repo::Repository;
-
-<span class="kw">let</span> repo = Repository::discover(<span class="string">"."</span>)?;
-<span class="kw">let</span> head = grit_lib::state::resolve_head(&repo.git_dir)?;
-
-<span class="kw">if let</span> Some(oid) = head.oid() {
-    <span class="kw">let</span> obj = repo.odb.read(oid)?;
-    println!(<span class="string">"{} {} bytes"</span>, obj.kind, obj.data.len());
-}</pre>
-            </div>
+        <section class="commit">
+          <div class="rail" aria-hidden="true">
+            <span class="line"></span><span class="dot"></span>
           </div>
-        </div>
-      </section>
-
-      <section class="wrap section progress-section" id="progress">
-        <div class="split">
-          <div>
-            <span class="num">Current status</span>
-            <h2>Git Test Suite Progress</h2>
-            <p class="section-intro">
-              The Grit library is tested with a Git-compatible CLI frontend that
-              largely passes the upstream Git testing harness. The generated
-              dashboard shows pass rate by family, skipped files, and per-file
-              status.
-            </p>
-            <ul class="list">
-              <li>
-                The 140+ Git commands are implemented in the
-                <a href="https://crates.io/crates/grit-git">grit-git</a>
-                crate / CLI.
-              </li>
-              <li>
-                grit-lib covers
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/objects/"
-                  >objects</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/pack/"
-                  >packs</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/index/"
-                  >index</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/refs/">refs</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/rev_parse/"
-                  >revisions</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/diff/">diff</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/merge_file/"
-                  >merge</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/config/"
-                  >config</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/ignore/"
-                  >ignore rules</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/hooks/"
-                  >hooks</a
-                >, and
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/">more</a>.
-              </li>
-              <li>
-                Development is agent-driven, with logs and generated progress
-                checked into the repo.
-              </li>
-            </ul>
-          </div>
-          <a
-            class="progress-card"
-            href="progress/"
-            aria-label="Open progress dashboard"
-          >
-            <div class="big-stat">99.3%</div>
-            <div class="bar" aria-hidden="true">
-              <span style="width: 99.3%"></span>
-            </div>
-            <div class="suite-grid" aria-label="Pass rate by Git test suite">
-              <div class="suite-stat" style="--pct: 99.9%">
-                <span>t0 basics</span><strong>99.9%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 99.4%">
-                <span>t1 database</span><strong>99.4%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 99%">
-                <span>t2 worktree</span><strong>99.0%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 98.9%">
-                <span>t3 ls-files</span><strong>98.9%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 98.9%">
-                <span>t4 diff</span><strong>98.9%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 99.4%">
-                <span>t5 fetch/push</span><strong>99.4%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 98.8%">
-                <span>t6 revisions</span><strong>98.8%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 99.5%">
-                <span>t7 porcelain</span><strong>99.5%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 99.6%">
-                <span>t8 forensics</span><strong>99.6%</strong>
-              </div>
-              <div class="suite-stat" style="--pct: 99.4%">
-                <span>t9 tools</span><strong>99.4%</strong>
-              </div>
+          <div class="body">
+            <div>
+              <div class="sha mono">a1f3e09 · feat(compat)</div>
+              <h2>Every repo you already have.</h2>
             </div>
             <p>
-              Latest generated harness pass rate: 41,715 of 42,001 in-scope
-              tests. Open the dashboard for exact counts.
+              Same .git directory, same pack format, same remotes. GitHub,
+              GitLab, your CI and your teammates won't notice. Switch to Grit
+              mid-branch and switch back whenever you like.
             </p>
-          </a>
-        </div>
-      </section>
-
-      <section class="wrap section" id="why">
-        <div class="editor-letter-wrap">
-          <article class="editor-letter" aria-labelledby="editor-letter-title">
-            <span class="num">Letter from the editor</span>
-            <h2 id="editor-letter-title">Why this exists.</h2>
-            <p>
-              For
-              <a
-                href="https://github.com/libgit2/libgit2/commit/4b7483a285024937df9623c3543390e717e2338a"
-                >over 15 years</a
-              >, I've wanted a full implementation of git that was available as
-              a nice, reentrant library. Not a fork-exec'd wrapper around the
-              command line, but a real library that didn't
-              <code>die</code>
-              whenever it got scared.
-            </p>
-            <p>
-              When I read about the Anthropic experiment to build a
-              <a
-                href="https://www.anthropic.com/engineering/building-c-compiler"
-                >C compiler</a
-              >
-              from scratch using agents and test suites, I thought that was a
-              pretty cool idea. Maybe I could do that to make the library of my
-              dreams, in Rust.
-            </p>
-            <p>
-              So here we are. Grit is the result of that experiment: an
-              agent-driven reimplementation of Git in Rust, built to pass Git's
-              own test suite. Hopefully I can get it to the finish line.
-            </p>
-            <p>Love, Scott</p>
-          </article>
-        </div>
-      </section>
-
-      <!-- Temporarily hidden: What can it do section.
-      <section class="wrap section" id="what">
-        <h2>What can it do?</h2>
-        <p class="section-intro">
-          Grit already covers the core Git building blocks in both the reusable
-          library and the Git-compatible CLI.
-        </p>
-        <div class="grid capabilities">
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24">
-                  <path
-                    d="M7 17h10a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.5A4.8 4.8 0 0 0 7 17Z"
-                  /></svg
-              ></span>
-              <h3>Objects</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/objects.rs"
-                  data-example="examples/objects.rs"
-                  data-example-title="Objects"
-                  >Read and write loose objects</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/hash-objects.rs"
-                  data-example="examples/hash-objects.rs"
-                  data-example-title="Hash objects"
-                  >Hash blobs, trees, commits, and tags</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/object-ids.rs"
-                  data-example="examples/object-ids.rs"
-                  data-example-title="Object IDs"
-                  >Parse object IDs and payloads</a
-                >
-              </li>
-            </ul>
-          </article>
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24">
-                  <path d="M7 5h10M7 19h10M12 5v14" /></svg
-              ></span>
-              <h3>Index</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/index.rs"
-                  data-example="examples/index.rs"
-                  data-example-title="Index"
-                  >Load and write the staging area</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/index-add.rs"
-                  data-example="examples/index-add.rs"
-                  data-example-title="Index entries"
-                  >Add, replace, sort, and refresh entries</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/write-tree.rs"
-                  data-example="examples/write-tree.rs"
-                  data-example-title="Write tree"
-                  >Build trees from the index</a
-                >
-              </li>
-            </ul>
-          </article>
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24">
-                  <circle cx="6" cy="6" r="2" />
-                  <circle cx="18" cy="6" r="2" />
-                  <circle cx="12" cy="18" r="2" />
-                  <path d="M8 6h8M7 8l5 8M17 8l-5 8" /></svg
-              ></span>
-              <h3>Refs</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/refs.rs"
-                  data-example="examples/refs.rs"
-                  data-example-title="Refs"
-                  >Read, write, delete, and list refs</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/head.rs"
-                  data-example="examples/head.rs"
-                  data-example-title="HEAD and symbolic refs"
-                  >Resolve HEAD and symbolic refs</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/reflog.rs"
-                  data-example="examples/reflog.rs"
-                  data-example-title="Reflogs"
-                  >Append and expire reflogs</a
-                >
-              </li>
-            </ul>
-          </article>
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24">
-                  <path d="M7 7h10M7 12h7M7 17h10" />
-                  <path d="M4 7h.01M4 12h.01M4 17h.01" /></svg
-              ></span>
-              <h3>Revisions</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/rev-parse.rs"
-                  data-example="examples/rev-parse.rs"
-                  data-example-title="Rev parse"
-                  >Parse names like <code>HEAD~3</code></a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/rev-list.rs"
-                  data-example="examples/rev-list.rs"
-                  data-example-title="Rev list"
-                  >Walk commit graphs</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/merge-base.rs"
-                  data-example="examples/merge-base.rs"
-                  data-example-title="Merge base"
-                  >Compute merge bases and ancestry</a
-                >
-              </li>
-            </ul>
-          </article>
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24"><path d="M6 8h8M10 4v8M6 17h8" /></svg
-              ></span>
-              <h3>Diffs</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/diff.rs"
-                  data-example="examples/diff.rs"
-                  data-example-title="Diffs"
-                  >Diff trees, index, and worktree</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/diff.rs"
-                  data-example="examples/diff.rs"
-                  data-example-title="Diffs"
-                  >Detect renames and copies</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/patch-id.rs"
-                  data-example="examples/patch-id.rs"
-                  data-example-title="Patch IDs"
-                  >Generate patches and patch IDs</a
-                >
-              </li>
-            </ul>
-          </article>
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24">
-                  <path d="M5 7h4c2.6 0 4.1 2.2 5.8 5" />
-                  <path d="M5 17h4c2.6 0 4.1-2.2 5.8-5" />
-                  <path d="M13 12h6" />
-                  <path d="M16 9l3 3-3 3" /></svg
-              ></span>
-              <h3>Merges</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/merge-file.rs"
-                  data-example="examples/merge-file.rs"
-                  data-example-title="Merge file"
-                  >Three-way line merges</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/merge-message.rs"
-                  data-example="examples/merge-message.rs"
-                  data-example-title="Merge messages"
-                  >Conflict styles and merge messages</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/cherry-pick.rs"
-                  data-example="examples/cherry-pick.rs"
-                  data-example-title="Cherry-pick"
-                  >Cherry-pick detection helpers</a
-                >
-              </li>
-            </ul>
-          </article>
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon" aria-hidden="true"
-                ><svg viewBox="0 0 24 24">
-                  <path d="M5 8h14M7 12h10M9 16h6" />
-                  <rect x="4" y="5" width="16" height="14" rx="2" /></svg
-              ></span>
-              <h3>Config</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/config.rs"
-                  data-example="examples/config.rs"
-                  data-example-title="Config"
-                  >Load multi-scope Git config</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/config.rs"
-                  data-example="examples/config.rs"
-                  data-example-title="Config"
-                  >Parse typed values</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/ignore.rs"
-                  data-example="examples/ignore.rs"
-                  data-example-title="Ignore rules"
-                  >Match ignore and sparse patterns</a
-                >
-              </li>
-            </ul>
-          </article>
-          Remote APIs are still CLI-heavy; revisit this card when a first-class grit-lib fetch/push API exists.
-          <article class="card capability-card">
-            <div class="cap-head">
-              <span class="cap-icon cap-letter" aria-hidden="true">↕</span>
-              <h3>Remotes</h3>
-            </div>
-            <ul>
-              <li>
-                <a
-                  href="examples/fetch.rs"
-                  data-example="examples/fetch.rs"
-                  data-example-title="Fetch"
-                  >Fetch refs from remotes</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/push.rs"
-                  data-example="examples/push.rs"
-                  data-example-title="Push"
-                  >Push branches and updates</a
-                >
-              </li>
-              <li>
-                <a
-                  href="examples/harness.rs"
-                  data-example="examples/harness.rs"
-                  data-example-title="Harness compatibility"
-                  >Harness-tested remote behavior</a
-                >
-              </li>
-            </ul>
-          </article>
-        </div>
-      </section>
-
-      -->
-
-      <section class="wrap section install-section" id="install">
-        <h2>Try it out.</h2>
-        <p class="section-intro">
-          <span class="install-primary"
-            >Install the <code>grit</code> CLI for a simple implementation of a
-            git client using the <code>grit-lib</code> library.</span
-          >
-          <span class="install-secondary"
-            >Pre-built binaries for macOS, Linux, and Windows, or install via
-            Cargo.</span
-          >
-        </p>
-        <div class="install-block" data-install-tabs>
-          <div class="install-tabs" role="tablist">
-            <button class="install-tab" data-os="unix" aria-selected="true">
-              macOS / Linux
-            </button>
-            <button class="install-tab" data-os="windows" aria-selected="false">
-              Windows
-            </button>
           </div>
+        </section>
 
-          <div class="install-panel active" data-os="unix">
-            <div class="install-cmd">
-              <code>curl -fsSL https://grit-scm.com/install | sh</code>
-              <button
-                class="copy-btn"
-                aria-label="Copy to clipboard"
-                data-copy="curl -fsSL https://grit-scm.com/install | sh"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <rect x="9" y="9" width="13" height="13" rx="2" />
-                  <path
-                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                  />
-                </svg>
-              </button>
-            </div>
-            <div class="install-alt">
-              installs <code>grit</code>, or
-              <code>cargo install grit-cli</code>
-            </div>
+        <section class="commit">
+          <div class="rail" aria-hidden="true">
+            <span class="line"></span>
+            <span class="branch-out"></span>
+            <span class="branch-line"></span>
+            <span class="branch-in"></span>
+            <span class="branch-dot"></span>
           </div>
+          <div class="body branched">
+            <div>
+              <div class="sha mono">7d2b4a1 · feat(lib) · branch: grit-lib</div>
+              <h2>Link it. Don't shell out.</h2>
+              <p>
+                Objects, packs, index, refs, diff, merge as typed Rust modules.
+                No process spawn, no parsing porcelain output.
+              </p>
+            </div>
+            <pre><code><span class="kw">use</span> grit_lib::{diff, repo::Repository};
 
-          <div class="install-panel" data-os="windows">
-            <div class="install-cmd">
-              <code>irm grit-scm.com/install.ps1 | iex</code>
-              <button
-                class="copy-btn"
-                aria-label="Copy to clipboard"
-                data-copy="irm grit-scm.com/install.ps1 | iex"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <rect x="9" y="9" width="13" height="13" rx="2" />
-                  <path
-                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                  />
-                </svg>
-              </button>
+<span class="kw">let</span> repo = Repository::discover(None)?;
+<span class="kw">let</span> index = repo.load_index()?;
+<span class="kw">if let</span> Some(wt) = &amp;repo.work_tree {
+  <span class="kw">for</span> f <span class="kw">in</span> diff::diff_index_to_worktree(&amp;repo.odb, &amp;index, wt, false, false)? {
+    println!(<span class="str">"{:?} {}"</span>, f.status, f.path());
+  }
+}</code></pre>
+          </div>
+        </section>
+
+        <section class="commit">
+          <div class="rail" aria-hidden="true">
+            <span class="line"></span><span class="dot"></span>
+          </div>
+          <div class="body">
+            <div>
+              <div class="sha mono">3e8c55f · refactor(cli)</div>
+              <h2>Simpler on purpose.</h2>
             </div>
-            <div class="install-alt">
-              installs <code>grit</code> (run in PowerShell), or
-              <code>cargo install grit-cli</code>
-            </div>
+            <p>
+              The commands you know, with clearer output and fewer footguns.
+              The CLI is a thin layer over the library, so whatever the CLI can
+              do, your code can do.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer class="commit">
+        <div class="rail" aria-hidden="true">
+          <span class="line" style="bottom: auto; height: 46px"></span>
+          <span class="root-dot"></span>
+        </div>
+        <div class="footer">
+          <div class="sha mono">
+            0000001 · initial commit · by
+            <a href="https://gitbutler.com">GitButler</a>
+          </div>
+          <div class="links">
+            <a href="https://docs.rs/grit-lib">Read the docs</a>
+            <a href="blog/introducing-grit/">Why we built it</a>
+            <a href="progress/">Compatibility report</a>
           </div>
         </div>
-      </section>
-    </main>
-
-    <footer class="wrap footer">
-      <span
-        >MIT licensed. Built at
-        <a href="https://github.com/gitbutlerapp/grit"
-          >github.com/gitbutlerapp/grit</a
-        >.</span
-      >
-      <span
-        ><a href="https://crates.io/crates/grit-cli">grit-cli</a> &middot;
-        <a href="https://crates.io/crates/grit-lib">grit-lib</a> &middot;
-        <a href="progress/">progress</a></span
-      >
-    </footer>
-
-    <div class="example-modal" data-example-modal hidden>
-      <div class="example-modal-backdrop" data-example-close></div>
-      <div
-        class="example-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="example-modal-title"
-      >
-        <div class="example-modal-head">
-          <h3 class="example-modal-title" id="example-modal-title">Example</h3>
-          <button
-            class="example-modal-close"
-            type="button"
-            data-example-close
-            aria-label="Close example"
-          >
-            ×
-          </button>
-        </div>
-        <div class="example-modal-body">
-          <aside class="example-sidebar" aria-label="Available examples">
-            <p class="example-sidebar-title">Examples</p>
-            <nav class="example-list" data-example-list></nav>
-          </aside>
-          <pre class="example-code"><code data-example-code></code></pre>
-        </div>
-      </div>
+      </footer>
     </div>
-
-    <script>
-      (function () {
-        document.querySelectorAll(".copy-btn").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            var text = btn.getAttribute("data-copy");
-            navigator.clipboard.writeText(text).then(function () {
-              btn.classList.add("copied");
-              btn.innerHTML =
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-              setTimeout(function () {
-                btn.classList.remove("copied");
-                btn.innerHTML =
-                  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-              }, 2000);
-            });
-          });
-        });
-      })();
-      (function () {
-        const block = document.querySelector("[data-install-tabs]");
-        if (!block) return;
-        const tabs = block.querySelectorAll(".install-tab");
-        const panels = block.querySelectorAll(".install-panel");
-        function select(os) {
-          tabs.forEach(function (t) {
-            t.setAttribute(
-              "aria-selected",
-              t.getAttribute("data-os") === os ? "true" : "false",
-            );
-          });
-          panels.forEach(function (p) {
-            p.classList.toggle("active", p.getAttribute("data-os") === os);
-          });
-        }
-        tabs.forEach(function (t) {
-          t.addEventListener("click", function () {
-            select(t.getAttribute("data-os"));
-          });
-        });
-        // Default to the tab matching the visitor's OS.
-        let isWindows = /windows|win32|win64/i.test(
-          (navigator.userAgent || "") + " " + (navigator.platform || ""),
-        );
-        if (navigator.userAgentData && navigator.userAgentData.platform) {
-          isWindows = /windows/i.test(navigator.userAgentData.platform);
-        }
-        select(isWindows ? "windows" : "unix");
-      })();
-      (function () {
-        const modal = document.querySelector("[data-example-modal]");
-        if (!modal) return;
-        const title = modal.querySelector(".example-modal-title");
-        const code = modal.querySelector("[data-example-code]");
-        const exampleList = modal.querySelector("[data-example-list]");
-        const inlineExamples = {
-          "examples/add.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html\nuse grit_lib::index::{Index, IndexEntry, MODE_REGULAR};\nuse grit_lib::objects::ObjectId;\n\nfn main() -> grit_lib::error::Result<()> {\n    let mut index = Index::new();\n    let oid = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;\n\n    index.add_or_replace(IndexEntry {\n        ctime_sec: 0,\n        ctime_nsec: 0,\n        mtime_sec: 0,\n        mtime_nsec: 0,\n        dev: 0,\n        ino: 0,\n        mode: MODE_REGULAR,\n        uid: 0,\n        gid: 0,\n        size: 0,\n        oid,\n        flags: "README.md".len() as u16,\n        flags_extended: None,\n        path: b"README.md".to_vec(),\n        base_index_pos: 0,\n    });\n\n    println!("staged {} entry", index.entries.len());\n    Ok(())\n}\n',
-          "examples/cherry-pick.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/patch_ids/index.html\nuse grit_lib::patch_ids::{compute_patch_ids_from_text, PatchIdMode};\n\nfn main() {\n    let patch = b"diff --git a/a b/a\\nindex 0000000..1111111 100644\\n--- a/a\\n+++ b/a\\n@@ -0,0 +1 @@\\n+hello\\n";\n    let ids = compute_patch_ids_from_text(patch, PatchIdMode::Stable);\n\n    for (commit_id, patch_id) in ids {\n        println!("{commit_id} has stable patch-id {patch_id}");\n    }\n}\n',
-          "examples/cli.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html\nuse std::process::Command;\n\nfn main() -> std::io::Result<()> {\n    let status = Command::new("grit").arg("status").status()?;\n    println!("grit status exited with {status}");\n    Ok(())\n}\n',
-          "examples/commit.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/objects/struct.CommitData.html\nuse grit_lib::objects::{serialize_commit, CommitData, ObjectId};\n\nfn main() -> grit_lib::error::Result<()> {\n    let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")?;\n    let commit = CommitData {\n        tree,\n        parents: Vec::new(),\n        author: "A U Thor <author@example.com> 0 +0000".into(),\n        committer: "C O Mitter <committer@example.com> 0 +0000".into(),\n        author_raw: Vec::new(),\n        committer_raw: Vec::new(),\n        encoding: None,\n        message: "initial commit\\n".into(),\n        raw_message: None,\n    };\n\n    let bytes = serialize_commit(&commit);\n    println!("{}", String::from_utf8_lossy(&bytes));\n    Ok(())\n}\n',
-          "examples/config.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html\nuse grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};\nuse std::path::Path;\n\nfn main() -> grit_lib::error::Result<()> {\n    let file = ConfigFile::parse(\n        Path::new(".git/config"),\n        "[user]\\n\\tname = Ada\\n[core]\\n\\tbare = false\\n",\n        ConfigScope::Local,\n    )?;\n    let mut config = ConfigSet::new();\n    config.merge(&file);\n\n    println!("user.name = {}", config.get("user.name").unwrap_or_default());\n    println!("core.bare = {:?}", config.get_bool("core.bare"));\n    Ok(())\n}\n',
-          "examples/diff.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/diff/index.html\nuse grit_lib::diff::unified_diff;\n\nfn main() {\n    let patch = unified_diff("hello\\nold\\n", "hello\\nnew\\n", "file.txt", "file.txt", 3, true, false);\n    println!("{patch}");\n}\n',
-          "examples/fetch.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/ls_remote/fn.ls_remote.html\nuse grit_lib::ls_remote::{ls_remote, Options};\nuse grit_lib::objects::{parse_commit, parse_tree, tag_object_line_oid, ObjectId, ObjectKind};\nuse grit_lib::odb::Odb;\nuse grit_lib::refs::write_ref;\nuse std::collections::HashSet;\nuse std::env;\nuse std::path::PathBuf;\n\nfn main() -> grit_lib::error::Result<()> {\n    let local_git = arg_path(1, ".git");\n    let remote_git = arg_path(2, "../remote.git");\n    let local_odb = Odb::new(&local_git.join("objects"));\n    let remote_odb = Odb::new(&remote_git.join("objects"));\n\n    let refs = ls_remote(\n        &remote_git,\n        &remote_odb,\n        &Options {\n            heads: true,\n            ..Options::default()\n        },\n    )?;\n\n    for remote_ref in refs {\n        copy_reachable(&remote_odb, &local_odb, remote_ref.oid)?;\n        if let Some(branch) = remote_ref.name.strip_prefix("refs/heads/") {\n            let tracking_ref = format!("refs/remotes/origin/{branch}");\n            write_ref(&local_git, &tracking_ref, &remote_ref.oid)?;\n            println!("fetched {} -> {}", remote_ref.name, tracking_ref);\n        }\n    }\n\n    Ok(())\n}\n\nfn arg_path(index: usize, default: &str) -> PathBuf {\n    env::args_os()\n        .nth(index)\n        .map(PathBuf::from)\n        .unwrap_or_else(|| PathBuf::from(default))\n}\n\nfn copy_reachable(remote: &Odb, local: &Odb, root: ObjectId) -> grit_lib::error::Result<()> {\n    let mut seen = HashSet::new();\n    let mut stack = vec![root];\n\n    while let Some(oid) = stack.pop() {\n        if !seen.insert(oid) || local.exists(&oid) {\n            continue;\n        }\n\n        let object = remote.read(&oid)?;\n        local.write(object.kind, &object.data)?;\n\n        match object.kind {\n            ObjectKind::Commit => {\n                let commit = parse_commit(&object.data)?;\n                stack.push(commit.tree);\n                stack.extend(commit.parents);\n            }\n            ObjectKind::Tree => {\n                stack.extend(parse_tree(&object.data)?.into_iter().map(|entry| entry.oid));\n            }\n            ObjectKind::Tag => {\n                if let Some(target) = tag_object_line_oid(&object.data) {\n                    stack.push(target);\n                }\n            }\n            ObjectKind::Blob => {}\n        }\n    }\n\n    Ok(())\n}\n',
-          "examples/harness.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html\nuse std::process::Command;\n\nfn main() -> std::io::Result<()> {\n    let output = Command::new("./scripts/run-tests.sh")\n        .arg("t0000-basic.sh")\n        .output()?;\n\n    println!("{}", String::from_utf8_lossy(&output.stdout));\n    Ok(())\n}\n',
-          "examples/hash-objects.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html\nuse grit_lib::objects::ObjectKind;\nuse grit_lib::odb::Odb;\n\nfn main() {\n    let oid = Odb::hash_object_data(ObjectKind::Blob, b"content to hash\\n");\n    println!("{oid}");\n}\n',
-          "examples/head.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/state/fn.resolve_head.html\nuse grit_lib::state::{resolve_head, HeadState};\nuse std::path::Path;\n\nfn main() -> grit_lib::error::Result<()> {\n    match resolve_head(Path::new(".git"))? {\n        HeadState::Branch { refname, oid, .. } => println!("{refname} at {oid:?}"),\n        HeadState::Detached { oid } => println!("detached at {oid}"),\n        HeadState::Invalid => println!("HEAD is invalid"),\n    }\n    Ok(())\n}\n',
-          "examples/ignore.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/ignore/index.html\nuse grit_lib::ignore::{parse_sparse_patterns_from_blob, path_matches_sparse_pattern_list};\n\nfn main() {\n    let patterns = parse_sparse_patterns_from_blob("/*\\n/docs/\\n!/target/\\n");\n    let included = path_matches_sparse_pattern_list("docs/index.html", &patterns).unwrap_or(false);\n\n    println!("docs/index.html included? {included}");\n}\n',
-          "examples/index-add.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html\nuse grit_lib::index::{Index, IndexEntry, MODE_REGULAR};\nuse grit_lib::objects::ObjectId;\n\nfn main() -> grit_lib::error::Result<()> {\n    let oid = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;\n    let mut index = Index::new();\n    let path = b"src/main.rs".to_vec();\n\n    index.add_or_replace(IndexEntry {\n        ctime_sec: 0,\n        ctime_nsec: 0,\n        mtime_sec: 0,\n        mtime_nsec: 0,\n        dev: 0,\n        ino: 0,\n        mode: MODE_REGULAR,\n        uid: 0,\n        gid: 0,\n        size: 0,\n        oid,\n        flags: path.len() as u16,\n        flags_extended: None,\n        path,\n        base_index_pos: 0,\n    });\n\n    index.sort();\n    println!("index version {}", index.version);\n    Ok(())\n}\n',
-          "examples/index.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html\nuse grit_lib::index::Index;\n\nfn main() {\n    let index = Index::new();\n    println!("empty index has {} entries", index.entries.len());\n}\n',
-          "examples/log.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/rev_list/index.html\nuse grit_lib::rev_list::{split_revision_token, RevListOptions};\n\nfn main() {\n    let (positive, negative) = split_revision_token("main..feature");\n    let options = RevListOptions::default();\n\n    println!("include {positive:?}, exclude {negative:?}");\n    println!("reverse output? {}", options.reverse);\n}\n',
-          "examples/merge-base.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/merge_base/index.html\nuse grit_lib::merge_base::resolve_fork_point_reflog_ref;\nuse grit_lib::repo::Repository;\nuse std::path::Path;\n\nfn main() -> grit_lib::error::Result<()> {\n    let repo = Repository::discover(Some(Path::new(".")))?;\n    let reflog_ref = resolve_fork_point_reflog_ref(&repo, "main");\n\n    println!("look for fork-point entries in {reflog_ref}");\n    Ok(())\n}\n',
-          "examples/merge-file.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/merge_file/index.html\nuse grit_lib::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};\n\nfn main() -> grit_lib::error::Result<()> {\n    let result = merge(&MergeInput {\n        base: b"base\\n",\n        ours: b"ours\\n",\n        theirs: b"theirs\\n",\n        label_ours: "ours",\n        label_base: "base",\n        label_theirs: "theirs",\n        favor: MergeFavor::None,\n        style: ConflictStyle::Merge,\n        marker_size: 7,\n        diff_algorithm: None,\n        ignore_all_space: false,\n        ignore_space_change: false,\n        ignore_space_at_eol: false,\n        ignore_cr_at_eol: false,\n    })?;\n\n    println!("{}", String::from_utf8_lossy(&result.content));\n    Ok(())\n}\n',
-          "examples/merge-message.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/fmt_merge_msg/fn.fmt_merge_msg.html\nuse grit_lib::fmt_merge_msg::{fmt_merge_msg, FmtMergeMsgOptions};\n\nfn main() {\n    let input = "0123456789012345678901234567890123456789\\t\\tbranch \'topic\' of example\\n";\n    let message = fmt_merge_msg(input, &FmtMergeMsgOptions::default());\n\n    println!("{message}");\n}\n',
-          "examples/object-ids.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html\nuse grit_lib::objects::ObjectId;\n\nfn main() -> grit_lib::error::Result<()> {\n    let id = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;\n\n    println!("full id: {id}");\n    println!("loose path: {}/{}", id.loose_prefix(), id.loose_suffix());\n    Ok(())\n}\n',
-          "examples/objects.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/objects/index.html\nuse grit_lib::objects::{Object, ObjectKind};\nuse grit_lib::odb::Odb;\n\nfn main() {\n    let object = Object::new(ObjectKind::Blob, b"hello from grit\\n".to_vec());\n    let oid = Odb::hash_object_data(object.kind, &object.data);\n\n    println!("{} {} bytes", oid, object.data.len());\n}\n',
-          "examples/patch-id.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/patch_ids/fn.compute_patch_ids_from_text.html\nuse grit_lib::patch_ids::{compute_patch_ids_from_text, PatchIdMode};\n\nfn main() {\n    let patch = b"diff --git a/file b/file\\n--- a/file\\n+++ b/file\\n@@ -1 +1 @@\\n-old\\n+new\\n";\n    let ids = compute_patch_ids_from_text(patch, PatchIdMode::Stable);\n\n    println!("computed {} patch-id record(s)", ids.len());\n}\n',
-          "examples/push.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/protocol/index.html\nuse grit_lib::protocol::{check_protocol_allowed_with, ProtocolPolicyInputs};\n\nfn main() -> Result<(), grit_lib::protocol::ProtocolError> {\n    check_protocol_allowed_with(\n        "https",\n        &ProtocolPolicyInputs {\n            git_allow_protocol: None,\n            git_protocol_from_user: Some("1".into()),\n            specific_allow: None,\n            blanket_allow: None,\n        },\n    )?;\n\n    println!("https transport is allowed for a user-requested push");\n    Ok(())\n}\n',
-          "examples/reflog.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/reflog/index.html\nuse grit_lib::reflog::{reflog_path, read_reflog};\nuse std::path::Path;\n\nfn main() -> grit_lib::error::Result<()> {\n    let git_dir = Path::new(".git");\n    println!("HEAD reflog path: {}", reflog_path(git_dir, "HEAD").display());\n\n    for entry in read_reflog(git_dir, "HEAD")?.iter().take(5) {\n        println!("{} -> {} {}", entry.old_oid, entry.new_oid, entry.message);\n    }\n    Ok(())\n}\n',
-          "examples/refs.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/refs/index.html\nuse grit_lib::refs::{list_refs, read_head};\nuse std::path::Path;\n\nfn main() -> grit_lib::error::Result<()> {\n    let git_dir = Path::new(".git");\n    println!("HEAD = {:?}", read_head(git_dir)?);\n\n    for (name, oid) in list_refs(git_dir, "refs/heads")? {\n        println!("{name} {oid}");\n    }\n    Ok(())\n}\n',
-          "examples/rev-list.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.ObjectFilter.html\nuse grit_lib::rev_list::ObjectFilter;\n\nfn main() -> Result<(), String> {\n    let filter = ObjectFilter::parse("blob:limit=1m")?;\n\n    println!("small blob included? {}", filter.includes_blob(512));\n    println!("large blob included? {}", filter.includes_blob(2 * 1024 * 1024));\n    Ok(())\n}\n',
-          "examples/rev-parse.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/rev_parse/index.html\nuse grit_lib::rev_parse::{abbreviate_ref_name, split_double_dot_range};\n\nfn main() {\n    let short = abbreviate_ref_name("refs/heads/main");\n    let range = split_double_dot_range("main..feature");\n\n    println!("short ref: {short}");\n    println!("range: {range:?}");\n}\n',
-          "examples/status.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/diff/enum.DiffStatus.html\nuse grit_lib::diff::DiffStatus;\n\nfn main() {\n    let statuses = [DiffStatus::Added, DiffStatus::Modified, DiffStatus::Deleted];\n\n    for status in statuses {\n        println!("{}", status.letter());\n    }\n}\n',
-          "examples/write-tree.rs":
-            '// API docs: https://docs.rs/grit-lib/latest/grit_lib/write_tree/fn.write_tree_from_index.html\nuse grit_lib::index::Index;\nuse grit_lib::odb::Odb;\nuse grit_lib::write_tree::write_tree_from_index;\nuse std::path::Path;\n\nfn main() -> grit_lib::error::Result<()> {\n    let odb = Odb::new(Path::new(".git/objects"));\n    let index = Index::new();\n    let tree_id = write_tree_from_index(&odb, &index, "")?;\n\n    println!("empty tree: {tree_id}");\n    Ok(())\n}\n',
-        };
-        let lastFocus = null;
-
-        function escapeHtml(value) {
-          return value
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
-        }
-
-        function highlightRust(source) {
-          let html = escapeHtml(source);
-          const tokens = [];
-          const keep = (className, value) => {
-            const key = String.fromCharCode(0xe000 + tokens.length);
-            tokens.push('<span class="' + className + '">' + value + "</span>");
-            return key;
-          };
-          html = html.replace(/\/\/.*$/gm, (match) => keep("com", match));
-          html = html.replace(/"(?:\\.|[^"\\])*"/g, (match) =>
-            keep("str", match),
-          );
-          html = html.replace(
-            /\b(use|fn|let|mut|pub|struct|enum|impl|trait|for|in|if|else|match|return|async|await|move|const|static|where|as)\b/g,
-            '<span class="kw">$1</span>',
-          );
-          html = html.replace(
-            /\b(Result|Ok|Err|Some|None|Repository|ObjectId|CommitOptions|FetchOptions|PushOptions)\b/g,
-            '<span class="type">$1</span>',
-          );
-          html = html.replace(
-            /\b([a-z_][a-zA-Z0-9_]*)\s*(?=\()/g,
-            '<span class="fn-name">$1</span>',
-          );
-          html = html.replace(
-            /\b\d+(?:\.\d+)?\b/g,
-            '<span class="numlit">$&</span>',
-          );
-          return html.replace(
-            /[\ue000-\ue0ff]/g,
-            (key) => tokens[key.charCodeAt(0) - 0xe000],
-          );
-        }
-
-        function linkApiDocs(line) {
-          return line.replace(
-            /(https:\/\/docs\.rs\/grit-lib\/latest\/grit_lib\/[^\s<]+)/,
-            '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
-          );
-        }
-
-        function renderEditor(source) {
-          return source
-            .trimEnd()
-            .split("\n")
-            .map((rawLine, index) => {
-              const line = linkApiDocs(highlightRust(rawLine));
-              const text = line.length ? line : " ";
-              return (
-                '<span class="code-line"><span class="line-num">' +
-                (index + 1) +
-                '</span><span class="line-text">' +
-                text +
-                "</span></span>"
-              );
-            })
-            .join("");
-        }
-
-        function closeModal() {
-          modal.hidden = true;
-          document.body.style.overflow = "";
-          if (lastFocus) lastFocus.focus();
-        }
-
-        function titleFromPath(path) {
-          return path
-            .replace(/^examples\//, "")
-            .replace(/\.rs$/, "")
-            .split("-")
-            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-            .join(" ");
-        }
-
-        const examples = Array.from(
-          document.querySelectorAll("[data-example]"),
-        ).reduce((items, link) => {
-          const path = link.getAttribute("data-example");
-          if (!path || items.some((item) => item.path === path)) return items;
-          items.push({
-            path,
-            title:
-              link.getAttribute("data-example-title") ||
-              link.textContent.trim(),
-            link,
-          });
-          return items;
-        }, []);
-        Object.keys(inlineExamples).forEach((path) => {
-          if (examples.some((example) => example.path === path)) return;
-          examples.push({ path, title: titleFromPath(path), link: null });
-        });
-
-        function setActiveExample(path) {
-          exampleList.querySelectorAll("button").forEach((button) => {
-            button.classList.toggle(
-              "active",
-              button.getAttribute("data-example-path") === path,
-            );
-          });
-        }
-
-        async function openExample(example, focusSource) {
-          if (focusSource) lastFocus = focusSource;
-          const path = example.path;
-          title.textContent = example.title;
-          setActiveExample(path);
-          code.textContent = "Loading " + path + "…";
-          modal.hidden = false;
-          document.body.style.overflow = "hidden";
-          try {
-            if (Object.prototype.hasOwnProperty.call(inlineExamples, path)) {
-              code.innerHTML = renderEditor(inlineExamples[path]);
-              return;
-            }
-            const response = await fetch(path);
-            if (!response.ok) throw new Error("missing");
-            const source = await response.text();
-            code.innerHTML = renderEditor(source);
-          } catch (error) {
-            code.textContent =
-              "Add an example at docs/" + path + " to show it here.";
-          }
-        }
-
-        examples.forEach((example) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.textContent = example.title;
-          button.setAttribute("data-example-path", example.path);
-          button.addEventListener("click", () => openExample(example));
-          exampleList.appendChild(button);
-
-          if (example.link) {
-            example.link.addEventListener("click", (event) => {
-              event.preventDefault();
-              openExample(example, example.link);
-            });
-          }
-        });
-        modal.querySelectorAll("[data-example-close]").forEach((button) => {
-          button.addEventListener("click", closeModal);
-        });
-        document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && !modal.hidden) closeModal();
-        });
-      })();
-      (function () {
-        const terminal = document.querySelector("[data-code-tabs]");
-        if (!terminal) return;
-        const buttons = Array.from(terminal.querySelectorAll(".tab-button"));
-        const panels = Array.from(terminal.querySelectorAll(".tab-panel"));
-        let active = 0;
-        let timer = null;
-        const delay = 8500;
-
-        function selectTab(index, manual) {
-          active = index;
-          buttons.forEach((button, i) => {
-            const selected = i === index;
-            button.setAttribute("aria-selected", selected ? "true" : "false");
-          });
-          panels.forEach((panel, i) => {
-            panel.classList.toggle("active", i === index);
-          });
-
-          terminal.classList.remove("is-auto");
-          if (!manual) {
-            void terminal.offsetWidth;
-            terminal.classList.add("is-auto");
-          }
-        }
-
-        buttons.forEach((button, index) => {
-          button.addEventListener("click", () => {
-            if (timer) {
-              clearInterval(timer);
-              timer = null;
-            }
-            selectTab(index, true);
-          });
-        });
-
-        selectTab(0, false);
-        timer = window.setInterval(() => {
-          selectTab((active + 1) % buttons.length, false);
-        }, delay);
-      })();
-    </script>
   </body>
 </html>

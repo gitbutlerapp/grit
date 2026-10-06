@@ -12,7 +12,7 @@ The harness is not the primary way we grow new coverage anymore; it guards **`gr
 
 Harness execution: `target/release/grit-git` is copied to `tests/grit` and exposed as `git` by the runner.
 
-The **single source of truth** for per-file harness status is the per-test TOML tree **`data/tests/<group>/<stem>.toml`** (e.g. `data/tests/t0/t0000-basic.toml`). There are no intermediate TSVs and no aggregate CSV. Dashboards — **`docs/index.html`** (homepage progress card), **`docs/progress/index.html`** (summary + progress by group), **`docs/testfiles.html`** (per-file table, filterable by group), and **`docs/test-progress.svg`** (overall pass-rate badge for the README) — are generated from that tree, but **only when requested**: pass `--dashboard` to `run-tests.sh` or run `python3 scripts/generate-dashboard-from-test-files.py` directly.
+The **single source of truth** for per-file harness status is the per-test TOML tree **`data/tests/<group>/<stem>.toml`** (e.g. `data/tests/t0/t0000-basic.toml`). There are no intermediate TSVs and no aggregate CSV. Dashboards — **`docs/progress/index.html`** (summary + progress by group), **`docs/testfiles.html`** (per-file table, filterable by group), and **`docs/test-progress.svg`** (overall pass-rate badge for the README) — are generated from that tree, but **only when requested**: pass `--dashboard` to `run-tests.sh` or run `python3 scripts/generate-dashboard-from-test-files.py` directly.
 
 ## Running tests
 
@@ -55,7 +55,7 @@ Re-run **`python3 scripts/generate-test-files-catalog.py`** if you add or rename
 | `scripts/generate-test-files-catalog.py`        | Scan `tests/t*.sh`, merge the **`data/tests/`** tree (preserves `in_scope` and prior run results; prunes stale TOMLs). |
 | `scripts/run-tests.sh`                          | Select files to run, execute harness, invoke apply (+ dashboard with `--dashboard`).                             |
 | `scripts/apply-test-run-results.py`             | Merge one batch of run lines into the matching **`data/tests/`** TOMLs.                                          |
-| `scripts/generate-dashboard-from-test-files.py` | Read `data/tests/` only; write **`docs/index.html`**, **`docs/progress/index.html`**, **`docs/testfiles.html`**, and **`docs/test-progress.svg`**. |
+| `scripts/generate-dashboard-from-test-files.py` | Read `data/tests/` only; write **`docs/progress/index.html`**, **`docs/testfiles.html`**, and **`docs/test-progress.svg`**. |
 
 ## Data pipeline (step by step)
 
