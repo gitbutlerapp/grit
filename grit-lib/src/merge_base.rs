@@ -12,6 +12,7 @@ use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;
+use crate::shallow::load_shallow_boundaries;
 use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_upstream_symbolic_name,
     upstream_suffix_info,
@@ -309,8 +310,8 @@ pub fn count_symmetric_ahead_behind(
 /// When `limit` is [`Some`], traversal stops once that many commits have been collected (after
 /// applying the hide filter). Use this for bounded ahead-of-target lists and status shortlogs.
 ///
-/// Missing parent objects and shallow boundaries are treated as roots, matching
-/// [`CommitGraphCache::parents_of`].
+/// Shallow boundaries (`.git/shallow`) stop parent traversal without following
+/// absent parent objects. Other missing commits propagate [`Error::ObjectNotFound`].
 ///
 /// # Errors
 ///
@@ -523,6 +524,7 @@ struct CommitGraphCache<'r> {
     parents: HashMap<ObjectId, Vec<ObjectId>>,
     closures: HashMap<ObjectId, HashSet<ObjectId>>,
     promisor_stop: std::collections::HashSet<ObjectId>,
+    shallow_boundaries: HashSet<ObjectId>,
     /// Committer timestamp (unix seconds) per visited oid, recorded alongside
     /// parents so the date-pruned [`Self::is_ancestor`] walk needs no extra reads.
     times: HashMap<ObjectId, i64>,
@@ -551,11 +553,13 @@ impl<'r> CommitGraphCache<'r> {
             HashSet::new()
         };
         let graph = crate::commit_graph_file::CommitGraphChain::load(&repo.git_dir.join("objects"));
+        let shallow_boundaries = load_shallow_boundaries(&repo.git_dir);
         Self {
             repo,
             parents: HashMap::new(),
             closures: HashMap::new(),
             promisor_stop,
+            shallow_boundaries,
             times: HashMap::new(),
             graph,
         }
@@ -585,40 +589,52 @@ impl<'r> CommitGraphCache<'r> {
         if let Some(parents) = self.parents.get(&oid) {
             return Ok(parents.clone());
         }
+        if self.promisor_stop.contains(&oid) {
+            self.parents.insert(oid, Vec::new());
+            self.times.insert(oid, 0);
+            return Ok(Vec::new());
+        }
+        if self.shallow_boundaries.contains(&oid) {
+            let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+                Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                other => other,
+            })?;
+            let object = self.repo.odb.read(&commit_oid)?;
+            if object.kind != ObjectKind::Commit {
+                return Err(Error::CorruptObject(format!(
+                    "object {commit_oid} is not a commit"
+                )));
+            }
+            let commit = parse_commit(&object.data)?;
+            self.times.insert(
+                oid,
+                crate::ident::committer_timestamp_for_until_filter(&commit.committer),
+            );
+            self.parents.insert(oid, Vec::new());
+            return Ok(Vec::new());
+        }
         // Fast path: parents + committer time from the commit-graph file (no
         // object decompression). Misses (not in graph / octopus) fall through.
         if let Some(graph) = &self.graph {
             if let Some((parents, ctime)) = graph.graph_commit(&oid) {
                 self.times.insert(oid, ctime);
+                let parents = if self.shallow_boundaries.contains(&oid) {
+                    Vec::new()
+                } else {
+                    parents
+                        .into_iter()
+                        .filter(|p| !self.promisor_stop.contains(p))
+                        .collect()
+                };
                 self.parents.insert(oid, parents.clone());
                 return Ok(parents);
             }
         }
-        let commit_oid = match peel_to_commit_for_merge_base(self.repo, oid) {
-            Ok(c) => c,
-            // A parent that is absent from the local object store is a shallow boundary (or a
-            // missing promisor object): treat it as a root with no parents rather than erroring,
-            // matching Git's graph walk over a shallow clone. Without this, ancestry checks over a
-            // shallow-fetched repo fail at the boundary commit's missing parent (t5537
-            // `fetch --update-shallow` could not follow an annotated tag pointing into the
-            // shallow history).
-            Err(Error::ObjectNotFound(_)) => {
-                self.parents.insert(oid, Vec::new());
-                self.times.insert(oid, 0);
-                return Ok(Vec::new());
-            }
-            Err(Error::InvalidRef(msg)) => return Err(Error::CorruptObject(msg)),
-            Err(other) => return Err(other),
-        };
-        let object = match self.repo.odb.read(&commit_oid) {
-            Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => {
-                self.parents.insert(oid, Vec::new());
-                self.times.insert(oid, 0);
-                return Ok(Vec::new());
-            }
-            Err(e) => return Err(e),
-        };
+        let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+            Error::InvalidRef(msg) => Error::CorruptObject(msg),
+            other => other,
+        })?;
+        let object = self.repo.odb.read(&commit_oid)?;
         if object.kind != ObjectKind::Commit {
             return Err(Error::CorruptObject(format!(
                 "object {commit_oid} is not a commit"
@@ -629,12 +645,16 @@ impl<'r> CommitGraphCache<'r> {
             oid,
             crate::ident::committer_timestamp_for_until_filter(&commit.committer),
         );
-        let parents: Vec<ObjectId> = commit
-            .parents
-            .iter()
-            .copied()
-            .filter(|p| !self.promisor_stop.contains(p))
-            .collect();
+        let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
+            Vec::new()
+        } else {
+            commit
+                .parents
+                .iter()
+                .copied()
+                .filter(|p| !self.promisor_stop.contains(p))
+                .collect()
+        };
         self.parents.insert(oid, parents.clone());
         Ok(parents)
     }
@@ -723,7 +743,8 @@ mod tests {
         odb: &Odb,
         parents: &[ObjectId],
         msg: &str,
-        time: i64,
+        author_time: i64,
+        committer_time: i64,
     ) -> Result<ObjectId> {
         let tree = empty_tree(odb)?;
         let mut body = format!("tree {tree}\n");
@@ -731,9 +752,18 @@ mod tests {
             body.push_str(&format!("parent {p}\n"));
         }
         body.push_str(&format!(
-            "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\n{msg}\n"
+            "author T <t@e.com> {author_time} +0000\ncommitter T <t@e.com> {committer_time} +0000\n\n{msg}\n"
         ));
         odb.write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+    }
+
+    fn write_commit_same_time(
+        odb: &Odb,
+        parents: &[ObjectId],
+        msg: &str,
+        time: i64,
+    ) -> Result<ObjectId> {
+        write_commit(odb, parents, msg, time, time)
     }
 
     fn open_test_bare(dir: &tempfile::TempDir) -> Result<Repository> {
@@ -745,9 +775,9 @@ mod tests {
     fn commits_reachable_excluding_respects_limit() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
         let repo = open_test_bare(&dir)?;
-        let c1 = write_commit(&repo.odb, &[], "one", 100)?;
-        let c2 = write_commit(&repo.odb, &[c1], "two", 200)?;
-        let c3 = write_commit(&repo.odb, &[c2], "three", 300)?;
+        let c1 = write_commit_same_time(&repo.odb, &[], "one", 100)?;
+        let c2 = write_commit_same_time(&repo.odb, &[c1], "two", 200)?;
+        let c3 = write_commit_same_time(&repo.odb, &[c2], "three", 300)?;
 
         let all = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], None)?;
         assert_eq!(all, vec![c3, c2, c1]);
@@ -762,16 +792,29 @@ mod tests {
     }
 
     #[test]
-    fn commits_reachable_excluding_treats_missing_parent_as_boundary() -> Result<()> {
+    fn commits_reachable_excluding_stops_at_shallow_boundary() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
         let repo = open_test_bare(&dir)?;
         let missing: ObjectId = "0000000000000000000000000000000000000001".parse().expect("oid");
-        let tip = write_commit(&repo.odb, &[missing], "tip", 100)?;
+        let tip = write_commit_same_time(&repo.odb, &[missing], "tip", 100)?;
 
         fs::write(repo.git_dir.join("shallow"), format!("{tip}\n")).map_err(Error::Io)?;
 
-        let out = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[missing], None)?;
+        let out = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None)?;
         assert_eq!(out, vec![tip]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn commits_reachable_errors_on_missing_parent_without_shallow() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let missing: ObjectId = "0000000000000000000000000000000000000001".parse().expect("oid");
+        let tip = write_commit_same_time(&repo.odb, &[missing], "tip", 100)?;
+
+        let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
+        assert!(matches!(err, Error::ObjectNotFound(_)));
 
         Ok(())
     }

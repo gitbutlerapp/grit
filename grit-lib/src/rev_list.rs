@@ -4807,11 +4807,12 @@ fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
         && !options.boundary
         && !options.no_kept_objects
         && !options.unpacked_only
+        && !options.exclude_first_parent_only
         && !options.exclude_promisor_objects
         && options.missing_action == MissingAction::Error
         && matches!(
             options.ordering,
-            OrderingMode::Default | OrderingMode::DateOrderWalk | OrderingMode::AuthorDateWalk
+            OrderingMode::Default | OrderingMode::DateOrderWalk
         )
 }
 
@@ -5209,16 +5210,7 @@ impl<'r> CommitGraph<'r> {
         if self.parents.contains_key(&oid) {
             return Ok(());
         }
-        let commit = match load_commit(self.repo, oid) {
-            Ok(c) => c,
-            Err(Error::ObjectNotFound(_)) => {
-                self.parents.insert(oid, Vec::new());
-                self.committer_time.insert(oid, 0);
-                self.author_time.insert(oid, 0);
-                return Ok(());
-            }
-            Err(err) => return Err(err),
-        };
+        let commit = load_commit(self.repo, oid)?;
         // Shallow boundaries: treat commit as having no parents
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
