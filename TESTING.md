@@ -37,6 +37,7 @@ Re-run **`python3 scripts/generate-test-files-catalog.py`** if you add or rename
 
 | Script                                          | Role                                                                                                             |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `scripts/gate.sh`                               | Pre-integration gate: fmt, clippy (**`-D warnings`**), workspace tests; prints per-stage wall times.             |
 | `scripts/test_status.py`                        | Shared helper: load/save **`data/tests/<group>/<stem>.toml`** files (atomic writes, TOML serialization, pruning). |
 | `scripts/generate-test-files-catalog.py`        | Scan `tests/t*.sh`, merge the **`data/tests/`** tree (preserves `in_scope` and prior run results; prunes stale TOMLs). |
 | `scripts/run-tests.sh`                          | Select files to run (`--list`), execute harness, strict CI mode (`--strict`), invoke apply (+ dashboard with `--dashboard`). |
@@ -131,17 +132,37 @@ can cost a test, so confirm no file regressed before committing.
 **Spotting candidates:** low pass ratio **and** nearly every `test_expect_success` body starts with a
 bare `cd`. Quick scan harness files with `rg -l "test_expect_success" tests/t*.sh` and inspect bodies that start with `cd`.
 
-## Lint and format
+## Lint, format, and pre-integration gate
 
 The repo root [`rust-toolchain.toml`](rust-toolchain.toml) pins **Rust 1.99.0** with **`rustfmt`** and **`clippy`**. From the repository root, `rustup show` should report that toolchain as active (rustup auto-installs it on first use).
+
+**Pre-integration gate** — run before merging a factory branch to **`origin/main`**:
+
+```bash
+make gate
+```
+
+This executes [`scripts/gate.sh`](scripts/gate.sh) in order, stopping at the first failure:
+
+1. `cargo fmt --all --check`
+2. `cargo clippy --workspace -- -D warnings`
+3. `cargo test --workspace`
+
+The script exports **`CARGO_BUILD_JOBS=$(nproc)`** for the run so builds use all cores despite the **`jobs = 2`** cap in [`.cargo/config.toml`](.cargo/config.toml). Each stage prints wall time on success or failure.
+
+**Integration procedure (maintainers and factory integrators):**
+
+1. Rebase the branch onto current **`origin/main`**.
+2. On that rebased branch, run **`make gate`** and confirm it exits **0**.
+3. Run **`but merge`** only when the gate passes.
+
+For day-to-day edits before committing, you can run individual stages or narrower tests (for example **`cargo test -p grit-lib --lib`**); the gate is the required bar for integration.
 
 ```bash
 rustup show
 cargo fmt --all --check
 cargo check --workspace
 ```
-
-For **`cargo clippy --workspace --all-targets -- -D warnings`**, the workspace still carries pre-existing lint debt outside touched crates; fix warnings in code you change. Do not treat a full-workspace clippy run as a green gate until that debt is burned down (CI stage 2 will enforce clippy).
 
 ## Continuous integration
 

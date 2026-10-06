@@ -142,12 +142,14 @@ When matching Git behavior: read published docs and specs for *what* and *why*, 
 
 ### Before committing Rust code
 
+Format and fix issues in the code you touch, then run library tests:
+
 ```bash
 cargo fmt
-cargo check # fix warnings
-cargo clippy --fix --allow-dirty   # ensure no warnings remain
-cargo test -p grit-lib --lib       # unit tests must pass
+cargo test -p grit-lib --lib
 ```
+
+Use **`cargo clippy --fix --allow-dirty`** on crates you change. The full workspace bar for integration is **`make gate`** (see **Committing** below).
 
 ## Project structure
 
@@ -173,7 +175,7 @@ Aligns with **how work is judged** above:
 - [ ] **Library hygiene** — typed errors, no lib printing/globals/shell-out; **`grit-cli`** adds **`--json`** and **`--markdown`** when touched.
 - [ ] **Rust tests** + **coverage tests** for new/changed public API.
 - [ ] **Docs** (site + rustdoc) updated in the same change.
-- [ ] **`cargo fmt`**, **`cargo clippy`** (no warnings), **`cargo test -p grit-lib --lib`** (and relevant workspace tests).
+- [ ] **`make gate`** passes (or the same checks: fmt, **`cargo clippy --workspace -- -D warnings`**, **`cargo test --workspace`**).
 
 ## Rust style and idioms
 
@@ -247,12 +249,14 @@ Agents version-control with **GitButler (`but`)** and **GitButler Mesh**. Nothin
 - Create work on **`factory/<short-slug>`** (or stacked branches as directed).
 - Commit with **`but commit -m "…"`** — not plain **`git commit`** on the workspace branch.
 - Read-only **`git`** (log, diff, blame) is fine.
-- Before committing Rust: **`cargo fmt`**, **`cargo clippy --fix --allow-dirty`**, **`cargo test -p grit-lib --lib`**.
+- Before committing Rust: **`cargo fmt`**, **`cargo test -p grit-lib --lib`** (and clippy on crates you touch).
+
+**Pre-integration gate:** before **`but merge`**, rebase onto **`origin/main`**, run **`make gate`** on the rebased branch, and merge only if it exits **0**. See **`TESTING.md`** (pre-integration gate and integration procedure).
 
 ## Cursor cloud specific instructions
 
 - **Rust toolchain**: Ensure stable ≥ 1.85 (`rustup update stable && rustup default stable`) for edition 2024 workspace deps.
 - **No external services**: Build and test via Cargo.
-- **Unit tests**: `cargo test -p grit-lib --lib`; use `cargo test --workspace` for broader runs.
-- **Lint**: `cargo clippy --workspace -- -D warnings` (fix new warnings in code you touch).
+- **Pre-integration gate**: **`make gate`** (`scripts/gate.sh`: fmt, clippy with **`-D warnings`**, **`cargo test --workspace`**).
+- **Unit tests**: `cargo test -p grit-lib --lib` during development; the gate runs the full workspace suite.
 - **Benchmarks**: `bench/` when touching hot paths (compare against system `git`).

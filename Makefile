@@ -6,11 +6,12 @@
 #   make test         - run the Rust unit/integration tests
 #   make clippy       - lint all crates
 #   make fmt          - format all crates
+#   make gate         - pre-integration gate (fmt, clippy, workspace tests)
 #   make clean        - remove build artifacts
 
 CARGO ?= cargo
 
-.PHONY: all build debug test clippy fmt clean
+.PHONY: all build debug test clippy fmt gate clean
 
 all: build
 
@@ -28,6 +29,9 @@ clippy:
 
 fmt:
 	$(CARGO) fmt --all
+
+gate:
+	./scripts/gate.sh
 
 clean:
 	$(CARGO) clean
