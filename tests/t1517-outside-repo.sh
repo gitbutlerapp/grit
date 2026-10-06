@@ -127,8 +127,6 @@ do
 		expect_outcome=expect_success ;;
 	esac
 	case "$cmd" in
-	instaweb)
-		prereq=PERL ;;
 	*)
 		prereq= ;;
 	esac

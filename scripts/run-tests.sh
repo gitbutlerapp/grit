@@ -161,6 +161,13 @@ rm -f "$TESTS_DIR/grit"
 cp "$BIN" "$TESTS_DIR/grit"
 chmod +x "$TESTS_DIR/grit"
 
+INSTAWEB_BIN="$REPO/target/release/grit-instaweb"
+rm -f "$TESTS_DIR/grit-instaweb"
+if [[ -x "$INSTAWEB_BIN" ]]; then
+  cp "$INSTAWEB_BIN" "$TESTS_DIR/grit-instaweb"
+  chmod +x "$TESTS_DIR/grit-instaweb"
+fi
+
 mkdir -p "$DATA_DIR"
 if [[ "$NO_CATALOG" != true ]]; then
   python3 "$CATALOG"

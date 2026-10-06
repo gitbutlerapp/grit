@@ -158,6 +158,7 @@ pub mod ident_resolve;
 pub mod ignore;
 pub mod index;
 pub mod index_name_hash_lazy;
+pub mod instaweb;
 pub mod interpret_trailers;
 pub mod line_log;
 pub mod ls_remote;

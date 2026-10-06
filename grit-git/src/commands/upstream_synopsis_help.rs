@@ -33,6 +33,11 @@ fn synopsis_for_non_builtin(cmd: &str) -> Option<&'static str> {
             "git imap-send [-v] [-q] [--[no-]curl] [(--folder|-f) <folder>]\n",
             "git imap-send --list",
         )),
+        "instaweb" => Some(concat!(
+            "git instaweb [--local] [--httpd=<httpd>] [--port=<port>]\n",
+            "               [--browser=<browser>]\n",
+            "git instaweb [--start] [--stop] [--restart]",
+        )),
         _ => None,
     }
 }

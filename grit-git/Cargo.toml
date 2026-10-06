@@ -16,6 +16,10 @@ path = "src/main.rs"
 name = "test-httpd"
 path = "src/bin/test_httpd.rs"
 
+[[bin]]
+name = "grit-instaweb"
+path = "src/bin/grit_instaweb.rs"
+
 [lints]
 workspace = true
 
@@ -51,6 +55,8 @@ base64.workspace = true
 shell-words.workspace = true
 filetime.workspace = true
 atty = "0.2"
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }

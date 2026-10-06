@@ -4311,6 +4311,7 @@ fn print_list_cmds(categories: &str) {
         "fsck",
         "help",
         "imap-send",
+        "instaweb",
         "mergetool",
         "prune",
         "reflog",
@@ -5511,6 +5512,7 @@ pub(crate) const KNOWN_COMMANDS: &[&str] = &[
     "http-fetch",
     "http-push",
     "imap-send",
+    "instaweb",
     "index-pack",
     "init",
     "interpret-trailers",
@@ -5851,6 +5853,22 @@ pub(crate) fn dispatch(subcmd: &str, rest: &[String], opts: &GlobalOpts) -> Resu
                 }
             }
             commands::imap_send::run_from_argv(rest)
+        }
+        "instaweb" => {
+            if rest.len() == 1 {
+                let a = rest[0].as_str();
+                if matches!(a, "-h" | "--help" | "--help-all") {
+                    if let Some(syn) =
+                        commands::upstream_synopsis_help::synopsis_for_builtin(subcmd)
+                    {
+                        let code = if a == "--help" { 0 } else { 129 };
+                        commands::upstream_synopsis_help::print_upstream_synopsis_stdout_and_exit(
+                            subcmd, syn, code,
+                        );
+                    }
+                }
+            }
+            commands::instaweb::run_from_argv(rest)
         }
         "index-pack" => {
             commands::upstream_synopsis_help::try_print_upstream_help_and_exit(subcmd, rest);

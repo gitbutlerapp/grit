@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>git instaweb · grit</title>
+    <link rel="canonical" href="https://grit-scm.com/instaweb.html" />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.6;
+      }
+      code {
+        background: #f4f0ea;
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+      }
+      pre {
+        background: #211914;
+        color: #f8ead8;
+        padding: 1rem;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <p><a href="index.html">← grit</a></p>
+    <h1><code>git instaweb</code></h1>
+    <p>
+      Grit ships a built-in repository browser: no Perl gitweb, no external
+      httpd. From any repository, run:
+    </p>
+    <pre>git instaweb</pre>
+    <p>
+      This starts <code>grit-instaweb</code> (built alongside
+      <code>grit-git</code>) on <code>127.0.0.1:1234</code> by default, then
+      opens your configured browser. Lifecycle commands match upstream Git:
+    </p>
+    <pre>git instaweb --start --port=4321
+git instaweb --stop
+git instaweb --restart</pre>
+    <p>
+      Configuration keys: <code>instaweb.port</code>,
+      <code>instaweb.local</code>, <code>instaweb.browser</code>. The library
+      API lives in <code>grit_lib::instaweb</code>; see
+      <a href="examples/instaweb.rs"><code>examples/instaweb.rs</code></a>.
+    </p>
+  </body>
+</html>

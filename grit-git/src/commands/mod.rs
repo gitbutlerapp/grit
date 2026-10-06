@@ -71,6 +71,7 @@ pub mod http_push;
 pub mod imap_send;
 pub mod index_pack;
 pub mod init;
+pub mod instaweb;
 pub mod interpret_trailers;
 pub mod last_modified;
 pub mod log;

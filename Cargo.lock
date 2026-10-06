@@ -508,6 +508,7 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "atty",
+ "axum",
  "base64",
  "clap",
  "clap_complete",
@@ -529,6 +530,7 @@ dependencies = [
  "similar",
  "tempfile",
  "time",
+ "tokio",
  "unicode-width",
  "ureq",
  "url",
