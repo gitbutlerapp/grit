@@ -75,7 +75,9 @@ fn current_branch_and_oid(head: &HeadState) -> Result<(&str, ObjectId)> {
         HeadState::Branch { short_name, .. } => {
             bail!("branch '{short_name}' does not have any commits yet")
         }
-        HeadState::Detached { .. } => bail!("HEAD is detached; grit shortlog needs a current branch"),
+        HeadState::Detached { .. } => {
+            bail!("HEAD is detached; grit shortlog needs a current branch")
+        }
         HeadState::Invalid => bail!("HEAD is invalid"),
     }
 }
