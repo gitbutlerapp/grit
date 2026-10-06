@@ -12,11 +12,11 @@ use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;
-use crate::shallow::load_shallow_boundaries;
 use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_upstream_symbolic_name,
     upstream_suffix_info,
 };
+use crate::shallow::load_shallow_boundaries;
 
 /// Resolve commit-ish command arguments to commit object IDs.
 ///
@@ -316,14 +316,30 @@ pub fn count_symmetric_ahead_behind(
 /// # Errors
 ///
 /// Propagates object read and parse errors from commit traversal.
-pub fn commits_reachable_excluding_ancestors_of(
+/// How [`walk_commits_reachable_excluding_ancestors_of`] bounds its output.
+#[derive(Debug, Clone, Copy)]
+pub enum ReachableWalkLimit {
+    /// Emit at most `n` commits and stop (rev-list `--max-count`).
+    StopAfter(usize),
+    /// Walk the full emitted set; return the total count and only the newest `n` OIDs.
+    CountAllRetainNewest(usize),
+    /// Walk and collect every emitted commit.
+    Unlimited,
+}
+
+/// Walk commits reachable from `tips` that are not ancestors of any `hide` tip.
+///
+/// Returns `(emitted_count, collected_oids)` where `collected_oids` are newest-first.
+/// With [`ReachableWalkLimit::CountAllRetainNewest`], `emitted_count` is the full
+/// ahead count while `collected_oids` holds at most the requested number of newest tips.
+pub fn walk_commits_reachable_excluding_ancestors_of(
     repo: &Repository,
     tips: &[ObjectId],
     hide: &[ObjectId],
-    limit: Option<usize>,
-) -> Result<Vec<ObjectId>> {
+    limit: ReachableWalkLimit,
+) -> Result<(usize, Vec<ObjectId>)> {
     if tips.is_empty() {
-        return Ok(Vec::new());
+        return Ok((0, Vec::new()));
     }
 
     let mut cache = CommitGraphCache::new(repo);
@@ -342,15 +358,18 @@ pub fn commits_reachable_excluding_ancestors_of(
     }
 
     let mut out = Vec::new();
-    let stop_at = limit.unwrap_or(usize::MAX);
+    let mut emitted = 0usize;
     let mut done = HashSet::new();
+
+    let (stop_early_at, retain_newest) = match limit {
+        ReachableWalkLimit::StopAfter(n) => (Some(n), None),
+        ReachableWalkLimit::CountAllRetainNewest(n) => (None, Some(n)),
+        ReachableWalkLimit::Unlimited => (None, None),
+    };
 
     while let Some((_time, _seq, oid)) = heap.pop() {
         if !done.insert(oid) {
             continue;
-        }
-        if out.len() >= stop_at {
-            break;
         }
 
         let mut hidden = false;
@@ -364,7 +383,17 @@ pub fn commits_reachable_excluding_ancestors_of(
             continue;
         }
 
-        out.push(oid);
+        emitted += 1;
+        if let Some(k) = retain_newest {
+            if out.len() < k {
+                out.push(oid);
+            }
+        } else {
+            out.push(oid);
+            if stop_early_at.is_some_and(|n| out.len() >= n) {
+                break;
+            }
+        }
 
         for parent in cache.parents_of(oid)? {
             if queued.insert(parent) {
@@ -375,7 +404,45 @@ pub fn commits_reachable_excluding_ancestors_of(
         }
     }
 
-    Ok(out)
+    Ok((emitted, out))
+}
+
+/// Count commits reachable from `head` but not from `target`, and return up to `retain_newest`
+/// of those commit OIDs (newest first) without materializing the full ahead list.
+///
+/// # Errors
+///
+/// Propagates object read and parse errors from commit traversal.
+pub fn ahead_of_target_commits(
+    repo: &Repository,
+    head: ObjectId,
+    target: ObjectId,
+    retain_newest: usize,
+) -> Result<(usize, Vec<ObjectId>)> {
+    if head == target {
+        return Ok((0, Vec::new()));
+    }
+    walk_commits_reachable_excluding_ancestors_of(
+        repo,
+        std::slice::from_ref(&head),
+        &[target],
+        ReachableWalkLimit::CountAllRetainNewest(retain_newest),
+    )
+}
+
+pub fn commits_reachable_excluding_ancestors_of(
+    repo: &Repository,
+    tips: &[ObjectId],
+    hide: &[ObjectId],
+    limit: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    let walk_limit = match limit {
+        Some(n) => ReachableWalkLimit::StopAfter(n),
+        None => ReachableWalkLimit::Unlimited,
+    };
+    let (_emitted, oids) =
+        walk_commits_reachable_excluding_ancestors_of(repo, tips, hide, walk_limit)?;
+    Ok(oids)
 }
 
 /// Return commits that are not reachable from any other input commit.
@@ -595,10 +662,11 @@ impl<'r> CommitGraphCache<'r> {
             return Ok(Vec::new());
         }
         if self.shallow_boundaries.contains(&oid) {
-            let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                Error::InvalidRef(msg) => Error::CorruptObject(msg),
-                other => other,
-            })?;
+            let commit_oid =
+                peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                    other => other,
+                })?;
             let object = self.repo.odb.read(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
                 return Err(Error::CorruptObject(format!(
@@ -785,6 +853,10 @@ mod tests {
         let limited = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], Some(2))?;
         assert_eq!(limited, vec![c3, c2]);
 
+        let (total, retained) = ahead_of_target_commits(&repo, c3, c1, 1)?;
+        assert_eq!(total, 2);
+        assert_eq!(retained, vec![c3]);
+
         let ahead = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[c1], None)?;
         assert_eq!(ahead, vec![c3, c2]);
 
@@ -795,7 +867,9 @@ mod tests {
     fn commits_reachable_excluding_stops_at_shallow_boundary() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
         let repo = open_test_bare(&dir)?;
-        let missing: ObjectId = "0000000000000000000000000000000000000001".parse().expect("oid");
+        let missing: ObjectId = "0000000000000000000000000000000000000001"
+            .parse()
+            .expect("oid");
         let tip = write_commit_same_time(&repo.odb, &[missing], "tip", 100)?;
 
         fs::write(repo.git_dir.join("shallow"), format!("{tip}\n")).map_err(Error::Io)?;
@@ -810,7 +884,9 @@ mod tests {
     fn commits_reachable_errors_on_missing_parent_without_shallow() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
         let repo = open_test_bare(&dir)?;
-        let missing: ObjectId = "0000000000000000000000000000000000000001".parse().expect("oid");
+        let missing: ObjectId = "0000000000000000000000000000000000000001"
+            .parse()
+            .expect("oid");
         let tip = write_commit_same_time(&repo.odb, &[missing], "tip", 100)?;
 
         let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();

@@ -37,9 +37,9 @@ pub struct StatusOutcome {
     pub head: Option<String>,
     /// Target branch name, or `null` when none applies / was found.
     pub target: Option<String>,
-    /// Number of commits ahead of `target`.
+    /// Number of commits ahead of `target` (full count).
     pub ahead: usize,
-    /// The ahead-of-target commits (newest first); empty unless ahead of a target.
+    /// Newest ahead-of-target commits (newest first), up to the status shortlog limit.
     pub commits: Vec<CommitJson>,
     pub staged: Vec<ChangeJson>,
     pub unstaged: Vec<ChangeJson>,
@@ -145,9 +145,9 @@ pub fn run() -> Result<StatusOutcome> {
     let model = status(&repo, &StatusOptions::default(), &mut NullProgress)
         .context("could not compute status")?;
 
-    let (branch, detached, head, target, ahead_commits, header) =
+    let (branch, detached, head, target, ahead_total, ahead_commits, header) =
         resolve_header(&repo, &model.head)?;
-    let ahead = ahead_commits.len();
+    let ahead = ahead_total;
     let commits = ahead_commits.iter().map(CommitJson::from_summary).collect();
 
     let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
@@ -185,6 +185,7 @@ type HeaderResult = (
     bool,
     Option<String>,
     Option<String>,
+    usize,
     Vec<CommitSummary>,
     HeaderKind,
 );
@@ -201,13 +202,13 @@ fn resolve_header(repo: &grit_lib::repo::Repository, head: &HeadState) -> Result
                 false,
                 Some(head_oid.to_hex()),
                 None,
+                0,
                 Vec::new(),
                 HeaderKind::NoTarget,
             ),
             Some(target) => {
-                let ahead: Vec<CommitSummary> =
-                    context::commits_ahead_of(repo, *head_oid, target.oid)?;
-                let header = if ahead.is_empty() {
+                let ahead = context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?;
+                let header = if ahead.total == 0 {
                     HeaderKind::EvenWith
                 } else {
                     HeaderKind::AheadOfTarget
@@ -217,7 +218,8 @@ fn resolve_header(repo: &grit_lib::repo::Repository, head: &HeadState) -> Result
                     false,
                     Some(head_oid.to_hex()),
                     Some(target.display_name),
-                    ahead,
+                    ahead.total,
+                    ahead.commits,
                     header,
                 )
             }
@@ -227,6 +229,7 @@ fn resolve_header(repo: &grit_lib::repo::Repository, head: &HeadState) -> Result
             false,
             None,
             None,
+            0,
             Vec::new(),
             HeaderKind::Unborn,
         ),
@@ -235,9 +238,10 @@ fn resolve_header(repo: &grit_lib::repo::Repository, head: &HeadState) -> Result
             true,
             Some(oid.to_hex()),
             None,
+            0,
             Vec::new(),
             HeaderKind::Detached,
         ),
-        HeadState::Invalid => (None, false, None, None, Vec::new(), HeaderKind::Invalid),
+        HeadState::Invalid => (None, false, None, None, 0, Vec::new(), HeaderKind::Invalid),
     })
 }

@@ -40,8 +40,9 @@ fn open_bare(dir: &Path) -> grit_lib::error::Result<Repository> {
 fn bounded_log_on_depth_one_shallow_does_not_emit_missing_parent() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
-    let missing: grit_lib::objects::ObjectId =
-        "0000000000000000000000000000000000000001".parse().expect("oid");
+    let missing: grit_lib::objects::ObjectId = "0000000000000000000000000000000000000001"
+        .parse()
+        .expect("oid");
     let tip = write_commit(&repo.odb, &[missing], "tip", 100, 100).expect("commit");
 
     fs::write(repo.git_dir.join("shallow"), format!("{tip}\n")).expect("shallow");
@@ -58,8 +59,9 @@ fn bounded_log_on_depth_one_shallow_does_not_emit_missing_parent() {
 fn rev_list_errors_on_missing_parent_without_shallow() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
-    let missing: grit_lib::objects::ObjectId =
-        "0000000000000000000000000000000000000001".parse().expect("oid");
+    let missing: grit_lib::objects::ObjectId = "0000000000000000000000000000000000000001"
+        .parse()
+        .expect("oid");
     let tip = write_commit(&repo.odb, &[missing], "tip", 100, 100).expect("commit");
 
     let opts = RevListOptions {
@@ -85,13 +87,7 @@ fn author_date_order_with_max_count_uses_author_timestamps() {
         ordering: OrderingMode::AuthorDateWalk,
         ..Default::default()
     };
-    let result = rev_list(
-        &repo,
-        &[a.to_hex(), b.to_hex()],
-        &[],
-        &opts,
-    )
-    .expect("rev-list");
+    let result = rev_list(&repo, &[a.to_hex(), b.to_hex()], &[], &opts).expect("rev-list");
     assert_eq!(result.commits, vec![b, a]);
 }
 
@@ -109,12 +105,6 @@ fn exclude_first_parent_only_with_max_count_matches_git() {
         exclude_first_parent_only: true,
         ..Default::default()
     };
-    let result = rev_list(
-        &repo,
-        &[second.to_hex()],
-        &[merge.to_hex()],
-        &opts,
-    )
-    .expect("rev-list");
+    let result = rev_list(&repo, &[second.to_hex()], &[merge.to_hex()], &opts).expect("rev-list");
     assert_eq!(result.commits, vec![second]);
 }

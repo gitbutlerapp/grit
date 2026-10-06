@@ -6,7 +6,6 @@ use grit_lib::ident_resolve::{
     resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
     IdentityError, SystemIdentityEnv,
 };
-use grit_lib::merge_base::commits_reachable_excluding_ancestors_of;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -95,22 +94,28 @@ fn candidate_refnames(candidate: &str) -> Vec<String> {
     ]
 }
 
-/// Commits reachable from `head` but not from `target`, newest first.
+/// Summary of how far `head` is ahead of `target` for status/shortlog.
+#[derive(Debug, Clone)]
+pub struct AheadOfTarget {
+    /// Total commits reachable from `head` but not from `target`.
+    pub total: usize,
+    /// Up to `summary_limit` newest such commits (newest first).
+    pub commits: Vec<CommitSummary>,
+}
+
+/// Commits on `head` not in `target`'s history: full ahead count plus bounded summaries.
+///
+/// Only the newest `summary_limit` commits are read and parsed; `total` reflects the
+/// full ahead count. JSON/Markdown status uses this so default `grit status` does not
+/// materialize unbounded ahead lists.
 pub fn commits_ahead_of(
     repo: &Repository,
     head: ObjectId,
     target: ObjectId,
-) -> Result<Vec<CommitSummary>> {
-    if head == target {
-        return Ok(Vec::new());
-    }
-
-    let oids = commits_reachable_excluding_ancestors_of(
-        repo,
-        std::slice::from_ref(&head),
-        &[target],
-        None,
-    )?;
+    summary_limit: usize,
+) -> Result<AheadOfTarget> {
+    let (total, oids) =
+        grit_lib::merge_base::ahead_of_target_commits(repo, head, target, summary_limit)?;
     let mut commits = Vec::with_capacity(oids.len());
     for oid in oids {
         let commit = read_commit(repo, &oid)?;
@@ -123,7 +128,7 @@ pub fn commits_ahead_of(
         });
     }
 
-    Ok(commits)
+    Ok(AheadOfTarget { total, commits })
 }
 
 /// Parse a `Name <email> <epoch> <tz>` identity into a display author (the

@@ -6,6 +6,9 @@ use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
 
 use crate::context::{self, CommitSummary};
+
+/// Maximum commits to load for `grit shortlog` display (full ahead count is still reported).
+const SHORTLOG_LIST_LIMIT: usize = 100;
 use crate::output::{CommitJson, HumanRender};
 use crate::ui;
 
@@ -55,13 +58,13 @@ pub fn run() -> Result<ShortlogOutcome> {
         });
     };
 
-    let ahead = context::commits_ahead_of(&repo, head_oid, target.oid)?;
+    let ahead = context::commits_ahead_of(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
     Ok(ShortlogOutcome {
         branch: branch_name.to_owned(),
         target: Some(target.display_name),
-        ahead: ahead.len(),
-        commits: ahead.iter().map(CommitJson::from_summary).collect(),
-        commit_rows: ahead,
+        ahead: ahead.total,
+        commits: ahead.commits.iter().map(CommitJson::from_summary).collect(),
+        commit_rows: ahead.commits,
     })
 }
 
