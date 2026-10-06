@@ -15,6 +15,7 @@ use grit_lib::pathspec::{
     has_glob_chars, matches_pathspec_list, pathdiff, pathspec_is_exclude,
     resolve_pathspec_in_worktree,
 };
+use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::precompose_config::effective_core_precomposeunicode;
 use grit_lib::progress::NullProgress;
@@ -114,26 +115,37 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
     };
 
     let mut staged = 0;
-    for entry in &model.unstaged {
-        let path = entry_path(entry);
-        if !matches(path) {
-            continue;
-        }
-        if entry.status == DiffStatus::Deleted {
-            if index.remove(path.as_bytes()) {
-                staged += 1;
-            }
-        } else {
+    if selectors.is_empty() {
+        let tracked = stage_tracked_modifications(repo, &work_tree)
+            .context("could not stage tracked modifications")?;
+        staged += tracked.change_count();
+        index = repo.load_index().context("could not reload the index")?;
+        for path in &model.untracked {
             stage_worktree_file(repo, &work_tree, path, &mut index)?;
             staged += 1;
         }
-    }
-    for path in &model.untracked {
-        if !matches(path) {
-            continue;
+    } else {
+        for entry in &model.unstaged {
+            let path = entry_path(entry);
+            if !matches(path) {
+                continue;
+            }
+            if entry.status == DiffStatus::Deleted {
+                if index.remove(path.as_bytes()) {
+                    staged += 1;
+                }
+            } else {
+                stage_worktree_file(repo, &work_tree, path, &mut index)?;
+                staged += 1;
+            }
         }
-        stage_worktree_file(repo, &work_tree, path, &mut index)?;
-        staged += 1;
+        for path in &model.untracked {
+            if !matches(path) {
+                continue;
+            }
+            stage_worktree_file(repo, &work_tree, path, &mut index)?;
+            staged += 1;
+        }
     }
 
     if staged > 0 {
