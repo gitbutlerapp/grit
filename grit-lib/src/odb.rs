@@ -174,6 +174,11 @@ impl Odb {
         }
     }
 
+    /// Whether the in-memory write overlay is currently enabled.
+    fn overlay_active(&self) -> bool {
+        self.mem_overlay.lock().is_ok_and(|g| g.is_some())
+    }
+
     /// If the in-memory overlay is active, store `(kind, data)` under `oid` there and return
     /// `true`; otherwise return `false` so the caller falls through to the on-disk path.
     fn overlay_store(&self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> bool {
@@ -634,17 +639,20 @@ impl Odb {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
-        // When the in-memory overlay is active, keep the object in memory only (unless it is
-        // already present on disk, in which case nothing new needs to be written anyway).
-        if !self.exists(&oid) && self.overlay_store(oid, kind, data) {
-            return Ok(oid);
-        }
-
+        // Cheapest check first: a loose copy in this store answers every case below with a
+        // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
         let path = self.object_path(&oid);
         if path.exists() {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
         }
+
+        // When the in-memory overlay is active, keep the object in memory only (unless it is
+        // already present on disk, in which case nothing new needs to be written anyway).
+        if self.overlay_active() && !self.exists(&oid) && self.overlay_store(oid, kind, data) {
+            return Ok(oid);
+        }
+
         if self.exists(&oid) {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
@@ -1252,5 +1260,151 @@ mod tests {
         let odb = Odb::new(&objects).with_config_git_dir(git_dir);
         assert!(odb.write(ObjectKind::Blob, b"x").is_err());
         assert!(tmp_loose_object_paths(&objects).is_empty());
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Re-writing an object that already exists as a loose file must not replace it; Git
+    /// only touches mtime via [`Self::freshen_object`].
+    #[test]
+    fn write_existing_loose_does_not_rewrite() {
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let odb = Odb::new(&objects);
+        let payload = b"already loose";
+        let oid = odb.write(ObjectKind::Blob, payload).unwrap();
+        let path = odb.object_path(&oid);
+        let before_bytes = fs::read(&path).unwrap();
+        let before_mtime =
+            filetime::FileTime::from_last_modification_time(&fs::metadata(&path).unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let oid2 = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert_eq!(oid, oid2);
+        assert_eq!(fs::read(&path).unwrap(), before_bytes);
+        let after_mtime =
+            filetime::FileTime::from_last_modification_time(&fs::metadata(&path).unwrap());
+        assert!(
+            after_mtime >= before_mtime,
+            "expected freshen to bump or preserve mtime"
+        );
+    }
+
+    /// Objects present only in a pack must not be duplicated as loose files on [`Self::write`].
+    #[test]
+    fn write_skips_loose_when_object_in_pack_only() {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("f"), b"pack-only payload").unwrap();
+        git_in(dir.path(), &["add", "f"]);
+        git_in(dir.path(), &["commit", "-m", "c"]);
+        git_in(dir.path(), &["repack", "-ad"]);
+        let objects = dir.path().join(".git").join("objects");
+        let odb = Odb::new(&objects);
+        let oid = odb.write(ObjectKind::Blob, b"pack-only payload").unwrap();
+        assert!(!odb.object_path(&oid).exists());
+        assert!(odb.exists(&oid));
+    }
+
+    /// Same as pack-only: alternates satisfy [`Self::exists`] without a local loose copy.
+    #[test]
+    fn write_skips_loose_when_object_only_in_alternate() {
+        let alt = TempDir::new().unwrap();
+        git_in(alt.path(), &["init", "-q", "--bare"]);
+        git_in(alt.path(), &["config", "user.email", "t@example.com"]);
+        let alt_objects = alt.path().join("objects");
+        let alt_odb = Odb::new(&alt_objects);
+        let payload = b"alternate-only";
+        let oid = alt_odb.write(ObjectKind::Blob, payload).unwrap();
+
+        let primary = TempDir::new().unwrap();
+        let primary_objects = primary.path().join("objects");
+        fs::create_dir_all(primary.path().join("objects").join("info")).unwrap();
+        fs::write(
+            primary
+                .path()
+                .join("objects")
+                .join("info")
+                .join("alternates"),
+            format!("{}\n", alt_objects.display()),
+        )
+        .unwrap();
+        let odb = Odb::new(&primary_objects);
+        assert!(odb.exists(&oid));
+        let oid2 = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert_eq!(oid, oid2);
+        assert!(!odb.object_path(&oid).exists());
+    }
+
+    #[test]
+    fn write_with_mem_overlay_stays_in_memory() {
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let odb = Odb::new(&objects);
+        odb.enable_mem_overlay();
+        let payload = b"overlay blob";
+        let oid = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert!(!odb.object_path(&oid).exists());
+        assert_eq!(odb.read(&oid).unwrap().data, payload);
+        odb.disable_mem_overlay();
+        assert!(odb.read(&oid).is_err());
+    }
+
+    #[test]
+    fn read_alternates_relative_path_and_symlinked_objects_dir() {
+        use crate::pack::read_alternates_recursive;
+
+        let layout = TempDir::new().unwrap();
+        let alt_objects = layout.path().join("alt-store").join("objects");
+        fs::create_dir_all(&alt_objects).unwrap();
+        let primary_objects = layout.path().join("repo").join("objects");
+        fs::create_dir_all(primary_objects.join("info")).unwrap();
+        fs::write(
+            primary_objects.join("info").join("alternates"),
+            "../../alt-store/objects\n",
+        )
+        .unwrap();
+        let resolved = read_alternates_recursive(&primary_objects).unwrap();
+        let alt_canonical = fs::canonicalize(&alt_objects).unwrap_or(alt_objects.clone());
+        assert!(
+            resolved
+                .iter()
+                .any(|p| { fs::canonicalize(p).unwrap_or_else(|_| p.clone()) == alt_canonical }),
+            "relative alternate entry should resolve: {resolved:?}"
+        );
+
+        #[cfg(unix)]
+        {
+            let link_parent = TempDir::new().unwrap();
+            std::os::unix::fs::symlink(&primary_objects, link_parent.path().join("objects-link"))
+                .unwrap();
+            let via_link =
+                read_alternates_recursive(&link_parent.path().join("objects-link")).unwrap();
+            assert!(
+                !via_link.is_empty(),
+                "alternates through symlinked objects dir: {via_link:?}"
+            );
+        }
     }
 }
