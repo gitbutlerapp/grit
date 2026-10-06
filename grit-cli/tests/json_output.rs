@@ -218,6 +218,7 @@ fn log_json_pages_with_next_cursor() -> TestResult {
     // 11 commits → one full page (10) plus a `next` cursor.
     for i in 0..11 {
         write_file(&repo.join("a.txt"), &format!("v{i}\n"));
+        gs_ok(&repo, &["add", "a.txt"]);
         gs_ok(&repo, &["commit", &format!("commit {i}")]);
     }
     let v = gs_json(&repo, &["log"]);

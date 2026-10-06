@@ -372,6 +372,8 @@ fn sha256_reftable_refs_roundtrip() {
             "init",
             "--object-format=sha256",
             "--ref-format=reftable",
+            "-b",
+            "main",
             ".",
         ],
         &dir,
@@ -397,8 +399,12 @@ fn sha256_reftable_refs_roundtrip() {
         refs.dump("for-each-ref")
     );
 
-    // The system git must read grit's sha256 reftable (version 2).
+    // The system git must read grit's sha256 reftable (version 2) when built with
+    // reftable support (Git 2.45+). Older system git binaries skip this leg.
     let gshow = git(&["show-ref"], &dir);
+    if !gshow.ok() && gshow.stderr.contains("refstorage") {
+        return;
+    }
     assert!(
         gshow.ok(),
         "git could not read grit's sha256 reftable\n{}",
@@ -512,7 +518,7 @@ fn sha256_clone_fetch_push_roundtrip() {
     // the pack (un)packing, object-format negotiation, and ref handling.
     let src = unique_tmp("net-src");
     assert!(
-        grit(&["init", "--object-format=sha256", "."], &src).ok(),
+        grit(&["init", "--object-format=sha256", "-b", "main", "."], &src,).ok(),
         "init src"
     );
     write_file(&src, "a.txt", "one\n");
@@ -794,7 +800,7 @@ fn sha256_fast_import_creates_sha256_objects() {
     // must produce a 64-hex commit resolvable by grit.
     let dir = unique_tmp("fast-import");
     assert!(
-        grit(&["init", "--object-format=sha256", "."], &dir).ok(),
+        grit(&["init", "--object-format=sha256", "-b", "main", "."], &dir,).ok(),
         "init"
     );
     let stream = b"blob\nmark :1\ndata 6\nhello\n\ncommit refs/heads/main\nmark :2\ncommitter Test <test@example.com> 1700000000 +0000\ndata 2\nc1\nM 100644 :1 a.txt\n";

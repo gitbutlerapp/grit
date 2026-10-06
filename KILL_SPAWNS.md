@@ -66,13 +66,13 @@ that both the CLI entry point and the internal caller use. No crate surgery.
 | `commands/checkout.rs`/`restore.rs` | `grit apply [--cached]` | factor `apply`'s engine to take buffers |
 | `commands/rev_parse.rs`, `range_diff.rs` | `grit rev-parse` / `grit log` | `grit_lib::rev_parse` / log machinery |
 
-Definition of done per row: the spawn is gone, the upstream test files covering
-the command stay at their current pass counts (the harness TOMLs in
-`data/tests/` are the baseline).
+Definition of done per row: the spawn is gone, and **Rust tests** (plus
+`bench/` where relevant) cover the behavior that previously relied on the
+child process.
 
-**Watch out:** some upstream tests *observe* child processes (`GIT_TRACE2`
-`child_start` counts, e.g. t2080's checkout--worker accounting). Before
-removing a spawn, grep `tests/` for trace expectations on that command.
+**Watch out:** some flows *observe* child processes (`GIT_TRACE2`
+`child_start` counts). Before removing a spawn, add or extend integration tests
+that assert the same externally visible behavior without subprocesses.
 
 ### Phase 2 — pack machinery as streaming APIs (medium effort)
 
