@@ -28,6 +28,7 @@ pub mod log;
 pub mod merge;
 pub mod rebase;
 pub mod revert;
+pub mod stage_tracked;
 pub mod stash;
 pub mod status;
 pub mod tag;
