@@ -746,6 +746,7 @@ impl HttpClientContext {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn http_post_once(
         &self,
         url: &str,
@@ -1705,6 +1706,7 @@ fn build_proxy_get_request(
     Ok(s.into_bytes())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_proxy_post_request(
     target_url: &str,
     content_type: &str,
@@ -1807,6 +1809,7 @@ fn build_get_request(
     Ok(s.into_bytes())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_post_request(
     url: &str,
     content_type: &str,

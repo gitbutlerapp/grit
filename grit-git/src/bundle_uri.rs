@@ -97,6 +97,7 @@ fn is_bundle_v2(data: &[u8]) -> bool {
     data.starts_with(b"# v2 git bundle\n")
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_bundle_header_refs(
     data: &[u8],
 ) -> Result<(Vec<(String, ObjectId)>, Vec<ObjectId>, usize)> {
@@ -831,7 +832,8 @@ fn fetch_bundles_by_token(
     if bundles.is_empty() {
         return Ok(());
     }
-    bundles.sort_by(|a, b| b.token.cmp(&a.token));
+    bundles.sort_by_key(|b| b.token);
+    bundles.reverse();
 
     if bundles[0].token <= max_creation_token {
         return Ok(());

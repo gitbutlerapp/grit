@@ -576,6 +576,7 @@ fn write_merge_tree_stdout(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_merge_tree_stdout_to(
     w: &mut dyn Write,
     repo: &Repository,

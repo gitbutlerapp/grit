@@ -720,6 +720,7 @@ pub(crate) fn hydrate_head_tree_blobs_from_promisor(
     flush_promisor_blob_batches(dest, promisor, &mut need, 50_000)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_sparse_missing_blobs_from_tree(
     dest: &Repository,
     promisor: &PromisorSource,

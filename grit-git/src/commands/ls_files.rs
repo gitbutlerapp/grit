@@ -1318,6 +1318,7 @@ struct LsFilesRecurseParams<'a> {
     debug: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ls_files_recurse_submodules(
     repo: &Repository,
     config: &grit_lib::config::ConfigSet,
@@ -1761,6 +1762,7 @@ fn simple_glob_prefix(pat: &[u8]) -> &[u8] {
 ///
 /// When `pathspecs` is set, directory boundaries follow Git `dir.c` `treat_directory`:
 /// untracked dirs are emitted as `name/` unless a pathspec can still match deeper paths inside.
+#[allow(clippy::too_many_arguments)]
 fn walk_worktree(
     root: &std::path::Path,
     dir: &std::path::Path,

@@ -801,6 +801,7 @@ fn launch_editor(repo: &Repository, initial: &str) -> Result<String> {
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_note(
     repo: &Repository,
     notes_ref: &str,
@@ -929,6 +930,7 @@ fn add_note(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_or_edit_note(
     repo: &Repository,
     notes_ref: &str,
@@ -1647,6 +1649,7 @@ Finalize the merge from the correct ref or abort.",
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn merge_notes_dispatch(
     repo: &Repository,
     notes_ref: &str,

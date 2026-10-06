@@ -30,7 +30,9 @@ static TRACED_HTTPS_URLS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 /// Clear deduplication state for `GIT_TRACE2_EVENT` `child_start` lines (new top-level command).
 pub fn clear_trace2_https_url_dedup() {
     if let Some(m) = TRACED_HTTPS_URLS.get() {
-        m.lock().ok().map(|mut g| g.clear());
+        if let Ok(mut g) = m.lock() {
+            g.clear();
+        }
     }
 }
 
@@ -1116,6 +1118,7 @@ fn trace_fetch_pack_packet(direction: char, payload: &str) {
     crate::wire_trace::trace_packet_line_ident("fetch-pack", direction, payload);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fetch_pack_v0_v1_stateless_http(
     local_git_dir: &Path,
     base: &str,
@@ -1267,10 +1270,7 @@ fn fetch_pack_v0_v1_stateless_http(
     let mut flush_at: usize = INITIAL_FLUSH;
     if let Some(negotiator) = negotiator.as_mut() {
         let mut round = Vec::new();
-        loop {
-            let Some(oid) = negotiator.next_have()? else {
-                break;
-            };
+        while let Some(oid) = negotiator.next_have()? {
             let line = format!("have {}", oid.to_hex());
             pkt_line::write_line_to_vec(&mut round, &line)?;
             trace_fetch_pack_packet('>', &line);

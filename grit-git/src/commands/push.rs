@@ -873,6 +873,7 @@ struct PreparedPushCert {
 /// * `Ok(Some(_))` when a certificate was signed and stored on the receiver.
 /// * `Err(_)` when `Always` was requested but the receiver does not support
 ///   push certificates, or when signing fails.
+#[allow(clippy::too_many_arguments)]
 fn prepare_signed_push_cert(
     local_config: &ConfigSet,
     remote_repo: &Repository,
@@ -1005,6 +1006,7 @@ fn committer_datestamp() -> String {
     format!("{secs} +0000")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_to_url(
     repo: &Repository,
     config: &ConfigSet,
@@ -3524,6 +3526,7 @@ enum ApplyRefResult {
 }
 
 /// Matching refspec `:` — push every `refs/heads/*` whose tip differs from the remote.
+#[allow(clippy::too_many_arguments)]
 fn collect_matching_push_updates(
     repo: &Repository,
     remote_repo: &Repository,
@@ -3635,6 +3638,7 @@ fn parse_matching_push_with_negatives(args: &Args) -> Option<(bool, Vec<String>)
 }
 
 /// Apply a single ref update on the remote, printing output as appropriate.
+#[allow(clippy::too_many_arguments)]
 fn apply_ref_update(
     repo: &Repository,
     remote_repo: &Repository,
@@ -4037,6 +4041,7 @@ fn validate_negative_push_patterns(patterns: &[&str]) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_prune_glob_refspec(
     repo: &Repository,
     remote_repo: &Repository,
@@ -4218,6 +4223,7 @@ fn scrub_push_url_credentials(url: &str) -> String {
     url.to_owned()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_to_http_url(
     repo: &Repository,
     config: &ConfigSet,
@@ -4743,6 +4749,7 @@ fn push_to_http_url(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_to_ssh_url(
     repo: &Repository,
     config: &ConfigSet,

@@ -53,8 +53,8 @@ fn url_is_local_not_ssh(url: &str) -> bool {
 /// Parse and validate `url` as Git would for SSH.
 pub fn parse_ssh_url(url: &str) -> Result<SshUrl> {
     let u = url.trim();
-    if u.starts_with("git+ssh://") {
-        return parse_ssh_url_form(&u["git+ssh://".len()..]);
+    if let Some(rest) = u.strip_prefix("git+ssh://") {
+        return parse_ssh_url_form(rest);
     }
     if let Some(rest) = u.strip_prefix("ssh://") {
         return parse_ssh_url_form(rest);
@@ -716,8 +716,7 @@ fn spawn_git_ssh_service(
             let Some(prog) = words.first() else {
                 bail!("empty GIT_SSH_COMMAND");
             };
-            let mut probe_args: Vec<OsString> =
-                words[1..].iter().map(|s| OsString::from(s)).collect();
+            let mut probe_args: Vec<OsString> = words[1..].iter().map(OsString::from).collect();
             push_ssh_options(
                 &mut probe_args,
                 SshVariant::OpenSsh,
@@ -821,7 +820,7 @@ pub fn unresolved_ssh_clone_invoke_git_ssh_command(
         let Some(prog) = words.first() else {
             bail!("empty GIT_SSH_COMMAND");
         };
-        let mut probe_args: Vec<OsString> = words[1..].iter().map(|s| OsString::from(s)).collect();
+        let mut probe_args: Vec<OsString> = words[1..].iter().map(OsString::from).collect();
         push_ssh_options(
             &mut probe_args,
             SshVariant::OpenSsh,

@@ -286,6 +286,7 @@ fn trace_packet_fetch(direction: char, payload: &str) {
 /// Protocol v2 ends the initial advertisement at a flush with no ref lines. Run `ls-refs` to
 /// obtain the same ref list v0 would have advertised (heads, tags, `HEAD`), matching Git's
 /// `fetch-pack` and fixing fetches that would otherwise see an empty ref map (e.g. t5525).
+#[allow(clippy::type_complexity)]
 fn v2_ls_refs_for_fetch(
     stdin: &mut impl Write,
     stdout: &mut impl Read,
@@ -463,6 +464,7 @@ fn parse_ref_advertisement_line(line: &str) -> Option<(ObjectId, String, &str)> 
     Some((oid, refname.to_string(), caps))
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn read_advertisement(
     child_stdout: &mut impl Read,
 ) -> Result<(
@@ -1112,10 +1114,7 @@ fn read_ack_round_with_negotiator(
     stdout: &mut impl Read,
     negotiator: &mut SkippingNegotiator,
 ) -> Result<()> {
-    loop {
-        let Some(pkt) = pkt_line::read_packet(stdout)? else {
-            break;
-        };
+    while let Some(pkt) = pkt_line::read_packet(stdout)? {
         match pkt {
             pkt_line::Packet::Flush => break,
             pkt_line::Packet::Data(ln) => {
@@ -1186,7 +1185,7 @@ pub(crate) fn read_pkt_payload_raw(r: &mut impl Read) -> std::io::Result<Option<
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     match len {
         // Flush / delim / response-end — not a data payload; side-band readers stop at flush.
-        0 | 1 | 2 => Ok(None),
+        0..=2 => Ok(None),
         n if n <= 4 => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("invalid pkt-line length: {n}"),
@@ -1235,10 +1234,7 @@ fn read_sideband_pack_until_done(r: &mut impl Read, out: &mut Vec<u8>) -> Result
     // Progress and pack data share side-band channel 1; the `PACK` magic may start mid-chunk or
     // span chunk boundaries (65515-byte framing), so scan a small carry buffer until we find it.
     let mut pending: Vec<u8> = Vec::new();
-    loop {
-        let Some(payload) = read_pkt_payload_raw(r)? else {
-            break;
-        };
+    while let Some(payload) = read_pkt_payload_raw(r)? {
         // `read_pkt_payload_raw` returns `None` on flush/EOF; empty payloads should not occur.
         if payload.is_empty() {
             continue;
@@ -1431,6 +1427,7 @@ pub fn fetch_upload_pack_explicit_wants(
 ///
 /// Returns remote heads and tags from the ref advertisement, plus `HEAD` symref target
 /// from capabilities when present (e.g. `symref=HEAD:refs/heads/main`).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn fetch_via_upload_pack_skipping(
     local_git_dir: &Path,
     remote_repo_path: &Path,
@@ -2332,6 +2329,7 @@ fn fetch_upload_pack_negotiate_pack_bytes(
     Ok(pack_buf)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_upload_pack_negotiate_pack_bytes_with_streams(
     local_git_dir: &Path,
     advertised: &[(String, ObjectId)],
@@ -2776,6 +2774,7 @@ pub fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
 }
 
 /// Fetch over `git://` (native daemon) using upload-pack negotiation.
+#[allow(clippy::type_complexity)]
 pub fn fetch_via_git_protocol_skipping(
     local_git_dir: &Path,
     url: &str,
@@ -2930,6 +2929,7 @@ pub fn fetch_via_git_protocol_skipping(
 }
 
 /// Fetch over SSH using the configured SSH command and upload-pack negotiation.
+#[allow(clippy::type_complexity)]
 pub fn fetch_via_ssh_upload_pack_skipping(
     local_git_dir: &Path,
     spec: &crate::ssh_transport::SshUrl,
@@ -3134,6 +3134,7 @@ fn copy_object_dir_contents(src: &Path, dst: &Path) -> Result<()> {
 /// Query refs from a `git://` remote using upload-pack negotiation.
 ///
 /// Returns advertised refs, optional `symref=HEAD:` target, and whether protocol v1/v2 was seen.
+#[allow(clippy::type_complexity)]
 pub fn ls_remote_via_git_protocol(
     url: &str,
 ) -> Result<(Vec<(String, ObjectId)>, Option<String>, bool, bool)> {

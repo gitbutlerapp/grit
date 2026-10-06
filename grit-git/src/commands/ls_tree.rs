@@ -541,6 +541,7 @@ fn make_cwd_relative(path: &str, cwd_prefix: Option<&str>) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn list_tree(
     repo: &Repository,
     data: &[u8],

@@ -1135,6 +1135,7 @@ pub fn run(mut args: Args) -> Result<()> {
 }
 
 /// Try each `-s` strategy in order until one succeeds (Git-compatible multi-strategy merge).
+#[allow(clippy::too_many_arguments)]
 fn try_merge_strategies(
     repo: &Repository,
     head: &HeadState,
@@ -2544,6 +2545,7 @@ fn trivial_three_way_index(
     Some(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn do_real_merge(
     repo: &Repository,
     head: &HeadState,
@@ -3651,6 +3653,7 @@ fn submodule_candidate_merges(
     prune_submodule_merge_candidates(sub_repo, out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn record_submodule_merge_conflict(
     path_str: &str,
     be: &IndexEntry,
@@ -3688,6 +3691,7 @@ fn record_submodule_merge_conflict(
 }
 
 /// Three-way merge for paths where base/ours/theirs are all gitlinks (`merge-ort` `merge_submodule`).
+#[allow(clippy::too_many_arguments)]
 fn try_merge_gitlink_entries(
     repo: &Repository,
     path_str: &str,
@@ -4523,6 +4527,7 @@ fn bail_if_merge_touches_present_skip_worktree(
 ///
 /// This creates a single merge commit with N+1 parents (HEAD + each branch).
 /// If any merge produces a conflict, we bail.
+#[allow(clippy::too_many_arguments)]
 fn do_octopus_merge(
     repo: &Repository,
     head: &HeadState,
@@ -5695,6 +5700,7 @@ fn die_octopus_merge_program_failed(repo: &Repository, pre_merge_index: &Index) 
 /// parent (Git order), and refresh the worktree. `HEAD` stays at the pre-merge tip (Git keeps
 /// `ORIG_HEAD` there; the concluding `git commit` parents are `MERGE_HEAD` only — see `commit.rs`).
 /// Strategy trials restore the pre-merge index instead (`t7603-merge-reduce-heads`).
+#[allow(clippy::too_many_arguments)]
 fn finish_octopus_merge_on_conflict(
     repo: &Repository,
     head: &HeadState,
@@ -6205,6 +6211,7 @@ fn config_value_enables_renames(val: &str) -> bool {
 ///
 /// Returns (ours_renames, theirs_renames) where each map goes from
 /// old_path (in base) → new_path (in that side).
+#[allow(clippy::type_complexity)]
 fn detect_merge_renames(
     repo: &Repository,
     base: &HashMap<Vec<u8>, IndexEntry>,
@@ -6647,6 +6654,7 @@ fn infer_pure_directory_renames(
     base: &HashMap<Vec<u8>, IndexEntry>,
     side: &HashMap<Vec<u8>, IndexEntry>,
 ) -> HashMap<Vec<u8>, Vec<u8>> {
+    #[allow(clippy::type_complexity)]
     fn subtree_fingerprints(entries: &HashMap<Vec<u8>, IndexEntry>) -> HashMap<Vec<u8>, Vec<u8>> {
         let mut by_prefix: HashMap<Vec<u8>, BTreeMap<Vec<u8>, (u32, ObjectId)>> = HashMap::new();
         for (path, entry) in entries {
@@ -7065,6 +7073,7 @@ fn apply_directory_renames_to_side(
 /// When `criss_cross_outer_merge` is true (recursive merge after folding multiple merge bases),
 /// directory/file conflicts use Git merge-ort index layout at the original path with stages
 /// 1+2 or 1+3.
+#[allow(clippy::too_many_arguments)]
 fn merge_trees(
     repo: &Repository,
     base: &HashMap<Vec<u8>, IndexEntry>,
@@ -9974,6 +9983,7 @@ fn materialize_unmerged_entries_for_merge_tree_tree(
 ///
 /// When `mergeability_only` is true and the merge is conflicted, the merge stops before
 /// writing new tree/blob objects (matches Git `mergeability_only` / `--quiet`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn merge_tree_write_tree_core(
     repo: &Repository,
     branch1_oid: ObjectId,
@@ -10417,6 +10427,7 @@ pub(crate) fn replay_preprocess_directory_renames_for_trees(
 /// This is a thin wrapper over the internal merge engine used by `merge` and
 /// is intended for sequencer-style commands (such as `replay`) that need to
 /// replay commits without touching refs/index/worktree directly.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn merge_trees_for_replay(
     repo: &Repository,
     base: &HashMap<Vec<u8>, IndexEntry>,
@@ -10758,6 +10769,7 @@ fn two_way_conflict_blob(
     Ok(content)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn try_content_merge_add_add(
     repo: &Repository,
     path_str: &str,
@@ -11134,6 +11146,7 @@ fn first_entry_under_path_prefix(
     best.cloned()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn conflict_submodule_vs_non_gitlink(
     repo: &Repository,
     path_str: &str,
@@ -11212,6 +11225,7 @@ fn conflict_submodule_vs_non_gitlink(
 /// Git merge-ort index layout: unmerged entries at the original path `P` with stages 1+2 or 1+3.
 /// Otherwise use `P~SUFFIX` staging so `git rm P~HEAD` works during initial conflict resolution
 /// (t6416 setup and t4301-style flows).
+#[allow(clippy::too_many_arguments)]
 fn apply_directory_file_conflicts(
     repo: &Repository,
     their_name: &str,

@@ -51,14 +51,15 @@ pub fn resolve_porcelain_commitish_filter(repo: &Repository, spec: &str) -> Resu
         })
     })?;
 
-    if spec.len() == 40 && spec.chars().all(|c| c.is_ascii_hexdigit()) {
-        if repo.odb.read(&oid).is_err() {
-            let hex = oid.to_hex();
-            return Err(anyhow::Error::new(ExplicitExit {
-                code: 129,
-                message: format!("error: no such commit {hex}"),
-            }));
-        }
+    if spec.len() == 40
+        && spec.chars().all(|c| c.is_ascii_hexdigit())
+        && repo.odb.read(&oid).is_err()
+    {
+        let hex = oid.to_hex();
+        return Err(anyhow::Error::new(ExplicitExit {
+            code: 129,
+            message: format!("error: no such commit {hex}"),
+        }));
     }
 
     let object = match repo.odb.read(&oid) {
@@ -147,13 +148,14 @@ pub fn resolve_porcelain_merged_commit(repo: &Repository, spec: &str) -> Result<
         )))
     })?;
 
-    if spec.len() == 40 && spec.chars().all(|c| c.is_ascii_hexdigit()) {
-        if repo.odb.read(&oid).is_err() {
-            return Err(anyhow::Error::new(ExplicitExit {
-                code: 129,
-                message: "error: option `merged' must point to a commit".to_owned(),
-            }));
-        }
+    if spec.len() == 40
+        && spec.chars().all(|c| c.is_ascii_hexdigit())
+        && repo.odb.read(&oid).is_err()
+    {
+        return Err(anyhow::Error::new(ExplicitExit {
+            code: 129,
+            message: "error: option `merged' must point to a commit".to_owned(),
+        }));
     }
 
     let object = match repo.odb.read(&oid) {

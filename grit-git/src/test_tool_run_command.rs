@@ -17,7 +17,7 @@ fn sq_quote_buf(s: &str) -> String {
     out.push('\'');
     let mut rest = s;
     while !rest.is_empty() {
-        let take = rest.find(|c| c == '\'' || c == '!').unwrap_or(rest.len());
+        let take = rest.find(['\'', '!']).unwrap_or(rest.len());
         out.push_str(&rest[..take]);
         rest = &rest[take..];
         if let Some(c) = rest.chars().next() {

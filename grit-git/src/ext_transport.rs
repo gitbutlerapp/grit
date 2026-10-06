@@ -56,7 +56,7 @@ fn remote_ext_arg_byte_len(input: &str) -> Result<usize> {
 }
 
 /// Split `input` into the first argument and the remainder (skips one inter-arg space).
-fn next_remote_ext_arg<'a>(input: &'a str) -> Result<(&'a str, &'a str)> {
+fn next_remote_ext_arg(input: &str) -> Result<(&str, &str)> {
     if input.is_empty() {
         return Ok(("", ""));
     }
@@ -272,6 +272,7 @@ fn write_git_daemon_request(
 /// the same upload-pack negotiation as local fetch.
 ///
 /// `service` is typically `git-upload-pack` for fetch/clone.
+#[allow(clippy::type_complexity)]
 pub fn fetch_via_ext_skipping(
     local_git_dir: &Path,
     ext_url: &str,
@@ -487,6 +488,7 @@ pub fn spawn_ext_receive_pack(ext_url: &str) -> Result<std::process::Child> {
 }
 
 /// Query refs from an `ext::` remote without fetching objects.
+#[allow(clippy::type_complexity)]
 pub fn ls_remote_via_ext(
     ext_url: &str,
     service: &str,
