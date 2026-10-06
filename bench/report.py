@@ -9,6 +9,19 @@ from datetime import datetime, timezone
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(REPO_ROOT, "bench", "results")
 OUTPUT = os.path.join(REPO_ROOT, "docs", "bench.html")
+PER_CMD_DIR = os.path.join(REPO_ROOT, "docs", "bench")
+
+SCALE_ORDER = ("S", "M", "L", "H")
+SCALE_FILES = {"S": 100, "M": 1000, "L": 10000, "H": 500}
+
+
+def is_grit_command(command: str) -> bool:
+    """True if hyperfine command invokes grit-git or the grit CLI binary."""
+    if "/grit-git " in command or command.startswith("grit-git "):
+        return True
+    if "/grit " in command or command.startswith("grit "):
+        return True
+    return False
 
 
 def load_results():
@@ -32,7 +45,7 @@ def load_results():
         grit_result = None
         for r in results:
             cmd = r.get("command", "")
-            if "/grit " in cmd or cmd.startswith("grit "):
+            if is_grit_command(cmd):
                 grit_result = r
             else:
                 git_result = r
@@ -367,6 +380,105 @@ def generate_html(benchmarks):
     return html
 
 
+def split_bench_name(name: str) -> tuple[str, str | None]:
+    """Split 'status@L' into ('status', 'L'); plain names have scale None."""
+    if "@" in name:
+        base, scale = name.rsplit("@", 1)
+        return base, scale
+    return name, None
+
+
+def group_by_command(benchmarks):
+    """Group scale-parameterized benchmarks by command prefix."""
+    groups: dict[str, list] = {}
+    for b in benchmarks:
+        base, scale = split_bench_name(b["name"])
+        if scale is None:
+            continue
+        groups.setdefault(base, []).append((scale, b))
+    for rows in groups.values():
+        rows.sort(
+            key=lambda item: (
+                SCALE_ORDER.index(item[0])
+                if item[0] in SCALE_ORDER
+                else len(SCALE_ORDER)
+            )
+        )
+    return groups
+
+
+def generate_command_pages(benchmarks, meta_line: str) -> list[str]:
+    """Write docs/bench/<command>.html for each scaled command group."""
+    os.makedirs(PER_CMD_DIR, exist_ok=True)
+    written: list[str] = []
+    groups = group_by_command(benchmarks)
+
+    for cmd, rows in sorted(groups.items()):
+        sections = ""
+        for scale, b in rows:
+            label = f"Scale {scale}"
+            if scale in SCALE_FILES:
+                label = f"{SCALE_FILES[scale]:,} files ({scale})"
+            cls = ratio_class(b["ratio"])
+            sections += f"""
+  <section class="bench">
+    <h2>{b["name"]}</h2>
+    <p class="desc">{label}</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>{format_time(b["git_mean"])}</td><td>{format_time(b["git_stddev"])}</td></tr>
+      <tr><td>Grit</td><td>{format_time(b["grit_mean"])}</td><td>{format_time(b["grit_stddev"])}</td></tr>
+      <tr><td colspan="3" class="ratio {cls}">{ratio_label(b["ratio"])} (git/grit)</td></tr>
+    </table>
+  </section>"""
+
+        page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{cmd} — Grit vs Git</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+         max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }}
+  a {{ color: #0969da; }}
+  .meta {{ color: #656d76; font-size: 0.9rem; margin-bottom: 1.5rem; }}
+  .bench {{ margin-bottom: 2rem; }}
+  .bench h2 {{ font-size: 1.1rem; margin-bottom: 0.25rem; font-family: monospace; }}
+  .desc {{ color: #656d76; font-size: 0.85rem; margin-bottom: 0.75rem; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
+  th, td {{ text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #d0d7de; }}
+  .ratio {{ font-weight: 600; border-bottom: none; padding-top: 0.5rem; }}
+  .much-faster, .faster {{ color: #1a7f37; }}
+  .similar {{ color: #9a6700; }}
+  .slower, .much-slower {{ color: #cf222e; }}
+</style>
+</head>
+<body>
+<p><a href="../bench.html">← All benchmarks</a></p>
+<h1>{cmd}</h1>
+<p class="meta">{meta_line}</p>
+{sections}
+</body>
+</html>"""
+        path = os.path.join(PER_CMD_DIR, f"{cmd}.html")
+        with open(path, "w") as f:
+            f.write(page)
+        written.append(path)
+
+    return written
+
+
+def machine_meta_line() -> str:
+    """One-line environment summary from bench/results/MACHINE.md if present."""
+    machine_path = os.path.join(RESULTS_DIR, "MACHINE.md")
+    if not os.path.isfile(machine_path):
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    with open(machine_path) as f:
+        lines = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+    return " · ".join(lines[:6])
+
+
 def main():
     benchmarks = load_results()
     if not benchmarks:
@@ -374,11 +486,16 @@ def main():
         print("Run: bash bench/run.sh")
         return
 
+    meta = machine_meta_line()
     html = generate_html(benchmarks)
     with open(OUTPUT, "w") as f:
         f.write(html)
     print(f"Generated {OUTPUT}")
     print(f"  {len(benchmarks)} benchmarks")
+
+    cmd_pages = generate_command_pages(benchmarks, meta)
+    for path in cmd_pages:
+        print(f"Generated {path}")
 
     faster = sum(1 for b in benchmarks if b["ratio"] > 1.2)
     slower = sum(1 for b in benchmarks if b["ratio"] < 0.8)

@@ -17,7 +17,7 @@ set -uo pipefail   # NOT -e: a failed state-mutation must not kill the whole swe
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GRIT="$REPO_ROOT/target/release/grit-git"
-GIT="$(which git)"
+GIT="$(command -v git)"
 RESULTS_DIR="$REPO_ROOT/bench/results"
 SCRATCH="${BENCH_SCRATCH:-/tmp/grit-bench-everyday}"
 WARMUP="${BENCH_WARMUP:-2}"
@@ -148,7 +148,7 @@ run_cmds_for_scale() {
         "$Gc reset -q --mixed HEAD~1" "$Rc reset -q --mixed HEAD~1" ;;
     stash)
       bench "stash@$scale" --prepare "echo s\$RANDOM >> $R/d1/f1.txt" -i \
-        "$Gc stash -q && $Gc stash pop -q" "$Rc stash -q && $Gc stash pop -q" ;;
+        "$Gc stash -q && $Gc stash pop -q" "$Rc stash -q && $Rc stash pop -q" ;;
     ls-files)
       bench "ls-files@$scale" "$Gc ls-files" "$Rc ls-files" ;;
     write-tree)

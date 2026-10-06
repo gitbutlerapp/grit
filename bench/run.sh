@@ -13,8 +13,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GRIT="$REPO_ROOT/target/release/grit"
-GIT="$(which git)"
+GRIT="$REPO_ROOT/target/release/grit-git"
+GIT="$(command -v git)"
 BENCH_DIR="$REPO_ROOT/bench"
 RESULTS_DIR="$BENCH_DIR/results"
 SCRATCH="/tmp/grit-bench-scratch"
@@ -23,7 +23,7 @@ SCRATCH="/tmp/grit-bench-scratch"
 
 if [[ ! -x "$GRIT" ]]; then
   echo "Building grit (release)..."
-  (cd "$REPO_ROOT" && cargo build --release --quiet)
+  (cd "$REPO_ROOT" && cargo build --release --quiet -p grit-git)
 fi
 
 command -v hyperfine >/dev/null 2>&1 || {
