@@ -2,13 +2,439 @@
 
 use std::collections::BTreeMap;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::index::{
     CacheTreeNode, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
     MODE_TREE,
 };
 use crate::objects::{parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry};
-use crate::odb::Odb;
+use crate::odb::{Odb, WriteOptions};
+
+/// How [`cache_tree_update`] persists rebuilt tree objects.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WriteTreePersistence {
+    /// Write missing tree objects to the object store.
+    #[default]
+    Write,
+    /// Compute tree OIDs without writing (dry run).
+    DryRun,
+    /// Reuse an existing OID when serialized tree bytes already exist.
+    Repair,
+}
+
+/// Options for [`cache_tree_update`] and [`write_tree_update_index`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteTreeFlags {
+    /// Allow missing blob OIDs when building trees.
+    pub missing_ok: bool,
+    /// Discard the index cache-tree and rebuild from scratch.
+    pub ignore_cache_tree: bool,
+    /// How tree objects are stored or hashed.
+    pub persistence: WriteTreePersistence,
+    /// Skip mtime freshen on existing objects when writing.
+    pub silent: bool,
+}
+
+impl WriteTreeFlags {
+    /// Silent refresh that reuses existing tree OIDs when bytes match.
+    #[must_use]
+    pub fn silent_repair() -> Self {
+        Self {
+            silent: true,
+            persistence: WriteTreePersistence::Repair,
+            missing_ok: false,
+            ignore_cache_tree: false,
+        }
+    }
+
+    #[must_use]
+    pub fn silent() -> Self {
+        Self {
+            silent: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// Returns whether every node in `node` is valid and its tree object exists in `odb`.
+#[must_use]
+pub fn cache_tree_fully_valid(odb: &Odb, node: Option<&CacheTreeNode>) -> bool {
+    let Some(it) = node else {
+        return false;
+    };
+    if it.entry_count < 0 {
+        return false;
+    }
+    let Some(oid) = it.oid else {
+        return false;
+    };
+    if !odb.exists(&oid) {
+        return false;
+    }
+    it.children
+        .iter()
+        .all(|child| cache_tree_fully_valid(odb, Some(child)))
+}
+
+/// Update the index cache-tree extension and write any missing tree objects.
+///
+/// On success the index's [`Index::cache_tree`] reflects the current stage-0 entries.
+/// Returns the number of index entries consumed at the root (for internal bookkeeping).
+///
+/// # Errors
+///
+/// Returns an error when the index has unmerged entries, path/file conflicts, or missing objects.
+pub fn cache_tree_update(odb: &Odb, index: &mut Index, flags: WriteTreeFlags) -> Result<()> {
+    verify_index_for_cache_tree(index, flags.silent)?;
+
+    if flags.ignore_cache_tree {
+        index.clear_cache_tree();
+    }
+
+    let mut root = index
+        .cache_tree
+        .take()
+        .unwrap_or_else(empty_cache_tree_root);
+
+    let rows: Vec<&IndexEntry> = cache_tree_index_rows(index);
+    let mut skipped = 0i32;
+    let consumed = rebuild_directory_node(odb, &mut root, &rows, b"", 0, &mut skipped, flags)?;
+    if consumed < 0 {
+        return Err(Error::IndexError("cache-tree update failed".to_owned()));
+    }
+    index.cache_tree_root = root.oid.filter(|_| root.entry_count >= 0);
+    index.cache_tree = Some(root);
+    Ok(())
+}
+
+/// Write the index as a tree, updating the cache-tree in place when needed.
+///
+/// When the existing cache-tree is fully valid and `prefix` is empty, this returns the cached
+/// root OID without rewriting tree objects.
+pub fn write_tree_update_index(
+    odb: &Odb,
+    index: &mut Index,
+    prefix: &str,
+    flags: WriteTreeFlags,
+) -> Result<ObjectId> {
+    ensure_empty_blob_for_intent_to_add(odb, index)?;
+
+    let was_valid =
+        !flags.ignore_cache_tree && cache_tree_fully_valid(odb, index.cache_tree.as_ref());
+
+    if !was_valid {
+        cache_tree_update(odb, index, flags)?;
+    }
+
+    if prefix.is_empty() {
+        let root = index.cache_tree.as_ref().ok_or_else(|| {
+            Error::IndexError("write-tree: missing cache-tree after update".to_owned())
+        })?;
+        let oid = root.oid.ok_or_else(|| {
+            Error::IndexError("write-tree: cache-tree root has no oid".to_owned())
+        })?;
+        return Ok(oid);
+    }
+
+    let subtree = find_cache_tree_subtree(index.cache_tree.as_ref(), prefix.as_bytes())
+        .ok_or_else(|| Error::IndexError(format!("write-tree: invalid prefix '{prefix}'")))?;
+    let oid = subtree
+        .oid
+        .ok_or_else(|| Error::IndexError(format!("write-tree: invalid prefix '{prefix}'")))?;
+    Ok(oid)
+}
+
+fn empty_cache_tree_root() -> CacheTreeNode {
+    CacheTreeNode {
+        name: Vec::new(),
+        entry_count: -1,
+        oid: None,
+        children: Vec::new(),
+    }
+}
+
+/// Stage-0 index rows that participate in cache-tree / write-tree (includes sparse-directory placeholders).
+fn cache_tree_index_rows(index: &Index) -> Vec<&IndexEntry> {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && (e.mode != MODE_TREE || e.is_sparse_directory_placeholder()))
+        .collect()
+}
+
+fn verify_index_for_cache_tree(index: &Index, _silent: bool) -> Result<()> {
+    if index.entries.iter().any(|e| e.stage() != 0) {
+        return Err(Error::IndexUnmerged);
+    }
+    let rows = cache_tree_index_rows(index);
+    for pair in rows.windows(2) {
+        let shorter = &pair[0].path;
+        let longer = &pair[1].path;
+        if longer.len() > shorter.len()
+            && longer.get(shorter.len()) == Some(&b'/')
+            && longer.starts_with(shorter.as_slice())
+        {
+            return Err(Error::IndexPathPrefixConflict {
+                directory: path_buf_from_bytes(shorter),
+                file: path_buf_from_bytes(longer),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn path_buf_from_bytes(bytes: &[u8]) -> std::path::PathBuf {
+    std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
+fn find_cache_tree_subtree<'a>(
+    root: Option<&'a CacheTreeNode>,
+    prefix: &[u8],
+) -> Option<&'a CacheTreeNode> {
+    let mut it = root?;
+    let mut path = prefix;
+    while !path.is_empty() {
+        if path[0] == b'/' {
+            path = &path[1..];
+            continue;
+        }
+        let slash = path.iter().position(|&b| b == b'/').unwrap_or(path.len());
+        let component = &path[..slash];
+        path = &path[slash..];
+        it = it
+            .children
+            .iter()
+            .find(|c| c.name.as_slice() == component)?;
+    }
+    Some(it)
+}
+
+fn find_or_create_child<'a>(
+    node: &'a mut CacheTreeNode,
+    name: &[u8],
+    create: bool,
+) -> Option<&'a mut CacheTreeNode> {
+    if let Some(pos) = node.children.iter().position(|c| c.name.as_slice() == name) {
+        return Some(&mut node.children[pos]);
+    }
+    if !create {
+        return None;
+    }
+    node.children.push(CacheTreeNode {
+        name: name.to_vec(),
+        entry_count: -1,
+        oid: None,
+        children: Vec::new(),
+    });
+    node.children.last_mut()
+}
+
+/// Rebuild one cache-tree node and the index rows it covers.
+fn rebuild_directory_node(
+    odb: &Odb,
+    node: &mut CacheTreeNode,
+    rows: &[&IndexEntry],
+    anchor: &[u8],
+    prefix_len: usize,
+    extra_skip: &mut i32,
+    flags: WriteTreeFlags,
+) -> Result<i32> {
+    use std::collections::HashMap;
+
+    *extra_skip = 0;
+
+    if let Some(head) = rows.first() {
+        if head.is_sparse_directory_placeholder()
+            && head.path.len() == prefix_len
+            && entry_matches_prefix(&head.path, anchor, prefix_len)
+        {
+            node.entry_count = 1;
+            node.oid = Some(head.oid);
+            return Ok(1);
+        }
+    }
+
+    if cached_node_still_good(node, odb) {
+        return Ok(node.entry_count);
+    }
+
+    let mut nested_sizes: HashMap<Vec<u8>, i32> = HashMap::new();
+    let mut direct_tree_names: HashMap<Vec<u8>, ()> = HashMap::new();
+    let mut pos = 0usize;
+    while pos < rows.len() {
+        let row = rows[pos];
+        let path = row.path.as_slice();
+        if !entry_matches_prefix(path, anchor, prefix_len) {
+            break;
+        }
+
+        let tail = path_strip_prefix(path, prefix_len);
+        let Some(component_end) = tail.iter().position(|&b| b == b'/') else {
+            pos += 1;
+            continue;
+        };
+        let child_name = &tail[..component_end];
+        let child = find_or_create_child(node, child_name, true).ok_or_else(|| {
+            Error::IndexError(format!(
+                "failed to attach cache-tree child '{}'",
+                String::from_utf8_lossy(child_name)
+            ))
+        })?;
+        let nested_len = prefix_len + component_end + 1;
+        let mut nested_extra = 0i32;
+        let covered = rebuild_directory_node(
+            odb,
+            child,
+            &rows[pos..],
+            path,
+            nested_len,
+            &mut nested_extra,
+            flags,
+        )?;
+        if covered <= 0 {
+            return Ok(covered);
+        }
+        nested_sizes.insert(child_name.to_vec(), covered);
+        pos += covered as usize;
+        *extra_skip += nested_extra;
+    }
+
+    node.children.retain(|child| {
+        nested_sizes.contains_key(&child.name) || direct_tree_names.contains_key(&child.name)
+    });
+
+    let write_opts = WriteOptions {
+        silent: flags.silent,
+    };
+
+    let mut members: Vec<TreeEntry> = Vec::new();
+    let mut stale = false;
+    pos = 0;
+    while pos < rows.len() {
+        let row = rows[pos];
+        let path = row.path.as_slice();
+        if !entry_matches_prefix(path, anchor, prefix_len) {
+            break;
+        }
+
+        let tail = path_strip_prefix(path, prefix_len);
+        let slash = tail.iter().position(|&b| b == b'/');
+
+        let (oid, mode, name_len, advance) = if let Some(off) = slash {
+            let name = &tail[..off];
+            let child = find_or_create_child(node, name, false).ok_or_else(|| {
+                Error::IndexError(format!(
+                    "cache-tree child '{}' missing for '{}'",
+                    String::from_utf8_lossy(name),
+                    String::from_utf8_lossy(path)
+                ))
+            })?;
+            let covered = *nested_sizes
+                .get(name)
+                .ok_or_else(|| Error::IndexError("cache-tree nested size missing".to_owned()))?;
+            let pending = child.entry_count < 0;
+            if pending {
+                stale = true;
+            }
+            let oid = child
+                .oid
+                .ok_or_else(|| Error::IndexError("cache-tree child oid missing".to_owned()))?;
+            if pending && is_empty_tree_oid(&oid) {
+                pos += covered as usize;
+                continue;
+            }
+            (oid, MODE_TREE, off, covered as usize)
+        } else {
+            if row.intent_to_add() {
+                stale = true;
+                pos += 1;
+                continue;
+            }
+            let mode = if row.is_sparse_directory_placeholder() {
+                let name = tail.to_vec();
+                direct_tree_names.insert(name.clone(), ());
+                if let Some(child) = find_or_create_child(node, &name, true) {
+                    child.entry_count = 1;
+                    child.oid = Some(row.oid);
+                    child.children.clear();
+                }
+                MODE_TREE
+            } else {
+                canonicalize_blob_mode(row.mode)
+            };
+            (row.oid, mode, tail.len(), 1)
+        };
+
+        let gitlink = mode == MODE_GITLINK;
+        let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
+        if (!gitlink && oid.is_zero()) || (!allow_missing && !odb.exists(&oid)) {
+            return Err(Error::ObjectNotFound(format!(
+                "{mode:o} {} at {}",
+                oid.to_hex(),
+                String::from_utf8_lossy(path)
+            )));
+        }
+
+        members.push(TreeEntry {
+            mode,
+            name: tail[..name_len].to_vec(),
+            oid,
+        });
+        pos += advance;
+    }
+
+    members.sort_by(|a, b| {
+        let a_tree = a.mode == MODE_TREE;
+        let b_tree = b.mode == MODE_TREE;
+        tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
+    });
+
+    let payload = serialize_tree(&members);
+    let (tree_oid, repair_stale) = store_tree_payload(odb, &payload, flags, write_opts)?;
+    stale |= repair_stale;
+
+    node.oid = Some(tree_oid);
+    node.entry_count = if stale { -1 } else { pos as i32 - *extra_skip };
+    Ok(pos as i32)
+}
+
+fn cached_node_still_good(node: &CacheTreeNode, odb: &Odb) -> bool {
+    node.entry_count >= 0 && node.oid.is_some_and(|oid| odb.exists(&oid))
+}
+
+fn entry_matches_prefix(path: &[u8], anchor: &[u8], prefix_len: usize) -> bool {
+    path.len() >= prefix_len && path[..prefix_len] == anchor[..prefix_len]
+}
+
+fn path_strip_prefix(path: &[u8], prefix_len: usize) -> &[u8] {
+    path[prefix_len..]
+        .strip_prefix(b"/")
+        .unwrap_or(&path[prefix_len..])
+}
+
+fn store_tree_payload(
+    odb: &Odb,
+    payload: &[u8],
+    flags: WriteTreeFlags,
+    write_opts: WriteOptions,
+) -> Result<(ObjectId, bool)> {
+    let hashed = odb.hash(ObjectKind::Tree, payload);
+    match flags.persistence {
+        WriteTreePersistence::DryRun => Ok((hashed, false)),
+        WriteTreePersistence::Repair => Ok((hashed, !odb.exists(&hashed))),
+        WriteTreePersistence::Write => Ok((
+            odb.write_with_options(ObjectKind::Tree, payload, write_opts)?,
+            false,
+        )),
+    }
+}
+
+fn is_empty_tree_oid(oid: &ObjectId) -> bool {
+    const EMPTY_TREE_CANON: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const EMPTY_TREE_LEGACY: &str = "4b825dc642cb6eb9a060e54bf899d69f7c6948d4";
+    let hex = oid.to_hex();
+    hex == EMPTY_TREE_CANON || hex == EMPTY_TREE_LEGACY
+}
 
 fn ensure_empty_blob_for_intent_to_add(odb: &Odb, index: &Index) -> Result<()> {
     if index
@@ -49,6 +475,14 @@ pub fn write_tree_from_index_subset(
 
 /// Build and write tree object(s) from index entries and return the tree OID.
 pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<ObjectId> {
+    if prefix.is_empty() {
+        if let Some(root) = index.cache_tree_root {
+            if cache_tree_fully_valid(odb, index.cache_tree.as_ref()) {
+                return Ok(root);
+            }
+        }
+    }
+
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let prefix_bytes = prefix.as_bytes();
@@ -63,14 +497,6 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
-    if prefix_bytes.is_empty() {
-        if let Some(mut cache_root) = index.cache_tree.clone() {
-            update_cache_tree_node(odb, &mut cache_root, b"", &entries)?;
-            if let Some(oid) = cache_root.oid {
-                return Ok(oid);
-            }
-        }
-    }
     build_tree(odb, &entries, prefix_bytes)
 }
 
@@ -87,14 +513,7 @@ pub fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTree
         .filter(|entry| entry.stage() == 0 && !entry.intent_to_add() && entry.mode != MODE_TREE)
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
-    let mut root = CacheTreeNode {
-        name: Vec::new(),
-        entry_count: -1,
-        oid: None,
-        children: Vec::new(),
-    };
-    update_cache_tree_node(odb, &mut root, b"", &entries)?;
-    Ok(root)
+    build_cache_tree_node(odb, b"", Vec::new(), &entries)
 }
 
 /// Build a cache-tree directly from a **tree object**, preserving Git's raw `entry_count`
@@ -245,47 +664,15 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     });
 
     let data = serialize_tree(&tree_entries);
-    ensure_tree_entries_exist(odb, &tree_entries)?;
-    write_tree_object(odb, &data)
+    odb.write(ObjectKind::Tree, &data)
 }
 
-fn cache_tree_subtree_mut<'a>(node: &'a mut CacheTreeNode, name: &[u8]) -> &'a mut CacheTreeNode {
-    match node
-        .children
-        .binary_search_by(|c| c.name.as_slice().cmp(name))
-    {
-        Ok(pos) => &mut node.children[pos],
-        Err(insert_at) => {
-            node.children.insert(
-                insert_at,
-                CacheTreeNode {
-                    name: name.to_vec(),
-                    entry_count: -1,
-                    oid: None,
-                    children: Vec::new(),
-                },
-            );
-            &mut node.children[insert_at]
-        }
-    }
-}
-
-/// Update `node` to reflect `entries` under `dir_prefix`, reusing valid subtrees when possible
-/// (Git `cache_tree_update` / `update_one`).
-fn update_cache_tree_node(
+fn build_cache_tree_node(
     odb: &Odb,
-    node: &mut CacheTreeNode,
     dir_prefix: &[u8],
+    name: Vec<u8>,
     entries: &[&IndexEntry],
-) -> Result<()> {
-    if node.is_valid() {
-        if let Some(oid) = node.oid {
-            if odb.exists(&oid) {
-                return Ok(());
-            }
-        }
-    }
-
+) -> Result<CacheTreeNode> {
     let mut children: BTreeMap<Vec<u8>, ChildKind> = BTreeMap::new();
 
     for entry in entries {
@@ -322,12 +709,9 @@ fn update_cache_tree_node(
         }
     }
 
-    let mut used_child_names: Vec<Vec<u8>> = Vec::new();
     let mut tree_entries = Vec::with_capacity(children.len());
     let mut cache_children = Vec::new();
-
     for (child_name, child) in children {
-        used_child_names.push(child_name.clone());
         match child {
             ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry {
                 mode,
@@ -335,23 +719,20 @@ fn update_cache_tree_node(
                 oid,
             }),
             ChildKind::Tree(sub_prefix, sub_entries) => {
-                let child_node = cache_tree_subtree_mut(node, &child_name);
-                update_cache_tree_node(odb, child_node, &sub_prefix, &sub_entries)?;
+                let child_node =
+                    build_cache_tree_node(odb, &sub_prefix, child_name.clone(), &sub_entries)?;
                 let oid = child_node.oid.ok_or_else(|| {
                     crate::error::Error::IndexError("cache-tree child missing oid".to_owned())
                 })?;
                 tree_entries.push(TreeEntry {
                     mode: MODE_TREE,
-                    name: child_name.clone(),
+                    name: child_name,
                     oid,
                 });
-                cache_children.push(child_node.clone());
+                cache_children.push(child_node);
             }
         }
     }
-
-    node.children
-        .retain(|c| used_child_names.iter().any(|n| n == &c.name));
 
     tree_entries.sort_by(|a, b| {
         let a_tree = a.mode == MODE_TREE;
@@ -361,12 +742,13 @@ fn update_cache_tree_node(
     cache_children.sort_by(|a, b| a.name.cmp(&b.name));
 
     let data = serialize_tree(&tree_entries);
-    ensure_tree_entries_exist(odb, &tree_entries)?;
-    let oid = write_tree_object(odb, &data)?;
-    node.entry_count = i32::try_from(entries.len()).unwrap_or(i32::MAX);
-    node.oid = Some(oid);
-    node.children = cache_children;
-    Ok(())
+    let oid = odb.write(ObjectKind::Tree, &data)?;
+    Ok(CacheTreeNode::valid(
+        name,
+        entries.len() as i32,
+        oid,
+        cache_children,
+    ))
 }
 
 /// Build a tree for a **partial** commit: paths listed in `paths_from_index` (repository-relative,
@@ -512,34 +894,10 @@ pub fn write_tree_partial_from_index(
             tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
         });
         let data = serialize_tree(&out);
-        ensure_tree_entries_exist(odb, &out)?;
-        write_tree_object(odb, &data)
+        odb.write(ObjectKind::Tree, &data)
     }
 
     merge_level(odb, index, base_tree_oid, b"", paths_from_index)
-}
-
-/// Store a reconstructed tree through [`Odb::write`] so duplicate tree OIDs are freshened.
-///
-/// Valid cache-tree subtrees skip reconstruction entirely; this path runs only for trees
-/// rebuilt from index entries.
-fn write_tree_object(odb: &Odb, data: &[u8]) -> Result<ObjectId> {
-    odb.write(ObjectKind::Tree, data)
-}
-
-/// Verify tree child OIDs are reachable in the ODB (Git cache-tree `odb_has_object`).
-///
-/// Gitlink entries reference submodule commits and are not checked against the parent ODB.
-fn ensure_tree_entries_exist(odb: &Odb, tree_entries: &[TreeEntry]) -> Result<()> {
-    for entry in tree_entries {
-        if entry.mode == MODE_GITLINK {
-            continue;
-        }
-        if !odb.exists(&entry.oid) {
-            return Err(crate::error::Error::ObjectNotFound(entry.oid.to_hex()));
-        }
-    }
-    Ok(())
 }
 
 fn canonicalize_blob_mode(mode: u32) -> u32 {
@@ -597,6 +955,247 @@ mod tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         }
+    }
+
+    fn sparse_dir_placeholder(path: &str, tree_oid: ObjectId) -> IndexEntry {
+        let mut e = entry(path, MODE_TREE, tree_oid);
+        e.set_skip_worktree(true);
+        e
+    }
+
+    #[test]
+    fn cache_tree_fully_valid_requires_positive_counts_and_objects() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"x").unwrap();
+        let tree_oid = write_tree_from_index(
+            &odb,
+            &Index {
+                entries: vec![entry("x", MODE_REGULAR, blob)],
+                ..Index::new()
+            },
+            "",
+        )
+        .unwrap();
+
+        assert!(!cache_tree_fully_valid(
+            &odb,
+            Some(&empty_cache_tree_root())
+        ));
+        let missing_oid = CacheTreeNode::valid(b"root".to_vec(), 1, tree_oid, vec![]);
+        std::fs::remove_file(odb.object_path(&tree_oid)).unwrap();
+        assert!(!cache_tree_fully_valid(&odb, Some(&missing_oid)));
+    }
+
+    #[test]
+    fn write_tree_update_index_reuses_valid_cache_tree() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"same").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("same", MODE_REGULAR, blob));
+        let first =
+            write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
+        let objects_before = std::fs::read_dir(dir.path()).unwrap().count();
+        let second =
+            write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
+        assert_eq!(first, second);
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            objects_before
+        );
+    }
+
+    #[test]
+    fn cache_tree_update_dry_run_hashes_without_writing_trees() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"d").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("d", MODE_REGULAR, blob));
+        let flags = WriteTreeFlags {
+            persistence: WriteTreePersistence::DryRun,
+            ..WriteTreeFlags::default()
+        };
+        cache_tree_update(&odb, &mut index, flags).unwrap();
+        let root_oid = index.cache_tree.as_ref().unwrap().oid.unwrap();
+        assert!(!odb.exists(&root_oid));
+        assert_eq!(root_oid, write_tree_from_index(&odb, &index, "").unwrap());
+    }
+
+    #[test]
+    fn cache_tree_update_repair_reuses_existing_tree_bytes() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"r").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("r", MODE_REGULAR, blob));
+        let expected = write_tree_from_index(&odb, &index, "").unwrap();
+        index.clear_cache_tree();
+        let flags = WriteTreeFlags {
+            persistence: WriteTreePersistence::Repair,
+            ..WriteTreeFlags::default()
+        };
+        cache_tree_update(&odb, &mut index, flags).unwrap();
+        assert_eq!(index.cache_tree.as_ref().unwrap().oid, Some(expected));
+    }
+
+    #[test]
+    fn cache_tree_update_rejects_unmerged_index() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"u").unwrap();
+        let mut conflict = entry("conflict", MODE_REGULAR, blob);
+        conflict.set_stage(1);
+        let mut index = Index::new();
+        index.add_or_replace(conflict);
+        let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
+        assert!(matches!(err, Error::IndexUnmerged));
+    }
+
+    #[test]
+    fn cache_tree_update_rejects_path_prefix_conflict() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let a = odb.write(ObjectKind::Blob, b"a").unwrap();
+        let b = odb.write(ObjectKind::Blob, b"b").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("dir", MODE_REGULAR, a));
+        index.add_or_replace(entry("dir/file", MODE_REGULAR, b));
+        let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
+        assert!(matches!(err, Error::IndexPathPrefixConflict { .. }));
+    }
+
+    #[test]
+    fn cache_tree_update_reports_missing_blob() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("gone", MODE_REGULAR, missing));
+        let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
+        assert!(matches!(err, Error::ObjectNotFound(_)));
+    }
+
+    #[test]
+    fn cache_tree_update_missing_ok_allows_zero_oid_gitlink_paths() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"ok").unwrap();
+        let zero = ObjectId::from_hex("0000000000000000000000000000000000000000").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("sub", MODE_GITLINK, zero));
+        index.add_or_replace(entry("ok", MODE_REGULAR, blob));
+        cache_tree_update(
+            &odb,
+            &mut index,
+            WriteTreeFlags {
+                missing_ok: true,
+                ..WriteTreeFlags::default()
+            },
+        )
+        .unwrap();
+        assert!(index.cache_tree.as_ref().unwrap().oid.is_some());
+    }
+
+    #[test]
+    fn cache_tree_update_ignore_cache_tree_rebuilds_from_scratch() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"i").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("i", MODE_REGULAR, blob));
+        index.set_cache_tree(build_cache_tree_from_index(&odb, &index).unwrap());
+        index.cache_tree.as_mut().unwrap().entry_count = -1;
+        cache_tree_update(
+            &odb,
+            &mut index,
+            WriteTreeFlags {
+                ignore_cache_tree: true,
+                ..WriteTreeFlags::default()
+            },
+        )
+        .unwrap();
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+    }
+
+    #[test]
+    fn cache_tree_update_marks_ita_entries_stale() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"old").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("old", MODE_REGULAR, blob));
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+
+        let mut ita = entry("new", MODE_REGULAR, ObjectId::zero());
+        ita.set_intent_to_add(true);
+        index.add_or_replace(ita);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        assert_eq!(index.cache_tree.as_ref().unwrap().entry_count, -1);
+    }
+
+    #[test]
+    fn sparse_placeholder_survives_ancestor_invalidation() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+
+        let inner_blob = odb.write(ObjectKind::Blob, b"inner").unwrap();
+        let mut inner_index = Index::new();
+        inner_index.add_or_replace(entry("leaf", MODE_REGULAR, inner_blob));
+        let inner_tree = write_tree_from_index(&odb, &inner_index, "").unwrap();
+
+        let top_blob = odb.write(ObjectKind::Blob, b"top").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("top", MODE_REGULAR, top_blob));
+        index.add_or_replace(sparse_dir_placeholder("wide/sub", inner_tree));
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+
+        index.invalidate_cache_tree_for_path(b"wide");
+        assert_eq!(index.cache_tree.as_ref().unwrap().entry_count, -1);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+
+        let wide = index
+            .cache_tree
+            .as_ref()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.name == b"wide")
+            .expect("wide subtree");
+        let sub = wide
+            .children
+            .iter()
+            .find(|c| c.name == b"sub")
+            .expect("sparse sub placeholder");
+        assert_eq!(sub.oid, Some(inner_tree));
+        assert_eq!(sub.entry_count, 1);
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+    }
+
+    #[test]
+    fn rebuilds_cache_tree_after_path_invalidation() {
+        let temp_dir = TempDir::new().unwrap();
+        let odb = Odb::new(temp_dir.path());
+
+        let oid_f = odb.write(ObjectKind::Blob, b"f").unwrap();
+        let oid_deep = odb.write(ObjectKind::Blob, b"deep").unwrap();
+
+        let mut index = Index::new();
+        index.add_or_replace(entry("f", MODE_REGULAR, oid_f));
+        let root_tree = write_tree_from_index(&odb, &index, "").unwrap();
+        index.set_cache_tree(build_cache_tree_from_index(&odb, &index).unwrap());
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+
+        index.invalidate_cache_tree_for_path(b"deep");
+        index.add_or_replace(entry("deep/very-long-subdir/file", MODE_REGULAR, oid_deep));
+
+        let oid = write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
+        assert_ne!(oid, root_tree);
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
     }
 
     #[test]
@@ -657,7 +1256,7 @@ mod tests {
         index.add_or_replace(entry("a.txt", 0o100644, oid_a));
         index.add_or_replace(entry("b.txt", 0o100644, oid_b));
 
-        write_tree_from_index(&odb, &index, "").unwrap();
+        write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
 
         let after_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
         let after_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
@@ -681,7 +1280,8 @@ mod tests {
         index.add_or_replace(entry("a.txt", 0o100644, oid_a));
         index.add_or_replace(entry("b.txt", 0o100644, oid_b));
 
-        let root_oid = write_tree_from_index(&odb, &index, "").unwrap();
+        let root_oid =
+            write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
         let tree_path = odb.object_path(&root_oid);
 
         let path_a = odb.object_path(&oid_a);
@@ -699,7 +1299,8 @@ mod tests {
         filetime::set_file_mtime(&tree_path, two_days_ago).unwrap();
         let aged = FileTime::from_last_modification_time(&fs::metadata(&tree_path).unwrap());
 
-        write_tree_from_index(&odb, &index, "").unwrap();
+        index.clear_cache_tree();
+        write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
 
         let after_tree = FileTime::from_last_modification_time(&fs::metadata(&tree_path).unwrap());
         assert!(
@@ -710,5 +1311,130 @@ mod tests {
         let after_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
         assert_eq!(after_a, stamp_a);
         assert_eq!(after_b, stamp_b);
+    }
+
+    fn cache_tree_child_oid(index: &Index, name: &[u8]) -> ObjectId {
+        index
+            .cache_tree
+            .as_ref()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.name == name)
+            .and_then(|c| c.oid)
+            .unwrap()
+    }
+
+    fn build_nested_index(odb: &Odb) -> Index {
+        let blobs: Vec<ObjectId> = (0..6)
+            .map(|i| {
+                odb.write(ObjectKind::Blob, format!("blob{i}").as_bytes())
+                    .unwrap()
+            })
+            .collect();
+        let mut index = Index::new();
+        index.add_or_replace(entry("alpha/one", MODE_REGULAR, blobs[0]));
+        index.add_or_replace(entry("alpha/two", MODE_REGULAR, blobs[1]));
+        index.add_or_replace(entry("beta/three", MODE_REGULAR, blobs[2]));
+        index.add_or_replace(entry("beta/four/deep", MODE_REGULAR, blobs[3]));
+        index.add_or_replace(entry("gamma", MODE_REGULAR, blobs[4]));
+        index.add_or_replace(entry("wide/sub/leaf", MODE_REGULAR, blobs[5]));
+        index
+    }
+
+    #[test]
+    fn cache_tree_update_matches_full_rebuild() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = build_nested_index(&odb);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let incremental_root = index.cache_tree.as_ref().unwrap().oid.unwrap();
+
+        let mut seed = 0xDEADBEEF_u32;
+        for step in 0..12 {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let path: &[u8] = match step % 5 {
+                0 => b"alpha",
+                1 => b"beta",
+                2 => b"beta/four",
+                3 => b"wide",
+                _ => b"gamma",
+            };
+            index.invalidate_cache_tree_for_path(path);
+            if step % 3 == 0 {
+                let blob = odb
+                    .write(ObjectKind::Blob, format!("mut{step}").as_bytes())
+                    .unwrap();
+                let extra_path = format!("alpha/extra{step}");
+                index.add_or_replace(entry(&extra_path, MODE_REGULAR, blob));
+            }
+            cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+            let full = build_cache_tree_from_index(&odb, &index).unwrap();
+            assert_eq!(
+                index.cache_tree.as_ref().unwrap().oid,
+                full.oid,
+                "step {step}: incremental cache-tree must match full rebuild"
+            );
+        }
+        let _ = incremental_root;
+    }
+
+    #[test]
+    fn cache_tree_update_rewrites_only_invalidated() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = build_nested_index(&odb);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let alpha_before = cache_tree_child_oid(&index, b"alpha");
+        let wide_before = cache_tree_child_oid(&index, b"wide");
+        let beta_before = cache_tree_child_oid(&index, b"beta");
+
+        index.invalidate_cache_tree_for_path(b"beta/four");
+        let blob = odb.write(ObjectKind::Blob, b"updated").unwrap();
+        index.add_or_replace(entry("beta/four/deep", MODE_REGULAR, blob));
+
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        assert_eq!(cache_tree_child_oid(&index, b"alpha"), alpha_before);
+        assert_eq!(cache_tree_child_oid(&index, b"wide"), wide_before);
+        assert_ne!(cache_tree_child_oid(&index, b"beta"), beta_before);
+    }
+
+    #[test]
+    fn cache_tree_update_rebuilds_missing_tree() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = build_nested_index(&odb);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let root_oid = index.cache_tree.as_ref().unwrap().oid.unwrap();
+        std::fs::remove_file(odb.object_path(&root_oid)).unwrap();
+        assert!(!odb.exists(&root_oid));
+
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        assert!(odb.exists(&index.cache_tree.as_ref().unwrap().oid.unwrap()));
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+    }
+
+    #[test]
+    fn cache_tree_update_prefix() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = build_nested_index(&odb);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+
+        let full =
+            write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
+        let sub =
+            write_tree_update_index(&odb, &mut index, "beta", WriteTreeFlags::default()).unwrap();
+        assert_ne!(full, sub);
+
+        let beta = index
+            .cache_tree
+            .as_ref()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.name == b"beta")
+            .expect("beta cache-tree child");
+        assert_eq!(beta.oid, Some(sub));
     }
 }
