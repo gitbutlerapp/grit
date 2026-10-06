@@ -1,0 +1,7 @@
+in_scope = "skip"
+tests_total = 12
+passed_last = 4
+failing = 8
+fully_passing = false
+status = "ok"
+expect_failure = 0

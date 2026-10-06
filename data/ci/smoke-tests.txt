@@ -1,0 +1,69 @@
+# CI smoke subset — one harness file per line (# comments allowed).
+# See TESTING.md "CI smoke subset" for purpose, rules, and how to run.
+
+# basics
+t0000-basic.sh
+
+# odb / packs
+t1006-cat-file.sh
+t1007-hash-object.sh
+t10060-hash-object-determinism.sh
+t1450-fsck-basic.sh
+t5300-pack-object.sh
+t5300-unpack-objects.sh
+t5302-pack-index.sh
+t5304-prune.sh
+
+# refs / reflog
+t1403-show-ref.sh
+t1404-update-ref-errors.sh
+t1410-reflog.sh
+t10010-show-ref-dereference.sh
+t3200-branch.sh
+t6300-for-each-ref.sh
+
+# index / worktree
+t0090-cache-tree.sh
+t1000-read-tree-m-3way.sh
+t1001-read-tree-m-2way.sh
+t1700-split-index.sh
+t2200-add-update.sh
+t2400-worktree-add.sh
+t3000-ls-files-others.sh
+t3600-rm.sh
+t3700-add.sh
+t7102-reset.sh
+t7508-status.sh
+
+# config / ignore / attr
+t0001-init.sh
+t0003-attributes.sh
+t0008-ignores.sh
+t1300-config.sh
+
+# diff
+t4000-diff-format.sh
+t4001-diff-rename.sh
+t4002-diff-basic.sh
+t4010-diff-pathspec.sh
+t4013-diff-various.sh
+t4017-diff-retval.sh
+
+# revs
+t0062-revision-walking.sh
+t1500-rev-parse.sh
+t1503-rev-parse-verify.sh
+t1506-rev-parse-diagnosis.sh
+t1507-rev-parse-upstream.sh
+t6000-rev-list-misc.sh
+t6003-rev-list-topo-order.sh
+t6006-rev-list-format.sh
+t6009-rev-list-parent.sh
+t6010-merge-base.sh
+t6101-rev-parse-parents.sh
+t6120-describe.sh
+
+# transport
+t5510-fetch.sh
+t5512-ls-remote.sh
+t5516-fetch-push.sh
