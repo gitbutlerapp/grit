@@ -58,6 +58,9 @@ jobs:
 
       - run: cargo test -p grit-lib -p grit-cli
 
+      - name: run-tests.sh strict list regression
+        run: python3 scripts/test_run_tests_strict_list.py
+
   smoke:
     name: smoke
     runs-on: ubuntu-latest

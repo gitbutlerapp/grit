@@ -19,8 +19,10 @@
 #                    (isolated run: canonical data and dashboards untouched)
 #                    Per-file harness logs are written under PATH/logs/ when set.
 #   --list FILE    read test file names to run (one per line; # starts a comment)
-#   --strict       exit 1 if any file has fail>0, status timeout/error, or 0 tests;
-#                  print each failing stem and its TAP "not ok" lines (full output in logs/)
+#   --strict       exit 1 if any explicit/--list target does not resolve to a runnable file,
+#                  if the resolved explicit list is empty, if any file has fail>0,
+#                  status timeout/error, or 0 tests; print each failing stem and TAP
+#                  "not ok" lines (full output in logs/)
 #   --dashboard    regenerate docs/ dashboards after the run (off by default)
 #   --no-catalog   skip generate-test-files-catalog.py (parent already refreshed the catalog)
 #
@@ -219,19 +221,23 @@ else
   unset GRIT_FAMILY_FILTER 2>/dev/null || true
 fi
 
+GRIT_RUN_TESTS_STRICT=0
+[[ "$STRICT" == true ]] && GRIT_RUN_TESTS_STRICT=1
+export GRIT_RUN_TESTS_STRICT
+
 # Build list of files to run: skip in_scope=skip. Use a read loop instead of
 # Bash 4 `mapfile` so the runner works with macOS' default Bash 3.
 # Scope is always read from the canonical data/tests tree; --data-dir only
 # redirects where results are written.
 FILES=()
-while IFS= read -r file; do
-  FILES+=("$file")
-done < <(
-  python3 - "$DATA_TESTS" "$TESTS_DIR" "$FROM" "${POS[@]}" <<'PY'
+FILE_LIST_TMP="$(mktemp)"
+if ! python3 - "$DATA_TESTS" "$TESTS_DIR" "$FROM" "${POS[@]}" >"$FILE_LIST_TMP" <<'PY'
 import os, sys, glob, tomllib
 
 data_dir, tests_dir, from_stem = sys.argv[1], sys.argv[2], sys.argv[3]
 targets = sys.argv[4:]
+strict = os.environ.get("GRIT_RUN_TESTS_STRICT") == "1"
+explicit = bool(targets)
 if from_stem.endswith(".sh"):
     from_stem = from_stem[:-3]
 
@@ -288,22 +294,34 @@ def expand_one(target):
 candidates = []
 if targets:
     seen = set()
+    unmatched = []
     for raw in targets:
         t = normalize_target(raw)
         if not t:
             continue
         got = expand_one(t)
         if not got:
-            print(
-                "WARNING: no test files matched %r (skipped, typo, or missing under %s)"
-                % (raw, tests_dir),
-                file=sys.stderr,
-            )
+            if strict and explicit:
+                unmatched.append(raw)
+            else:
+                print(
+                    "WARNING: no test files matched %r (skipped, typo, or missing under %s)"
+                    % (raw, tests_dir),
+                    file=sys.stderr,
+                )
             continue
         for fn in got:
             if fn not in seen:
                 seen.add(fn)
                 candidates.append(fn)
+    if strict and explicit and unmatched:
+        for raw in unmatched:
+            print(
+                "ERROR: strict mode: no test files matched %r (typo, missing, or in_scope=skip under %s)"
+                % (raw, tests_dir),
+                file=sys.stderr,
+            )
+        sys.exit(1)
 else:
     for base in sorted(rows):
         if rows[base]["in_scope"].strip().lower() == "skip":
@@ -348,13 +366,31 @@ if want:
         if rows.get(c[:-3] if c.endswith(".sh") else c, {}).get("group", "") == want
     ]
 
+if strict and explicit and not candidates:
+    print(
+        "ERROR: strict mode: explicit test list resolved to zero runnable files.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 for c in candidates:
     print(c)
 PY
-)
+then
+  rm -f "$FILE_LIST_TMP"
+  exit 1
+fi
+while IFS= read -r file; do
+  [[ -n "$file" ]] && FILES+=("$file")
+done <"$FILE_LIST_TMP"
+rm -f "$FILE_LIST_TMP"
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
-  echo "No test files to run (all skipped or no match)."
+  echo "No test files to run (all skipped or no match)." >&2
+  if [[ "$STRICT" == true ]]; then
+    echo "ERROR: strict mode requires at least one test file to run." >&2
+    exit 1
+  fi
   if [[ "$DASHBOARD" == true && -z "$DATA_DIR_OVERRIDE" ]]; then
     python3 "$GEN_DASH"
   fi
