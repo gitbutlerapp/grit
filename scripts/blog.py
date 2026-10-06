@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import email.utils
+import hashlib
 import html
 import re
 import shutil
@@ -193,9 +194,26 @@ def load_posts() -> list[Post]:
     return sorted(posts, key=lambda p: (p.published, p.slug), reverse=True)
 
 
+FONTS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com" />\n'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n'
+    '<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />'
+)
+
+
+def short_sha(post: Post) -> str:
+    """Decorative commit-style id for a post, stable across rebuilds."""
+    return hashlib.sha1(post.slug.encode("utf-8")).hexdigest()[:7]
+
+
+def rail(*parts: str) -> str:
+    """Render the commit-graph rail; each part is a CSS class for one mark."""
+    marks = "".join(f'<span class="{part}"></span>' for part in parts)
+    return f'<div class="rail" aria-hidden="true">{marks}</div>'
+
+
 def page_shell(title: str, description: str, body: str, base: str, blog_href: str, feed_href: str, extra_head: str = "") -> str:
     home_href = f"{base}/" if base != "." else "./"
-    logo_href = f"{base}/grit-logo.svg"
     return f"""<!doctype html>
 <html lang=\"en\">
 <head>
@@ -205,49 +223,90 @@ def page_shell(title: str, description: str, body: str, base: str, blog_href: st
 <meta name=\"description\" content=\"{html.escape(description, quote=True)}\" />
 <link rel=\"alternate\" type=\"application/rss+xml\" title=\"Grit blog feed\" href=\"{feed_href}\" />
 <script async src=\"https://u.gitbutler.com/script.js\" data-website-id=\"2c6f680c-eaf5-4cd7-a419-1032ffab6bbc\"></script>
+{FONTS}
 {extra_head}
 <style>{CSS}</style>
 </head>
 <body>
-<header class=\"site-header\">
-  <a class=\"brand\" href=\"{home_href}\"><img src=\"{logo_href}\" alt=\"\" /> <span><span>the</span> <strong>Grit</strong> <span>project</span></span></a>
-  <nav aria-label=\"Primary\"><a href=\"{blog_href}\">Blog</a><a href=\"{feed_href}\">RSS</a></nav>
+<div class=\"wrap\">
+<header class=\"topbar\">
+  <a class=\"brand\" href=\"{home_href}\" aria-label=\"grit homepage\">grit</a>
+  <nav class=\"nav\" aria-label=\"Primary\">
+    <a href=\"https://docs.rs/grit-lib\">Docs</a>
+    <a href=\"https://crates.io/crates/grit-lib\">Library</a>
+    <a href=\"{blog_href}\">Blog</a>
+    <a class=\"pill\" href=\"https://github.com/gitbutlerapp/grit\">GitHub</a>
+  </nav>
 </header>
 {body}
+</div>
 </body>
 </html>
 """
 
 
+def footer(links: str) -> str:
+    return f"""<footer class=\"commit\">
+  {rail("line stub", "root-dot")}
+  <div class=\"foot\">
+    <div class=\"sha\">0000001 · initial commit · by <a href=\"https://gitbutler.com\">GitButler</a></div>
+    <div class=\"links\">{links}</div>
+  </div>
+</footer>"""
+
+
 def render_index(posts: list[Post]) -> str:
     rows = "\n".join(
-        f'<li><time datetime="{post.published.isoformat()}">{post.published.strftime("%b %d, %Y")}</time> <a href="{post.slug}/">{html.escape(post.title)}</a></li>'
-        for post in posts
-    ) or '<li><span class="empty">No posts yet.</span></li>'
-    body = f"""<main class=\"blog-index\">
-  <section class=\"hero\">
-    <p class=\"eyebrow\">Blog</p>
-    <h1>{html.escape(BLOG_TITLE)}</h1>
-    <p>{html.escape(BLOG_DESCRIPTION)}</p>
-  </section>
-  <ol class=\"post-list\">{rows}</ol>
-</main>"""
+        f"""<section class=\"commit\">
+  {rail("line", "head-dot small" if i == 0 else "dot")}
+  <div class=\"entry\">
+    <div class=\"sha{' hot' if i == 0 else ''}\">{short_sha(post)} · <time datetime=\"{post.published.isoformat()}\">{post.published.strftime("%b %-d, %Y")}</time> · {html.escape(post.author)}</div>
+    <h2><a href=\"{post.slug}/\">{html.escape(post.title)}</a></h2>
+    {f'<p>{html.escape(post.summary)}</p>' if post.summary else ''}
+  </div>
+</section>"""
+        for i, post in enumerate(posts)
+    ) or '<section class="commit"><div class="rail"></div><div class="entry"><p>No posts yet.</p></div></section>'
+    links = '<a href="../">Home</a><a href="feed.xml">RSS feed</a><a href="../progress/">Compatibility report</a>'
+    body = f"""<main>
+<section class=\"commit\">
+  {rail("line from-head", "head-dot")}
+  <div class=\"hero\">
+    <div class=\"refs\"><span class=\"ref\">HEAD → blog</span><a href=\"feed.xml\">feed.xml</a></div>
+    <h1>Blog</h1>
+    <p class=\"tagline\">{html.escape(BLOG_TITLE[0].upper() + BLOG_TITLE[1:])}.</p>
+    <p class=\"lede\">{html.escape(BLOG_DESCRIPTION)}</p>
+  </div>
+</section>
+{rows}
+</main>
+{footer(links)}"""
     return page_shell(f"Blog - {SITE_TITLE}", BLOG_DESCRIPTION, body, "..", "./", "feed.xml", '<link rel="canonical" href="./" />')
 
 
 def render_post(post: Post) -> str:
     toc = "\n".join(f'<li class="toc-level-{item.level}"><a href="#{item.anchor}">{html.escape(item.text)}</a></li>' for item in post.toc)
-    if not toc:
-        toc = '<li><span>No sections</span></li>'
-    body = f"""<main class=\"post-layout\">
-  <article class=\"post\">
-    <p class=\"breadcrumb\"><a href=\"../\">blog</a> / <time datetime=\"{post.published.isoformat()}\">{post.published.isoformat()}</time> / {html.escape(post.author)}</p>
+    aside = f'<aside class="toc" aria-label="On this page"><h2>On this page</h2><ol>{toc}</ol></aside>' if toc else ""
+    lede = f'<p class="lede">{html.escape(post.summary)}</p>' if post.summary else ""
+    links = '<a href="../">All posts</a><a href="../../">Home</a><a href="../feed.xml">RSS feed</a>'
+    body = f"""<main>
+<section class=\"commit\">
+  {rail("line from-head", "head-dot")}
+  <div class=\"hero post-hero\">
+    <div class=\"refs\"><a class=\"ref\" href=\"../\">← blog</a><span>{short_sha(post)}</span><time datetime=\"{post.published.isoformat()}\">{post.display_date}</time><span>{html.escape(post.author)}</span></div>
     <h1>{html.escape(post.title)}</h1>
-    {f'<p class=\"dek\">{html.escape(post.summary)}</p>' if post.summary else ''}
-    <div class=\"content\">{post.body_html}</div>
-  </article>
-  <aside class=\"toc\" aria-label=\"On this page\"><h2>On this page</h2><ol>{toc}</ol></aside>
-</main>"""
+    {lede}
+  </div>
+</section>
+<section class=\"commit\">
+  {rail("line")}
+  <div class=\"post-body\">
+    <article class=\"content\">{post.body_html}</article>
+    {aside}
+  </div>
+</section>
+</main>
+{footer(links)}"""
     extra = f'<link rel="canonical" href="./" />\n<meta property="og:title" content="{html.escape(post.title, quote=True)}" />'
     return page_shell(f"{post.title} - {SITE_TITLE}", post.summary or BLOG_DESCRIPTION, body, "../..", "../", "../feed.xml", extra)
 
@@ -276,7 +335,58 @@ def render_feed(posts: list[Post]) -> str:
 
 
 CSS = r'''
-:root{--bg:#f8f2e8;--ink:#211711;--muted:#736961;--line:#e2d6c7;--accent:#b64729;--paper:#fff9f1;--code:#f3e8de}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:16px;line-height:1.65}.site-header{height:4.8rem;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 2.4rem}.brand{display:flex;align-items:center;gap:.65rem;color:var(--ink);font-size:1rem;font-weight:720;text-decoration:none}.brand img{width:2.25rem;height:2.25rem}.brand span span{color:#645a52;font-weight:650}.brand strong{color:var(--ink)}nav{display:flex;gap:1.55rem;font-size:.95rem}nav a,.content a,.breadcrumb a{color:var(--accent);text-decoration:none}.blog-index{max-width:72rem;margin:0 auto;padding:3.4rem 2rem}.hero{text-align:center;max-width:none;margin:0 auto 2.4rem}.eyebrow,.toc h2{text-transform:uppercase;letter-spacing:.24em;color:var(--accent);font:700 .72rem/1 ui-monospace,SFMono-Regular,Menlo,monospace}.hero h1{font:800 clamp(2rem,4.8vw,3.6rem)/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.05em;margin:.75rem 0;color:var(--ink);white-space:nowrap}.hero p:not(.eyebrow){font-size:1.08rem;color:#534941;white-space:nowrap}.post-list{list-style:none;margin:0 auto;padding:0;max-width:50rem;border-top:1px solid var(--line)}.post-list li{display:flex;gap:1.2rem;border-bottom:1px solid var(--line);padding:.78rem 0;font:700 .88rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}.post-list time{color:#837a72;min-width:8.8rem}.post-list a{color:var(--accent);text-decoration:none}.post-layout{display:grid;grid-template-columns:minmax(0,1fr) 14rem;gap:3rem;max-width:76rem;margin:0 auto;padding:3.2rem 3rem}.post{max-width:48rem}.breadcrumb{font:700 .86rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#837a72;margin:0 0 1.25rem}.post>h1{font:850 clamp(2rem,3.8vw,3.25rem)/1.04 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.055em;margin:0 0 1.6rem}.dek{font-size:1.08rem;color:#584d45}.content h2{font-size:1.35rem;line-height:1.25;margin:2.7rem 0 .8rem}.content h3{font-size:1.08rem;margin:2rem 0 .6rem}.content p{margin:0 0 1.25rem;color:#51473f}.content ul,.content ol{color:#51473f;margin:0 0 1.25rem 1.1rem}.content code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border:1px solid #ded0c4;border-radius:.35rem;padding:.04rem .28rem}.content pre{background:#fff6ee;border:1px solid #ded0c4;border-radius:.7rem;padding:1rem;margin:1.4rem 0;overflow:auto}.content pre code{background:transparent;border:0;padding:0}.content blockquote{border-left:3px solid var(--accent);margin:1.4rem 0;padding:.2rem 0 .2rem 1rem;color:#5c5148}.toc{position:sticky;top:1.5rem;align-self:start;border-left:1px solid var(--line);padding-left:1.1rem;font:700 .82rem/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:#81776f}.toc h2{color:#81776f;margin:0 0 1rem}.toc ol{list-style:none;margin:0;padding:0}.toc li{margin:0 0 .75rem}.toc a{color:#81776f;text-decoration:none}.toc-level-3{padding-left:.8rem}@media(max-width:900px){.site-header{padding:0 1.2rem}.post-layout{display:block;padding:2rem 1.25rem}.toc{position:static;border-left:0;border-top:1px solid var(--line);margin-top:2.2rem;padding:1.25rem 0 0}.blog-index{padding:2.6rem 1.25rem}.post-list li{display:block}.post-list time{display:block;margin-bottom:.25rem}.post>h1{font-size:2.15rem}}
+:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--code-fg:#e9e4d8;--chip:#e9e4d8;--rail:clamp(48px,8vw,120px);--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+a{color:inherit}a:hover{opacity:.7}
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(20px,4vw,56px)}
+.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:24px 0}
+.brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;text-decoration:none}
+.brand::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent)}
+.nav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:15px}.nav a{text-decoration:none}
+.nav .pill{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px}
+.commit{display:grid;grid-template-columns:var(--rail) minmax(0,1fr)}
+.commit+.commit{border-top:1px solid var(--line)}
+.rail{position:relative}.rail>span{position:absolute;display:block}
+.line{left:20px;top:0;bottom:0;width:3px;background:var(--ink)}
+.line.from-head{top:110px}.line.stub{bottom:auto;height:46px}
+.dot{left:15px;top:44px;width:13px;height:13px;border-radius:50%;background:var(--ink)}
+.head-dot{left:8px;top:96px;width:27px;height:27px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--ink)}
+.head-dot.small{left:13px;top:41px;width:17px;height:17px;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--ink)}
+.root-dot{left:14px;top:44px;width:15px;height:15px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px var(--ink)}
+.hero{padding:56px 0 72px}
+.refs{display:flex;flex-wrap:wrap;gap:14px;font:14px var(--mono);color:var(--muted)}
+.refs a{text-decoration:none}.refs .ref{color:var(--accent)}
+h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spacing:-.06em;font-weight:700}
+.post-hero h1{font-size:clamp(44px,7vw,88px);line-height:.95;letter-spacing:-.045em;max-width:16ch;text-wrap:balance}
+.tagline{margin:24px 0 0;font-size:clamp(26px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:500}
+.lede{max-width:640px;margin:20px 0 0;font-size:clamp(17px,1.6vw,20px);line-height:1.5;color:var(--soft);text-wrap:pretty}
+.entry{padding:36px 0 40px}
+.sha{font:13px var(--mono);color:var(--muted)}.sha.hot{color:var(--accent)}.sha a{color:inherit}
+.entry h2{margin:12px 0 0;font-size:clamp(28px,3.4vw,40px);line-height:1.05;letter-spacing:-.03em}
+.entry h2 a{text-decoration:none}
+.entry p{max-width:680px;margin:14px 0 0;font-size:18px;line-height:1.55;color:var(--soft);text-wrap:pretty}
+.post-body{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:56px;padding:48px 0 64px}
+.content{font-size:19px;line-height:1.65;color:var(--soft)}
+.content>:first-child{margin-top:0}
+.content h2{margin:2.2em 0 .5em;font-size:clamp(26px,3vw,34px);line-height:1.1;letter-spacing:-.025em;color:var(--ink)}
+.content h3{margin:1.8em 0 .4em;font-size:22px;letter-spacing:-.015em;color:var(--ink)}
+.content p{margin:0 0 1.1em;text-wrap:pretty}
+.content ul,.content ol{margin:0 0 1.1em;padding-left:1.2em}.content li{margin:.3em 0}
+.content li::marker{color:var(--accent)}
+.content a{color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.content strong{color:var(--ink)}
+.content code{font:.86em var(--mono);background:var(--chip);border-radius:6px;padding:.1em .35em}
+.content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
+.content pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
+.foot{padding:40px 0 64px}
+.foot .links{display:flex;flex-wrap:wrap;gap:28px;margin-top:14px;font-size:17px}
+@media(max-width:900px){.post-body{display:block}.toc{display:none}}
 '''
 
 
