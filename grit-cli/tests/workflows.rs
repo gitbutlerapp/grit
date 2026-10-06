@@ -114,6 +114,49 @@ fn write_file(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn git_in(dir: &Path, args: &[&str]) -> Result<CmdOutput, Box<dyn Error>> {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .env("GIT_AUTHOR_NAME", "Test User")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test User")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .output()?;
+    Ok(CmdOutput {
+        status: out.status.code(),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    })
+}
+
+fn git_ok(dir: &Path, args: &[&str]) -> Result<(), Box<dyn Error>> {
+    let out = git_in(dir, args)?;
+    assert!(out.status == Some(0), "{}", out.dump());
+    Ok(())
+}
+
+fn git_head(dir: &Path) -> Result<String, Box<dyn Error>> {
+    let out = git_in(dir, &["rev-parse", "HEAD"])?;
+    assert_eq!(out.status, Some(0));
+    Ok(out.stdout.trim().to_owned())
+}
+
+/// Nested repository at `parent/sub` with one tracked file; returns its HEAD oid.
+fn init_checked_out_submodule(parent: &Path, name: &str) -> Result<String, Box<dyn Error>> {
+    let sub = parent.join(name);
+    fs::create_dir_all(&sub)?;
+    git_ok(&sub, &["init", "-q"])?;
+    git_ok(&sub, &["config", "user.name", "Test"])?;
+    git_ok(&sub, &["config", "user.email", "t@e.com"])?;
+    write_file(&sub.join("tracked.txt"), "v1\n")?;
+    git_ok(&sub, &["add", "tracked.txt"])?;
+    git_ok(&sub, &["commit", "-qm", "sub init"])?;
+    git_head(&sub)
+}
+
 #[test]
 fn local_edit_config_commit_status_and_log_workflow() -> TestResult {
     let scratch = Scratch::new("local")?;
@@ -296,6 +339,122 @@ fn diff_succeeds_with_uninitialized_gitlink_on_clean_tree() -> TestResult {
     assert!(
         diff.stdout.contains("a changed") || diff.stdout.contains("changed"),
         "ordinary file edits should still appear:\n{}",
+        diff.dump()
+    );
+    Ok(())
+}
+
+#[test]
+fn diff_commit_gitlink_to_regular_file_typechange() -> TestResult {
+    let scratch = Scratch::new("gitlink-to-file")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "commit.gpgsign", "false"])?;
+
+    let sub_oid = init_checked_out_submodule(&repo, "sub")?;
+    git_ok(
+        &repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{sub_oid},sub"),
+        ],
+    )?;
+    gs_ok(&repo, ["commit", "-m", "gitlink"])?;
+
+    fs::remove_dir_all(repo.join("sub"))?;
+    write_file(&repo.join("sub"), "plain file\n")?;
+    gs_ok(&repo, ["add", "sub"])?;
+    gs_ok(&repo, ["commit", "-m", "replace with file"])?;
+
+    let diff = gs(&repo, ["diff", "HEAD"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        diff.stdout.contains("Subproject commit"),
+        "gitlink side should remain a subproject line:\n{}",
+        diff.dump()
+    );
+    assert!(
+        diff.stdout.contains("plain file"),
+        "regular file content must appear on the new side:\n{}",
+        diff.dump()
+    );
+    Ok(())
+}
+
+#[test]
+fn diff_commit_regular_file_to_gitlink_typechange() -> TestResult {
+    let scratch = Scratch::new("file-to-gitlink")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "commit.gpgsign", "false"])?;
+
+    write_file(&repo.join("sub"), "plain file\n")?;
+    gs_ok(&repo, ["add", "sub"])?;
+    gs_ok(&repo, ["commit", "-m", "file"])?;
+
+    fs::remove_file(repo.join("sub"))?;
+    let sub_oid = init_checked_out_submodule(&repo, "sub")?;
+    git_ok(
+        &repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{sub_oid},sub"),
+        ],
+    )?;
+    gs_ok(&repo, ["commit", "-m", "replace with gitlink"])?;
+
+    let diff = gs(&repo, ["diff", "HEAD"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        diff.stdout.contains("plain file"),
+        "removed regular file content must appear:\n{}",
+        diff.dump()
+    );
+    assert!(
+        diff.stdout.contains("Subproject commit"),
+        "new gitlink side must be a subproject line:\n{}",
+        diff.dump()
+    );
+    Ok(())
+}
+
+#[test]
+fn diff_dirty_initialized_submodule_shows_dirty_suffix() -> TestResult {
+    let scratch = Scratch::new("gitlink-dirty")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "commit.gpgsign", "false"])?;
+
+    let sub_oid = init_checked_out_submodule(&repo, "sub")?;
+    git_ok(
+        &repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{sub_oid},sub"),
+        ],
+    )?;
+    gs_ok(&repo, ["commit", "-m", "gitlink"])?;
+
+    write_file(&repo.join("sub/tracked.txt"), "dirty worktree\n")?;
+    let diff = gs(&repo, ["diff"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        diff.stdout.contains("-dirty"),
+        "dirty submodule worktree should suffix the plus line like Git:\n{}",
+        diff.dump()
+    );
+    assert!(
+        diff.stdout.contains("Subproject commit"),
+        "expected subproject hunk:\n{}",
         diff.dump()
     );
     Ok(())

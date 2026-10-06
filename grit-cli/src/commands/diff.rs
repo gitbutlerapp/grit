@@ -15,7 +15,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    diff_tree_to_worktree, diff_trees, read_submodule_head_oid, DiffEntry, DiffStatus,
+    diff_tree_to_worktree, diff_trees, read_submodule_head_oid, submodule_porcelain_flags,
+    DiffEntry, DiffStatus,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
@@ -158,15 +159,8 @@ fn worktree_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
     entries
         .into_iter()
         .map(|e| {
-            if entry_is_gitlink(&e) {
-                let (old_text, new_text) = gitlink_texts(&e, Some(work_tree));
-                return Ok(file_change(e, old_text, new_text, false));
-            }
-            let (old_text, old_bin) = blob_text(&repo.odb, &e.old_oid)?;
-            let (new_text, new_bin) = match &e.new_path {
-                Some(p) => file_text(&work_tree.join(p)),
-                None => (String::new(), false),
-            };
+            let (old_text, old_bin) = old_side_text(&repo.odb, &e)?;
+            let (new_text, new_bin) = new_side_text(&repo.odb, &e, Some(work_tree))?;
             Ok(file_change(e, old_text, new_text, old_bin || new_bin))
         })
         .collect()
@@ -188,12 +182,8 @@ fn commit_changes(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<V
     entries
         .into_iter()
         .map(|e| {
-            if entry_is_gitlink(&e) {
-                let (old_text, new_text) = gitlink_texts(&e, None);
-                return Ok(file_change(e, old_text, new_text, false));
-            }
-            let (old_text, old_bin) = blob_text(&repo.odb, &e.old_oid)?;
-            let (new_text, new_bin) = blob_text(&repo.odb, &e.new_oid)?;
+            let (old_text, old_bin) = old_side_text(&repo.odb, &e)?;
+            let (new_text, new_bin) = new_side_text(&repo.odb, &e, None)?;
             Ok(file_change(e, old_text, new_text, old_bin || new_bin))
         })
         .collect()
@@ -223,33 +213,63 @@ fn file_change(e: DiffEntry, old_text: String, new_text: String, binary: bool) -
     }
 }
 
-fn entry_is_gitlink(e: &DiffEntry) -> bool {
-    e.old_mode == "160000" || e.new_mode == "160000"
-}
-
-/// Gitlink OIDs are commit ids in the submodule, not blobs in the superproject ODB.
-fn gitlink_texts(e: &DiffEntry, work_tree: Option<&Path>) -> (String, String) {
-    let old = gitlink_line(&e.old_oid);
-    let new = if e.new_oid != ObjectId::zero() {
-        gitlink_line(&e.new_oid)
-    } else if let (Some(wt), Some(path)) =
-        (work_tree, e.new_path.as_deref().or(e.old_path.as_deref()))
-    {
-        read_submodule_head_oid(&wt.join(path))
-            .map(|oid| gitlink_line(&oid))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    (old, new)
-}
-
-fn gitlink_line(oid: &ObjectId) -> String {
-    if *oid == ObjectId::zero() {
-        String::new()
-    } else {
-        format!("Subproject commit {}\n", oid.to_hex())
+fn old_side_text(odb: &Odb, e: &DiffEntry) -> Result<(String, bool)> {
+    if e.old_mode == "160000" {
+        return Ok((gitlink_line(&e.old_oid, None), false));
     }
+    if e.old_mode == "000000" {
+        return Ok((String::new(), false));
+    }
+    blob_text(odb, &e.old_oid)
+}
+
+fn new_side_text(odb: &Odb, e: &DiffEntry, work_tree: Option<&Path>) -> Result<(String, bool)> {
+    if e.new_mode == "160000" {
+        return Ok((gitlink_new_line(e, work_tree), false));
+    }
+    if e.new_mode == "000000" {
+        return Ok((String::new(), false));
+    }
+    if let (Some(wt), Some(p)) = (work_tree, e.new_path.as_deref().or(e.old_path.as_deref())) {
+        Ok(file_text(&wt.join(p)))
+    } else {
+        blob_text(odb, &e.new_oid)
+    }
+}
+
+fn gitlink_line(oid: &ObjectId, dirty_suffix: Option<&str>) -> String {
+    if *oid == ObjectId::zero() {
+        return String::new();
+    }
+    let suffix = dirty_suffix.unwrap_or("");
+    format!("Subproject commit {}{suffix}\n", oid.to_hex())
+}
+
+/// Resolve the worktree-side gitlink line, including `-dirty` when HEAD matches the tree gitlink
+/// but the submodule work tree has local changes (Git `diff` / `--submodule` parity).
+fn gitlink_new_line(e: &DiffEntry, work_tree: Option<&Path>) -> String {
+    let path = e.new_path.as_deref().or(e.old_path.as_deref());
+    let resolved = if e.new_oid != ObjectId::zero() {
+        e.new_oid
+    } else if let (Some(wt), Some(p)) = (work_tree, path) {
+        read_submodule_head_oid(&wt.join(p)).unwrap_or(ObjectId::zero())
+    } else {
+        ObjectId::zero()
+    };
+    if resolved == ObjectId::zero() {
+        return String::new();
+    }
+    let dirty = e.new_oid == ObjectId::zero()
+        && e.old_mode == "160000"
+        && e.new_mode == "160000"
+        && e.old_oid == resolved
+        && work_tree.is_some_and(|wt| {
+            path.is_some_and(|p| {
+                let flags = submodule_porcelain_flags(wt, p, e.old_oid);
+                flags.modified || flags.untracked
+            })
+        });
+    gitlink_line(&resolved, if dirty { Some("-dirty") } else { None })
 }
 
 /// Read a blob as text. Returns `(text, is_binary)`; a zero oid → empty text.
