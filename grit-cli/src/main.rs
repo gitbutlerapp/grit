@@ -121,6 +121,9 @@ enum Command {
         /// Delete the named branch instead of creating it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
+        /// Delete even when the branch is not fully merged into the current branch.
+        #[arg(short = 'D', long = "force")]
+        force_delete: bool,
     },
     /// Switch to another branch.
     #[command(alias = "checkout", alias = "co")]
@@ -241,7 +244,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             message_flag,
             all: _,
         } => emit(&commands::commit::run(message.or(message_flag))?, opts),
-        Command::Branch { name, delete } => emit(&commands::branch::run(name, delete)?, opts),
+        Command::Branch {
+            name,
+            delete,
+            force_delete,
+        } => emit(&commands::branch::run(name, delete, force_delete)?, opts),
         Command::Tag { name, delete } => emit(&commands::tag::run(name, delete)?, opts),
         Command::Switch { name, create } => emit(&commands::switch::run(&name, create)?, opts),
         Command::Merge { branch } => emit(&commands::merge::run(&branch)?, opts),

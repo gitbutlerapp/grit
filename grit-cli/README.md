@@ -83,7 +83,8 @@ List branches, or create / delete one.
 ```sh
 grit branch            # list (current marked with *)
 grit branch feature    # create "feature" at HEAD (does not switch)
-grit branch -d feature # delete "feature"
+grit branch -d feature # delete "feature" (refuses if not merged into HEAD)
+grit branch -D feature # force-delete even when not merged
 ```
 
 ### `grit switch`
