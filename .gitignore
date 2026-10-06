@@ -31,3 +31,8 @@ logs/agent_*
 data/family/
 reports/*
 .DS_Store
+
+# Editor swap files (vim)
+*.swp
+*.swo
+.*.sw?
