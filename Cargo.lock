@@ -462,6 +462,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "tempfile",
  "terminal_size",
  "time",
 ]

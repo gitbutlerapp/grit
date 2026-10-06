@@ -63,6 +63,14 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+    if prefix_bytes.is_empty() {
+        if let Some(mut cache_root) = index.cache_tree.clone() {
+            update_cache_tree_node(odb, &mut cache_root, b"", &entries)?;
+            if let Some(oid) = cache_root.oid {
+                return Ok(oid);
+            }
+        }
+    }
     build_tree(odb, &entries, prefix_bytes)
 }
 
@@ -79,7 +87,14 @@ pub fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTree
         .filter(|entry| entry.stage() == 0 && !entry.intent_to_add() && entry.mode != MODE_TREE)
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
-    build_cache_tree_node(odb, b"", Vec::new(), &entries)
+    let mut root = CacheTreeNode {
+        name: Vec::new(),
+        entry_count: -1,
+        oid: None,
+        children: Vec::new(),
+    };
+    update_cache_tree_node(odb, &mut root, b"", &entries)?;
+    Ok(root)
 }
 
 /// Build a cache-tree directly from a **tree object**, preserving Git's raw `entry_count`
@@ -230,16 +245,47 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     });
 
     let data = serialize_tree(&tree_entries);
-    freshen_tree_entries(odb, &tree_entries);
-    odb.write(ObjectKind::Tree, &data)
+    ensure_tree_entries_exist(odb, &tree_entries)?;
+    write_tree_object(odb, &data)
 }
 
-fn build_cache_tree_node(
+fn cache_tree_subtree_mut<'a>(node: &'a mut CacheTreeNode, name: &[u8]) -> &'a mut CacheTreeNode {
+    match node
+        .children
+        .binary_search_by(|c| c.name.as_slice().cmp(name))
+    {
+        Ok(pos) => &mut node.children[pos],
+        Err(insert_at) => {
+            node.children.insert(
+                insert_at,
+                CacheTreeNode {
+                    name: name.to_vec(),
+                    entry_count: -1,
+                    oid: None,
+                    children: Vec::new(),
+                },
+            );
+            &mut node.children[insert_at]
+        }
+    }
+}
+
+/// Update `node` to reflect `entries` under `dir_prefix`, reusing valid subtrees when possible
+/// (Git `cache_tree_update` / `update_one`).
+fn update_cache_tree_node(
     odb: &Odb,
+    node: &mut CacheTreeNode,
     dir_prefix: &[u8],
-    name: Vec<u8>,
     entries: &[&IndexEntry],
-) -> Result<CacheTreeNode> {
+) -> Result<()> {
+    if node.is_valid() {
+        if let Some(oid) = node.oid {
+            if odb.exists(&oid) {
+                return Ok(());
+            }
+        }
+    }
+
     let mut children: BTreeMap<Vec<u8>, ChildKind> = BTreeMap::new();
 
     for entry in entries {
@@ -276,9 +322,12 @@ fn build_cache_tree_node(
         }
     }
 
+    let mut used_child_names: Vec<Vec<u8>> = Vec::new();
     let mut tree_entries = Vec::with_capacity(children.len());
     let mut cache_children = Vec::new();
+
     for (child_name, child) in children {
+        used_child_names.push(child_name.clone());
         match child {
             ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry {
                 mode,
@@ -286,20 +335,23 @@ fn build_cache_tree_node(
                 oid,
             }),
             ChildKind::Tree(sub_prefix, sub_entries) => {
-                let child_node =
-                    build_cache_tree_node(odb, &sub_prefix, child_name.clone(), &sub_entries)?;
+                let child_node = cache_tree_subtree_mut(node, &child_name);
+                update_cache_tree_node(odb, child_node, &sub_prefix, &sub_entries)?;
                 let oid = child_node.oid.ok_or_else(|| {
                     crate::error::Error::IndexError("cache-tree child missing oid".to_owned())
                 })?;
                 tree_entries.push(TreeEntry {
                     mode: MODE_TREE,
-                    name: child_name,
+                    name: child_name.clone(),
                     oid,
                 });
-                cache_children.push(child_node);
+                cache_children.push(child_node.clone());
             }
         }
     }
+
+    node.children
+        .retain(|c| used_child_names.iter().any(|n| n == &c.name));
 
     tree_entries.sort_by(|a, b| {
         let a_tree = a.mode == MODE_TREE;
@@ -309,14 +361,12 @@ fn build_cache_tree_node(
     cache_children.sort_by(|a, b| a.name.cmp(&b.name));
 
     let data = serialize_tree(&tree_entries);
-    freshen_tree_entries(odb, &tree_entries);
-    let oid = odb.write(ObjectKind::Tree, &data)?;
-    Ok(CacheTreeNode::valid(
-        name,
-        entries.len() as i32,
-        oid,
-        cache_children,
-    ))
+    ensure_tree_entries_exist(odb, &tree_entries)?;
+    let oid = write_tree_object(odb, &data)?;
+    node.entry_count = i32::try_from(entries.len()).unwrap_or(i32::MAX);
+    node.oid = Some(oid);
+    node.children = cache_children;
+    Ok(())
 }
 
 /// Build a tree for a **partial** commit: paths listed in `paths_from_index` (repository-relative,
@@ -462,17 +512,34 @@ pub fn write_tree_partial_from_index(
             tree_entry_cmp(&a.name, a_tree, &b.name, b_tree)
         });
         let data = serialize_tree(&out);
-        freshen_tree_entries(odb, &out);
-        odb.write(ObjectKind::Tree, &data)
+        ensure_tree_entries_exist(odb, &out)?;
+        write_tree_object(odb, &data)
     }
 
     merge_level(odb, index, base_tree_oid, b"", paths_from_index)
 }
 
-fn freshen_tree_entries(odb: &Odb, tree_entries: &[TreeEntry]) {
+/// Store a reconstructed tree through [`Odb::write`] so duplicate tree OIDs are freshened.
+///
+/// Valid cache-tree subtrees skip reconstruction entirely; this path runs only for trees
+/// rebuilt from index entries.
+fn write_tree_object(odb: &Odb, data: &[u8]) -> Result<ObjectId> {
+    odb.write(ObjectKind::Tree, data)
+}
+
+/// Verify tree child OIDs are reachable in the ODB (Git cache-tree `odb_has_object`).
+///
+/// Gitlink entries reference submodule commits and are not checked against the parent ODB.
+fn ensure_tree_entries_exist(odb: &Odb, tree_entries: &[TreeEntry]) -> Result<()> {
     for entry in tree_entries {
-        let _ = odb.freshen_object(&entry.oid);
+        if entry.mode == MODE_GITLINK {
+            continue;
+        }
+        if !odb.exists(&entry.oid) {
+            return Err(crate::error::Error::ObjectNotFound(entry.oid.to_hex()));
+        }
     }
+    Ok(())
 }
 
 fn canonicalize_blob_mode(mode: u32) -> u32 {
@@ -563,5 +630,85 @@ mod tests {
         assert_eq!(bin_entries.len(), 1);
         assert_eq!(bin_entries[0].name, b"run.sh");
         assert_eq!(bin_entries[0].mode, MODE_EXECUTABLE);
+    }
+
+    #[test]
+    fn write_tree_does_not_touch_entry_blobs() {
+        use filetime::FileTime;
+        use std::fs;
+        use std::thread;
+        use std::time::Duration;
+
+        let temp_dir = TempDir::new().unwrap();
+        let odb = Odb::new(temp_dir.path());
+
+        let oid_a = odb.write(ObjectKind::Blob, b"a").unwrap();
+        let oid_b = odb.write(ObjectKind::Blob, b"b").unwrap();
+
+        let path_a = odb.object_path(&oid_a);
+        let path_b = odb.object_path(&oid_b);
+        thread::sleep(Duration::from_millis(50));
+        let stamp_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
+        let stamp_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
+        filetime::set_file_mtime(&path_a, stamp_a).unwrap();
+        filetime::set_file_mtime(&path_b, stamp_b).unwrap();
+
+        let mut index = Index::new();
+        index.add_or_replace(entry("a.txt", 0o100644, oid_a));
+        index.add_or_replace(entry("b.txt", 0o100644, oid_b));
+
+        write_tree_from_index(&odb, &index, "").unwrap();
+
+        let after_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
+        let after_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
+        assert_eq!(after_a, stamp_a, "write-tree must not freshen index blob a");
+        assert_eq!(after_b, stamp_b, "write-tree must not freshen index blob b");
+    }
+
+    #[test]
+    fn write_tree_freshens_reconstructed_existing_tree() {
+        use filetime::FileTime;
+        use std::fs;
+        use std::thread;
+        use std::time::Duration;
+
+        let temp_dir = TempDir::new().unwrap();
+        let odb = Odb::new(temp_dir.path());
+
+        let oid_a = odb.write(ObjectKind::Blob, b"a").unwrap();
+        let oid_b = odb.write(ObjectKind::Blob, b"b").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("a.txt", 0o100644, oid_a));
+        index.add_or_replace(entry("b.txt", 0o100644, oid_b));
+
+        let root_oid = write_tree_from_index(&odb, &index, "").unwrap();
+        let tree_path = odb.object_path(&root_oid);
+
+        let path_a = odb.object_path(&oid_a);
+        let path_b = odb.object_path(&oid_b);
+        thread::sleep(Duration::from_millis(50));
+        let stamp_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
+        let stamp_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
+        filetime::set_file_mtime(&path_a, stamp_a).unwrap();
+        filetime::set_file_mtime(&path_b, stamp_b).unwrap();
+
+        let two_days_ago = FileTime::from_unix_time(
+            filetime::FileTime::now().unix_seconds() - time::Duration::days(2).whole_seconds(),
+            0,
+        );
+        filetime::set_file_mtime(&tree_path, two_days_ago).unwrap();
+        let aged = FileTime::from_last_modification_time(&fs::metadata(&tree_path).unwrap());
+
+        write_tree_from_index(&odb, &index, "").unwrap();
+
+        let after_tree = FileTime::from_last_modification_time(&fs::metadata(&tree_path).unwrap());
+        assert!(
+            after_tree > aged,
+            "reconstructed tree must be freshened (t6501 same-tree)"
+        );
+        let after_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
+        let after_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
+        assert_eq!(after_a, stamp_a);
+        assert_eq!(after_b, stamp_b);
     }
 }

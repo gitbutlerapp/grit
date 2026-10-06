@@ -17,6 +17,7 @@
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -134,6 +135,9 @@ pub struct Odb {
     hash_algo_cache: Arc<OnceLock<HashAlgo>>,
     /// Zlib level for loose-object writes, resolved from config and cached.
     loose_zlib_cache: Arc<OnceLock<Compression>>,
+    /// Pack files whose mtimes were already bumped for object freshening on this [`Odb`]
+    /// (Git's `packed_git->freshened`: at most one `utimensat` per pack per process).
+    freshened_packs: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -171,6 +175,7 @@ impl Odb {
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
         }
@@ -197,6 +202,7 @@ impl Odb {
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
         }
@@ -621,32 +627,99 @@ impl Odb {
             return touch_path_mtime(&loose).is_some();
         }
 
-        if freshen_object_in_objects_dir(&self.objects_dir, oid) {
+        if self.freshen_object_in_objects_dir(&self.objects_dir, oid) {
             return true;
         }
 
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
-            if freshen_object_in_objects_dir(alt_dir, oid) {
+            if self.freshen_object_in_objects_dir(alt_dir, oid) {
                 return true;
             }
         }
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
-            if freshen_object_in_objects_dir(alt_dir, oid) {
+            if self.freshen_object_in_objects_dir(alt_dir, oid) {
                 return true;
             }
         }
 
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
-                if freshen_object_in_objects_dir(alt_dir, oid) {
+                if self.freshen_object_in_objects_dir(alt_dir, oid) {
                     return true;
                 }
             }
         }
 
         false
+    }
+
+    fn freshen_object_in_objects_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
+        let loose = objects_dir
+            .join(oid.loose_prefix())
+            .join(oid.loose_suffix());
+        if loose.is_file() {
+            return touch_path_mtime(&loose).is_some();
+        }
+        let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
+            return false;
+        };
+        for idx in &indexes {
+            if idx.contains(oid) {
+                return self.freshen_pack_once(&idx.pack_path);
+            }
+        }
+        false
+    }
+
+    /// Touch `pack_path`'s mtime at most once for this [`Odb`], refreshing the pack cache signature.
+    ///
+    /// The path is recorded in [`Self::freshened_packs`] only after a successful touch, matching
+    /// Git's `packed_git->freshened` assignment after `utime` succeeds.
+    fn freshen_pack_once(&self, pack_path: &Path) -> bool {
+        if pack_path.with_extension("mtimes").exists() {
+            return false;
+        }
+        let Ok(mut guard) = self.freshened_packs.lock() else {
+            return false;
+        };
+        if guard.contains(pack_path) {
+            return true;
+        }
+        let Some(touched_at) = touch_path_mtime(pack_path) else {
+            return false;
+        };
+        pack::refresh_pack_bytes_signature(pack_path, touched_at);
+        guard.insert(pack_path.to_path_buf());
+        true
+    }
+
+    /// When `oid` is already reachable, freshen it and return its id. Returns `None` when the
+    /// object lives only in a pack and freshening failed so the caller can materialize a loose copy.
+    fn try_freshen_existing(&self, oid: &ObjectId) -> Option<ObjectId> {
+        if self.object_path(oid).is_file() {
+            let _ = self.freshen_object(oid);
+            return Some(*oid);
+        }
+        if !self.exists(oid) {
+            return None;
+        }
+        if self.freshen_object(oid) {
+            return Some(*oid);
+        }
+        None
+    }
+
+    fn try_freshen_existing_local(&self, oid: &ObjectId) -> Option<ObjectId> {
+        if self.object_path(oid).is_file() {
+            let _ = self.freshen_object(oid);
+            return Some(*oid);
+        }
+        if exists_materialized_in_objects_dir(&self.objects_dir, oid) && self.freshen_object(oid) {
+            return Some(*oid);
+        }
+        None
     }
 
     /// Read a loose object file at `path`, verifying the uncompressed payload hashes to `expected_oid`.
@@ -804,8 +877,8 @@ impl Odb {
         // Cheapest check first: a loose copy in this store answers every case below with a
         // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
         let path = self.object_path(&oid);
-        if path.exists() {
-            let _ = self.freshen_object(&oid);
+        if path.is_file() {
+            let _ = touch_path_mtime(&path);
             return Ok(oid);
         }
 
@@ -817,8 +890,7 @@ impl Odb {
             return Ok(oid);
         }
 
-        if already_exists {
-            let _ = self.freshen_object(&oid);
+        if already_exists && self.freshen_object(&oid) {
             return Ok(oid);
         }
 
@@ -866,16 +938,11 @@ impl Odb {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
-        let path = self.object_path(&oid);
-        if path.exists() {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
-        }
-        if exists_materialized_in_objects_dir(&self.objects_dir, &oid) {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
+        if let Some(existing) = self.try_freshen_existing_local(&oid) {
+            return Ok(existing);
         }
 
+        let path = self.object_path(&oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
@@ -955,16 +1022,11 @@ impl Odb {
         parse_object_bytes(store_bytes)?;
 
         let oid = hash_bytes_with(self.hash_algo(), store_bytes);
-        let path = self.object_path(&oid);
-        if path.exists() {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
-        }
-        if self.exists(&oid) {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
+        if let Some(existing) = self.try_freshen_existing(&oid) {
+            return Ok(existing);
         }
 
+        let path = self.object_path(&oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
@@ -1001,16 +1063,11 @@ impl Odb {
         parse_object_bytes(store_bytes)?;
 
         let oid = hash_bytes_with(self.hash_algo(), store_bytes);
-        let path = self.object_path(&oid);
-        if path.exists() {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
-        }
-        if exists_materialized_in_objects_dir(&self.objects_dir, &oid) {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
+        if let Some(existing) = self.try_freshen_existing_local(&oid) {
+            return Ok(existing);
         }
 
+        let path = self.object_path(&oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
@@ -1087,23 +1144,6 @@ fn touch_path_mtime(path: &Path) -> Option<std::time::SystemTime> {
     filetime::set_file_times(path, now, now)
         .ok()
         .map(|()| touched_at)
-}
-
-fn freshen_object_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
-    let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
-        return false;
-    };
-    for idx in &indexes {
-        if idx.contains(oid) {
-            if let Some(touched_at) = touch_path_mtime(&idx.pack_path) {
-                // Keep the cached pack bytes valid: this mtime bump is ours, not a content change.
-                pack::refresh_pack_bytes_signature(&idx.pack_path, touched_at);
-                return true;
-            }
-            return false;
-        }
-    }
-    false
 }
 
 /// Hash the canonical store bytes of an object (`"<kind> <len>\0<data>"`) with
@@ -1484,6 +1524,86 @@ mod tests {
 
     /// Same as pack-only: alternates satisfy [`Self::exists`] without a local loose copy.
     #[test]
+    fn write_freshens_loose_object_in_alternate() {
+        use filetime::FileTime;
+        use std::thread;
+        use std::time::Duration;
+
+        let alt = TempDir::new().unwrap();
+        git_in(alt.path(), &["init", "-q", "--bare"]);
+        git_in(alt.path(), &["config", "user.email", "t@example.com"]);
+        let alt_objects = alt.path().join("objects");
+        let alt_odb = Odb::new(&alt_objects);
+        let payload = b"alternate-loose";
+        let oid = alt_odb.write(ObjectKind::Blob, payload).unwrap();
+        let alt_loose = alt_odb.object_path(&oid);
+
+        let primary = TempDir::new().unwrap();
+        let primary_objects = primary.path().join("objects");
+        fs::create_dir_all(primary_objects.join("info")).unwrap();
+        fs::write(
+            primary_objects.join("info").join("alternates"),
+            format!("{}\n", alt_objects.display()),
+        )
+        .unwrap();
+        let odb = Odb::new(&primary_objects);
+        thread::sleep(Duration::from_millis(50));
+        let before = FileTime::from_last_modification_time(&fs::metadata(&alt_loose).unwrap());
+        filetime::set_file_mtime(&alt_loose, before).unwrap();
+
+        let oid2 = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert_eq!(oid, oid2);
+        assert!(!odb.object_path(&oid).exists());
+        let after = FileTime::from_last_modification_time(&fs::metadata(&alt_loose).unwrap());
+        assert!(after > before, "write must freshen alternate loose object");
+    }
+
+    #[test]
+    fn write_freshens_packed_object_in_alternate() {
+        use filetime::FileTime;
+        use std::thread;
+        use std::time::Duration;
+
+        let alt = TempDir::new().unwrap();
+        git_in(alt.path(), &["init", "-q"]);
+        git_in(alt.path(), &["config", "user.email", "t@example.com"]);
+        git_in(alt.path(), &["config", "user.name", "T"]);
+        let payload = b"alternate-pack";
+        fs::write(alt.path().join("f"), payload).unwrap();
+        git_in(alt.path(), &["add", "f"]);
+        git_in(alt.path(), &["commit", "-m", "c"]);
+        git_in(alt.path(), &["repack", "-ad"]);
+        let alt_objects = alt.path().join(".git").join("objects");
+        let alt_odb = Odb::new(&alt_objects);
+        let oid = alt_odb.write(ObjectKind::Blob, payload).unwrap();
+        let pack_path = fs::read_dir(alt_objects.join("pack"))
+            .unwrap()
+            .flatten()
+            .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .unwrap()
+            .path();
+        thread::sleep(Duration::from_millis(50));
+        let before = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+
+        let primary = TempDir::new().unwrap();
+        let primary_objects = primary.path().join("objects");
+        fs::create_dir_all(primary_objects.join("info")).unwrap();
+        fs::write(
+            primary_objects.join("info").join("alternates"),
+            format!("{}\n", alt_objects.display()),
+        )
+        .unwrap();
+        pack::clear_pack_cache();
+        let odb = Odb::new(&primary_objects);
+        assert!(odb.exists(&oid));
+        let oid2 = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert_eq!(oid, oid2);
+        assert!(!odb.object_path(&oid).exists());
+        let after = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+        assert!(after >= before, "write must freshen alternate pack");
+    }
+
+    #[test]
     fn write_skips_loose_when_object_only_in_alternate() {
         let alt = TempDir::new().unwrap();
         git_in(alt.path(), &["init", "-q", "--bare"]);
@@ -1563,7 +1683,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn empty_tree_exists_without_hex() {
         let odb = Odb::new(std::path::Path::new("/nonexistent/objects"));
@@ -1660,5 +1779,253 @@ mod tests {
             1,
             "pack/alternate write path must call exists() exactly once"
         );
+    }
+
+    #[test]
+    fn write_existing_object_freshens() {
+        use filetime::FileTime;
+        use std::fs;
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let oid = odb.write(ObjectKind::Blob, b"hello").unwrap();
+        let path = odb.object_path(&oid);
+        thread::sleep(Duration::from_millis(50));
+        let before = FileTime::from_last_modification_time(&fs::metadata(&path).unwrap());
+        filetime::set_file_mtime(&path, before).unwrap();
+
+        let _ = odb.write(ObjectKind::Blob, b"hello").unwrap();
+        let after = FileTime::from_last_modification_time(&fs::metadata(&path).unwrap());
+        assert!(
+            after > before,
+            "rewriting an existing loose object must freshen its mtime"
+        );
+    }
+
+    #[test]
+    fn freshen_pack_once_per_odb() {
+        use filetime::FileTime;
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use sha1::{Digest, Sha1};
+        use std::fs;
+        use std::io::Write;
+        use std::thread;
+        use std::time::Duration;
+
+        fn append_pack_object(buf: &mut Vec<u8>, type_code: u8, data: &[u8]) {
+            let mut size = data.len();
+            let first = ((type_code & 0x7) << 4) | (size & 0x0f) as u8;
+            size >>= 4;
+            if size > 0 {
+                buf.push(first | 0x80);
+                while size > 0 {
+                    let b = (size & 0x7f) as u8;
+                    size >>= 7;
+                    buf.push(if size > 0 { b | 0x80 } else { b });
+                }
+            } else {
+                buf.push(first);
+            }
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+            enc.write_all(data).unwrap();
+            buf.extend_from_slice(&enc.finish().unwrap());
+        }
+
+        fn write_v2_idx(
+            idx_path: &Path,
+            pack_path: &Path,
+            entries: &[(ObjectId, u64)],
+        ) -> Result<()> {
+            let mut sorted = entries.to_vec();
+            sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            let n = sorted.len();
+            let mut fanout = [0u32; 256];
+            for byte in 0u32..256 {
+                let count = sorted
+                    .iter()
+                    .filter(|(oid, _)| u32::from(oid.as_bytes()[0]) <= byte)
+                    .count();
+                fanout[byte as usize] = u32::try_from(count).unwrap_or(u32::MAX);
+            }
+            let mut buf = Vec::new();
+            buf.extend_from_slice(b"\xfftOc");
+            buf.extend_from_slice(&2u32.to_be_bytes());
+            for f in fanout {
+                buf.extend_from_slice(&f.to_be_bytes());
+            }
+            for (oid, _) in &sorted {
+                buf.extend_from_slice(oid.as_bytes());
+            }
+            for _ in 0..n {
+                buf.extend_from_slice(&0u32.to_be_bytes());
+            }
+            for (_, off) in &sorted {
+                buf.extend_from_slice(&u32::try_from(*off).unwrap_or(0x8000_0000).to_be_bytes());
+            }
+            let pack_bytes = fs::read(pack_path)?;
+            buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
+            let mut hasher = Sha1::new();
+            Digest::update(&mut hasher, &buf);
+            buf.extend_from_slice(&hasher.finalize());
+            fs::write(idx_path, buf)?;
+            Ok(())
+        }
+
+        let dir = TempDir::new().unwrap();
+        let objects_dir = dir.path();
+        let odb = Odb::new(objects_dir);
+
+        let oid_a = odb.write(ObjectKind::Blob, b"alpha").unwrap();
+        let oid_b = odb.write(ObjectKind::Blob, b"beta").unwrap();
+        fs::remove_file(odb.object_path(&oid_a)).unwrap();
+        fs::remove_file(odb.object_path(&oid_b)).unwrap();
+
+        let mut pack = Vec::new();
+        pack.extend_from_slice(b"PACK");
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        let off_a = pack.len() as u64;
+        append_pack_object(&mut pack, 3, b"alpha");
+        let off_b = pack.len() as u64;
+        append_pack_object(&mut pack, 3, b"beta");
+        let mut hasher = Sha1::new();
+        Digest::update(&mut hasher, &pack);
+        pack.extend_from_slice(hasher.finalize().as_slice());
+
+        let pack_dir = objects_dir.join("pack");
+        fs::create_dir_all(&pack_dir).unwrap();
+        let pack_path = pack_dir.join("test-177.pack");
+        let idx_path = pack_dir.join("test-177.idx");
+        fs::write(&pack_path, &pack).unwrap();
+        write_v2_idx(&idx_path, &pack_path, &[(oid_a, off_a), (oid_b, off_b)]).unwrap();
+        pack::clear_pack_cache();
+
+        thread::sleep(Duration::from_millis(50));
+        let before = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+
+        assert!(odb.freshen_object(&oid_a));
+        let after_first = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+        assert!(after_first > before);
+
+        assert!(odb.freshen_object(&oid_b));
+        let after_second =
+            FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+        assert_eq!(
+            after_second, after_first,
+            "second freshen of another object in the same pack must not touch the pack again"
+        );
+    }
+
+    #[test]
+    fn write_existing_packed_object_freshens_pack() {
+        use filetime::FileTime;
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use sha1::{Digest, Sha1};
+        use std::fs;
+        use std::io::Write;
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = TempDir::new().unwrap();
+        let objects_dir = dir.path();
+        let odb = Odb::new(objects_dir);
+        let oid = odb.write(ObjectKind::Blob, b"packed-only").unwrap();
+        fs::remove_file(odb.object_path(&oid)).unwrap();
+
+        let mut pack = Vec::new();
+        pack.extend_from_slice(b"PACK");
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        pack.extend_from_slice(&1u32.to_be_bytes());
+        let off = pack.len() as u64;
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(b"packed-only").unwrap();
+        let compressed = enc.finish().unwrap();
+        pack.push(0x30 | 0x03); // blob len 11
+        pack.extend_from_slice(&compressed);
+        let mut hasher = Sha1::new();
+        Digest::update(&mut hasher, &pack);
+        pack.extend_from_slice(hasher.finalize().as_slice());
+
+        let pack_dir = objects_dir.join("pack");
+        fs::create_dir_all(&pack_dir).unwrap();
+        let pack_path = pack_dir.join("single-177.pack");
+        fs::write(&pack_path, &pack).unwrap();
+        // Minimal idx: reuse logic from freshen_pack_once_per_odb via inline write
+        let idx_path = pack_dir.join("single-177.idx");
+        let mut sorted = [(oid, off)];
+        sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        let mut fanout = [0u32; 256];
+        for byte in 0u32..256 {
+            fanout[byte as usize] = if u32::from(oid.as_bytes()[0]) <= byte {
+                1
+            } else {
+                0
+            };
+        }
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"\xfftOc");
+        buf.extend_from_slice(&2u32.to_be_bytes());
+        for f in fanout {
+            buf.extend_from_slice(&f.to_be_bytes());
+        }
+        buf.extend_from_slice(oid.as_bytes());
+        buf.extend_from_slice(&0u32.to_be_bytes());
+        buf.extend_from_slice(&(off as u32).to_be_bytes());
+        buf.extend_from_slice(&pack[pack.len() - 20..]);
+        let mut hasher = Sha1::new();
+        Digest::update(&mut hasher, &buf);
+        buf.extend_from_slice(&hasher.finalize());
+        fs::write(&idx_path, buf).unwrap();
+        pack::clear_pack_cache();
+
+        thread::sleep(Duration::from_millis(50));
+        let before = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+
+        odb.write(ObjectKind::Blob, b"packed-only").unwrap();
+
+        let after = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
+        assert!(
+            after > before,
+            "write of an existing packed object must freshen the pack mtime"
+        );
+    }
+
+    /// When a local pack is indexed but its `.pack` path cannot be utime'd, [`Odb::write`]
+    /// materializes a loose copy (Git `write_object_file` fallback). Replacing the pack file
+    /// with a directory simulates a failed freshen without requiring a root-owned pack.
+    #[test]
+    fn write_materializes_loose_when_pack_freshen_fails() {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        let payload = b"packed-fallback";
+        fs::write(dir.path().join("f"), payload).unwrap();
+        git_in(dir.path(), &["add", "f"]);
+        git_in(dir.path(), &["commit", "-m", "c"]);
+        git_in(dir.path(), &["repack", "-ad"]);
+        let objects = dir.path().join(".git").join("objects");
+        let odb = Odb::new(&objects);
+        let oid = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert!(!odb.object_path(&oid).exists());
+        assert!(odb.exists(&oid));
+
+        let pack_path = fs::read_dir(objects.join("pack"))
+            .unwrap()
+            .flatten()
+            .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .unwrap()
+            .path();
+        fs::remove_file(&pack_path).unwrap();
+        fs::create_dir(&pack_path).unwrap();
+        pack::clear_pack_cache();
+        assert!(!odb.freshen_object(&oid));
+
+        odb.write(ObjectKind::Blob, payload).unwrap();
+        assert!(odb.object_path(&oid).exists());
     }
 }
