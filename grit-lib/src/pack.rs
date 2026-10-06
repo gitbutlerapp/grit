@@ -479,12 +479,24 @@ mod pack_cache {
     /// file's mtime/size changes.
     ///
     /// Whether `path` names a final, content-addressed pack file (`pack-<hash>.pack`).
-    /// For such paths the name pins the content, so a cached copy cannot silently
-    /// go stale; temporary packs (`tmp_pack_*`) keep the stat-stamp revalidation.
+    ///
+    /// Git allows arbitrary basenames such as `pack-custom.pack`; only names whose
+    /// hash segment is exactly 40 (SHA-1) or 64 (SHA-256) lowercase/uppercase hex
+    /// digits are treated as immutable for the stat-free fast path.
     fn is_content_addressed_pack(path: &Path) -> bool {
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with("pack-") && n.ends_with(".pack"))
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        let Some(hash_part) = name
+            .strip_prefix("pack-")
+            .and_then(|s| s.strip_suffix(".pack"))
+        else {
+            return false;
+        };
+        if hash_part.len() != 40 && hash_part.len() != 64 {
+            return false;
+        }
+        hash_part.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
@@ -2863,14 +2875,24 @@ mod cached_lookup_tests {
     fn temporary_pack_bytes_revalidated_after_change() {
         clear_pack_cache();
         let dir = tempfile::tempdir().expect("tempdir");
-        let pack_path = dir.path().join("tmp_pack_abc123.pack");
-        let v1 = b"PACK-temp-v1";
-        std::fs::write(&pack_path, v1).expect("write v1");
-        let _ = read_pack_bytes_cached(&pack_path).expect("prime cache");
+        for pack_path in [
+            dir.path().join("tmp_pack_abc123.pack"),
+            dir.path().join("pack-custom.pack"),
+        ] {
+            clear_pack_cache();
+            let v1 = b"PACK-temp-v1";
+            std::fs::write(&pack_path, v1).expect("write v1");
+            let _ = read_pack_bytes_cached(&pack_path).expect("prime cache");
 
-        let v2 = b"PACK-temp-v2-longer-body";
-        std::fs::write(&pack_path, v2).expect("overwrite temp pack");
-        let again = read_pack_bytes_cached(&pack_path).expect("re-read temp pack");
-        assert_eq!(&*again, v2, "temporary packs must observe on-disk changes");
+            let v2 = b"PACK-temp-v2-longer-body";
+            std::fs::write(&pack_path, v2).expect("overwrite pack");
+            let again = read_pack_bytes_cached(&pack_path).expect("re-read pack");
+            assert_eq!(
+                &*again,
+                v2,
+                "{} must observe on-disk changes",
+                pack_path.display()
+            );
+        }
     }
 }
