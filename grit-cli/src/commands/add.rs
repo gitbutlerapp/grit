@@ -4,14 +4,21 @@
 //! stages exactly what `grit status` reports as changed — including deletions and
 //! untracked files — without reimplementing worktree walking or ignore rules.
 
+use std::collections::HashSet;
+use std::path::Path;
+
 use anyhow::{bail, Context, Result};
 use grit_lib::diff::{mode_from_metadata, DiffStatus};
-use grit_lib::index::{entry_from_stat, Index};
-use grit_lib::objects::ObjectKind;
-use grit_lib::pathspec::{matches_pathspec_list, pathdiff, resolve_pathspec_in_worktree};
+use grit_lib::index::{Index, MODE_TREE};
+use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use grit_lib::pathspec::{
+    has_glob_chars, matches_pathspec_list, pathdiff, pathspec_is_exclude,
+    resolve_pathspec_in_worktree,
+};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::state::resolve_head;
 use serde::Serialize;
 
 use crate::context;
@@ -31,7 +38,7 @@ impl HumanRender for AddOutcome {
     fn render_human(&self) {
         match self.staged {
             0 if self.no_paths => println!("Nothing to stage — working tree clean."),
-            0 => println!("Nothing to stage matched the given paths."),
+            0 => {}
             1 => println!("Staged 1 change."),
             n => println!("Staged {n} changes."),
         }
@@ -82,6 +89,22 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
     let model = status(repo, &opts, &mut NullProgress).context("could not compute status")?;
     let mut index = repo.load_index().context("could not load the index")?;
 
+    if let Some(specs) = &resolved_specs {
+        let positive = selectors
+            .iter()
+            .zip(specs.iter())
+            .filter(|(s, _)| !pathspec_is_exclude(s))
+            .collect::<Vec<_>>();
+        if !positive.is_empty() {
+            let known = known_paths(repo, &index, &model, &work_tree)?;
+            for (orig, resolved) in positive {
+                if !selector_matches_known(resolved, &known, &work_tree)? {
+                    bail!("pathspec '{orig}' did not match any files");
+                }
+            }
+        }
+    }
+
     let matches = |path: &str| {
         resolved_specs
             .as_ref()
@@ -115,11 +138,124 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
         index.sort();
         repo.write_index(&mut index)
             .context("could not write the index")?;
-    } else if resolved_specs.is_some() {
-        let pathspec = selectors.first().map(String::as_str).unwrap_or("");
-        bail!("pathspec '{pathspec}' did not match any files");
     }
     Ok(staged)
+}
+
+/// Paths that may satisfy an explicit pathspec (index, HEAD tree, status, work tree).
+fn known_paths(
+    repo: &Repository,
+    index: &Index,
+    model: &grit_lib::porcelain::status::StatusModel,
+    work_tree: &Path,
+) -> Result<Vec<String>> {
+    let mut set = HashSet::<String>::new();
+    for entry in &index.entries {
+        if entry.stage() == 0 {
+            set.insert(String::from_utf8_lossy(&entry.path).into_owned());
+        }
+    }
+    for entry in &model.staged {
+        set.insert(entry_path(entry).to_owned());
+    }
+    for entry in &model.unstaged {
+        set.insert(entry_path(entry).to_owned());
+    }
+    for path in &model.untracked {
+        set.insert(path.clone());
+    }
+    for path in head_tree_paths(repo)? {
+        set.insert(path);
+    }
+    collect_worktree_paths(work_tree, work_tree, &mut set)?;
+    Ok(set.into_iter().collect())
+}
+
+fn head_tree_paths(repo: &Repository) -> Result<Vec<String>> {
+    let head = resolve_head(&repo.git_dir)?;
+    let Some(head_oid) = head.oid() else {
+        return Ok(Vec::new());
+    };
+    let obj = repo.odb.read(head_oid)?;
+    let commit = parse_commit(&obj.data)?;
+    let mut paths = HashSet::new();
+    collect_tree_paths(repo, commit.tree, "", &mut paths)?;
+    Ok(paths.into_iter().collect())
+}
+
+fn collect_tree_paths(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    prefix: &str,
+    out: &mut HashSet<String>,
+) -> Result<()> {
+    let obj = repo.odb.read(&tree_oid)?;
+    for entry in parse_tree(&obj.data)? {
+        let name = String::from_utf8_lossy(&entry.name);
+        let path = if prefix.is_empty() {
+            name.into_owned()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.mode == MODE_TREE {
+            collect_tree_paths(repo, entry.oid, &path, out)?;
+        } else {
+            out.insert(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_worktree_paths(base: &Path, dir: &Path, out: &mut HashSet<String>) -> Result<()> {
+    let read_dir = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in read_dir {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(base)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if rel.is_empty() {
+            continue;
+        }
+        let file_type = entry.file_type().ok();
+        if file_type.as_ref().is_some_and(|t| t.is_dir()) {
+            collect_worktree_paths(base, &path, out)?;
+        } else {
+            out.insert(rel);
+        }
+    }
+    Ok(())
+}
+
+/// Whether `resolved` matches at least one known path or an on-disk path under the work tree.
+fn selector_matches_known(resolved: &str, known: &[String], work_tree: &Path) -> Result<bool> {
+    let spec = [resolved.to_owned()];
+    if known.iter().any(|p| matches_pathspec_list(p, &spec)) {
+        return Ok(true);
+    }
+    if !has_glob_chars(resolved) && !resolved.starts_with(':') {
+        let abs = work_tree.join(resolved);
+        if abs.exists() {
+            return Ok(true);
+        }
+    }
+    if has_glob_chars(resolved) || resolved.starts_with(":(") {
+        let mut walk_set = HashSet::new();
+        collect_worktree_paths(work_tree, work_tree, &mut walk_set)?;
+        if walk_set.iter().any(|p| matches_pathspec_list(p, &spec)) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Hash a working-tree file into a blob and (re)stage it in the index.
@@ -146,7 +282,7 @@ fn stage_worktree_file(
         .odb
         .write(ObjectKind::Blob, &data)
         .with_context(|| format!("could not store {rel_path}"))?;
-    let entry = entry_from_stat(&abs, rel_path.as_bytes(), oid, mode)
+    let entry = grit_lib::index::entry_from_stat(&abs, rel_path.as_bytes(), oid, mode)
         .with_context(|| format!("could not stage {rel_path}"))?;
     index.add_or_replace(entry);
     Ok(())

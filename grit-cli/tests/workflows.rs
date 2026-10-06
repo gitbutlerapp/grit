@@ -169,22 +169,33 @@ fn add_pathspec_from_subdirectory() -> TestResult {
     let deep = repo.join("sub/deep");
     fs::create_dir_all(&deep)?;
     write_file(&deep.join("g"), "g\n")?;
-    write_file(&deep.join("h"), "h\n")?;
-    write_file(&deep.join("i"), "i\n")?;
 
     gs_ok(&deep, ["add", "g"])?;
     let status = gs_ok(&deep, ["status"])?;
     assert!(
-        status.stdout.contains("Staged") && status.stdout.contains("g"),
-        "expected g staged from subdir:\n{}",
+        status.stdout.contains("new           g"),
+        "expected cwd-relative staged path g:\n{}",
         status.dump()
     );
+
+    gs_ok(&deep, ["add", "g"])?;
+    gs_ok(&deep, ["add", "../deep/g"])?;
+    gs_ok(&deep, ["add", &path_arg(&deep.join("g"))?])?;
+    gs_ok(&deep, ["add", ".."])?;
 
     let missing = gs(&deep, ["add", "nonexist"])?;
     assert_ne!(missing.status, Some(0), "{}", missing.dump());
 
-    gs_ok(&deep, ["add", "../deep/h"])?;
-    gs_ok(&deep, ["add", &path_arg(&deep.join("i"))?])?;
+    write_file(&deep.join("valid"), "v\n")?;
+    let mixed = gs(&deep, ["add", "valid", "missing"])?;
+    assert_ne!(mixed.status, Some(0), "{}", mixed.dump());
+    let after_fail = gs_ok(&deep, ["status"])?;
+    assert!(
+        after_fail.stdout.contains("Untracked") && after_fail.stdout.contains("valid"),
+        "valid must stay unstaged after partial pathspec failure:\n{}",
+        after_fail.dump()
+    );
+
     Ok(())
 }
 
