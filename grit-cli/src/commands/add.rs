@@ -16,6 +16,7 @@ use grit_lib::pathspec::{
     resolve_pathspec_in_worktree,
 };
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::precompose_config::index_relpath_from_worktree;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
@@ -242,15 +243,17 @@ fn stage_worktree_file(
         std::fs::read(&abs).with_context(|| format!("could not read {rel_path}"))?
     };
 
+    let rel_index = index_relpath_from_worktree(rel_path, &repo.git_dir);
+
     let oid = repo
         .odb
         .write(ObjectKind::Blob, &data)
         .with_context(|| format!("could not store {rel_path}"))?;
-    let entry = grit_lib::index::entry_from_stat(&abs, rel_path.as_bytes(), oid, mode)
+    let entry = grit_lib::index::entry_from_stat(&abs, rel_index.as_bytes(), oid, mode)
         .with_context(|| format!("could not stage {rel_path}"))?;
     index.add_or_replace(entry);
     if index.fsmonitor_last_update.is_some() {
-        if let Some(staged) = index.get_mut(rel_path.as_bytes(), 0) {
+        if let Some(staged) = index.get_mut(rel_index.as_bytes(), 0) {
             staged.set_fsmonitor_valid(true);
         }
     }

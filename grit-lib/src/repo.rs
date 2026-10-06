@@ -27,6 +27,7 @@ use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
 use crate::hooks::run_hook;
 use crate::index::Index;
+use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::parse_commit;
 use crate::odb::Odb;
 use crate::rev_parse::is_inside_work_tree;
@@ -2463,6 +2464,7 @@ fn write_fresh_git_directory(
         git_dir.join("description"),
         "Unnamed repository; edit this file 'description' to name the repository.\n",
     )?;
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
     Ok(())
 }
 
@@ -2584,6 +2586,7 @@ pub fn init_bare_clone_minimal(
         git_dir.join("packed-refs"),
         "# pack-refs with: peeled fully-peeled sorted\n",
     )?;
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
     Ok(())
 }
 
@@ -2710,6 +2713,8 @@ pub fn init_repository_separate(
 
     let gitfile = work_tree.join(".git");
     fs::write(&gitfile, format!("gitdir: {}\n", git_dir_abs.display()))?;
+
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
 
     Repository::open(git_dir, Some(work_tree))
 }
