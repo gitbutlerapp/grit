@@ -623,6 +623,16 @@ impl Repository {
         // the in-memory `Index` was constructed (e.g. a fresh `Index::new`).
         index.hash_algo = self.odb.hash_algo();
         self.finalize_sparse_index_if_needed(index)?;
+        let prev_index_mtime = crate::index::index_file_mtime(path);
+        if let Some(work_tree) = self.work_tree.as_deref() {
+            crate::diff::smudge_racily_clean_entries(
+                &self.odb,
+                &self.git_dir,
+                index,
+                work_tree,
+                prev_index_mtime,
+            );
+        }
         let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
         let skip_hash = crate::index::index_skip_hash_for_write(Some(&cfg));
         write_index_file_split(path, &self.git_dir, index, &cfg, split, skip_hash)?;

@@ -2345,7 +2345,13 @@ impl SymlinkDirCache {
     }
 }
 
-fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
+/// Whether an index entry's cached mtime is at or after the on-disk index file's mtime.
+///
+/// Git labels such entries racy: stat data can look clean even though the worktree changed
+/// within the same second the index was written. Callers pass the index file mtime sampled when
+/// the index was read (before any rewrite). When `index_mtime` is `None`, returns `false`.
+#[must_use]
+pub fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
     let Some((index_mtime_sec, index_mtime_nsec)) = index_mtime else {
         return false;
     };
@@ -2354,6 +2360,76 @@ fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
     }
     index_mtime_sec < ie.mtime_sec
         || (index_mtime_sec == ie.mtime_sec && index_mtime_nsec <= ie.mtime_nsec)
+}
+
+/// Clear racily-clean cache lines on entries whose blob no longer matches the worktree.
+///
+/// Before Git writes the index, it walks stage-0 file and symlink entries and sets the cached
+/// size to zero when stat data still matches the worktree but content does not match the
+/// recorded OID and the entry timestamp is racy relative to `index_mtime`. That forces the
+/// next diff or status pass to re-hash the path instead of trusting stat alone.
+///
+/// Skip-worktree, assume-unchanged, and intent-to-add entries are left unchanged. When
+/// `index_mtime` is `None` (no prior on-disk index), nothing is smudged.
+///
+/// Content equality uses `git_dir` config and worktree attributes with [`hash_worktree_file`]
+/// so the repository hash algorithm and clean (CRLF/filter) conversion match index OIDs.
+///
+/// Returns `true` when at least one entry was smudged.
+pub fn smudge_racily_clean_entries(
+    odb: &Odb,
+    git_dir: &Path,
+    index: &mut Index,
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+) -> bool {
+    use crate::crlf;
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+
+    let Some(index_mtime) = index_mtime else {
+        return false;
+    };
+
+    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let conv = crlf::ConversionConfig::from_config(&config);
+    let attrs = crlf::load_gitattributes(work_tree);
+
+    let mut changed = false;
+    for ie in &mut index.entries {
+        if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+            continue;
+        }
+        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+            continue;
+        }
+        if ie.size == 0 {
+            continue;
+        }
+        if !entry_is_racy(ie, Some(index_mtime)) {
+            continue;
+        }
+        let Ok(path) = std::str::from_utf8(&ie.path) else {
+            continue;
+        };
+        let abs = work_tree.join(path);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        if !stat_matches(ie, &meta) {
+            continue;
+        }
+        let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
+        let content_matches =
+            hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
+                .map(|oid| oid == ie.oid)
+                .unwrap_or(false);
+        if content_matches {
+            continue;
+        }
+        ie.size = 0;
+        changed = true;
+    }
+    changed
 }
 
 /// Quick stat check: does the index entry's cached stat data match the file?
@@ -2637,7 +2713,7 @@ pub fn hash_worktree_file(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts).unwrap_or(raw)
     };
 
-    Ok(Odb::hash_object_data(ObjectKind::Blob, &data))
+    Ok(odb.hash(ObjectKind::Blob, &data))
 }
 
 /// Derive a Git file mode from filesystem metadata.
@@ -6383,5 +6459,232 @@ mod gitlink_tree_worktree_tests {
             entries.is_empty(),
             "untracked-only submodule dirt must not appear in default tree→worktree diff: {entries:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod smudge_racily_clean_tests {
+    use super::*;
+    use crate::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use crate::objects::{HashAlgo, ObjectKind};
+    use filetime::FileTime;
+    use std::fs;
+    use std::path::PathBuf;
+
+    const INDEX_MTIME: (u32, u32) = (1_700_000_000, 123_456_789);
+
+    fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
+        filetime::set_file_mtime(path, FileTime::from_unix_time(i64::from(sec), nsec))
+            .expect("set mtime");
+    }
+
+    fn minimal_repo(work_tree: &Path, config: &str) -> (PathBuf, Odb) {
+        let git_dir = work_tree.join(".git");
+        fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
+        fs::write(git_dir.join("config"), config).expect("config");
+        let odb = Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.clone());
+        (git_dir, odb)
+    }
+
+    fn staged_entry_for_file(
+        odb: &Odb,
+        work_tree: &Path,
+        rel: &str,
+        bytes: &[u8],
+        mtime: (u32, u32),
+    ) -> IndexEntry {
+        let path = work_tree.join(rel);
+        fs::write(&path, bytes).expect("write file");
+        pin_mtime(&path, mtime.0, mtime.1);
+        let meta = fs::symlink_metadata(&path).expect("stat file");
+        let oid = odb.hash(ObjectKind::Blob, bytes);
+        entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR)
+    }
+
+    fn staged_entry_with_oid(
+        work_tree: &Path,
+        rel: &str,
+        worktree_bytes: &[u8],
+        oid: crate::objects::ObjectId,
+        mtime: (u32, u32),
+    ) -> IndexEntry {
+        let path = work_tree.join(rel);
+        fs::write(&path, worktree_bytes).expect("write file");
+        pin_mtime(&path, mtime.0, mtime.1);
+        let meta = fs::symlink_metadata(&path).expect("stat file");
+        entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR)
+    }
+
+    #[test]
+    fn smudges_racily_clean_modified_entry() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let content_a = b"same length!!";
+        let content_b = b"same length??";
+        assert_eq!(content_a.len(), content_b.len());
+
+        let mut index = Index::new();
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", content_a, INDEX_MTIME);
+        let stale_oid = entry.oid;
+
+        fs::write(wt.join("f.txt"), content_b).expect("rewrite");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        // Stat was refreshed from the worktree but the blob OID is still stale (racy window).
+        let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, MODE_REGULAR);
+        index.entries.push(entry.clone());
+
+        assert!(stat_matches(&entry, &meta));
+        assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
+
+        let smudged =
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(INDEX_MTIME));
+        assert!(smudged);
+        assert_eq!(index.entries[0].size, 0);
+
+        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff[0].path(), "f.txt");
+    }
+
+    #[test]
+    fn leaves_non_racy_entry_alone() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let content_a = b"same length!!";
+        let content_b = b"same length??";
+        let entry_mtime = (INDEX_MTIME.0 - 10, 0);
+
+        let mut index = Index::new();
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", content_a, entry_mtime);
+        index.entries.push(entry.clone());
+
+        fs::write(wt.join("f.txt"), content_b).expect("rewrite");
+        pin_mtime(&wt.join("f.txt"), entry_mtime.0, entry_mtime.1);
+
+        assert!(!entry_is_racy(&entry, Some(INDEX_MTIME)));
+        let smudged =
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(INDEX_MTIME));
+        assert!(!smudged);
+        assert_eq!(index.entries[0].size, entry.size);
+    }
+
+    #[test]
+    fn leaves_matching_content_alone() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let bytes = b"unchanged!!!!";
+
+        let mut index = Index::new();
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", bytes, INDEX_MTIME);
+        index.entries.push(entry.clone());
+
+        assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
+        let smudged =
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(INDEX_MTIME));
+        assert!(!smudged);
+        assert_eq!(index.entries[0].size, entry.size);
+    }
+
+    #[test]
+    fn leaves_matching_sha256_racy_content_alone() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[extensions]\n\tobjectformat = sha256\n");
+        assert_eq!(odb.hash_algo(), HashAlgo::Sha256);
+
+        let bytes = b"sha256 width!!";
+        let oid = odb.hash(ObjectKind::Blob, bytes);
+        let mut index = Index::new();
+        let entry = staged_entry_with_oid(wt, "f.txt", bytes, oid, INDEX_MTIME);
+        index.entries.push(entry.clone());
+
+        assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
+        let smudged =
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(INDEX_MTIME));
+        assert!(!smudged, "matching SHA-256 blob must not be smudged");
+        assert_eq!(index.entries[0].size, entry.size);
+    }
+
+    #[test]
+    fn leaves_matching_crlf_worktree_content_alone() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n\tautocrlf = true\n");
+        let git_form = b"line one\nline two\n";
+        let worktree_form = b"line one\r\nline two\r\n";
+        let oid = odb.hash(ObjectKind::Blob, git_form);
+
+        let mut index = Index::new();
+        let entry = staged_entry_with_oid(wt, "f.txt", worktree_form, oid, INDEX_MTIME);
+        index.entries.push(entry.clone());
+
+        assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
+        let smudged =
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(INDEX_MTIME));
+        assert!(
+            !smudged,
+            "CRLF worktree matching clean index OID must not be smudged"
+        );
+        assert_eq!(index.entries[0].size, entry.size);
+    }
+
+    #[test]
+    fn skips_skip_worktree_and_intent_to_add() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let content_a = b"same length!!";
+        let content_b = b"same length??";
+
+        let mut index = Index::new();
+        let mut entry = staged_entry_for_file(&odb, wt, "f.txt", content_a, INDEX_MTIME);
+        entry.set_skip_worktree(true);
+        index.entries.push(entry);
+        fs::write(wt.join("f.txt"), content_b).expect("rewrite");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+        assert!(!smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(INDEX_MTIME)
+        ));
+        assert_ne!(index.entries[0].size, 0);
+
+        let mut index = Index::new();
+        let mut entry = staged_entry_for_file(&odb, wt, "f.txt", content_a, INDEX_MTIME);
+        entry.set_intent_to_add(true);
+        index.entries.push(entry);
+        fs::write(wt.join("f.txt"), content_b).expect("rewrite");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+        assert!(!smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(INDEX_MTIME)
+        ));
+        assert_ne!(index.entries[0].size, 0);
+    }
+
+    #[test]
+    fn smudges_nothing_without_prior_index_mtime() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let mut index = Index::new();
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", b"same length!!", INDEX_MTIME);
+        index.entries.push(entry);
+
+        fs::write(wt.join("f.txt"), b"same length??").expect("rewrite");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+
+        let smudged = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None);
+        assert!(!smudged);
+        assert_ne!(index.entries[0].size, 0);
     }
 }
