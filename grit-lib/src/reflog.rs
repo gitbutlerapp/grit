@@ -570,12 +570,21 @@ fn parse_gc_reflog_expiry(raw: &str, now: i64) -> Result<i64> {
         .map_err(|_| Error::Message(format!("invalid reflog expiry: {raw:?}")))
 }
 
+/// Default `gc.reflogExpire`: reachable reflog entries older than this are dropped.
+const REFLOG_DEFAULT_EXPIRE_REACHABLE_DAYS: i64 = 90;
+/// Default `gc.reflogExpireUnreachable`: unreachable entries older than this are dropped.
+const REFLOG_DEFAULT_EXPIRE_UNREACHABLE_DAYS: i64 = 30;
+
+fn default_expire_cutoff(now: i64, days: i64) -> i64 {
+    now.saturating_sub(time::Duration::days(days).whole_seconds())
+}
+
 fn default_expire_total(now: i64) -> i64 {
-    now - 30 * 86400
+    default_expire_cutoff(now, REFLOG_DEFAULT_EXPIRE_REACHABLE_DAYS)
 }
 
 fn default_expire_unreachable(now: i64) -> i64 {
-    now - 90 * 86400
+    default_expire_cutoff(now, REFLOG_DEFAULT_EXPIRE_UNREACHABLE_DAYS)
 }
 
 fn resolve_expire_for_ref(
@@ -945,4 +954,23 @@ pub fn mark_stalefix_reachable(repo: &Repository, git_dir: &Path) -> Result<Hash
         }
     }
     Ok(seen)
+}
+
+#[cfg(test)]
+mod default_expire_tests {
+    use super::{default_expire_total, default_expire_unreachable};
+
+    #[test]
+    fn default_expire_total_is_ninety_days_before_now() {
+        let now = 1_700_000_000_i64;
+        let cutoff = default_expire_total(now);
+        assert_eq!(cutoff, now - 90 * 86_400);
+    }
+
+    #[test]
+    fn default_expire_unreachable_is_thirty_days_before_now() {
+        let now = 1_700_000_000_i64;
+        let cutoff = default_expire_unreachable(now);
+        assert_eq!(cutoff, now - 30 * 86_400);
+    }
 }
