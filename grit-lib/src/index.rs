@@ -518,27 +518,23 @@ pub fn get_index_format_from_env() -> Option<u32> {
 /// Parse Git's `FSMN` index extension payload (`read_fsmonitor_extension`).
 fn parse_fsmonitor_extension(ext_data: &[u8]) -> Result<(String, crate::ewah_bitmap::EwahBitmap)> {
     if ext_data.len() < 4 + 1 + 4 {
-        return Err(Error::IndexError(
-            "corrupt fsmonitor extension (too short)".to_owned(),
-        ));
+        return Err(Error::IndexFsmonitorExtensionTruncated);
     }
     let hdr_version = u32::from_be_bytes(
         ext_data[0..4]
             .try_into()
-            .map_err(|_| Error::IndexError("corrupt fsmonitor extension".to_owned()))?,
+            .map_err(|_| Error::IndexFsmonitorExtensionTruncated)?,
     );
     let mut pos = 4usize;
     let token = match hdr_version {
         FSMONITOR_EXT_VERSION1 => {
             if ext_data.len() < pos + 8 + 4 {
-                return Err(Error::IndexError(
-                    "corrupt fsmonitor extension (too short)".to_owned(),
-                ));
+                return Err(Error::IndexFsmonitorExtensionTruncated);
             }
             let ts = u64::from_be_bytes(
                 ext_data[pos..pos + 8]
                     .try_into()
-                    .map_err(|_| Error::IndexError("corrupt fsmonitor extension".to_owned()))?,
+                    .map_err(|_| Error::IndexFsmonitorExtensionTruncated)?,
             );
             pos += 8;
             ts.to_string()
@@ -547,44 +543,30 @@ fn parse_fsmonitor_extension(ext_data: &[u8]) -> Result<(String, crate::ewah_bit
             let nul = ext_data[pos..]
                 .iter()
                 .position(|&b| b == 0)
-                .ok_or_else(|| {
-                    Error::IndexError("corrupt fsmonitor extension (too short)".to_owned())
-                })?;
+                .ok_or_else(|| Error::IndexFsmonitorExtensionTruncated)?;
             let token = String::from_utf8_lossy(&ext_data[pos..pos + nul]).into_owned();
             pos += nul + 1;
             token
         }
-        v => {
-            return Err(Error::IndexError(format!("bad fsmonitor version {v}")));
-        }
+        v => return Err(Error::IndexFsmonitorExtensionBadVersion(v)),
     };
     if ext_data.len() < pos + 4 {
-        return Err(Error::IndexError(
-            "corrupt fsmonitor extension (too short)".to_owned(),
-        ));
+        return Err(Error::IndexFsmonitorExtensionTruncated);
     }
     let ewah_size = u32::from_be_bytes(
         ext_data[pos..pos + 4]
             .try_into()
-            .map_err(|_| Error::IndexError("corrupt fsmonitor extension".to_owned()))?,
+            .map_err(|_| Error::IndexFsmonitorExtensionTruncated)?,
     ) as usize;
     pos += 4;
     if ext_data.len() < pos + ewah_size {
-        return Err(Error::IndexError(
-            "corrupt fsmonitor extension (too short)".to_owned(),
-        ));
+        return Err(Error::IndexFsmonitorExtensionTruncated);
     }
     let ewah_slice = &ext_data[pos..pos + ewah_size];
     let (dirty, consumed) = crate::ewah_bitmap::EwahBitmap::deserialize_prefix(ewah_slice)
-        .ok_or_else(|| {
-            Error::IndexError(
-                "failed to parse ewah bitmap reading fsmonitor index extension".to_owned(),
-            )
-        })?;
+        .ok_or_else(|| Error::IndexFsmonitorExtensionEwahInvalid)?;
     if consumed != ewah_size {
-        return Err(Error::IndexError(
-            "failed to parse ewah bitmap reading fsmonitor index extension".to_owned(),
-        ));
+        return Err(Error::IndexFsmonitorExtensionEwahInvalid);
     }
     Ok((token, dirty))
 }
@@ -1313,30 +1295,80 @@ impl Index {
         self.entries.len()
     }
 
-    /// Whether the on-disk `FSMN` payload can be written unchanged.
-    fn fsmonitor_raw_still_valid(&self) -> bool {
-        let Some(raw) = &self.fsmonitor_raw_extension else {
-            return false;
-        };
-        let Some(dirty) = &self.fsmonitor_dirty else {
-            return false;
-        };
-        dirty.bit_size <= self.fsmonitor_active_entry_count() && !raw.is_empty()
-    }
-
-    /// Rebuild the in-memory fsmonitor dirty bitmap from `CE_FSMONITOR_VALID` (`fill_fsmonitor_bitmap`).
-    fn rebuild_fsmonitor_dirty_from_entries(&mut self) {
-        if self.fsmonitor_last_update.is_none() {
-            return;
-        }
+    /// Build the fsmonitor dirty EWAH from in-memory `CE_FSMONITOR_VALID` (`fill_fsmonitor_bitmap`).
+    fn build_fsmonitor_dirty_from_entries(&self) -> crate::ewah_bitmap::EwahBitmap {
         use crate::ewah_bitmap::EwahBitmap;
         let mut dirty = EwahBitmap::new();
+        if self.fsmonitor_last_update.is_none() {
+            return dirty;
+        }
         for (i, entry) in self.entries.iter().enumerate() {
             if !entry.fsmonitor_valid() {
                 dirty.set_bit_extend(i);
             }
         }
-        self.fsmonitor_dirty = Some(dirty);
+        dirty
+    }
+
+    /// Whether the on-disk `FSMN` payload still matches token and fsmonitor-valid state.
+    fn fsmonitor_raw_still_valid(&self) -> bool {
+        use crate::ewah_bitmap::ewah_bitmaps_equal;
+        let Some(raw) = self.fsmonitor_raw_extension.as_ref() else {
+            return false;
+        };
+        let Some(token) = self.fsmonitor_last_update.as_deref() else {
+            return false;
+        };
+        let Ok((raw_token, raw_dirty)) = parse_fsmonitor_extension(raw) else {
+            return false;
+        };
+        if raw_token != token {
+            return false;
+        }
+        let current = self.build_fsmonitor_dirty_from_entries();
+        if !ewah_bitmaps_equal(&raw_dirty, &current) {
+            return false;
+        }
+        current.bit_size <= self.fsmonitor_active_entry_count()
+    }
+
+    /// Rebuild the in-memory fsmonitor dirty bitmap from `CE_FSMONITOR_VALID` (`fill_fsmonitor_bitmap`).
+    fn rebuild_fsmonitor_dirty_from_entries(&mut self) {
+        if self.fsmonitor_last_update.is_none() {
+            self.fsmonitor_dirty = None;
+            return;
+        }
+        self.fsmonitor_dirty = Some(self.build_fsmonitor_dirty_from_entries());
+    }
+
+    /// Update the fsmonitor token; clears any stale on-disk snapshot when the token changes.
+    pub fn set_fsmonitor_last_update(&mut self, token: Option<String>) {
+        if self.fsmonitor_last_update.as_deref() != token.as_deref() {
+            self.fsmonitor_raw_extension = None;
+        }
+        self.fsmonitor_last_update = token;
+        self.rebuild_fsmonitor_dirty_from_entries();
+    }
+
+    /// Remove fsmonitor metadata from the index (extension and in-memory valid bits are cleared on write).
+    pub fn clear_fsmonitor_extension(&mut self) {
+        self.fsmonitor_last_update = None;
+        self.fsmonitor_dirty = None;
+        self.fsmonitor_raw_extension = None;
+    }
+
+    /// Refresh the in-memory fsmonitor EWAH from entry valid bits (does not invalidate raw).
+    pub fn sync_fsmonitor_dirty_bitmap(&mut self) {
+        self.rebuild_fsmonitor_dirty_from_entries();
+    }
+
+    /// Call after mutating entry fsmonitor-valid bits without changing index membership.
+    pub fn fsmonitor_validity_changed(&mut self) {
+        if self.fsmonitor_last_update.is_none() {
+            return;
+        }
+        self.fsmonitor_raw_extension = None;
+        self.rebuild_fsmonitor_dirty_from_entries();
     }
 
     /// Drop byte-for-byte `FSMN` preservation after index entries change.
@@ -1362,10 +1394,7 @@ impl Index {
         let Some(token) = &self.fsmonitor_last_update else {
             return Ok(());
         };
-        let Some(dirty) = &self.fsmonitor_dirty else {
-            // In-memory token only (no EWAH); omit rather than write a truncated extension.
-            return Ok(());
-        };
+        let dirty = self.build_fsmonitor_dirty_from_entries();
         if dirty.bit_size > self.fsmonitor_active_entry_count() {
             return Ok(());
         }
@@ -2694,6 +2723,9 @@ mod tests {
         let path = dir.path().join("index");
         let mut idx = Index::new();
         idx.add_or_replace(make_entry("a"));
+        if let Some(e) = idx.get_mut(b"a", 0) {
+            e.set_fsmonitor_valid(true);
+        }
         idx.fsmonitor_last_update = Some(token);
         idx.fsmonitor_dirty = Some(dirty);
         idx.fsmonitor_raw_extension = Some(fsmn_payload.to_vec());
@@ -2723,19 +2755,73 @@ mod tests {
     }
 
     #[test]
-    fn fsmonitor_extension_omitted_when_only_in_memory_token() {
+    fn fsmonitor_extension_written_from_token_only_state() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("index");
         let mut idx = Index::new();
         idx.add_or_replace(make_entry("a"));
-        idx.fsmonitor_last_update = Some("builtin:fake".to_owned());
+        idx.set_fsmonitor_last_update(Some("builtin:fake".to_owned()));
         idx.write(&path).unwrap();
 
         let data = fs::read(&path).unwrap();
         assert!(
-            !data.windows(4).any(|w| w == b"FSMN"),
-            "must not write truncated FSMN"
+            data.windows(4).any(|w| w == b"FSMN"),
+            "token-only enable must emit a full FSMN extension"
         );
+        let loaded = Index::load(&path).unwrap();
+        assert_eq!(
+            loaded.fsmonitor_last_update.as_deref(),
+            Some("builtin:fake")
+        );
+    }
+
+    #[test]
+    fn fsmonitor_raw_not_reused_after_token_change() {
+        let fsmn_payload: [u8; 41] = [
+            0, 0, 0, 2, b'b', b'u', b'i', b'l', b't', b'i', b'n', b':', b'f', b'a', b'k', b'e', 0,
+            0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("a"));
+        idx.fsmonitor_last_update = Some("builtin:fake".to_owned());
+        idx.fsmonitor_dirty = Some(parse_fsmonitor_extension(&fsmn_payload).unwrap().1);
+        idx.fsmonitor_raw_extension = Some(fsmn_payload.to_vec());
+
+        idx.set_fsmonitor_last_update(Some("last_update_token".to_owned()));
+        let mut body = Vec::new();
+        idx.serialize_into(&mut body).unwrap();
+        let off = body.windows(4).position(|w| w == b"FSMN").unwrap();
+        let ext_sz = u32::from_be_bytes(body[off + 4..off + 8].try_into().unwrap()) as usize;
+        let written = &body[off + 8..off + 8 + ext_sz];
+        let (token, _) = parse_fsmonitor_extension(written).unwrap();
+        assert_eq!(token, "last_update_token");
+        assert_ne!(written, fsmn_payload);
+    }
+
+    #[test]
+    fn fsmonitor_raw_not_reused_after_validity_change() {
+        let fsmn_payload: [u8; 41] = [
+            0, 0, 0, 2, b'b', b'u', b'i', b'l', b't', b'i', b'n', b':', b'f', b'a', b'k', b'e', 0,
+            0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("a"));
+        idx.fsmonitor_last_update = Some("builtin:fake".to_owned());
+        idx.fsmonitor_dirty = Some(parse_fsmonitor_extension(&fsmn_payload).unwrap().1);
+        idx.fsmonitor_raw_extension = Some(fsmn_payload.to_vec());
+        if let Some(e) = idx.get_mut(b"a", 0) {
+            e.set_fsmonitor_valid(false);
+        }
+        idx.fsmonitor_validity_changed();
+
+        let mut body = Vec::new();
+        idx.serialize_into(&mut body).unwrap();
+        let off = body.windows(4).position(|w| w == b"FSMN").unwrap();
+        let ext_sz = u32::from_be_bytes(body[off + 4..off + 8].try_into().unwrap()) as usize;
+        let written = &body[off + 8..off + 8 + ext_sz];
+        assert_ne!(written, fsmn_payload);
+        let (_, dirty) = parse_fsmonitor_extension(written).unwrap();
+        assert!(dirty.bit_size >= 1);
     }
 
     #[test]

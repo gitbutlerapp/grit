@@ -527,11 +527,13 @@ pub fn run(args: Args, raw_rest: &[String]) -> Result<()> {
             );
         }
         if index.fsmonitor_last_update.is_none() {
-            index.fsmonitor_last_update = Some("builtin:fake".to_string());
+            index.set_fsmonitor_last_update(Some("builtin:fake".to_string()));
+        } else {
+            index.sync_fsmonitor_dirty_bitmap();
         }
         write_update_index(&repo, &index_path, &mut index, split_write).context("writing index")?;
     } else if args.no_fsmonitor {
-        index.fsmonitor_last_update = None;
+        index.clear_fsmonitor_extension();
         for entry in &mut index.entries {
             if entry.stage() == 0 {
                 entry.set_fsmonitor_valid(false);
@@ -542,7 +544,7 @@ pub fn run(args: Args, raw_rest: &[String]) -> Result<()> {
 
     if !args.fsmonitor_valid.is_empty() || !args.no_fsmonitor_valid.is_empty() {
         if index.fsmonitor_last_update.is_none() {
-            index.fsmonitor_last_update = Some("builtin:fake".to_string());
+            index.set_fsmonitor_last_update(Some("builtin:fake".to_string()));
         }
         for p in &args.fsmonitor_valid {
             let (rel_path, _abs_path) = resolve_repo_path(work_tree, &cwd, p)?;
@@ -558,6 +560,7 @@ pub fn run(args: Args, raw_rest: &[String]) -> Result<()> {
                 e.set_fsmonitor_valid(false);
             }
         }
+        index.fsmonitor_validity_changed();
         write_update_index(&repo, &index_path, &mut index, split_write).context("writing index")?;
     }
 
@@ -1260,7 +1263,7 @@ fn query_update_index_fsmonitor_paths(
         return (false, None);
     };
     let changed = old_token != new_token;
-    index.fsmonitor_last_update = Some(new_token);
+    index.set_fsmonitor_last_update(Some(new_token));
     (changed, Some(reported))
 }
 
