@@ -547,12 +547,12 @@ fn parse_log_into_patches(contents: &str) -> Result<Vec<Patch>> {
         // While accumulating a `diff --git` header, capture mode/new/delete/rename
         // metadata and consume the header lines until the first hunk or content.
         if let Some(h) = pending.as_mut() {
-            if line.starts_with("old mode ") {
-                h.old_mode = line["old mode ".len()..].trim().to_string();
+            if let Some(rest) = line.strip_prefix("old mode ") {
+                h.old_mode = rest.trim().to_string();
                 continue;
             }
-            if line.starts_with("new mode ") {
-                h.new_mode = line["new mode ".len()..].trim().to_string();
+            if let Some(rest) = line.strip_prefix("new mode ") {
+                h.new_mode = rest.trim().to_string();
                 continue;
             }
             if let Some(rest) = line.strip_prefix("new file mode ") {
@@ -843,11 +843,11 @@ fn get_correspondences(a: &mut [Patch], b: &mut [Patch], creation_factor: u64) {
     }
 
     let assign = minimize(&cost, n, n);
-    for i in 0..a.len() {
-        if let Some(Some(j)) = assign.get(i) {
-            if *j < b.len() {
-                a[i].matching = *j as i32;
-                b[*j].matching = i as i32;
+    for (i, (patch, slot)) in a.iter_mut().zip(assign.iter()).enumerate() {
+        if let Some(j) = *slot {
+            if j < b.len() {
+                patch.matching = j as i32;
+                b[j].matching = i as i32;
             }
         }
     }
@@ -892,6 +892,7 @@ fn match_adjacent_unmatched_prefix_subjects(repo: &Repository, a: &mut [Patch], 
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn output(
     out: &mut impl Write,
     repo: &Repository,
@@ -1259,6 +1260,7 @@ fn truncate_funcname(text: &str) -> String {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_pair_header(
     out: &mut impl Write,
     repo: &Repository,

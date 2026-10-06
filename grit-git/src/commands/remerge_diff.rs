@@ -550,11 +550,7 @@ pub(crate) fn write_remerge_diff(
                     }
                 }
             }
-        } else if d.kind == "modify/delete" {
-            let p = d.subject_path.as_str();
-            writeln!(out, "diff --git a/{p} b/{p}")?;
-            writeln!(out, "{}", d.remerge_header_line())?;
-        } else if d.kind == "content" {
+        } else if d.kind == "modify/delete" || d.kind == "content" {
             let p = d.subject_path.as_str();
             writeln!(out, "diff --git a/{p} b/{p}")?;
             writeln!(out, "{}", d.remerge_header_line())?;
@@ -631,6 +627,7 @@ pub(crate) fn write_remerge_diff(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn emit_patch_for_entry(
     out: &mut impl Write,
     repo: &Repository,

@@ -497,7 +497,7 @@ fn parse_spec(stdin_lines: &[String]) -> Result<(Vec<String>, Vec<OptEntry>)> {
         let name_field = &raw[..sp];
         let help = raw[sp + 1..].trim().to_string();
         let flag_start = name_field
-            .find(|c| matches!(c, '*' | '=' | '?' | '!'))
+            .find(['*', '=', '?', '!'])
             .unwrap_or(name_field.len());
         if flag_start == 0 {
             bail!("fatal: missing opt-spec before option flags");
@@ -639,8 +639,7 @@ pub fn run_parseopt(extra_args: &[String]) -> Result<()> {
             exit_with_usage(&usage_lines, &options, false);
         }
 
-        if arg.starts_with("--") {
-            let inner = &arg[2..];
+        if let Some(inner) = arg.strip_prefix("--") {
             let attached_from_eq = inner.find('=').map(|p| inner[p + 1..].to_string());
             let name_part = inner.find('=').map(|p| &inner[..p]).unwrap_or(inner);
             let matched = parse_long_option(name_part, &options, disallow_abbrev);

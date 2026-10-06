@@ -1011,7 +1011,7 @@ fn write_medium_message_lines(
         let raw = commit
             .raw_message
             .as_deref()
-            .unwrap_or_else(|| commit.message.as_bytes());
+            .unwrap_or(commit.message.as_bytes());
         return write_indented_raw_message(out, raw);
     }
 
@@ -1083,7 +1083,7 @@ fn expand_typechange_entries_for_porcelain(entries: Vec<DiffEntry>) -> Vec<DiffE
 
 /// Emit `git show -m` for a merge commit: one full medium-format entry per parent, each header
 /// tagged `(from <parent>)` and followed by that parent's diff (matches `git log -m -p`).
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn show_commit_separate_merge(
     out: &mut impl Write,
     repo: &Repository,
@@ -1166,6 +1166,7 @@ fn show_commit_separate_merge(
 }
 
 /// Show a commit object: header + diff.
+#[expect(clippy::too_many_arguments)]
 fn show_commit(
     out: &mut impl Write,
     repo: &Repository,
@@ -2200,6 +2201,7 @@ fn format_rename_path(entry: &grit_lib::diff::DiffEntry) -> String {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_diffstat(
     out: &mut impl Write,
     odb: &Odb,

@@ -642,7 +642,7 @@ pub(crate) fn read_advertisement(
 fn parse_advertised_ref_oid(line: &str) -> Option<ObjectId> {
     let line = line.trim_end_matches('\n');
     let (main, _) = line.split_once('\0').unwrap_or((line, ""));
-    let mut it = main.splitn(2, |c| c == '\t' || c == ' ');
+    let mut it = main.splitn(2, ['\t', ' ']);
     let hex = it.next()?.trim();
     let name = it.next()?.trim();
     // `HEAD` appears on the first pkt-line alongside capabilities; it may be detached at the
@@ -687,7 +687,7 @@ pub(crate) fn peel_advertised_commits(repo: &Repository, oids: &[ObjectId]) -> V
 fn parse_dot_have_line(line: &str) -> Option<ObjectId> {
     let line = line.trim_end_matches('\n');
     let (main, _) = line.split_once('\0').unwrap_or((line, ""));
-    let mut it = main.splitn(2, |c| c == '\t' || c == ' ');
+    let mut it = main.splitn(2, ['\t', ' ']);
     let hex = it.next()?;
     let name = it.next()?.trim();
     if name == ".have" {

@@ -231,11 +231,7 @@ fn parse_show_branch_args(repo: &Repository, raw: Vec<String>) -> Result<Parsed>
                         "auto" => ColorWhen::Auto,
                         _ => bail!("unknown --color parameter: {v}"),
                     };
-                    if s != "--color" {
-                        i += 1;
-                    } else {
-                        i += 1;
-                    }
+                    i += 1;
                 }
                 s if s == "-g"
                     || s == "--reflog"
@@ -311,9 +307,7 @@ fn parse_color_bool(v: &str) -> ColorWhen {
         ColorWhen::Always
     } else if t.eq_ignore_ascii_case("never") {
         ColorWhen::Never
-    } else if t.eq_ignore_ascii_case("auto") {
-        ColorWhen::Auto
-    } else if parse_bool_loose(t).unwrap_or(false) {
+    } else if t.eq_ignore_ascii_case("auto") || parse_bool_loose(t).unwrap_or(false) {
         ColorWhen::Auto
     } else {
         ColorWhen::Never
@@ -686,6 +680,7 @@ fn run_graph_mode(
     run_graph_from_seeds(repo, p, head, head_oid, names, oids, graph_extra, None)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_graph_from_seeds(
     repo: &Repository,
     p: &Parsed,
@@ -1009,7 +1004,7 @@ fn mark_seen_oid(
     true
 }
 
-fn sort_seen_by_date(repo: &Repository, seen: &mut Vec<ObjectId>) -> Result<()> {
+fn sort_seen_by_date(repo: &Repository, seen: &mut [ObjectId]) -> Result<()> {
     let mut times = HashMap::new();
     for oid in seen.iter() {
         times.insert(*oid, commit_committer_time(repo, oid)?);
@@ -1178,10 +1173,7 @@ fn name_first_parent_chain(
     commit_gen: &mut HashMap<ObjectId, u32>,
 ) -> Result<u32> {
     let mut count = 0u32;
-    loop {
-        let Some(cname) = commit_name.get(&c).cloned() else {
-            break;
-        };
+    while let Some(cname) = commit_name.get(&c).cloned() {
         let cg = *commit_gen.get(&c).unwrap_or(&0);
         let parents = parents_of(repo, c)?;
         let Some(p) = parents.first().copied() else {

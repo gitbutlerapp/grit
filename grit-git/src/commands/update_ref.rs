@@ -114,7 +114,7 @@ pub fn run(mut args: Args) -> Result<()> {
             refname: target_refname.clone(),
             deletes_ref: true,
         };
-        run_ref_transaction_prepare(&repo, &[hook_update.clone()])?;
+        run_ref_transaction_prepare(&repo, std::slice::from_ref(&hook_update))?;
         delete_ref(&repo.git_dir, &target_refname).context("deleting ref")?;
         run_ref_transaction_committed(&repo, &[hook_update]);
 
@@ -155,7 +155,7 @@ pub fn run(mut args: Args) -> Result<()> {
     };
 
     if new_oid == zero_oid() {
-        run_ref_transaction_prepare(&repo, &[hook_update.clone()])?;
+        run_ref_transaction_prepare(&repo, std::slice::from_ref(&hook_update))?;
         delete_ref(&repo.git_dir, &target_refname).context("deleting ref")?;
         run_ref_transaction_committed(&repo, &[hook_update]);
         if let Some(msg) = args.log_message.as_deref() {
@@ -193,7 +193,7 @@ pub fn run(mut args: Args) -> Result<()> {
 
     if should_write_update_reflog(&repo, &args, &target_refname, msg) {
         let identity = resolve_reflog_identity(&repo);
-        run_ref_transaction_prepare(&repo, &[hook_update.clone()])?;
+        run_ref_transaction_prepare(&repo, std::slice::from_ref(&hook_update))?;
         if grit_lib::reftable::is_reftable_repo(&repo.git_dir) {
             grit_lib::reftable::reftable_write_ref(
                 &repo.git_dir,
@@ -218,7 +218,7 @@ pub fn run(mut args: Args) -> Result<()> {
         }
         run_ref_transaction_committed(&repo, &[hook_update]);
     } else {
-        run_ref_transaction_prepare(&repo, &[hook_update.clone()])?;
+        run_ref_transaction_prepare(&repo, std::slice::from_ref(&hook_update))?;
         write_ref(&repo.git_dir, &target_refname, &new_oid).context("writing ref")?;
         run_ref_transaction_committed(&repo, &[hook_update]);
     }
@@ -328,9 +328,9 @@ enum OldExpectation {
 
 #[derive(Clone)]
 enum SymrefOldExpectation {
-    MustNotExist,
-    MustTarget(String),
-    MustOid(ObjectId),
+    Absent,
+    Target(String),
+    Oid(ObjectId),
 }
 
 #[derive(Clone)]
@@ -727,10 +727,7 @@ fn queue_or_apply(
     op: BatchOp,
     implicit_one_shot: bool,
 ) -> Result<()> {
-    if transaction_active {
-        staged.push((no_deref, op));
-        Ok(())
-    } else if implicit_one_shot {
+    if transaction_active || implicit_one_shot {
         staged.push((no_deref, op));
         Ok(())
     } else {
@@ -738,7 +735,7 @@ fn queue_or_apply(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn process_batch_command(
     repo: &Repository,
     args: &Args,
@@ -840,14 +837,14 @@ fn process_batch_command(
                     let Some(target) = parts.get(4) else {
                         bail!("symref-update requires old-target after 'ref'");
                     };
-                    Some(SymrefOldExpectation::MustTarget((*target).to_owned()))
+                    Some(SymrefOldExpectation::Target((*target).to_owned()))
                 }
                 Some("oid") => {
                     let Some(oid) = parts.get(4) else {
                         bail!("symref-update requires old-oid after 'oid'");
                     };
                     let parsed = oid.parse::<ObjectId>().context("invalid old-value OID")?;
-                    Some(SymrefOldExpectation::MustOid(parsed))
+                    Some(SymrefOldExpectation::Oid(parsed))
                 }
                 Some(other) => bail!("symref-update expected 'ref' or 'oid', got '{other}'"),
             };
@@ -892,7 +889,7 @@ fn process_batch_command(
             }
             let expected_old = parts
                 .get(2)
-                .map(|target| SymrefOldExpectation::MustTarget((*target).to_owned()));
+                .map(|target| SymrefOldExpectation::Target((*target).to_owned()));
             let op = BatchOp::DeleteSymref {
                 refname: parts[1].to_owned(),
                 expected_old,
@@ -917,8 +914,8 @@ fn process_batch_command(
             }
             let expected_old = parts
                 .get(2)
-                .map(|target| SymrefOldExpectation::MustTarget((*target).to_owned()))
-                .unwrap_or(SymrefOldExpectation::MustNotExist);
+                .map(|target| SymrefOldExpectation::Target((*target).to_owned()))
+                .unwrap_or(SymrefOldExpectation::Absent);
             let op = BatchOp::VerifySymref {
                 refname: parts[1].to_owned(),
                 expected_old,
@@ -963,7 +960,7 @@ fn process_batch_command(
                 bail!("no transaction started");
             }
 
-            let drained: Vec<(bool, BatchOp)> = staged.drain(..).collect();
+            let drained: Vec<(bool, BatchOp)> = std::mem::take(staged);
             let hook_updates = hook_updates_for_ops(&drained)?;
             verify_batch_staged(repo, &drained)?;
             if !*transaction_prepared {
@@ -1547,9 +1544,9 @@ fn hook_updates_for_ops(ops: &[(bool, BatchOp)]) -> Result<Vec<HookUpdate>> {
 
 fn symref_old_for_hook(expected_old: Option<SymrefOldExpectation>) -> String {
     match expected_old {
-        None | Some(SymrefOldExpectation::MustNotExist) => zero_oid_hex().to_owned(),
-        Some(SymrefOldExpectation::MustTarget(target)) => format!("ref:{target}"),
-        Some(SymrefOldExpectation::MustOid(oid)) => oid.to_hex(),
+        None | Some(SymrefOldExpectation::Absent) => zero_oid_hex().to_owned(),
+        Some(SymrefOldExpectation::Target(target)) => format!("ref:{target}"),
+        Some(SymrefOldExpectation::Oid(oid)) => oid.to_hex(),
     }
 }
 
@@ -1715,14 +1712,14 @@ fn verify_symref_expected_old(
     expected: SymrefOldExpectation,
 ) -> Result<()> {
     match expected {
-        SymrefOldExpectation::MustNotExist => {
+        SymrefOldExpectation::Absent => {
             if ref_exists_no_deref(repo, refname)? {
                 return Err(anyhow::Error::from(GritError::Message(format!(
                     "fatal: cannot lock ref '{refname}': reference already exists"
                 ))));
             }
         }
-        SymrefOldExpectation::MustTarget(target) => {
+        SymrefOldExpectation::Target(target) => {
             let current = read_symbolic_ref_no_deref(repo, refname)?;
             match current {
                 None => {
@@ -1738,7 +1735,7 @@ fn verify_symref_expected_old(
                 Some(_) => {}
             }
         }
-        SymrefOldExpectation::MustOid(oid) => {
+        SymrefOldExpectation::Oid(oid) => {
             let current = resolve_ref(&repo.git_dir, refname).ok();
             match current {
                 None => {

@@ -74,7 +74,7 @@ pub fn run(args: Args) -> Result<()> {
             refname: name.to_owned(),
             deletes_ref: true,
         };
-        run_ref_transaction_prepare(&repo, &[hook_update.clone()])?;
+        run_ref_transaction_prepare(&repo, std::slice::from_ref(&hook_update))?;
         delete_loose_ref(&repo.git_dir, name)?;
         run_ref_transaction_committed(&repo, &[hook_update]);
         return Ok(());
@@ -119,7 +119,7 @@ pub fn run(args: Args) -> Result<()> {
                 refname: name.to_owned(),
                 deletes_ref: false,
             };
-            run_ref_transaction_prepare(&repo, &[hook_update.clone()])?;
+            run_ref_transaction_prepare(&repo, std::slice::from_ref(&hook_update))?;
             write_symbolic_ref(&repo.git_dir, name, target)?;
             run_ref_transaction_committed(&repo, &[hook_update]);
             if let Some(message) = args.message.as_deref() {

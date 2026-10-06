@@ -202,7 +202,7 @@ fn apply_url_instead_of(config: &ConfigSet, url: &str) -> String {
         };
         if url == short {
             let len = long.len();
-            if best.as_ref().map_or(true, |(l, _)| len > *l) {
+            if best.as_ref().is_none_or(|(l, _)| len > *l) {
                 best = Some((len, long.to_owned()));
             }
         }
@@ -535,25 +535,23 @@ fn cmd_remove(rest: &[String]) -> Result<()> {
     let all_refs = refs::list_refs(&git_dir, "refs/")?;
     for (refname, _) in &all_refs {
         let mut mapped_src: Option<String> = None;
-        if remote_find_tracking_src(&remote, refname, &mut mapped_src).is_ok() {
-            if mapped_src.is_some() {
-                let mut keep = false;
-                for o in &others {
-                    let mut s2: Option<String> = None;
-                    let r2 = build_remote_stub(&config, o);
-                    if remote_find_tracking_src(&r2, refname, &mut s2).is_ok() && s2.is_some() {
-                        keep = true;
-                        break;
-                    }
+        if remote_find_tracking_src(&remote, refname, &mut mapped_src).is_ok()
+            && mapped_src.is_some()
+        {
+            let mut keep = false;
+            for o in &others {
+                let mut s2: Option<String> = None;
+                let r2 = build_remote_stub(&config, o);
+                if remote_find_tracking_src(&r2, refname, &mut s2).is_ok() && s2.is_some() {
+                    keep = true;
+                    break;
                 }
-                if !keep {
-                    if refname.starts_with("refs/remotes/") {
-                        to_delete.push(refname.clone());
-                    } else if refname.starts_with("refs/heads/") {
-                        if let Some(short) = refname.strip_prefix("refs/heads/") {
-                            skipped_branch_names.insert(short.to_owned());
-                        }
-                    }
+            }
+            if !keep {
+                if refname.starts_with("refs/remotes/") {
+                    to_delete.push(refname.clone());
+                } else if let Some(short) = refname.strip_prefix("refs/heads/") {
+                    skipped_branch_names.insert(short.to_owned());
                 }
             }
         }
@@ -2005,8 +2003,6 @@ fn merge_remote_branch_status(listed: &mut Vec<(String, String)>) {
             2
         } else if s.contains("new (next fetch") {
             1
-        } else if s == "skipped" {
-            0
         } else {
             0
         }

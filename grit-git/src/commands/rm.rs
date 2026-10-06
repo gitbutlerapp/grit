@@ -705,14 +705,13 @@ fn rm_entry_matches_sparse_worktree(
     if entry.skip_worktree() {
         return false;
     }
-    let in_sparse = if patterns.is_empty() {
+    if patterns.is_empty() {
         true
     } else if cone_cfg {
         path_in_sparse_checkout_patterns(path, patterns, true)
     } else {
         path_in_sparse_checkout_lines(path, patterns, work_tree)
-    };
-    in_sparse
+    }
 }
 
 fn collect_sparse_placeholder_outputs_for_pathspec_list(

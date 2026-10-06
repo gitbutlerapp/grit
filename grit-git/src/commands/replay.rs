@@ -288,9 +288,11 @@ pub fn run(args: Args) -> Result<()> {
         bail!("fatal: need some commits to replay");
     }
 
-    let mut rev_opts = RevListOptions::default();
-    rev_opts.ordering = OrderingMode::Topo;
-    rev_opts.reverse = true;
+    let mut rev_opts = RevListOptions {
+        ordering: OrderingMode::Topo,
+        reverse: true,
+        ..Default::default()
+    };
     if let Some(ap) = parsed.ancestry_path.as_deref() {
         rev_opts.ancestry_path = true;
         let bottom = resolve_revision_as_commit(&repo, ap).map_err(|e| {
@@ -479,7 +481,7 @@ pub fn run(args: Args) -> Result<()> {
 ///
 /// Uses merge-ort directory-rename preprocess then [`merge_trees_for_replay`] with directory
 /// renames disabled inside the engine (t3401, t6429 part 2).
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn merge_trees_for_single_cherry_pick(
     repo: &Repository,
     base_tree: ObjectId,
@@ -1227,19 +1229,17 @@ fn detect_side_renames(
                     });
                 }
             }
-            (Some(be), Some(se)) => {
-                if rename_sources.contains(path) && be.oid != se.oid {
-                    diff_entries.push(DiffEntry {
-                        status: DiffStatus::Deleted,
-                        old_path: Some(path_str),
-                        new_path: None,
-                        old_mode: format!("{:06o}", be.mode),
-                        new_mode: String::new(),
-                        old_oid: be.oid,
-                        new_oid: zero_oid,
-                        score: None,
-                    });
-                }
+            (Some(be), Some(se)) if rename_sources.contains(path) && be.oid != se.oid => {
+                diff_entries.push(DiffEntry {
+                    status: DiffStatus::Deleted,
+                    old_path: Some(path_str),
+                    new_path: None,
+                    old_mode: format!("{:06o}", be.mode),
+                    new_mode: String::new(),
+                    old_oid: be.oid,
+                    new_oid: zero_oid,
+                    score: None,
+                });
             }
             _ => {}
         }

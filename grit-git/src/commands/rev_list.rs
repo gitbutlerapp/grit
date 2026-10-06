@@ -265,7 +265,7 @@ fn object_kind_for_tree_mode(mode: u32) -> ObjectKind {
 
 fn quote_missing_info_path(path: &str) -> String {
     let quoted = quote_c_style(path, true);
-    if quoted == path && path.as_bytes().iter().any(|&b| b == b' ') {
+    if quoted == path && path.as_bytes().contains(&b' ') {
         format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
     } else {
         quoted
@@ -1875,6 +1875,7 @@ fn rev_list_reflog_transition_touches_paths(
     tree_diff_touches(old_tree, &new_commit.tree)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_rev_list_reflog_walk(
     repo: &Repository,
     revision_specs: &[String],
@@ -2001,7 +2002,7 @@ fn run_rev_list_reflog_walk(
         }
 
         if show_parents {
-            let parents = commit_parents_for_output(&repo, entry.new_oid, &graft_parents)?;
+            let parents = commit_parents_for_output(repo, entry.new_oid, &graft_parents)?;
             if parents.is_empty() {
                 writeln!(out, "{}", entry.new_oid.to_hex())?;
             } else {

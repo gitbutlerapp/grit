@@ -316,9 +316,7 @@ pub fn run(args: Args) -> Result<()> {
             Some(pkt_line::Packet::Data(line)) => {
                 if line == "done" {
                     saw_negotiation = true;
-                    if !last_hex.is_empty() && multi_ack_detailed {
-                        pkt_line::write_line(&mut out, &format!("ACK {last_hex}"))?;
-                    } else if got_common {
+                    if (!last_hex.is_empty() && multi_ack_detailed) || got_common {
                         pkt_line::write_line(&mut out, &format!("ACK {last_hex}"))?;
                     } else {
                         pkt_line::write_line(&mut out, "NAK")?;

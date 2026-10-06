@@ -1305,9 +1305,7 @@ fn do_stash_patch_push(
                     }
                     "a" | "A" => {
                         any_hunk_marked_stash = true;
-                        for j in hunk_cursor..n_hunks {
-                            accepted[j] = true;
-                        }
+                        accepted[hunk_cursor..n_hunks].fill(true);
                         break 'hunk_loop;
                     }
                     "d" | "D" => {
@@ -1553,7 +1551,6 @@ pub(crate) fn partial_unified_for_op_range(
 /// within the slice merge into one `@@` hunk when their unchanged gap is `<= 2*context + inter`
 /// lines. Used by `reset`/`commit`/`stash`/`checkout`/`restore` `-p` when `-U`/`--inter-hunk-context`
 /// are given (t3701 "<cmd> accepts -U and --inter-hunk-context").
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn partial_unified_for_op_range_interhunk(
     path: &str,
     head_bytes: &[u8],
@@ -1696,9 +1693,7 @@ pub(crate) fn edit_bytes_tempfile(content: &[u8]) -> Result<Vec<u8>> {
         .or_else(|| std::env::var("VISUAL").ok().filter(|e| effective_editor(e)))
         .or_else(|| std::env::var("EDITOR").ok().filter(|e| effective_editor(e)))
         .unwrap_or_else(|| {
-            if visual_present || editor_present {
-                "true".to_owned()
-            } else if !std::io::stdin().is_terminal() {
+            if visual_present || editor_present || !std::io::stdin().is_terminal() {
                 "true".to_owned()
             } else {
                 "vi".to_owned()
@@ -1718,6 +1713,7 @@ pub(crate) fn edit_bytes_tempfile(content: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Push with pathspec: only stash specific files.
+#[expect(clippy::too_many_arguments)]
 fn do_push_pathspec(
     repo: &Repository,
     work_tree: &Path,
@@ -2512,14 +2508,9 @@ fn do_list(extra_args: Vec<String>) -> Result<()> {
     let repo = Repository::discover(None).context("not a git repository")?;
     let entries = read_reflog(&repo.git_dir, "refs/stash")?;
     let n_entries = entries.len();
-    let mut shown = 0usize;
+    let limit = parsed.max_count.unwrap_or(usize::MAX);
 
-    for (i, entry) in entries.iter().rev().enumerate() {
-        if let Some(limit) = parsed.max_count {
-            if shown >= limit {
-                break;
-            }
-        }
+    for (i, entry) in entries.iter().rev().enumerate().take(limit) {
         if parsed.format_gd_only {
             println!("stash@{{{i}}}");
         } else {
@@ -2534,7 +2525,6 @@ fn do_list(extra_args: Vec<String>) -> Result<()> {
                 show_stash_diff(&repo, &stash_oid, true, false)?;
             }
         }
-        shown += 1;
     }
 
     let _ = n_entries;
@@ -3886,6 +3876,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 /// Create a stash commit and return its OID (does NOT update refs/stash).
+#[expect(clippy::too_many_arguments)]
 fn create_stash_commit(
     repo: &Repository,
     head: &HeadState,
@@ -4544,6 +4535,7 @@ fn find_untracked_for_stash(
     Ok(out)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn walk_stash_untracked(
     dir: &Path,
     work_tree: &Path,
@@ -4801,52 +4793,49 @@ fn create_worktree_tree(
         let file_path = work_tree.join(&fe.path);
         let path_bytes = fe.path.as_bytes();
         let flags = path_bytes.len().min(0xFFF) as u16;
-        match fs::symlink_metadata(&file_path) {
-            Ok(meta) => {
-                if meta.is_symlink() {
-                    let target = fs::read_link(&file_path)?;
-                    let target_bytes = target.to_string_lossy().into_owned().into_bytes();
-                    let oid = odb.write(ObjectKind::Blob, &target_bytes)?;
-                    temp_index.add_or_replace(IndexEntry {
-                        ctime_sec: 0,
-                        ctime_nsec: 0,
-                        mtime_sec: 0,
-                        mtime_nsec: 0,
-                        dev: 0,
-                        ino: 0,
-                        mode: MODE_SYMLINK,
-                        uid: 0,
-                        gid: 0,
-                        size: 0,
-                        oid,
-                        flags,
-                        flags_extended: None,
-                        path: path_bytes.to_vec(),
-                        base_index_pos: 0,
-                    });
-                } else if meta.is_file() {
-                    let data = fs::read(&file_path)?;
-                    let oid = odb.write(ObjectKind::Blob, &data)?;
-                    temp_index.add_or_replace(IndexEntry {
-                        ctime_sec: 0,
-                        ctime_nsec: 0,
-                        mtime_sec: 0,
-                        mtime_nsec: 0,
-                        dev: 0,
-                        ino: 0,
-                        mode: mode_from_metadata(&meta),
-                        uid: 0,
-                        gid: 0,
-                        size: 0,
-                        oid,
-                        flags,
-                        flags_extended: None,
-                        path: path_bytes.to_vec(),
-                        base_index_pos: 0,
-                    });
-                }
+        if let Ok(meta) = fs::symlink_metadata(&file_path) {
+            if meta.is_symlink() {
+                let target = fs::read_link(&file_path)?;
+                let target_bytes = target.to_string_lossy().into_owned().into_bytes();
+                let oid = odb.write(ObjectKind::Blob, &target_bytes)?;
+                temp_index.add_or_replace(IndexEntry {
+                    ctime_sec: 0,
+                    ctime_nsec: 0,
+                    mtime_sec: 0,
+                    mtime_nsec: 0,
+                    dev: 0,
+                    ino: 0,
+                    mode: MODE_SYMLINK,
+                    uid: 0,
+                    gid: 0,
+                    size: 0,
+                    oid,
+                    flags,
+                    flags_extended: None,
+                    path: path_bytes.to_vec(),
+                    base_index_pos: 0,
+                });
+            } else if meta.is_file() {
+                let data = fs::read(&file_path)?;
+                let oid = odb.write(ObjectKind::Blob, &data)?;
+                temp_index.add_or_replace(IndexEntry {
+                    ctime_sec: 0,
+                    ctime_nsec: 0,
+                    mtime_sec: 0,
+                    mtime_nsec: 0,
+                    dev: 0,
+                    ino: 0,
+                    mode: mode_from_metadata(&meta),
+                    uid: 0,
+                    gid: 0,
+                    size: 0,
+                    oid,
+                    flags,
+                    flags_extended: None,
+                    path: path_bytes.to_vec(),
+                    base_index_pos: 0,
+                });
             }
-            Err(_) => {}
         }
     }
 
@@ -4924,34 +4913,9 @@ fn create_worktree_tree(
                 if entry.skip_worktree() {
                     continue;
                 }
-                // File not found OR path component is not a directory.
-                // Check if a file exists at a parent path (type change: dir->file).
-                // Walk up the path to find which component is now a file.
-                let path_path = std::path::Path::new(&path_str);
-                let parts: Vec<_> = path_path.components().collect();
-                let mut found_file_at_dir = false;
-                let mut cur = String::new();
-                for (i, comp) in parts.iter().enumerate() {
-                    if i > 0 { cur.push('/'); }
-                    cur.push_str(&comp.as_os_str().to_string_lossy());
-                    if i + 1 < parts.len() {
-                        // This is a directory component - check if it's a file
-                        let cur_path = work_tree.join(&cur);
-                        if let Ok(m) = fs::symlink_metadata(&cur_path) {
-                            if !m.is_dir() {
-                                // A file exists where a directory is expected
-                                // Only add if not already handled
-                                found_file_at_dir = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if !found_file_at_dir {
-                    entry.oid = ObjectId::from_hex("0000000000000000000000000000000000000000")?;
-                } else {
-                    entry.oid = ObjectId::from_hex("0000000000000000000000000000000000000000")?;
-                }
+                // File not found OR path component is not a directory (e.g. a dir->file type
+                // change at a parent path): either way the path is recorded as removed.
+                entry.oid = ObjectId::from_hex("0000000000000000000000000000000000000000")?;
             }
             Err(e) => return Err(e.into()),
         }
@@ -5004,7 +4968,7 @@ fn create_worktree_tree(
         let file_path = work_tree.join(&path_str);
         if file_path.is_dir() {
             // Capture all files under this directory
-            capture_dir_as_entries(odb, work_tree, &path_str, &file_path, &mut extra_entries)?;
+            capture_dir_as_entries(odb, &path_str, &file_path, &mut extra_entries)?;
         }
     }
 
@@ -5022,7 +4986,6 @@ fn create_worktree_tree(
 /// Recursively capture all files under `dir_path` as stash index entries.
 fn capture_dir_as_entries(
     odb: &grit_lib::odb::Odb,
-    work_tree: &Path,
     prefix: &str,
     dir_path: &Path,
     extra: &mut Vec<IndexEntry>,
@@ -5041,7 +5004,7 @@ fn capture_dir_as_entries(
             Err(_) => continue,
         };
         if meta.is_dir() {
-            capture_dir_as_entries(odb, work_tree, &rel_path, &abs_path, extra)?;
+            capture_dir_as_entries(odb, &rel_path, &abs_path, extra)?;
         } else if meta.is_file() {
             if let Ok(data) = std::fs::read(&abs_path) {
                 let oid = odb.write(grit_lib::objects::ObjectKind::Blob, &data)?;

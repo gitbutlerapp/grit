@@ -593,13 +593,13 @@ fn cmd_add(args: AddArgs) -> Result<()> {
     let config = ConfigSet::load(Some(&common), true).unwrap_or_default();
     let default_remote = config.get("checkout.defaultRemote");
     let mut guess_remote = args.guess_remote;
-    if !args.no_guess_remote && !guess_remote {
-        if config
+    if !args.no_guess_remote
+        && !guess_remote
+        && config
             .get("worktree.guessRemote")
             .is_some_and(|v| v == "true")
-        {
-            guess_remote = true;
-        }
+    {
+        guess_remote = true;
     }
 
     // Determine the absolute path for the new worktree
@@ -1094,7 +1094,7 @@ fn setup_unborn_worktree(
 
     let gitdir_content = format!("{}\n", wt_path.join(".git").display());
     fs::write(wt_admin.join("gitdir"), &gitdir_content)?;
-    let commondir_rel = make_relative_path(&wt_admin, &common);
+    let commondir_rel = make_relative_path(wt_admin, common);
     fs::write(
         wt_admin.join("commondir"),
         format!("{}\n", commondir_rel.display()),

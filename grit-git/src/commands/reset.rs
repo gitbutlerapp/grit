@@ -1154,9 +1154,7 @@ fn reset_patch(
                     hunk_cursor += 1;
                 }
                 "a" | "A" => {
-                    for j in hunk_cursor..n_hunks {
-                        accepted[j] = true;
-                    }
+                    accepted[hunk_cursor..n_hunks].fill(true);
                     break 'hunk_loop;
                 }
                 "d" | "D" => {
@@ -1586,6 +1584,7 @@ fn refresh_stage0_index_stats_from_worktree(index: &mut Index, work_tree: &Path)
 }
 
 /// Reset HEAD (and optionally index + working tree) to the given commit.
+#[expect(clippy::too_many_arguments)]
 fn reset_commit(
     repo: &Repository,
     commit_spec: &str,
@@ -1618,7 +1617,7 @@ fn reset_commit(
 
     let target_oid = match resolve_to_commit(repo, commit_spec) {
         Ok(oid) => oid,
-        Err(e) if head.oid().is_none() && !head_was_implicit => {
+        Err(_e) if head.oid().is_none() && !head_was_implicit => {
             // Explicit HEAD on unborn branch: error like Git C
             bail!(
                 "fatal: ambiguous argument '{}': unknown revision or path not in the working tree.\n\
@@ -2473,12 +2472,13 @@ fn check_keep_safety(
                     if is_dir && worktree_dir_is_empty_for_new_gitlink(&abs_path) {
                         continue;
                     }
-                    if is_dir && head_tracked_directory_prefix(path, &head_map) {
-                        if gitlink_replaces_clean_tracked_directory(
+                    if is_dir
+                        && head_tracked_directory_prefix(path, &head_map)
+                        && gitlink_replaces_clean_tracked_directory(
                             repo, &work_tree, path, &head_map, &index_map,
-                        )? {
-                            continue;
-                        }
+                        )?
+                    {
+                        continue;
                     }
                     let is_untracked_plain_file = std::fs::symlink_metadata(&abs_path)
                         .map(|m| m.file_type().is_file())
@@ -3257,7 +3257,7 @@ fn checkout_index_to_worktree(
     // Sort by descending path length so nested files are removed before parent directories
     // (HashSet iteration order is unspecified; wrong order can leave stale files on disk).
     let mut to_drop: Vec<Vec<u8>> = old_paths.difference(&new_paths).cloned().collect();
-    to_drop.sort_by(|a, b| b.len().cmp(&a.len()));
+    to_drop.sort_by_key(|p| std::cmp::Reverse(p.len()));
     for old_path in &to_drop {
         let rel = String::from_utf8_lossy(old_path).into_owned();
         if grit_lib::worktree_cwd::cwd_would_be_removed_with_repo_path(&work_tree, &rel) {
@@ -3301,7 +3301,7 @@ fn checkout_index_to_worktree(
         .filter(|p| !new_paths.contains(p.as_slice()))
         .cloned()
         .collect();
-    unmerged_drop.sort_by(|a, b| b.len().cmp(&a.len()));
+    unmerged_drop.sort_by_key(|p| std::cmp::Reverse(p.len()));
     for path in &unmerged_drop {
         let rel = String::from_utf8_lossy(path).into_owned();
         if grit_lib::worktree_cwd::cwd_would_be_removed_with_repo_path(&work_tree, &rel) {
