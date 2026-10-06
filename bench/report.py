@@ -17,9 +17,10 @@ SCALE_FILES = {"S": 100, "M": 1000, "L": 10000, "H": 500}
 
 def is_grit_command(command: str) -> bool:
     """True if hyperfine command invokes grit-git or the grit CLI binary."""
-    if "/grit-git " in command or command.startswith("grit-git "):
+    cmd = command.strip()
+    if cmd == "grit-git" or "/grit-git" in cmd or cmd.startswith("grit-git "):
         return True
-    if "/grit " in command or command.startswith("grit "):
+    if cmd == "grit" or "/grit " in cmd or cmd.startswith("grit "):
         return True
     return False
 
