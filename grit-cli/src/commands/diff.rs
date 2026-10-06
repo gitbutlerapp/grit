@@ -245,8 +245,8 @@ fn gitlink_line(oid: &ObjectId, dirty_suffix: Option<&str>) -> String {
     format!("Subproject commit {}{suffix}\n", oid.to_hex())
 }
 
-/// Resolve the worktree-side gitlink line, including `-dirty` when HEAD matches the tree gitlink
-/// but the submodule work tree has local changes (Git `diff` / `--submodule` parity).
+/// Resolve the worktree-side gitlink line, including `-dirty` when the submodule has modified
+/// tracked content (Git patch / `--submodule` parity), including when HEAD moved ahead of the tree.
 fn gitlink_new_line(e: &DiffEntry, work_tree: Option<&Path>) -> String {
     let path = e.new_path.as_deref().or(e.old_path.as_deref());
     let resolved = if e.new_oid != ObjectId::zero() {
@@ -259,15 +259,10 @@ fn gitlink_new_line(e: &DiffEntry, work_tree: Option<&Path>) -> String {
     if resolved == ObjectId::zero() {
         return String::new();
     }
-    let dirty = e.new_oid == ObjectId::zero()
-        && e.old_mode == "160000"
+    let dirty = e.old_mode == "160000"
         && e.new_mode == "160000"
-        && e.old_oid == resolved
         && work_tree.is_some_and(|wt| {
-            path.is_some_and(|p| {
-                let flags = submodule_porcelain_flags(wt, p, e.old_oid);
-                flags.modified || flags.untracked
-            })
+            path.is_some_and(|p| submodule_porcelain_flags(wt, p, e.old_oid).modified)
         });
     gitlink_line(&resolved, if dirty { Some("-dirty") } else { None })
 }

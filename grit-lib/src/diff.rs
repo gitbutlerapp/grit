@@ -2778,9 +2778,11 @@ pub fn diff_tree_to_worktree(
                         submodule_worktree_is_unpopulated_placeholder(&sub_dir)
                     };
                     let index_matches_tree = index_gitlink_oid.is_some_and(|oid| oid == te.oid);
-                    let dirty_while_aligned = index_matches_tree
-                        && ref_matches
-                        && submodule_has_dirty_worktree_for_super_diff(work_tree, path, &te.oid);
+                    // Default tree↔worktree diff matches Git: untracked-only paths inside a
+                    // checked-out submodule do not make the gitlink differ (see `git diff <tree>`).
+                    let sub_flags = submodule_porcelain_flags(work_tree, path, te.oid);
+                    let dirty_while_aligned =
+                        index_matches_tree && ref_matches && sub_flags.modified;
                     if !ref_matches || dirty_while_aligned {
                         // Raw `git diff <tree>` lines use a null OID on the worktree side when the
                         // checked-out submodule HEAD differs from the tree's gitlink; patch output
@@ -5872,17 +5874,6 @@ pub fn submodule_head_object_broken(sub_dir: &Path) -> bool {
     }
 }
 
-/// True when a checked-out submodule at `rel_path` has modified or untracked content relative to
-/// the gitlink `recorded_oid` stored in the superproject (used for `git diff <tree>` parity).
-fn submodule_has_dirty_worktree_for_super_diff(
-    super_worktree: &Path,
-    rel_path: &str,
-    recorded_oid: &ObjectId,
-) -> bool {
-    let flags = submodule_porcelain_flags(super_worktree, rel_path, *recorded_oid);
-    flags.modified || flags.untracked
-}
-
 /// Submodule dirty bits aligned with Git's `DIRTY_SUBMODULE_*` / porcelain v2 `S???` token.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SubmodulePorcelainFlags {
@@ -6315,6 +6306,82 @@ mod gitlink_tree_worktree_tests {
         assert!(
             entries.is_empty(),
             "clean uninitialized gitlink should not appear in tree→worktree diff: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn untracked_only_in_checked_out_submodule_produces_no_diff_entry() {
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let work_tree = dir.path();
+        fs::create_dir(work_tree.join("sub")).expect("sub dir");
+
+        let repo = init_repository(work_tree, false, "main", None, "files").expect("init");
+        let sub = work_tree.join("sub");
+        for args in [
+            &["init", "-q"][..],
+            &["config", "user.name", "T"][..],
+            &["config", "user.email", "t@e.com"][..],
+        ] {
+            let status = Command::new("git")
+                .current_dir(&sub)
+                .args(args)
+                .status()
+                .expect("git");
+            assert!(status.success(), "git {args:?} failed");
+        }
+        fs::write(sub.join("tracked.txt"), b"v1\n").expect("write");
+        for args in [&["add", "tracked.txt"][..], &["commit", "-qm", "sub"][..]] {
+            let status = Command::new("git")
+                .current_dir(&sub)
+                .args(args)
+                .status()
+                .expect("git");
+            assert!(status.success());
+        }
+        let head_out = Command::new("git")
+            .current_dir(&sub)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        let gitlink = std::str::from_utf8(&head_out.stdout)
+            .expect("utf8")
+            .trim()
+            .parse::<ObjectId>()
+            .expect("oid");
+
+        let tree_oid = repo
+            .odb
+            .write(ObjectKind::Tree, &encode_tree_gitlink("sub", &gitlink))
+            .expect("tree");
+        let path = b"sub".to_vec();
+        let mut index = Index::new();
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_GITLINK,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: gitlink,
+            flags: (path.len().min(0xfff)) as u16,
+            flags_extended: None,
+            path,
+            base_index_pos: 0,
+        });
+
+        fs::write(sub.join("untracked.txt"), b"extra\n").expect("untracked");
+
+        let entries = diff_tree_to_worktree(&repo.odb, Some(&tree_oid), work_tree, &index)
+            .expect("diff_tree_to_worktree");
+        assert!(
+            entries.is_empty(),
+            "untracked-only submodule dirt must not appear in default tree→worktree diff: {entries:?}"
         );
     }
 }

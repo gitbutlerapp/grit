@@ -459,3 +459,77 @@ fn diff_dirty_initialized_submodule_shows_dirty_suffix() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn diff_untracked_only_inside_submodule_is_empty() -> TestResult {
+    let scratch = Scratch::new("gitlink-untracked-only")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "commit.gpgsign", "false"])?;
+
+    let sub_oid = init_checked_out_submodule(&repo, "sub")?;
+    git_ok(
+        &repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{sub_oid},sub"),
+        ],
+    )?;
+    gs_ok(&repo, ["commit", "-m", "gitlink"])?;
+
+    write_file(&repo.join("sub/untracked.txt"), "not in sub index\n")?;
+    let diff = gs(&repo, ["diff"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        !diff.stdout.contains("Subproject commit"),
+        "untracked-only submodule content must not produce a gitlink hunk:\n{}",
+        diff.dump()
+    );
+    Ok(())
+}
+
+#[test]
+fn diff_moved_submodule_head_with_tracked_dirt_shows_dirty_suffix() -> TestResult {
+    let scratch = Scratch::new("gitlink-moved-dirty")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "commit.gpgsign", "false"])?;
+
+    let sub_oid_a = init_checked_out_submodule(&repo, "sub")?;
+    git_ok(
+        &repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{sub_oid_a},sub"),
+        ],
+    )?;
+    gs_ok(&repo, ["commit", "-m", "gitlink at A"])?;
+
+    let sub = repo.join("sub");
+    write_file(&sub.join("tracked.txt"), "v2\n")?;
+    git_ok(&sub, &["add", "tracked.txt"])?;
+    git_ok(&sub, &["commit", "-qm", "advance to B"])?;
+    let sub_oid_b = git_head(&sub)?;
+    assert_ne!(sub_oid_a, sub_oid_b);
+
+    write_file(&sub.join("tracked.txt"), "v2 dirty\n")?;
+    let diff = gs(&repo, ["diff"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        diff.stdout.contains("-dirty"),
+        "tracked dirt with advanced HEAD should suffix the plus line:\n{}",
+        diff.dump()
+    );
+    assert!(
+        diff.stdout.contains(&sub_oid_b),
+        "plus line should use the checked-out HEAD commit:\n{}",
+        diff.dump()
+    );
+    Ok(())
+}
