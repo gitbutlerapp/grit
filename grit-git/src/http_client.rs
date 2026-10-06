@@ -32,13 +32,14 @@ pub struct HttpClientContext {
     credential_use_http_path: bool,
     credential_username: Option<String>,
     cookies: Vec<CookieSpec>,
+    host_only_cookie_domain: Arc<Mutex<Option<String>>>,
     cookie_file_path: Option<PathBuf>,
     save_cookies: bool,
     extra_headers: Vec<ExtraHeaderRule>,
     smart_http_enabled: bool,
     proactive_auth: ProactiveAuth,
     empty_auth: bool,
-    auth_cache: Arc<Mutex<Option<AuthCredentials>>>,
+    auth_cache: Arc<Mutex<Option<CachedAuth>>>,
 }
 
 #[derive(Clone)]
@@ -82,6 +83,19 @@ struct CookieSpec {
     path: Option<String>,
     secure: bool,
     expires_at: Option<i64>,
+}
+
+#[derive(Clone)]
+struct CachedAuth {
+    scope: AuthScope,
+    credentials: AuthCredentials,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AuthScope {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,20 +146,17 @@ fn ensure_supported_proxy_auth_method(method: &ProxyAuthMethod, proxy_url: &Url)
 }
 
 impl CookieSpec {
-    fn matches_url(&self, url: Option<&Url>) -> bool {
+    fn matches_url(&self, url: &Url, host_only_domain: Option<&str>) -> bool {
         if self.is_expired() {
             return false;
         }
-        let Some(url) = url else {
-            return self.domain.is_none() && self.path.is_none() && !self.secure;
-        };
         if self.secure && url.scheme() != "https" {
             return false;
         }
+        let Some(host) = url.host_str().map(str::to_ascii_lowercase) else {
+            return false;
+        };
         if let Some(domain) = self.domain.as_deref() {
-            let Some(host) = url.host_str() else {
-                return false;
-            };
             if self.include_subdomains {
                 if host != domain && !host.ends_with(&format!(".{domain}")) {
                     return false;
@@ -153,6 +164,8 @@ impl CookieSpec {
             } else if host != domain {
                 return false;
             }
+        } else if host_only_domain != Some(host.as_str()) {
+            return false;
         }
         if let Some(path) = self.path.as_deref() {
             if !url.path().starts_with(path) {
@@ -165,6 +178,17 @@ impl CookieSpec {
     fn is_expired(&self) -> bool {
         self.expires_at
             .is_some_and(|expiry| time::OffsetDateTime::now_utc().unix_timestamp() >= expiry)
+    }
+}
+
+impl AuthScope {
+    fn from_url(url: &str) -> Option<Self> {
+        let parsed = Url::parse(url).ok()?;
+        Some(Self {
+            scheme: parsed.scheme().to_ascii_lowercase(),
+            host: parsed.host_str()?.to_ascii_lowercase(),
+            port: parsed.port_or_known_default(),
+        })
     }
 }
 
@@ -284,6 +308,7 @@ impl HttpClientContext {
             credential_use_http_path,
             credential_username,
             cookies,
+            host_only_cookie_domain: Arc::new(Mutex::new(None)),
             cookie_file_path,
             save_cookies,
             extra_headers,
@@ -358,7 +383,7 @@ impl HttpClientContext {
         self.trace_cookie_header(cookie_header.as_deref());
         let extra_headers = self.extra_headers_for_url(url);
         self.trace_extra_headers(&extra_headers);
-        let request_auth = match self.cached_authorization_header() {
+        let request_auth = match self.cached_authorization_header(url) {
             Some(header) => Some(header),
             None => self.proactive_authorization_header(url)?,
         };
@@ -417,7 +442,7 @@ impl HttpClientContext {
                 }
                 let approve_extras = next_auth.credential_extras();
                 let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-                self.store_cached_auth(next_auth);
+                self.store_cached_auth(url, next_auth);
                 return Ok(retry2);
             }
         }
@@ -428,7 +453,7 @@ impl HttpClientContext {
         }
         let approve_extras = auth.credential_extras();
         let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-        self.store_cached_auth(auth);
+        self.store_cached_auth(url, auth);
         Ok(retry)
     }
 
@@ -484,7 +509,7 @@ impl HttpClientContext {
         }
         self.trace_rpc_post_size(url, payload.len(), chunked);
 
-        let request_auth = match self.cached_authorization_header() {
+        let request_auth = match self.cached_authorization_header(url) {
             Some(header) => Some(header),
             None => self.proactive_authorization_header(url)?,
         };
@@ -569,7 +594,7 @@ impl HttpClientContext {
                 }
                 let approve_extras = next_auth.credential_extras();
                 let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-                self.store_cached_auth(next_auth);
+                self.store_cached_auth(url, next_auth);
                 return Ok(retry2.body);
             }
         }
@@ -580,7 +605,7 @@ impl HttpClientContext {
         }
         let approve_extras = auth.credential_extras();
         let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-        self.store_cached_auth(auth);
+        self.store_cached_auth(url, auth);
         Ok(retry.body)
     }
 
@@ -758,28 +783,42 @@ impl HttpClientContext {
         }
     }
 
-    fn cached_authorization_header(&self) -> Option<String> {
+    fn cached_authorization_header(&self, url: &str) -> Option<String> {
+        let scope = AuthScope::from_url(url)?;
         let guard = self
             .auth_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.as_ref().map(AuthCredentials::authorization_header)
+        guard
+            .as_ref()
+            .filter(|cached| cached.scope == scope)
+            .map(|cached| cached.credentials.authorization_header())
     }
 
-    fn cached_auth_credentials(&self) -> Option<AuthCredentials> {
+    fn cached_auth_credentials(&self, url: &str) -> Option<AuthCredentials> {
+        let scope = AuthScope::from_url(url)?;
         let guard = self
             .auth_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.clone()
+        guard
+            .as_ref()
+            .filter(|cached| cached.scope == scope)
+            .map(|cached| cached.credentials.clone())
     }
 
-    fn store_cached_auth(&self, auth: AuthCredentials) {
+    fn store_cached_auth(&self, url: &str, auth: AuthCredentials) {
+        let Some(scope) = AuthScope::from_url(url) else {
+            return;
+        };
         let mut guard = self
             .auth_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *guard = Some(auth);
+        *guard = Some(CachedAuth {
+            scope,
+            credentials: auth,
+        });
     }
 
     fn clear_cached_auth(&self) {
@@ -791,7 +830,7 @@ impl HttpClientContext {
     }
 
     fn approve_cached_auth_for_url(&self, url: &str) {
-        let Some(auth) = self.cached_auth_credentials() else {
+        let Some(auth) = self.cached_auth_credentials(url) else {
             return;
         };
         let Ok(mut credential_input) = self.credential_input_for_url(url) else {
@@ -828,7 +867,7 @@ impl HttpClientContext {
         }
         let header = auth.authorization_header();
         self.trace_auth_header(&header);
-        self.store_cached_auth(auth);
+        self.store_cached_auth(url, auth);
         Ok(Some(header))
     }
 
@@ -1096,14 +1135,30 @@ impl HttpClientContext {
         if self.cookies.is_empty() {
             return None;
         }
-        let parsed = Url::parse(url).ok();
+        let parsed = Url::parse(url).ok()?;
+        let host_only_domain = self.host_only_cookie_domain_for_url(&parsed);
         let parts = self
             .cookies
             .iter()
-            .filter(|cookie| cookie.matches_url(parsed.as_ref()))
+            .filter(|cookie| cookie.matches_url(&parsed, host_only_domain.as_deref()))
             .map(|cookie| cookie.name_value.clone())
             .collect::<Vec<_>>();
         (!parts.is_empty()).then(|| parts.join("; "))
+    }
+
+    fn host_only_cookie_domain_for_url(&self, url: &Url) -> Option<String> {
+        if !self.cookies.iter().any(|cookie| cookie.domain.is_none()) {
+            return None;
+        }
+        let host = url.host_str()?.to_ascii_lowercase();
+        let mut guard = self
+            .host_only_cookie_domain
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_none() {
+            *guard = Some(host);
+        }
+        guard.clone()
     }
 
     fn trace_cookie_header(&self, cookie: Option<&str>) {
