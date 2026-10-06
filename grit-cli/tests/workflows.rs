@@ -158,6 +158,65 @@ fn init_checked_out_submodule(parent: &Path, name: &str) -> Result<String, Box<d
 }
 
 #[test]
+#[cfg(unix)]
+fn add_explicit_pathspec_does_not_walk_ignored_subtree() -> TestResult {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch = Scratch::new("add-no-walk")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    write_file(&repo.join(".gitignore"), "blocked/\n")?;
+    fs::create_dir_all(repo.join("blocked/secret"))?;
+    fs::set_permissions(repo.join("blocked"), fs::Permissions::from_mode(0o000))?;
+    write_file(&repo.join("tracked"), "t\n")?;
+    gs_ok(&repo, ["add", "tracked"])?;
+    Ok(())
+}
+
+#[test]
+fn add_pathspec_from_subdirectory() -> TestResult {
+    let scratch = Scratch::new("add-subdir")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    write_file(&repo.join("a"), "a\n")?;
+    gs_ok(&repo, ["commit", "one"])?;
+
+    let deep = repo.join("sub/deep");
+    fs::create_dir_all(&deep)?;
+    write_file(&deep.join("g"), "g\n")?;
+
+    gs_ok(&deep, ["add", "g"])?;
+    let status = gs_ok(&deep, ["status"])?;
+    assert!(
+        status.stdout.contains("new           g"),
+        "expected cwd-relative staged path g:\n{}",
+        status.dump()
+    );
+
+    gs_ok(&deep, ["add", "g"])?;
+    gs_ok(&deep, ["add", "../deep/g"])?;
+    gs_ok(&deep, ["add", &path_arg(&deep.join("g"))?])?;
+    gs_ok(&deep, ["add", ".."])?;
+
+    let missing = gs(&deep, ["add", "nonexist"])?;
+    assert_ne!(missing.status, Some(0), "{}", missing.dump());
+
+    write_file(&deep.join("valid"), "v\n")?;
+    let mixed = gs(&deep, ["add", "valid", "missing"])?;
+    assert_ne!(mixed.status, Some(0), "{}", mixed.dump());
+    let after_fail = gs_ok(&deep, ["status"])?;
+    assert!(
+        after_fail.stdout.contains("Untracked") && after_fail.stdout.contains("valid"),
+        "valid must stay unstaged after partial pathspec failure:\n{}",
+        after_fail.dump()
+    );
+
+    Ok(())
+}
+
+#[test]
 fn local_edit_config_commit_status_and_log_workflow() -> TestResult {
     let scratch = Scratch::new("local")?;
     let repo = scratch.child("repo");

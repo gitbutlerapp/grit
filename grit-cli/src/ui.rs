@@ -1,10 +1,89 @@
 //! Small output-formatting helpers shared by `grit` commands.
 
+use std::borrow::Cow;
 use std::io::IsTerminal;
+use std::path::{Component, Path, PathBuf};
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::pathspec::pathdiff;
 
 use crate::context::{self, CommitSummary};
+
+/// When the user runs `grit status` from a subdirectory, show paths relative to cwd
+/// (like Git) instead of from the repository root.
+#[derive(Clone, Debug)]
+pub struct PathDisplayContext {
+    cwd: PathBuf,
+    work_tree: PathBuf,
+}
+
+impl PathDisplayContext {
+    /// Build display context when `cwd` is not the work tree root.
+    pub fn from_cwd_and_work_tree(cwd: PathBuf, work_tree: PathBuf) -> Option<Self> {
+        pathdiff(&cwd, &work_tree)?;
+        Some(Self { cwd, work_tree })
+    }
+
+    /// Map a repository-relative path to a cwd-relative display string.
+    pub fn format_repo_path<'a>(&self, repo_rel: &'a str) -> Cow<'a, str> {
+        let target = self.work_tree.join(repo_rel);
+        match pathdiff_relative_lexical(&self.cwd, &target) {
+            Ok(rel) if rel == "." => Cow::Borrowed(repo_rel),
+            Ok(rel) => Cow::Owned(rel),
+            Err(_) => Cow::Borrowed(repo_rel),
+        }
+    }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+fn path_to_slash(path: &Path) -> String {
+    path.components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            Component::ParentDir => Some("..".to_owned()),
+            Component::CurDir => None,
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn pathdiff_relative_lexical(from: &Path, to: &Path) -> Result<String, ()> {
+    let from_norm = normalize_path(from);
+    let to_norm = normalize_path(to);
+    let from_parts: Vec<_> = from_norm.components().collect();
+    let to_parts: Vec<_> = to_norm.components().collect();
+    let common = from_parts
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut result = PathBuf::new();
+    for _ in common..from_parts.len() {
+        result.push("..");
+    }
+    for part in &to_parts[common..] {
+        result.push(part);
+    }
+    if result.as_os_str().is_empty() {
+        Ok(".".to_string())
+    } else {
+        Ok(path_to_slash(&result))
+    }
+}
 
 /// Width of the change-label column, sized to the longest label
 /// (`"type changed"`) so the paths after it line up.
@@ -144,7 +223,11 @@ fn status_color(status: &DiffStatus) -> &'static str {
 ///
 /// Each line is `  <glyph>  <label>  <path>`: the glyph and the fixed-width label
 /// column come first (colored by status on a TTY) so the paths line up.
-pub fn print_change_group(title: &str, entries: &[DiffEntry]) {
+pub fn print_change_group(
+    title: &str,
+    entries: &[DiffEntry],
+    path_display: Option<&PathDisplayContext>,
+) {
     if entries.is_empty() {
         return;
     }
@@ -154,25 +237,32 @@ pub fn print_change_group(title: &str, entries: &[DiffEntry]) {
         let g = glyph(&entry.status);
         let l = label(entry);
         let marker = format!("{g}  {l:<width$}", width = LABEL_WIDTH);
+        let repo_path = entry_path(entry);
+        let shown = path_display
+            .map(|ctx| ctx.format_repo_path(repo_path).into_owned())
+            .unwrap_or_else(|| repo_path.to_owned());
         println!(
             "  {}  {}",
             paint(color, status_color(&entry.status), &marker),
-            entry_path(entry)
+            shown
         );
     }
     println!();
 }
 
 /// Print the untracked-files group (does nothing when empty).
-pub fn print_untracked(paths: &[String]) {
+pub fn print_untracked(paths: &[String], path_display: Option<&PathDisplayContext>) {
     if paths.is_empty() {
         return;
     }
     let color = use_color();
     println!("{}", paint(color, "1", "Untracked"));
     for path in paths {
+        let shown = path_display
+            .map(|ctx| ctx.format_repo_path(path).into_owned())
+            .unwrap_or_else(|| path.clone());
         let marker = format!("?  {l:<width$}", l = "untracked", width = LABEL_WIDTH);
-        println!("  {}  {path}", paint(color, "31", &marker));
+        println!("  {}  {shown}", paint(color, "31", &marker));
     }
     println!();
 }
