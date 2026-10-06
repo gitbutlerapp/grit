@@ -25,6 +25,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
+use crate::check_ref_format::is_valid_advertised_refname;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
@@ -204,6 +205,11 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
                 if refname == "HEAD" {
                     for cap in caps.split_whitespace() {
                         if let Some(target) = cap.strip_prefix("symref=HEAD:") {
+                            if !is_valid_advertised_refname(target) {
+                                return Err(Error::Message(format!(
+                                    "invalid ref advertisement: {target}"
+                                )));
+                            }
                             adv.head_symref = Some(target.to_string());
                         }
                     }
@@ -215,6 +221,11 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
                 }
                 if refname == "HEAD" {
                     continue;
+                }
+                if !is_valid_advertised_refname(&refname) {
+                    return Err(Error::Message(format!(
+                        "invalid ref advertisement: {refname}"
+                    )));
                 }
                 adv.refs.push((refname, oid));
             }
@@ -1133,6 +1144,19 @@ mod tests {
             .any(|c| c == "fetch=shallow wait-for-done filter"));
         assert!(adv.capabilities.iter().any(|c| c == "object-format=sha1"));
         assert!(adv.head_symref.is_none());
+    }
+
+    #[test]
+    fn read_advertisement_rejects_traversal_refname() {
+        let mut buf: Vec<u8> = Vec::new();
+        let oid = "1111111111111111111111111111111111111111";
+        let line = format!("{oid} refs/heads/../../../config\0multi_ack");
+        pkt_line::write_line_to_vec(&mut buf, &line).unwrap();
+        buf.extend_from_slice(b"0000");
+
+        let mut cur = std::io::Cursor::new(buf);
+        let err = read_advertisement(&mut cur).unwrap_err().to_string();
+        assert!(err.contains("invalid ref advertisement"));
     }
 
     #[test]

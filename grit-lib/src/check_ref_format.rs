@@ -205,6 +205,15 @@ pub fn check_refname_format(refname: &str, opts: &RefNameOptions) -> Result<Stri
     Ok(normalized)
 }
 
+/// True when a server-advertised ref name is valid.
+///
+/// Protocol advertisements may include the pseudo-ref `HEAD`; other names must
+/// be regular full ref names.
+#[must_use]
+pub fn is_valid_advertised_refname(refname: &str) -> bool {
+    refname == "HEAD" || check_refname_format(refname, &RefNameOptions::default()).is_ok()
+}
+
 /// Validate a single path component (the bytes between `/` separators, or the
 /// entire name when there are no slashes).
 ///
@@ -415,5 +424,13 @@ mod tests {
     fn utf8_allowed() {
         // Non-ASCII bytes that are valid UTF-8 are allowed.
         valid("heads/fu\u{00DF}", &opts_default());
+    }
+
+    #[test]
+    fn advertised_refname_allows_head_but_rejects_traversal() {
+        assert!(is_valid_advertised_refname("HEAD"));
+        assert!(is_valid_advertised_refname("refs/heads/main"));
+        assert!(!is_valid_advertised_refname("refs/heads/../config"));
+        assert!(!is_valid_advertised_refname("FETCH_HEAD"));
     }
 }

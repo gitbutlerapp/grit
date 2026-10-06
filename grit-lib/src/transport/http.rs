@@ -34,6 +34,7 @@ use std::collections::HashSet;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
+use crate::check_ref_format::is_valid_advertised_refname;
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::fetch_negotiator::SkippingNegotiator;
@@ -292,6 +293,11 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                     if let Some(raw_caps) = cap_part {
                         for cap in raw_caps.split_whitespace() {
                             if let Some(target) = cap.strip_prefix("symref=HEAD:") {
+                                if !is_valid_advertised_refname(target) {
+                                    return Err(Error::Message(format!(
+                                        "invalid ref advertisement: {target}"
+                                    )));
+                                }
                                 head_symref = Some(target.to_owned());
                             }
                             caps.insert(cap.to_owned());
@@ -305,6 +311,14 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                 // All-zero OID marks the unborn-HEAD capabilities carrier (empty repo).
                 if oid_hex.bytes().all(|b| b == b'0') {
                     continue;
+                }
+                if refname.ends_with("^{}") {
+                    continue;
+                }
+                if !is_valid_advertised_refname(refname) {
+                    return Err(Error::Message(format!(
+                        "invalid ref advertisement: {refname}"
+                    )));
                 }
                 let oid = ObjectId::from_hex(oid_hex).map_err(|e| {
                     Error::Message(format!("bad oid in advertisement: {oid_hex}: {e}"))
@@ -1828,10 +1842,24 @@ mod tests {
         let disc = parse_advertisement(&body).unwrap();
         assert_eq!(disc.head_symref.as_deref(), Some("refs/heads/main"));
         assert_eq!(disc.object_format, "sha1");
-        // `parse_advertisement` keeps HEAD; the connection/fetch layer filters
-        // HEAD and peeled `^{}` carriers. Both lines parse here.
+        // `parse_advertisement` keeps HEAD; the connection/fetch layer filters it.
         assert!(disc.refs.iter().any(|r| r.name == "HEAD"));
         assert!(disc.refs.iter().any(|r| r.name == "refs/heads/main"));
+    }
+
+    #[test]
+    fn parse_advertisement_rejects_traversal_refname() {
+        let mut body = Vec::new();
+        let oid = "3".repeat(40);
+        let line = format!("{oid} refs/heads/../../../config\0multi_ack_detailed");
+        pkt_line::write_line_to_vec(&mut body, &line).unwrap();
+        body.extend_from_slice(b"0000");
+
+        let err = match parse_advertisement(&body) {
+            Ok(_) => panic!("expected invalid ref advertisement"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("invalid ref advertisement"));
     }
 
     #[test]

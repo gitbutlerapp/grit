@@ -97,4 +97,21 @@ test_expect_success TEE_DOES_NOT_HANG \
 	test_must_fail git -C remote.git rev-list $(git -C repo rev-parse HEAD)
 '
 
+test_expect_success 'receive-pack rejects invalid refname without deleting config' '
+	test_when_finished "rm -rf invalid-ref.git" &&
+	git init --bare invalid-ref.git &&
+	cp invalid-ref.git/config expect.config &&
+	ref=refs/heads/../../config &&
+	{
+		printf "%s %s %s\0report-status\n" \
+			"$ZERO_OID" "$ZERO_OID" "$ref" | packetize_raw &&
+		printf 0000
+	} >input &&
+	git receive-pack invalid-ref.git <input >actual 2>err &&
+	test_path_is_file invalid-ref.git/config &&
+	test_cmp expect.config invalid-ref.git/config &&
+	test_grep "ng $ref funny refname" actual &&
+	test_grep "funny ref" err
+'
+
 test_done

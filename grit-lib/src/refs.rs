@@ -16,7 +16,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
@@ -635,13 +635,12 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
         return crate::reftable::reftable_write_symref(git_dir, refname, target, None, None);
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
+    let (_stor, path) = storage_ref_path_at_storage(&storage_dir, refname)?;
     if packed_ref_namespace_conflict(&storage_dir, refname)? {
         return Err(Error::InvalidRef(format!(
             "cannot update ref '{refname}': reference namespace conflict"
         )));
     }
-    let stor = crate::ref_namespace::storage_ref_name(refname);
-    let path = storage_dir.join(stor);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -657,6 +656,7 @@ pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
         return crate::reftable::reftable_write_ref(git_dir, refname, oid, None, None);
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
+    let _ = checked_storage_ref_name(refname)?;
     if packed_ref_namespace_conflict(&storage_dir, refname)? {
         return Err(Error::InvalidRef(format!(
             "cannot update ref '{refname}': reference namespace conflict"
@@ -668,8 +668,7 @@ pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
 /// Write a loose ref file under `storage_dir`: the body shared by [`write_ref`]
 /// and [`write_ref_cached`], run after the packed-refs namespace-conflict check.
 fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
-    let stor = crate::ref_namespace::storage_ref_name(refname);
-    let path = storage_dir.join(stor);
+    let (_stor, path) = storage_ref_path_at_storage(storage_dir, refname)?;
     // An empty directory left over from a previously deleted nested ref can sit exactly where
     // this ref file must go (e.g. `refs/e-create/foo` after `refs/e-create/foo/bar` was pruned).
     // Git removes such empty directory trees before locking the ref (see t0600 "empty directory
@@ -940,8 +939,7 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
         return crate::reftable::reftable_delete_ref(git_dir, refname);
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
-    let stor = crate::ref_namespace::storage_ref_name(refname);
-    let path = storage_dir.join(&stor);
+    let (stor, path) = storage_ref_path_at_storage(&storage_dir, refname)?;
 
     // Remove the packed-refs entry *first* (acquiring the packed-refs lock). Git deletes the
     // packed version while holding the lock before unlinking the loose ref, so that a failure to
@@ -1374,7 +1372,7 @@ pub fn append_reflog(
         );
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
-    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let stor = checked_storage_ref_name(refname)?;
     let log_path = storage_dir.join("logs").join(&stor);
     let may_create = force_create || should_autocreate_reflog(git_dir, refname);
     if !may_create && !log_path.exists() {
@@ -1421,6 +1419,28 @@ pub fn reflog_file_path(git_dir: &Path, refname: &str) -> PathBuf {
 
 fn ref_storage_dir(git_dir: &Path, refname: &str) -> PathBuf {
     crate::worktree_ref::resolve_ref_storage(git_dir, refname).0
+}
+
+fn checked_storage_ref_name(refname: &str) -> Result<String> {
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    if stor.is_empty() {
+        return Err(Error::InvalidRef(format!("invalid ref name: {refname}")));
+    }
+    if Path::new(&stor).components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(Error::InvalidRef(format!("invalid ref name: {refname}")));
+    }
+    Ok(stor)
+}
+
+fn storage_ref_path_at_storage(storage_dir: &Path, refname: &str) -> Result<(String, PathBuf)> {
+    let stor = checked_storage_ref_name(refname)?;
+    let path = storage_dir.join(&stor);
+    Ok((stor, path))
 }
 
 /// Normalize a ref prefix for filesystem traversal and packed-ref filtering.
