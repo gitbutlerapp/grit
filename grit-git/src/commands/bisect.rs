@@ -142,7 +142,7 @@ fn hello_sed_p_env(work_dir: &Path) -> Option<String> {
 /// Parse one line of `BISECT_NAMES` (shell-quoted words) into pathspec tokens.
 fn first_bisect_replay_token_and_rest(line: &str) -> (&str, &str) {
     let s = line.trim_start();
-    let word_end = s.find(char::is_whitespace).unwrap_or_else(|| s.len());
+    let word_end = s.find(char::is_whitespace).unwrap_or(s.len());
     let word = &s[..word_end];
     let rest = s[word_end..].trim_start();
     (word, rest)
@@ -1950,7 +1950,7 @@ fn cmd_run(repo: &Repository, args: &[String]) -> Result<()> {
             }
         }
 
-        if code < 0 || code >= 128 {
+        if !(0..128).contains(&code) {
             bail!("bisect run failed: exit code {code} from {display_cmd} is < 0 or >= 128");
         }
 

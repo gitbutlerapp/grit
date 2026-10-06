@@ -2825,6 +2825,7 @@ fn three_way_merge_with_content(
     })
 }
 
+#[expect(clippy::too_many_arguments)]
 fn content_merge_or_conflict(
     repo: &Repository,
     index: &mut Index,
@@ -3026,10 +3027,11 @@ fn preflight_blob_write_vs_cwd_dir(
     entry: &IndexEntry,
 ) -> Result<()> {
     if entry.mode == 0o160000 {
-        if abs_path.is_dir() && !abs_path.join(".git").exists() {
-            if grit_lib::worktree_cwd::cwd_would_be_removed_with_repo_path(work_tree, path_str) {
-                bail!("Refusing to remove the current working directory:\n{path_str}\n");
-            }
+        if abs_path.is_dir()
+            && !abs_path.join(".git").exists()
+            && grit_lib::worktree_cwd::cwd_would_be_removed_with_repo_path(work_tree, path_str)
+        {
+            bail!("Refusing to remove the current working directory:\n{path_str}\n");
         }
         return Ok(());
     }
@@ -3037,10 +3039,10 @@ fn preflight_blob_write_vs_cwd_dir(
     if obj.kind != ObjectKind::Blob {
         return Ok(());
     }
-    if abs_path.is_dir() {
-        if grit_lib::worktree_cwd::cwd_would_be_removed_with_repo_path(work_tree, path_str) {
-            bail!("Refusing to remove the current working directory:\n{path_str}\n");
-        }
+    if abs_path.is_dir()
+        && grit_lib::worktree_cwd::cwd_would_be_removed_with_repo_path(work_tree, path_str)
+    {
+        bail!("Refusing to remove the current working directory:\n{path_str}\n");
     }
     Ok(())
 }

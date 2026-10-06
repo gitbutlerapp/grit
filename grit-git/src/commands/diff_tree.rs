@@ -481,8 +481,8 @@ fn parse_options(repo: &Repository, argv: &[String]) -> Result<Options> {
                 "--no-renames" => opts.find_renames = None,
                 _ if arg.starts_with("-M") => {
                     let val = &arg[2..];
-                    let pct = if val.ends_with('%') {
-                        val[..val.len() - 1].parse::<u32>().unwrap_or(50)
+                    let pct = if let Some(stripped) = val.strip_suffix('%') {
+                        stripped.parse::<u32>().unwrap_or(50)
                     } else {
                         // Could be e.g. -M80 or -M80%
                         val.parse::<u32>().unwrap_or(50)
@@ -491,8 +491,8 @@ fn parse_options(repo: &Repository, argv: &[String]) -> Result<Options> {
                 }
                 _ if arg.starts_with("--find-renames=") => {
                     let val = &arg["--find-renames=".len()..];
-                    let pct = if val.ends_with('%') {
-                        val[..val.len() - 1].parse::<u32>().unwrap_or(50)
+                    let pct = if let Some(stripped) = val.strip_suffix('%') {
+                        stripped.parse::<u32>().unwrap_or(50)
                     } else {
                         val.parse::<u32>().unwrap_or(50)
                     };
@@ -602,9 +602,11 @@ fn parse_options(repo: &Repository, argv: &[String]) -> Result<Options> {
         // Positional: like Git `setup_revisions` — up to two tree-ishes, then pathspecs.
         // In `--stdin` mode the tree-ishes come from stdin, so any positional given
         // on the command line is a pathspec.
-        if end_of_options || opts.stdin_mode || opts.objects.len() >= 2 {
-            opts.pathspecs.push(arg.clone());
-        } else if opts.objects.len() == 1 && !spec_names_commit_or_tree(repo, arg) {
+        if end_of_options
+            || opts.stdin_mode
+            || opts.objects.len() >= 2
+            || (opts.objects.len() == 1 && !spec_names_commit_or_tree(repo, arg))
+        {
             opts.pathspecs.push(arg.clone());
         } else {
             opts.objects.push(arg.clone());
@@ -1088,7 +1090,7 @@ fn run_two_trees(repo: &Repository, opts: &Options, out: &mut impl Write) -> Res
         validate_tree_depth_limit(&repo.odb, tree_oid, 0, max_tree_depth)?;
     }
     let entries = diff_with_opts(&repo.odb, old_tree, new_tree, opts)?;
-    let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+    let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
     let has_diff = !filtered.is_empty();
     if opts.check {
         let prepared = prepare_diff_tree_entries(&repo.odb, filtered, opts, old_tree);
@@ -1125,7 +1127,7 @@ fn run_one_commit(repo: &Repository, opts: &Options, out: &mut impl Write) -> Re
                         (None, Some(&commit.tree))
                     };
                     let entries = diff_with_opts(&repo.odb, old_side, new_side, opts)?;
-                    let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+                    let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
                     has_diff = !filtered.is_empty();
                     if opts.check {
                         // `--check` runs the whitespace/conflict-marker check instead of
@@ -1226,7 +1228,7 @@ fn run_one_commit(repo: &Repository, opts: &Options, out: &mut impl Write) -> Re
                     let parent_tree = commit_tree(&repo.odb, parent_oid)?;
                     let entries =
                         diff_with_opts(&repo.odb, Some(&parent_tree), Some(&commit.tree), opts)?;
-                    let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+                    let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
                     any_diff |= !filtered.is_empty();
                     if !opts.quiet {
                         write_commit_header(out, &oid, &obj.data, opts, Some(parent_oid))?;
@@ -1242,7 +1244,7 @@ fn run_one_commit(repo: &Repository, opts: &Options, out: &mut impl Write) -> Re
                 let parent_tree = commit_tree(&repo.odb, &commit.parents[0])?;
                 let entries =
                     diff_with_opts(&repo.odb, Some(&parent_tree), Some(&commit.tree), opts)?;
-                let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+                let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
                 has_diff = !filtered.is_empty();
                 if opts.check {
                     let prepared =
@@ -1291,10 +1293,7 @@ fn process_stdin_line(
     line: &str,
 ) -> Result<bool> {
     // Split on the first space to get the leading OID and optional remainder.
-    let (oid_str, rest) = line
-        .split_once(' ')
-        .map(|(a, b)| (a, b))
-        .unwrap_or((line, ""));
+    let (oid_str, rest) = line.split_once(' ').unwrap_or((line, ""));
 
     let oid = match oid_str.parse::<ObjectId>() {
         Ok(o) => o,
@@ -1406,7 +1405,7 @@ fn process_stdin_commit(
     } else if parent_oids.is_empty() {
         if opts.root {
             let entries = diff_with_opts(&repo.odb, None, Some(&commit.tree), opts)?;
-            let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+            let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
             let hd = !filtered.is_empty();
             if !opts.quiet {
                 print_diff(out, repo, &filtered, opts, None)?;
@@ -1418,7 +1417,7 @@ fn process_stdin_commit(
     } else {
         let parent_tree = commit_tree(&repo.odb, &parent_oids[0])?;
         let entries = diff_with_opts(&repo.odb, Some(&parent_tree), Some(&commit.tree), opts)?;
-        let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+        let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
         let hd = !filtered.is_empty();
         if !opts.quiet {
             print_diff(out, repo, &filtered, opts, None)?;
@@ -1455,7 +1454,7 @@ fn process_stdin_two_trees(
         (Some(oid1), Some(&oid2))
     };
     let entries = diff_with_opts(&repo.odb, old_side, new_side, opts)?;
-    let filtered = filter_entries(&repo.odb, &repo, entries, opts)?;
+    let filtered = filter_entries(&repo.odb, repo, entries, opts)?;
     let has_diff = !filtered.is_empty();
     if !opts.quiet {
         print_diff(out, repo, &filtered, opts, None)?;
@@ -2371,7 +2370,7 @@ fn write_raw_diff_tree_z(
     Ok(())
 }
 
-fn prepare_diff_tree_entries<'a>(
+fn prepare_diff_tree_entries(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     opts: &Options,
@@ -2967,6 +2966,7 @@ fn emit_git_binary_patch(out: &mut impl Write, old_raw: &[u8], new_raw: &[u8]) -
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn write_patch_entry(
     out: &mut impl Write,
     odb: &Odb,
@@ -3534,10 +3534,10 @@ fn parse_tz_offset_secs(tz: &str) -> i32 {
     if tz.len() < 4 {
         return 0;
     }
-    let (sign, rest) = if tz.starts_with('+') {
-        (1i32, &tz[1..])
-    } else if tz.starts_with('-') {
-        (-1i32, &tz[1..])
+    let (sign, rest) = if let Some(rest) = tz.strip_prefix('+') {
+        (1i32, rest)
+    } else if let Some(rest) = tz.strip_prefix('-') {
+        (-1i32, rest)
     } else {
         (1i32, tz)
     };

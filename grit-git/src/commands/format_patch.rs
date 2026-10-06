@@ -753,9 +753,7 @@ pub fn run(mut args: Args) -> Result<()> {
     }
     let want_cover = if args.no_cover_letter {
         false
-    } else if cover_from_cli {
-        true
-    } else if has_inter_or_range && total > 1 {
+    } else if cover_from_cli || (has_inter_or_range && total > 1) {
         true
     } else {
         match cover_config.as_deref() {
@@ -1296,9 +1294,7 @@ fn collect_cherry_pick_right_only_commits(
 
 /// If the first revision token is `-N`, strip it and return `Some(N)` (Git `format-patch -3`).
 fn strip_leading_neg_count(tokens: &mut Vec<String>) -> Option<usize> {
-    let Some(first) = tokens.first() else {
-        return None;
-    };
+    let first = tokens.first()?;
     let rest = first.strip_prefix('-')?;
     let n: usize = rest.parse().ok()?;
     tokens.remove(0);
@@ -1307,13 +1303,15 @@ fn strip_leading_neg_count(tokens: &mut Vec<String>) -> Option<usize> {
 
 /// Resolve revision argv like Git `format-patch`: `rev_list` with `max_parents=1`, reversed for
 /// patch order. Returns positive/negative spec strings for `--ignore-if-in-upstream`.
+type FormatPatchCommitSet = (Vec<(ObjectId, CommitData)>, Vec<String>, Vec<String>);
+
 fn collect_commits_for_format_patch(
     repo: &Repository,
     rev_tokens: &[String],
     exclude_rest: &[String],
     max_count: Option<usize>,
     topo_order: bool,
-) -> Result<(Vec<(ObjectId, CommitData)>, Vec<String>, Vec<String>)> {
+) -> Result<FormatPatchCommitSet> {
     let mut positive: Vec<String> = Vec::new();
     let mut negative: Vec<String> = Vec::new();
 
@@ -2510,7 +2508,7 @@ fn build_cover_subject(
     prefix: &str,
     use_numbering: bool,
     display_total: usize,
-    start: usize,
+    _start: usize,
     cover_desc: Option<&CoverDescription>,
     _encode: bool,
     _enc: &str,
@@ -2518,8 +2516,6 @@ fn build_cover_subject(
     let subj = cover_desc
         .and_then(|d| d.subject.clone())
         .unwrap_or_else(|| "*** SUBJECT HERE ***".to_owned());
-    let num0 = if start != 1 { 0 } else { 0 };
-    let _ = num0;
     if use_numbering {
         if prefix.is_empty() {
             format!("[0/{display_total}] {subj}")

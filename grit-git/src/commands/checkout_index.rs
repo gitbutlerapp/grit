@@ -332,6 +332,7 @@ fn classify_checkout_index_path(
     PathClass::NotInCache
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_checkout_stage_all(
     repo: &Repository,
     index: &mut Index,
@@ -404,6 +405,7 @@ fn index_has_any_entry(index: &Index, path_bytes: &[u8]) -> bool {
     index.entries.iter().any(|e| e.path == path_bytes)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn checkout_stages_one_path(
     repo: &Repository,
     index: &Index,
@@ -443,6 +445,7 @@ fn checkout_stages_one_path(
     Err(anyhow::anyhow!("'{display_path}' is not in the cache"))
 }
 
+#[expect(clippy::too_many_arguments)]
 fn checkout_entry(
     repo: &Repository,
     index: &mut Index,
@@ -609,6 +612,7 @@ fn checkout_entry(
     Ok(outcome)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn checkout_one_stage_to_temp_line(
     repo: &Repository,
     _index: &Index,
@@ -645,11 +649,11 @@ fn format_stage_all_line(
     work_tree: &std::path::Path,
 ) -> String {
     let mut s = String::new();
-    for i in 1..4 {
-        if i > 1 {
+    for (i, slot) in top.iter().skip(1).enumerate() {
+        if i > 0 {
             s.push(' ');
         }
-        match &top[i] {
+        match slot {
             Some(p) => s.push_str(&display_temp_path_for_stdout(p, work_tree)),
             None => s.push('.'),
         }

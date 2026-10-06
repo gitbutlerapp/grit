@@ -260,6 +260,26 @@ fn parse_range(tok: &str, n: usize, files: &[FileItem]) -> Option<(usize, usize,
     None
 }
 
+/// Apply a half-open `[from, to)` selection to `selected`, matching `for idx in from..to.min(n)`.
+///
+/// When `from >= to.min(n)` (for example token `3` with a single listed item), this is a no-op and
+/// must not panic.
+fn apply_selection_in_range(
+    selected: &mut [bool],
+    from: usize,
+    to: usize,
+    choose: bool,
+    count: &mut isize,
+) {
+    let end = to.min(selected.len());
+    for sel in selected.iter_mut().take(end).skip(from) {
+        if *sel != choose {
+            *sel = choose;
+            *count += if choose { 1 } else { -1 };
+        }
+    }
+}
+
 /// `list_and_choose` for multi-select prompts; returns the boolean selection vector and the count.
 fn list_and_choose(
     out: &mut impl Write,
@@ -296,12 +316,7 @@ fn list_and_choose(
         for tok in line.split([' ', '\t', '\r', ',']).filter(|t| !t.is_empty()) {
             match parse_range(tok, n, files) {
                 Some((from, to, choose)) => {
-                    for idx in from..to.min(n) {
-                        if selected[idx] != choose {
-                            selected[idx] = choose;
-                            count += if choose { 1 } else { -1 };
-                        }
-                    }
+                    apply_selection_in_range(&mut selected, from, to, choose, &mut count);
                 }
                 None => {
                     writeln!(out, "Huh ({tok})?").ok();
@@ -466,7 +481,7 @@ fn print_command_menu(out: &mut impl Write, commands: &[&str]) {
             writeln!(out).ok();
         }
     }
-    if commands.len() % cols != 0 {
+    if !commands.len().is_multiple_of(cols) {
         writeln!(out).ok();
     }
 }
@@ -702,12 +717,7 @@ fn run_add_untracked(
         for tok in line.split([' ', '\t', '\r', ',']).filter(|t| !t.is_empty()) {
             match parse_range(tok, n, &files) {
                 Some((from, to, choose)) => {
-                    for idx in from..to.min(n) {
-                        if selected[idx] != choose {
-                            selected[idx] = choose;
-                            count += if choose { 1 } else { -1 };
-                        }
-                    }
+                    apply_selection_in_range(&mut selected, from, to, choose, &mut count);
                 }
                 None => {
                     writeln!(out, "Huh ({tok})?").ok();
@@ -839,4 +849,43 @@ fn emit_cached_diff(ctx: &mut AddIContext, out: &mut impl Write, paths: &[String
         .context("render cached diff for add -i")?;
     out.write_all(&buf).ok();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_selection_in_range_out_of_range_single_item_no_panic() {
+        let mut selected = vec![false];
+        let mut count = 0isize;
+        // Same as `parse_range("3", 1, …)` → from=2, to=3: old `2..1` loop was empty.
+        apply_selection_in_range(&mut selected, 2, 3, true, &mut count);
+        assert!(!selected[0]);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn apply_selection_in_range_selects_in_bounds() {
+        let mut selected = vec![false, false, false];
+        let mut count = 0isize;
+        apply_selection_in_range(&mut selected, 0, 2, true, &mut count);
+        assert!(selected[0] && selected[1] && !selected[2]);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn parse_range_single_digit_beyond_list_end() {
+        let files = vec![FileItem {
+            name: "only".into(),
+            ..Default::default()
+        }];
+        let (from, to, choose) = parse_range("3", 1, &files).expect("parses as item 3");
+        assert!(choose);
+        assert_eq!((from, to), (2, 3));
+        let mut selected = vec![false];
+        let mut count = 0isize;
+        apply_selection_in_range(&mut selected, from, to, choose, &mut count);
+        assert_eq!(count, 0);
+    }
 }

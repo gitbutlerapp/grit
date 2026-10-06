@@ -94,9 +94,9 @@ fn read_object_format_from_git_dir(git_dir: &Path) -> String {
 }
 
 thread_local! {
-    static DRY_RUN_STDOUT_LINES: RefCell<Vec<String>> = RefCell::new(Vec::new());
-    static DRY_RUN_CAPTURE_MULTISPEC: Cell<bool> = Cell::new(false);
-    static EMBEDDED_REPO_FULL_HINT_EMITTED: Cell<bool> = Cell::new(false);
+    static DRY_RUN_STDOUT_LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static DRY_RUN_CAPTURE_MULTISPEC: Cell<bool> = const { Cell::new(false) };
+    static EMBEDDED_REPO_FULL_HINT_EMITTED: Cell<bool> = const { Cell::new(false) };
 }
 
 fn dry_run_stdout_begin_multispec_capture() {
@@ -2019,6 +2019,7 @@ fn pathspec_uses_long_magic(pathspec: &str) -> bool {
 }
 
 /// Stage every work-tree file that matches `pathspecs` (Git `match_pathspec`, including excludes).
+#[expect(clippy::too_many_arguments)]
 fn add_with_pathspec_list(
     odb: &Odb,
     index: &mut Index,
@@ -2096,6 +2097,7 @@ fn add_with_pathspec_list(
 }
 
 /// Add all files under the working tree (or a prefix) to the index.
+#[expect(clippy::too_many_arguments)]
 fn add_all(
     odb: &Odb,
     index: &mut Index,
@@ -2260,6 +2262,7 @@ fn path_matches_any_resolved_spec(path: &str, specs: &[String]) -> bool {
 
 /// `git add -A <pathspec>...` — stage updates only under the given pathspecs and record deletions
 /// there (not the whole tree). Matches Git when path arguments are present with `-A`.
+#[expect(clippy::too_many_arguments)]
 fn add_all_for_pathspecs(
     odb: &Odb,
     index: &mut Index,
@@ -2403,6 +2406,7 @@ fn add_all_for_pathspecs(
 }
 
 /// Update only already-tracked files.
+#[expect(clippy::too_many_arguments)]
 fn update_tracked(
     odb: &Odb,
     index: &mut Index,
@@ -2611,6 +2615,7 @@ fn resolve_add_path_on_disk(
 }
 
 /// Add a single pathspec (which may be a file or directory).
+#[expect(clippy::too_many_arguments)]
 fn add_path(
     odb: &Odb,
     index: &mut Index,
@@ -2955,6 +2960,7 @@ fn embedded_repository_git_dir(worktree: &Path) -> Result<PathBuf> {
 /// Reads the HEAD of the embedded repo to get the commit OID, and warns
 /// (unless `--no-warn-embedded-repo` is set) that a bare `git add` of an
 /// embedded repo is probably a mistake.
+#[expect(clippy::too_many_arguments)]
 fn stage_gitlink(
     _odb: &Odb,
     index: &mut Index,
@@ -3143,6 +3149,7 @@ fn remove_obstructing_parent_file_entries(index: &mut Index, rel_path: &str) {
 }
 
 /// Stage a single file into the index.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn stage_file(
     odb: &Odb,
     index: &mut Index,
@@ -3369,11 +3376,11 @@ fn is_unwritable_odb_error(err: &anyhow::Error) -> bool {
                 return true;
             }
         }
-        if let Some(grit_err) = cause.downcast_ref::<grit_lib::error::Error>() {
-            if let grit_lib::error::Error::Io(io_err) = grit_err {
-                if io_err.kind() == std::io::ErrorKind::PermissionDenied {
-                    return true;
-                }
+        if let Some(grit_lib::error::Error::Io(io_err)) =
+            cause.downcast_ref::<grit_lib::error::Error>()
+        {
+            if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                return true;
             }
         }
     }

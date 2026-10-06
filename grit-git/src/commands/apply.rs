@@ -365,6 +365,7 @@ fn count_hunk_line_changes(fp: &FilePatch) -> (usize, usize) {
 }
 
 /// Try Git's `apply --3way` in-core merge: base = patch preimage, theirs = patch postimage, ours = `our_bytes`.
+#[expect(clippy::too_many_arguments)]
 fn try_three_way_merge_blob(
     repo: &Repository,
     fp: &FilePatch,
@@ -3345,7 +3346,7 @@ fn write_worktree_path(
     let raw_on_disk_had_crlf = path.is_file()
         && fs::read(path)
             .ok()
-            .is_some_and(|raw| raw.windows(2).any(|w| w == [b'\r', b'\n']));
+            .is_some_and(|raw| raw.windows(2).any(|w| w == *b"\r\n"));
 
     if mode == Some("120000") {
         remove_path_for_replacement(path)?;
@@ -5030,15 +5031,14 @@ fn prepare_patch_modes_for_apply(patches: &mut [FilePatch], args: &Args) -> Resu
             let st_stat = match fs::symlink_metadata(&path) {
                 Ok(meta) => Some(meta.permissions().mode()),
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    if args.index
+                    if (args.index
                         && path_is_sparse_in_indexes(
                             index.as_ref(),
                             raw_index.as_ref(),
                             &operational,
-                        )
+                        ))
+                        || can_apply_with_empty_preimage(fp)
                     {
-                        None
-                    } else if can_apply_with_empty_preimage(fp) {
                         None
                     } else {
                         return Err(err).with_context(|| format!("failed to stat {adjusted}"));

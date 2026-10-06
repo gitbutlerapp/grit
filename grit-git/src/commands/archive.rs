@@ -782,6 +782,7 @@ fn collect_gitattributes_from_tree(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn build_archive(
     repo: &Repository,
     config: &ConfigSet,
@@ -935,10 +936,10 @@ fn lookup_archiver(config: &ConfigSet, format: &str, remote: bool) -> Option<Arc
         let cmd_tgz = cmd_tgz.as_deref();
         let cmd_tgzz = config.get("tar.tar.gz.command");
         let cmd_tgzz = cmd_tgzz.as_deref();
-        let use_internal = match (cmd_tgz, cmd_tgzz) {
-            (None, None) | (Some(""), None) | (None, Some("")) | (Some(""), Some("")) => true,
-            _ => false,
-        };
+        let use_internal = matches!(
+            (cmd_tgz, cmd_tgzz),
+            (None, None) | (Some(""), None) | (None, Some("")) | (Some(""), Some(""))
+        );
         if use_internal {
             if remote && !is_remote_enabled(config, "tar.gz") {
                 return None;
@@ -1017,11 +1018,7 @@ pub(crate) fn tar_filters_from_config(config: &ConfigSet) -> Vec<(String, Option
 
     let mut out: Vec<(String, Option<String>, bool)> = Vec::new();
     for (stem, (cmd, rem)) in map {
-        let display_name = if stem.contains('.') {
-            stem.clone()
-        } else {
-            stem.clone()
-        };
+        let display_name = stem.clone();
         out.push((display_name, cmd, rem));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1124,6 +1121,7 @@ fn tree_has_pathspec_match(
     Ok(false)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn collect_entries(
     repo: &Repository,
     tree_data: &[u8],
@@ -1637,6 +1635,7 @@ fn split_ustar_path(path: &str, file_size: Option<usize>) -> (String, String, bo
     (String::new(), String::new(), true)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_ustar_header<W: Write>(
     tw: &mut TarBlockWriter<W>,
     name: &str,

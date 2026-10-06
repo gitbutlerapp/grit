@@ -621,8 +621,10 @@ fn write_submodule_log_lines(
         return Ok(());
     };
     writeln!(out, "Submodule {} {}..{}:", entry.path(), old_a, new_a)?;
-    let mut opts = RevListOptions::default();
-    opts.first_parent = true;
+    let opts = RevListOptions {
+        first_parent: true,
+        ..Default::default()
+    };
     let (_, negative_specs) =
         grit_lib::rev_list::split_revision_token(&format!("^{}", entry.old_oid.to_hex()));
     let Ok(res) = rev_list(&sub_repo, &[new_oid.to_hex()], &negative_specs, &opts) else {
@@ -877,6 +879,7 @@ fn ws_check_emit(out: &mut String, body: &str, ws_rule: u32, set: &str, reset: &
 
 /// Emit one content line (`+`/`-`/` `) with whitespace-error markup, mirroring Git
 /// `emit_line_ws_markup` for the non-dual-color case (`set_sign == NULL`).
+#[expect(clippy::too_many_arguments)]
 fn emit_ws_markup_line(
     out: &mut String,
     sign: char,
@@ -1174,6 +1177,7 @@ fn no_index_build_line_slots(data: &[u8], mode: &WhitespaceMode) -> Vec<NoIndexL
 }
 
 /// Unified diff body (`---` / `+++` / hunks) for `--no-index`, optional algorithm and whitespace rules.
+#[expect(clippy::too_many_arguments)]
 fn no_index_unified_patch_body(
     old_bytes: &[u8],
     new_bytes: &[u8],
@@ -1932,7 +1936,7 @@ pub(crate) fn unstaged_patch_for_add_edit(
     let pathspec_prefix = (!pathspec_prefix_buf.is_empty()).then_some(pathspec_prefix_buf.as_str());
     let resolved_specs: Vec<String> = pathspecs
         .iter()
-        .map(|p| resolve_pathspec(p, work_tree, pathspec_prefix.as_deref()))
+        .map(|p| resolve_pathspec(p, work_tree, pathspec_prefix))
         .collect();
     let entries = filter_by_paths(entries, &resolved_specs);
 
@@ -1951,8 +1955,10 @@ pub(crate) fn unstaged_patch_for_add_edit(
     };
     let diff_algo_cli = parse_cli_diff_algorithm_from_argv();
 
-    let mut diff_args = Args::default();
-    diff_args.color = Some("never".to_owned());
+    let diff_args = Args {
+        color: Some("never".to_owned()),
+        ..Default::default()
+    };
     let (src_prefix, dst_prefix) = resolve_diff_prefixes(&diff_args, repo, false);
     let relative_prefix = resolve_diff_relative_prefix(Some(work_tree), &repo.git_dir, &diff_args);
 
@@ -1998,7 +2004,7 @@ pub(crate) fn unstaged_patch_for_add_edit(
         relative_prefix.as_deref(),
         resolve_indent_heuristic(&diff_config, false, false),
     )?;
-    Ok(String::from_utf8(out).context("diff patch was not valid UTF-8")?)
+    String::from_utf8(out).context("diff patch was not valid UTF-8")
 }
 
 /// Run the `diff` command.
@@ -2225,36 +2231,38 @@ pub fn run(mut args: Args) -> Result<()> {
     }
 
     // `git diff <blob-oid> <file>` — raw object id vs path (t4063: prefers filename in headers).
-    if revs.len() == 1 && paths.len() == 1 && !args.cached {
-        if split_treeish_colon(&revs[0]).is_none() {
-            if let Some(wt) = repo.work_tree.as_ref() {
-                if fs::symlink_metadata(wt.join(&paths[0])).is_ok() {
-                    let oid = resolve_revision(&repo, &revs[0]).ok();
-                    let is_blob = oid.is_some_and(|o| {
-                        repo.odb
-                            .read(&o)
-                            .map(|obj| obj.kind == ObjectKind::Blob)
-                            .unwrap_or(false)
-                    });
-                    if is_blob {
-                        return run_diff_blob_vs_file(
-                            &repo,
-                            &args,
-                            &revs[0],
-                            &paths[0],
-                            Some(paths[0].as_str()),
-                            &src_prefix,
-                            &dst_prefix,
-                            patch_context,
-                            Arc::clone(&merged_attrs),
-                            diff_config.clone(),
-                            ignore_case_attrs,
-                            diff_algo_cli,
-                            &cwd,
-                            quote_path_fully,
-                            indent_heuristic,
-                        );
-                    }
+    if revs.len() == 1
+        && paths.len() == 1
+        && !args.cached
+        && split_treeish_colon(&revs[0]).is_none()
+    {
+        if let Some(wt) = repo.work_tree.as_ref() {
+            if fs::symlink_metadata(wt.join(&paths[0])).is_ok() {
+                let oid = resolve_revision(&repo, &revs[0]).ok();
+                let is_blob = oid.is_some_and(|o| {
+                    repo.odb
+                        .read(&o)
+                        .map(|obj| obj.kind == ObjectKind::Blob)
+                        .unwrap_or(false)
+                });
+                if is_blob {
+                    return run_diff_blob_vs_file(
+                        &repo,
+                        &args,
+                        &revs[0],
+                        &paths[0],
+                        Some(paths[0].as_str()),
+                        &src_prefix,
+                        &dst_prefix,
+                        patch_context,
+                        Arc::clone(&merged_attrs),
+                        diff_config.clone(),
+                        ignore_case_attrs,
+                        diff_algo_cli,
+                        &cwd,
+                        quote_path_fully,
+                        indent_heuristic,
+                    );
                 }
             }
         }
@@ -2571,14 +2579,14 @@ pub fn run(mut args: Args) -> Result<()> {
                 "--pickaxe-all" => {
                     // Accepted for compatibility
                 }
-                s if s == "--dirstat" => {
+                "--dirstat" => {
                     args.dirstat.push(String::new());
                 }
                 s if s.starts_with("--dirstat=") => {
                     args.dirstat
                         .push(s.strip_prefix("--dirstat=").unwrap_or("").to_owned());
                 }
-                s if s == "--dirstat-by-file" => {
+                "--dirstat-by-file" => {
                     args.dirstat_by_file = Some(String::new());
                 }
                 s if s.starts_with("--dirstat-by-file=") => {
@@ -2669,9 +2677,7 @@ pub fn run(mut args: Args) -> Result<()> {
             revs = vec![mb_oid.to_hex()];
         } else if revs.len() == 1 && revs[0].contains("..") && !is_symmetric_diff(&revs[0]) {
             bail!("fatal: --merge-base does not work with ranges");
-        } else if revs.is_empty() {
-            bail!("usage: grit diff [<options>] [<commit>] [--] [<path>...]\n   or: grit diff [<options>] --cached [--merge-base] [<commit>] [--] [<path>...]\n   or: grit diff [<options>] [--merge-base] <commit> [<commit>...] <commit> [--] [<path>...]");
-        } else if revs.len() > 2 {
+        } else if revs.is_empty() || revs.len() > 2 {
             bail!("usage: grit diff [<options>] [<commit>] [--] [<path>...]\n   or: grit diff [<options>] --cached [--merge-base] [<commit>] [--] [<path>...]\n   or: grit diff [<options>] [--merge-base] <commit> [<commit>...] <commit> [--] [<path>...]");
         } else if revs.len() == 2 {
             let a = resolve_commit_ish_for_merge_base(&repo, &revs[0])?;
@@ -2804,7 +2810,7 @@ pub fn run(mut args: Args) -> Result<()> {
             symmetric_warn_multiple_bases = bases.len() > 1;
             let chosen = bases[0];
             symmetric_base_name = abbreviate_object_id(&repo, chosen, 7)
-                .unwrap_or_else(|_| chosen.to_hex()[..7.min(40)].to_string());
+                .unwrap_or_else(|_| chosen.to_hex()[..7].to_string());
             revs = vec![chosen.to_string(), right_oid.to_string()];
             _symmetric = true;
         } else if let Some((left, right)) = revs[0].split_once("..") {
@@ -2856,7 +2862,7 @@ pub fn run(mut args: Args) -> Result<()> {
         let abbrev_opt = if args.full_index || args.no_abbrev {
             None
         } else {
-            Some(args.abbrev.map(|n| n.max(4).min(40)).unwrap_or(7))
+            Some(args.abbrev.map(|n| n.clamp(4, 40)).unwrap_or(7))
         };
         let mut stdout = io::stdout().lock();
         if args.name_only {
@@ -2924,10 +2930,8 @@ pub fn run(mut args: Args) -> Result<()> {
                 }
             }
         }
-        if args.exit_code || args.quiet {
-            if has_diff {
-                std::process::exit(1);
-            }
+        if (args.exit_code || args.quiet) && has_diff {
+            std::process::exit(1);
         }
         return Ok(());
     }
@@ -3439,7 +3443,7 @@ pub fn run(mut args: Args) -> Result<()> {
             let patch_abbrev = if args.full_index {
                 40usize
             } else if let Some(n) = args.abbrev {
-                n.max(4).min(40)
+                n.clamp(4, 40)
             } else {
                 7
             };
@@ -3941,6 +3945,7 @@ pub fn run(mut args: Args) -> Result<()> {
 }
 
 /// `git diff <rev>:<path> <file>` — blob at revision vs worktree file (t4063-diff-blobs).
+#[expect(clippy::too_many_arguments)]
 fn run_diff_blob_vs_file(
     repo: &Repository,
     args: &Args,
@@ -4065,7 +4070,7 @@ fn run_diff_blob_vs_file(
     let patch_abbrev = if args.full_index {
         40usize
     } else if let Some(n) = args.abbrev {
-        n.max(4).min(40)
+        n.clamp(4, 40)
     } else {
         7
     };
@@ -4171,6 +4176,7 @@ fn run_diff_blob_vs_file(
 ///
 /// `path_in_repo` / `path_other` are used for reading the work tree (after pathspec resolution).
 /// `display_in_repo` / `display_other` are used in `---` / `+++` labels (repo-root-relative).
+#[expect(clippy::too_many_arguments)]
 fn run_diff_two_paths(
     repo: &Repository,
     args: &Args,
@@ -4486,7 +4492,7 @@ fn run_no_index(args: Args) -> Result<()> {
     let patch_abbrev = if args.full_index {
         40usize
     } else if let Some(n) = args.abbrev {
-        n.max(4).min(40)
+        n.clamp(4, 40)
     } else {
         7
     };
@@ -4878,7 +4884,7 @@ fn run_no_index_dirs(args: Args, dir_a: &Path, dir_b: &Path) -> Result<()> {
     let patch_abbrev = if args.full_index {
         40usize
     } else if let Some(n) = args.abbrev {
-        n.max(4).min(40)
+        n.clamp(4, 40)
     } else {
         7
     };
@@ -5281,20 +5287,15 @@ pub(crate) struct DiffFilesFormatParse {
     pub format: DiffFilesDefaultFormat,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiffFilesDefaultFormat {
+    #[default]
     Raw,
     Patch,
     Stat,
     NumStat,
     NameOnly,
     NameStatus,
-}
-
-impl Default for DiffFilesDefaultFormat {
-    fn default() -> Self {
-        Self::Raw
-    }
 }
 
 /// Parse `diff-files`-specific output flags in argv order (matches Git: `-s` suppresses following format output until `-p`).
@@ -5630,6 +5631,7 @@ fn dirstat_damage_for_entry(
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn gather_dirstat_recursive(
     out: &mut impl Write,
     files: &[DirstatFile],
@@ -6507,6 +6509,7 @@ fn config_big_file_threshold(config: &ConfigSet) -> Option<u64> {
 ///
 /// When `--break-rewrites` is set and Git would treat the pair as a complete rewrite,
 /// counts match Git's diffstat path (full line counts) instead of Myers line diff.
+#[expect(clippy::too_many_arguments)]
 fn stat_ins_del_for_entry(
     odb: &Odb,
     entry: &DiffEntry,
@@ -6663,6 +6666,7 @@ fn write_diff_header_with_abbrev(
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_diff_header_with_prefix(
     out: &mut impl Write,
     entry: &DiffEntry,
@@ -6684,14 +6688,14 @@ fn write_diff_header_with_prefix(
 
     let (b, r) = if use_color { (BOLD, RESET) } else { ("", "") };
     let old_git = if old_path.is_empty() {
-        format!("{src_prefix}")
+        src_prefix.to_string()
     } else if old_path == "/dev/null" {
         "/dev/null".to_string()
     } else {
         format_diff_path_with_prefix(src_prefix, old_path, quote_path_fully)
     };
     let new_git = if new_path.is_empty() {
-        format!("{dst_prefix}")
+        dst_prefix.to_string()
     } else if new_path == "/dev/null" {
         "/dev/null".to_string()
     } else {
@@ -7140,6 +7144,7 @@ fn mode_is_regular_blob_mode_str(mode: &str) -> bool {
 }
 
 /// Git splits a regular-file ↔ symlink type change into two patches (deleted old + added new).
+#[expect(clippy::too_many_arguments)]
 fn write_typechange_blob_symlink_split_patch(
     out: &mut impl Write,
     entry: &DiffEntry,
@@ -7238,6 +7243,7 @@ fn write_typechange_blob_symlink_split_patch(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_typechange_symlink_blob_split_patch(
     out: &mut impl Write,
     entry: &DiffEntry,
@@ -7336,6 +7342,7 @@ fn write_typechange_symlink_blob_split_patch(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_blob_to_blob_patch_fragment(
     out: &mut impl Write,
     old_content: &str,
@@ -7518,6 +7525,7 @@ fn rewrite_patch_label_prefixes(
     out
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_patch_with_prefix(
     out: &mut impl Write,
     repo: &Repository,
@@ -8922,9 +8930,7 @@ fn next_git_word(text: &str, mut pos: usize, word_re: Option<&WordRe>) -> Option
     // NOT fall back to whitespace splitting.
     if let Some(re) = word_re {
         while pos < text.len() {
-            let Some((m_start, m_end)) = re.find_at(text, pos) else {
-                return None;
-            };
+            let (m_start, m_end) = re.find_at(text, pos)?;
             let begin = m_start;
             // git truncates the match at the first embedded newline.
             let matched = text.get(begin..m_end)?;
@@ -9433,6 +9439,7 @@ enum WordDiffBodyStyle {
     PlainMarkers,
 }
 
+#[expect(clippy::too_many_arguments)]
 fn word_diff_emit_body(
     out: &mut String,
     minus: &str,
@@ -9840,6 +9847,7 @@ fn word_diff_emit_plain_markers(
     );
 }
 
+#[expect(clippy::too_many_arguments)]
 fn word_diff_generate_patch(
     config: &ConfigSet,
     old_content: &str,
@@ -9896,9 +9904,10 @@ fn word_diff_generate_patch(
     } else {
         ("", "")
     };
-    let (cb, cr) = if header_use_color && matches!(wd.mode, WordDiffModeCli::Color) {
-        (CYAN, RESET)
-    } else if header_use_color && wd.force_color && matches!(wd.mode, WordDiffModeCli::Plain) {
+    let (cb, cr) = if header_use_color
+        && (matches!(wd.mode, WordDiffModeCli::Color)
+            || (wd.force_color && matches!(wd.mode, WordDiffModeCli::Plain)))
+    {
         (CYAN, RESET)
     } else {
         ("", "")
@@ -10170,6 +10179,7 @@ fn compact_summary_display_path(entry: &DiffEntry, quote_path_fully: bool) -> St
 }
 
 /// Per-file compact summary plus totals line (matches `git diff --compact-summary`).
+#[expect(clippy::too_many_arguments)]
 fn write_compact_summary(
     out: &mut impl Write,
     entries: &[DiffEntry],
@@ -10280,6 +10290,7 @@ fn write_compact_summary(
 }
 
 /// Write only the summary line: `N files changed, N insertions(+), N deletions(-)`.
+#[expect(clippy::too_many_arguments)]
 fn write_shortstat(
     out: &mut impl Write,
     entries: &[DiffEntry],
@@ -10362,6 +10373,7 @@ fn append_stat_counts(summary: &mut String, total_ins: usize, total_del: usize) 
 }
 
 /// Write a stat summary for each entry, followed by a totals line.
+#[expect(clippy::too_many_arguments)]
 fn write_stat(
     out: &mut impl Write,
     entries: &[DiffEntry],
@@ -10505,6 +10517,7 @@ fn format_rename_display(old: &str, new: &str, quote_path_fully: bool) -> String
 }
 
 /// Write machine-readable numstat output: `{insertions}\t{deletions}\t{path}`.
+#[expect(clippy::too_many_arguments)]
 fn write_numstat(
     out: &mut impl Write,
     entries: &[DiffEntry],
@@ -10601,15 +10614,13 @@ pub(crate) fn write_diff_summary(
                     grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
                 )?;
             }
-            DiffStatus::Modified => {
-                if break_rewrites {
-                    if let Some(pct) = entry.score {
-                        writeln!(
-                            out,
-                            " rewrite {} ({pct}%)",
-                            grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
-                        )?;
-                    }
+            DiffStatus::Modified if break_rewrites => {
+                if let Some(pct) = entry.score {
+                    writeln!(
+                        out,
+                        " rewrite {} ({pct}%)",
+                        grit_lib::quote_path::quote_c_style(entry.path(), quote_path_fully)
+                    )?;
                 }
             }
             _ => {}

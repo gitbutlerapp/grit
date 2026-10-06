@@ -179,6 +179,7 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn walk_tree_for_backfill(
     repo: &Repository,
     promisor: &PromisorSource,

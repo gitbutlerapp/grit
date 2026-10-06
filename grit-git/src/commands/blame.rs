@@ -941,7 +941,7 @@ fn read_from_index_conflict(repo: &Repository, odb: &Odb, file_path: &str) -> Re
     for entry in &index.entries {
         if entry.path == path_bytes
             && entry.stage() > 0
-            && best.map_or(true, |b| entry.stage() > b.stage())
+            && best.is_none_or(|b| entry.stage() > b.stage())
         {
             best = Some(entry);
         }
@@ -1440,6 +1440,7 @@ fn funcname_matcher_for_blame(ctx: &LineRangeParseCtx<'_>) -> Option<userdiff::F
         .flatten()
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_porcelain(
     out: &mut impl Write,
     lines: &[BlameLine],
@@ -1619,6 +1620,7 @@ fn age_color_for_timestamp(author_time: i64, buckets: &[(i64, String)]) -> &str 
     buckets.get(i).map(|(_, c)| c.as_str()).unwrap_or("")
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_default(
     out: &mut impl Write,
     lines: &[BlameLine],
@@ -1639,7 +1641,6 @@ fn write_default(
     };
     let max_lineno = lines.iter().map(|b| b.final_lineno).max().unwrap_or(1);
     let lineno_width = format!("{max_lineno}").len();
-    let use_color = args.color_lines || args.color_by_age;
 
     let mut prev_oid: Option<ObjectId> = None;
 
@@ -1688,8 +1689,6 @@ fn write_default(
             (c, RESET)
         } else if args.color_lines && prev_oid == Some(bl.oid) {
             (color_style.repeated_lines_ansi.as_str(), RESET)
-        } else if use_color {
-            ("", "")
         } else {
             ("", "")
         };

@@ -1188,6 +1188,7 @@ fn split_treeish_colon_path(spec: &str) -> Option<(&str, &str)> {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn write_submodule_batch_line(
     out: &mut impl Write,
     format: &str,
@@ -1233,6 +1234,7 @@ fn write_submodule_batch_line(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn emit_batch_object_lines(
     repo: &Repository,
     oid: ObjectId,
@@ -1314,6 +1316,7 @@ fn emit_batch_object_lines(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn print_batch_follow_symlinks(
     repo: &Repository,
     display_spec: &str,
@@ -1508,6 +1511,7 @@ fn write_excluded_line(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn print_batch_entry(
     repo: &Repository,
     display_spec: &str,
@@ -1742,6 +1746,7 @@ fn parse_batch_input<'a>(line: &'a str, format: &str) -> (&'a str, &'a str) {
     (trimmed, "")
 }
 
+#[expect(clippy::too_many_arguments)]
 fn apply_format(
     format: &str,
     object_name: &str,
@@ -1953,9 +1958,7 @@ fn cat_file_emit_transformed(
     )
     .map_err(|e| anyhow::anyhow!("could not convert '{oid_hex}' {path}: {e}"))?;
 
-    let data = if args.filters {
-        smudged
-    } else if blob_mode == Some(MODE_SYMLINK) {
+    let data = if args.filters || blob_mode == Some(MODE_SYMLINK) {
         smudged
     } else {
         let rules = match index.as_ref() {
