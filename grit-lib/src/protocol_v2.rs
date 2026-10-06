@@ -10,6 +10,65 @@
 
 use std::collections::HashSet;
 
+/// A section header in a protocol-v2 `command=fetch` response.
+///
+/// See `Documentation/gitprotocol-v2.txt` ("The response of fetch is broken into a number of
+/// sections…").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FetchResponseSection {
+    /// Negotiation round-trips (`ACK`/`NAK`/`ready`); omitted when the server jumps straight to the pack.
+    Acknowledgments,
+    /// Shallow boundary updates when the client sent `deepen` / related lines.
+    ShallowInfo,
+    /// OID resolution for client `want-ref` lines when ref-in-want is enabled.
+    WantedRefs,
+    /// Alternate pack URIs when the client requested `packfile-uris`.
+    PackfileUris,
+    /// Side-band-64k framed pack data.
+    Packfile,
+}
+
+impl FetchResponseSection {
+    /// PKT-LINE section header written/read on the wire.
+    #[must_use]
+    pub const fn header(self) -> &'static str {
+        match self {
+            Self::Acknowledgments => "acknowledgments",
+            Self::ShallowInfo => "shallow-info",
+            Self::WantedRefs => "wanted-refs",
+            Self::PackfileUris => "packfile-uris",
+            Self::Packfile => "packfile",
+        }
+    }
+}
+
+/// Section order after negotiation completes: optional prelude sections, then `packfile`.
+///
+/// Matches gitprotocol-v2 (and upstream `upload-pack.c` after shallow/wanted-ref order was fixed).
+/// Returns true when `shallow-info` appears before `wanted-refs` in a fetch response prelude.
+#[must_use]
+pub fn fetch_prelude_shallow_before_wanted_refs(section_headers: &[&str]) -> bool {
+    let shallow = section_headers
+        .iter()
+        .position(|h| *h == FetchResponseSection::ShallowInfo.header());
+    let wanted = section_headers
+        .iter()
+        .position(|h| *h == FetchResponseSection::WantedRefs.header());
+    match (shallow, wanted) {
+        (Some(s), Some(w)) => s < w,
+        _ => true,
+    }
+}
+
+pub const FETCH_RESPONSE_SECTION_ORDER: &[FetchResponseSection] = &[
+    FetchResponseSection::Acknowledgments,
+    FetchResponseSection::ShallowInfo,
+    FetchResponseSection::WantedRefs,
+    FetchResponseSection::PackfileUris,
+    FetchResponseSection::Packfile,
+];
+
 /// True when the server's v2 capability advertisement offers the `bundle-uri` command.
 ///
 /// Advertised either bare (`bundle-uri`) or with a value (`bundle-uri=...`).
@@ -94,6 +153,36 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| (*x).to_owned()).collect()
+    }
+
+    #[test]
+    fn fetch_prelude_order_helper() {
+        assert!(fetch_prelude_shallow_before_wanted_refs(&[
+            "shallow-info",
+            "wanted-refs",
+            "packfile"
+        ]));
+        assert!(!fetch_prelude_shallow_before_wanted_refs(&[
+            "wanted-refs",
+            "shallow-info"
+        ]));
+    }
+
+    #[test]
+    fn fetch_response_section_order_matches_protocol_v2() {
+        assert_eq!(
+            FETCH_RESPONSE_SECTION_ORDER
+                .iter()
+                .map(|s| s.header())
+                .collect::<Vec<_>>(),
+            [
+                "acknowledgments",
+                "shallow-info",
+                "wanted-refs",
+                "packfile-uris",
+                "packfile"
+            ]
+        );
     }
 
     #[test]

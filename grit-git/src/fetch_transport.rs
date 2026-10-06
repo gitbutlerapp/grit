@@ -1274,8 +1274,22 @@ fn read_sideband_pack_until_done(r: &mut impl Read, out: &mut Vec<u8>) -> Result
     Ok(())
 }
 
+/// True when the client is asking the server to adjust shallow boundaries.
+fn upload_pack_shallow_deepen_requested(opts: &UploadPackShallowOptions) -> bool {
+    opts.depth.is_some()
+        || opts.deepen.is_some()
+        || opts.unshallow
+        || opts.shallow_since.is_some()
+        || !opts.shallow_exclude.is_empty()
+}
+
 /// Read a protocol v2 `fetch` response: skip non-pack sections, demux side-band-64k pack data.
-fn read_v2_fetch_pack_response(stdout: &mut impl Read, out: &mut Vec<u8>) -> Result<()> {
+fn read_v2_fetch_pack_response(
+    stdout: &mut impl Read,
+    out: &mut Vec<u8>,
+    local_git_dir: Option<&Path>,
+    apply_unshallow_from_shallow_info: bool,
+) -> Result<()> {
     loop {
         let hdr = match pkt_line::read_packet(stdout)? {
             Some(pkt_line::Packet::Data(s)) => s,
@@ -1289,7 +1303,24 @@ fn read_v2_fetch_pack_response(stdout: &mut impl Read, out: &mut Vec<u8>) -> Res
             bail!("fatal: remote error: {}", msg.trim_end());
         }
         match hdr.as_str() {
-            "acknowledgments" | "wanted-refs" | "shallow-info" | "packfile-uris" => {
+            "shallow-info" => {
+                if apply_unshallow_from_shallow_info {
+                    if let Some(git_dir) = local_git_dir {
+                        let (shallow, unshallow) =
+                            grit_lib::shallow::read_shallow_info_section(stdout)?;
+                        if !unshallow.is_empty() {
+                            grit_lib::shallow::apply_shallow_updates(git_dir, &[], &unshallow)
+                                .map_err(|e| anyhow::anyhow!("{e}"))?;
+                        }
+                        let _ = shallow;
+                    } else {
+                        skip_v2_section_until_boundary(stdout)?;
+                    }
+                } else {
+                    skip_v2_section_until_boundary(stdout)?;
+                }
+            }
+            "acknowledgments" | "wanted-refs" | "packfile-uris" => {
                 skip_v2_section_until_boundary(stdout)?;
             }
             "packfile" => {
@@ -1307,7 +1338,7 @@ fn read_v2_fetch_pack_response(stdout: &mut impl Read, out: &mut Vec<u8>) -> Res
 
 /// Outcome of reading one protocol-v2 `acknowledgments` section during multi-round negotiation.
 struct V2AckRound {
-    /// Server emitted `ready`: the packfile (and any `wanted-refs`/`shallow-info`) follows in the
+    /// Server emitted `ready`: the packfile (and any `shallow-info`/`wanted-refs`) follows in the
     /// SAME response after a delimiter — the caller must read the pack now without sending more.
     ready: bool,
     /// At least one `ACK <oid>` was seen (a common commit was found).
@@ -1337,7 +1368,7 @@ fn read_v2_acknowledgments(stdout: &mut impl Read) -> Result<Option<V2AckRound>>
         bail!("fatal: remote error: {}", msg.trim_end());
     }
     if hdr != "acknowledgments" {
-        // Not an acknowledgments section (server went straight to pack / shallow / wanted-refs).
+        // Not an acknowledgments section (server went straight to pack / shallow-info / wanted-refs).
         // Signal the caller to handle this header itself.
         return Ok(None);
     }
@@ -1467,7 +1498,18 @@ pub fn fetch_via_upload_pack_skipping(
     if !has_cli_refspecs {
         merge_remote_refs_into_upload_pack_advertisement(remote_repo_path, &mut advertised)?;
     }
-    let wants = filter_wants_already_local(local_git_dir, compute_wants(&advertised)?);
+    let raw_wants = compute_wants(&advertised)?;
+    let filtered_wants = filter_wants_already_local(local_git_dir, raw_wants.clone());
+    // Deepen requests must run upload-pack even when every wanted tip is already local (the pack
+    // extends history, not only ref tips). Keep the unfiltered wants only in that case.
+    let deepen_with_local_tips = shallow_options.is_some_and(upload_pack_shallow_deepen_requested)
+        && filtered_wants.is_empty()
+        && !raw_wants.is_empty();
+    let wants = if deepen_with_local_tips {
+        raw_wants
+    } else {
+        filtered_wants
+    };
     if has_hide_refs_for_fetch_connectivity(local_git_dir) {
         crate::trace_run_command_git_invocation(&[
             "rev-list",
@@ -1594,7 +1636,6 @@ pub fn fetch_via_upload_pack_skipping(
         // the plain `want` list; exact-OID sources and follow-tag wants stay as `want <oid>`.
         let (want_refs, plain_wants): (Vec<String>, Vec<ObjectId>) = if has_cli_refspecs
             && v2_fetch_supports_ref_in_want(&caps)
-            && !shallow_request
         {
             let (refs, _exact) = cli_want_refs_and_oids(&advertised, refspecs);
             if refs.is_empty() {
@@ -1650,12 +1691,22 @@ pub fn fetch_via_upload_pack_skipping(
             let server_ready = ack.as_ref().map(|a| a.ready).unwrap_or(false);
             if server_ready {
                 // Server is `ready`: the pack follows in the same response after a delim.
-                read_v2_fetch_pack_response(&mut stdout, &mut buf)?;
+                read_v2_fetch_pack_response(
+                    &mut stdout,
+                    &mut buf,
+                    Some(local_git_dir),
+                    deepen_with_local_tips,
+                )?;
                 drop(stdin);
             } else if ack.is_none() {
                 // Server skipped acknowledgments and went straight to the pack (already handled the
                 // header inside the reader): nothing more to send.
-                read_v2_fetch_pack_response(&mut stdout, &mut buf)?;
+                read_v2_fetch_pack_response(
+                    &mut stdout,
+                    &mut buf,
+                    Some(local_git_dir),
+                    deepen_with_local_tips,
+                )?;
                 drop(stdin);
             } else {
                 // Round 2: remaining haves + `done`, then read the pack.
@@ -1681,7 +1732,12 @@ pub fn fetch_via_upload_pack_skipping(
                     true,
                 )?;
                 drop(stdin);
-                read_v2_fetch_pack_response(&mut stdout, &mut buf)?;
+                read_v2_fetch_pack_response(
+                    &mut stdout,
+                    &mut buf,
+                    Some(local_git_dir),
+                    deepen_with_local_tips,
+                )?;
             }
             crate::trace2_emit_data_intmax("negotiation_v2", "total_rounds", total_rounds as i64);
         } else {
@@ -1708,7 +1764,12 @@ pub fn fetch_via_upload_pack_skipping(
             // Close stdin so `upload-pack` v2 sees EOF after this fetch; otherwise `serve_loop`
             // blocks for the next command while we block reading the pack response (deadlock).
             drop(stdin);
-            read_v2_fetch_pack_response(&mut stdout, &mut buf)?;
+            read_v2_fetch_pack_response(
+                &mut stdout,
+                &mut buf,
+                Some(local_git_dir),
+                deepen_with_local_tips,
+            )?;
         }
         buf
     } else {
@@ -2223,7 +2284,7 @@ fn fetch_upload_pack_negotiate_pack_bytes(
         )?;
         drop(stdin);
         let mut out = Vec::new();
-        read_v2_fetch_pack_response(&mut stdout, &mut out)?;
+        read_v2_fetch_pack_response(&mut stdout, &mut out, Some(local_git_dir), false)?;
         // Explicit-OID lazy fetches negotiate in a single round (a lone `want ... done`); record
         // `total_rounds`=1 like upstream `fetch-pack.c` so partial-clone checkout traces match
         // (t5601 #108).
@@ -2844,7 +2905,7 @@ pub fn fetch_via_git_protocol_skipping(
             true,
         )?;
         let mut buf = Vec::new();
-        read_v2_fetch_pack_response(&mut stream, &mut buf)?;
+        read_v2_fetch_pack_response(&mut stream, &mut buf, Some(local_git_dir), false)?;
         buf
     } else {
         fetch_upload_pack_negotiate_pack_bytes_with_streams(
@@ -2969,7 +3030,7 @@ pub fn fetch_via_ssh_upload_pack_skipping(
         )?;
         drop(stdin);
         let mut buf = Vec::new();
-        read_v2_fetch_pack_response(&mut stdout, &mut buf)?;
+        read_v2_fetch_pack_response(&mut stdout, &mut buf, Some(local_git_dir), false)?;
         buf
     } else {
         let buf = fetch_upload_pack_negotiate_pack_bytes_with_streams(

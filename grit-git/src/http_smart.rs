@@ -1602,11 +1602,11 @@ fn process_v2_fetch_response(
             bail!("fatal: remote error: {}", msg.trim_end());
         } else if pkt == "acknowledgments" {
             skip_to_flush(&mut cur)?;
-        } else if pkt == "wanted-refs" {
-            apply_wanted_refs_section(&mut cur, remote_heads, remote_tags, all_advertised)?;
         } else if pkt == "shallow-info" {
             let (shallow, unshallow) = read_shallow_info_section(&mut cur)?;
             apply_shallow_updates(local_git_dir, &shallow, &unshallow)?;
+        } else if pkt == "wanted-refs" {
+            apply_wanted_refs_section(&mut cur, remote_heads, remote_tags, all_advertised)?;
         } else if pkt == "packfile" {
             let pack_path = write_sideband_pack_to_temp(local_git_dir, &mut cur, progress)
                 .context("receive packfile")?;
