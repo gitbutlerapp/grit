@@ -2,19 +2,21 @@
 
 > The living version of this plan is maintained on the Grit Factory dashboard (https://maint.grit-scm.com/roadmap); this file is a snapshot. Items are worked one at a time, in order.
 
+> **Note:** The vendored Git C tree and upstream shell harness are removed. Validation is Rust tests plus **`bench/`** comparisons against system `git`. Some items below still mention the old harness; treat those as Rust-test / benchmark acceptance unless updated in a later roadmap edit.
+
 ## 1. CI gate for every integration
 *Workstream: Foundations*
 
 **Goal.** Integration pushes straight to `main`, and today there is no test CI at all (only `release.yml`). Add a fast, reliable gate.
 
 **Scope.**
-- A GitHub Actions workflow on push/PR running: `cargo fmt --check`, `cargo clippy --workspace -D warnings`, `cargo test -p grit-lib -p grit-cli`, and a curated smoke subset of the upstream harness (~50 files spanning odb, refs, index, diff, revs, transport).
+- A GitHub Actions workflow on push/PR running: `cargo fmt --check`, `cargo clippy --workspace -D warnings`, `cargo test -p grit-lib -p grit-cli`, and a curated workspace integration subset (odb, refs, index, diff, revs, transport modules).
 - Use cargo caching (e.g. Swatinem/rust-cache). Remove the `.cargo/config.toml` `jobs = 2` cap in CI only.
 - Delete the stray committed `.PLAN.md.swp`.
 
 **Acceptance.**
 - The workflow is green on main and takes under 15 minutes.
-- The smoke subset list is documented in TESTING.md.
+- The CI test subset is documented in TESTING.md.
 - A broken test demonstrably fails the workflow.
 
 ## 2. Benchmark suite and baseline vs Git

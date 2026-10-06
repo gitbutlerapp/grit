@@ -4,7 +4,7 @@ alwaysApply: true
 ---
 
 ---
-description: "Grit: fast linkable Git library, modern grit CLI, grit-git compatibility bed"
+description: "Grit: fast linkable Git library, modern grit CLI, optional grit-git compatibility CLI"
 alwaysApply: true
 ---
 
@@ -20,7 +20,7 @@ Grit began as a Rust reimplementation of Git aimed at passing Git's own test sui
 | ----- | ---- |
 | **`grit-cli`** | Git client with a **modern CLI** (`grit` binary). Primary UX. |
 | **`grit-lib`** | Clean, well-designed, **linkable** library any Rust project can use. |
-| **`grit-git`** | Git-compatible CLI — **compatibility test bed** for the harness. |
+| **`grit-git`** | Optional Git-compatible CLI for users who need drop-in `git` behavior. |
 
 Ordered work: **ROADMAP.md** (live plan on the [factory dashboard](https://maint.grit-scm.com/roadmap)).
 
@@ -40,7 +40,7 @@ On-disk formats and wire protocols must stay **correct and compatible with Git**
 
 ### What we drop
 
-Relatively unused commands get **no CLI and no further work:** archive; the email workflow (`am`, `format-patch`, `send-email`, `imap-send`, `request-pull`); foreign-VCS bridges. Remove from **`grit-lib`** where that simplifies the library. Mark related harness files **`in_scope = "skip"`** with a reason (ROADMAP item 5, `docs/v1-scope.md`).
+Relatively unused commands get **no CLI and no further work:** archive; the email workflow (`am`, `format-patch`, `send-email`, `imap-send`, `request-pull`); foreign-VCS bridges. Remove from **`grit-lib`** where that simplifies the library (ROADMAP item 5, `docs/v1-scope.md`).
 
 ### The CLI (`grit-cli`)
 
@@ -61,9 +61,9 @@ The library and CLI must be **as fast as possible.**
 
 ### Testing
 
-- Convert all **relevant** Git unit tests to Rust — core functionality and edge cases, **not** command UX or option compatibility.
+- Exercise core functionality and edge cases with **Rust tests** on the **`grit-lib`** public API (and workspace integration tests where CLI wiring matters).
 - Write **coverage tests for every public library interface**.
-- The upstream harness (`tests/*.sh` via **`grit-git`**) stays a **regression gate**. Do not weaken tests.
+- Do not weaken or delete tests to green a change.
 
 Detail: **TESTING.md** and ROADMAP testing items.
 
@@ -83,36 +83,23 @@ Detail: **TESTING.md** and ROADMAP testing items.
 
 ```bash
 # Build
-cargo build --release -p grit-git
 cargo build --release -p grit-cli
+cargo build --release -p grit-git   # optional Git-compatible CLI
 
-# Run a single harness file
-./scripts/run-tests.sh t3200-branch.sh
-
-# Run one group (e.g. t1xxx)
-./scripts/run-tests.sh t1
-
-# Full harness (in-scope files only)
-./scripts/run-tests.sh
+# Test
+cargo test -p grit-lib --lib
+cargo test --workspace
 ```
 
-## Testing pipeline (harness)
+## Testing
 
-`tests/` + **`scripts/run-tests.sh`**; per-file status in **`data/tests/<group>/<stem>.toml`**. **`in_scope=skip`** excludes a file. Dashboards: **`--dashboard`** or `scripts/generate-dashboard-from-test-files.py`. **TESTING.md** has full detail.
-
-## Do not weaken tests
-
-**Never weaken, delete, or skip tests to make a change pass.** The upstream harness **must not regress** on in-scope files you touch or that your change could affect.
-
-Allowed: flip **`test_expect_failure` → `test_expect_success`** when the underlying bug is genuinely fixed.
-
-New behavior belongs in **Rust tests** (`grit-lib` / workspace integration tests), not harness edits.
+**TESTING.md** describes the Rust-first strategy: `cargo test -p grit-lib --lib`, workspace integration tests, and **`bench/`** for performance comparisons against system `git`.
 
 ## Source of truth
 
 - On-disk formats and wire protocols: the Git specification and observed compatibility with the **`git`** command where benchmarks and tests require it.
-- Command behavior reference: [git-scm.com documentation](https://git-scm.com/docs) and the ported shell harness in **`tests/`** (run against `grit-git` as `git`).
-- Library correctness: **`grit-lib`** Rust unit and integration tests (primary growth path).
+- Command behavior reference: [git-scm.com documentation](https://git-scm.com/docs) and **`grit-lib`** / workspace integration tests.
+- Product APIs: `grit-lib` rustdoc and the docs site.
 
 ## Licensing hard rule — no copied expression in `grit-lib`
 
@@ -142,24 +129,22 @@ cargo test -p grit-lib --lib       # unit tests must pass
 grit/
 ├── grit-lib/src/          # Core library (product)
 ├── grit-cli/src/          # Modern `grit` CLI (--json / --markdown)
-├── grit-git/src/commands/ # Git-compatible CLI (compatibility bed)
-├── tests/                 # Shell harness + test-lib.sh (regression gate for grit-git)
-├── data/tests/            # Per-file harness status TOMLs
-├── bench/                 # Benchmarks vs git
-├── docs/                  # Site + harness dashboards
-├── scripts/               # Test runner, dashboard generators
+├── grit-git/src/commands/ # Git-compatible CLI (optional)
+├── bench/                 # Benchmarks vs system git
+├── docs/                  # Site + usage docs
+├── scripts/               # Repo maintenance scripts
 ├── ROADMAP.md             # Ordered work plan (snapshot)
-└── TESTING.md             # Harness + Rust test strategy
+└── TESTING.md             # Rust test strategy
 ```
 
 ## Definition of done
 
 Aligns with **how work is judged** above:
 
-- [ ] **Compatibility** — formats/protocols match Git; harness files you affect do not regress.
+- [ ] **Compatibility** — formats/protocols match Git where implemented; Rust tests cover the change.
 - [ ] **Speed** — benchmarks before/after vs `git` for hot-path or performance work (`bench/`).
 - [ ] **Library hygiene** — typed errors, no lib printing/globals/shell-out; **`grit-cli`** adds **`--json`** and **`--markdown`** when touched.
-- [ ] **Rust tests** + **coverage tests** for new/changed public API; relevant upstream cases converted over time.
+- [ ] **Rust tests** + **coverage tests** for new/changed public API.
 - [ ] **Docs** (site + rustdoc) updated in the same change.
 - [ ] **`cargo fmt`**, **`cargo clippy`** (no warnings), **`cargo test -p grit-lib --lib`** (and relevant workspace tests).
 
@@ -221,13 +206,10 @@ The Git-compatible engine lives in **`grit-lib`**. Binaries stay thin: parse CLI
 
 ## Testing (agents)
 
-Run affected harness files before/after substantive changes. Add Rust integration + **coverage tests** for new **`grit-lib`** API. Never run harness inside the main repo — use `/tmp/`. See **Project direction → Testing** above.
+Run **`cargo test -p grit-lib --lib`** and relevant workspace tests before/after substantive changes. Add integration + **coverage tests** for new **`grit-lib`** API. For hot paths, use **`bench/`** against system `git`.
 
 ## Do not
 
-- Modify `tests/test-lib.sh` (causes regressions)
-- Create stub/partial harness files (extend `tests/` with complete scenarios when adding coverage)
-- Skip harness tests by adding `SKIP` prereqs (fix the code instead)
 - Weaken or delete tests to green a run
 - Run `cargo build` in worktrees (build in main repo, copy binary)
 
@@ -243,8 +225,7 @@ Agents version-control with **GitButler (`but`)** and **GitButler Mesh**. Nothin
 ## Cursor cloud specific instructions
 
 - **Rust toolchain**: Ensure stable ≥ 1.85 (`rustup update stable && rustup default stable`) for edition 2024 workspace deps.
-- **No external services**: Build and test via Cargo and the Bash test runner.
+- **No external services**: Build and test via Cargo.
 - **Unit tests**: `cargo test -p grit-lib --lib`; use `cargo test --workspace` for broader runs.
-- **Integration tests**: `./scripts/run-tests.sh <test-file>` (see TESTING.md). Many harness tests still fail overall; **do not regress** files in scope for your change.
-- **Lint**: `cargo check -p grit-git 2>&1 | grep warning` — known pre-existing warnings in `grit-git/src/commands/add.rs`.
-- **Binary location**: After `cargo build --release`, harness uses **`target/release/grit-git`**.
+- **Lint**: `cargo clippy --workspace -- -D warnings` (fix new warnings in code you touch).
+- **Benchmarks**: `bench/` when touching hot paths (compare against system `git`).

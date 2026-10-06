@@ -83,12 +83,7 @@ files this is N × (tree-walk + multi-file parse) = super-linear.
 
 ## Optimization plan (ranked by impact; all in `grit-lib`)
 
-Each item is verified against the ported test suite (`data/tests`, ~1,291 files fully
-passing) by running the affected families after the change; **no pass-count regression**
-is the gate. The fixes are caches/reuse, so the risk is staleness — every cache must
-invalidate on the relevant mutation (config write, `.gitattributes` change), and the
-suite's config/attribute tests (t1300-config, t0003/t0008-attributes, t7810-grep) are
-the guard.
+Each item is verified with Rust tests, targeted integration tests, and **`bench/`** ratios after the change. The fixes are caches/reuse, so the risk is staleness — every cache must invalidate on the relevant mutation (config write, `.gitattributes` change); add or extend library tests when touching attribute/config caching.
 
 ### P1 — Cache the gitattributes stack  *(grit-lib/src/attributes.rs)*  — **huge**
 `load_gitattributes_for_diff`/`load_gitattributes_for_checkout` rebuild the full stack per
@@ -144,12 +139,9 @@ fixed transitively by P1–P5. No combo-specific work is needed first.
 
 ## Sequencing & verification
 
-1. **P1 (attributes cache)** — biggest win, self-contained in `attributes.rs`. Gate:
-   t7810-grep, t0003/t0008/t0021 (attributes/filters), t4 diff family, t2 checkout.
-2. **P2 (config cache)** — broad win. Gate: t1300-config family, plus a full-suite run
-   (config touches everything) confirming `sum(passed_last)` unchanged.
-3. **P3 (index parse)** then **P4 (tree-diff pruning)** then **P5 (write path)** — each
-   gated on the relevant t-family + the no-regression ratchet on `data/tests`.
+1. **P1 (attributes cache)** — biggest win, self-contained in `attributes.rs`. Gate: attribute/diff/grep-related Rust tests + `bench/run-everyday.sh`.
+2. **P2 (config cache)** — broad win. Gate: config-related Rust tests + full `cargo test -p grit-lib --lib`.
+3. **P3 (index parse)** then **P4 (tree-diff pruning)** then **P5 (write path)** — each gated on index/diff/log benchmarks and relevant library tests.
 
 Re-run `bash bench/run-everyday.sh` after each phase; `docs/bench.html` (scale-grouped)
 tracks the ratios trending toward parity.

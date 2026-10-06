@@ -24,8 +24,8 @@ path = "src/bin/grit_instaweb.rs"
 workspace = true
 
 [features]
-# `test-tools` is on by default so normal builds and the test harness keep the
-# full `grit test-tool <sub>` surface. Build the product binary without the test
+# `test-tools` is on by default so normal builds keep the full `grit test-tool <sub>`
+# surface used by integration tests. Build the product binary without the test
 # scaffolding via `--no-default-features`.
 default = ["test-tools"]
 test-tools = ["grit-lib/test-tools"]

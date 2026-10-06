@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-const GRIT_BIN: &str = env!("CARGO_BIN_EXE_grit");
+const GRIT_BIN: &str = env!("CARGO_BIN_EXE_grit-git");
 
 /// A captured command result.
 struct Output {
