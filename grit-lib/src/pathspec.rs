@@ -1476,6 +1476,29 @@ fn inject_magic_prefix_token(magic_prefix: &str, prefix: &str) -> String {
     }
 }
 
+/// Drop repeated leading `./` / `.//` from a repo-root pathspec (Git `prefix_path` behavior).
+///
+/// When stripping exposes a leading `:`, wrap with `:(literal)` so a filesystem path like
+/// `:!foo` is not reinterpreted as short exclude magic.
+fn normalize_repo_root_relative_pathspec(pathspec: &str) -> String {
+    let mut spec = pathspec;
+    let mut stripped = false;
+    while let Some(rest) = spec.strip_prefix("./") {
+        stripped = true;
+        spec = rest.trim_start_matches('/');
+    }
+    if !stripped {
+        return pathspec.to_owned();
+    }
+    if spec.is_empty() {
+        return ".".to_owned();
+    }
+    if spec.starts_with(':') && !literal_pathspecs_enabled() {
+        return format!(":(literal){spec}");
+    }
+    spec.to_owned()
+}
+
 fn normalize_relative_path_str(path: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     for component in std::path::Path::new(path).components() {
@@ -1632,19 +1655,7 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
         Some(p) if !p.is_empty() => {
             normalize_relative_path_str(&PathBuf::from(p).join(pathspec).to_string_lossy())
         }
-        _ => {
-            // At the work-tree root, Git drops repeated leading `./` (and `.//`) so index paths
-            // never contain a `.` directory component; e.g. `add ./-` must stage `-`, not `./-`.
-            let mut spec = pathspec;
-            while let Some(rest) = spec.strip_prefix("./") {
-                spec = rest.trim_start_matches('/');
-            }
-            if spec.is_empty() {
-                ".".to_owned()
-            } else {
-                spec.to_owned()
-            }
-        }
+        _ => normalize_repo_root_relative_pathspec(pathspec),
     }
 }
 
@@ -1849,5 +1860,15 @@ mod resolve_pathspec_tests {
             "sub/dir/file"
         );
         assert_eq!(resolve_pathspec(":(glob)*.rs", &wt, None), ":(glob)*.rs");
+    }
+
+    #[test]
+    fn dot_slash_colon_filename_stays_literal_not_exclude_magic() {
+        let wt = wt();
+        let resolved = resolve_pathspec("./:!foo", &wt, None);
+        assert_eq!(resolved, ":(literal):!foo");
+        assert!(!pathspec_is_exclude(&resolved));
+        assert!(pathspec_matches(&resolved, ":!foo"));
+        assert!(!pathspec_matches(&resolved, "other"));
     }
 }

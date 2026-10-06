@@ -91,3 +91,25 @@ fn add_dot_slash_dash_writes_tree_without_dot_entry() {
     );
     assert!(dir.join("-").is_file(), "checked-out file '-' missing");
 }
+
+#[test]
+fn add_dot_slash_colon_bang_filename_does_not_exclude_other_files() {
+    let dir = unique_tmp("add-colon-bang");
+    assert!(grit(&["init"], &dir).ok(), "init failed");
+
+    std::fs::write(dir.join(":!foo"), "x\n").expect("create :!foo");
+    std::fs::write(dir.join("other"), "y\n").expect("create other");
+
+    let add = grit(&["add", "./:!foo"], &dir);
+    assert!(add.ok(), "add ./:!foo failed: {}", add.stderr);
+
+    let cached = grit(&["diff", "--cached", "--name-only"], &dir);
+    assert!(cached.ok(), "diff --cached failed: {}", cached.stderr);
+    let names: Vec<&str> = cached.stdout.lines().collect();
+    assert_eq!(
+        names,
+        vec![":!foo"],
+        "expected only literal :!foo staged, got: {:?}",
+        names
+    );
+}

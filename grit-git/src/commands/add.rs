@@ -799,7 +799,7 @@ pub fn run(mut args: Args) -> Result<()> {
         let mut had_errors = false;
         let mut had_ignored = false;
         let mut chmod_deferred: Option<anyhow::Error> = None;
-        if pathspecs_need_match_walk(&args.pathspec) {
+        if pathspecs_need_match_walk(&resolved_specs) {
             let matched = add_with_pathspec_list(
                 odb,
                 &mut index,
