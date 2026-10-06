@@ -126,7 +126,10 @@ pub fn push(
     refs: &[PushRefSpec],
 ) -> Result<PushOutcome> {
     let url = remote_url(config, remote)?;
-    let opts = PushOptions::default();
+    let opts = PushOptions {
+        tracking_remote: Some(remote.to_owned()),
+        ..PushOptions::default()
+    };
 
     let outcome = if !is_url_scheme(&url) {
         push_local(&repo.git_dir, &local_git_dir(&url), refs, &opts)?

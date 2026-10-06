@@ -3851,31 +3851,13 @@ fn update_remote_tracking_ref(
     remote_ref: &str,
     new_oid: Option<ObjectId>,
 ) -> Result<()> {
-    if remote_name.contains('/') || remote_name.starts_with('.') {
-        return Ok(());
-    }
-
-    let Some(branch) = remote_ref.strip_prefix("refs/heads/") else {
-        return Ok(());
-    };
-    let tracking_ref = format!("refs/remotes/{remote_name}/{branch}");
-
-    match new_oid {
-        Some(oid) => {
-            // Skip the write when the tracking ref already records this value. Otherwise an
-            // up-to-date push would re-materialize a packed tracking ref as a loose file
-            // (t5516 'push preserves up-to-date packed refs').
-            if refs::resolve_ref(&repo.git_dir, &tracking_ref).ok() == Some(oid) {
-                return Ok(());
-            }
-            refs::write_ref(&repo.git_dir, &tracking_ref, &oid)
-                .with_context(|| format!("updating tracking ref {tracking_ref}"))?
-        }
-        None => {
-            let _ = refs::delete_ref(&repo.git_dir, &tracking_ref);
-        }
-    }
-    Ok(())
+    grit_lib::branch_tracking::update_remote_tracking_ref(
+        &repo.git_dir,
+        remote_name,
+        remote_ref,
+        new_oid,
+    )
+    .with_context(|| format!("updating tracking ref for {remote_ref}"))
 }
 
 /// Parsed --force-with-lease argument.

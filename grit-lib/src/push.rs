@@ -29,6 +29,7 @@ use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::Path;
 
+use crate::branch_tracking;
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::{parse_tag, HashAlgo, ObjectId, ObjectKind};
@@ -38,6 +39,19 @@ use crate::transfer::{
     build_pack, open_odb, PackBuildOptions, PushOptions, PushOutcome, PushRefSpec,
 };
 use crate::transport::Connection;
+
+fn finish_push_outcome(
+    local_git_dir: &Path,
+    opts: &PushOptions,
+    results: Vec<PushRefResult>,
+) -> Result<PushOutcome> {
+    if !opts.dry_run {
+        if let Some(remote) = opts.tracking_remote.as_deref() {
+            branch_tracking::apply_push_remote_tracking_updates(local_git_dir, remote, &results)?;
+        }
+    }
+    Ok(PushOutcome { results })
+}
 
 /// The receive-pack capabilities we negotiate, in the order Git's `send-pack`
 /// lists them. `report-status-v2` is requested alongside `report-status` so a
@@ -120,7 +134,7 @@ pub fn push_remote(
     //       early-returns; the shared planner mirrors `push_local`'s gate.
     let mut plan = match plan_push(refs, &local_odb, local_git_dir, &adv, opts)? {
         PlanOutcome::Send(plan) => plan,
-        PlanOutcome::Done(results) => return Ok(PushOutcome { results }),
+        PlanOutcome::Done(results) => return finish_push_outcome(local_git_dir, opts, results),
     };
 
     // 4. Write the ref-update commands (first carries the cap list after a NUL),
@@ -166,7 +180,7 @@ pub fn push_remote(
 
     let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
     net_trace!("push_remote: done — {} result(s)", results.len());
-    Ok(PushOutcome { results })
+    finish_push_outcome(local_git_dir, opts, results)
 }
 
 /// Push refs to a remote over smart HTTP (`git-receive-pack`), returning a
@@ -237,7 +251,7 @@ pub fn push_http(
     // 2–3. Decide each ref update client-side (shared with `push_remote`).
     let mut plan = match plan_push(refs, &local_odb, local_git_dir, &adv.state, opts)? {
         PlanOutcome::Send(plan) => plan,
-        PlanOutcome::Done(results) => return Ok(PushOutcome { results }),
+        PlanOutcome::Done(results) => return finish_push_outcome(local_git_dir, opts, results),
     };
 
     // 4. Build the single POST body: ref-update commands + flush (then the
@@ -268,9 +282,8 @@ pub fn push_http(
     apply_report_status(&report, &mut plan.decisions);
     net_trace!("push_http: done — {} result(s)", plan.decisions.len());
 
-    Ok(PushOutcome {
-        results: plan.decisions.into_iter().map(|d| d.result).collect(),
-    })
+    let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
+    finish_push_outcome(local_git_dir, opts, results)
 }
 
 const RECEIVE_PACK: &str = "git-receive-pack";

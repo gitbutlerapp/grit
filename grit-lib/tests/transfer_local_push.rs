@@ -324,3 +324,182 @@ fn push_local_atomic_rejects_all_on_any_failure() {
     assert_eq!(remote_ref(remote_git, "refs/heads/locked"), Some(c1));
     fsck_clean(remote_git);
 }
+
+#[test]
+fn push_local_updates_remote_tracking_ref_when_configured() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    let remote_git = remote.as_path();
+
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    std::fs::write(local.join("a.txt"), "one\n").unwrap();
+    git(&local, &["add", "a.txt"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    let c1 = rev_parse(&local, "refs/heads/main");
+
+    push_local(
+        &local_git,
+        remote_git,
+        &[PushRefSpec {
+            src: Some(c1),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions {
+            tracking_remote: Some("origin".to_owned()),
+            ..PushOptions::default()
+        },
+    )
+    .expect("push with tracking");
+
+    assert_eq!(
+        remote_ref(&local_git, "refs/remotes/origin/main"),
+        Some(c1),
+        "local remote-tracking ref should match the pushed tip"
+    );
+}
+
+#[test]
+fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    let remote_git = remote.as_path();
+
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    git(
+        &local,
+        &["remote", "add", "origin", remote_git.to_str().unwrap()],
+    );
+    std::fs::write(local.join("a.txt"), "one\n").unwrap();
+    git(&local, &["add", "a.txt"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    std::fs::write(local.join("b.txt"), "two\n").unwrap();
+    git(&local, &["add", "b.txt"]);
+    git(&local, &["commit", "-q", "-m", "c2"]);
+
+    let c1 = rev_parse(&local, "HEAD~1");
+    let c2 = rev_parse(&local, "refs/heads/main");
+
+    push_local(
+        &local_git,
+        remote_git,
+        &[PushRefSpec {
+            src: Some(c2),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions {
+            tracking_remote: Some("origin".to_owned()),
+            ..PushOptions::default()
+        },
+    )
+    .expect("initial push");
+
+    // Stale tracking ref: remote is at c2 but we still record c1 locally.
+    grit_lib::refs::write_ref(&local_git, "refs/remotes/origin/main", &c1).expect("stale tracking");
+
+    let outcome = push_local(
+        &local_git,
+        remote_git,
+        &[PushRefSpec {
+            src: Some(c2),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions {
+            tracking_remote: Some("origin".to_owned()),
+            ..PushOptions::default()
+        },
+    )
+    .expect("up-to-date push");
+
+    assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);
+    assert_eq!(
+        remote_ref(&local_git, "refs/remotes/origin/main"),
+        Some(c2),
+        "up-to-date push should refresh stale remote-tracking ref"
+    );
+}
+
+#[test]
+fn push_local_honors_custom_fetch_refspec_for_tracking() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    let remote_git = remote.as_path();
+
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    git(
+        &local,
+        &["remote", "add", "origin", remote_git.to_str().unwrap()],
+    );
+    git(&local, &["config", "--unset-all", "remote.origin.fetch"]);
+    git(
+        &local,
+        &[
+            "config",
+            "--add",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/custom/origin/*",
+        ],
+    );
+    std::fs::write(local.join("a.txt"), "one\n").unwrap();
+    git(&local, &["add", "a.txt"]);
+    git(&local, &["commit", "-q", "-m", "c1"]);
+    let c1 = rev_parse(&local, "refs/heads/main");
+
+    push_local(
+        &local_git,
+        remote_git,
+        &[PushRefSpec {
+            src: Some(c1),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions {
+            tracking_remote: Some("origin".to_owned()),
+            ..PushOptions::default()
+        },
+    )
+    .expect("push with custom tracking mapping");
+
+    assert_eq!(
+        remote_ref(&local_git, "refs/custom/origin/main"),
+        Some(c1),
+        "tracking ref should follow fetch refspec destination"
+    );
+    assert_eq!(
+        remote_ref(&local_git, "refs/remotes/origin/main"),
+        None,
+        "must not write the conventional refs/remotes path when fetch maps elsewhere"
+    );
+}

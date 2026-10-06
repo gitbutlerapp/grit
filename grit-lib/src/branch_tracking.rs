@@ -2,15 +2,20 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::merge_base::count_symmetric_ahead_behind;
+use crate::objects::ObjectId;
+use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
+use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::{
     abbreviate_ref_name, resolve_push_full_ref_for_branch, resolve_upstream_symbolic_name,
 };
+use crate::transfer::{match_positive, ref_excluded};
 
 /// How to compare local HEAD to a remote-tracking ref (`AHEAD_BEHIND_FULL` vs `QUICK`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +51,120 @@ pub enum TrackingStat {
 #[must_use]
 pub fn shorten_tracking_ref(full_ref: &str) -> String {
     abbreviate_ref_name(full_ref)
+}
+
+/// Resolve the local tracking ref for a remote ref using `remote.<name>.fetch`
+/// refspecs (Git `remote_find_tracking` / `refspec_find_match` on the fetch list).
+///
+/// Returns `None` when no positive fetch refspec maps `remote_ref`, or when a
+/// negative refspec excludes it. When no fetch refspecs are configured at all,
+/// falls back to `refs/remotes/<remote>/<branch>` for `refs/heads/*` only.
+#[must_use]
+pub fn tracking_ref_for_remote_push_ref(
+    git_dir: &Path,
+    remote_name: &str,
+    remote_ref: &str,
+) -> Option<String> {
+    if remote_name.contains('/') || remote_name.starts_with('.') {
+        return None;
+    }
+
+    let config = ConfigSet::load(Some(git_dir), true).ok()?;
+    let (positive, negative) = remote_fetch_refspecs(&config, remote_name);
+    if ref_excluded(remote_ref, &negative) {
+        return None;
+    }
+    match match_positive(remote_ref, &positive) {
+        Some(Some(dst)) => Some(dst),
+        Some(None) => None,
+        None if positive.is_empty() => remote_ref
+            .strip_prefix("refs/heads/")
+            .map(|branch| format!("refs/remotes/{remote_name}/{branch}")),
+        None => None,
+    }
+}
+
+fn remote_fetch_refspecs(
+    config: &ConfigSet,
+    remote_name: &str,
+) -> (Vec<RefspecItem>, Vec<RefspecItem>) {
+    let key = format!("remote.{remote_name}.fetch");
+    let mut positive = Vec::new();
+    let mut negative = Vec::new();
+    for spec in config.get_all(&key) {
+        let Ok(item) = parse_fetch_refspec(&spec) else {
+            continue;
+        };
+        if item.negative {
+            negative.push(item);
+        } else {
+            positive.push(item);
+        }
+    }
+    (positive, negative)
+}
+
+/// Update a local remote-tracking ref after a successful push to a named remote.
+///
+/// The destination ref is resolved through the remote's configured fetch refspecs.
+/// Path-like remote names (containing `/` or starting with `.`) skip tracking updates.
+///
+/// # Parameters
+///
+/// - `git_dir`: local repository `.git` directory.
+/// - `remote_name`: short remote name (e.g. `origin`).
+/// - `remote_ref`: destination ref on the remote (e.g. `refs/heads/main`).
+/// - `new_oid`: new tip after the push, or `None` when the remote ref was deleted.
+///
+/// # Errors
+///
+/// Returns an error if writing or deleting the tracking ref fails.
+pub fn update_remote_tracking_ref(
+    git_dir: &Path,
+    remote_name: &str,
+    remote_ref: &str,
+    new_oid: Option<ObjectId>,
+) -> Result<()> {
+    let Some(tracking_ref) = tracking_ref_for_remote_push_ref(git_dir, remote_name, remote_ref)
+    else {
+        return Ok(());
+    };
+
+    match new_oid {
+        Some(oid) => {
+            if refs::resolve_ref(git_dir, &tracking_ref).ok() == Some(oid) {
+                return Ok(());
+            }
+            refs::write_ref(git_dir, &tracking_ref, &oid)?;
+        }
+        None => {
+            let _ = refs::delete_ref(git_dir, &tracking_ref);
+        }
+    }
+    Ok(())
+}
+
+/// Apply remote-tracking ref updates for every successfully pushed ref in `results`.
+///
+/// Refs reported as [`PushRefStatus::Ok`] or [`PushRefStatus::UpToDate`] are
+/// updated (matching Git `transport_update_tracking_ref`). Deletions pass
+/// `new_oid: None` to remove the tracking ref.
+///
+/// # Errors
+///
+/// Propagates errors from [`update_remote_tracking_ref`].
+pub fn apply_push_remote_tracking_updates(
+    git_dir: &Path,
+    remote_name: &str,
+    results: &[PushRefResult],
+) -> Result<()> {
+    for result in results {
+        if result.status != PushRefStatus::Ok && result.status != PushRefStatus::UpToDate {
+            continue;
+        }
+        update_remote_tracking_ref(git_dir, remote_name, &result.remote_ref, result.new_oid)?;
+    }
+    Ok(())
 }
 
 fn branch_head_ref(short_name: &str) -> String {

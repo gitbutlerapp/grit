@@ -228,6 +228,13 @@ fn local_remote_clone_push_fetch_and_pull_workflow() -> TestResult {
     gs_ok(&clone, ["commit", "-am", "clone work"])?;
     gs_ok(&clone, ["push"])?;
 
+    let status_after_push = gs_ok(&clone, ["status"])?;
+    assert!(
+        status_after_push.stdout.contains("even with origin/main"),
+        "status after push should reflect updated remote-tracking ref:\n{}",
+        status_after_push.dump()
+    );
+
     let fetched = gs_ok(&seed, ["fetch"])?;
     assert!(fetched.stdout.contains("Fetched"));
     let pulled = gs_ok(&seed, ["pull"])?;

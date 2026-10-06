@@ -200,6 +200,9 @@ pub struct PushOptions {
     pub atomic: bool,
     /// Compute results without writing to the remote.
     pub dry_run: bool,
+    /// When set, update `refs/remotes/<name>/...` in the local repo after a
+    /// successful push (matching Git's post-push tracking ref maintenance).
+    pub tracking_remote: Option<String>,
     /// Server-side push options to transmit (`git push --push-option <value>`).
     ///
     /// When non-empty, the negotiated capability list includes `push-options`
@@ -1275,9 +1278,18 @@ pub fn push_local(
         }
     }
 
-    Ok(PushOutcome {
-        results: decisions.into_iter().map(|d| d.result).collect(),
-    })
+    let results: Vec<_> = decisions.into_iter().map(|d| d.result).collect();
+    if !opts.dry_run {
+        if let Some(remote) = opts.tracking_remote.as_deref() {
+            crate::branch_tracking::apply_push_remote_tracking_updates(
+                local_git_dir,
+                remote,
+                &results,
+            )?;
+        }
+    }
+
+    Ok(PushOutcome { results })
 }
 
 /// What a single accepted push update does once applied.
