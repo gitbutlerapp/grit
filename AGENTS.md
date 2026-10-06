@@ -18,11 +18,36 @@ Grit began as a Rust reimplementation of Git aimed at passing Git's own test sui
 
 | Crate | Role |
 | ----- | ---- |
-| **`grit-cli`** | Git client with a **modern CLI** (`grit` binary). Primary UX. |
-| **`grit-lib`** | Clean, well-designed, **linkable** library any Rust project can use. |
-| **`grit-git`** | Optional Git-compatible CLI for users who need drop-in `git` behavior. |
+| **`grit-lib`** | Clean, well-designed, **linkable** library any Rust project can use. **Where almost all implementation work belongs.** |
+| **`grit-cli`** | Git client with a **modern CLI** (`grit` binary). Primary UX — **thin shell** over the library. |
+| **`grit-git`** | Optional Git-compatible CLI for drop-in `git` behavior and **compatibility test bed** for the harness. **Thin shell**; Git-shaped text at the boundary. |
 
 Ordered work: **ROADMAP.md** (live plan on the [factory dashboard](https://maint.grit-scm.com/roadmap)).
+
+## Library-first (default for every task)
+
+**For any task, the majority of the work — lines changed, tests written, and design effort — must land in `grit-lib` with a solid, linkable API.** The CLI crates exist to expose that API, not to host Git logic.
+
+| Where effort should go | Typical share of a feature task |
+| ---------------------- | --------------------------------- |
+| **`grit-lib`** — behavior, types, errors, tests, rustdoc | **Most** (aim for the bulk of the diff) |
+| **`grit-cli`** — clap parsing, exit codes, human / `--json` / `--markdown` output | **Minimal** |
+| **`grit-git`** — Git-compatible argv, messages, exit codes for the harness | Only what compatibility requires |
+
+**Default workflow:** design and implement in **`grit-lib`** first (or extend an existing type/method), add **Rust unit and coverage tests** there, document the **public API**, then wire **`grit-cli`** (and **`grit-git`** if the harness needs it) with the smallest possible glue.
+
+**`grit-cli` and `grit-git` may only contain:**
+
+- Argument and environment parsing
+- Opening a `Repository` (or other library handle) and calling library APIs
+- Mapping `grit_lib::Error` (and typed results) to exit codes and stdout/stderr
+- Output formatting (default, `--json`, `--markdown` in **`grit-cli`**; Git-compatible strings in **`grit-git`**)
+
+**Do not put in CLI crates:** object/index/ref/transport logic, diff or merge algorithms, config semantics, pathspec evaluation, or other reusable Git behavior — even if “only one command” needs it today. Add or extend **`grit-lib`** instead.
+
+**Review heuristic:** if a change adds substantial non-presentation code under **`grit-cli/src`**, it is likely in the wrong crate. Move it to **`grit-lib`** and leave the CLI as a short call site.
+
+See also **Architecture and design** and **Library crate layout and public API** below.
 
 ### What `grit-lib` must do
 
@@ -76,8 +101,9 @@ Detail: **TESTING.md** and ROADMAP testing items.
 
 1. Correctness and compatibility of on-disk formats and wire protocols with Git.
 2. Speed, measured.
-3. Clean library API: typed errors, no stringly-typed matching, no printing from the library, no global state, no shelling out (in **`grit-lib`**).
-4. Tests and docs land in the **same change** as the code.
+3. **Library-first delivery:** behavior and API live in **`grit-lib`**; CLI crates stay thin (see **Library-first** above).
+4. Clean library API: typed errors, no stringly-typed matching, no printing from the library, no global state, no shelling out (in **`grit-lib`**).
+5. Tests and docs land in the **same change** as the code.
 
 ## Quick Start
 
@@ -141,6 +167,7 @@ grit/
 
 Aligns with **how work is judged** above:
 
+- [ ] **Library-first** — new behavior and tests are in **`grit-lib`**; **`grit-cli`** / **`grit-git`** changes are mostly wiring and output.
 - [ ] **Compatibility** — formats/protocols match Git where implemented; Rust tests cover the change.
 - [ ] **Speed** — benchmarks before/after vs `git` for hot-path or performance work (`bench/`).
 - [ ] **Library hygiene** — typed errors, no lib printing/globals/shell-out; **`grit-cli`** adds **`--json`** and **`--markdown`** when touched.
