@@ -2184,7 +2184,7 @@ pub fn try_read_object_via_midx(
             return Ok(None);
         }
     };
-    crate::pack::read_object_from_pack(&idx, oid).map(Some)
+    crate::pack::read_object_from_pack(idx.as_ref(), oid).map(Some)
 }
 
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
