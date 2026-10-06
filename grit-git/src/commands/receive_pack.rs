@@ -6,6 +6,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
+use grit_lib::check_ref_format::receive_pack_refname_ok;
 use grit_lib::config::{parse_bool, ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::connectivity::{diagnose_push_connectivity_failure, push_tip_connected_to_refs};
 use grit_lib::hide_refs;
@@ -716,6 +717,25 @@ fn open_repo(path: &Path) -> Result<Repository> {
     Repository::open(&git_dir, Some(path)).map_err(Into::into)
 }
 
+fn reference_transaction_stdin(updates: &[&(String, String, String)], zero_oid: &str) -> String {
+    let lines: Vec<String> = updates
+        .iter()
+        .map(|(old_hex, new_hex, refname)| {
+            let old_display = if old_hex == zero_oid {
+                zero_oid.to_owned()
+            } else {
+                (*old_hex).clone()
+            };
+            format!("{old_display} {new_hex} {refname}")
+        })
+        .collect();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    }
+}
+
 fn run_hooks_and_update_refs(
     repo: &Repository,
     remote_config: &ConfigSet,
@@ -776,46 +796,54 @@ fn run_hooks_and_update_refs(
         bail!("pre-receive hook declined the push");
     }
 
-    let mut ref_tx_lines = Vec::with_capacity(updates.len());
-    for (old_hex, new_hex, refname) in updates {
-        let old_display = if old_hex == zero_oid {
-            zero_oid.to_owned()
-        } else {
-            old_hex.clone()
-        };
-        ref_tx_lines.push(format!("{old_display} {new_hex} {refname}"));
-    }
-    let ref_tx_stdin = format!("{}\n", ref_tx_lines.join("\n"));
-
-    let (tx_preparing_result, tx_preparing_output) = run_hook_in_git_dir(
-        repo,
-        "reference-transaction",
-        &["preparing"],
-        Some(ref_tx_stdin.as_bytes()),
-        &push_option_env,
-    );
-    diag.bytes(&tx_preparing_output);
-    if let HookResult::Failed(_code) = tx_preparing_result {
-        bail!("reference-transaction hook declined the update");
+    // Funny ref names are rejected in `update()` before any ref-transaction work in Git.
+    // Classify them here so reference-transaction and update hooks never see them.
+    let mut funny_refnames: HashSet<String> = HashSet::new();
+    for (_old_hex, new_hex, refname) in updates {
+        let is_delete = new_hex == zero_oid;
+        if !receive_pack_refname_ok(refname, is_delete) {
+            funny_refnames.insert(refname.clone());
+        }
     }
 
-    let (tx_prepared_result, tx_prepared_output) = run_hook_in_git_dir(
-        repo,
-        "reference-transaction",
-        &["prepared"],
-        Some(ref_tx_stdin.as_bytes()),
-        &push_option_env,
-    );
-    diag.bytes(&tx_prepared_output);
-    if let HookResult::Failed(_code) = tx_prepared_result {
-        let _ = run_hook_in_git_dir(
+    let hookable_updates: Vec<&(String, String, String)> = updates
+        .iter()
+        .filter(|(_, _, refname)| !funny_refnames.contains(refname))
+        .collect();
+
+    let ref_tx_stdin = reference_transaction_stdin(&hookable_updates, zero_oid);
+
+    if !hookable_updates.is_empty() {
+        let (tx_preparing_result, tx_preparing_output) = run_hook_in_git_dir(
             repo,
             "reference-transaction",
-            &["aborted"],
+            &["preparing"],
             Some(ref_tx_stdin.as_bytes()),
             &push_option_env,
         );
-        bail!("reference-transaction hook declined the update");
+        diag.bytes(&tx_preparing_output);
+        if let HookResult::Failed(_code) = tx_preparing_result {
+            bail!("reference-transaction hook declined the update");
+        }
+
+        let (tx_prepared_result, tx_prepared_output) = run_hook_in_git_dir(
+            repo,
+            "reference-transaction",
+            &["prepared"],
+            Some(ref_tx_stdin.as_bytes()),
+            &push_option_env,
+        );
+        diag.bytes(&tx_prepared_output);
+        if let HookResult::Failed(_code) = tx_prepared_result {
+            let _ = run_hook_in_git_dir(
+                repo,
+                "reference-transaction",
+                &["aborted"],
+                Some(ref_tx_stdin.as_bytes()),
+                &push_option_env,
+            );
+            bail!("reference-transaction hook declined the update");
+        }
     }
 
     // Per-ref acceptance: `git receive-pack` rejects individual commands (policy or update-hook
@@ -825,6 +853,14 @@ fn run_hooks_and_update_refs(
     let mut accepted: Vec<(String, String, String)> = Vec::new();
     for (old_hex, new_hex, refname) in updates {
         let is_delete = new_hex == zero_oid;
+
+        if funny_refnames.contains(refname.as_str()) {
+            diag.line(&format!(
+                "error: refusing to update funny ref '{refname}' remotely"
+            ));
+            outcomes.push(RefOutcome::rejected(refname, "funny refname").with_delete(is_delete));
+            continue;
+        }
 
         match check_receive_update_policy(
             repo,
@@ -888,16 +924,20 @@ fn run_hooks_and_update_refs(
         accepted.push((old_hex.clone(), new_hex.clone(), refname.clone()));
     }
 
-    let (tx_committed_result, tx_committed_output) = run_hook_in_git_dir(
-        repo,
-        "reference-transaction",
-        &["committed"],
-        Some(ref_tx_stdin.as_bytes()),
-        &push_option_env,
-    );
-    diag.bytes(&tx_committed_output);
-    if let HookResult::Failed(_code) = tx_committed_result {
-        // committed hook exit status is ignored (matches githooks(5)).
+    if !accepted.is_empty() && !hookable_updates.is_empty() {
+        let committed_refs: Vec<&(String, String, String)> = accepted.iter().collect();
+        let committed_stdin = reference_transaction_stdin(&committed_refs, zero_oid);
+        let (tx_committed_result, tx_committed_output) = run_hook_in_git_dir(
+            repo,
+            "reference-transaction",
+            &["committed"],
+            Some(committed_stdin.as_bytes()),
+            &push_option_env,
+        );
+        diag.bytes(&tx_committed_output);
+        if let HookResult::Failed(_code) = tx_committed_result {
+            // committed hook exit status is ignored (matches githooks(5)).
+        }
     }
 
     // post-receive and post-update only see the refs that were actually updated (matches

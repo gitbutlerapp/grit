@@ -614,23 +614,16 @@ fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> 
     Ok(None)
 }
 
-/// Write a ref, creating parent directories as needed.
-///
-/// Dispatches to the reftable backend when `extensions.refStorage = reftable`.
-///
-/// # Parameters
-///
-/// - `git_dir` — path to the git directory.
-/// - `refname` — reference name (e.g. `"refs/heads/main"`).
-/// - `oid` — the new target object ID.
-///
-/// # Errors
-///
-/// Returns [`Error::Io`] on filesystem errors.
 /// Write a symbolic ref (e.g. `NOTES_MERGE_REF` → `refs/notes/m`).
 ///
 /// For reftable-backed repositories this dispatches to the reftable writer.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage (e.g. path
+/// traversal under `refs/`), on a namespace conflict, or [`Error::Io`] on filesystem errors.
 pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_write_symref(git_dir, refname, target, None, None);
     }
@@ -652,7 +645,32 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
     Ok(())
 }
 
+fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
+    if crate::check_ref_format::refname_is_safe(refname) {
+        Ok(())
+    } else {
+        Err(Error::InvalidRef(format!(
+            "refusing to update ref with bad name '{refname}'"
+        )))
+    }
+}
+
+/// Write a ref, creating parent directories as needed.
+///
+/// Dispatches to the reftable backend when `extensions.refStorage = reftable`.
+///
+/// # Parameters
+///
+/// - `git_dir` — path to the git directory.
+/// - `refname` — reference name (e.g. `"refs/heads/main"`).
+/// - `oid` — the new target object ID.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage (e.g. path
+/// traversal under `refs/`), on a namespace conflict, or [`Error::Io`] on filesystem errors.
 pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_write_ref(git_dir, refname, oid, None, None);
     }
@@ -838,14 +856,15 @@ pub fn resolve_ref_cached(
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidRef`] on a namespace conflict, or [`Error::Io`] /
-/// [`Error::Message`] on filesystem errors.
+/// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage, on a namespace
+/// conflict, or [`Error::Io`] / [`Error::Message`] on filesystem errors.
 pub fn write_ref_cached(
     git_dir: &Path,
     refname: &str,
     oid: &ObjectId,
     packed: &PackedRefs,
 ) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_write_ref(git_dir, refname, oid, None, None);
     }
@@ -934,8 +953,10 @@ fn remove_dir_tree(dir: &Path) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] for errors other than "not found".
+/// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage, or
+/// [`Error::Io`] for errors other than "not found".
 pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_delete_ref(git_dir, refname);
     }
@@ -1930,6 +1951,68 @@ mod refname_available_tests {
         let extras = BTreeSet::from(["refs/ns/newchild".to_string()]);
         let skip = HashSet::new();
         verify_refname_available_for_create(git_dir, "refs/ns/newchild", &extras, &skip).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod ref_storage_traversal_guard_tests {
+    use super::*;
+    use crate::objects::ObjectId;
+    use tempfile::tempdir;
+
+    const TRAVERSAL_REF: &str = "refs/heads/../../config";
+
+    fn bare_repo_with_config() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path().to_path_buf();
+        fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+        fs::write(
+            git_dir.join("config"),
+            "[core]\nrepositoryformatversion = 0\n",
+        )
+        .unwrap();
+        (dir, git_dir)
+    }
+
+    fn sample_oid() -> ObjectId {
+        "67bf698f3ab735e92fb011a99cff3497c44d30c1".parse().unwrap()
+    }
+
+    fn assert_invalid_ref_preserves_config(git_dir: &Path, result: Result<()>) {
+        assert!(matches!(result, Err(Error::InvalidRef(_))));
+        assert!(
+            git_dir.join("config").is_file(),
+            "repository config must not be touched"
+        );
+    }
+
+    #[test]
+    fn write_ref_rejects_traversal_refname() {
+        let (_dir, git_dir) = bare_repo_with_config();
+        let result = write_ref(&git_dir, TRAVERSAL_REF, &sample_oid());
+        assert_invalid_ref_preserves_config(&git_dir, result);
+    }
+
+    #[test]
+    fn write_ref_cached_rejects_traversal_refname() {
+        let (_dir, git_dir) = bare_repo_with_config();
+        let packed = PackedRefs::load(&git_dir).unwrap();
+        let result = write_ref_cached(&git_dir, TRAVERSAL_REF, &sample_oid(), &packed);
+        assert_invalid_ref_preserves_config(&git_dir, result);
+    }
+
+    #[test]
+    fn write_symbolic_ref_rejects_traversal_refname() {
+        let (_dir, git_dir) = bare_repo_with_config();
+        let result = write_symbolic_ref(&git_dir, TRAVERSAL_REF, "refs/heads/main");
+        assert_invalid_ref_preserves_config(&git_dir, result);
+    }
+
+    #[test]
+    fn delete_ref_rejects_traversal_refname() {
+        let (_dir, git_dir) = bare_repo_with_config();
+        let result = delete_ref(&git_dir, TRAVERSAL_REF);
+        assert_invalid_ref_preserves_config(&git_dir, result);
     }
 }
 

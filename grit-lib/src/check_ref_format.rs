@@ -22,6 +22,8 @@
 //! 12. Must have at least two slash-separated components (unless
 //!     `--allow-onelevel`)
 
+use crate::git_path::normalize_path_copy;
+
 use thiserror::Error;
 
 /// Errors returned by [`check_refname_format`].
@@ -234,6 +236,47 @@ fn validate_component(
     Ok(())
 }
 
+/// Whether `refname` is safe to map to a path under ref storage.
+///
+/// Matches Git's `refname_is_safe()` in `refs.c`: refs under `refs/` must not
+/// escape that prefix via `.` / `..` components; root-style names must be
+/// uppercase ASCII letters and underscores only (e.g. `HEAD`).
+#[must_use]
+pub fn refname_is_safe(refname: &str) -> bool {
+    if let Some(rest) = refname.strip_prefix("refs/") {
+        if rest.is_empty() || rest.starts_with('/') || rest.ends_with('/') {
+            return false;
+        }
+        return normalize_path_copy(rest)
+            .ok()
+            .is_some_and(|normalized| normalized == rest);
+    }
+
+    if refname.is_empty() {
+        return false;
+    }
+    refname.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
+}
+
+/// Validate a ref name sent on the receive-pack wire before applying updates.
+///
+/// Mirrors the check in Git's `receive-pack` `update()`: only `refs/…` names,
+/// with the suffix validated via [`check_refname_format`].
+#[must_use]
+pub fn receive_pack_refname_ok(refname: &str, is_delete: bool) -> bool {
+    if !refname.starts_with("refs/") {
+        return false;
+    }
+    check_refname_format(
+        &refname[5..],
+        &RefNameOptions {
+            allow_onelevel: is_delete,
+            ..Default::default()
+        },
+    )
+    .is_ok()
+}
+
 /// Strip a leading `/` and collapse consecutive interior slashes to one.
 ///
 /// This collapses runs of `/` the same way `git check-ref-format` does.
@@ -415,5 +458,23 @@ mod tests {
     fn utf8_allowed() {
         // Non-ASCII bytes that are valid UTF-8 are allowed.
         valid("heads/fu\u{00DF}", &opts_default());
+    }
+
+    #[test]
+    fn refname_is_safe_rejects_traversal_under_refs() {
+        assert!(!refname_is_safe("refs/heads/../../config"));
+        assert!(!refname_is_safe("refs/foo/../../bar"));
+        assert!(!refname_is_safe("refs/foo/../bar"));
+        assert!(refname_is_safe("refs/heads/main"));
+        assert!(refname_is_safe("HEAD"));
+    }
+
+    #[test]
+    fn receive_pack_refname_ok_rejects_funny_refs() {
+        assert!(!receive_pack_refname_ok("refs/heads/../../config", true));
+        assert!(!receive_pack_refname_ok("refs/heads/../../config", false));
+        assert!(!receive_pack_refname_ok("heads/main", false));
+        assert!(receive_pack_refname_ok("refs/heads/main", false));
+        assert!(receive_pack_refname_ok("refs/tags/v1", true));
     }
 }
