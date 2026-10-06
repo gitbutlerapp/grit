@@ -186,14 +186,14 @@
 <div class="nav"><a href="progress/">← Test Coverage</a></div>
 
 <h1>Grit <span>vs</span> Git</h1>
-<p class="subtitle">Performance benchmarks — 2026-10-06 11:07 UTC</p>
+<p class="subtitle">Performance benchmarks — 2026-10-06 11:34 UTC</p>
 
 <div class="summary">
-  <div class="card"><div class="number">112</div><div class="label">Benchmarks</div></div>
-  <div class="card green"><div class="number">5</div><div class="label">Grit Faster</div></div>
-  <div class="card yellow"><div class="number">22</div><div class="label">Similar</div></div>
-  <div class="card red"><div class="number">85</div><div class="label">Git Faster</div></div>
-  <div class="card"><div class="number">0.4×</div><div class="label">Geo Mean</div></div>
+  <div class="card"><div class="number">136</div><div class="label">Benchmarks</div></div>
+  <div class="card green"><div class="number">4</div><div class="label">Grit Faster</div></div>
+  <div class="card yellow"><div class="number">11</div><div class="label">Similar</div></div>
+  <div class="card red"><div class="number">121</div><div class="label">Git Faster</div></div>
+  <div class="card"><div class="number">0.3×</div><div class="label">Geo Mean</div></div>
 </div>
 
 <div class="legend-bar">
@@ -214,32 +214,6 @@
   </thead>
   <tbody>
 
-    <tr class="faster">
-      <td class="bench-name">show</td>
-      <td class="time">7.6 ms <span class="range">±2.7 ms</span></td>
-      <td class="time">4.8 ms <span class="range">±1.1 ms</span></td>
-      <td class="ratio faster">1.6× faster</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 62%"></div>
-          <div class="bar bar-grit" style="width: 100%"></div>
-        </div>
-      </td>
-      <td class="runs">374</td>
-    </tr>
-    <tr class="faster">
-      <td class="bench-name">reset</td>
-      <td class="time">7.2 ms <span class="range">±1.2 ms</span></td>
-      <td class="time">4.8 ms <span class="range">±640.5 µs</span></td>
-      <td class="ratio faster">1.5× faster</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 67%"></div>
-          <div class="bar bar-grit" style="width: 100%"></div>
-        </div>
-      </td>
-      <td class="runs">138</td>
-    </tr>
     <tr class="faster">
       <td class="bench-name">restore@L</td>
       <td class="time">8.5 ms <span class="range">±1.4 ms</span></td>
@@ -267,6 +241,19 @@
       <td class="runs">29</td>
     </tr>
     <tr class="faster">
+      <td class="bench-name">clone-local@H</td>
+      <td class="time">141.8 ms <span class="range">±38.4 ms</span></td>
+      <td class="time">109.0 ms <span class="range">±14.2 ms</span></td>
+      <td class="ratio faster">1.3× faster</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 77%"></div>
+          <div class="bar bar-grit" style="width: 100%"></div>
+        </div>
+      </td>
+      <td class="runs">20</td>
+    </tr>
+    <tr class="faster">
       <td class="bench-name">hash-object</td>
       <td class="time">4.2 ms <span class="range">±929.7 µs</span></td>
       <td class="time">3.5 ms <span class="range">±480.3 µs</span></td>
@@ -280,17 +267,17 @@
       <td class="runs">736</td>
     </tr>
     <tr class="similar">
-      <td class="bench-name">branch-list</td>
-      <td class="time">5.0 ms <span class="range">±1.9 ms</span></td>
-      <td class="time">4.5 ms <span class="range">±822.9 µs</span></td>
-      <td class="ratio similar">1.1× faster</td>
+      <td class="bench-name">checkout</td>
+      <td class="time">2.5 ms <span class="range">±3.2 ms</span></td>
+      <td class="time">2.2 ms <span class="range">±313.5 µs</span></td>
+      <td class="ratio similar">1.2× faster</td>
       <td class="bar-cell">
         <div class="bar-container">
-          <div class="bar bar-git" style="width: 91%"></div>
+          <div class="bar bar-git" style="width: 85%"></div>
           <div class="bar bar-grit" style="width: 100%"></div>
         </div>
       </td>
-      <td class="runs">470</td>
+      <td class="runs">742</td>
     </tr>
     <tr class="similar">
       <td class="bench-name">restore@M</td>
@@ -306,17 +293,17 @@
       <td class="runs">716</td>
     </tr>
     <tr class="similar">
-      <td class="bench-name">read-tree</td>
-      <td class="time">4.8 ms <span class="range">±818.7 µs</span></td>
-      <td class="time">4.6 ms <span class="range">±655.5 µs</span></td>
+      <td class="bench-name">restore@H</td>
+      <td class="time">1.9 ms <span class="range">±633.2 µs</span></td>
+      <td class="time">1.9 ms <span class="range">±312.6 µs</span></td>
       <td class="ratio similar">1.0× faster</td>
       <td class="bar-cell">
         <div class="bar-container">
-          <div class="bar bar-git" style="width: 97%"></div>
+          <div class="bar bar-git" style="width: 98%"></div>
           <div class="bar bar-grit" style="width: 100%"></div>
         </div>
       </td>
-      <td class="runs">501</td>
+      <td class="runs">987</td>
     </tr>
     <tr class="similar">
       <td class="bench-name">clone-local@M</td>
@@ -332,19 +319,6 @@
       <td class="runs">11</td>
     </tr>
     <tr class="similar">
-      <td class="bench-name">for-each-ref</td>
-      <td class="time">7.1 ms <span class="range">±700.8 µs</span></td>
-      <td class="time">7.0 ms <span class="range">±836.9 µs</span></td>
-      <td class="ratio similar">1.0× faster</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 99%"></div>
-          <div class="bar bar-grit" style="width: 100%"></div>
-        </div>
-      </td>
-      <td class="runs">356</td>
-    </tr>
-    <tr class="similar">
       <td class="bench-name">blame@S</td>
       <td class="time">6.9 ms <span class="range">±1.0 ms</span></td>
       <td class="time">6.9 ms <span class="range">±876.1 µs</span></td>
@@ -356,19 +330,6 @@
         </div>
       </td>
       <td class="runs">402</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">update-ref</td>
-      <td class="time">2.7 ms <span class="range">±560.5 µs</span></td>
-      <td class="time">2.8 ms <span class="range">±448.9 µs</span></td>
-      <td class="ratio similar">1.0× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 97%"></div>
-        </div>
-      </td>
-      <td class="runs">414</td>
     </tr>
     <tr class="similar">
       <td class="bench-name">cat-file-batch</td>
@@ -410,19 +371,6 @@
       <td class="runs">696</td>
     </tr>
     <tr class="similar">
-      <td class="bench-name">commit-tree</td>
-      <td class="time">2.8 ms <span class="range">±589.0 µs</span></td>
-      <td class="time">3.0 ms <span class="range">±633.2 µs</span></td>
-      <td class="ratio similar">1.1× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 92%"></div>
-        </div>
-      </td>
-      <td class="runs">697</td>
-    </tr>
-    <tr class="similar">
       <td class="bench-name">blame@M</td>
       <td class="time">28.8 ms <span class="range">±3.6 ms</span></td>
       <td class="time">31.3 ms <span class="range">±3.0 ms</span></td>
@@ -434,71 +382,6 @@
         </div>
       </td>
       <td class="runs">93</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">rm</td>
-      <td class="time">4.2 ms <span class="range">±805.9 µs</span></td>
-      <td class="time">4.7 ms <span class="range">±541.1 µs</span></td>
-      <td class="ratio similar">1.1× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 91%"></div>
-        </div>
-      </td>
-      <td class="runs">168</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">show-ref</td>
-      <td class="time">4.4 ms <span class="range">±599.0 µs</span></td>
-      <td class="time">4.9 ms <span class="range">±633.1 µs</span></td>
-      <td class="ratio similar">1.1× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 91%"></div>
-        </div>
-      </td>
-      <td class="runs">528</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">merge-base</td>
-      <td class="time">3.6 ms <span class="range">±598.4 µs</span></td>
-      <td class="time">4.1 ms <span class="range">±603.5 µs</span></td>
-      <td class="ratio similar">1.1× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 89%"></div>
-        </div>
-      </td>
-      <td class="runs">604</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">tag-create</td>
-      <td class="time">2.5 ms <span class="range">±461.1 µs</span></td>
-      <td class="time">3.0 ms <span class="range">±500.0 µs</span></td>
-      <td class="ratio similar">1.2× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 84%"></div>
-        </div>
-      </td>
-      <td class="runs">521</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">mv</td>
-      <td class="time">2.8 ms <span class="range">±408.3 µs</span></td>
-      <td class="time">3.4 ms <span class="range">±513.6 µs</span></td>
-      <td class="ratio similar">1.2× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 83%"></div>
-        </div>
-      </td>
-      <td class="runs">143</td>
     </tr>
     <tr class="similar">
       <td class="bench-name">log-oneline@M</td>
@@ -514,19 +397,6 @@
       <td class="runs">170</td>
     </tr>
     <tr class="similar">
-      <td class="bench-name">tag-list</td>
-      <td class="time">4.8 ms <span class="range">±631.3 µs</span></td>
-      <td class="time">5.9 ms <span class="range">±661.5 µs</span></td>
-      <td class="ratio similar">1.2× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 83%"></div>
-        </div>
-      </td>
-      <td class="runs">494</td>
-    </tr>
-    <tr class="similar">
       <td class="bench-name">log-stat@L</td>
       <td class="time">113.5 ms <span class="range">±13.7 ms</span></td>
       <td class="time">139.3 ms <span class="range">±12.1 ms</span></td>
@@ -538,45 +408,6 @@
         </div>
       </td>
       <td class="runs">23</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">check-ignore</td>
-      <td class="time">2.4 ms <span class="range">±521.9 µs</span></td>
-      <td class="time">3.0 ms <span class="range">±592.8 µs</span></td>
-      <td class="ratio similar">1.2× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 81%"></div>
-        </div>
-      </td>
-      <td class="runs">670</td>
-    </tr>
-    <tr class="similar">
-      <td class="bench-name">checkout</td>
-      <td class="time">8.3 ms <span class="range">±1.5 ms</span></td>
-      <td class="time">10.3 ms <span class="range">±1.0 ms</span></td>
-      <td class="ratio similar">1.2× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 81%"></div>
-        </div>
-      </td>
-      <td class="runs">172</td>
-    </tr>
-    <tr class="slower">
-      <td class="bench-name">symbolic-ref</td>
-      <td class="time">2.1 ms <span class="range">±570.1 µs</span></td>
-      <td class="time">2.6 ms <span class="range">±568.1 µs</span></td>
-      <td class="ratio slower">1.3× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 79%"></div>
-        </div>
-      </td>
-      <td class="runs">813</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">log-stat@M</td>
@@ -590,19 +421,6 @@
         </div>
       </td>
       <td class="runs">28</td>
-    </tr>
-    <tr class="slower">
-      <td class="bench-name">checkout-index</td>
-      <td class="time">2.6 ms <span class="range">±495.4 µs</span></td>
-      <td class="time">3.3 ms <span class="range">±616.5 µs</span></td>
-      <td class="ratio slower">1.3× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 79%"></div>
-        </div>
-      </td>
-      <td class="runs">478</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">log-oneline@S</td>
@@ -631,9 +449,9 @@
       <td class="runs">875</td>
     </tr>
     <tr class="slower">
-      <td class="bench-name">config-list</td>
-      <td class="time">2.3 ms <span class="range">±565.6 µs</span></td>
-      <td class="time">3.3 ms <span class="range">±575.7 µs</span></td>
+      <td class="bench-name">mv</td>
+      <td class="time">1.0 ms <span class="range">±701.9 µs</span></td>
+      <td class="time">1.5 ms <span class="range">±249.6 µs</span></td>
       <td class="ratio slower">1.4× slower</td>
       <td class="bar-cell">
         <div class="bar-container">
@@ -641,7 +459,7 @@
           <div class="bar bar-grit" style="width: 70%"></div>
         </div>
       </td>
-      <td class="runs">754</td>
+      <td class="runs">443</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">shortlog@M</td>
@@ -657,6 +475,19 @@
       <td class="runs">1510</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">update-ref</td>
+      <td class="time">1.1 ms <span class="range">±179.9 µs</span></td>
+      <td class="time">1.5 ms <span class="range">±190.5 µs</span></td>
+      <td class="ratio slower">1.4× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 69%"></div>
+        </div>
+      </td>
+      <td class="runs">858</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">shortlog@S</td>
       <td class="time">1.0 ms <span class="range">±224.9 µs</span></td>
       <td class="time">1.5 ms <span class="range">±255.8 µs</span></td>
@@ -668,32 +499,6 @@
         </div>
       </td>
       <td class="runs">1370</td>
-    </tr>
-    <tr class="slower">
-      <td class="bench-name">stripspace</td>
-      <td class="time">2.0 ms <span class="range">±507.1 µs</span></td>
-      <td class="time">2.9 ms <span class="range">±540.2 µs</span></td>
-      <td class="ratio slower">1.5× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 68%"></div>
-        </div>
-      </td>
-      <td class="runs">786</td>
-    </tr>
-    <tr class="slower">
-      <td class="bench-name">count-objects</td>
-      <td class="time">12.3 ms <span class="range">±1.1 ms</span></td>
-      <td class="time">18.2 ms <span class="range">±1.6 ms</span></td>
-      <td class="ratio slower">1.5× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 68%"></div>
-        </div>
-      </td>
-      <td class="runs">157</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">log-patch@L</td>
@@ -735,6 +540,19 @@
       <td class="runs">1373</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">shortlog@H</td>
+      <td class="time">896.6 µs <span class="range">±212.0 µs</span></td>
+      <td class="time">1.3 ms <span class="range">±284.7 µs</span></td>
+      <td class="ratio slower">1.5× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 67%"></div>
+        </div>
+      </td>
+      <td class="runs">1718</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">log-oneline</td>
       <td class="time">2.9 ms <span class="range">±367.3 µs</span></td>
       <td class="time">4.3 ms <span class="range">±756.0 µs</span></td>
@@ -748,6 +566,19 @@
       <td class="runs">632</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">symbolic-ref</td>
+      <td class="time">897.7 µs <span class="range">±257.1 µs</span></td>
+      <td class="time">1.4 ms <span class="range">±246.1 µs</span></td>
+      <td class="ratio slower">1.5× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 65%"></div>
+        </div>
+      </td>
+      <td class="runs">1420</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">branch-list@M</td>
       <td class="time">1.3 ms <span class="range">±327.5 µs</span></td>
       <td class="time">2.0 ms <span class="range">±372.5 µs</span></td>
@@ -759,19 +590,6 @@
         </div>
       </td>
       <td class="runs">1252</td>
-    </tr>
-    <tr class="slower">
-      <td class="bench-name">name-rev</td>
-      <td class="time">2.3 ms <span class="range">±2.2 ms</span></td>
-      <td class="time">3.5 ms <span class="range">±1.9 ms</span></td>
-      <td class="ratio slower">1.6× slower</td>
-      <td class="bar-cell">
-        <div class="bar-container">
-          <div class="bar bar-git" style="width: 100%"></div>
-          <div class="bar bar-grit" style="width: 64%"></div>
-        </div>
-      </td>
-      <td class="runs">587</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">checkout@S</td>
@@ -826,6 +644,32 @@
       <td class="runs">855</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">log-stat@H</td>
+      <td class="time">35.9 ms <span class="range">±2.5 ms</span></td>
+      <td class="time">58.2 ms <span class="range">±2.7 ms</span></td>
+      <td class="ratio slower">1.6× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 62%"></div>
+        </div>
+      </td>
+      <td class="runs">48</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">commit-tree</td>
+      <td class="time">998.8 µs <span class="range">±161.2 µs</span></td>
+      <td class="time">1.6 ms <span class="range">±339.0 µs</span></td>
+      <td class="ratio slower">1.6× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 61%"></div>
+        </div>
+      </td>
+      <td class="runs">1643</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">branch-list@S</td>
       <td class="time">1.3 ms <span class="range">±253.2 µs</span></td>
       <td class="time">2.2 ms <span class="range">±579.7 µs</span></td>
@@ -850,6 +694,32 @@
         </div>
       </td>
       <td class="runs">14</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">tag-create</td>
+      <td class="time">1.1 ms <span class="range">±771.6 µs</span></td>
+      <td class="time">1.8 ms <span class="range">±560.5 µs</span></td>
+      <td class="ratio slower">1.7× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 60%"></div>
+        </div>
+      </td>
+      <td class="runs">227</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">for-each-ref</td>
+      <td class="time">2.8 ms <span class="range">±619.7 µs</span></td>
+      <td class="time">4.7 ms <span class="range">±749.3 µs</span></td>
+      <td class="ratio slower">1.7× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 60%"></div>
+        </div>
+      </td>
+      <td class="runs">650</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">cat-file</td>
@@ -878,6 +748,19 @@
       <td class="runs">430</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">rm</td>
+      <td class="time">1.6 ms <span class="range">±484.4 µs</span></td>
+      <td class="time">2.7 ms <span class="range">±310.5 µs</span></td>
+      <td class="ratio slower">1.7× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 60%"></div>
+        </div>
+      </td>
+      <td class="runs">398</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">show@M</td>
       <td class="time">2.1 ms <span class="range">±347.8 µs</span></td>
       <td class="time">3.5 ms <span class="range">±530.4 µs</span></td>
@@ -889,6 +772,32 @@
         </div>
       </td>
       <td class="runs">589</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">name-rev</td>
+      <td class="time">1.9 ms <span class="range">±312.5 µs</span></td>
+      <td class="time">3.2 ms <span class="range">±485.9 µs</span></td>
+      <td class="ratio slower">1.7× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 60%"></div>
+        </div>
+      </td>
+      <td class="runs">835</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">show</td>
+      <td class="time">2.6 ms <span class="range">±296.2 µs</span></td>
+      <td class="time">4.5 ms <span class="range">±348.9 µs</span></td>
+      <td class="ratio slower">1.7× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 59%"></div>
+        </div>
+      </td>
+      <td class="runs">611</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">log-format</td>
@@ -928,6 +837,32 @@
         </div>
       </td>
       <td class="runs">567</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">branch-list@H</td>
+      <td class="time">1.1 ms <span class="range">±236.5 µs</span></td>
+      <td class="time">1.9 ms <span class="range">±564.1 µs</span></td>
+      <td class="ratio slower">1.7× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 58%"></div>
+        </div>
+      </td>
+      <td class="runs">1349</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">show@H</td>
+      <td class="time">1.6 ms <span class="range">±328.5 µs</span></td>
+      <td class="time">2.9 ms <span class="range">±1.1 ms</span></td>
+      <td class="ratio slower">1.8× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 57%"></div>
+        </div>
+      </td>
+      <td class="runs">1046</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">rev-parse</td>
@@ -982,6 +917,19 @@
       <td class="runs">840</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">log-patch@H</td>
+      <td class="time">41.0 ms <span class="range">±4.6 ms</span></td>
+      <td class="time">74.4 ms <span class="range">±4.7 ms</span></td>
+      <td class="ratio slower">1.8× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 55%"></div>
+        </div>
+      </td>
+      <td class="runs">40</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">diff-staged@M</td>
       <td class="time">3.2 ms <span class="range">±687.4 µs</span></td>
       <td class="time">5.8 ms <span class="range">±929.1 µs</span></td>
@@ -1021,6 +969,32 @@
       <td class="runs">656</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">count-objects</td>
+      <td class="time">3.6 ms <span class="range">±792.1 µs</span></td>
+      <td class="time">6.7 ms <span class="range">±1.8 ms</span></td>
+      <td class="ratio slower">1.9× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 54%"></div>
+        </div>
+      </td>
+      <td class="runs">437</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">tag-list</td>
+      <td class="time">1.7 ms <span class="range">±814.3 µs</span></td>
+      <td class="time">3.2 ms <span class="range">±990.2 µs</span></td>
+      <td class="ratio slower">1.9× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 53%"></div>
+        </div>
+      </td>
+      <td class="runs">881</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">show@S</td>
       <td class="time">1.9 ms <span class="range">±358.0 µs</span></td>
       <td class="time">3.6 ms <span class="range">±566.4 µs</span></td>
@@ -1032,6 +1006,32 @@
         </div>
       </td>
       <td class="runs">871</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">checkout-index</td>
+      <td class="time">945.5 µs <span class="range">±201.6 µs</span></td>
+      <td class="time">1.8 ms <span class="range">±344.4 µs</span></td>
+      <td class="ratio slower">1.9× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 52%"></div>
+        </div>
+      </td>
+      <td class="runs">1045</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">diff@H</td>
+      <td class="time">3.8 ms <span class="range">±665.7 µs</span></td>
+      <td class="time">7.3 ms <span class="range">±1.4 ms</span></td>
+      <td class="ratio slower">1.9× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 52%"></div>
+        </div>
+      </td>
+      <td class="runs">382</td>
     </tr>
     <tr class="slower">
       <td class="bench-name">diff-staged@S</td>
@@ -1060,6 +1060,19 @@
       <td class="runs">222</td>
     </tr>
     <tr class="slower">
+      <td class="bench-name">ls-files@H</td>
+      <td class="time">1.0 ms <span class="range">±245.4 µs</span></td>
+      <td class="time">2.0 ms <span class="range">±413.1 µs</span></td>
+      <td class="ratio slower">2.0× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 51%"></div>
+        </div>
+      </td>
+      <td class="runs">1532</td>
+    </tr>
+    <tr class="slower">
       <td class="bench-name">status@S</td>
       <td class="time">1.8 ms <span class="range">±334.9 µs</span></td>
       <td class="time">3.5 ms <span class="range">±666.1 µs</span></td>
@@ -1071,6 +1084,19 @@
         </div>
       </td>
       <td class="runs">746</td>
+    </tr>
+    <tr class="slower">
+      <td class="bench-name">show-ref</td>
+      <td class="time">1.3 ms <span class="range">±221.8 µs</span></td>
+      <td class="time">2.6 ms <span class="range">±341.4 µs</span></td>
+      <td class="ratio slower">2.0× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 51%"></div>
+        </div>
+      </td>
+      <td class="runs">1049</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">diff-tree</td>
@@ -1112,6 +1138,19 @@
       <td class="runs">386</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">merge@H</td>
+      <td class="time">4.1 ms <span class="range">±289.7 µs</span></td>
+      <td class="time">8.2 ms <span class="range">±657.1 µs</span></td>
+      <td class="ratio much-slower">2.0× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 49%"></div>
+        </div>
+      </td>
+      <td class="runs">181</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">ls-files@M</td>
       <td class="time">1.3 ms <span class="range">±273.2 µs</span></td>
       <td class="time">2.6 ms <span class="range">±549.9 µs</span></td>
@@ -1136,6 +1175,19 @@
         </div>
       </td>
       <td class="runs">397</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">stripspace</td>
+      <td class="time">659.4 µs <span class="range">±116.1 µs</span></td>
+      <td class="time">1.4 ms <span class="range">±287.8 µs</span></td>
+      <td class="ratio much-slower">2.1× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 49%"></div>
+        </div>
+      </td>
+      <td class="runs">1702</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">log-patch@S</td>
@@ -1164,6 +1216,19 @@
       <td class="runs">428</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">branch-list</td>
+      <td class="time">1.3 ms <span class="range">±271.5 µs</span></td>
+      <td class="time">2.9 ms <span class="range">±461.2 µs</span></td>
+      <td class="ratio much-slower">2.2× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 46%"></div>
+        </div>
+      </td>
+      <td class="runs">873</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">status-long@S</td>
       <td class="time">1.8 ms <span class="range">±352.3 µs</span></td>
       <td class="time">4.0 ms <span class="range">±636.8 µs</span></td>
@@ -1175,6 +1240,32 @@
         </div>
       </td>
       <td class="runs">715</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">merge-base</td>
+      <td class="time">1.5 ms <span class="range">±173.1 µs</span></td>
+      <td class="time">3.3 ms <span class="range">±469.9 µs</span></td>
+      <td class="ratio much-slower">2.2× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 45%"></div>
+        </div>
+      </td>
+      <td class="runs">825</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">checkout@H</td>
+      <td class="time">6.2 ms <span class="range">±2.1 ms</span></td>
+      <td class="time">13.7 ms <span class="range">±1.4 ms</span></td>
+      <td class="ratio much-slower">2.2× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 45%"></div>
+        </div>
+      </td>
+      <td class="runs">159</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">blame@L</td>
@@ -1216,6 +1307,32 @@
       <td class="runs">267</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">cherry-pick@H</td>
+      <td class="time">7.7 ms <span class="range">±2.7 ms</span></td>
+      <td class="time">18.0 ms <span class="range">±2.9 ms</span></td>
+      <td class="ratio much-slower">2.3× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 43%"></div>
+        </div>
+      </td>
+      <td class="runs">128</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">status@H</td>
+      <td class="time">2.4 ms <span class="range">±829.6 µs</span></td>
+      <td class="time">5.7 ms <span class="range">±439.6 µs</span></td>
+      <td class="ratio much-slower">2.4× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 42%"></div>
+        </div>
+      </td>
+      <td class="runs">434</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">checkout@M</td>
       <td class="time">8.3 ms <span class="range">±2.3 ms</span></td>
       <td class="time">19.7 ms <span class="range">±3.3 ms</span></td>
@@ -1242,6 +1359,32 @@
       <td class="runs">470</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">read-tree</td>
+      <td class="time">2.2 ms <span class="range">±326.5 µs</span></td>
+      <td class="time">5.4 ms <span class="range">±2.7 ms</span></td>
+      <td class="ratio much-slower">2.5× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 40%"></div>
+        </div>
+      </td>
+      <td class="runs">437</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">reset</td>
+      <td class="time">2.5 ms <span class="range">±382.5 µs</span></td>
+      <td class="time">6.5 ms <span class="range">±507.2 µs</span></td>
+      <td class="ratio much-slower">2.6× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 39%"></div>
+        </div>
+      </td>
+      <td class="runs">293</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">log-oneline@L</td>
       <td class="time">15.9 ms <span class="range">±2.9 ms</span></td>
       <td class="time">42.1 ms <span class="range">±7.9 ms</span></td>
@@ -1255,6 +1398,19 @@
       <td class="runs">62</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">check-ignore</td>
+      <td class="time">442.7 µs <span class="range">±170.1 µs</span></td>
+      <td class="time">1.2 ms <span class="range">±359.3 µs</span></td>
+      <td class="ratio much-slower">2.8× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 36%"></div>
+        </div>
+      </td>
+      <td class="runs">1632</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">ls-files@L</td>
       <td class="time">2.6 ms <span class="range">±592.3 µs</span></td>
       <td class="time">7.5 ms <span class="range">±1.3 ms</span></td>
@@ -1266,6 +1422,45 @@
         </div>
       </td>
       <td class="runs">299</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">reset@H</td>
+      <td class="time">3.1 ms <span class="range">±807.8 µs</span></td>
+      <td class="time">9.4 ms <span class="range">±1.6 ms</span></td>
+      <td class="ratio much-slower">3.1× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 33%"></div>
+        </div>
+      </td>
+      <td class="runs">223</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">diff-staged@H</td>
+      <td class="time">2.3 ms <span class="range">±368.7 µs</span></td>
+      <td class="time">7.2 ms <span class="range">±1.0 ms</span></td>
+      <td class="ratio much-slower">3.1× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 32%"></div>
+        </div>
+      </td>
+      <td class="runs">338</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">config-list</td>
+      <td class="time">410.8 µs <span class="range">±284.7 µs</span></td>
+      <td class="time">1.4 ms <span class="range">±332.0 µs</span></td>
+      <td class="ratio much-slower">3.3× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 30%"></div>
+        </div>
+      </td>
+      <td class="runs">1390</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">write-tree@S</td>
@@ -1320,6 +1515,19 @@
       <td class="runs">10</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">status-long@H</td>
+      <td class="time">1.9 ms <span class="range">±796.3 µs</span></td>
+      <td class="time">6.5 ms <span class="range">±1.7 ms</span></td>
+      <td class="ratio much-slower">3.5× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 29%"></div>
+        </div>
+      </td>
+      <td class="runs">412</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">status-long@L</td>
       <td class="time">10.9 ms <span class="range">±1.7 ms</span></td>
       <td class="time">39.7 ms <span class="range">±3.8 ms</span></td>
@@ -1372,6 +1580,19 @@
       <td class="runs">180</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">stash@H</td>
+      <td class="time">14.5 ms <span class="range">±3.8 ms</span></td>
+      <td class="time">59.2 ms <span class="range">±4.4 ms</span></td>
+      <td class="ratio much-slower">4.1× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 24%"></div>
+        </div>
+      </td>
+      <td class="runs">48</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">status@L</td>
       <td class="time">11.5 ms <span class="range">±5.4 ms</span></td>
       <td class="time">48.2 ms <span class="range">±4.2 ms</span></td>
@@ -1383,6 +1604,19 @@
         </div>
       </td>
       <td class="runs">52</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">log-oneline@H</td>
+      <td class="time">28.1 ms <span class="range">±2.3 ms</span></td>
+      <td class="time">124.0 ms <span class="range">±3.1 ms</span></td>
+      <td class="ratio much-slower">4.4× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 23%"></div>
+        </div>
+      </td>
+      <td class="runs">24</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">diff@L</td>
@@ -1411,6 +1645,19 @@
       <td class="runs">84</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">blame@H</td>
+      <td class="time">39.4 ms <span class="range">±4.6 ms</span></td>
+      <td class="time">201.7 ms <span class="range">±14.9 ms</span></td>
+      <td class="ratio much-slower">5.1× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 20%"></div>
+        </div>
+      </td>
+      <td class="runs">15</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">cherry-pick@L</td>
       <td class="time">42.4 ms <span class="range">±4.7 ms</span></td>
       <td class="time">246.1 ms <span class="range">±33.3 ms</span></td>
@@ -1435,6 +1682,32 @@
         </div>
       </td>
       <td class="runs">160</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">grep@H</td>
+      <td class="time">2.2 ms <span class="range">±653.7 µs</span></td>
+      <td class="time">15.2 ms <span class="range">±2.0 ms</span></td>
+      <td class="ratio much-slower">6.9× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 15%"></div>
+        </div>
+      </td>
+      <td class="runs">201</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">add@H</td>
+      <td class="time">3.5 ms <span class="range">±406.6 µs</span></td>
+      <td class="time">28.5 ms <span class="range">±3.0 ms</span></td>
+      <td class="ratio much-slower">8.2× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 12%"></div>
+        </div>
+      </td>
+      <td class="runs">92</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">grep@M</td>
@@ -1513,6 +1786,19 @@
         </div>
       </td>
       <td class="runs">128</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">write-tree@H</td>
+      <td class="time">1.2 ms <span class="range">±237.3 µs</span></td>
+      <td class="time">17.4 ms <span class="range">±2.1 ms</span></td>
+      <td class="ratio much-slower">14.6× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 7%"></div>
+        </div>
+      </td>
+      <td class="runs">166</td>
     </tr>
     <tr class="much-slower">
       <td class="bench-name">write-tree@M</td>
@@ -1632,10 +1918,36 @@
       <td class="runs">12</td>
     </tr>
     <tr class="much-slower">
+      <td class="bench-name">commit@H</td>
+      <td class="time">5.4 ms <span class="range">±355.4 µs</span></td>
+      <td class="time">1.62 s <span class="range">±6.65 s</span></td>
+      <td class="ratio much-slower">300.0× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 0%"></div>
+        </div>
+      </td>
+      <td class="runs">55</td>
+    </tr>
+    <tr class="much-slower">
       <td class="bench-name">commit@M</td>
       <td class="time">7.5 ms <span class="range">±3.1 ms</span></td>
       <td class="time">3.75 s <span class="range">±4.01 s</span></td>
       <td class="ratio much-slower">497.6× slower</td>
+      <td class="bar-cell">
+        <div class="bar-container">
+          <div class="bar bar-git" style="width: 100%"></div>
+          <div class="bar bar-grit" style="width: 0%"></div>
+        </div>
+      </td>
+      <td class="runs">10</td>
+    </tr>
+    <tr class="much-slower">
+      <td class="bench-name">rebase@H</td>
+      <td class="time">10.2 ms <span class="range">±1.5 ms</span></td>
+      <td class="time">5.43 s <span class="range">±229.0 ms</span></td>
+      <td class="ratio much-slower">533.0× slower</td>
       <td class="bar-cell">
         <div class="bar-container">
           <div class="bar bar-git" style="width: 100%"></div>
