@@ -426,6 +426,15 @@ pub fn is_valid_fetch_advertised_ref(name: &str) -> bool {
     crate::check_ref_format::is_valid_fetch_advertised_ref(name)
 }
 
+/// Whether a name from a protocol-v2 `ls-refs` response should be kept.
+///
+/// `HEAD` is valid without a `refs/` prefix; every other name must pass
+/// [`is_valid_fetch_advertised_ref`].
+#[must_use]
+pub fn is_valid_ls_refs_advertised_name(name: &str) -> bool {
+    name == "HEAD" || is_valid_fetch_advertised_ref(name)
+}
+
 /// Whether a ref name is safe to store under the ref backend (post-refspec mapping).
 #[must_use]
 pub fn is_valid_storable_ref_name(name: &str) -> bool {

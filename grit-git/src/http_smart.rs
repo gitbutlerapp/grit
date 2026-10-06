@@ -828,7 +828,7 @@ fn parse_ls_refs_v2_response(data: &[u8]) -> Result<Vec<LsRefEntry>> {
         if name.is_empty() {
             continue;
         }
-        if !grit_lib::refs::is_valid_fetch_advertised_ref(&name) {
+        if !grit_lib::refs::is_valid_ls_refs_advertised_name(&name) {
             continue;
         }
         out.push(LsRefEntry { name, oid });
@@ -2003,5 +2003,28 @@ mod parse_v0_v1_advertisement_tests {
         assert_eq!(refs.len(), 2);
         assert!(refs.iter().any(|r| r.name == "HEAD"));
         assert!(refs.iter().any(|r| r.name == "refs/heads/main"));
+    }
+
+    #[test]
+    fn parse_ls_refs_v2_keeps_head_and_drops_traversal() {
+        let oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let malicious = "refs/heads/../../../config";
+        let mut body = Vec::new();
+        pkt_line::write_line_to_vec(
+            &mut body,
+            &format!("{oid} HEAD symref-target:refs/heads/main"),
+        )
+        .unwrap();
+        pkt_line::write_line_to_vec(&mut body, &format!("{oid} {malicious}")).unwrap();
+        pkt_line::write_line_to_vec(&mut body, &format!("{oid} refs/heads/main")).unwrap();
+        body.extend_from_slice(b"0000");
+
+        let entries = parse_ls_refs_v2_response(&body).unwrap();
+        assert!(entries.iter().any(|e| e.name == "HEAD"));
+        assert!(entries.iter().any(|e| e.name == "refs/heads/main"));
+        assert!(
+            !entries.iter().any(|e| e.name.contains("../")),
+            "traversal ref must be dropped"
+        );
     }
 }

@@ -965,17 +965,20 @@ pub(crate) fn parse_v2_ls_refs_output(data: &[u8], args: &Args) -> Result<Vec<Re
         };
 
         let (name, oid, peeled, symref_target) = parse_ls_refs_v2_line(&pkt)?;
-        if !grit_lib::refs::is_valid_fetch_advertised_ref(&name) {
+        if !grit_lib::refs::is_valid_ls_refs_advertised_name(&name) {
             continue;
         }
         if !grit_lib::ls_remote::ref_matches_ls_remote_patterns(&name, &args.patterns) {
             continue;
         }
 
+        let symref_target =
+            symref_target.filter(|t| grit_lib::refs::is_valid_advertised_symref_target(t));
+
         entries.push(RefEntry {
             name: name.clone(),
             oid,
-            symref_target: symref_target.clone(),
+            symref_target,
         });
 
         if let Some(poid) = peeled {
@@ -1263,4 +1266,54 @@ fn common_git_dir_or_self(git_dir: &Path) -> PathBuf {
         git_dir.join(rel)
     };
     candidate.canonicalize().unwrap_or(candidate)
+}
+
+#[cfg(test)]
+mod parse_v2_ls_refs_tests {
+    use super::*;
+    use grit_lib::pkt_line;
+
+    fn empty_ls_remote_args() -> Args {
+        Args {
+            branches: false,
+            tags: false,
+            refs_only: false,
+            symref: true,
+            upload_pack: None,
+            quiet: false,
+            get_url: false,
+            exit_code: false,
+            sort: Vec::new(),
+            server_options: Vec::new(),
+            repository: None,
+            patterns: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn parse_v2_ls_refs_keeps_head_and_drops_traversal() {
+        let oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let malicious = "refs/heads/../../../config";
+        let mut body = Vec::new();
+        pkt_line::write_line(
+            &mut body,
+            &format!("{oid} HEAD symref-target:refs/heads/main"),
+        )
+        .unwrap();
+        pkt_line::write_line(&mut body, &format!("{oid} {malicious}")).unwrap();
+        pkt_line::write_line(&mut body, &format!("{oid} refs/heads/main")).unwrap();
+        pkt_line::write_flush(&mut body).unwrap();
+
+        let entries = parse_v2_ls_refs_output(&body, &empty_ls_remote_args()).unwrap();
+        assert!(entries.iter().any(|e| e.name == "HEAD"));
+        assert_eq!(
+            entries
+                .iter()
+                .find(|e| e.name == "HEAD")
+                .and_then(|e| e.symref_target.as_deref()),
+            Some("refs/heads/main")
+        );
+        assert!(entries.iter().any(|e| e.name == "refs/heads/main"));
+        assert!(!entries.iter().any(|e| e.name.contains("../")));
+    }
 }
