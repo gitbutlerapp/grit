@@ -82,9 +82,11 @@ bench() {
 # Weekly:   merge rebase stash cherry-pick reset shortlog clone-local
 reset_repo() {
   # Restore the repo to a pristine main checkout (cheap; runs before each command).
+  # Grit may write index extensions C git cannot read; rebuild the index from HEAD.
   local R="$1"
   $GIT -C "$R" checkout -q main 2>/dev/null || true
-  $GIT -C "$R" reset -q --hard main 2>/dev/null || true
+  rm -f "$R/.git/index"
+  $GIT -C "$R" read-tree -u HEAD 2>/dev/null || $GRIT -C "$R" read-tree -u HEAD 2>/dev/null || true
   $GIT -C "$R" clean -fdq 2>/dev/null || true
 }
 
