@@ -1,0 +1,17 @@
+#!/bin/sh
+# Helper shim for simplified test harnesses where test_path_is_symlink
+# is not defined as a shell function.
+
+if test "$#" -ne 1
+then
+	echo "test_path_is_symlink: expected 1 argument" >&2
+	exit 1
+fi
+
+if test -h "$1"
+then
+	exit 0
+fi
+
+echo "Symbolic link $1 doesn't exist" >&2
+exit 1

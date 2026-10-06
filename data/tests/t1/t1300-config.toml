@@ -1,0 +1,7 @@
+in_scope = "yes"
+tests_total = 497
+passed_last = 497
+failing = 0
+fully_passing = true
+status = "ok"
+expect_failure = 0

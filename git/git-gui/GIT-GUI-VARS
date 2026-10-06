@@ -1,0 +1,1 @@
+SHELL_PATH='/bin/sh' TCL_PATH='tclsh' TCLTK_PATH='wish' gitexecdir='/Users/schacon/libexec/git-core' gg_libdir='/Users/schacon/share/git-gui/lib' GITGUI_MACOSXAPP=YesPlease 

@@ -1,0 +1,21 @@
+#!/bin/sh
+
+file="$1"
+if test -z "$file"
+then
+	echo "usage: test_trailing_hash <file>" >&2
+	exit 1
+fi
+
+python3 - "$file" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+data = path.read_bytes()
+hash_size = 20  # SHA-1 raw size used in this harness
+if len(data) < hash_size:
+    print("", end="")
+else:
+    print(data[-hash_size:].hex())
+PY
