@@ -533,6 +533,14 @@ pub fn write_tree_from_index_subset(
 /// extension. Callers that need incremental reuse must use [`write_tree_update_index`] on a
 /// mutable index instead.
 pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<ObjectId> {
+    if prefix.is_empty() {
+        if let Some(root) = index.cache_tree_root {
+            if cache_tree_fully_valid(odb, index.cache_tree.as_ref()) {
+                return Ok(root);
+            }
+        }
+    }
+
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let prefix_bytes = prefix.as_bytes();
