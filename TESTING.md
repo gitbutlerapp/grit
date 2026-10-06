@@ -133,7 +133,10 @@ bare `cd`. Quick scan harness files with `rg -l "test_expect_success" tests/t*.s
 
 ## Lint and format
 
+The repo root [`rust-toolchain.toml`](rust-toolchain.toml) pins **Rust 1.99.0** with **`rustfmt`** and **`clippy`**. From the repository root, `rustup show` should report that toolchain as active (rustup auto-installs it on first use).
+
 ```bash
+rustup show
 cargo fmt --all --check
 cargo check --workspace
 ```
@@ -144,7 +147,7 @@ For **`cargo clippy --workspace --all-targets -- -D warnings`**, the workspace s
 
 GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It runs on push to **`main`**, on **pull requests**, and via **workflow_dispatch**. Superseded PR runs are cancelled via workflow **`concurrency`**.
 
-**Toolchain:** Rust **1.99.0** with **`rustfmt`** and **`clippy`**, pinned with [`dtolnay/rust-toolchain`](https://github.com/dtolnay/rust-toolchain) (`uses: dtolnay/rust-toolchain@1.99.0`). To bump the compiler, update that `@1.99.0` tag in every job in `ci.yml` (keep the three jobs on the same version) and refresh this section.
+**Toolchain:** Rust **1.99.0** with **`rustfmt`** and **`clippy`**, pinned in [`rust-toolchain.toml`](rust-toolchain.toml) for local and agent checkouts, and in CI with [`dtolnay/rust-toolchain`](https://github.com/dtolnay/rust-toolchain) (`uses: dtolnay/rust-toolchain@1.99.0`). **Bump procedure:** set `channel` in `rust-toolchain.toml`, update the `@1.99.0` tag in every job in `ci.yml` (keep all jobs on the same version), run `rustup toolchain install` for the new release locally, then refresh this section and [`AGENTS.md`](AGENTS.md) if the minimum stable version changes.
 
 **Build parallelism:** Local checkouts cap Cargo jobs at 2 in [`.cargo/config.toml`](.cargo/config.toml) for multi-worktree development. CI exports **`CARGO_BUILD_JOBS=$(nproc)`** so runners use all cores; the config file is unchanged.
 
