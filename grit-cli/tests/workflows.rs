@@ -246,3 +246,57 @@ fn local_remote_clone_push_fetch_and_pull_workflow() -> TestResult {
     assert_eq!(fs::read_to_string(seed.join("clone.txt"))?, "from clone\n");
     Ok(())
 }
+
+/// Mirrors GitHub issue #903: a gitlink whose commit object is not in the superproject ODB
+/// must not make `grit diff` fail on a clean tree.
+#[test]
+fn diff_succeeds_with_uninitialized_gitlink_on_clean_tree() -> TestResult {
+    let scratch = Scratch::new("gitlink-diff")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    gs_ok(&repo, ["config", "commit.gpgsign", "false"])?;
+    write_file(&repo.join("a"), "a\n")?;
+    fs::create_dir(&repo.join("sub"))?;
+
+    let null = null_device();
+    let gitlink_oid = "855827c583bc30645ba427885caa40c5b81764d2";
+    let add_a = Command::new("git")
+        .current_dir(&repo)
+        .args(["add", "a"])
+        .env("GIT_CONFIG_GLOBAL", null)
+        .env("GIT_CONFIG_SYSTEM", null)
+        .output()?;
+    assert!(add_a.status.success(), "git add failed");
+    let cacheinfo = Command::new("git")
+        .current_dir(&repo)
+        .args([
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{gitlink_oid},sub"),
+        ])
+        .env("GIT_CONFIG_GLOBAL", null)
+        .env("GIT_CONFIG_SYSTEM", null)
+        .output()?;
+    assert!(cacheinfo.status.success(), "git update-index failed");
+    gs_ok(&repo, ["commit", "-m", "init"])?;
+
+    let diff = gs(&repo, ["diff"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        !diff.stderr.contains("object not found"),
+        "gitlink must not trigger ODB blob read:\n{}",
+        diff.dump()
+    );
+
+    write_file(&repo.join("a"), "a changed\n")?;
+    let diff = gs(&repo, ["diff"])?;
+    assert_eq!(diff.status, Some(0), "{}", diff.dump());
+    assert!(
+        diff.stdout.contains("a changed") || diff.stdout.contains("changed"),
+        "ordinary file edits should still appear:\n{}",
+        diff.dump()
+    );
+    Ok(())
+}

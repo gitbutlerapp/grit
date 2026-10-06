@@ -2772,16 +2772,24 @@ pub fn diff_tree_to_worktree(
                         });
                         continue;
                     }
+                    let ref_matches = if let Some(head) = sub_head {
+                        head == te.oid
+                    } else {
+                        submodule_worktree_is_unpopulated_placeholder(&sub_dir)
+                    };
                     let index_matches_tree = index_gitlink_oid.is_some_and(|oid| oid == te.oid);
-                    let head_differs = sub_head.as_ref() != Some(&te.oid);
                     let dirty_while_aligned = index_matches_tree
-                        && !head_differs
+                        && ref_matches
                         && submodule_has_dirty_worktree_for_super_diff(work_tree, path, &te.oid);
-                    if head_differs || dirty_while_aligned {
+                    if !ref_matches || dirty_while_aligned {
                         // Raw `git diff <tree>` lines use a null OID on the worktree side when the
                         // checked-out submodule HEAD differs from the tree's gitlink; patch output
                         // still resolves the real commit from the submodule directory.
-                        let new_oid = if head_differs { zero_oid() } else { te.oid };
+                        let new_oid = if !ref_matches {
+                            sub_head.unwrap_or_else(zero_oid)
+                        } else {
+                            zero_oid()
+                        };
                         result.push(DiffEntry {
                             status: DiffStatus::Modified,
                             old_path: Some(path.clone()),
@@ -6249,4 +6257,64 @@ fn orderfile_glob_match(pattern: &str, text: &str) -> bool {
         pi += 1;
     }
     pi == pb.len()
+}
+
+#[cfg(test)]
+mod gitlink_tree_worktree_tests {
+    use std::fs;
+
+    use crate::index::{Index, IndexEntry, MODE_GITLINK};
+    use crate::objects::{ObjectId, ObjectKind};
+    use crate::repo::init_repository;
+
+    use super::diff_tree_to_worktree;
+
+    fn encode_tree_gitlink(name: &str, oid: &ObjectId) -> Vec<u8> {
+        let mut data = format!("160000 {name}\0").into_bytes();
+        data.extend_from_slice(oid.as_bytes());
+        data
+    }
+
+    #[test]
+    fn unpopulated_gitlink_matching_index_produces_no_diff_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let work_tree = dir.path();
+        fs::create_dir(work_tree.join("sub")).expect("sub placeholder");
+
+        let repo = init_repository(work_tree, false, "main", None, "files").expect("init");
+        let gitlink: ObjectId = "855827c583bc30645ba427885caa40c5b81764d2"
+            .parse()
+            .expect("gitlink oid");
+        let tree_oid = repo
+            .odb
+            .write(ObjectKind::Tree, &encode_tree_gitlink("sub", &gitlink))
+            .expect("write tree");
+
+        let path = b"sub".to_vec();
+        let mut index = Index::new();
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_GITLINK,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: gitlink,
+            flags: (path.len().min(0xfff)) as u16,
+            flags_extended: None,
+            path,
+            base_index_pos: 0,
+        });
+
+        let entries = diff_tree_to_worktree(&repo.odb, Some(&tree_oid), work_tree, &index)
+            .expect("diff_tree_to_worktree");
+        assert!(
+            entries.is_empty(),
+            "clean uninitialized gitlink should not appear in tree→worktree diff: {entries:?}"
+        );
+    }
 }

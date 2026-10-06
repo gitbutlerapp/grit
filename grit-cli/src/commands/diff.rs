@@ -14,7 +14,9 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use grit_lib::diff::{diff_tree_to_worktree, diff_trees, DiffEntry, DiffStatus};
+use grit_lib::diff::{
+    diff_tree_to_worktree, diff_trees, read_submodule_head_oid, DiffEntry, DiffStatus,
+};
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
 use grit_lib::state::resolve_head;
@@ -156,6 +158,10 @@ fn worktree_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
     entries
         .into_iter()
         .map(|e| {
+            if entry_is_gitlink(&e) {
+                let (old_text, new_text) = gitlink_texts(&e, Some(work_tree));
+                return Ok(file_change(e, old_text, new_text, false));
+            }
             let (old_text, old_bin) = blob_text(&repo.odb, &e.old_oid)?;
             let (new_text, new_bin) = match &e.new_path {
                 Some(p) => file_text(&work_tree.join(p)),
@@ -182,6 +188,10 @@ fn commit_changes(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<V
     entries
         .into_iter()
         .map(|e| {
+            if entry_is_gitlink(&e) {
+                let (old_text, new_text) = gitlink_texts(&e, None);
+                return Ok(file_change(e, old_text, new_text, false));
+            }
             let (old_text, old_bin) = blob_text(&repo.odb, &e.old_oid)?;
             let (new_text, new_bin) = blob_text(&repo.odb, &e.new_oid)?;
             Ok(file_change(e, old_text, new_text, old_bin || new_bin))
@@ -210,6 +220,35 @@ fn file_change(e: DiffEntry, old_text: String, new_text: String, binary: bool) -
         old_text,
         new_text,
         binary,
+    }
+}
+
+fn entry_is_gitlink(e: &DiffEntry) -> bool {
+    e.old_mode == "160000" || e.new_mode == "160000"
+}
+
+/// Gitlink OIDs are commit ids in the submodule, not blobs in the superproject ODB.
+fn gitlink_texts(e: &DiffEntry, work_tree: Option<&Path>) -> (String, String) {
+    let old = gitlink_line(&e.old_oid);
+    let new = if e.new_oid != ObjectId::zero() {
+        gitlink_line(&e.new_oid)
+    } else if let (Some(wt), Some(path)) =
+        (work_tree, e.new_path.as_deref().or(e.old_path.as_deref()))
+    {
+        read_submodule_head_oid(&wt.join(path))
+            .map(|oid| gitlink_line(&oid))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    (old, new)
+}
+
+fn gitlink_line(oid: &ObjectId) -> String {
+    if *oid == ObjectId::zero() {
+        String::new()
+    } else {
+        format!("Subproject commit {}\n", oid.to_hex())
     }
 }
 
