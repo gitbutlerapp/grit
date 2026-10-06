@@ -382,6 +382,15 @@ impl Odb {
         self.mem_overlay.lock().is_ok_and(|g| g.is_some())
     }
 
+    /// Number of objects stored in the active mem overlay (tests only).
+    #[cfg(test)]
+    pub fn mem_overlay_len_for_tests(&self) -> Option<usize> {
+        self.mem_overlay
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(std::collections::HashMap::len))
+    }
+
     /// If the in-memory overlay is active, store `(kind, data)` under `oid` there and return
     /// `true`; otherwise return `false` so the caller falls through to the on-disk path.
     fn overlay_store(&self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> bool {

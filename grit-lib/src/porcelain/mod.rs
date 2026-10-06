@@ -20,7 +20,10 @@
 //!
 //! Operation modules are added one command at a time; this file is the
 //! scaffolding they attach to.
+//!
+//! - [`add::stage`] — stage worktree changes into the index without a full status pass.
 
+pub mod add;
 pub mod checkout;
 pub mod cherry_pick;
 pub mod format_patch;
