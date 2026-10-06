@@ -18,6 +18,7 @@ use crate::error::{Error, Result};
 use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
+use crate::merge_base::commits_reachable_excluding_ancestors_of;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::pack;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
@@ -908,6 +909,10 @@ pub fn rev_list(
     } else {
         HashSet::new()
     };
+
+    if let Some(ordered) = try_bounded_limit_list(repo, &include, &exclude, options)? {
+        return Ok(rev_list_result_from_commits(ordered));
+    }
 
     let mut traversal_missing = Vec::new();
     let mut traversal_missing_seen = HashSet::new();
@@ -4759,6 +4764,83 @@ fn load_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::Commi
     parse_commit(&object.data)
 }
 
+fn rev_list_result_from_commits(commits: Vec<ObjectId>) -> RevListResult {
+    RevListResult {
+        commits,
+        objects: Vec::new(),
+        omitted_objects: Vec::new(),
+        missing_objects: Vec::new(),
+        boundary_commits: Vec::new(),
+        left_right_map: HashMap::new(),
+        cherry_equivalent: HashSet::new(),
+        per_commit_object_counts: Vec::new(),
+        object_walk_tips: Vec::new(),
+        objects_print_commit: Vec::new(),
+        object_segments: Vec::new(),
+        bitmap_object_format: false,
+        tip_annotated_tag_by_commit: HashMap::new(),
+    }
+}
+
+fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
+    (options.max_count.is_some() || options.skip > 0)
+        && !options.all_refs
+        && !options.first_parent
+        && !options.objects
+        && options.paths.is_empty()
+        && !options.left_right
+        && !options.left_only
+        && !options.right_only
+        && !options.cherry_mark
+        && !options.cherry_pick
+        && !options.ancestry_path
+        && !options.simplify_by_decoration
+        && options.simplify_by_decoration_oids.is_empty()
+        && !options.simplify_merges
+        && options.min_parents.is_none()
+        && options.max_parents.is_none()
+        && !options.maximal_only
+        && options.symmetric_left.is_none()
+        && options.symmetric_right.is_none()
+        && options.until_cutoff.is_none()
+        && options.since_cutoff.is_none()
+        && !options.boundary
+        && !options.no_kept_objects
+        && !options.unpacked_only
+        && !options.exclude_promisor_objects
+        && options.missing_action == MissingAction::Error
+        && matches!(
+            options.ordering,
+            OrderingMode::Default | OrderingMode::DateOrderWalk | OrderingMode::AuthorDateWalk
+        )
+}
+
+fn try_bounded_limit_list(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<Vec<ObjectId>>> {
+    if include.is_empty() || !can_use_bounded_limit_list(options) {
+        return Ok(None);
+    }
+
+    let need = options
+        .skip
+        .saturating_add(options.max_count.unwrap_or(usize::MAX));
+    let mut ordered = commits_reachable_excluding_ancestors_of(repo, include, exclude, Some(need))?;
+    if options.skip > 0 {
+        ordered = ordered.into_iter().skip(options.skip).collect();
+    }
+    if let Some(max) = options.max_count {
+        ordered.truncate(max);
+    }
+    if options.reverse {
+        ordered.reverse();
+    }
+    Ok(Some(ordered))
+}
+
 fn extend_split_token(
     token: &str,
     not_mode: bool,
@@ -5127,7 +5209,16 @@ impl<'r> CommitGraph<'r> {
         if self.parents.contains_key(&oid) {
             return Ok(());
         }
-        let commit = load_commit(self.repo, oid)?;
+        let commit = match load_commit(self.repo, oid) {
+            Ok(c) => c,
+            Err(Error::ObjectNotFound(_)) => {
+                self.parents.insert(oid, Vec::new());
+                self.committer_time.insert(oid, 0);
+                self.author_time.insert(oid, 0);
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
         // Shallow boundaries: treat commit as having no parents
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()

@@ -4,7 +4,7 @@
 //! default merge-base selection, `--all`, `--octopus`, `--independent`,
 //! and `--is-ancestor`.
 
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
@@ -300,6 +300,81 @@ pub fn count_symmetric_ahead_behind(
     let ahead = left.difference(&right).count();
     let behind = right.difference(&left).count();
     Ok((ahead, behind))
+}
+
+/// Commits reachable from `tips` that are not ancestors of any `hide` tip, in committer-date order
+/// (newest first). Matches `git rev-list tips ^hide…` default ordering for the common case without
+/// materializing the full ancestor closure of the hide tips.
+///
+/// When `limit` is [`Some`], traversal stops once that many commits have been collected (after
+/// applying the hide filter). Use this for bounded ahead-of-target lists and status shortlogs.
+///
+/// Missing parent objects and shallow boundaries are treated as roots, matching
+/// [`CommitGraphCache::parents_of`].
+///
+/// # Errors
+///
+/// Propagates object read and parse errors from commit traversal.
+pub fn commits_reachable_excluding_ancestors_of(
+    repo: &Repository,
+    tips: &[ObjectId],
+    hide: &[ObjectId],
+    limit: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    if tips.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut cache = CommitGraphCache::new(repo);
+    let mut heap: BinaryHeap<(i64, u64, ObjectId)> = BinaryHeap::new();
+    let mut queued = HashSet::new();
+    let mut seq = 0u64;
+    for &tip in tips {
+        if hide.contains(&tip) {
+            continue;
+        }
+        if queued.insert(tip) {
+            let time = cache.commit_time(tip)?;
+            heap.push((time, seq, tip));
+            seq += 1;
+        }
+    }
+
+    let mut out = Vec::new();
+    let stop_at = limit.unwrap_or(usize::MAX);
+    let mut done = HashSet::new();
+
+    while let Some((_time, _seq, oid)) = heap.pop() {
+        if !done.insert(oid) {
+            continue;
+        }
+        if out.len() >= stop_at {
+            break;
+        }
+
+        let mut hidden = false;
+        for &hide_tip in hide {
+            if oid == hide_tip || cache.is_ancestor(oid, hide_tip)? {
+                hidden = true;
+                break;
+            }
+        }
+        if hidden {
+            continue;
+        }
+
+        out.push(oid);
+
+        for parent in cache.parents_of(oid)? {
+            if queued.insert(parent) {
+                let time = cache.commit_time(parent)?;
+                heap.push((time, seq, parent));
+                seq += 1;
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 /// Return commits that are not reachable from any other input commit.
@@ -628,5 +703,76 @@ impl<'r> CommitGraphCache<'r> {
             }
         }
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::ObjectKind;
+    use crate::odb::Odb;
+    use crate::repo::init_bare_clone_minimal;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn empty_tree(odb: &Odb) -> Result<ObjectId> {
+        odb.write_loose_materialize(ObjectKind::Tree, b"")
+    }
+
+    fn write_commit(
+        odb: &Odb,
+        parents: &[ObjectId],
+        msg: &str,
+        time: i64,
+    ) -> Result<ObjectId> {
+        let tree = empty_tree(odb)?;
+        let mut body = format!("tree {tree}\n");
+        for p in parents {
+            body.push_str(&format!("parent {p}\n"));
+        }
+        body.push_str(&format!(
+            "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\n{msg}\n"
+        ));
+        odb.write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+    }
+
+    fn open_test_bare(dir: &tempfile::TempDir) -> Result<Repository> {
+        init_bare_clone_minimal(dir.path(), "main", "files")?;
+        Repository::open(dir.path(), None)
+    }
+
+    #[test]
+    fn commits_reachable_excluding_respects_limit() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let c1 = write_commit(&repo.odb, &[], "one", 100)?;
+        let c2 = write_commit(&repo.odb, &[c1], "two", 200)?;
+        let c3 = write_commit(&repo.odb, &[c2], "three", 300)?;
+
+        let all = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], None)?;
+        assert_eq!(all, vec![c3, c2, c1]);
+
+        let limited = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[], Some(2))?;
+        assert_eq!(limited, vec![c3, c2]);
+
+        let ahead = commits_reachable_excluding_ancestors_of(&repo, &[c3], &[c1], None)?;
+        assert_eq!(ahead, vec![c3, c2]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn commits_reachable_excluding_treats_missing_parent_as_boundary() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let missing: ObjectId = "0000000000000000000000000000000000000001".parse().expect("oid");
+        let tip = write_commit(&repo.odb, &[missing], "tip", 100)?;
+
+        fs::write(repo.git_dir.join("shallow"), format!("{tip}\n")).map_err(Error::Io)?;
+
+        let out = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[missing], None)?;
+        assert_eq!(out, vec![tip]);
+
+        Ok(())
     }
 }

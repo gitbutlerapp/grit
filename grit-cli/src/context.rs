@@ -1,13 +1,12 @@
 //! Shared repository helpers used across `grit` commands.
 
-use std::collections::HashSet;
-
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::{
     resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
     IdentityError, SystemIdentityEnv,
 };
+use grit_lib::merge_base::commits_reachable_excluding_ancestors_of;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -102,17 +101,19 @@ pub fn commits_ahead_of(
     head: ObjectId,
     target: ObjectId,
 ) -> Result<Vec<CommitSummary>> {
-    let excluded = reachable_commits(repo, target)?;
-    let mut seen = HashSet::new();
-    let mut stack = vec![head];
-    let mut commits = Vec::new();
+    if head == target {
+        return Ok(Vec::new());
+    }
 
-    while let Some(oid) = stack.pop() {
-        if !seen.insert(oid) || excluded.contains(&oid) {
-            continue;
-        }
+    let oids = commits_reachable_excluding_ancestors_of(
+        repo,
+        std::slice::from_ref(&head),
+        &[target],
+        None,
+    )?;
+    let mut commits = Vec::with_capacity(oids.len());
+    for oid in oids {
         let commit = read_commit(repo, &oid)?;
-        stack.extend(commit.parents.iter().copied());
         let (author, timestamp) = author_and_time(&commit.author);
         commits.push(CommitSummary {
             oid,
@@ -174,21 +175,6 @@ pub fn relative_date_from(timestamp: i64, now: i64) -> String {
         (secs / (86_400 * 365), "year")
     };
     format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
-}
-
-fn reachable_commits(repo: &Repository, start: ObjectId) -> Result<HashSet<ObjectId>> {
-    let mut reachable = HashSet::new();
-    let mut stack = vec![start];
-
-    while let Some(oid) = stack.pop() {
-        if !reachable.insert(oid) {
-            continue;
-        }
-        let commit = read_commit(repo, &oid)?;
-        stack.extend(commit.parents.iter().copied());
-    }
-
-    Ok(reachable)
 }
 
 /// The tree OID recorded by a commit.
