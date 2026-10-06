@@ -1395,6 +1395,12 @@ fn read_pack_base_cached(
     Ok((kind, data))
 }
 
+/// Deepest delta chain a read will follow before treating the pack as corrupt.
+///
+/// Safety valve against cyclic ref-delta chains and unbounded recursion, not a
+/// format limit — Git reads chains of any depth (`pack.depth` caps only writers).
+const MAX_DELTA_CHAIN_READ_DEPTH: usize = 4096;
+
 fn read_pack_object_at(
     pack_bytes: &[u8],
     offset: u64,
@@ -1402,10 +1408,10 @@ fn read_pack_object_at(
     objects_dir: Option<&Path>,
     depth: usize,
 ) -> Result<(ObjectKind, Vec<u8>)> {
-    if depth > 50 {
-        return Err(Error::CorruptObject(
-            "delta chain too deep (>50)".to_owned(),
-        ));
+    if depth > MAX_DELTA_CHAIN_READ_DEPTH {
+        return Err(Error::DeltaChainTooDeep {
+            limit: MAX_DELTA_CHAIN_READ_DEPTH,
+        });
     }
     let mut pos = offset as usize;
     let (packed_type, size) = parse_pack_object_header(pack_bytes, &mut pos)?;
@@ -1988,4 +1994,237 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::delta_encode::encode_lcp_delta;
+    use crate::odb::Odb;
+    use crate::transfer::{build_pack, PackBuildOptions};
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    use std::process::Command;
+
+    fn git_try(dir: &std::path::Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_AUTHOR_DATE", "2005-04-07T22:13:13 +0200")
+            .env("GIT_COMMITTER_DATE", "2005-04-07T22:13:13 +0200")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn append_pack_object_header(buf: &mut Vec<u8>, type_code: u8, payload_len: usize) {
+        let mut size = payload_len;
+        let first = ((type_code & 0x7) << 4) | (size & 0x0f) as u8;
+        size >>= 4;
+        if size > 0 {
+            buf.push(first | 0x80);
+            while size > 0 {
+                let b = (size & 0x7f) as u8;
+                size >>= 7;
+                buf.push(if size > 0 { b | 0x80 } else { b });
+            }
+        } else {
+            buf.push(first);
+        }
+    }
+
+    fn zlib_pack(payload: &[u8]) -> Vec<u8> {
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(payload).unwrap();
+        enc.finish().unwrap()
+    }
+
+    fn append_sha1_pack_trailer(buf: &mut Vec<u8>) {
+        let mut hasher = Sha1::new();
+        Digest::update(&mut hasher, &*buf);
+        buf.extend_from_slice(&hasher.finalize());
+    }
+
+    fn append_ref_delta(buf: &mut Vec<u8>, base_oid: &ObjectId, delta: &[u8]) {
+        let compressed = zlib_pack(delta);
+        append_pack_object_header(buf, 7, delta.len());
+        buf.extend_from_slice(base_oid.as_bytes());
+        buf.extend_from_slice(&compressed);
+    }
+
+    fn pack_index_for_objects(
+        pack_path: std::path::PathBuf,
+        objects: &[(ObjectId, u64)],
+    ) -> PackIndex {
+        let mut entries: Vec<PackIndexEntry> = objects
+            .iter()
+            .map(|(oid, offset)| PackIndexEntry {
+                oid: oid.as_bytes().to_vec(),
+                offset: *offset,
+            })
+            .collect();
+        entries.sort_by(|a, b| a.oid.cmp(&b.oid));
+        let fanout = compute_fanout_from_entries(&entries);
+        PackIndex {
+            idx_path: pack_path.with_extension("idx"),
+            pack_path,
+            hash_bytes: 20,
+            entries,
+            fanout,
+        }
+    }
+
+    fn index_pack_in_scratch(pack: &[u8]) -> (tempfile::TempDir, PackIndex) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack_path = dir.path().join("chain.pack");
+        std::fs::write(&pack_path, pack).expect("write pack");
+        let out = Command::new("git")
+            .current_dir(dir.path())
+            .args(["index-pack", "chain.pack"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("index-pack");
+        assert!(
+            out.status.success(),
+            "git index-pack failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let idx_path = dir.path().join("chain.idx");
+        let idx = read_pack_index(&idx_path).expect("read idx");
+        (dir, idx)
+    }
+
+    /// Repo with many prefix-preserving edits to one blob so delta chains can exceed 50.
+    fn build_deep_delta_repo(commit_count: usize) -> Option<(tempfile::TempDir, ObjectId, Odb)> {
+        let tmp = tempfile::tempdir().ok()?;
+        let dir = tmp.path();
+        if !git_try(dir, &["init", "-q", "-b", "main", "."]) {
+            return None;
+        }
+        let mut body = String::new();
+        for i in 0..200 {
+            body.push_str(&format!("seed line {i:04}\n"));
+        }
+        for rev in 0..commit_count {
+            body.push_str(&format!("edit-{rev}\n"));
+            std::fs::write(dir.join("blob.txt"), body.as_bytes()).ok()?;
+            git(dir, &["add", "blob.txt"]);
+            git(dir, &["commit", "-q", "-m", &format!("c{rev}")]);
+        }
+        let tip_hex = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .ok()?;
+        if !tip_hex.status.success() {
+            return None;
+        }
+        let tip = ObjectId::from_hex(std::str::from_utf8(&tip_hex.stdout).ok()?.trim()).ok()?;
+        let git_dir = dir.join(".git");
+        let odb = Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir);
+        Some((tmp, tip, odb))
+    }
+
+    #[test]
+    fn reads_delta_chain_deeper_than_50() {
+        let Some((_repo, tip, odb)) = build_deep_delta_repo(120) else {
+            eprintln!("SKIP: git unavailable for deep delta fixture");
+            return;
+        };
+        let pack = build_pack(
+            &odb,
+            &[tip],
+            &[],
+            &PackBuildOptions {
+                delta: true,
+                max_depth: 120,
+                use_ofs_delta: true,
+                ..PackBuildOptions::default()
+            },
+        )
+        .expect("build deep delta pack");
+
+        let (_scratch, idx) = index_pack_in_scratch(&pack);
+        assert!(
+            idx.entries.len() > 1,
+            "expected a multi-object pack, got {}",
+            idx.entries.len()
+        );
+
+        for entry in &idx.entries {
+            let oid = ObjectId::from_bytes(&entry.oid).expect("oid in idx");
+            let from_pack = read_object_from_pack(&idx, &oid).expect("read packed object");
+            let expected = odb.read(&oid).expect("loose/alt copy for oid");
+            assert_eq!(from_pack.kind, expected.kind);
+            assert_eq!(from_pack.data, expected.data);
+            assert_eq!(odb.hash(from_pack.kind, &from_pack.data), oid);
+        }
+    }
+
+    #[test]
+    fn cyclic_ref_delta_chain_errors() {
+        let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
+        let content_a = b"aaa".as_slice();
+        let content_b = b"bbb".as_slice();
+        let oid_a = odb.hash(ObjectKind::Blob, content_a);
+        let oid_b = odb.hash(ObjectKind::Blob, content_b);
+        let delta_a = encode_lcp_delta(content_b, content_a).expect("delta a");
+        let delta_b = encode_lcp_delta(content_a, content_b).expect("delta b");
+
+        let mut pack = Vec::new();
+        pack.extend_from_slice(b"PACK");
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        let off_a = pack.len() as u64;
+        append_ref_delta(&mut pack, &oid_b, &delta_a);
+        let off_b = pack.len() as u64;
+        append_ref_delta(&mut pack, &oid_a, &delta_b);
+        append_sha1_pack_trailer(&mut pack);
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack_path = dir.path().join("cycle.pack");
+        std::fs::write(&pack_path, &pack).expect("write cyclic pack");
+        let idx = pack_index_for_objects(pack_path, &[(oid_a, off_a), (oid_b, off_b)]);
+        let pack_bytes = std::fs::read(&idx.pack_path).expect("read pack");
+        // Start one step below the cap so the first cyclic hop hits `DeltaChainTooDeep`
+        // without thousands of recursive frames (which would overflow the stack).
+        let err = read_pack_object_at(
+            &pack_bytes,
+            off_a,
+            &idx,
+            None,
+            MAX_DELTA_CHAIN_READ_DEPTH,
+        )
+        .expect_err("cycle must not resolve");
+        assert!(
+            matches!(err, Error::DeltaChainTooDeep { limit: 4096 }),
+            "expected typed delta chain limit, got {err:?}"
+        );
+    }
 }
