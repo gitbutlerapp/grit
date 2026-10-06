@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use crate::config::ConfigSet;
 use crate::diff_indent_heuristic;
 use crate::error::{Error, Result};
-use crate::index::{Index, IndexEntry};
+use crate::index::{CacheTreeNode, Index, IndexEntry};
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::userdiff::FuncnameMatcher;
@@ -1500,8 +1500,16 @@ fn diff_trees_opts(
     Ok(result)
 }
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(test)]
+static DIFF_TREE_READ_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 /// Read and parse a tree object from the ODB.
 fn read_tree(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
+    #[cfg(test)]
+    DIFF_TREE_READ_COUNT.fetch_add(1, Ordering::Relaxed);
     let obj = odb.read(oid)?;
     if obj.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
@@ -1727,6 +1735,43 @@ pub fn diff_index_to_tree(
     tree_oid: Option<&ObjectId>,
     ignore_submodules: bool,
 ) -> Result<Vec<DiffEntry>> {
+    if index_cache_tree_diff_fast_ok(index, tree_oid) {
+        diff_index_to_tree_with_cache_tree(
+            odb,
+            index,
+            tree_oid.expect("checked Some above"),
+            index.cache_tree.as_ref().expect("checked Some above"),
+            ignore_submodules,
+        )
+    } else {
+        diff_index_to_tree_flatten(odb, index, tree_oid, ignore_submodules)
+    }
+}
+
+/// Whether the index cache-tree is safe to use for [`diff_index_to_tree`].
+fn index_cache_tree_diff_fast_ok(index: &Index, tree_oid: Option<&ObjectId>) -> bool {
+    let Some(head_tree) = tree_oid else {
+        return false;
+    };
+    let Some(cache_root) = index.cache_tree.as_ref() else {
+        return false;
+    };
+    if index.entries.iter().any(|e| e.stage() != 0) {
+        return false;
+    }
+    if index.cache_tree_root.as_ref() != Some(head_tree) || !cache_root.is_valid() {
+        return false;
+    }
+    crate::write_tree::verify_cache_tree(index).is_ok()
+}
+
+/// Flatten-tree index-vs-tree diff (used when the index has no cache-tree extension).
+fn diff_index_to_tree_flatten(
+    odb: &Odb,
+    index: &Index,
+    tree_oid: Option<&ObjectId>,
+    ignore_submodules: bool,
+) -> Result<Vec<DiffEntry>> {
     // Flatten the tree into a sorted list of (path, mode, oid)
     let tree_entries = match tree_oid {
         Some(oid) => flatten_tree(odb, oid, "")?,
@@ -1806,7 +1851,26 @@ pub fn diff_index_to_tree(
         }
     }
 
-    for (path, (_, mode)) in &unmerged_modes {
+    diff_index_to_tree_finish_unmerged_and_deleted(
+        ignore_submodules,
+        &mut tree_map,
+        &unmerged_modes,
+        &stage0_paths,
+        &mut result,
+    );
+
+    result.sort_by(|a, b| a.path().cmp(b.path()));
+    Ok(result)
+}
+
+fn diff_index_to_tree_finish_unmerged_and_deleted(
+    ignore_submodules: bool,
+    tree_map: &mut std::collections::BTreeMap<&str, &FlatEntry>,
+    unmerged_modes: &std::collections::BTreeMap<String, (u8, u32)>,
+    stage0_paths: &std::collections::BTreeSet<String>,
+    result: &mut Vec<DiffEntry>,
+) {
+    for (path, (_, mode)) in unmerged_modes {
         if stage0_paths.contains(path) {
             continue;
         }
@@ -1824,7 +1888,7 @@ pub fn diff_index_to_tree(
     }
 
     // Remaining tree entries not in index → deleted
-    for (path, te) in tree_map {
+    for (path, te) in std::mem::take(tree_map) {
         if ignore_submodules && te.mode == 0o160000 {
             continue;
         }
@@ -1839,9 +1903,425 @@ pub fn diff_index_to_tree(
             score: None,
         });
     }
+}
+
+/// Cache-tree-aware index-vs-tree diff: walk HEAD tree and index together and skip
+/// subtrees whose valid cache-tree node OID matches the tree entry (Git unpack-trees).
+fn diff_index_to_tree_with_cache_tree(
+    odb: &Odb,
+    index: &Index,
+    head_tree: &ObjectId,
+    cache_root: &CacheTreeNode,
+    ignore_submodules: bool,
+) -> Result<Vec<DiffEntry>> {
+    let mut result = Vec::new();
+    let mut stage0_paths = std::collections::BTreeSet::new();
+    let mut unmerged_modes: std::collections::BTreeMap<String, (u8, u32)> =
+        std::collections::BTreeMap::new();
+    collect_index_unmerged(index, &mut unmerged_modes);
+
+    let mut idx_cursor = 0usize;
+
+    let mut walk = DiffIndexTreeWalk {
+        odb,
+        index,
+        idx_cursor: &mut idx_cursor,
+        ignore_submodules,
+        result: &mut result,
+        stage0_paths: &mut stage0_paths,
+    };
+    diff_index_tree_at(&mut walk, head_tree, Some(cache_root), "")?;
+
+    // Index entries not consumed by the tree walk (added paths).
+    while idx_cursor < index.entries.len() {
+        let ie = &index.entries[idx_cursor];
+        idx_cursor += 1;
+        let path = String::from_utf8_lossy(&ie.path).to_string();
+        if ie.stage() == 0 && ie.intent_to_add() {
+            continue;
+        }
+        if ie.stage() != 0 {
+            continue;
+        }
+        if ignore_submodules && ie.mode == 0o160000 {
+            stage0_paths.insert(path.clone());
+            continue;
+        }
+        stage0_paths.insert(path.clone());
+        result.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(path),
+            old_mode: "000000".to_owned(),
+            new_mode: format_mode(ie.mode),
+            old_oid: zero_oid(),
+            new_oid: ie.oid,
+            score: None,
+        });
+    }
+
+    let mut tree_map: std::collections::BTreeMap<&str, &FlatEntry> =
+        std::collections::BTreeMap::new();
+    diff_index_to_tree_finish_unmerged_and_deleted(
+        ignore_submodules,
+        &mut tree_map,
+        &unmerged_modes,
+        &stage0_paths,
+        &mut result,
+    );
 
     result.sort_by(|a, b| a.path().cmp(b.path()));
     Ok(result)
+}
+
+fn collect_index_unmerged(
+    index: &Index,
+    unmerged_modes: &mut std::collections::BTreeMap<String, (u8, u32)>,
+) {
+    for ie in index.entries.iter().filter(|e| e.stage() != 0) {
+        let path = String::from_utf8_lossy(&ie.path).to_string();
+        let rank = match ie.stage() {
+            2 => 0u8,
+            3 => 1u8,
+            1 => 2u8,
+            _ => 3u8,
+        };
+        match unmerged_modes.get(&path) {
+            Some((existing_rank, _)) if *existing_rank <= rank => {}
+            _ => {
+                unmerged_modes.insert(path, (rank, ie.mode));
+            }
+        }
+    }
+}
+
+enum IndexLevelKind<'a> {
+    Blob {
+        entry: &'a IndexEntry,
+        name: Vec<u8>,
+    },
+    Tree {
+        name: Vec<u8>,
+    },
+}
+
+fn index_path_under_dir(path: &str, dir_prefix: &str) -> bool {
+    if dir_prefix.is_empty() {
+        return true;
+    }
+    path == dir_prefix || path.starts_with(&format!("{dir_prefix}/"))
+}
+
+fn index_relative_in_dir<'a>(path: &'a str, dir_prefix: &str) -> Option<&'a str> {
+    if dir_prefix.is_empty() {
+        Some(path)
+    } else if path == dir_prefix {
+        Some("")
+    } else if let Some(rest) = path.strip_prefix(&format!("{dir_prefix}/")) {
+        Some(rest)
+    } else {
+        None
+    }
+}
+
+fn peek_index_level_entry<'a>(
+    index: &'a Index,
+    cursor: &mut usize,
+    dir_prefix: &str,
+    ignore_submodules: bool,
+    stage0_paths: &mut std::collections::BTreeSet<String>,
+) -> Option<IndexLevelKind<'a>> {
+    loop {
+        if *cursor >= index.entries.len() {
+            return None;
+        }
+        let ie = &index.entries[*cursor];
+        let path = String::from_utf8_lossy(&ie.path);
+        if !index_path_under_dir(&path, dir_prefix) {
+            return None;
+        }
+        let rel = index_relative_in_dir(&path, dir_prefix)?;
+        if ie.stage() != 0 {
+            *cursor += 1;
+            continue;
+        }
+        if ie.stage() == 0 && ie.intent_to_add() {
+            *cursor += 1;
+            continue;
+        }
+        if rel.is_empty() {
+            *cursor += 1;
+            continue;
+        }
+        if let Some(slash) = rel.find('/') {
+            let name = rel.as_bytes()[..slash].to_vec();
+            return Some(IndexLevelKind::Tree { name });
+        }
+        if ignore_submodules && ie.mode == 0o160000 {
+            stage0_paths.insert(path.into_owned());
+            *cursor += 1;
+            continue;
+        }
+        return Some(IndexLevelKind::Blob {
+            entry: ie,
+            name: rel.as_bytes().to_vec(),
+        });
+    }
+}
+
+fn skip_index_subtree(
+    index: &Index,
+    cursor: &mut usize,
+    dir_prefix: &str,
+    ignore_submodules: bool,
+    stage0_paths: &mut std::collections::BTreeSet<String>,
+) {
+    while *cursor < index.entries.len() {
+        let ie = &index.entries[*cursor];
+        let path = String::from_utf8_lossy(&ie.path);
+        if !index_path_under_dir(&path, dir_prefix) {
+            break;
+        }
+        if ie.stage() == 0 && !ie.intent_to_add() {
+            stage0_paths.insert(path.into_owned());
+            let _ = ignore_submodules;
+        }
+        *cursor += 1;
+    }
+}
+
+fn cache_child<'a>(cache: Option<&'a CacheTreeNode>, name: &[u8]) -> Option<&'a CacheTreeNode> {
+    cache.and_then(|node| node.children.iter().find(|c| c.name == name))
+}
+
+struct DiffIndexTreeWalk<'a, 'b> {
+    odb: &'a Odb,
+    index: &'a Index,
+    idx_cursor: &'b mut usize,
+    ignore_submodules: bool,
+    result: &'b mut Vec<DiffEntry>,
+    stage0_paths: &'b mut std::collections::BTreeSet<String>,
+}
+
+fn diff_index_tree_at(
+    walk: &mut DiffIndexTreeWalk<'_, '_>,
+    tree_oid: &ObjectId,
+    cache_node: Option<&CacheTreeNode>,
+    dir_prefix: &str,
+) -> Result<()> {
+    let tree_entries = read_tree(walk.odb, tree_oid)?;
+    let mut ti = 0usize;
+
+    while ti < tree_entries.len()
+        || peek_index_level_entry(
+            walk.index,
+            walk.idx_cursor,
+            dir_prefix,
+            walk.ignore_submodules,
+            walk.stage0_paths,
+        )
+        .is_some()
+    {
+        let te = tree_entries.get(ti);
+        let ie_kind = peek_index_level_entry(
+            walk.index,
+            walk.idx_cursor,
+            dir_prefix,
+            walk.ignore_submodules,
+            walk.stage0_paths,
+        );
+
+        match (te, ie_kind) {
+            (Some(t_entry), Some(ie)) => {
+                let t_name = &t_entry.name;
+                let (i_name, i_is_tree) = match &ie {
+                    IndexLevelKind::Blob { name, .. } => (name.as_slice(), false),
+                    IndexLevelKind::Tree { name } => (name.as_slice(), true),
+                };
+                let t_is_tree = is_tree_mode(t_entry.mode);
+                let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
+                match cmp {
+                    std::cmp::Ordering::Less => {
+                        emit_index_tree_deleted(
+                            walk.odb,
+                            t_entry,
+                            dir_prefix,
+                            walk.ignore_submodules,
+                            walk.result,
+                        )?;
+                        ti += 1;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        emit_index_tree_added(walk, dir_prefix)?;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        let name_str = String::from_utf8_lossy(t_name);
+                        let full_path = format_path(dir_prefix, &name_str);
+                        if t_is_tree && i_is_tree {
+                            let child_cache = cache_child(cache_node, t_name);
+                            if child_cache
+                                .is_some_and(|c| c.is_valid() && c.oid == Some(t_entry.oid))
+                            {
+                                skip_index_subtree(
+                                    walk.index,
+                                    walk.idx_cursor,
+                                    &full_path,
+                                    walk.ignore_submodules,
+                                    walk.stage0_paths,
+                                );
+                                ti += 1;
+                                continue;
+                            }
+                            diff_index_tree_at(walk, &t_entry.oid, child_cache, &full_path)?;
+                        } else if t_is_tree != i_is_tree {
+                            emit_index_tree_deleted(
+                                walk.odb,
+                                t_entry,
+                                dir_prefix,
+                                walk.ignore_submodules,
+                                walk.result,
+                            )?;
+                            emit_index_tree_added(walk, dir_prefix)?;
+                        } else {
+                            let IndexLevelKind::Blob { entry: ie, .. } = ie else {
+                                ti += 1;
+                                continue;
+                            };
+                            let path = String::from_utf8_lossy(&ie.path).to_string();
+                            walk.stage0_paths.insert(path.clone());
+                            *walk.idx_cursor += 1;
+                            if t_entry.oid != ie.oid || t_entry.mode != ie.mode {
+                                walk.result.push(DiffEntry {
+                                    status: DiffStatus::Modified,
+                                    old_path: Some(path.clone()),
+                                    new_path: Some(path),
+                                    old_mode: format_mode(t_entry.mode),
+                                    new_mode: format_mode(ie.mode),
+                                    old_oid: t_entry.oid,
+                                    new_oid: ie.oid,
+                                    score: None,
+                                });
+                            }
+                        }
+                        ti += 1;
+                    }
+                }
+            }
+            (Some(t_entry), None) => {
+                emit_index_tree_deleted(
+                    walk.odb,
+                    t_entry,
+                    dir_prefix,
+                    walk.ignore_submodules,
+                    walk.result,
+                )?;
+                ti += 1;
+            }
+            (None, Some(_)) => {
+                emit_index_tree_added(walk, dir_prefix)?;
+            }
+            (None, None) => break,
+        }
+    }
+
+    Ok(())
+}
+
+fn emit_index_tree_deleted(
+    odb: &Odb,
+    entry: &TreeEntry,
+    dir_prefix: &str,
+    ignore_submodules: bool,
+    result: &mut Vec<DiffEntry>,
+) -> Result<()> {
+    let name_str = String::from_utf8_lossy(&entry.name);
+    let path = format_path(dir_prefix, &name_str);
+    if ignore_submodules && entry.mode == 0o160000 {
+        return Ok(());
+    }
+    if is_tree_mode(entry.mode) {
+        for fe in flatten_tree(odb, &entry.oid, &path)? {
+            result.push(DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some(fe.path.clone()),
+                new_path: None,
+                old_mode: format_mode(fe.mode),
+                new_mode: "000000".to_owned(),
+                old_oid: fe.oid,
+                new_oid: zero_oid(),
+                score: None,
+            });
+        }
+    } else {
+        result.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(path.clone()),
+            new_path: None,
+            old_mode: format_mode(entry.mode),
+            new_mode: "000000".to_owned(),
+            old_oid: entry.oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+    }
+    Ok(())
+}
+
+fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &str) -> Result<()> {
+    let ie_kind = peek_index_level_entry(
+        walk.index,
+        walk.idx_cursor,
+        dir_prefix,
+        walk.ignore_submodules,
+        walk.stage0_paths,
+    )
+    .ok_or_else(|| Error::IndexError("missing index entry during tree walk".to_owned()))?;
+    match ie_kind {
+        IndexLevelKind::Blob { entry: ie, .. } => {
+            let path = String::from_utf8_lossy(&ie.path).to_string();
+            walk.stage0_paths.insert(path.clone());
+            *walk.idx_cursor += 1;
+            walk.result.push(DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some(path),
+                old_mode: "000000".to_owned(),
+                new_mode: format_mode(ie.mode),
+                old_oid: zero_oid(),
+                new_oid: ie.oid,
+                score: None,
+            });
+        }
+        IndexLevelKind::Tree { name } => {
+            let name_str = String::from_utf8_lossy(&name);
+            let full_path = format_path(dir_prefix, &name_str);
+            let start = *walk.idx_cursor;
+            skip_index_subtree(
+                walk.index,
+                walk.idx_cursor,
+                &full_path,
+                walk.ignore_submodules,
+                walk.stage0_paths,
+            );
+            for ie in &walk.index.entries[start..*walk.idx_cursor] {
+                if ie.stage() != 0 || ie.intent_to_add() {
+                    continue;
+                }
+                let path = String::from_utf8_lossy(&ie.path).to_string();
+                walk.result.push(DiffEntry {
+                    status: DiffStatus::Added,
+                    old_path: None,
+                    new_path: Some(path),
+                    old_mode: "000000".to_owned(),
+                    new_mode: format_mode(ie.mode),
+                    old_oid: zero_oid(),
+                    new_oid: ie.oid,
+                    score: None,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 // ── Index-to-worktree diff (unstaged changes) ───────────────────────
@@ -6351,6 +6831,172 @@ fn orderfile_glob_match(pattern: &str, text: &str) -> bool {
         pi += 1;
     }
     pi == pb.len()
+}
+
+#[cfg(test)]
+mod diff_index_to_tree_cache_tree_tests {
+    use super::*;
+    use crate::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
+    use crate::objects::ObjectKind;
+    use crate::write_tree::{build_cache_tree_from_index, write_tree_from_index};
+    use tempfile::TempDir;
+
+    fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid,
+            flags: path.len().min(0xfff) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    fn repo_with_tree(depth: usize, width: usize) -> (TempDir, Odb, ObjectId, Index) {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let mut index = Index::new();
+        for d in 0..depth {
+            for w in 0..width {
+                let path = format!("unchanged/d{d}/f{w}.txt");
+                let oid = odb
+                    .write(ObjectKind::Blob, format!("body-{d}-{w}").as_bytes())
+                    .expect("blob");
+                index.add_or_replace(index_entry(&path, MODE_REGULAR, oid));
+            }
+        }
+        let head_tree = write_tree_from_index(&odb, &index, "").expect("write tree");
+        let cache = build_cache_tree_from_index(&odb, &index).expect("cache-tree");
+        index.set_cache_tree(cache);
+        index.cache_tree_root = Some(head_tree);
+        (temp, odb, head_tree, index)
+    }
+
+    #[test]
+    fn diff_index_to_tree_cache_tree_fast_path_matches_slow() {
+        let (_temp, odb, head_tree, mut index) = repo_with_tree(3, 4);
+        index.invalidate_cache_tree_for_path(b"unchanged/d1/f2.txt");
+        let mut other = index.clone();
+        other.clear_cache_tree();
+
+        let fast = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("fast");
+        let slow = diff_index_to_tree(&odb, &other, Some(&head_tree), false).expect("slow");
+        assert_eq!(fast, slow);
+
+        // Touch a random subset of paths and compare again.
+        for path in ["unchanged/d0/f1.txt", "unchanged/d2/f3.txt"] {
+            index.invalidate_cache_tree_for_path(path.as_bytes());
+            if let Some(e) = index.get_mut(path.as_bytes(), 0) {
+                let new_oid = odb.write(ObjectKind::Blob, b"new").expect("blob");
+                e.oid = new_oid;
+            }
+        }
+        let mut other2 = index.clone();
+        other2.clear_cache_tree();
+        let fast = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("fast");
+        let slow = diff_index_to_tree(&odb, &other2, Some(&head_tree), false).expect("slow");
+        assert_eq!(fast, slow);
+    }
+
+    #[test]
+    fn diff_index_to_tree_skips_unchanged_subtrees() {
+        let (_temp, odb, head_tree, index) = repo_with_tree(5, 6);
+        DIFF_TREE_READ_COUNT.store(0, Ordering::Relaxed);
+        diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("cached diff");
+        let cached_reads = DIFF_TREE_READ_COUNT.load(Ordering::Relaxed);
+
+        let mut no_cache = index.clone();
+        no_cache.clear_cache_tree();
+        DIFF_TREE_READ_COUNT.store(0, Ordering::Relaxed);
+        diff_index_to_tree(&odb, &no_cache, Some(&head_tree), false).expect("flat diff");
+        let flat_reads = DIFF_TREE_READ_COUNT.load(Ordering::Relaxed);
+
+        assert!(
+            cached_reads < flat_reads,
+            "expected fewer tree reads with cache-tree (cached={cached_reads}, flat={flat_reads})"
+        );
+        assert_eq!(
+            cached_reads, 1,
+            "unchanged repo should only read the root tree"
+        );
+    }
+
+    #[test]
+    fn diff_index_to_tree_reports_mode_gitlink_and_intent_to_add() {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let blob = odb.write(ObjectKind::Blob, b"x").expect("blob");
+        let mut index = Index::new();
+        index.add_or_replace(index_entry("tracked.txt", MODE_REGULAR, blob));
+        let head_tree = write_tree_from_index(&odb, &index, "").expect("tree");
+        let cache = build_cache_tree_from_index(&odb, &index).expect("cache");
+        index.set_cache_tree(cache);
+
+        let mode_entry = index_entry("tracked.txt", MODE_EXECUTABLE, blob);
+        index.add_or_replace(mode_entry);
+        index.invalidate_cache_tree_for_path(b"tracked.txt");
+
+        let diffs = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("diff");
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].status, DiffStatus::Modified);
+        assert_eq!(diffs[0].old_mode, format_mode(MODE_REGULAR));
+        assert_eq!(diffs[0].new_mode, format_mode(MODE_EXECUTABLE));
+
+        // Intent-to-add is omitted from staged diff.
+        let mut ita = index_entry("new.txt", MODE_REGULAR, blob);
+        ita.set_intent_to_add(true);
+        index.add_or_replace(ita);
+        let diffs = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("diff");
+        assert!(
+            diffs.iter().all(|d| d.path() != "new.txt"),
+            "intent-to-add must not appear in staged diff"
+        );
+
+        // Gitlink with ignore_submodules skips diff entry but still matches tree.
+        let gitlink: ObjectId = "855827c583bc30645ba427885caa40c5b81764d2"
+            .parse()
+            .expect("oid");
+        let mut sub_index = Index::new();
+        sub_index.add_or_replace(index_entry("sub", MODE_GITLINK, gitlink));
+        let sub_tree = write_tree_from_index(&odb, &sub_index, "").expect("tree");
+        let sub_cache = build_cache_tree_from_index(&odb, &sub_index).expect("cache");
+        sub_index.set_cache_tree(sub_cache);
+        let diffs =
+            diff_index_to_tree(&odb, &sub_index, Some(&sub_tree), true).expect("gitlink diff");
+        assert!(
+            diffs.is_empty(),
+            "ignored gitlink should not diff: {diffs:?}"
+        );
+    }
+
+    #[test]
+    fn diff_trees_skips_identical_subtree_oids() {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let leaf = odb.write(ObjectKind::Blob, b"leaf").expect("blob");
+        let mut deep = Index::new();
+        for i in 0..20 {
+            deep.add_or_replace(index_entry(&format!("deep/n{i}.txt"), MODE_REGULAR, leaf));
+        }
+        let tree = write_tree_from_index(&odb, &deep, "").expect("tree");
+        DIFF_TREE_READ_COUNT.store(0, Ordering::Relaxed);
+        let entries = diff_trees(&odb, Some(&tree), Some(&tree), "").expect("diff");
+        assert!(entries.is_empty());
+        assert_eq!(
+            DIFF_TREE_READ_COUNT.load(Ordering::Relaxed),
+            2,
+            "identical trees should read each root once and skip shared subtrees"
+        );
+    }
 }
 
 #[cfg(test)]
