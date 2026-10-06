@@ -543,7 +543,7 @@ fn parse_fsmonitor_extension(ext_data: &[u8]) -> Result<(String, crate::ewah_bit
             let nul = ext_data[pos..]
                 .iter()
                 .position(|&b| b == 0)
-                .ok_or_else(|| Error::IndexFsmonitorExtensionTruncated)?;
+                .ok_or(Error::IndexFsmonitorExtensionTruncated)?;
             let token = String::from_utf8_lossy(&ext_data[pos..pos + nul]).into_owned();
             pos += nul + 1;
             token
@@ -564,7 +564,7 @@ fn parse_fsmonitor_extension(ext_data: &[u8]) -> Result<(String, crate::ewah_bit
     }
     let ewah_slice = &ext_data[pos..pos + ewah_size];
     let (dirty, consumed) = crate::ewah_bitmap::EwahBitmap::deserialize_prefix(ewah_slice)
-        .ok_or_else(|| Error::IndexFsmonitorExtensionEwahInvalid)?;
+        .ok_or(Error::IndexFsmonitorExtensionEwahInvalid)?;
     if consumed != ewah_size {
         return Err(Error::IndexFsmonitorExtensionEwahInvalid);
     }
