@@ -4,14 +4,21 @@
 //! [`StageMode::All`] is selected). It does **not** compute the index-vs-HEAD diff
 //! that full [`super::status::status`] requires.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use crate::diff::{mode_from_metadata, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus};
+use crate::config::ConfigSet;
+use crate::crlf;
+use crate::diff::{
+    mode_from_metadata, read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
+};
 use crate::error::{Error, Result};
-use crate::index::{entry_from_stat, index_file_mtime, Index, MODE_TREE};
+use crate::index::{
+    entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
+};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use crate::odb::Odb;
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
 use crate::progress::ProgressSink;
@@ -64,7 +71,7 @@ impl StageOutcome {
 ///
 /// Loads the index, compares it to the work tree once, hashes only changed or new
 /// blobs, removes deleted paths, and invalidates cache-tree / untracked-cache entries
-/// for touched paths via [`Index::add_or_replace`] / [`Index::remove`].
+/// for touched paths via [`Index::stage_file`] / [`Index::remove`].
 ///
 /// # Errors
 ///
@@ -116,26 +123,18 @@ pub fn stage(
 
     let mut outcome = StageOutcome::default();
 
-    for entry in &unstaged {
-        let path = entry.path();
-        if !matches(path) {
-            continue;
-        }
-        match entry.status {
-            DiffStatus::Deleted => {
+    let worktree_updates = collect_worktree_updates(&unstaged, &matches);
+    for (path, update) in worktree_updates {
+        match update {
+            WorktreeUpdate::Remove => {
                 if index.remove(path.as_bytes()) {
                     outcome.removed += 1;
                 }
             }
-            DiffStatus::Modified | DiffStatus::TypeChanged | DiffStatus::Added => {
-                stage_worktree_path(repo, work_tree, path, &mut index)?;
+            WorktreeUpdate::StageContent => {
+                stage_worktree_path(repo, work_tree, &path, &mut index)?;
                 outcome.modified += 1;
             }
-            DiffStatus::Unmerged if entry.new_mode != "000000" => {
-                stage_worktree_path(repo, work_tree, path, &mut index)?;
-                outcome.modified += 1;
-            }
-            _ => {}
         }
     }
 
@@ -154,6 +153,39 @@ pub fn stage(
 
     progress.finish();
     Ok(outcome)
+}
+
+enum WorktreeUpdate {
+    Remove,
+    StageContent,
+}
+
+/// Merge unstaged diff rows into one action per path (unmerged paths may appear twice).
+fn collect_worktree_updates(
+    unstaged: &[DiffEntry],
+    matches: &impl Fn(&str) -> bool,
+) -> BTreeMap<String, WorktreeUpdate> {
+    let mut changes = BTreeMap::<String, WorktreeUpdate>::new();
+    for entry in unstaged {
+        let path = entry.path();
+        if !matches(path) {
+            continue;
+        }
+        let path = path.to_owned();
+        match entry.status {
+            DiffStatus::Deleted => {
+                changes.insert(path, WorktreeUpdate::Remove);
+            }
+            DiffStatus::Modified | DiffStatus::TypeChanged | DiffStatus::Added => {
+                changes.entry(path).or_insert(WorktreeUpdate::StageContent);
+            }
+            DiffStatus::Unmerged if entry.new_mode != "000000" => {
+                changes.entry(path).or_insert(WorktreeUpdate::StageContent);
+            }
+            _ => {}
+        }
+    }
+    changes
 }
 
 fn validate_pathspecs(
@@ -281,66 +313,94 @@ fn stage_worktree_path(
             format!("could not read {rel_path}: {e}"),
         ))
     })?;
-    let mode = mode_from_metadata(&meta);
 
-    let data = if meta.file_type().is_symlink() {
-        let target = fs::read_link(&abs).map_err(|e| {
-            Error::Io(std::io::Error::new(
-                e.kind(),
-                format!("could not read symlink {rel_path}: {e}"),
-            ))
+    if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
+        let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
+            Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
         })?;
-        target.to_string_lossy().into_owned().into_bytes()
-    } else {
-        fs::read(&abs).map_err(|e| {
-            Error::Io(std::io::Error::new(
-                e.kind(),
-                format!("could not read {rel_path}: {e}"),
-            ))
-        })?
-    };
+        return stage_gitlink_at(rel_path, &meta, head_oid, index);
+    }
 
+    let git_dir = work_tree.join(".git");
+    let config = ConfigSet::load(Some(&git_dir), true).unwrap_or_default();
+    let conv = crlf::ConversionConfig::from_config(&config);
+    let attrs = crlf::load_gitattributes(work_tree);
+    let file_attrs = crlf::get_file_attrs(&attrs, rel_path, false, &config);
+    let index_entry = index
+        .get(rel_path.as_bytes(), 0)
+        .or_else(|| index.get(rel_path.as_bytes(), 2))
+        .or_else(|| index.get(rel_path.as_bytes(), 3));
+
+    let mode = mode_from_metadata(&meta);
+    let blob_bytes = worktree_bytes_for_staging(
+        &repo.odb,
+        &abs,
+        &meta,
+        rel_path,
+        &conv,
+        &file_attrs,
+        index_entry,
+    )?;
     let oid = repo
         .odb
-        .write(ObjectKind::Blob, &data)
+        .write(ObjectKind::Blob, &blob_bytes)
         .map_err(|e| Error::Message(format!("could not store {rel_path}: {e}")))?;
-    let entry = entry_from_stat(&abs, rel_path.as_bytes(), oid, mode)
-        .map_err(|e| Error::Message(format!("could not stage {rel_path}: {e}")))?;
-    index.add_or_replace(entry);
+
+    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode);
+    entry.mode = mode;
+    index.stage_file(entry);
+    mark_fsmonitor_staged(index, rel_path);
+    Ok(())
+}
+
+fn worktree_bytes_for_staging(
+    odb: &Odb,
+    abs: &Path,
+    meta: &fs::Metadata,
+    rel_path: &str,
+    conv: &crlf::ConversionConfig,
+    file_attrs: &crlf::FileAttrs,
+    index_entry: Option<&IndexEntry>,
+) -> Result<Vec<u8>> {
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(abs)?;
+        return Ok(target.to_string_lossy().into_owned().into_bytes());
+    }
+    if meta.is_dir() {
+        return Ok(Vec::new());
+    }
+    let raw = fs::read(abs)?;
+    let prior_blob = index_entry
+        .filter(|e| !e.oid.is_zero())
+        .and_then(|e| odb.read(&e.oid).ok())
+        .map(|o| o.data);
+    let opts = crlf::ConvertToGitOpts {
+        index_blob: prior_blob.as_deref(),
+        renormalize: false,
+        check_safecrlf: false,
+    };
+    Ok(crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts).unwrap_or(raw))
+}
+
+fn stage_gitlink_at(
+    rel_path: &str,
+    meta: &fs::Metadata,
+    head_oid: ObjectId,
+    index: &mut Index,
+) -> Result<()> {
+    let mut entry = entry_from_metadata(meta, rel_path.as_bytes(), head_oid, MODE_GITLINK);
+    entry.size = 0;
+    index.stage_file(entry);
+    mark_fsmonitor_staged(index, rel_path);
+    Ok(())
+}
+
+fn mark_fsmonitor_staged(index: &mut Index, rel_path: &str) {
     if index.fsmonitor_last_update.is_some() {
         if let Some(staged) = index.get_mut(rel_path.as_bytes(), 0) {
             staged.set_fsmonitor_valid(true);
         }
     }
-    Ok(())
-}
-
-/// Look up a cache-tree node by repository-relative path (for tests and diagnostics).
-#[must_use]
-pub fn cache_tree_node_valid(index: &Index, path: &str) -> Option<bool> {
-    let root = index.cache_tree.as_ref()?;
-    let node = find_cache_tree_node(root, path)?;
-    Some(node.is_valid())
-}
-
-fn find_cache_tree_node<'a>(
-    root: &'a crate::index::CacheTreeNode,
-    path: &str,
-) -> Option<&'a crate::index::CacheTreeNode> {
-    if path.is_empty() {
-        return Some(root);
-    }
-    let mut current = root;
-    for component in path.split('/') {
-        if component.is_empty() {
-            continue;
-        }
-        current = current
-            .children
-            .iter()
-            .find(|c| c.name == component.as_bytes())?;
-    }
-    Some(current)
 }
 
 #[cfg(test)]
@@ -348,7 +408,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::index::MODE_REGULAR;
+    use crate::index::{entry_from_stat, MODE_GITLINK, MODE_REGULAR};
     use crate::progress::NullProgress;
     use std::fs;
     use std::path::Path;
@@ -382,6 +442,23 @@ mod tests {
     fn write_index(repo: &Repository, index: &mut Index) {
         index.sort();
         repo.write_index(index).unwrap();
+    }
+
+    fn cache_tree_node_valid(index: &Index, path: &str) -> Option<bool> {
+        let root = index.cache_tree.as_ref()?;
+        let mut current = root;
+        if !path.is_empty() {
+            for component in path.split('/') {
+                if component.is_empty() {
+                    continue;
+                }
+                current = current
+                    .children
+                    .iter()
+                    .find(|c| c.name == component.as_bytes())?;
+            }
+        }
+        Some(current.is_valid())
     }
 
     #[test]
@@ -505,5 +582,194 @@ mod tests {
         assert_eq!(cache_tree_node_valid(&index, ""), Some(false));
         assert_eq!(cache_tree_node_valid(&index, "alpha"), Some(true));
         assert_eq!(cache_tree_node_valid(&index, "beta"), Some(false));
+    }
+
+    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: u32) -> IndexEntry {
+        let path_bytes = path.as_bytes().to_vec();
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid,
+            flags: (path_bytes.len().min(0xFFF) as u16) | ((stage as u16) << 12),
+            flags_extended: None,
+            path: path_bytes,
+            base_index_pos: 0,
+        }
+    }
+
+    #[test]
+    fn stage_resolved_conflict_clears_unmerged_stages() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let base = repo.odb.write(ObjectKind::Blob, b"base\n").unwrap();
+        let ours = repo.odb.write(ObjectKind::Blob, b"ours\n").unwrap();
+        let theirs = repo.odb.write(ObjectKind::Blob, b"theirs\n").unwrap();
+
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("f.txt", 1, base, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry("f.txt", 2, ours, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry("f.txt", 3, theirs, MODE_REGULAR));
+        write_index(&repo, &mut index);
+
+        fs::write(root.join("f.txt"), b"resolved\n").unwrap();
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["f.txt".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.total(), 1);
+
+        let index = repo.load_index().unwrap();
+        assert!(
+            !index
+                .entries
+                .iter()
+                .any(|e| e.path == b"f.txt" && e.stage() != 0),
+            "unmerged stages must be cleared"
+        );
+        let staged = index.get(b"f.txt", 0).expect("stage 0 entry");
+        let blob = repo.odb.read(&staged.oid).unwrap();
+        assert_eq!(blob.data, b"resolved\n");
+    }
+
+    #[test]
+    fn stage_applies_autocrlf_on_write() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(
+            root.join(".git/config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tautocrlf = true\n",
+        )
+        .unwrap();
+        fs::write(root.join("f.txt"), b"changed\r\n").unwrap();
+
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let index = repo.load_index().unwrap();
+        let oid = index.get(b"f.txt", 0).unwrap().oid;
+        assert_eq!(repo.odb.read(&oid).unwrap().data, b"changed\n");
+    }
+
+    fn commit_in_repo(repo: &Repository, rel_file: &str, content: &[u8], msg: &str) -> ObjectId {
+        let wt = repo.work_tree.as_ref().unwrap();
+        let abs = wt.join(rel_file);
+        if let Some(p) = abs.parent() {
+            fs::create_dir_all(p).unwrap();
+        }
+        fs::write(&abs, content).unwrap();
+        let blob = repo.odb.write(ObjectKind::Blob, content).unwrap();
+        let tree_body = format!("100644 {blob}\t{rel_file}\n");
+        let tree = repo
+            .odb
+            .write(ObjectKind::Tree, tree_body.as_bytes())
+            .unwrap();
+        let commit_body =
+            format!("tree {tree}\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\n{msg}\n");
+        repo.odb
+            .write(ObjectKind::Commit, commit_body.as_bytes())
+            .unwrap()
+    }
+
+    fn open_nested_repo(nested_root: &Path) -> Repository {
+        let git = nested_root.join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+        )
+        .unwrap();
+        Repository::open(&git, Some(nested_root)).unwrap()
+    }
+
+    fn set_branch_head(repo: &Repository, head: ObjectId) {
+        let main = repo.git_dir.join("refs/heads/main");
+        fs::write(main, format!("{head}\n")).unwrap();
+    }
+
+    #[test]
+    fn stage_gitlink_records_submodule_head() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let sub = root.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let old_head = commit_in_repo(&sub_repo, "inside.txt", b"old\n", "old");
+        set_branch_head(&sub_repo, old_head);
+
+        let mut index = Index::new();
+        let mut gitlink = conflict_index_entry("sub", 0, old_head, MODE_GITLINK);
+        gitlink.size = 0;
+        index.entries.push(gitlink);
+        write_index(&repo, &mut index);
+
+        let new_head = commit_in_repo(&sub_repo, "inside.txt", b"new\n", "new");
+        set_branch_head(&sub_repo, new_head);
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["sub".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.total(), 1);
+
+        let index = repo.load_index().unwrap();
+        let entry = index.get(b"sub", 0).unwrap();
+        assert_eq!(entry.mode, MODE_GITLINK);
+        assert_eq!(entry.oid, new_head);
+    }
+
+    #[test]
+    fn stage_mode_update_skips_untracked() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "tracked.txt", b"old\n");
+        write_index(&repo, &mut index);
+        fs::write(root.join("tracked.txt"), b"new\n").unwrap();
+        fs::write(root.join("brand-new.txt"), b"hi\n").unwrap();
+
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                mode: StageMode::Update,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.modified, 1);
+        assert_eq!(outcome.added, 0);
+        assert_eq!(outcome.total(), 1);
+
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"tracked.txt", 0).is_some());
+        assert!(index.get(b"brand-new.txt", 0).is_none());
     }
 }
