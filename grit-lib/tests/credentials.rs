@@ -14,6 +14,8 @@
 //!
 //! The tests skip gracefully if the system `git` binary is unavailable.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;

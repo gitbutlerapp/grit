@@ -109,3 +109,23 @@ pub unsafe fn strftime(buf: *mut i8, max: usize, fmt: *const i8, tm: *const tm) 
     }
     unsafe { strftime(buf, max, fmt, tm) }
 }
+
+/// Refresh the C runtime timezone cache after changing `TZ` (POSIX `tzset`).
+///
+/// MSVC exports `_tzset` rather than `tzset`; test binaries link this path on Windows.
+pub fn refresh_tz_after_env_change() {
+    #[cfg(unix)]
+    unsafe {
+        extern "C" {
+            fn tzset();
+        }
+        tzset();
+    }
+    #[cfg(windows)]
+    unsafe {
+        extern "C" {
+            fn _tzset();
+        }
+        _tzset();
+    }
+}

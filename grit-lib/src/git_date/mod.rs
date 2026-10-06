@@ -22,13 +22,7 @@ pub fn test_tool_date(args: &[String]) -> Result<TestToolDateResult, String> {
     // unset (direct `sh t0006-date.sh` runs). Do not override an explicit `TZ` (e.g. `EST5`).
     if std::env::var_os("GIT_TEST_DATE_NOW").is_some() && std::env::var_os("TZ").is_none() {
         std::env::set_var("TZ", "UTC");
-        // POSIX: refresh libc timezone cache after changing TZ (not in all `libc` bindings).
-        unsafe extern "C" {
-            fn tzset();
-        }
-        unsafe {
-            tzset();
-        }
+        compat::refresh_tz_after_env_change();
     }
     if args.is_empty() {
         return Err("test-tool date: missing subcommand".to_string());

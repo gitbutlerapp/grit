@@ -34,6 +34,8 @@
 //! lives behind that feature); the non-HTTP tests compile unconditionally.
 //!   cargo test -p grit-lib --features http-ureq --test matrix_credentials
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
