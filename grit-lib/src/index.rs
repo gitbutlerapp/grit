@@ -2328,6 +2328,20 @@ pub fn entry_from_stat(
     Ok(entry_from_metadata(&meta, rel_path, oid, mode))
 }
 
+/// Returns `(mtime_sec, mtime_nsec)` for an on-disk index file, or `None` if it does not exist.
+///
+/// Uses the `filetime` crate so index mtime reads behave the same on Unix and Windows.
+#[must_use]
+pub(crate) fn index_file_mtime(path: &Path) -> Option<(u32, u32)> {
+    let meta = fs::metadata(path).ok()?;
+    let ft = filetime::FileTime::from_last_modification_time(&meta);
+    let secs = ft.unix_seconds();
+    if secs.is_negative() {
+        return Some((0, 0));
+    }
+    Some((secs as u32, ft.nanoseconds()))
+}
+
 /// Build an [`IndexEntry`] from already-obtained metadata.
 ///
 /// This avoids a redundant `stat()` call when the caller already has
