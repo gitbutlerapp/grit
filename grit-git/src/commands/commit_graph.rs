@@ -485,7 +485,7 @@ fn cmd_write(
         .get("commitgraph.changedpathsversion")
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(-1);
-    if ver < -1 || ver > 2 {
+    if !(-1..=2).contains(&ver) {
         eprintln!(
             "warning: attempting to write a commit-graph, but 'commitGraph.changedPathsVersion' ({ver}) is not supported"
         );
@@ -583,8 +583,7 @@ fn cmd_write(
                 .map(|s| {
                     s.lines()
                         .map(str::trim)
-                        .filter(|l| !l.is_empty())
-                        .next()
+                        .find(|l| !l.is_empty())
                         .is_none()
                 })
                 .unwrap_or(true);
@@ -1162,7 +1161,7 @@ fn parse_verify_layer(path: &Path, data: Vec<u8>) -> std::result::Result<VerifyL
 impl VerifyLayer {
     fn oid_at(&self, lex: u32) -> Option<ObjectId> {
         let off = self.oid_lookup_off + lex as usize * HASH_LEN;
-        ObjectId::from_bytes(self.data.get(off..off + HASH_LEN)?.try_into().ok()?).ok()
+        ObjectId::from_bytes(self.data.get(off..off + HASH_LEN)?).ok()
     }
     fn checksum_valid(&self) -> bool {
         if self.data.len() < HASH_LEN {
@@ -1312,14 +1311,7 @@ fn cmd_verify(
                     valid = false;
                     break;
                 }
-                let mut ok = true;
-                for k in 0..n {
-                    if layer.base_graphs[k] != prev_hashes[k] {
-                        ok = false;
-                        break;
-                    }
-                }
-                if !ok {
+                if layer.base_graphs[..n] != prev_hashes[..n] {
                     eprintln!("warning: commit-graph chain does not match");
                     valid = false;
                     break;
@@ -1441,11 +1433,10 @@ fn cmd_verify(
     }
 
     if show_progress {
-        let pct = if total == 0 {
-            100
-        } else {
-            (seen * 100 / total) as u64
-        };
+        let pct = seen
+            .saturating_mul(100)
+            .checked_div(total)
+            .unwrap_or(100);
         eprintln!("Verifying commits in commit graph: {pct}% ({seen}/{total}), done.");
     }
 

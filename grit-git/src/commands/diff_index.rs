@@ -873,8 +873,8 @@ fn parse_options(argv: &[String]) -> Result<Options> {
                 }
                 _ if arg.starts_with("-M") => {
                     let val = &arg[2..];
-                    let pct = if val.ends_with('%') {
-                        val[..val.len() - 1].parse::<u32>().unwrap_or(50)
+                    let pct = if let Some(stripped) = val.strip_suffix('%') {
+                        stripped.parse::<u32>().unwrap_or(50)
                     } else {
                         val.parse::<u32>().unwrap_or(50)
                     };
@@ -882,8 +882,8 @@ fn parse_options(argv: &[String]) -> Result<Options> {
                 }
                 _ if arg.starts_with("--find-renames=") => {
                     let val = &arg["--find-renames=".len()..];
-                    let pct = if val.ends_with('%') {
-                        val[..val.len() - 1].parse::<u32>().unwrap_or(50)
+                    let pct = if let Some(stripped) = val.strip_suffix('%') {
+                        stripped.parse::<u32>().unwrap_or(50)
                     } else {
                         val.parse::<u32>().unwrap_or(50)
                     };
@@ -2258,11 +2258,13 @@ fn write_submodule_log_commit_lines(
     // commits in commit-date order (newest first). Left (old) side prints `<`, right (new)
     // side prints `>`. This interleaves the two sides exactly like Git rather than grouping.
     let _ = (fast_forward, fast_backward);
-    let mut opts = RevListOptions::default();
-    opts.first_parent = true;
-    opts.left_right = true;
-    opts.symmetric_left = Some(old_commit);
-    opts.symmetric_right = Some(new_commit);
+    let opts = RevListOptions {
+        first_parent: true,
+        left_right: true,
+        symmetric_left: Some(old_commit),
+        symmetric_right: Some(new_commit),
+        ..Default::default()
+    };
 
     let bases = merge_bases(sub_repo, old_commit, new_commit, true).unwrap_or_default();
     let negatives: Vec<String> = bases.iter().map(ObjectId::to_hex).collect();
@@ -2346,6 +2348,7 @@ fn absorbed_submodule_gitdir(super_repo: &Repository, sub_path: &str) -> Option<
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn write_submodule_diff_recursive(
     out: &mut impl Write,
     super_repo: &Repository,
@@ -2674,6 +2677,7 @@ pub(crate) fn write_submodule_diff_recursive(
 }
 
 /// Write a unified-diff block for one entry (diff-index -p).
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn write_patch_entry(
     out: &mut impl std::io::Write,
     repo: &Repository,
@@ -2820,6 +2824,7 @@ pub(crate) fn write_patch_entry(
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn write_patch_entry_inner(
     out: &mut impl std::io::Write,
     repo: &Repository,
@@ -3378,16 +3383,14 @@ fn count_line_changes(old: &str, new: &str) -> (usize, usize) {
             j += 1;
         } else {
             // Try to find old_lines[i] ahead in new_lines
-            let mut found_in_new = false;
-            for k in (j + 1)..new_lines.len().min(j + 10) {
-                if old_lines[i] == new_lines[k] {
-                    ins += k - j;
-                    j = k;
-                    found_in_new = true;
-                    break;
-                }
-            }
-            if !found_in_new {
+            if let Some(rel) = new_lines[j + 1..new_lines.len().min(j + 10)]
+                .iter()
+                .position(|line| *line == old_lines[i])
+            {
+                let k = j + 1 + rel;
+                ins += k - j;
+                j = k;
+            } else {
                 del += 1;
                 i += 1;
             }

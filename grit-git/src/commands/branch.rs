@@ -1783,7 +1783,7 @@ fn format_branch(
     let refname_display = match &branch.full_refname {
         Some(refname) => refname.clone(),
         None => {
-            detached_head_description(repo, head).map_err(|e| BranchListError::Other(e.into()))?
+            detached_head_description(repo, head).map_err(BranchListError::Other)?
         }
     };
     let ctx = BranchFormatContext {
@@ -1966,11 +1966,11 @@ fn configure_submodule_tracking(
     };
     let auto = branch_auto_setup_merge(repo);
     let explicit = track_is_explicit(args);
-    if explicit || matches!(auto, AutoSetupMerge::Always) {
-        if grit_lib::refs::resolve_ref(&repo.git_dir, &format!("refs/heads/{sp}")).is_ok() {
-            let _ = write_branch_tracking_config(repo, name, ".", &format!("refs/heads/{sp}"));
-            return;
-        }
+    if (explicit || matches!(auto, AutoSetupMerge::Always))
+        && grit_lib::refs::resolve_ref(&repo.git_dir, &format!("refs/heads/{sp}")).is_ok()
+    {
+        let _ = write_branch_tracking_config(repo, name, ".", &format!("refs/heads/{sp}"));
+        return;
     }
     if explicit || args.track.is_none() {
         if let Some((remote, merge_ref)) = submodule_remote_tracking_pair(repo, sp) {

@@ -604,6 +604,7 @@ fn missing_object_kind_for_referrer(odb: &Odb, referrer: Option<ObjectId>) -> &'
 
 /// Walk all reachable objects from refs and HEAD.
 /// Returns (reachable set, set of OIDs whose content was validated).
+#[expect(clippy::too_many_arguments)]
 fn walk_reachable(
     repo: &Repository,
     odb: &Odb,
@@ -876,6 +877,7 @@ fn git_style_inflate_message(zlib_detail: &str) -> String {
 }
 
 /// Validate a loose object file, including Git's hash-vs-path check.
+#[expect(clippy::too_many_arguments)]
 fn validate_loose_object_file(
     git_dir: &Path,
     path: &Path,
@@ -948,6 +950,7 @@ fn validate_object(
 }
 
 /// Validate the parsed content of an object.
+#[expect(clippy::too_many_arguments)]
 fn validate_object_data(
     oid: &ObjectId,
     kind: &ObjectKind,

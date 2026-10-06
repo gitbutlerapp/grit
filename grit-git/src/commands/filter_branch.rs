@@ -21,12 +21,9 @@ pub struct Args {
 /// at `/usr/bin/git`, then `/bin/git`. Returns `None` when neither exists, in
 /// which case callers fall back to the hard-coded exec-path candidates below.
 fn system_git_binary() -> Option<&'static str> {
-    for candidate in ["/usr/bin/git", "/bin/git"] {
-        if std::path::Path::new(candidate).is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    ["/usr/bin/git", "/bin/git"]
+        .into_iter()
+        .find(|&candidate| std::path::Path::new(candidate).is_file())
 }
 
 /// Ask the real system git for its exec-path (the `git-core` directory that ships

@@ -166,11 +166,7 @@ fn format_rows(
     let max_item = items.iter().map(|s| s.len()).max().unwrap_or(0);
     let col_width = max_item + padding;
     let usable = width.saturating_sub(indent.len());
-    let num_cols = if col_width == 0 {
-        1
-    } else {
-        (usable / col_width).max(1)
-    };
+    let num_cols = usable.checked_div(col_width).unwrap_or(0).max(1);
 
     let mut col = 0;
     for (i, item) in items.iter().enumerate() {
@@ -210,11 +206,7 @@ fn format_columns(
     let max_item = items.iter().map(|s| s.len()).max().unwrap_or(0);
     let col_width = max_item + padding;
     let usable = width.saturating_sub(indent.len());
-    let num_cols = if col_width == 0 {
-        1
-    } else {
-        (usable / col_width).max(1)
-    };
+    let num_cols = usable.checked_div(col_width).unwrap_or(0).max(1);
     let num_rows = items.len().div_ceil(num_cols);
 
     for row in 0..num_rows {
@@ -284,14 +276,14 @@ fn format_columns_dense(
 
     for row in 0..best_rows {
         write!(out, "{indent}")?;
-        for col in 0..best_cols {
+        for (col, col_width) in best_col_widths.iter().enumerate().take(best_cols) {
             let idx = col * best_rows + row;
             if idx >= items.len() {
                 break;
             }
             let item = &items[idx];
             if col + 1 < best_cols && (col + 1) * best_rows + row < items.len() {
-                let w = best_col_widths[col] + padding;
+                let w = *col_width + padding;
                 write!(out, "{item:<width$}", width = w)?;
             } else {
                 write!(out, "{item}")?;

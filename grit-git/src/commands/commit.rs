@@ -401,12 +401,14 @@ fn peel_message_flags_from_pathspec(args: &mut Args) {
             i += 1;
             continue;
         }
-        if a.len() > 2 && a.starts_with("-F") && !a.starts_with("--") {
-            if args.file.is_none() {
-                args.file = Some(a[2..].to_owned());
-                i += 1;
-                continue;
-            }
+        if a.len() > 2
+            && a.starts_with("-F")
+            && !a.starts_with("--")
+            && args.file.is_none()
+        {
+            args.file = Some(a[2..].to_owned());
+            i += 1;
+            continue;
         }
         match a {
             "-e" | "--edit" => {
@@ -514,7 +516,7 @@ pub(crate) fn preprocess_commit_for_parse(argv: &[String]) -> Vec<String> {
     if let Some(v) = effective {
         std::env::set_var(GIT_GRIT_COMMIT_VERBOSE_ENV, v.to_string());
     } else {
-        let _ = std::env::remove_var(GIT_GRIT_COMMIT_VERBOSE_ENV);
+        std::env::remove_var(GIT_GRIT_COMMIT_VERBOSE_ENV);
     }
 
     argv.iter()
@@ -1972,6 +1974,7 @@ pub fn run(mut args: Args) -> Result<()> {
 }
 
 /// Print dry-run output (like `git commit --dry-run`).
+#[expect(clippy::too_many_arguments)]
 fn print_dry_run(
     repo: &Repository,
     config: &ConfigSet,
@@ -2016,10 +2019,10 @@ fn print_dry_run(
         }
     }
 
-    let config_hints = match config.get("advice.statusHints") {
-        Some(v) if v == "false" || v == "no" || v == "off" || v == "0" => false,
-        _ => true,
-    };
+    let config_hints = !matches!(
+        config.get("advice.statusHints"),
+        Some(v) if v == "false" || v == "no" || v == "off" || v == "0"
+    );
     let show_hints = std::env::var("GIT_ADVICE")
         .ok()
         .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
@@ -2765,8 +2768,8 @@ fn run_commit_patch_mode(
                     }
                     "a" | "A" => {
                         any_hunk_staged = true;
-                        for j in hunk_cursor..n_hunks {
-                            accepted[j] = true;
+                        for slot in &mut accepted[hunk_cursor..n_hunks] {
+                            *slot = true;
                         }
                         break 'hunk_loop;
                     }
@@ -2929,7 +2932,7 @@ fn apply_pathspec_to_index(
     for spec in pathspecs {
         let resolved = crate::pathspec::resolve_pathspec(spec, work_tree, prefix.as_deref());
         if !grit_lib::pathspec::has_glob_chars(&resolved) {
-            reject_skip_worktree(&index, resolved.as_bytes())?;
+            reject_skip_worktree(index, resolved.as_bytes())?;
             if !is_known_to_index(index, resolved.as_bytes()) {
                 bail!("pathspec '{spec}' did not match any file(s) known to git");
             }
@@ -3000,7 +3003,7 @@ fn apply_pathspec_to_index(
             if index.get(rel.as_bytes(), 0).is_none() {
                 continue;
             }
-            reject_skip_worktree(&index, rel.as_bytes())?;
+            reject_skip_worktree(index, rel.as_bytes())?;
             let abs_path = work_tree.join(&rel);
             if let Ok(meta) = fs::symlink_metadata(&abs_path) {
                 let data = if meta.file_type().is_symlink() {
@@ -4000,7 +4003,7 @@ fn resolve_commit_verbose_level(args: &Args, config: &ConfigSet) -> i64 {
     let scanned = std::env::var(GIT_GRIT_COMMIT_VERBOSE_ENV)
         .ok()
         .and_then(|s| s.parse::<u32>().ok());
-    let _ = std::env::remove_var(GIT_GRIT_COMMIT_VERBOSE_ENV);
+    std::env::remove_var(GIT_GRIT_COMMIT_VERBOSE_ENV);
     let clap_v = u32::from(args.verbose);
     let cli_count = scanned.unwrap_or(clap_v);
     if scanned.is_some() {
@@ -4140,6 +4143,7 @@ fn append_verbose_cut_line(buf: &mut String, comment_prefix: &str) {
 }
 
 /// Append unified diffs to the commit message template (Git `wt_longstatus_print_verbose`).
+#[expect(clippy::too_many_arguments)]
 fn append_commit_verbose_diffs(
     args: &Args,
     repo: &Repository,
@@ -4164,9 +4168,7 @@ fn append_commit_verbose_diffs(
 
     append_verbose_cut_line(buf, &comment);
 
-    let (a1, b1) = if verbose_level > 1 && committable {
-        ("c/", "i/")
-    } else if mnemonic {
+    let (a1, b1) = if (verbose_level > 1 && committable) || mnemonic {
         ("c/", "i/")
     } else {
         ("a/", "b/")
@@ -4265,7 +4267,7 @@ fn commit_template_includes_status(args: &Args, config: &ConfigSet) -> bool {
     if args.status {
         return true;
     }
-    config.get("commit.status").map_or(true, |value| {
+    config.get("commit.status").is_none_or(|value| {
         !matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "false" | "no" | "off" | "0"
@@ -4415,6 +4417,7 @@ fn commit_template_status_append_with_prefix(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn prepare_commit_message(
     args: &Args,
     repo: &Repository,

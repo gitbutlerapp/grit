@@ -816,10 +816,8 @@ fn parse_bundle_rev_list_args(
         positive.extend(refs.iter().map(|(name, _)| name.clone()));
     }
 
-    if positive.is_empty() && !include_all {
-        if let Ok(_) = resolve_ref(repo, "HEAD") {
-            positive.push("HEAD".to_string());
-        }
+    if positive.is_empty() && !include_all && resolve_ref(repo, "HEAD").is_ok() {
+        positive.push("HEAD".to_string());
     }
 
     Ok((positive, negative))

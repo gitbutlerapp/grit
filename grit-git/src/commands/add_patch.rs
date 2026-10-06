@@ -24,6 +24,8 @@ use grit_lib::index::entry_from_metadata;
 
 const COLOR_RESET: &str = "\x1b[m";
 
+type RenderHunkCallback<'a> = dyn Fn(usize, &[(usize, usize)], &[u8]) -> String + 'a;
+
 /// Resolve a color slot: `cfg.get(key)` parsed via `parse_color`, else the provided default ANSI
 /// escape. Empty config or parse failure falls back to the default.
 fn color_slot(cfg: &ConfigSet, key: &str, default_esc: &str) -> String {
@@ -703,7 +705,7 @@ fn display_hunk_list(
     decisions: &[Decision],
     work: &[u8],
     start: usize,
-    render_hunk: &dyn Fn(usize, &[(usize, usize)], &[u8]) -> String,
+    render_hunk: &RenderHunkCallback<'_>,
 ) -> usize {
     let end = (start + DISPLAY_HUNKS_LINES).min(ranges.len());
     for (i, dec) in decisions.iter().enumerate().take(end).skip(start) {
@@ -971,11 +973,10 @@ pub(crate) fn run_add_patch_with_reader(
         let index_blob = if ie.oid == ObjectId::zero() {
             Vec::new()
         } else {
-            let obj = match odb.read(&ie.oid) {
+            match odb.read(&ie.oid) {
                 Ok(o) if o.kind == ObjectKind::Blob => o.data,
                 _ => continue,
-            };
-            obj
+            }
         };
 
         let work_blob = if meta.file_type().is_symlink() {
@@ -1165,9 +1166,8 @@ pub(crate) fn run_add_patch_with_reader(
             // plain diff, abort with "mismatched output" (t3701 "detect bogus diffFilter output").
             if let Some(filter) = &cctx.diff_filter {
                 let mut full_plain = header.clone();
-                for i in 0..hunk_ranges.len() {
+                for &(s, e) in &hunk_ranges {
                     full_plain.push_str(&{
-                        let (s, e) = hunk_ranges[i];
                         if (s, e) == MODE_HUNK {
                             String::new()
                         } else {
@@ -1712,6 +1712,7 @@ fn parse_mode_u32(m: &str) -> u32 {
     u32::from_str_radix(m, 8).unwrap_or(0)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn handle_deleted_file(
     repo: &Repository,
     index: &mut Index,
@@ -1788,8 +1789,8 @@ fn handle_deleted_file(
                     hunk_cursor += 1;
                 }
                 'a' => {
-                    for j in hunk_cursor..n_hunks {
-                        accepted[j] = true;
+                    for slot in &mut accepted[hunk_cursor..n_hunks] {
+                        *slot = true;
                     }
                     break;
                 }
@@ -2027,6 +2028,7 @@ enum EditResult {
     Aborted,
 }
 
+#[expect(clippy::too_many_arguments)]
 fn edit_hunk_and_apply(
     git_dir: &Path,
     work_tree: Option<&Path>,
@@ -2178,10 +2180,7 @@ fn locate_hunk(haystack: &[&str], needle: &[String], hint: usize) -> Option<usiz
             return Some(p);
         }
     }
-    for p in (0..start).rev() {
-        if matches_at(p) {
-            return Some(p);
-        }
-    }
-    None
+    (0..start)
+        .rev()
+        .find(|&p| matches_at(p))
 }

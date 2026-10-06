@@ -730,18 +730,20 @@ fn collect_loose_refs(
     Ok(())
 }
 
+type LooseRefRecord = (Option<ObjectId>, String, Option<String>);
+
 fn read_loose_ref_oid(
     git_dir: &Path,
     refname: &str,
     path: &Path,
-) -> Result<Option<(Option<ObjectId>, String, Option<String>)>> {
+) -> Result<Option<LooseRefRecord>> {
     let text = fs::read_to_string(path)?;
     let raw = text.trim();
     if raw.is_empty() {
         bail!("empty ref");
     }
-    if raw.starts_with("ref: ") {
-        let target = raw["ref: ".len()..].trim().to_owned();
+    if let Some(symref) = raw.strip_prefix("ref: ") {
+        let target = symref.trim().to_owned();
         if check_refname_format(&target, &RefNameOptions::default()).is_err() {
             return Ok(None);
         }
@@ -1154,8 +1156,8 @@ fn validate_format_quoting(format: &str, quote: Option<QuoteStyle>) -> Result<()
     let mut rest = format;
     while let Some(start) = rest.find('%') {
         let after = &rest[start + 1..];
-        if after.starts_with('%') {
-            rest = &after[1..];
+        if let Some(tail) = after.strip_prefix('%') {
+            rest = tail;
             continue;
         }
         let Some(inner) = after.strip_prefix('(') else {
@@ -1183,8 +1185,8 @@ fn validate_format_atoms(format: &str) -> Result<(), FormatError> {
     let mut rest = format;
     while let Some(start) = rest.find('%') {
         let after = &rest[start + 1..];
-        if after.starts_with('%') {
-            rest = &after[1..];
+        if let Some(tail) = after.strip_prefix('%') {
+            rest = tail;
             continue;
         }
         let Some(inner) = after.strip_prefix('(') else {
@@ -1230,8 +1232,8 @@ fn collect_is_base_targets_from_format(
     let mut rest = format;
     while let Some(start) = rest.find('%') {
         let after = &rest[start + 1..];
-        if after.starts_with('%') {
-            rest = &after[1..];
+        if let Some(tail) = after.strip_prefix('%') {
+            rest = tail;
             continue;
         }
         let Some(inner) = after.strip_prefix('(') else {
@@ -1460,6 +1462,7 @@ fn tcl_quote_buf(src: &str) -> String {
     out
 }
 
+#[expect(clippy::too_many_arguments)]
 fn expand_format(
     repo: &Repository,
     entry: &RefEntry,
@@ -1474,12 +1477,12 @@ fn expand_format(
     let mut emitted_color = false;
     let mut rest = format;
     while let Some(start) = rest.find('%') {
-        out.extend_from_slice(rest[..start].as_bytes());
+        out.extend_from_slice(&rest.as_bytes()[..start]);
         let after = &rest[start + 1..];
-        if after.starts_with('%') {
+        if let Some(tail) = after.strip_prefix('%') {
             let lit = quote_output("%", quote_style);
             out.extend_from_slice(lit.as_bytes());
-            rest = &after[1..];
+            rest = tail;
         } else if let Some(inner) = after.strip_prefix('(') {
             let Some(end) = inner.find(')') else {
                 return Err(FormatError::Other("unterminated format atom".to_owned()));
@@ -1563,6 +1566,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn select_conditional_format<'a>(
     repo: &Repository,
     entry: &RefEntry,
@@ -1602,11 +1606,11 @@ fn select_conditional_format<'a>(
     )?;
     let matched = match atom.strip_prefix("if:") {
         None => !trim_ascii_whitespace_bytes(&condition).is_empty(),
-        Some(expected) if expected.starts_with("equals=") => {
-            condition == expected["equals=".len()..].as_bytes()
+        Some(expected) if let Some(want) = expected.strip_prefix("equals=") => {
+            condition == want.as_bytes()
         }
-        Some(expected) if expected.starts_with("notequals=") => {
-            condition != expected["notequals=".len()..].as_bytes()
+        Some(expected) if let Some(want) = expected.strip_prefix("notequals=") => {
+            condition != want.as_bytes()
         }
         Some(other) => {
             return Err(FormatError::Fatal(format!(
@@ -2929,11 +2933,8 @@ fn format_email_with_opts(raw: &str, opts: &EmailFormatOpts, mailmap: &MailmapTa
 /// Returns (epoch_seconds, tz_offset_str like "+0200").
 fn parse_identity_timestamp(raw: &str) -> Option<(i64, String)> {
     // Format: "Name <email> 1234567890 +0200"
-    let after_email = if let Some(pos) = raw.find('>') {
-        raw[pos + 1..].trim()
-    } else {
-        return None;
-    };
+    let pos = raw.find('>')?;
+    let after_email = raw[pos + 1..].trim();
     let mut parts = after_email.split_whitespace();
     let epoch: i64 = parts.next()?.parse().ok()?;
     let tz = parts.next().unwrap_or("+0000").to_owned();

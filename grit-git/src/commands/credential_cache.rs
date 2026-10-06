@@ -503,7 +503,7 @@ pub fn run(args: Args) -> Result<()> {
         if !matches!(args.action.as_str(), "get" | "store" | "erase" | "exit") {
             bail!("unknown credential-cache action: {}", args.action);
         }
-        return run_client(args);
+        run_client(args)
     }
     #[cfg(not(unix))]
     {
