@@ -1,0 +1,4 @@
+#!/bin/sh
+oid="$1"
+basename="${oid#??}"
+printf '%s/%s\n' "${oid%$basename}" "$basename"
