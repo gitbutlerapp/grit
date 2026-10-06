@@ -145,3 +145,37 @@ fixed transitively by P1–P5. No combo-specific work is needed first.
 
 Re-run `bash bench/run-everyday.sh` after each phase; `docs/bench.html` (scale-grouped)
 tracks the ratios trending toward parity.
+
+## Clone / commit / push scenarios (`bench/run-ccp.sh`)
+
+Fixed-fixture benchmarks for network-shaped workflows (local clone/push, no external
+services). Twelve scenarios over prebuilt repos under `/tmp/grit-bench-ccp`:
+
+| Fixture | Shape |
+|---|---|
+| **many** | 10k files, 5 commits, packed |
+| **many-loose** | 10k files, one commit, loose objects |
+| **hist** | 2000 commits on 10 files, packed |
+| **large** | three ~40 MB blobs, packed |
+| **plain-10k** | 10k files on disk (no repo) for add/commit |
+
+Scenarios: `clone-many`, `clone-many-loose`, `clone-hist`, `clone-large`,
+`clone-file-many`, `clone-bare-many`, `commit-touch-many` (`commit -a` on 10k-file
+clone), `add-10k`, `commit-10k`, `push-hist`, `push-incr`, `push-large`.
+
+Fixtures are built with **system git**, `core.multiPackIndex=false`, and `gc.auto=0` so
+git 2.43 can read packs when used as the reference column (grit may write MIDX v2 that
+older git cannot consume) and **many-loose** stays loose (auto-GC would pack 10k
+objects during setup).
+
+```bash
+bash bench/run-ccp.sh fixtures          # once; scratch under /tmp/grit-bench-ccp
+bash bench/run-ccp.sh run                 # hyperfine → bench/results/ccp-<scenario>.json
+bash bench/run-ccp.sh run --runs 3        # exactly three timed runs per tool (hyperfine --runs)
+BENCH_TOOLS=git,grit-git bash bench/run-ccp.sh run   # omit grit-cli
+```
+
+Aggregated baseline metadata: `bench/results/ccp-baseline.json`. Compare **git**,
+**grit-git**, and **grit-cli** (modern CLI; no `-q` flags — output redirected during
+timing). **grit-cli** skips `clone-bare-many` until bare clone exists; push scenarios
+use `origin` as the bare remote because `grit push` has no remote argument.

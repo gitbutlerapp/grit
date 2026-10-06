@@ -1,0 +1,253 @@
+{
+  "kind": "grit-bench-ccp-baseline",
+  "generated_at": "2026-10-06T12:42:38Z",
+  "runs": 5,
+  "tools": [
+    "git",
+    "grit-git",
+    "grit"
+  ],
+  "git_version": "git version 2.43.0",
+  "binaries": {
+    "git": "/usr/bin/git",
+    "grit-git": "/workspace/target/release/grit-git",
+    "grit-cli": "/workspace/target/release/grit"
+  },
+  "scenarios": {
+    "clone-many": {
+      "file": "ccp-clone-many.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.1454820857,
+          "mean_sec": 0.14863632890000003
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.6728241467,
+          "mean_sec": 0.6676827457000001
+        },
+        {
+          "command": "grit",
+          "median_sec": 1.1289668917,
+          "mean_sec": 1.1262506325
+        }
+      ]
+    },
+    "clone-many-loose": {
+      "file": "ccp-clone-many-loose.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.48750312724,
+          "mean_sec": 0.48009008923999996
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.7148478962400001,
+          "mean_sec": 0.7265611762400002
+        },
+        {
+          "command": "grit",
+          "median_sec": 1.08576914024,
+          "mean_sec": 1.08260647604
+        }
+      ]
+    },
+    "clone-hist": {
+      "file": "ccp-clone-hist.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.01055091698,
+          "mean_sec": 0.01065454118
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.00984152298,
+          "mean_sec": 0.009793745779999998
+        },
+        {
+          "command": "grit",
+          "median_sec": 0.70283985498,
+          "mean_sec": 0.7038244009800001
+        }
+      ]
+    },
+    "clone-large": {
+      "file": "ccp-clone-large.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.64995562216,
+          "mean_sec": 0.65586567356
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.64060292116,
+          "mean_sec": 0.65269423496
+        },
+        {
+          "command": "grit",
+          "median_sec": 9.84745059616,
+          "mean_sec": 9.86596657916
+        }
+      ]
+    },
+    "clone-file-many": {
+      "file": "ccp-clone-file-many.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.1668994299,
+          "mean_sec": 0.16706932010000003
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 15.1159758279,
+          "mean_sec": 15.129464819099999
+        },
+        {
+          "command": "grit",
+          "median_sec": 1.1900371209,
+          "mean_sec": 1.1778852595
+        }
+      ]
+    },
+    "clone-bare-many": {
+      "file": "ccp-clone-bare-many.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.01005746804,
+          "mean_sec": 0.01015573804
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.00712486304,
+          "mean_sec": 0.007175079839999999
+        }
+      ]
+    },
+    "commit-touch-many": {
+      "file": "ccp-commit-touch-many.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.07261449686,
+          "mean_sec": 0.06608588186
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.86976997986,
+          "mean_sec": 0.8681141104600002
+        },
+        {
+          "command": "grit",
+          "median_sec": 0.13576410985999998,
+          "mean_sec": 0.13094853686000002
+        }
+      ]
+    },
+    "add-10k": {
+      "file": "ccp-add-10k.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.67872293716,
+          "mean_sec": 0.67907116396
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 1.09211941116,
+          "mean_sec": 1.0972052253600002
+        },
+        {
+          "command": "grit",
+          "median_sec": 0.55293254216,
+          "mean_sec": 0.56672552916
+        }
+      ]
+    },
+    "commit-10k": {
+      "file": "ccp-commit-10k.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.04197783716,
+          "mean_sec": 0.04183559336
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 0.11805924716,
+          "mean_sec": 0.11745611056000001
+        },
+        {
+          "command": "grit",
+          "median_sec": 0.10588425416000001,
+          "mean_sec": 0.10897215856
+        }
+      ]
+    },
+    "push-hist": {
+      "file": "ccp-push-hist.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.06568208830000001,
+          "mean_sec": 0.0654037373
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 8.3786776013,
+          "mean_sec": 8.4753566331
+        },
+        {
+          "command": "grit",
+          "median_sec": 0.6427255183,
+          "mean_sec": 0.6491807571
+        }
+      ]
+    },
+    "push-incr": {
+      "file": "ccp-push-incr.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 0.015583764200000001,
+          "mean_sec": 0.0156075938
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 1.1855421552,
+          "mean_sec": 1.1911417690000001
+        },
+        {
+          "command": "grit",
+          "median_sec": 0.0902252852,
+          "mean_sec": 0.09064248220000001
+        }
+      ]
+    },
+    "push-large": {
+      "file": "ccp-push-large.json",
+      "results": [
+        {
+          "command": "git",
+          "median_sec": 4.43264954646,
+          "mean_sec": 4.43368920386
+        },
+        {
+          "command": "grit-git",
+          "median_sec": 10.22350137746,
+          "mean_sec": 10.32990676366
+        },
+        {
+          "command": "grit",
+          "median_sec": 10.17742100346,
+          "mean_sec": 10.088079010259998
+        }
+      ]
+    }
+  }
+}
