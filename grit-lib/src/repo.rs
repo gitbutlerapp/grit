@@ -2737,10 +2737,9 @@ fn parse_ceiling_directories() -> (Vec<PathBuf>, bool) {
         return (Vec::new(), false);
     }
     // A leading colon means "don't resolve symlinks".
-    let (no_resolve, effective) = if raw.starts_with(':') {
-        (true, &raw[1..])
-    } else {
-        (false, raw.as_str())
+    let (no_resolve, effective) = match raw.strip_prefix(':') {
+        Some(rest) => (true, rest),
+        None => (false, raw.as_str()),
     };
     let paths = effective
         .split(':')

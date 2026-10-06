@@ -600,17 +600,13 @@ fn simplify_non_conflicts_between_conflicts(
         };
         let mut merged = hunks[i].clone();
         let mut j = i;
-        loop {
-            let Some(Hunk::Unchanged(gap)) = hunks.get(j + 1) else {
-                break;
-            };
-            let Some(Hunk::Conflict { .. }) = hunks.get(j + 2) else {
-                break;
-            };
+        while let (Some(Hunk::Unchanged(gap)), Some(next @ Hunk::Conflict { .. })) =
+            (hunks.get(j + 1), hunks.get(j + 2))
+        {
             if gap_blocks_merge_between_conflicts(gap, simplify_if_no_alnum) {
                 break;
             }
-            let Some(m) = merge_two_adjacent_conflicts(&merged, gap, &hunks[j + 2]) else {
+            let Some(m) = merge_two_adjacent_conflicts(&merged, gap, next) else {
                 break;
             };
             merged = m;
@@ -1259,18 +1255,15 @@ fn coalesce_nearby_conflicts(hunks: Vec<Hunk>, max_gap_lines: usize, enable: boo
         let mut merged_theirs = theirs.clone();
         let mut j = i;
 
-        loop {
-            let Some(Hunk::Unchanged(gap)) = hunks.get(j + 1) else {
-                break;
-            };
-            let Some(Hunk::Conflict {
+        while let (
+            Some(Hunk::Unchanged(gap)),
+            Some(Hunk::Conflict {
                 base: next_base,
                 ours: next_ours,
                 theirs: next_theirs,
-            }) = hunks.get(j + 2)
-            else {
-                break;
-            };
+            }),
+        ) = (hunks.get(j + 1), hunks.get(j + 2))
+        {
             if gap.len() > max_gap_lines {
                 break;
             }

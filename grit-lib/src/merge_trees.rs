@@ -66,7 +66,7 @@ impl Default for TreeMergeConflictPresentation<'_> {
         }
     }
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Merge `base` + `ours` + `their` trees (by OID) into an index using rename detection.
 ///
 /// Paths in the result follow the **ours** tree naming. Rename detection uses a 50%
@@ -147,11 +147,13 @@ pub fn merge_trees_three_way(
     )
 }
 
+type RenamePathPair = (Vec<u8>, Vec<u8>, u32);
+
 fn rename_pairs_base_to_other(
     odb: &Odb,
     base_tree: &ObjectId,
     other_tree: &ObjectId,
-) -> crate::error::Result<Vec<(Vec<u8>, Vec<u8>, u32)>> {
+) -> crate::error::Result<Vec<RenamePathPair>> {
     let mut entries = diff_trees(odb, Some(base_tree), Some(other_tree), "")?;
     entries = detect_renames(odb, None, entries, 50);
     let mut out = Vec::new();
@@ -170,7 +172,7 @@ fn rename_pairs_base_to_other(
     }
     Ok(out)
 }
-
+#[expect(clippy::too_many_arguments)]
 fn three_way_on_aligned_paths(
     repo: &Repository,
     base: &HashMap<Vec<u8>, IndexEntry>,
@@ -304,7 +306,7 @@ fn sorted_paths<'a>(keys: impl Iterator<Item = &'a Vec<u8>>) -> Vec<Vec<u8>> {
     v.sort();
     v
 }
-
+#[expect(clippy::too_many_arguments)]
 fn merge_one_path(
     repo: &Repository,
     index: &mut Index,
@@ -443,7 +445,7 @@ fn stage_entry(index: &mut Index, path: &[u8], src: &IndexEntry, stage: u8) {
     e.flags = path_len_flags(path) | ((stage as u16) << 12);
     index.entries.push(e);
 }
-
+#[expect(clippy::too_many_arguments)]
 fn content_merge_or_conflict(
     repo: &Repository,
     index: &mut Index,
@@ -713,7 +715,6 @@ fn tree_to_map(entries: Vec<IndexEntry>) -> HashMap<Vec<u8>, IndexEntry> {
 }
 
 /// True when the index tree matches `head_tree_oid` (used for empty pick detection).
-#[must_use]
 pub fn index_tree_oid_matches_head(
     odb: &Odb,
     index: &Index,

@@ -597,6 +597,7 @@ fn commit_or_tree_oid(repo: &Repository, spec: &str) -> Result<ObjectId> {
     peel_to_tree(repo, oid)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn launch_file_diff(
     repo: &Repository,
     entry: &DiffEntry,
@@ -762,6 +763,7 @@ fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_dir_diff(
     repo: &Repository,
     entries: &[DiffEntry],

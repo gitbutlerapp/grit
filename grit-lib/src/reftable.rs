@@ -1804,7 +1804,7 @@ impl ReftableStack {
             }
         }
         // Sort by update_index descending (most recent first)
-        logs.sort_by(|a, b| b.update_index.cmp(&a.update_index));
+        logs.sort_by_key(|a| std::cmp::Reverse(a.update_index));
         Ok(logs)
     }
 
@@ -1852,8 +1852,10 @@ impl ReftableStack {
         }
         max_idx = max_idx.max(next_update_index.saturating_sub(1));
 
-        let mut wopts = WriteOptions::default();
-        wopts.hash_size = self.hash_size();
+        let wopts = WriteOptions {
+            hash_size: self.hash_size(),
+            ..Default::default()
+        };
         let mut writer = ReftableWriter::new(wopts, min_idx, max_idx);
         for rec in refs {
             writer.add_ref(rec)?;
@@ -2019,8 +2021,10 @@ impl ReftableStack {
             min_idx = 0;
         }
 
-        let mut wopts = WriteOptions::default();
-        wopts.hash_size = self.hash_size();
+        let wopts = WriteOptions {
+            hash_size: self.hash_size(),
+            ..Default::default()
+        };
         let mut writer = ReftableWriter::new(wopts, min_idx, max_idx);
         for rec in refs {
             writer.add_ref(rec)?;
@@ -2080,8 +2084,10 @@ impl ReftableStack {
             min_idx = 0;
         }
 
-        let mut wopts = WriteOptions::default();
-        wopts.hash_size = self.hash_size();
+        let wopts = WriteOptions {
+            hash_size: self.hash_size(),
+            ..Default::default()
+        };
         let mut writer = ReftableWriter::new(wopts, min_idx, max_idx);
         for rec in refs {
             writer.add_ref(rec)?;
@@ -2971,8 +2977,10 @@ pub fn reftable_delete_reflog(git_dir: &Path, refname: &str) -> Result<()> {
 
 /// Read reftable write options from the repository config.
 pub fn read_write_options(git_dir: &Path) -> WriteOptions {
-    let mut opts = WriteOptions::default();
-    opts.hash_size = reftable_hash_size_for_git_dir(git_dir);
+    let mut opts = WriteOptions {
+        hash_size: reftable_hash_size_for_git_dir(git_dir),
+        ..Default::default()
+    };
 
     if let Ok(config) = ConfigSet::load(Some(git_dir), true) {
         if let Some(value) = config.get("reftable.blockSize") {

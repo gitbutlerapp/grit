@@ -89,7 +89,7 @@ pub enum TagMode {
 }
 
 /// Options controlling a fetch.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FetchOptions {
     /// Positive refspecs selecting what to fetch.
     pub refspecs: Vec<String>,
@@ -119,22 +119,6 @@ pub struct FetchOptions {
     /// (`git fetch --unshallow`). Drives the wire `deepen 0x7fffffff` request and
     /// removes the local `shallow` boundaries that get reported as `unshallow`.
     pub unshallow: bool,
-}
-
-impl Default for FetchOptions {
-    fn default() -> Self {
-        Self {
-            refspecs: Vec::new(),
-            negative_refspecs: Vec::new(),
-            tags: TagMode::default(),
-            prune: false,
-            dry_run: false,
-            depth: None,
-            deepen_since: None,
-            deepen_not: Vec::new(),
-            unshallow: false,
-        }
-    }
 }
 
 impl FetchOptions {
@@ -671,12 +655,7 @@ fn plan_deltas(
 
             // Consider larger in-pack blobs within the window (closest in size).
             // `blobs` is ascending by size, so later entries are the larger bases.
-            let mut considered = 0usize;
-            for &b in blobs.iter().skip(i + 1) {
-                if considered >= opts.window {
-                    break;
-                }
-                considered += 1;
+            for &b in blobs.iter().skip(i + 1).take(opts.window) {
                 // Island rule: never base `t` on a blob in a non-superset island.
                 if !islands.in_same_island(&t, &b) {
                     continue;

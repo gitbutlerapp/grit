@@ -178,8 +178,7 @@ fn parse_refspec(refspec: &str, fetch: bool) -> Result<RefspecItem, RefspecError
         }
         // RHS
         match item.dst.as_deref() {
-            None => {}     // missing is ok; same as empty
-            Some("") => {} // empty is ok; means "do not store"
+            None | Some("") => {} // missing/empty: do not store
             Some(dst) => {
                 if !refname_ok(dst, is_glob) {
                     return Err(invalid());

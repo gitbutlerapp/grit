@@ -943,10 +943,7 @@ pub fn build_expanded_cone_sparse_checkout_lines(dirs: &[String]) -> Vec<String>
     let mut parents: BTreeSet<String> = BTreeSet::new();
     for r in &recursive {
         let mut cur = r.clone();
-        loop {
-            let Some(slash) = cur.rfind('/') else {
-                break;
-            };
+        while let Some(slash) = cur.rfind('/') {
             if slash == 0 {
                 break;
             }
@@ -1018,10 +1015,7 @@ fn unescape_cone_pattern_path(escaped: &str) -> String {
 
 fn recursive_set_has_strict_ancestor(recursive: &BTreeSet<String>, path: &str) -> bool {
     let mut cur = path.to_string();
-    loop {
-        let Some(slash) = cur.rfind('/') else {
-            break;
-        };
+    while let Some(slash) = cur.rfind('/') {
         if slash == 0 {
             break;
         }

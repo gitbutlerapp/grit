@@ -48,6 +48,12 @@ impl HashAlgo {
         }
     }
 
+    /// Always false — every hash algorithm has a non-zero digest length.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        false
+    }
+
     /// The hex-encoded digest length (40 for SHA-1, 64 for SHA-256).
     #[must_use]
     pub const fn hex_len(self) -> usize {

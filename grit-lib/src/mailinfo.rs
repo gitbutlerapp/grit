@@ -184,19 +184,14 @@ fn read_header_line(inp: &mut Input<'_>, line: &mut Vec<u8>) -> io::Result<bool>
         line.push(b'\n');
         return Ok(false);
     }
-    loop {
-        match inp.peek() {
-            Some(b' ') | Some(b'\t') => {
-                inp.pos += 1;
-                let mut cont = Vec::new();
-                if !inp.read_line(&mut cont)? {
-                    break;
-                }
-                line.push(b' ');
-                line.extend_from_slice(&cont);
-            }
-            _ => break,
+    while matches!(inp.peek(), Some(b' ') | Some(b'\t')) {
+        inp.pos += 1;
+        let mut cont = Vec::new();
+        if !inp.read_line(&mut cont)? {
+            break;
         }
+        line.push(b' ');
+        line.extend_from_slice(&cont);
     }
     Ok(true)
 }
@@ -847,7 +842,7 @@ fn read_part_headers(
     }
     Ok(())
 }
-
+#[expect(clippy::too_many_arguments)]
 fn split_qp_carry(
     opts: &MailinfoOptions,
     mime: &Mime,
@@ -887,7 +882,7 @@ fn split_qp_carry(
     st.qp_carry.drain(..start);
     Ok(())
 }
-
+#[expect(clippy::too_many_arguments)]
 fn flush_qp_tail(
     opts: &MailinfoOptions,
     mime: &Mime,
@@ -923,7 +918,7 @@ fn flush_qp_tail(
         have_quoted_cr,
     )
 }
-
+#[expect(clippy::too_many_arguments)]
 fn process_decoded_physical_line(
     opts: &MailinfoOptions,
     mime: &Mime,
@@ -984,7 +979,7 @@ fn bytes_to_log_text(line: &[u8], mime: &Mime) -> String {
     let cs = (!mime.charset.trim().is_empty()).then_some(mime.charset.as_str());
     decode_bytes(cs, line)
 }
-
+#[expect(clippy::too_many_arguments)]
 fn handle_filter_flowed(
     opts: &MailinfoOptions,
     mime: &Mime,
@@ -1100,7 +1095,7 @@ fn handle_filter_flowed(
         have_quoted_cr,
     )
 }
-
+#[expect(clippy::too_many_arguments)]
 fn handle_filter(
     opts: &MailinfoOptions,
     line: &[u8],
@@ -1145,7 +1140,7 @@ fn handle_filter(
         _ => Ok(()),
     }
 }
-
+#[expect(clippy::too_many_arguments)]
 fn handle_commit_msg(
     opts: &MailinfoOptions,
     line: &[u8],
@@ -1303,8 +1298,8 @@ fn patchbreak(line: &[u8]) -> bool {
     if line.len() > 3 && line[3] == b' ' {
         return line.len() > 4 && !line[4].is_ascii_whitespace();
     }
-    for i in 3..line.len() {
-        match line[i] {
+    for &b in &line[3..] {
+        match b {
             b'\n' => return true,
             b if !b.is_ascii_whitespace() => break,
             _ => {}
@@ -1363,7 +1358,7 @@ fn is_scissors_line(line: &str) -> bool {
     };
     scissors > 0 && visible >= 8 && visible < perforation.saturating_mul(3) && gap * 2 < perforation
 }
-
+#[expect(clippy::too_many_arguments)]
 fn write_info(
     opts: &MailinfoOptions,
     patch_lines: u64,

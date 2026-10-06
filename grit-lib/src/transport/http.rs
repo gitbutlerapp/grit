@@ -878,6 +878,7 @@ fn append_shallow_request_v0_http(
 /// Negotiate and download the pack for `wants` over stateless-RPC HTTP,
 /// returning the raw pack bytes (empty if the server sent none) plus any
 /// shallow-boundary updates the server reported.
+#[expect(clippy::too_many_arguments)]
 fn negotiate_pack_http(
     client: &dyn HttpClient,
     local_git_dir: &Path,

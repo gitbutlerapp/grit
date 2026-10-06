@@ -70,7 +70,6 @@ pub fn merge_bases_first_vs_rest(
 /// Merge base of `HEAD` and one other commit, matching `git diff --merge-base <commit>`.
 ///
 /// Returns an error when there is no merge base or more than one.
-#[must_use]
 pub fn merge_base_for_diff_index(
     repo: &Repository,
     head: ObjectId,
@@ -88,7 +87,6 @@ pub fn merge_base_for_diff_index(
 /// Merge base of two commits, matching `git diff --merge-base <a> <b>` / `diff-tree --merge-base`.
 ///
 /// Returns an error when there is no merge base or more than one.
-#[must_use]
 pub fn merge_base_for_diff_two_commits(
     repo: &Repository,
     a: ObjectId,
@@ -591,8 +589,7 @@ impl<'r> CommitGraphCache<'r> {
 
         // Compare against commit OIDs (the form the walk yields), peeling tags.
         let ancestor = peel_to_commit_for_merge_base(self.repo, ancestor).unwrap_or(ancestor);
-        let descendant =
-            peel_to_commit_for_merge_base(self.repo, descendant).unwrap_or(descendant);
+        let descendant = peel_to_commit_for_merge_base(self.repo, descendant).unwrap_or(descendant);
         if ancestor == descendant {
             return Ok(true);
         }

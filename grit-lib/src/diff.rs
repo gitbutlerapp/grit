@@ -334,7 +334,7 @@ where
                 fs1 -= 1;
             }
             while fs1 > 0
-                && before_line(fs1 - 1).trim().is_empty() == false
+                && !before_line(fs1 - 1).trim().is_empty()
                 && !is_func_line(before_line(fs1 - 1), funcname_matcher)
             {
                 fs1 -= 1;
@@ -436,7 +436,7 @@ pub fn unified_diff_histogram_hunks_only(
 ) -> String {
     histogram_unified_body_raw(old_content, new_content, context_lines, inter_hunk_context)
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm.
 #[must_use]
 pub fn unified_diff_histogram_with_prefix_and_funcname(
@@ -3367,7 +3367,7 @@ pub fn detect_copies(
         }
 
         // Sort by score descending.
-        scores.sort_by(|a, b| b.0.cmp(&a.0));
+        scores.sort_by_key(|a| std::cmp::Reverse(a.0));
 
         // Build source->added mappings, each added file assigned to best source.
         let mut used_added = vec![false; added.len()];
@@ -4090,7 +4090,7 @@ fn group_diff_ops_gap(
 
     rv
 }
-
+#[expect(clippy::too_many_arguments)]
 /// `git diff -W`: expand each hunk to include full function bodies (see Git `xemit.c`).
 fn unified_diff_with_function_context(
     old_content: &str,
@@ -4755,7 +4755,7 @@ fn get_func_line_forward(
     }
     None
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Compute a unified diff with anchored lines.
 ///
 /// Anchored lines that appear exactly once in both old and new content are

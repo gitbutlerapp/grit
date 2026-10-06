@@ -548,7 +548,7 @@ fn trie_find_common(key: &[u8]) -> Option<bool> {
         .iter()
         .filter(|e| key_has_prefix_node(&norm, e.path.as_bytes()))
         .collect();
-    matches.sort_by(|a, b| b.path.len().cmp(&a.path.len()));
+    matches.sort_by_key(|a| std::cmp::Reverse(a.path.len()));
     for entry in matches {
         let plen = entry.path.len();
         let unmatched = &norm[plen..];

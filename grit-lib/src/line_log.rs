@@ -305,6 +305,12 @@ pub struct LineLogFile {
 /// Maps commit OID → active line ranges per path (sorted by path).
 pub type LineLogState = HashMap<ObjectId, Vec<LineLogFile>>;
 
+type LineLogFilterOutcome = (
+    Vec<ObjectId>,
+    LineLogState,
+    HashMap<ObjectId, Vec<LineLogDisplay>>,
+);
+
 fn search_insert_path(files: &[LineLogFile], path: &str) -> usize {
     match files.binary_search_by_key(&path, |f| f.path.as_str()) {
         Ok(i) => i,
@@ -1166,7 +1172,7 @@ fn process_all_files(
     }
     Ok((out, displays, changed))
 }
-
+#[expect(clippy::too_many_arguments)]
 fn process_ranges_ordinary_commit(
     odb: &Odb,
     parents: &[ObjectId],
@@ -1198,7 +1204,7 @@ fn process_ranges_ordinary_commit(
     }
     Ok(changed)
 }
-
+#[expect(clippy::too_many_arguments)]
 fn process_ranges_merge_commit(
     odb: &Odb,
     parents: &[ObjectId],
@@ -1214,8 +1220,7 @@ fn process_ranges_merge_commit(
 
     let mut candidates: Vec<Vec<LineLogFile>> = Vec::with_capacity(nparents);
 
-    for i in 0..nparents {
-        let p = parents[i];
+    for &p in parents.iter().take(nparents) {
         let ptree = parse_commit(&odb.read(&p)?.data)?.tree;
         let path_keys = paths_from_range_files(range);
         let queue = diff_tree_pair(odb, Some(&ptree), tree_oid, &path_keys, rename_threshold)?;
@@ -1253,11 +1258,7 @@ pub fn line_log_filter_commits(
     initial: Vec<LineLogFile>,
     rename_threshold: u32,
     first_parent_only: bool,
-) -> Result<(
-    Vec<ObjectId>,
-    LineLogState,
-    HashMap<ObjectId, Vec<LineLogDisplay>>,
-)> {
+) -> Result<LineLogFilterOutcome> {
     let mut state: LineLogState = HashMap::new();
     state.insert(tip, initial);
     let mut display_map: HashMap<ObjectId, Vec<LineLogDisplay>> = HashMap::new();

@@ -62,8 +62,6 @@ fn parse_shared_repository_perm(raw: Option<&str>) -> i32 {
     }
     if value.eq_ignore_ascii_case("true") {
         PERM_GROUP
-    } else if value.eq_ignore_ascii_case("false") {
-        PERM_UMASK
     } else {
         PERM_UMASK
     }

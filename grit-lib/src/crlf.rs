@@ -1344,7 +1344,7 @@ fn decode_utf32_body_to_utf8_bytes(
         return Err(fail());
     }
     let mut s = String::new();
-    for chunk in body.chunks_exact(4) {
+    for chunk in body.as_chunks::<4>().0 {
         let cp = if big_endian {
             u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
         } else {
@@ -1848,7 +1848,6 @@ pub fn convert_to_worktree(
 }
 
 /// Like [`convert_to_worktree`] without delayed-checkout queueing (always materializes or errors).
-#[must_use]
 pub fn convert_to_worktree_eager(
     data: &[u8],
     rel_path: &str,

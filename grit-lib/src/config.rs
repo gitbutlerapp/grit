@@ -1816,9 +1816,14 @@ impl ConfigSet {
     ///
     /// Returns errors from file I/O or parsing.
     pub fn load(git_dir: Option<&Path>, include_system: bool) -> Result<Self> {
-        let mut opts = LoadConfigOptions::default();
-        opts.include_system = include_system;
-        opts.include_ctx.git_dir = git_dir.map(PathBuf::from);
+        let opts = LoadConfigOptions {
+            include_system,
+            include_ctx: IncludeContext {
+                git_dir: git_dir.map(PathBuf::from),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         Self::load_with_options(git_dir, &opts)
     }
 

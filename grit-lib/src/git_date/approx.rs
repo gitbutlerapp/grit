@@ -162,7 +162,8 @@ fn approxidate_alpha(
         }
     }
 
-    let specials: [(&str, fn(&mut tm, &tm, &mut i32)); 8] = [
+    type SpecialDateHandler = (&'static str, fn(&mut tm, &tm, &mut i32));
+    let specials: [SpecialDateHandler; 8] = [
         ("yesterday", date_yesterday),
         ("noon", date_noon),
         ("midnight", date_midnight),
@@ -181,9 +182,9 @@ fn approxidate_alpha(
     }
 
     if *num == 0 {
-        for i in 1..11 {
-            let len = NUMBER_NAME[i].len();
-            if match_string(date, NUMBER_NAME[i]) == len {
+        for (i, name) in NUMBER_NAME.iter().enumerate().skip(1).take(10) {
+            let len = name.len();
+            if match_string(date, name) == len {
                 *num = i as i32;
                 *touched = 1;
                 return end;

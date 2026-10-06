@@ -133,7 +133,7 @@ fn strip(input: &[u8], comment_prefix: Option<&str>) -> Vec<u8> {
         let stripped = strip_trailing(raw_line);
 
         // A line that reduces to just '\n' is blank.
-        if stripped == [b'\n'] {
+        if stripped == b"\n" {
             if saw_content {
                 pending_blank += 1;
             }

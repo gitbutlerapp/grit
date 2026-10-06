@@ -718,7 +718,6 @@ fn has_ignored_entry_or_dir(
     matcher: &mut IgnoreMatcher,
     rel: &str,
     abs: &Path,
-    uc: &mut UntrackedCache,
 ) -> Result<bool> {
     if matcher.check_path(repo, Some(index), rel, true)?.0 {
         return Ok(true);
@@ -744,9 +743,8 @@ fn has_ignored_entry_or_dir(
             continue;
         }
         if is_dir {
-            if has_ignored_entry_or_dir(
-                repo, index, tracked, gitlinks, matcher, &child_rel, &path, uc,
-            )? {
+            if has_ignored_entry_or_dir(repo, index, tracked, gitlinks, matcher, &child_rel, &path)?
+            {
                 return Ok(true);
             }
         } else {
@@ -1324,7 +1322,7 @@ fn visit_untracked_directory_uc(
     }
 
     if sub_untracked.is_empty() && sub_ignored.is_empty() {
-        if has_ignored_entry_or_dir(repo, index, tracked, gitlinks, matcher, rel, abs, uc)? {
+        if has_ignored_entry_or_dir(repo, index, tracked, gitlinks, matcher, rel, abs)? {
             let child = lookup_or_create_child(parent_ucd, &name, uc);
             child.recurse = true;
             child.check_only = true;

@@ -34,6 +34,8 @@ use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 use crate::pack;
 
+type MemOdbOverlay = Arc<Mutex<Option<std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>>>>;
+
 /// Decompress a zlib-wrapped loose object payload from an open file.
 ///
 /// When the zlib wrapper advertises a preset dictionary (FDICT), `flate2` typically fails with a
@@ -101,7 +103,7 @@ pub struct Odb {
     /// persisted to the loose store (Git's tmp-objdir). Reads consult the overlay first. This
     /// mirrors `git merge-tree --quiet`, which performs a full merge but must leave the object
     /// database untouched (no new loose objects).
-    mem_overlay: Arc<Mutex<Option<std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>>>>,
+    mem_overlay: MemOdbOverlay,
     /// The repository's object hash algorithm (`extensions.objectformat`),
     /// detected lazily from the config and cached. Determines the hash used
     /// when writing objects. Defaults to SHA-1 when no config is available.

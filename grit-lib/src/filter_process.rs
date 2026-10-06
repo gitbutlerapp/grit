@@ -296,10 +296,7 @@ fn read_packet_line(stdout: &mut ChildStdout) -> std::io::Result<Option<String>>
 /// Read pkt-lines until flush; updates `acc` only when a `status=` line appears (matches Git
 /// `subprocess_read_status` — if the segment is empty, `acc` is left unchanged).
 fn read_status(stdout: &mut ChildStdout, acc: &mut String) -> std::io::Result<()> {
-    loop {
-        let Some(line) = read_packet_line(stdout)? else {
-            break;
-        };
+    while let Some(line) = read_packet_line(stdout)? {
         if let Some(rest) = line.strip_prefix("status=") {
             *acc = rest.to_string();
         }
@@ -309,10 +306,7 @@ fn read_status(stdout: &mut ChildStdout, acc: &mut String) -> std::io::Result<()
 
 fn read_packetized(stdout: &mut ChildStdout) -> std::io::Result<Vec<u8>> {
     let mut out = Vec::new();
-    loop {
-        let Some(chunk) = read_packet_payload(stdout)? else {
-            break;
-        };
+    while let Some(chunk) = read_packet_payload(stdout)? {
         out.extend_from_slice(&chunk);
     }
     Ok(out)
@@ -363,10 +357,7 @@ fn handshake(stdout: &mut ChildStdout, stdin: &mut ChildStdin) -> std::io::Resul
     write_flush(stdin)?;
 
     let mut caps = 0u32;
-    loop {
-        let Some(line) = read_packet_line(stdout)? else {
-            break;
-        };
+    while let Some(line) = read_packet_line(stdout)? {
         if let Some(name) = line.strip_prefix("capability=") {
             match name {
                 "clean" => caps |= CAP_CLEAN,

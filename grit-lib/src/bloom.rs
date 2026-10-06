@@ -189,26 +189,30 @@ fn add_key_to_filter(key: &[u32], filter: &mut [u8], settings: &BloomFilterSetti
     }
 }
 
+/// Invalid or missing Bloom filter data (zero-length filter, etc.).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct BloomFilterInvalid;
+
 /// Returns `Ok(true)` if all bits for every key are set, `Ok(false)` if definitely not,
-/// `Err(())` if the filter has zero length (missing / invalid).
+/// [`Err(BloomFilterInvalid)`] if the filter has zero length (missing / invalid).
 pub fn bloom_filter_contains(
     key: &[u32],
     filter: &[u8],
     settings: &BloomFilterSettings,
-) -> Result<bool, ()> {
+) -> Result<bool, BloomFilterInvalid> {
     let mod_bits = (filter.len() as u64).saturating_mul(BITS_PER_WORD);
     if mod_bits == 0 {
-        return Err(());
+        return Err(BloomFilterInvalid);
     }
     for i in 0..settings.num_hashes as usize {
         let Some(&h) = key.get(i) else {
-            return Err(());
+            return Err(BloomFilterInvalid);
         };
         let hash_mod = (h as u64) % mod_bits;
         let block_pos = (hash_mod / BITS_PER_WORD) as usize;
         let bitmask = get_bitmask(hash_mod as u32);
         let Some(byte) = filter.get(block_pos) else {
-            return Err(());
+            return Err(BloomFilterInvalid);
         };
         if *byte & bitmask == 0 {
             return Ok(false);

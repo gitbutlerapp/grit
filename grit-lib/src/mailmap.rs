@@ -123,9 +123,10 @@ fn add_mapping(
 
     if let Some(old_n) = old_name {
         let nk = ascii_lowercase_owned(&old_n);
-        let mut mi = MailmapInfo::default();
-        mi.name = new_name;
-        mi.email = new_email;
+        let mi = MailmapInfo {
+            name: new_name,
+            email: new_email,
+        };
         bucket.by_name.insert(nk, mi);
     } else {
         if let Some(n) = new_name {

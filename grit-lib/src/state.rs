@@ -154,9 +154,7 @@ pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
     let content = match fs::read_link(&head_path) {
         Ok(link_target) => {
             let rendered = link_target.to_string_lossy();
-            if link_target.is_absolute() {
-                format!("ref: {rendered}")
-            } else if rendered.starts_with("refs/") {
+            if link_target.is_absolute() || rendered.starts_with("refs/") {
                 format!("ref: {rendered}")
             } else {
                 fs::read_to_string(&head_path).map_err(Error::Io)?

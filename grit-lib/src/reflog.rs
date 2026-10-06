@@ -773,6 +773,7 @@ fn should_drop_reflog_entry(
 }
 
 /// Git-compatible reflog expiry for one ref.
+#[expect(clippy::too_many_arguments)]
 pub fn expire_reflog_git(
     repo: &Repository,
     git_dir: &Path,

@@ -198,7 +198,7 @@ pub fn check_stash_apply_would_overwrite_local_changes(
     let current_index = match repo.load_index() {
         Ok(idx) => idx,
         Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Index::new(),
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(e),
     };
 
     for path in stash_worktree_change_paths(repo, stash_commit)? {
@@ -257,7 +257,7 @@ pub fn apply_stash(
     let current_index = match repo.load_index() {
         Ok(idx) => idx,
         Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Index::new(),
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(e),
     };
 
     // Read stash trees

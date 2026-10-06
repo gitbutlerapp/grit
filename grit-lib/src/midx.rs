@@ -1498,7 +1498,7 @@ pub fn format_midx_dump_layer(objects_dir: &Path, checksum: Option<&str>) -> Res
             x if x == MIDX_CHUNKID_OBJECTOFFSETS => "object-offsets",
             x if x == MIDX_CHUNKID_LARGEOFFSETS => "large-offsets",
             x if x == MIDX_CHUNKID_REVINDEX => "revindex",
-            x if x == 0x4254_4d50 => "bitmapped-packs",
+            x if x == MIDX_CHUNKID_BITMAPPED_PACKS => "bitmapped-packs",
             _ => "unknown",
         };
         chunk_tags.push(tag);

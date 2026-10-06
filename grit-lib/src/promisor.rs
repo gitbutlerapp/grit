@@ -121,7 +121,6 @@ pub fn promisor_pack_peeled_tag_targets(repo: &Repository) -> HashSet<ObjectId> 
 }
 
 /// Promisor pack member OIDs plus peeled tag targets (one hop from each tag in the pack).
-#[must_use]
 pub fn promisor_pack_and_tag_targets(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let seeds = promisor_pack_object_ids(&repo.git_dir.join("objects"));
     let mut out = seeds.clone();

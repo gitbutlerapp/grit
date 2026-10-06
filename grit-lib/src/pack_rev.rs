@@ -200,12 +200,11 @@ pub fn pack_rev_fsck_messages(
     let mut order: Vec<u32> = (0..n as u32).collect();
     order.sort_by_key(|&i| index.entries[i as usize].offset);
 
-    for i in 0..n {
+    for (i, &expected) in order.iter().enumerate() {
         let Some(got) = read_u32_be(data, &mut pos) else {
             msgs.push("truncated rev-index data".to_owned());
             break;
         };
-        let expected = order[i];
         if got != expected {
             msgs.push(format!(
                 "invalid rev-index position at {i}: {got} != {expected}"
@@ -254,10 +253,9 @@ pub fn verify_pack_rev_file_contents(
     }
     let mut order: Vec<u32> = (0..n as u32).collect();
     order.sort_by_key(|&i| index.entries[i as usize].offset);
-    for i in 0..n {
+    for (i, &expected) in order.iter().enumerate() {
         let got =
             read_u32_be(data, &mut pos).ok_or_else(|| "truncated rev-index data".to_owned())?;
-        let expected = order[i];
         if got != expected {
             return Err(format!(
                 "invalid rev-index position at {i}: {got} != {expected}"

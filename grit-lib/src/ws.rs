@@ -378,8 +378,7 @@ pub fn ws_fix_copy_line(src: &str, ws_rule: u32) -> (String, bool) {
 
         let mut consecutive_spaces = 0i32;
         let tw = ws_tab_width(ws_rule);
-        for idx in 0..last {
-            let ch = bytes[idx];
+        for &ch in &bytes[..last] {
             if ch != b' ' {
                 consecutive_spaces = 0;
                 dst.push(ch as char);
@@ -401,8 +400,8 @@ pub fn ws_fix_copy_line(src: &str, ws_rule: u32) -> (String, bool) {
     } else if (ws_rule & WS_TAB_IN_INDENT) != 0 && last_tab_in_indent >= 0 {
         let last = (last_tab_in_indent + 1) as usize;
         let start = dst.len();
-        for idx in 0..last {
-            if bytes[idx] == b'\t' {
+        for &ch in &bytes[..last] {
+            if ch == b'\t' {
                 loop {
                     dst.push(' ');
                     if (dst.len() - start).is_multiple_of(ws_tab_width(ws_rule)) {
@@ -410,7 +409,7 @@ pub fn ws_fix_copy_line(src: &str, ws_rule: u32) -> (String, bool) {
                     }
                 }
             } else {
-                dst.push(bytes[idx] as char);
+                dst.push(ch as char);
             }
         }
         src_rest = &src[last..len];

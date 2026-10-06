@@ -349,6 +349,8 @@ mod pack_cache {
     /// `core.deltaBaseCacheLimit` (96 MiB).
     const DELTA_BASE_CACHE_LIMIT: usize = 96 * 1024 * 1024;
 
+    type PackDeltaBaseCache = HashMap<u64, (ObjectKind, Arc<Vec<u8>>)>;
+
     #[derive(Default)]
     struct State {
         by_dir: HashMap<PathBuf, CachedDir>,
@@ -358,7 +360,7 @@ mod pack_cache {
         /// `delta_base_cache`). Entries are dropped whenever the pack's bytes
         /// are re-read (stamp change), so they can never outlive the pack
         /// content they were inflated from.
-        delta_bases: HashMap<PathBuf, HashMap<u64, (ObjectKind, Arc<Vec<u8>>)>>,
+        delta_bases: HashMap<PathBuf, PackDeltaBaseCache>,
         /// FIFO eviction order for `delta_bases` (size-bounded).
         delta_order: VecDeque<(PathBuf, u64)>,
         delta_bytes: usize,
@@ -916,7 +918,7 @@ fn detect_idx_hash_bytes_v2(
             continue;
         }
         let extra = idx_file_len - fixed;
-        if extra % 8 != 0 {
+        if !extra.is_multiple_of(8) {
             continue;
         }
         if extra / 8 > object_count {
@@ -1898,7 +1900,6 @@ fn parse_ofs_delta_base(bytes: &[u8], pos: &mut usize, this_offset: u64) -> Resu
 /// Raw bytes of one packed object (header + zlib payload) starting at `object_start_offset`.
 ///
 /// `hash_bytes` is the ref-delta base OID width in this pack (`20` for SHA-1, `32` for SHA-256).
-#[must_use]
 pub fn slice_one_pack_object(
     bytes: &[u8],
     object_start_offset: u64,

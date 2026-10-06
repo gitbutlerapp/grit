@@ -41,7 +41,7 @@ pub struct tm {
 /// (where present) are left untouched. Callers route `%z`/`%Z`/`%s` through
 /// `strbuf_addftime` before reaching `strftime`, so those fields are never read.
 pub fn gmtime(time: time_t, out: &mut tm) -> bool {
-    let Ok(dt) = ::time::OffsetDateTime::from_unix_timestamp(time as i64) else {
+    let Ok(dt) = ::time::OffsetDateTime::from_unix_timestamp(time) else {
         return false;
     };
     out.tm_sec = i32::from(dt.second());
