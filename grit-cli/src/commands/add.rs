@@ -96,7 +96,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
             .filter(|(s, _)| !pathspec_is_exclude(s))
             .collect::<Vec<_>>();
         if !positive.is_empty() {
-            let known = known_paths(repo, &index, &model, &work_tree)?;
+            let known = known_paths(repo, &index, &model)?;
             for (orig, resolved) in positive {
                 if !selector_matches_known(resolved, &known, &work_tree)? {
                     bail!("pathspec '{orig}' did not match any files");
@@ -142,12 +142,11 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
     Ok(staged)
 }
 
-/// Paths that may satisfy an explicit pathspec (index, HEAD tree, status, work tree).
+/// Paths that may satisfy an explicit pathspec (index, HEAD tree, and status).
 fn known_paths(
     repo: &Repository,
     index: &Index,
     model: &grit_lib::porcelain::status::StatusModel,
-    work_tree: &Path,
 ) -> Result<Vec<String>> {
     let mut set = HashSet::<String>::new();
     for entry in &index.entries {
@@ -167,7 +166,6 @@ fn known_paths(
     for path in head_tree_paths(repo)? {
         set.insert(path);
     }
-    collect_worktree_paths(work_tree, work_tree, &mut set)?;
     Ok(set.into_iter().collect())
 }
 
@@ -206,52 +204,18 @@ fn collect_tree_paths(
     Ok(())
 }
 
-fn collect_worktree_paths(base: &Path, dir: &Path, out: &mut HashSet<String>) -> Result<()> {
-    let read_dir = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    for entry in read_dir {
-        let entry = entry?;
-        let name = entry.file_name();
-        if name == ".git" {
-            continue;
-        }
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(base)
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        if rel.is_empty() {
-            continue;
-        }
-        let file_type = entry.file_type().ok();
-        if file_type.as_ref().is_some_and(|t| t.is_dir()) {
-            collect_worktree_paths(base, &path, out)?;
-        } else {
-            out.insert(rel);
-        }
-    }
-    Ok(())
-}
-
-/// Whether `resolved` matches at least one known path or an on-disk path under the work tree.
+/// Whether `resolved` matches at least one known path or an explicitly named worktree path.
 fn selector_matches_known(resolved: &str, known: &[String], work_tree: &Path) -> Result<bool> {
     let spec = [resolved.to_owned()];
     if known.iter().any(|p| matches_pathspec_list(p, &spec)) {
         return Ok(true);
     }
-    if !has_glob_chars(resolved) && !resolved.starts_with(':') {
+    if has_glob_chars(resolved) || resolved.starts_with(":(") {
+        return Ok(false);
+    }
+    if !resolved.starts_with(':') {
         let abs = work_tree.join(resolved);
         if abs.exists() {
-            return Ok(true);
-        }
-    }
-    if has_glob_chars(resolved) || resolved.starts_with(":(") {
-        let mut walk_set = HashSet::new();
-        collect_worktree_paths(work_tree, work_tree, &mut walk_set)?;
-        if walk_set.iter().any(|p| matches_pathspec_list(p, &spec)) {
             return Ok(true);
         }
     }

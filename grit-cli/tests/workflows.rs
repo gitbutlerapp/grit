@@ -158,6 +158,23 @@ fn init_checked_out_submodule(parent: &Path, name: &str) -> Result<String, Box<d
 }
 
 #[test]
+#[cfg(unix)]
+fn add_explicit_pathspec_does_not_walk_ignored_subtree() -> TestResult {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch = Scratch::new("add-no-walk")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    write_file(&repo.join(".gitignore"), "blocked/\n")?;
+    fs::create_dir_all(repo.join("blocked/secret"))?;
+    fs::set_permissions(repo.join("blocked"), fs::Permissions::from_mode(0o000))?;
+    write_file(&repo.join("tracked"), "t\n")?;
+    gs_ok(&repo, ["add", "tracked"])?;
+    Ok(())
+}
+
+#[test]
 fn add_pathspec_from_subdirectory() -> TestResult {
     let scratch = Scratch::new("add-subdir")?;
     let repo = scratch.child("repo");
