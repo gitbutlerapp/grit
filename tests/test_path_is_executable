@@ -1,0 +1,4 @@
+#!/bin/sh
+
+test $# -eq 1 || exit 1
+test -f "$1" && test -x "$1"

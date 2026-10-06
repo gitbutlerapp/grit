@@ -1,0 +1,19 @@
+# grit test git-sh-setup — shell helpers
+
+die () {
+	echo >&2 "$@"
+	exit 1
+}
+
+require_work_tree () {
+	test "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ||
+		die "fatal: $0 requires a working tree"
+}
+
+cd_to_toplevel () {
+	cd "$(git rev-parse --show-toplevel)" || die "cannot chdir to toplevel"
+}
+
+require_clean_work_tree () {
+	git diff --quiet HEAD -- || die "working tree is dirty"
+}

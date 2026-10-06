@@ -1,4 +1,8 @@
 target/*
+# Upstream harness runner artifacts (see scripts/run-tests.sh)
+tests/trash*
+tests/trash/
+tests/grit
 bench/.scratch/
 .claude/
 bench/.scratch

@@ -119,7 +119,7 @@ cargo test --workspace
 
 ## Testing
 
-**TESTING.md** describes the Rust-first strategy: `cargo test -p grit-lib --lib`, workspace integration tests, and **`bench/`** for performance comparisons against system `git`.
+**TESTING.md** describes the Rust-first strategy: `cargo test -p grit-lib --lib`, workspace integration tests, **`bench/`** comparisons against system `git`, and the GitHub Actions CI jobs (fmt, unit tests, harness smoke) with local reproduction commands.
 
 ## Source of truth
 
