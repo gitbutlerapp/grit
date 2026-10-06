@@ -1632,7 +1632,19 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
         Some(p) if !p.is_empty() => {
             normalize_relative_path_str(&PathBuf::from(p).join(pathspec).to_string_lossy())
         }
-        _ => pathspec.to_owned(),
+        _ => {
+            // At the work-tree root, Git drops repeated leading `./` (and `.//`) so index paths
+            // never contain a `.` directory component; e.g. `add ./-` must stage `-`, not `./-`.
+            let mut spec = pathspec;
+            while let Some(rest) = spec.strip_prefix("./") {
+                spec = rest.trim_start_matches('/');
+            }
+            if spec.is_empty() {
+                ".".to_owned()
+            } else {
+                spec.to_owned()
+            }
+        }
     }
 }
 
@@ -1807,5 +1819,35 @@ mod pathspec_list_tests {
             &attrs,
             &exclude_only,
         ));
+    }
+}
+
+#[cfg(test)]
+mod resolve_pathspec_tests {
+    use super::*;
+
+    fn wt() -> PathBuf {
+        PathBuf::from("/tmp/grit-pathspec-worktree")
+    }
+
+    #[test]
+    fn strips_leading_dot_slash_at_repo_root() {
+        let wt = wt();
+        assert_eq!(resolve_pathspec("./-", &wt, None), "-");
+        assert_eq!(resolve_pathspec("./a/b", &wt, None), "a/b");
+        assert_eq!(resolve_pathspec("././a", &wt, None), "a");
+        assert_eq!(resolve_pathspec(".//a", &wt, None), "a");
+        assert_eq!(resolve_pathspec("./", &wt, None), ".");
+        assert_eq!(resolve_pathspec(".", &wt, None), ".");
+    }
+
+    #[test]
+    fn prefixed_cwd_resolution_unchanged() {
+        let wt = wt();
+        assert_eq!(
+            resolve_pathspec("file", &wt, Some("sub/dir")),
+            "sub/dir/file"
+        );
+        assert_eq!(resolve_pathspec(":(glob)*.rs", &wt, None), ":(glob)*.rs");
     }
 }
