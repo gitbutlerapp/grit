@@ -24,7 +24,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use grit_lib::error::Result as GritResult;
+use grit_lib::config::ConfigSet;
+use grit_lib::error::{Error, Result as GritResult};
 use grit_lib::fetch::NoProgress;
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
@@ -77,6 +78,26 @@ fn build_source(dir: &Path) {
     git(dir, &["commit", "-q", "-m", "c2"]);
     git(dir, &["tag", "-a", "v1", "-m", "release one"]);
     git(dir, &["branch", "topic"]);
+}
+
+/// Extend [`build_source`] with many branch refs and a large blob (exercises v2
+/// `ls-refs` + a non-trivial pack over smart-HTTP).
+fn build_heavy_source(dir: &Path, extra_refs: usize) {
+    build_source(dir);
+    let tip = git(dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    for i in 0..extra_refs {
+        git(
+            dir,
+            &[
+                "update-ref",
+                &format!("refs/heads/branch-{i}"),
+                tip.as_str(),
+            ],
+        );
+    }
+    std::fs::write(dir.join("large.bin"), vec![b'L'; 512 * 1024]).unwrap();
+    git(dir, &["add", "large.bin"]);
+    git(dir, &["commit", "-q", "-m", "large blob"]);
 }
 
 /// Pick a currently-free localhost port by binding then dropping a listener.
@@ -350,6 +371,12 @@ impl RecordingClient {
         Self::from_inner(UreqHttpClient::new())
     }
 
+    /// Client built like grit-cli (`UreqHttpClient::from_config` on default config).
+    fn from_default_config() -> GritResult<Self> {
+        let inner = UreqHttpClient::from_config(&ConfigSet::new())?;
+        Ok(Self::from_inner(inner))
+    }
+
     fn from_inner(inner: UreqHttpClient) -> Self {
         Self {
             inner,
@@ -503,6 +530,40 @@ impl HttpClient for RecordingClient {
                 .push(Self::pack_object_count(&resp));
         }
         Ok(resp)
+    }
+
+    fn git_protocol_header(&self) -> Option<&str> {
+        self.inner.git_protocol_header()
+    }
+}
+
+/// Wraps an HTTP client and fails `git-upload-pack` POSTs with an I/O error
+/// (simulates a truncated response body read).
+struct IoFailUploadPackClient<C> {
+    inner: C,
+}
+
+impl<C: HttpClient> HttpClient for IoFailUploadPackClient<C> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> GritResult<Vec<u8>> {
+        self.inner.get(url, git_protocol)
+    }
+
+    fn post(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> GritResult<Vec<u8>> {
+        if url.contains("git-upload-pack") {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "failed to fill whole buffer",
+            )));
+        }
+        self.inner
+            .post(url, content_type, accept, body, git_protocol)
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -822,6 +883,182 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
         fsck2.status.success(),
         "git fsck failed after incremental v2 http fetch: {}",
         String::from_utf8_lossy(&fsck2.stderr)
+    );
+}
+
+/// Regression for #911: grit-cli uses `UreqHttpClient::from_config` without
+/// manually calling `with_git_protocol`. Default config must negotiate v2 and
+/// complete a many-ref / large-pack fetch (the v0/v1 path mis-handles this).
+#[test]
+fn fetch_from_config_client_v2_many_refs_and_large_pack() {
+    let Some(grit_bin) = find_binary("grit-git") else {
+        eprintln!("SKIP: `grit` binary not found in target dir (build grit-git first)");
+        return;
+    };
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
+        return;
+    };
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_heavy_source(&work, 1500);
+
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            source.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&source, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+        eprintln!("SKIP: could not spawn grit-http-server");
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: grit-http-server did not become ready on port {port}");
+        return;
+    }
+
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+
+    let recording = Arc::new(
+        RecordingClient::from_default_config().expect("from_config client for #911 regression"),
+    );
+    assert_eq!(
+        recording.git_protocol_header(),
+        Some("version=2"),
+        "from_config must default to Git-Protocol version=2 (grit-cli path)"
+    );
+    assert!(
+        UreqHttpClient::new().git_protocol_header().is_none(),
+        "sanity: bare new() must not imply v2 — regression targets from_config"
+    );
+
+    let opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        tags: TagMode::All,
+        ..Default::default()
+    };
+    let outcome = http_fetch(recording.as_ref(), &local_git, &url, &opts, &mut NoProgress)
+        .expect("from_config v2 http_fetch over many-ref repo");
+
+    let commands = recording.post_commands.lock().unwrap().clone();
+    assert!(
+        commands.iter().any(|c| c == "command=ls-refs"),
+        "from_config fetch must use v2 ls-refs; saw {commands:?}"
+    );
+    assert!(
+        commands.iter().any(|c| c == "command=fetch"),
+        "from_config fetch must use v2 command=fetch; saw {commands:?}"
+    );
+    let branch_updates = outcome
+        .updates
+        .iter()
+        .filter(|u| u.remote_ref.starts_with("refs/heads/branch-"))
+        .count();
+    assert!(
+        branch_updates >= 1500,
+        "expected >=1500 branch ref updates, got {branch_updates}"
+    );
+
+    let main_oid = rev_parse(&source, "refs/heads/main");
+    assert_eq!(
+        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        main_oid
+    );
+    let fsck = Command::new("git")
+        .current_dir(&local)
+        .args(["fsck", "--no-dangling"])
+        .output()
+        .expect("run git fsck");
+    assert!(
+        fsck.status.success(),
+        "git fsck failed after from_config v2 fetch: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+}
+
+#[test]
+fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
+    let Some(grit_bin) = find_binary("grit-git") else {
+        eprintln!("SKIP: `grit` binary not found in target dir (build grit-git first)");
+        return;
+    };
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
+        return;
+    };
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            source.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&source, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+        eprintln!("SKIP: could not spawn grit-http-server");
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: grit-http-server did not become ready on port {port}");
+        return;
+    }
+
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+
+    let inner = UreqHttpClient::from_config(&ConfigSet::new()).expect("from_config");
+    let client = IoFailUploadPackClient { inner };
+    let opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        tags: TagMode::None,
+        ..Default::default()
+    };
+    let err = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress).expect_err("I/O");
+    assert!(
+        matches!(err, Error::Io(_)),
+        "truncated upload-pack read must surface as Io error, got {err:?}"
     );
 }
 
