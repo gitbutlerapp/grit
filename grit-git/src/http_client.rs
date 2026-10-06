@@ -4,19 +4,20 @@ use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
-
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
 
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use grit_lib::config::{parse_bool, parse_i64, ConfigSet};
+
+use crate::http_transport::{read_http_body, HttpResponseBody, HttpTransportTimeouts};
+
 use grit_lib::transport::http::{
     effective_info_refs_url_after_redirect, http_origin_key, http_origins_match,
 };
@@ -46,6 +47,7 @@ pub struct HttpClientContext {
     /// without a `Domain` attribute are sent only on this origin (not after a
     /// cross-authority redirect).
     hostonly_cookie_scope: Arc<Mutex<Option<String>>>,
+    timeouts: HttpTransportTimeouts,
 }
 
 #[derive(Clone)]
@@ -256,6 +258,7 @@ impl HttpClientContext {
             .filter(|value| !value.trim().is_empty())
             .or_else(|| config.get("http.proxy"));
         let proxy_auth_method = proxy_auth_method(config);
+        let timeouts = HttpTransportTimeouts::from_config(config);
         let transport = build_transport(config, &proxy_auth_method, proxy_raw.as_deref())?;
         let ssl_verify = ssl_verify_enabled(config);
         let git_protocol_header = resolve_git_protocol_header(config);
@@ -314,6 +317,7 @@ impl HttpClientContext {
             empty_auth,
             auth_entry: Arc::new(Mutex::new(None)),
             hostonly_cookie_scope: Arc::new(Mutex::new(None)),
+            timeouts,
         })
     }
 
@@ -355,7 +359,7 @@ impl HttpClientContext {
         git_protocol_header: Option<&str>,
     ) -> Result<Vec<u8>> {
         self.get_raw_with_git_protocol(url, git_protocol_header)
-            .map(|resp| resp.body)
+            .and_then(|resp| resp.body.into_vec())
     }
 
     /// Like [`get_with_git_protocol`](Self::get_with_git_protocol), but also
@@ -369,7 +373,7 @@ impl HttpClientContext {
         git_protocol_header: Option<&str>,
     ) -> Result<(Vec<u8>, Option<String>)> {
         self.get_raw_with_git_protocol(url, git_protocol_header)
-            .map(|resp| (resp.body, resp.final_url))
+            .and_then(|resp| resp.body.into_vec().map(|body| (body, resp.final_url)))
     }
 
     fn get_raw_with_git_protocol(
@@ -500,6 +504,31 @@ impl HttpClientContext {
         body: &[u8],
         git_protocol_header: Option<&str>,
     ) -> Result<Vec<u8>> {
+        self.post_with_git_protocol_raw(url, content_type, accept, body, git_protocol_header, false)
+            .and_then(|body| body.into_vec())
+    }
+
+    /// POST for `git-upload-pack` RPC: spools the response body to disk instead of buffering in RAM.
+    pub fn post_upload_pack_with_git_protocol(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol_header: Option<&str>,
+    ) -> Result<HttpResponseBody> {
+        self.post_with_git_protocol_raw(url, content_type, accept, body, git_protocol_header, true)
+    }
+
+    pub(crate) fn post_with_git_protocol_raw(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol_header: Option<&str>,
+        spool_body: bool,
+    ) -> Result<HttpResponseBody> {
         self.trace_proxy_auth_header();
         self.trace_request_start("POST", url, self.smart_http_enabled);
         self.trace_outgoing_header(&format!("Content-Type: {content_type}"));
@@ -537,6 +566,7 @@ impl HttpClientContext {
             gzip_enabled,
             chunked,
             git_protocol_header,
+            spool_body,
         )?;
         self.save_response_cookies(&first)?;
         self.trace_response_status(first.status, &first.reason);
@@ -575,6 +605,7 @@ impl HttpClientContext {
             gzip_enabled,
             chunked,
             git_protocol_header,
+            spool_body,
         )?;
         self.save_response_cookies(&retry)?;
         let mut credential_input = self.credential_input_for_url(url)?;
@@ -598,6 +629,7 @@ impl HttpClientContext {
                     gzip_enabled,
                     chunked,
                     git_protocol_header,
+                    spool_body,
                 )?;
                 self.save_response_cookies(&retry2)?;
                 let mut credential_input = self.credential_input_for_url(url)?;
@@ -647,7 +679,12 @@ impl HttpClientContext {
         let env_transport = if self.proxy_raw.is_none() {
             env_proxy_for_url(&request_url)
                 .map(|proxy| {
-                    build_transport_from_proxy(&proxy, self.ssl_verify, &self.proxy_auth_method)
+                    build_transport_from_proxy(
+                        &proxy,
+                        self.ssl_verify,
+                        &self.proxy_auth_method,
+                        &self.timeouts,
+                    )
                 })
                 .transpose()?
         } else {
@@ -675,7 +712,7 @@ impl HttpClientContext {
                 // >= 400 responses arrive as `Ok`; only genuine transport errors
                 // are `Err`.
                 match req.call() {
-                    Ok(resp) => raw_response_from_ureq(resp, "GET", true),
+                    Ok(resp) => raw_response_from_ureq(resp, "GET", true, false, &self.timeouts),
                     Err(err) => Err(http_request_error("GET", &request_url, err)),
                 }
             }
@@ -693,7 +730,7 @@ impl HttpClientContext {
                     &extra_headers,
                     self.smart_http_enabled,
                 )?;
-                http_over_tcp_forward(proxy_host, *proxy_port, &req)
+                http_over_tcp_forward(proxy_host, *proxy_port, &req, false, &self.timeouts)
             }
             Transport::SocksUnix { socket_path } => {
                 let req = build_get_request(
@@ -704,7 +741,7 @@ impl HttpClientContext {
                     &extra_headers,
                     self.smart_http_enabled,
                 )?;
-                http_over_socks_unix(socket_path, &request_url, &req)
+                http_over_socks_unix(socket_path, &request_url, &req, false, &self.timeouts)
             }
         }
     }
@@ -719,6 +756,7 @@ impl HttpClientContext {
         gzip_enabled: bool,
         chunked: bool,
         git_protocol_header: Option<&str>,
+        spool_body: bool,
     ) -> Result<RawHttpResponse> {
         let request_url = discovery_url_for_mode(url, self.smart_http_enabled);
         let extra_headers = self.extra_headers_for_url(&request_url);
@@ -726,7 +764,12 @@ impl HttpClientContext {
         let env_transport = if self.proxy_raw.is_none() {
             env_proxy_for_url(&request_url)
                 .map(|proxy| {
-                    build_transport_from_proxy(&proxy, self.ssl_verify, &self.proxy_auth_method)
+                    build_transport_from_proxy(
+                        &proxy,
+                        self.ssl_verify,
+                        &self.proxy_auth_method,
+                        &self.timeouts,
+                    )
                 })
                 .transpose()?
         } else {
@@ -765,7 +808,9 @@ impl HttpClientContext {
                 };
                 // `http_status_as_error(false)` => >= 400 arrives as `Ok`.
                 match send_result {
-                    Ok(resp) => raw_response_from_ureq(resp, "POST", false),
+                    Ok(resp) => {
+                        raw_response_from_ureq(resp, "POST", false, spool_body, &self.timeouts)
+                    }
                     Err(err) => Err(http_request_error("POST", &request_url, err)),
                 }
             }
@@ -788,7 +833,7 @@ impl HttpClientContext {
                     &extra_headers,
                     self.smart_http_enabled,
                 )?;
-                http_over_tcp_forward(proxy_host, *proxy_port, &req)
+                http_over_tcp_forward(proxy_host, *proxy_port, &req, spool_body, &self.timeouts)
             }
             Transport::SocksUnix { socket_path } => {
                 let req = build_post_request(
@@ -804,7 +849,7 @@ impl HttpClientContext {
                     &extra_headers,
                     self.smart_http_enabled,
                 )?;
-                http_over_socks_unix(socket_path, &request_url, &req)
+                http_over_socks_unix(socket_path, &request_url, &req, spool_body, &self.timeouts)
             }
         }
     }
@@ -1340,6 +1385,8 @@ fn raw_response_from_ureq(
     resp: ureq::http::Response<ureq::Body>,
     what: &str,
     with_final_url: bool,
+    spool_body: bool,
+    timeouts: &HttpTransportTimeouts,
 ) -> Result<RawHttpResponse> {
     use ureq::ResponseExt as _;
     let status = resp.status().as_u16();
@@ -1347,11 +1394,7 @@ fn raw_response_from_ureq(
     let reason = resp.status().canonical_reason().unwrap_or("").to_string();
     let headers = response_headers(&resp);
     let final_url = with_final_url.then(|| resp.get_uri().to_string());
-    let mut body = Vec::new();
-    resp.into_body()
-        .into_reader()
-        .read_to_end(&mut body)
-        .with_context(|| format!("read {what} body"))?;
+    let body = read_http_body(resp.into_body().into_reader(), what, spool_body, timeouts)?;
     Ok(RawHttpResponse {
         status,
         reason,
@@ -1444,7 +1487,7 @@ struct RawHttpResponse {
     status: u16,
     reason: String,
     headers: Vec<(String, String)>,
-    body: Vec<u8>,
+    body: HttpResponseBody,
     /// The final URL the request resolved to after any HTTP redirects the
     /// transport followed (ureq follows redirects on GET). `None` when the
     /// transport does not report it (the manual proxy/SOCKS paths). Used to
@@ -1606,14 +1649,21 @@ impl AuthCredentials {
     }
 }
 
-fn http_over_tcp_forward(host: &str, port: u16, req: &[u8]) -> Result<RawHttpResponse> {
+fn http_over_tcp_forward(
+    host: &str,
+    port: u16,
+    req: &[u8],
+    spool_body: bool,
+    timeouts: &HttpTransportTimeouts,
+) -> Result<RawHttpResponse> {
     let mut sock = TcpStream::connect((host, port))
         .with_context(|| format!("connect to proxy {host}:{port}"))?;
-    let _ = sock.set_read_timeout(Some(Duration::from_secs(120)));
-    let _ = sock.set_write_timeout(Some(Duration::from_secs(120)));
+    let rw = timeouts.socket_rw_timeout();
+    let _ = sock.set_read_timeout(rw);
+    let _ = sock.set_write_timeout(rw);
     sock.write_all(req).context("write to proxy")?;
     sock.flush()?;
-    read_http_response(&mut sock)
+    read_http_response(&mut sock, spool_body, timeouts)
 }
 
 fn build_proxy_get_request(
@@ -1901,6 +1951,8 @@ fn http_over_socks_unix(
     socket_path: &Path,
     target_url: &str,
     http_bytes: &[u8],
+    spool_body: bool,
+    timeouts: &HttpTransportTimeouts,
 ) -> Result<RawHttpResponse> {
     let url = Url::parse(target_url).with_context(|| format!("bad URL {target_url}"))?;
     let ip = resolve_target_ipv4(&url)?;
@@ -1910,8 +1962,9 @@ fn http_over_socks_unix(
 
     let mut sock = UnixStream::connect(socket_path)
         .with_context(|| format!("connect SOCKS unix socket {}", socket_path.display()))?;
-    let _ = sock.set_read_timeout(Some(Duration::from_secs(120)));
-    let _ = sock.set_write_timeout(Some(Duration::from_secs(120)));
+    let rw = timeouts.socket_rw_timeout();
+    let _ = sock.set_read_timeout(rw);
+    let _ = sock.set_write_timeout(rw);
 
     let mut req = Vec::with_capacity(9 + 1);
     req.push(4u8);
@@ -1932,7 +1985,7 @@ fn http_over_socks_unix(
     sock.write_all(http_bytes).context("write HTTP request")?;
     sock.flush()?;
 
-    read_http_response(&mut sock)
+    read_http_response(&mut sock, spool_body, timeouts)
 }
 
 #[cfg(not(unix))]
@@ -1940,11 +1993,17 @@ fn http_over_socks_unix(
     _socket_path: &Path,
     _target_url: &str,
     _http_bytes: &[u8],
+    _spool_body: bool,
+    _timeouts: &HttpTransportTimeouts,
 ) -> Result<RawHttpResponse> {
     bail!("SOCKS proxy over Unix socket is not supported on this platform")
 }
 
-fn read_http_response(r: &mut impl Read) -> Result<RawHttpResponse> {
+fn read_http_response(
+    r: &mut impl Read,
+    spool_body: bool,
+    timeouts: &HttpTransportTimeouts,
+) -> Result<RawHttpResponse> {
     let mut reader = BufReader::new(r);
     let mut status_line = String::new();
     reader.read_line(&mut status_line).context("read status")?;
@@ -1979,37 +2038,58 @@ fn read_http_response(r: &mut impl Read) -> Result<RawHttpResponse> {
         }
     }
 
-    let mut body = Vec::new();
-    if let Some(cl) = headers.iter().find(|(k, _)| k == "content-length") {
-        let len: usize = cl.1.parse().context("content-length")?;
-        body.resize(len, 0);
-        reader.read_exact(&mut body).context("read body")?;
-    } else if headers
-        .iter()
-        .any(|(k, v)| k == "transfer-encoding" && v.to_ascii_lowercase().contains("chunked"))
-    {
-        loop {
-            let mut size_line = String::new();
-            reader.read_line(&mut size_line).context("chunk size")?;
-            let size_line = size_line.trim_end_matches(['\r', '\n']);
-            let chunk_len = usize::from_str_radix(size_line.trim(), 16)
-                .map_err(|_| anyhow::anyhow!("bad chunk size"))?;
-            if chunk_len == 0 {
-                let mut crlf = [0u8; 2];
-                let _ = reader.read_exact(&mut crlf);
-                break;
+    let body =
+        if spool_body {
+            if let Some(cl) = headers.iter().find(|(k, _)| k == "content-length") {
+                let len: u64 = cl.1.parse().context("content-length")?;
+                read_http_body((&mut reader).take(len), "HTTP", true, timeouts)?
+            } else if headers.iter().any(|(k, v)| {
+                k == "transfer-encoding" && v.to_ascii_lowercase().contains("chunked")
+            }) {
+                read_http_body(
+                    HttpChunkedBodyReader {
+                        reader: &mut reader,
+                    },
+                    "HTTP chunked",
+                    true,
+                    timeouts,
+                )?
+            } else {
+                read_http_body(&mut reader, "HTTP", true, timeouts)?
             }
-            let mut chunk = vec![0u8; chunk_len];
-            reader.read_exact(&mut chunk).context("chunk data")?;
-            body.extend_from_slice(&chunk);
-            let mut crlf = [0u8; 2];
-            reader.read_exact(&mut crlf).context("chunk crlf")?;
-        }
-    } else {
-        reader
-            .read_to_end(&mut body)
-            .context("read body until EOF")?;
-    }
+        } else {
+            let mut inline = Vec::new();
+            if let Some(cl) = headers.iter().find(|(k, _)| k == "content-length") {
+                let len: usize = cl.1.parse().context("content-length")?;
+                inline.resize(len, 0);
+                reader.read_exact(&mut inline).context("read body")?;
+            } else if headers.iter().any(|(k, v)| {
+                k == "transfer-encoding" && v.to_ascii_lowercase().contains("chunked")
+            }) {
+                loop {
+                    let mut size_line = String::new();
+                    reader.read_line(&mut size_line).context("chunk size")?;
+                    let size_line = size_line.trim_end_matches(['\r', '\n']);
+                    let chunk_len = usize::from_str_radix(size_line.trim(), 16)
+                        .map_err(|_| anyhow::anyhow!("bad chunk size"))?;
+                    if chunk_len == 0 {
+                        let mut crlf = [0u8; 2];
+                        let _ = reader.read_exact(&mut crlf);
+                        break;
+                    }
+                    let mut chunk = vec![0u8; chunk_len];
+                    reader.read_exact(&mut chunk).context("chunk data")?;
+                    inline.extend_from_slice(&chunk);
+                    let mut crlf = [0u8; 2];
+                    reader.read_exact(&mut crlf).context("chunk crlf")?;
+                }
+            } else {
+                reader
+                    .read_to_end(&mut inline)
+                    .context("read body until EOF")?;
+            }
+            HttpResponseBody::Inline(inline)
+        };
 
     Ok(RawHttpResponse {
         status,
@@ -2018,6 +2098,44 @@ fn read_http_response(r: &mut impl Read) -> Result<RawHttpResponse> {
         body,
         final_url: None,
     })
+}
+
+/// Incrementally decode an HTTP/1.1 chunked body for [`read_http_body`].
+struct HttpChunkedBodyReader<'a, R: Read> {
+    reader: &'a mut BufReader<R>,
+}
+
+impl<R: Read> Read for HttpChunkedBodyReader<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            let mut size_line = String::new();
+            self.reader.read_line(&mut size_line)?;
+            let size_line = size_line.trim_end_matches(['\r', '\n']);
+            if size_line.is_empty() {
+                continue;
+            }
+            let chunk_len = usize::from_str_radix(size_line.trim(), 16).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "bad chunk size")
+            })?;
+            if chunk_len == 0 {
+                let mut crlf = [0u8; 2];
+                let _ = self.reader.read_exact(&mut crlf);
+                return Ok(0);
+            }
+            let to_read = buf.len().min(chunk_len);
+            self.reader.read_exact(&mut buf[..to_read])?;
+            if to_read < chunk_len {
+                let mut rest = vec![0u8; chunk_len - to_read];
+                self.reader.read_exact(&mut rest)?;
+            }
+            let mut crlf = [0u8; 2];
+            self.reader.read_exact(&mut crlf)?;
+            return Ok(to_read);
+        }
+    }
 }
 
 fn trace_socks_granted_after_handshake() {
@@ -2297,11 +2415,17 @@ fn ssl_verify_enabled(config: &ConfigSet) -> bool {
         .unwrap_or(true)
 }
 
-fn ureq_agent(ssl_verify: bool, proxy: Option<ureq::Proxy>) -> ureq::Agent {
+fn ureq_agent(
+    ssl_verify: bool,
+    proxy: Option<ureq::Proxy>,
+    timeouts: &HttpTransportTimeouts,
+) -> ureq::Agent {
     let mut builder = ureq::Agent::config_builder()
         // Surface >= 400 responses as `Ok` so the auth-retry logic can read the
         // status, body, and `WWW-Authenticate` headers itself.
         .http_status_as_error(false)
+        .timeout_connect(Some(timeouts.connect))
+        .timeout_global(timeouts.global)
         .proxy(proxy);
     if !ssl_verify {
         // `http.sslVerify=false` / `GIT_SSL_NO_VERIFY`: opt out of certificate
@@ -2322,20 +2446,22 @@ fn build_transport(
     proxy_raw: Option<&str>,
 ) -> Result<Transport> {
     let ssl_verify = ssl_verify_enabled(config);
+    let timeouts = HttpTransportTimeouts::from_config(config);
     let Some(raw_proxy) = proxy_raw else {
-        return Ok(Transport::Ureq(ureq_agent(ssl_verify, None)));
+        return Ok(Transport::Ureq(ureq_agent(ssl_verify, None, &timeouts)));
     };
     let raw_proxy = raw_proxy.trim();
     if raw_proxy.is_empty() {
-        return Ok(Transport::Ureq(ureq_agent(ssl_verify, None)));
+        return Ok(Transport::Ureq(ureq_agent(ssl_verify, None, &timeouts)));
     }
-    build_transport_from_proxy(raw_proxy, ssl_verify, proxy_auth_method)
+    build_transport_from_proxy(raw_proxy, ssl_verify, proxy_auth_method, &timeouts)
 }
 
 fn build_transport_from_proxy(
     raw_proxy: &str,
     ssl_verify: bool,
     proxy_auth_method: &ProxyAuthMethod,
+    timeouts: &HttpTransportTimeouts,
 ) -> Result<Transport> {
     validate_proxy_url(raw_proxy)?;
     let with_scheme = if raw_proxy.contains("://") {
@@ -2374,7 +2500,11 @@ fn build_transport_from_proxy(
     ensure_supported_proxy_auth_method(proxy_auth_method, &parsed_proxy_url)?;
     let proxy =
         ureq::Proxy::new(&proxy_url).with_context(|| format!("invalid proxy URL '{raw_proxy}'"))?;
-    Ok(Transport::Ureq(ureq_agent(ssl_verify, Some(proxy))))
+    Ok(Transport::Ureq(ureq_agent(
+        ssl_verify,
+        Some(proxy),
+        timeouts,
+    )))
 }
 
 fn proxy_basic_token(url: &Url) -> Result<Option<String>> {

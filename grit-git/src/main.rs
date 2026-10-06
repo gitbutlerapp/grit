@@ -36,6 +36,7 @@ mod http_bundle_uri;
 mod http_client;
 mod http_push_smart;
 mod http_smart;
+mod http_transport;
 mod ident;
 mod pack_objects_upload;
 pub mod pathspec;

@@ -597,9 +597,73 @@ fn lazy_fetch_thin_delta_bases(objects_dir: Option<&Path>, bases: &[ObjectId]) -
     result.is_ok()
 }
 
-/// Write `pack_bytes` under `repo`'s `objects/pack/`, build the `.idx`, and return the `.pack` path.
+/// Ingest a `.pack` from `path` into `repo`'s object store (reads the file once).
 ///
-/// Used when ingesting a pack from the network (e.g. promisor lazy fetch) without unpacking loose objects.
+/// Used when ingesting a pack from the network without holding the full response in RAM.
+pub(crate) fn ingest_pack_file(
+    repo: &grit_lib::repo::Repository,
+    path: &std::path::Path,
+    fix_thin: bool,
+) -> Result<PathBuf> {
+    let pack_bytes =
+        fs::read(path).with_context(|| format!("read pack file {}", path.display()))?;
+    if pack_bytes.len() < 12 + 20 {
+        bail!("pack too small");
+    }
+    if &pack_bytes[0..4] != b"PACK" {
+        bail!("not a pack file: invalid signature");
+    }
+    let version = u32::from_be_bytes(pack_bytes[4..8].try_into()?);
+    if version != 2 && version != 3 {
+        bail!("unsupported pack version {version}");
+    }
+    let pack_end = pack_bytes.len() - 20;
+    {
+        let mut h = Sha1::new();
+        h.update(&pack_bytes[..pack_end]);
+        let digest = h.finalize();
+        if digest.as_slice() != &pack_bytes[pack_end..] {
+            bail!("pack trailing checksum mismatch");
+        }
+    }
+    let pack_hash = hex::encode(&pack_bytes[pack_end..]);
+    let pack_dir = repo.odb.objects_dir().join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    let pack_out = pack_dir.join(format!("pack-{pack_hash}.pack"));
+    let idx_out = pack_dir.join(format!("pack-{pack_hash}.idx"));
+    if path != pack_out {
+        fs::rename(path, &pack_out).or_else(|_| {
+            fs::copy(path, &pack_out)?;
+            fs::remove_file(path)?;
+            Ok::<(), std::io::Error>(())
+        })?;
+    }
+    let mut pack_data = pack_bytes[..pack_end].to_vec();
+    let (resolved, _by_oid) = parse_and_resolve(
+        &mut pack_data,
+        fix_thin,
+        Some(&repo.odb),
+        false,
+        true,
+        false,
+    )?;
+    let mut h = Sha1::new();
+    h.update(&pack_data);
+    let digest = h.finalize();
+    let on_disk = if digest.as_slice() == &pack_bytes[pack_end..] {
+        pack_bytes
+    } else {
+        pack_data.extend_from_slice(digest.as_slice());
+        fs::write(&pack_out, &pack_data)?;
+        pack_data
+    };
+    if !idx_out.exists() {
+        let idx_bytes = build_idx(&resolved, &on_disk, None)?;
+        fs::write(&idx_out, &idx_bytes)?;
+    }
+    Ok(pack_out)
+}
+
 pub(crate) fn ingest_pack_bytes(
     repo: &grit_lib::repo::Repository,
     pack_bytes: &[u8],

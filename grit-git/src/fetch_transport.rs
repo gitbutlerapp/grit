@@ -1988,13 +1988,49 @@ fn valid_token(token: &str) -> bool {
 /// When `filter_active` is true (client sent `filter` during fetch/clone), objects may be
 /// omitted and the pack must be kept as a **promisor** pack with a sibling `.promisor` marker,
 /// matching Git's partial-clone behavior (`t0410`).
+///
+/// Reads the pack from `pack_path` on disk instead of an in-memory buffer.
+pub(crate) fn unpack_upload_pack_file(
+    local_git_dir: &Path,
+    pack_path: &Path,
+    filter_active: bool,
+) -> Result<()> {
+    let len = std::fs::metadata(pack_path)
+        .with_context(|| format!("stat fetched pack {}", pack_path.display()))?
+        .len();
+    if len <= 12 {
+        anyhow::bail!("missing or empty packfile at {}", pack_path.display());
+    }
+    let repo = Repository::open(local_git_dir, None)
+        .with_context(|| format!("open repository {}", local_git_dir.display()))?;
+    let installed =
+        index_pack::ingest_pack_file(&repo, pack_path, true).context("ingest fetched pack")?;
+    append_pack_to_git_trace_packfile_path(&installed)?;
+    if filter_active {
+        let _ = std::fs::File::create(installed.with_extension("promisor"));
+    }
+    let pack_bytes = std::fs::read(&installed)
+        .with_context(|| format!("read installed pack {}", installed.display()))?;
+    lazy_fetch_missing_ref_delta_bases(&repo, &pack_bytes)?;
+    if filter_active || std::env::var_os("GRIT_FETCH_KEEP_PACK").is_some() {
+        return Ok(());
+    }
+    if should_store_fetched_pack_as_pack(local_git_dir, &pack_bytes) {
+        return Ok(());
+    }
+    let odb = Odb::new(&local_git_dir.join("objects"));
+    let mut reader = pack_bytes.as_slice();
+    unpack_objects(&mut reader, &odb, &UnpackOptions::default())?;
+    Ok(())
+}
+
 pub(crate) fn unpack_upload_pack_bytes(
     local_git_dir: &Path,
     pack_buf: &[u8],
     filter_active: bool,
 ) -> Result<()> {
     if pack_buf.len() <= 12 {
-        return Ok(());
+        anyhow::bail!("missing or empty packfile in upload-pack response");
     }
     append_pack_to_git_trace_packfile(pack_buf)?;
     if filter_active || std::env::var_os("GRIT_FETCH_KEEP_PACK").is_some() {
@@ -2088,6 +2124,12 @@ fn fetch_unpack_limit(local_git_dir: &Path) -> Option<usize> {
         }
     }
     None
+}
+
+fn append_pack_to_git_trace_packfile_path(path: &Path) -> anyhow::Result<()> {
+    let pack = std::fs::read(path)
+        .with_context(|| format!("read pack for GIT_TRACE_PACKFILE at {}", path.display()))?;
+    append_pack_to_git_trace_packfile(&pack)
 }
 
 fn append_pack_to_git_trace_packfile(pack: &[u8]) -> anyhow::Result<()> {
