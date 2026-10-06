@@ -15,9 +15,9 @@
 //! See `Documentation/technical/index-format.txt` in the Git source tree for
 //! the authoritative format specification.
 
-use std::collections::{BTreeMap, BTreeSet};
 #[cfg(not(unix))]
 use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

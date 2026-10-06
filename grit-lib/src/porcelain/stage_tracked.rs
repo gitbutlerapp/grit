@@ -134,22 +134,26 @@ pub fn stage_tracked_modifications_in_index(
             continue;
         };
 
-        if fs::symlink_metadata(&abs_path).is_ok() {
-            let ctx = PresentRefreshCtx {
-                repo,
-                index,
-                raw_path: &raw_path,
-                abs_path: &abs_path,
-                idx_e,
-                index_mtime,
-            };
-            if refresh_present_tracked_path(ctx)? {
-                summary.modified.push(raw_path);
+        match symlink_metadata_for_staging(&abs_path)? {
+            Some(_) => {
+                let ctx = PresentRefreshCtx {
+                    repo,
+                    index,
+                    raw_path: &raw_path,
+                    abs_path: &abs_path,
+                    idx_e,
+                    index_mtime,
+                };
+                if refresh_present_tracked_path(ctx)? {
+                    summary.modified.push(raw_path);
+                }
             }
-        } else if idx_e.skip_worktree() {
-            continue;
-        } else if index.remove(&raw_path) {
-            summary.removed.push(raw_path);
+            None if idx_e.skip_worktree() => continue,
+            None => {
+                if index.remove(&raw_path) {
+                    summary.removed.push(raw_path);
+                }
+            }
         }
     }
 
@@ -187,21 +191,38 @@ fn refresh_unmerged_tracked_path(
                 .map(|e| e.mode)
         })
         .unwrap_or(0o100644);
-    index.remove(raw_path);
-    if fs::symlink_metadata(abs_path).is_ok() {
-        if idx_mode == 0o160000 {
-            if let Some(oid) = read_submodule_head_oid(abs_path) {
-                stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
+    match symlink_metadata_for_staging(abs_path)? {
+        Some(_) => {
+            index.remove(raw_path);
+            if idx_mode == 0o160000 {
+                if let Some(oid) = read_submodule_head_oid(abs_path) {
+                    stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
+                    summary.modified.push(raw_path.to_vec());
+                }
+            } else {
+                stage_blob_from_worktree(repo, index, abs_path, raw_path, None)?;
                 summary.modified.push(raw_path.to_vec());
             }
-        } else {
-            stage_blob_from_worktree(repo, index, abs_path, raw_path, None)?;
-            summary.modified.push(raw_path.to_vec());
         }
-    } else {
-        summary.removed.push(raw_path.to_vec());
+        None => {
+            index.remove(raw_path);
+            summary.removed.push(raw_path.to_vec());
+        }
     }
     Ok(())
+}
+
+/// Worktree metadata for staging: present, definitively missing, or I/O error.
+fn symlink_metadata_for_staging(path: &Path) -> Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => Ok(Some(meta)),
+        Err(e) if worktree_path_is_missing(&e) => Ok(None),
+        Err(e) => Err(Error::Io(e)),
+    }
+}
+
+fn worktree_path_is_missing(err: &std::io::Error) -> bool {
+    matches!(err.kind(), std::io::ErrorKind::NotFound)
 }
 
 fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
@@ -395,7 +416,7 @@ mod tests {
     use filetime::{set_file_mtime, FileTime};
     use std::fs;
 
-    use crate::diff::{entry_is_racy, smudge_racily_clean_entries, stat_matches};
+    use crate::diff::{entry_is_racy, stat_matches};
     use crate::index::{entry_from_metadata, index_file_mtime, MODE_EXECUTABLE, MODE_REGULAR};
     use crate::objects::ObjectKind;
     use crate::odb::Odb;
@@ -679,6 +700,35 @@ mod tests {
         let summary = stage_tracked_modifications(&repo, repo.work_tree.as_ref().unwrap()).unwrap();
         assert!(summary.modified.is_empty());
         assert!(summary.removed.is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn unreadable_parent_does_not_stage_deletion() {
+        use std::io::ErrorKind;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree.as_ref().unwrap();
+        let locked = wt.join("locked");
+        fs::create_dir(&locked).unwrap();
+        fs::write(locked.join("f"), b"secret").unwrap();
+        write_and_index(&repo, b"locked/f", b"secret");
+        finalize_index_for_stat_trust(&repo);
+
+        let mut perms = fs::metadata(&locked).unwrap().permissions();
+        perms.set_mode(0o000);
+        fs::set_permissions(&locked, perms).unwrap();
+
+        let err = stage_tracked_modifications(&repo, wt).unwrap_err();
+        let Error::Io(io_err) = err else {
+            panic!("expected I/O error, got {err:?}");
+        };
+        assert_eq!(io_err.kind(), ErrorKind::PermissionDenied);
+
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let index = repo.load_index().unwrap();
+        assert!(index.entries.iter().any(|e| e.path == b"locked/f"));
     }
 
     #[test]
