@@ -51,7 +51,9 @@ use crate::config::{self, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
 use crate::error::{Error, Result};
 
-use super::HttpClient;
+use super::{
+    effective_info_refs_url_after_redirect, http_origin_key, http_origins_match, HttpClient,
+};
 
 /// A blocking [`ureq`]-backed [`HttpClient`].
 ///
@@ -61,14 +63,22 @@ use super::HttpClient;
 /// [`UreqHttpClient::with_git_protocol`]. To honor `http.proxy`,
 /// `http.cookieFile`, and `http.extraHeader`, build from a loaded [`ConfigSet`]
 /// with [`UreqHttpClient::from_config`].
+#[derive(Clone, Debug)]
+struct CachedAuthHeader {
+    header: String,
+    origin: String,
+}
+
 pub struct UreqHttpClient {
     agent: ureq::Agent,
     user_agent: String,
     git_protocol: Option<String>,
     credentials: Option<Box<dyn CredentialProvider + Send + Sync>>,
-    /// Cached `Authorization: Basic …` header from a successful auth, reused on
-    /// subsequent requests (mirrors Git's per-connection auth cache).
-    cached_auth: Mutex<Option<String>>,
+    /// Cached `Authorization: Basic …` header and the origin it is valid for.
+    cached_auth: Mutex<Option<CachedAuthHeader>>,
+    /// Origin of the first HTTP request in this session; host-only cookies without
+    /// a `Domain` attribute are sent only on this origin.
+    hostonly_cookie_scope: Mutex<Option<String>>,
     /// Parsed cookies (from `http.cookieFile`), sent as a `Cookie:` header on
     /// matching URLs. Empty when no cookie file was configured.
     cookies: Vec<CookieSpec>,
@@ -97,6 +107,7 @@ impl UreqHttpClient {
             git_protocol: None,
             credentials: None,
             cached_auth: Mutex::new(None),
+            hostonly_cookie_scope: Mutex::new(None),
             cookies: Vec::new(),
             cookie_file_path: None,
             save_cookies: false,
@@ -176,13 +187,20 @@ impl UreqHttpClient {
         self
     }
 
-    fn cached_auth_header(&self) -> Option<String> {
-        self.cached_auth.lock().ok().and_then(|g| g.clone())
+    fn cached_auth_header_for_url(&self, url: &str) -> Option<String> {
+        let origin = http_origin_key(url)?;
+        let guard = self.cached_auth.lock().ok()?;
+        guard
+            .as_ref()
+            .filter(|entry| entry.origin == origin)
+            .map(|entry| entry.header.clone())
     }
 
-    fn store_auth_header(&self, header: String) {
-        if let Ok(mut g) = self.cached_auth.lock() {
-            *g = Some(header);
+    fn store_auth_header(&self, header: String, url: &str) {
+        if let Some(origin) = http_origin_key(url) {
+            if let Ok(mut g) = self.cached_auth.lock() {
+                *g = Some(CachedAuthHeader { header, origin });
+            }
         }
     }
 
@@ -192,17 +210,42 @@ impl UreqHttpClient {
         }
     }
 
+    /// Seed cached basic auth for a URL origin (integration tests only).
+    #[doc(hidden)]
+    pub fn seed_cached_basic_auth(&self, url: &str, username: &str, password: &str) {
+        use base64::Engine as _;
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+        self.store_auth_header(format!("Basic {encoded}"), url);
+    }
+
+    fn hostonly_cookie_scope_for_url(&self, url: &str) -> Option<String> {
+        let origin = http_origin_key(url)?;
+        let mut guard = self.hostonly_cookie_scope.lock().ok()?;
+        if guard.is_none() {
+            *guard = Some(origin.clone());
+        }
+        guard.clone()
+    }
+
+    fn invalidate_auth_on_cross_origin_redirect(&self, request_url: &str, final_url: &str) {
+        if !http_origins_match(request_url, final_url) {
+            self.clear_auth_header();
+        }
+    }
+
     /// The `Cookie:` header value to send for `url`, or `None` when no cookie
     /// matches. Lifts the CLI's `cookie_header_for_url`.
     fn cookie_header_for_url(&self, url: &str) -> Option<String> {
         if self.cookies.is_empty() {
             return None;
         }
+        let scope = self.hostonly_cookie_scope_for_url(url);
         let parsed = url::Url::parse(url).ok();
         let parts = self
             .cookies
             .iter()
-            .filter(|cookie| cookie.matches_url(parsed.as_ref()))
+            .filter(|cookie| cookie.matches_url(parsed.as_ref(), scope.as_deref()))
             .map(|cookie| cookie.name_value.clone())
             .collect::<Vec<_>>();
         (!parts.is_empty()).then(|| parts.join("; "))
@@ -444,11 +487,12 @@ impl UreqHttpClient {
     /// the response body and the final URL after any followed redirects.
     fn with_auth_retry<F>(&self, url: &str, attempt: F) -> Result<(Vec<u8>, String)>
     where
-        F: Fn(Option<&str>) -> Result<RawResponse>,
+        F: Fn(&str, Option<&str>) -> Result<RawResponse>,
     {
-        let initial_auth = self.cached_auth_header();
-        let first = attempt(initial_auth.as_deref())?;
+        let initial_auth = self.cached_auth_header_for_url(url);
+        let first = attempt(url, initial_auth.as_deref())?;
         if first.status != 401 {
+            self.invalidate_auth_on_cross_origin_redirect(url, &first.final_url);
             self.save_response_cookies(&first.set_cookie);
             return finalize_status(url, first.status, first.body, first.final_url);
         }
@@ -467,9 +511,10 @@ impl UreqHttpClient {
                 first.www_authenticate
             )));
         }
-        let Some(input) = credential_for_url(url, &self.credential_config) else {
+        let auth_url = effective_info_refs_url_after_redirect(url, Some(first.final_url.as_str()));
+        let Some(input) = credential_for_url(&auth_url, &self.credential_config) else {
             return Err(Error::Auth(format!(
-                "{url}: server requires authentication (401) but the URL could not be decomposed into credential fields"
+                "{auth_url}: server requires authentication (401) but the URL could not be decomposed into credential fields"
             )));
         };
         // A provider that cannot supply a credential (no configured helper, or a
@@ -477,13 +522,13 @@ impl UreqHttpClient {
         // generic message, and crucially never blocks on a TTY.
         let cred = provider
             .fill(&input)
-            .map_err(|e| Error::Auth(format!("{url}: could not obtain credentials: {e}")))?;
+            .map_err(|e| Error::Auth(format!("{auth_url}: could not obtain credentials: {e}")))?;
         let Some(header) = basic_auth_header(&cred) else {
             return Err(Error::Auth(format!(
-                "{url}: credential helper returned no usable username/password"
+                "{auth_url}: credential helper returned no usable username/password"
             )));
         };
-        let retry = attempt(Some(&header))?;
+        let retry = attempt(&auth_url, Some(&header))?;
         if retry.status == 401 {
             // Credentials were supplied but rejected: erase them and surface a
             // typed auth error.
@@ -498,9 +543,13 @@ impl UreqHttpClient {
             self.clear_auth_header();
             return Err(http_status_error(url, retry.status));
         }
-        // Success: approve + cache the working auth header.
+        // Success: approve + cache the working auth header for this origin only.
         let _ = provider.approve(&cred);
-        self.store_auth_header(header);
+        if http_origins_match(&auth_url, &retry.final_url) {
+            self.store_auth_header(header, &auth_url);
+        } else {
+            self.clear_auth_header();
+        }
         self.save_response_cookies(&retry.set_cookie);
         Ok((retry.body, retry.final_url))
     }
@@ -509,7 +558,7 @@ impl UreqHttpClient {
 impl HttpClient for UreqHttpClient {
     fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
         let gp = git_protocol.or(self.git_protocol.as_deref());
-        self.with_auth_retry(url, |auth| self.do_get(url, gp, auth))
+        self.with_auth_retry(url, |target, auth| self.do_get(target, gp, auth))
             .map(|(body, _)| body)
     }
 
@@ -522,8 +571,8 @@ impl HttpClient for UreqHttpClient {
         git_protocol: Option<&str>,
     ) -> Result<Vec<u8>> {
         let gp = git_protocol.or(self.git_protocol.as_deref());
-        self.with_auth_retry(url, |auth| {
-            self.do_post(url, content_type, accept, body, gp, auth)
+        self.with_auth_retry(url, |target, auth| {
+            self.do_post(target, content_type, accept, body, gp, auth)
         })
         .map(|(body, _)| body)
     }
@@ -534,12 +583,16 @@ impl HttpClient for UreqHttpClient {
         git_protocol: Option<&str>,
     ) -> Result<(Vec<u8>, Option<String>)> {
         let gp = git_protocol.or(self.git_protocol.as_deref());
-        self.with_auth_retry(url, |auth| self.do_get(url, gp, auth))
+        self.with_auth_retry(url, |target, auth| self.do_get(target, gp, auth))
             .map(|(body, final_url)| (body, Some(final_url)))
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
         self.git_protocol.as_deref()
+    }
+
+    fn reset_auth_after_redirect_rebase(&self) {
+        self.clear_auth_header();
     }
 }
 
@@ -692,23 +745,31 @@ struct CookieSpec {
     path: Option<String>,
     secure: bool,
     expires_at: Option<i64>,
+    host_only_origin: Option<String>,
 }
 
 impl CookieSpec {
     /// Whether this cookie should be sent on a request to `url`. Lifts the CLI's
     /// `CookieSpec::matches_url`: honors expiry, `secure` (https-only), the
     /// domain (with optional subdomain inclusion), and the path prefix.
-    fn matches_url(&self, url: Option<&url::Url>) -> bool {
+    fn matches_url(&self, url: Option<&url::Url>, hostonly_scope: Option<&str>) -> bool {
         if self.is_expired() {
             return false;
         }
         let Some(url) = url else {
-            return self.domain.is_none() && self.path.is_none() && !self.secure;
+            return false;
         };
         if self.secure && url.scheme() != "https" {
             return false;
         }
-        if let Some(domain) = self.domain.as_deref() {
+        if self.domain.is_none() {
+            let bind = self.host_only_origin.as_deref().or(hostonly_scope);
+            if let Some(origin) = bind {
+                if !http_origins_match(origin, url.as_str()) {
+                    return false;
+                }
+            }
+        } else if let Some(domain) = self.domain.as_deref() {
             let Some(host) = url.host_str() else {
                 return false;
             };
@@ -790,6 +851,7 @@ fn parse_netscape_cookie(line: &str) -> Option<CookieSpec> {
         path: (!path.is_empty()).then(|| path.to_string()),
         secure,
         expires_at,
+        host_only_origin: None,
     })
 }
 
@@ -812,6 +874,7 @@ fn parse_header_cookie(line: &str) -> Option<CookieSpec> {
         path: None,
         secure: false,
         expires_at: None,
+        host_only_origin: None,
     };
     for attr in parts {
         if attr.eq_ignore_ascii_case("secure") {
@@ -846,10 +909,10 @@ mod tests {
         let spec = parse_cookie_spec(line).expect("parse netscape cookie");
         assert_eq!(spec.name_value, "SID=abc123");
         let url = url::Url::parse("http://example.com/repo.git/info/refs").unwrap();
-        assert!(spec.matches_url(Some(&url)));
+        assert!(spec.matches_url(Some(&url), None));
         // Different host does not match.
         let other = url::Url::parse("http://other.test/").unwrap();
-        assert!(!spec.matches_url(Some(&other)));
+        assert!(!spec.matches_url(Some(&other), None));
     }
 
     #[test]
@@ -859,13 +922,24 @@ mod tests {
         let http = url::Url::parse("http://example.com/").unwrap();
         let https = url::Url::parse("https://example.com/").unwrap();
         assert!(
-            !spec.matches_url(Some(&http)),
+            !spec.matches_url(Some(&http), None),
             "secure cookie must skip http"
         );
         assert!(
-            spec.matches_url(Some(&https)),
+            spec.matches_url(Some(&https), None),
             "secure cookie matches https"
         );
+    }
+
+    #[test]
+    fn host_only_cookie_file_cookie_respects_session_origin() {
+        let line = "Set-Cookie: Foo=1";
+        let spec = parse_cookie_spec(line).expect("parse header cookie");
+        let gateway = url::Url::parse("http://127.0.0.1:8001/gateway/repo.git/info/refs").unwrap();
+        let target = url::Url::parse("http://127.0.0.1:8002/secure/repo.git/info/refs").unwrap();
+        let scope = "http://127.0.0.1:8001";
+        assert!(spec.matches_url(Some(&gateway), Some(scope)));
+        assert!(!spec.matches_url(Some(&target), Some(scope)));
     }
 
     #[test]
@@ -878,24 +952,25 @@ mod tests {
         assert!(spec.secure);
         // Subdomain inclusion (Domain attribute set).
         let sub = url::Url::parse("https://api.example.com/git/info/refs").unwrap();
-        assert!(spec.matches_url(Some(&sub)));
+        assert!(spec.matches_url(Some(&sub), None));
         // Path that does not match the prefix is rejected.
         let wrong_path = url::Url::parse("https://example.com/other").unwrap();
-        assert!(!spec.matches_url(Some(&wrong_path)));
+        assert!(!spec.matches_url(Some(&wrong_path), None));
     }
 
     #[test]
     fn expired_cookie_does_not_match() {
         let spec = CookieSpec {
             name_value: "x=1".to_owned(),
-            domain: None,
+            domain: Some("example.com".to_owned()),
             include_subdomains: false,
             path: None,
             secure: false,
             expires_at: Some(1), // 1970 — long expired
+            host_only_origin: None,
         };
         let url = url::Url::parse("http://example.com/").unwrap();
-        assert!(!spec.matches_url(Some(&url)));
+        assert!(!spec.matches_url(Some(&url), None));
     }
 
     #[test]

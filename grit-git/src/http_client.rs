@@ -17,6 +17,9 @@ use base64::Engine;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use grit_lib::config::{parse_bool, parse_i64, ConfigSet};
+use grit_lib::transport::http::{
+    effective_info_refs_url_after_redirect, http_origin_key, http_origins_match,
+};
 use url::Url;
 
 /// Pre-built ureq agent or SOCKS-over-Unix tunnel for `http.proxy`.
@@ -38,7 +41,17 @@ pub struct HttpClientContext {
     smart_http_enabled: bool,
     proactive_auth: ProactiveAuth,
     empty_auth: bool,
-    auth_cache: Arc<Mutex<Option<AuthCredentials>>>,
+    auth_entry: Arc<Mutex<Option<CachedHttpAuth>>>,
+    /// Origin of the first HTTP request in this client session; host-only cookies
+    /// without a `Domain` attribute are sent only on this origin (not after a
+    /// cross-authority redirect).
+    hostonly_cookie_scope: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Clone)]
+struct CachedHttpAuth {
+    credentials: AuthCredentials,
+    origin: String,
 }
 
 #[derive(Clone)]
@@ -82,6 +95,8 @@ struct CookieSpec {
     path: Option<String>,
     secure: bool,
     expires_at: Option<i64>,
+    /// When set, a host-only cookie (no `Domain` attribute) is limited to this origin.
+    host_only_origin: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,17 +147,24 @@ fn ensure_supported_proxy_auth_method(method: &ProxyAuthMethod, proxy_url: &Url)
 }
 
 impl CookieSpec {
-    fn matches_url(&self, url: Option<&Url>) -> bool {
+    fn matches_url(&self, url: Option<&Url>, hostonly_scope: Option<&str>) -> bool {
         if self.is_expired() {
             return false;
         }
         let Some(url) = url else {
-            return self.domain.is_none() && self.path.is_none() && !self.secure;
+            return false;
         };
         if self.secure && url.scheme() != "https" {
             return false;
         }
-        if let Some(domain) = self.domain.as_deref() {
+        if self.domain.is_none() {
+            let bind = self.host_only_origin.as_deref().or(hostonly_scope);
+            if let Some(origin) = bind {
+                if !http_origins_match(origin, url.as_str()) {
+                    return false;
+                }
+            }
+        } else if let Some(domain) = self.domain.as_deref() {
             let Some(host) = url.host_str() else {
                 return false;
             };
@@ -290,8 +312,14 @@ impl HttpClientContext {
             smart_http_enabled,
             proactive_auth,
             empty_auth,
-            auth_cache: Arc::new(Mutex::new(None)),
+            auth_entry: Arc::new(Mutex::new(None)),
+            hostonly_cookie_scope: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Drop cached HTTP authorization after redirect re-basing (Git `credential_from_url`).
+    pub(crate) fn reset_auth_after_redirect_rebase(&self) {
+        self.clear_cached_auth();
     }
 
     /// Default agent (no proxy, trace from environment only).
@@ -358,7 +386,7 @@ impl HttpClientContext {
         self.trace_cookie_header(cookie_header.as_deref());
         let extra_headers = self.extra_headers_for_url(url);
         self.trace_extra_headers(&extra_headers);
-        let request_auth = match self.cached_authorization_header() {
+        let request_auth = match self.cached_authorization_header_for_url(url) {
             Some(header) => Some(header),
             None => self.proactive_authorization_header(url)?,
         };
@@ -366,6 +394,9 @@ impl HttpClientContext {
         self.save_response_cookies(&first)?;
         self.trace_response_status(first.status, &first.reason);
         if first.status != 401 {
+            if let Some(final_url) = first.final_url.as_deref() {
+                self.invalidate_auth_on_cross_origin_redirect(url, final_url);
+            }
             if first.status >= 400 {
                 return Err(http_access_error(url, first.status));
             }
@@ -373,24 +404,25 @@ impl HttpClientContext {
             return Ok(first);
         }
         let auth_challenges = first.www_authenticate_challenges();
+        let auth_url = effective_info_refs_url_after_redirect(url, first.final_url.as_deref());
 
         let mut auth = self
-            .credentials_from_fill(url, &auth_challenges)?
-            .unwrap_or(self.default_auth_for_url(url)?);
+            .credentials_from_fill(&auth_url, &auth_challenges)?
+            .unwrap_or(self.default_auth_for_url(&auth_url)?);
         if auth.needs_basic_prompt() && !self.empty_auth {
             let mut username = auth.username().unwrap_or_default().to_string();
             if username.is_empty() {
-                username = self.askpass_username(url)?;
+                username = self.askpass_username(&auth_url)?;
             }
-            let password = self.askpass_password(url, &username)?;
+            let password = self.askpass_password(&auth_url, &username)?;
             auth = AuthCredentials::Basic { username, password };
         }
 
         let auth_header = auth.authorization_header();
         self.trace_auth_header(&auth_header);
-        let retry = self.http_get_once(url, Some(&auth_header), git_protocol_header)?;
+        let retry = self.http_get_once(&auth_url, Some(&auth_header), git_protocol_header)?;
         self.save_response_cookies(&retry)?;
-        let mut credential_input = self.credential_input_for_url(url)?;
+        let mut credential_input = self.credential_input_for_url(&auth_url)?;
         auth.add_to_credential_input(&mut credential_input);
         let mut reject_extras = auth.credential_extras();
         reject_extras.extend(credential_challenge_extras(&auth_challenges));
@@ -398,14 +430,14 @@ impl HttpClientContext {
         if retry.status == 401 && auth.should_continue() {
             let next_challenges = retry.www_authenticate_challenges();
             if let Some(next_auth) =
-                self.credentials_from_fill_continue(url, &next_challenges, &auth)?
+                self.credentials_from_fill_continue(&auth_url, &next_challenges, &auth)?
             {
                 let next_auth_header = next_auth.authorization_header();
                 self.trace_auth_header(&next_auth_header);
                 let retry2 =
-                    self.http_get_once(url, Some(&next_auth_header), git_protocol_header)?;
+                    self.http_get_once(&auth_url, Some(&next_auth_header), git_protocol_header)?;
                 self.save_response_cookies(&retry2)?;
-                let mut credential_input = self.credential_input_for_url(url)?;
+                let mut credential_input = self.credential_input_for_url(&auth_url)?;
                 next_auth.add_to_credential_input(&mut credential_input);
                 let mut reject_extras = next_auth.credential_extras();
                 reject_extras.extend(credential_challenge_extras(&next_challenges));
@@ -413,22 +445,30 @@ impl HttpClientContext {
                 if retry2.status >= 400 {
                     let _ = self.run_credential_action("reject", &credential_input, &reject_extras);
                     self.clear_cached_auth();
-                    return Err(http_access_error(url, retry2.status));
+                    return Err(http_access_error(&auth_url, retry2.status));
                 }
                 let approve_extras = next_auth.credential_extras();
                 let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-                self.store_cached_auth(next_auth);
+                self.store_cached_auth(next_auth, &auth_url);
                 return Ok(retry2);
             }
         }
         if retry.status >= 400 {
             let _ = self.run_credential_action("reject", &credential_input, &reject_extras);
             self.clear_cached_auth();
-            return Err(http_access_error(url, retry.status));
+            return Err(http_access_error(&auth_url, retry.status));
         }
         let approve_extras = auth.credential_extras();
         let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-        self.store_cached_auth(auth);
+        if retry
+            .final_url
+            .as_deref()
+            .is_none_or(|final_url| http_origins_match(&auth_url, final_url))
+        {
+            self.store_cached_auth(auth, &auth_url);
+        } else {
+            self.clear_cached_auth();
+        }
         Ok(retry)
     }
 
@@ -484,7 +524,7 @@ impl HttpClientContext {
         }
         self.trace_rpc_post_size(url, payload.len(), chunked);
 
-        let request_auth = match self.cached_authorization_header() {
+        let request_auth = match self.cached_authorization_header_for_url(url) {
             Some(header) => Some(header),
             None => self.proactive_authorization_header(url)?,
         };
@@ -501,6 +541,9 @@ impl HttpClientContext {
         self.save_response_cookies(&first)?;
         self.trace_response_status(first.status, &first.reason);
         if first.status != 401 {
+            if let Some(final_url) = first.final_url.as_deref() {
+                self.invalidate_auth_on_cross_origin_redirect(url, final_url);
+            }
             if first.status >= 400 {
                 return Err(http_access_error(url, first.status));
             }
@@ -569,7 +612,7 @@ impl HttpClientContext {
                 }
                 let approve_extras = next_auth.credential_extras();
                 let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-                self.store_cached_auth(next_auth);
+                self.store_cached_auth(next_auth, url);
                 return Ok(retry2.body);
             }
         }
@@ -580,7 +623,15 @@ impl HttpClientContext {
         }
         let approve_extras = auth.credential_extras();
         let _ = self.run_credential_action("approve", &credential_input, &approve_extras);
-        self.store_cached_auth(auth);
+        if retry
+            .final_url
+            .as_deref()
+            .is_none_or(|final_url| http_origins_match(url, final_url))
+        {
+            self.store_cached_auth(auth, url);
+        } else {
+            self.clear_cached_auth();
+        }
         Ok(retry.body)
     }
 
@@ -758,36 +809,64 @@ impl HttpClientContext {
         }
     }
 
-    fn cached_authorization_header(&self) -> Option<String> {
+    fn cached_authorization_header_for_url(&self, url: &str) -> Option<String> {
+        let origin = http_origin_key(url)?;
         let guard = self
-            .auth_cache
+            .auth_entry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.as_ref().map(AuthCredentials::authorization_header)
+        guard
+            .as_ref()
+            .filter(|entry| entry.origin == origin)
+            .map(|entry| entry.credentials.authorization_header())
     }
 
     fn cached_auth_credentials(&self) -> Option<AuthCredentials> {
         let guard = self
-            .auth_cache
+            .auth_entry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.clone()
+        guard.as_ref().map(|entry| entry.credentials.clone())
     }
 
-    fn store_cached_auth(&self, auth: AuthCredentials) {
+    fn store_cached_auth(&self, auth: AuthCredentials, url: &str) {
+        let Some(origin) = http_origin_key(url) else {
+            return;
+        };
         let mut guard = self
-            .auth_cache
+            .auth_entry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *guard = Some(auth);
+        *guard = Some(CachedHttpAuth {
+            credentials: auth,
+            origin,
+        });
     }
 
     fn clear_cached_auth(&self) {
         let mut guard = self
-            .auth_cache
+            .auth_entry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = None;
+    }
+
+    fn hostonly_cookie_scope_for_url(&self, url: &str) -> Option<String> {
+        let origin = http_origin_key(url)?;
+        let mut guard = self
+            .hostonly_cookie_scope
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_none() {
+            *guard = Some(origin.clone());
+        }
+        guard.clone()
+    }
+
+    fn invalidate_auth_on_cross_origin_redirect(&self, request_url: &str, final_url: &str) {
+        if !http_origins_match(request_url, final_url) {
+            self.clear_cached_auth();
+        }
     }
 
     fn approve_cached_auth_for_url(&self, url: &str) {
@@ -828,7 +907,7 @@ impl HttpClientContext {
         }
         let header = auth.authorization_header();
         self.trace_auth_header(&header);
-        self.store_cached_auth(auth);
+        self.store_cached_auth(auth, url);
         Ok(Some(header))
     }
 
@@ -873,9 +952,8 @@ impl HttpClientContext {
         let host = host_header_value(&parsed);
         input.insert("host".to_string(), host);
         if self.credential_use_http_path {
-            let path = parsed.path().trim_start_matches('/');
-            if !path.is_empty() {
-                input.insert("path".to_string(), path.to_string());
+            if let Some(path) = credential_prompt_path(parsed.path()) {
+                input.insert("path".to_string(), path);
             }
         }
         if let Some(user) = self
@@ -1016,7 +1094,10 @@ impl HttpClientContext {
     }
 
     fn askpass_username(&self, url: &str) -> Result<String> {
-        let prompt = format!("Username for '{}': ", credential_prompt_origin(url)?);
+        let prompt = format!(
+            "Username for '{}': ",
+            credential_prompt_origin(url, self.credential_use_http_path)?
+        );
         run_askpass(&prompt)
     }
 
@@ -1027,7 +1108,7 @@ impl HttpClientContext {
             "Password for '{}://{}@{}': ",
             credential_prompt_scheme(url)?,
             encoded_user,
-            credential_prompt_host(url)?
+            credential_prompt_host(url, self.credential_use_http_path)?
         );
         run_askpass(&prompt)
     }
@@ -1096,11 +1177,12 @@ impl HttpClientContext {
         if self.cookies.is_empty() {
             return None;
         }
+        let scope = self.hostonly_cookie_scope_for_url(url);
         let parsed = Url::parse(url).ok();
         let parts = self
             .cookies
             .iter()
-            .filter(|cookie| cookie.matches_url(parsed.as_ref()))
+            .filter(|cookie| cookie.matches_url(parsed.as_ref(), scope.as_deref()))
             .map(|cookie| cookie.name_value.clone())
             .collect::<Vec<_>>();
         (!parts.is_empty()).then(|| parts.join("; "))
@@ -2014,6 +2096,7 @@ fn parse_netscape_cookie(line: &str) -> Option<CookieSpec> {
         path: (!path.is_empty()).then(|| path.to_string()),
         secure,
         expires_at,
+        host_only_origin: None,
     })
 }
 
@@ -2035,6 +2118,7 @@ fn parse_header_cookie(line: &str) -> Option<CookieSpec> {
         path: None,
         secure: false,
         expires_at: None,
+        host_only_origin: None,
     };
     for attr in parts {
         if attr.eq_ignore_ascii_case("secure") {
@@ -2474,10 +2558,15 @@ fn run_askpass(prompt: &str) -> Result<String> {
     Ok(value)
 }
 
-fn credential_prompt_origin(url: &str) -> Result<String> {
+fn credential_prompt_origin(url: &str, use_http_path: bool) -> Result<String> {
     let parsed = Url::parse(url).with_context(|| format!("bad URL {url}"))?;
     let scheme = parsed.scheme();
     let host = host_header_value(&parsed);
+    if use_http_path {
+        if let Some(path) = credential_prompt_path(parsed.path()) {
+            return Ok(format!("{scheme}://{host}/{path}"));
+        }
+    }
     Ok(format!("{scheme}://{host}"))
 }
 
@@ -2486,7 +2575,22 @@ fn credential_prompt_scheme(url: &str) -> Result<String> {
     Ok(parsed.scheme().to_string())
 }
 
-fn credential_prompt_host(url: &str) -> Result<String> {
+fn credential_prompt_host(url: &str, use_http_path: bool) -> Result<String> {
     let parsed = Url::parse(url).with_context(|| format!("bad URL {url}"))?;
-    Ok(host_header_value(&parsed))
+    let host = host_header_value(&parsed);
+    if use_http_path {
+        if let Some(path) = credential_prompt_path(parsed.path()) {
+            return Ok(format!("{host}/{path}"));
+        }
+    }
+    Ok(host)
+}
+
+/// Path segment shown in Git-compatible askpass prompts when `credential.useHttpPath` applies.
+fn credential_prompt_path(raw_path: &str) -> Option<String> {
+    let mut path = raw_path.trim_start_matches('/');
+    if let Some(stripped) = path.strip_suffix("info/refs") {
+        path = stripped.trim_end_matches('/');
+    }
+    (!path.is_empty()).then(|| path.to_string())
 }

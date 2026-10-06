@@ -138,6 +138,10 @@ esac
 case "$*" in
 *"auth/smart"*|*"auth-fetch/smart"*|*"auth-push/smart"*) _http=0 ;;
 esac
+# Redirect credential re-auth (t5551, issue #895): exercise Grit's smart-HTTP client.
+case "$*" in
+*"smart-redir-auth"*) _http=0 ;;
+esac
 # t5564-http-proxy: grit implements http.proxy / GIT_TRACE_CURL / SOCKS path validation.
 if test -n "${LIB_HTTPD_PROXY-}"; then
 	case "$*" in

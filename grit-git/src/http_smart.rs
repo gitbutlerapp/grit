@@ -239,6 +239,7 @@ pub(crate) fn http_get_discovery_with_base(
         return Ok((body, original_base.to_string()));
     };
     trace_http_line(format!("< redirected base {original_base} -> {new_base}"));
+    client.reset_auth_after_redirect_rebase();
 
     let new_refs_url = info_refs_url(&new_base);
     trace_http_line(format!("> GET {new_refs_url}"));

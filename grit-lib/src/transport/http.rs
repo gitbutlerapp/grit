@@ -118,6 +118,10 @@ pub trait HttpClient: Send + Sync {
     fn smart_http_enabled(&self) -> bool {
         true
     }
+
+    /// Drop cached HTTP authorization after an `info/refs` redirect changed the
+    /// effective repository base (Git re-binds credentials via `credential_from_url`).
+    fn reset_auth_after_redirect_rebase(&self) {}
 }
 
 /// Forward [`HttpClient`] through a shared [`std::sync::Arc`], so one client can
@@ -337,12 +341,43 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
 
 /// Build the `info/refs?service=git-upload-pack` discovery URL for `repo_url`.
 fn info_refs_url(repo_url: &str) -> String {
-    let base = repo_url.trim_end_matches('/');
+    smart_info_refs_discovery_url(repo_url)
+}
+
+/// Build the smart-HTTP `info/refs?service=git-upload-pack` discovery URL for a repo base.
+#[must_use]
+pub fn smart_info_refs_discovery_url(repo_base: &str) -> String {
+    let base = repo_base.trim_end_matches('/');
     let mut url = format!("{base}/info/refs");
     url.push_str(if url.contains('?') { "&" } else { "?" });
     url.push_str("service=");
     url.push_str(UPLOAD_PACK);
     url
+}
+
+/// Strip the `/info/refs` suffix (and query) from a discovery URL, returning the repo base.
+#[must_use]
+pub fn repo_base_from_info_refs_url(info_refs_url: &str) -> Option<String> {
+    let path = info_refs_url.split('?').next()?;
+    let base = path.strip_suffix("/info/refs")?.trim_end_matches('/');
+    (!base.is_empty()).then(|| base.to_string())
+}
+
+/// After an `info/refs` GET that returned `401` following redirects, return the
+/// discovery URL whose path matches the effective repository base (Git's
+/// `credential_from_url` after `update_url_from_redirect`).
+#[must_use]
+pub fn effective_info_refs_url_after_redirect(
+    requested_info_refs_url: &str,
+    final_url: Option<&str>,
+) -> String {
+    let Some(original_base) = repo_base_from_info_refs_url(requested_info_refs_url) else {
+        return requested_info_refs_url.to_string();
+    };
+    match rebased_base_from_redirect(&original_base, final_url) {
+        Some(new_base) => smart_info_refs_discovery_url(&new_base),
+        None => requested_info_refs_url.to_string(),
+    }
 }
 
 /// Given the `original_base` of an `info/refs` discovery request and the final
@@ -367,6 +402,30 @@ pub fn rebased_base_from_redirect(original_base: &str, final_url: Option<&str>) 
         return None;
     }
     Some(new_base.to_owned())
+}
+
+/// Normalized HTTP origin (`scheme://host:port`) used to scope cached credentials
+/// and cookies across redirects.
+///
+/// Host names are lowercased and not aliased (`127.0.0.1` and `localhost` stay
+/// distinct). Non-default ports are always included; default ports for the scheme
+/// are filled in when omitted from the URL.
+#[must_use]
+pub fn http_origin_key(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let scheme = parsed.scheme().to_ascii_lowercase();
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let port = parsed.port_or_known_default()?;
+    Some(format!("{scheme}://{host}:{port}"))
+}
+
+/// Returns whether two URLs share the same HTTP origin (scheme, host, port).
+#[must_use]
+pub fn http_origins_match(a: &str, b: &str) -> bool {
+    match (http_origin_key(a), http_origin_key(b)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
 }
 
 /// The `git-upload-pack` stateless-RPC endpoint URL for `repo_url`.
@@ -1128,6 +1187,7 @@ pub fn http_fetch(
     let (repo_url, disc) = match rebased {
         Some(new_base) => {
             net_trace!("http_fetch: redirected base {repo_url} -> {new_base}");
+            client.reset_auth_after_redirect_rebase();
             let url = info_refs_url(&new_base);
             let body = client.get(&url, client.git_protocol_header())?;
             let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
@@ -1772,6 +1832,34 @@ mod tests {
         assert_eq!(
             rebased_base_from_redirect(base, Some("https://host/smart/repo/info/refs")).as_deref(),
             Some("https://host/smart/repo")
+        );
+    }
+
+    #[test]
+    fn effective_info_refs_url_uses_redirect_target() {
+        let requested =
+            smart_info_refs_discovery_url("http://127.0.0.1:9/smart-redir-auth/repo.git");
+        let final_url = "http://127.0.0.1:9/auth/smart/repo.git/info/refs?service=git-upload-pack";
+        let effective = effective_info_refs_url_after_redirect(&requested, Some(final_url));
+        assert_eq!(
+            effective,
+            smart_info_refs_discovery_url("http://127.0.0.1:9/auth/smart/repo.git")
+        );
+    }
+
+    #[test]
+    fn http_origin_distinguishes_localhost_from_loopback() {
+        assert!(!http_origins_match(
+            "http://127.0.0.1:8080/repo",
+            "http://localhost:8080/repo"
+        ));
+        assert!(http_origins_match(
+            "http://127.0.0.1:8080/x",
+            "http://127.0.0.1:8080/y"
+        ));
+        assert_eq!(
+            http_origin_key("https://Example.com/repo").as_deref(),
+            Some("https://example.com:443")
         );
     }
 

@@ -65,10 +65,11 @@ test_expect_success 'no-op half-auth fetch does not require a password' '
 	GIT_TEST_PROTOCOL_VERSION=0 git --git-dir=half-auth fetch &&
 	expect_askpass none
 '
-test_expect_failure 'redirects send auth to new location' '
+test_expect_success 'redirects send auth to new location' '
 	set_askpass user@host pass@host &&
 	git -c credential.useHttpPath=true \
-	  clone $HTTPD_URL/smart-redir-auth/repo.git repo-redir-auth
+	  clone $HTTPD_URL/smart-redir-auth/repo.git repo-redir-auth &&
+	test_cmp file repo-redir-auth/file
 '
 test_expect_success 'GIT_TRACE_CURL redacts auth details' '
 	rm -rf redact-auth trace && set_askpass user@host pass@host &&
