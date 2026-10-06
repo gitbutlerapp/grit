@@ -2931,7 +2931,6 @@ pub fn smudge_racily_clean_entries(
     }
     changed
 }
-
 /// Quick stat check: does the index entry's cached stat data match the file?
 /// Returns true when the file at `ie`'s path differs from the index entry (mode or blob).
 ///
@@ -3233,7 +3232,7 @@ fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
 /// On Unix the raw `OsStr` bytes are used verbatim. On Windows `OsStr` is WTF-8
 /// and has no stable byte view, so the lossy UTF-8 form is used (symlink targets
 /// in Git trees are UTF-8 in practice).
-fn symlink_target_bytes(target: &Path) -> Vec<u8> {
+pub(crate) fn symlink_target_bytes(target: &Path) -> Vec<u8> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt as _;

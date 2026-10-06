@@ -8,19 +8,24 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::diff::{entry_is_racy, mode_from_metadata, read_submodule_head_oid, stat_matches};
+use crate::diff::{
+    entry_is_racy, mode_from_metadata, read_submodule_head_oid, stat_matches, symlink_target_bytes,
+};
 use crate::error::{Error, Result};
-use crate::index::{entry_from_stat, Index, IndexEntry};
+use crate::index::index_file_mtime;
+use crate::index::{entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 
 /// Summary of paths updated while staging tracked modifications/deletions.
+///
+/// Paths are stored as raw index bytes (may be non-UTF-8 on Unix).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StageTrackedSummary {
     /// Tracked paths newly staged or re-staged with updated blob/mode metadata.
-    pub modified: Vec<String>,
+    pub modified: Vec<Vec<u8>>,
     /// Tracked paths removed from the index because they disappeared from the worktree.
-    pub removed: Vec<String>,
+    pub removed: Vec<Vec<u8>>,
 }
 
 impl StageTrackedSummary {
@@ -44,6 +49,9 @@ impl StageTrackedSummary {
 /// # Parameters
 /// - `repo` — repository handle (object store and index paths).
 /// - `work_tree` — working tree root.
+///
+/// # Returns
+/// A [`StageTrackedSummary`] listing modified and removed index paths (sorted).
 ///
 /// # Errors
 /// I/O failures, object write failures, or a missing index when one is required.
@@ -73,6 +81,18 @@ pub fn stage_tracked_modifications(
 ///
 /// Useful when the caller will merge further index updates before a single write (for example
 /// `git commit --dry-run`).
+///
+/// # Parameters
+/// - `repo` — repository handle (object store).
+/// - `work_tree` — working tree root.
+/// - `index_path` — on-disk index path used to sample racy-timestamp context.
+/// - `index` — index to update in place.
+///
+/// # Returns
+/// A [`StageTrackedSummary`] with sorted `modified` and `removed` path lists.
+///
+/// # Errors
+/// I/O failures or object write failures while reading the worktree.
 pub fn stage_tracked_modifications_in_index(
     repo: &Repository,
     work_tree: &Path,
@@ -97,82 +117,60 @@ pub fn stage_tracked_modifications_in_index(
     let mut summary = StageTrackedSummary::default();
 
     for raw_path in path_keys {
-        let path_str = String::from_utf8_lossy(&raw_path).into_owned();
-        let abs_path = work_tree.join(&path_str);
+        let abs_path = worktree_path_from_index_rel(work_tree, &raw_path);
         if path_has_symlink_parent_cached(work_tree, &abs_path, &mut symlink_parent_cache) {
             if index.remove(&raw_path) {
-                summary.removed.push(path_str);
+                summary.removed.push(raw_path.clone());
             }
             continue;
         }
 
         if unmerged_paths.contains(&raw_path) {
-            refresh_unmerged_tracked_path(
-                repo,
-                work_tree,
-                index,
-                &raw_path,
-                &path_str,
-                &abs_path,
-                &mut summary,
-            )?;
+            refresh_unmerged_tracked_path(repo, index, &raw_path, &abs_path, &mut summary)?;
             continue;
         }
 
         let Some(idx_e) = stage0.get(&raw_path) else {
             continue;
         };
-        let idx_mode = idx_e.mode;
-        let idx_skip_worktree = idx_e.skip_worktree();
-        let idx_intent_to_add = idx_e.intent_to_add();
-        let idx_oid = idx_e.oid;
 
         if fs::symlink_metadata(&abs_path).is_ok() {
-            if refresh_present_tracked_path(
+            let ctx = PresentRefreshCtx {
                 repo,
                 index,
-                &raw_path,
-                &path_str,
-                &abs_path,
-                idx_mode,
-                idx_intent_to_add,
-                idx_oid,
-                index_mtime,
+                raw_path: &raw_path,
+                abs_path: &abs_path,
                 idx_e,
-            )? {
-                summary.modified.push(path_str);
+                index_mtime,
+            };
+            if refresh_present_tracked_path(ctx)? {
+                summary.modified.push(raw_path);
             }
-        } else if idx_skip_worktree {
+        } else if idx_e.skip_worktree() {
             continue;
         } else if index.remove(&raw_path) {
-            summary.removed.push(path_str);
+            summary.removed.push(raw_path);
         }
     }
 
+    summary.modified.sort();
+    summary.removed.sort();
     Ok(summary)
 }
 
-fn index_file_mtime(index_path: &Path) -> Option<(u32, u32)> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        fs::symlink_metadata(index_path)
-            .ok()
-            .map(|m| (m.mtime() as u32, m.mtime_nsec() as u32))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = index_path;
-        None
-    }
+struct PresentRefreshCtx<'a> {
+    repo: &'a Repository,
+    index: &'a mut Index,
+    raw_path: &'a [u8],
+    abs_path: &'a Path,
+    idx_e: &'a IndexEntry,
+    index_mtime: Option<(u32, u32)>,
 }
 
 fn refresh_unmerged_tracked_path(
     repo: &Repository,
-    _work_tree: &Path,
     index: &mut Index,
     raw_path: &[u8],
-    path_str: &str,
     abs_path: &Path,
     summary: &mut StageTrackedSummary,
 ) -> Result<()> {
@@ -193,33 +191,34 @@ fn refresh_unmerged_tracked_path(
     if fs::symlink_metadata(abs_path).is_ok() {
         if idx_mode == 0o160000 {
             if let Some(oid) = read_submodule_head_oid(abs_path) {
-                stage_gitlink_from_stat(abs_path, raw_path, path_str, oid, index)?;
-                summary.modified.push(path_str.to_owned());
+                stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
+                summary.modified.push(raw_path.to_vec());
             }
         } else {
-            stage_blob_from_worktree(repo, index, abs_path, raw_path, path_str, None)?;
-            summary.modified.push(path_str.to_owned());
+            stage_blob_from_worktree(repo, index, abs_path, raw_path, None)?;
+            summary.modified.push(raw_path.to_vec());
         }
     } else {
-        summary.removed.push(path_str.to_owned());
+        summary.removed.push(raw_path.to_vec());
     }
     Ok(())
 }
 
-fn refresh_present_tracked_path(
-    repo: &Repository,
-    index: &mut Index,
-    raw_path: &[u8],
-    path_str: &str,
-    abs_path: &Path,
-    idx_mode: u32,
-    idx_intent_to_add: bool,
-    idx_oid: ObjectId,
-    index_mtime: Option<(u32, u32)>,
-    idx_e: &IndexEntry,
-) -> Result<bool> {
+fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
+    let PresentRefreshCtx {
+        repo,
+        index,
+        raw_path,
+        abs_path,
+        idx_e,
+        index_mtime,
+    } = ctx;
+    let idx_mode = idx_e.mode;
+    let idx_intent_to_add = idx_e.intent_to_add();
+    let idx_oid = idx_e.oid;
+
     if idx_mode == 0o160000 {
-        return refresh_gitlink(repo, index, raw_path, path_str, abs_path, idx_e);
+        return refresh_gitlink(repo, index, raw_path, abs_path, idx_e);
     }
 
     let meta = fs::symlink_metadata(abs_path)?;
@@ -234,7 +233,7 @@ fn refresh_present_tracked_path(
                 {
                     return Ok(false);
                 }
-                stage_gitlink_from_stat(abs_path, raw_path, path_str, oid, index)?;
+                stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
                 return Ok(true);
             }
         } else {
@@ -246,11 +245,10 @@ fn refresh_present_tracked_path(
     let wt_mode = mode_from_metadata(&meta);
     let stat_same = stat_matches(idx_e, &meta);
     let racy = entry_is_racy(idx_e, index_mtime);
-    if !idx_intent_to_add && stat_same && !racy {
+    if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
         if wt_mode == idx_mode {
             return Ok(false);
         }
-        // Mode-only change: stat still matches but executable bit (or symlink bit) differs.
         let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
         index.stage_file(entry);
         return Ok(true);
@@ -269,7 +267,6 @@ fn refresh_gitlink(
     _repo: &Repository,
     index: &mut Index,
     raw_path: &[u8],
-    path_str: &str,
     abs_path: &Path,
     idx_e: &IndexEntry,
 ) -> Result<bool> {
@@ -282,7 +279,7 @@ fn refresh_gitlink(
         {
             return Ok(false);
         }
-        stage_gitlink_from_stat(abs_path, raw_path, path_str, oid, index)?;
+        stage_gitlink_from_stat(abs_path, raw_path, oid, index)?;
         return Ok(true);
     }
     let _ = idx_e;
@@ -292,7 +289,6 @@ fn refresh_gitlink(
 fn stage_gitlink_from_stat(
     abs_path: &Path,
     raw_path: &[u8],
-    path_str: &str,
     oid: ObjectId,
     index: &mut Index,
 ) -> Result<()> {
@@ -311,7 +307,7 @@ fn stage_gitlink_from_stat(
         gid: meta.gid(),
         size: 0,
         oid,
-        flags: path_str.len().min(0xFFF) as u16,
+        flags: raw_path.len().min(0xFFF) as u16,
         flags_extended: None,
         path: raw_path.to_vec(),
         base_index_pos: 0,
@@ -325,7 +321,6 @@ fn stage_blob_from_worktree(
     index: &mut Index,
     abs_path: &Path,
     raw_path: &[u8],
-    _path_str: &str,
     mode_override: Option<u32>,
 ) -> Result<()> {
     let meta = fs::symlink_metadata(abs_path)?;
@@ -354,7 +349,7 @@ fn read_worktree_blob_oid(
 ) -> Result<ObjectId> {
     let data = if meta.file_type().is_symlink() {
         let target = fs::read_link(abs_path)?;
-        target.to_string_lossy().into_owned().into_bytes()
+        symlink_target_bytes(&target)
     } else {
         fs::read(abs_path)?
     };
@@ -399,13 +394,17 @@ mod tests {
 
     use filetime::{set_file_mtime, FileTime};
     use std::fs;
+
+    use crate::diff::{entry_is_racy, smudge_racily_clean_entries, stat_matches};
+    use crate::index::{entry_from_metadata, index_file_mtime, MODE_EXECUTABLE, MODE_REGULAR};
+    use crate::objects::ObjectKind;
+    use crate::odb::Odb;
+    use crate::repo::{init_repository, Repository};
     use tempfile::TempDir;
 
-    use crate::index::MODE_EXECUTABLE;
-    use crate::objects::ObjectKind;
-    use crate::repo::{init_repository, Repository};
-
     use super::*;
+
+    const INDEX_MTIME: (u32, u32) = (1_700_000_000, 123_456_789);
 
     fn init_repo() -> (TempDir, Repository) {
         let dir = TempDir::new().unwrap();
@@ -413,9 +412,13 @@ mod tests {
         (dir, repo)
     }
 
-    fn write_and_index(repo: &Repository, rel: &str, content: &[u8]) {
+    fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
+        set_file_mtime(path, FileTime::from_unix_time(i64::from(sec), nsec)).unwrap();
+    }
+
+    fn write_and_index(repo: &Repository, rel: &[u8], content: &[u8]) {
         let wt = repo.work_tree.as_ref().unwrap();
-        let abs = wt.join(rel);
+        let abs = worktree_path_from_index_rel(wt, rel);
         if let Some(parent) = abs.parent() {
             fs::create_dir_all(parent).unwrap();
         }
@@ -424,12 +427,11 @@ mod tests {
         let mut index = repo.load_index().unwrap();
         let meta = fs::symlink_metadata(&abs).unwrap();
         let mode = mode_from_metadata(&meta);
-        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, mode).unwrap();
+        let entry = entry_from_stat(&abs, rel, oid, mode).unwrap();
         index.add_or_replace(entry);
         repo.write_index(&mut index).unwrap();
     }
 
-    /// Refresh cached stat fields from disk, then age the index file past all entry mtimes.
     fn finalize_index_for_stat_trust(repo: &Repository) {
         let wt = repo.work_tree.as_ref().unwrap();
         let mut index = repo.load_index().unwrap();
@@ -437,13 +439,9 @@ mod tests {
             if entry.stage() != 0 {
                 continue;
             }
-            let rel = String::from_utf8_lossy(&entry.path);
-            let abs = wt.join(rel.as_ref());
-            if let Ok(meta) = fs::symlink_metadata(&abs) {
-                if let Ok(fresh) = entry_from_stat(&abs, &entry.path, entry.oid, entry.mode) {
-                    *entry = fresh;
-                }
-                let _ = meta;
+            let abs = worktree_path_from_index_rel(wt, &entry.path);
+            if let Ok(fresh) = entry_from_stat(&abs, &entry.path, entry.oid, entry.mode) {
+                *entry = fresh;
             }
         }
         repo.write_index(&mut index).unwrap();
@@ -455,27 +453,23 @@ mod tests {
             .map(|e| (e.mtime_sec, e.mtime_nsec))
             .max()
             .unwrap_or((0, 0));
-        set_file_mtime(
-            &index_path,
-            FileTime::from_unix_time(i64::from(max_sec.saturating_add(2)), max_nsec),
-        )
-        .unwrap();
+        pin_mtime(&index_path, max_sec.saturating_add(2), max_nsec);
     }
 
     #[test]
     fn stages_modified_tracked_file() {
         let (_dir, repo) = init_repo();
-        write_and_index(&repo, "a.txt", b"one");
-        write_and_index(&repo, "b.txt", b"two");
+        write_and_index(&repo, b"a.txt", b"one");
+        write_and_index(&repo, b"b.txt", b"two");
         finalize_index_for_stat_trust(&repo);
         fs::write(
-            repo.work_tree.as_ref().unwrap().join("b.txt"),
+            worktree_path_from_index_rel(repo.work_tree.as_ref().unwrap(), b"b.txt"),
             b"two-changed",
         )
         .unwrap();
 
         let summary = stage_tracked_modifications(&repo, repo.work_tree.as_ref().unwrap()).unwrap();
-        assert_eq!(summary.modified, vec!["b.txt"]);
+        assert_eq!(summary.modified, vec![b"b.txt".to_vec()]);
         assert!(summary.removed.is_empty());
 
         let index = repo.load_index().unwrap();
@@ -487,29 +481,29 @@ mod tests {
     #[test]
     fn removes_deleted_tracked_file() {
         let (_dir, repo) = init_repo();
-        write_and_index(&repo, "gone.txt", b"x");
-        fs::remove_file(repo.work_tree.as_ref().unwrap().join("gone.txt")).unwrap();
+        write_and_index(&repo, b"gone.txt", b"x");
+        fs::remove_file(worktree_path_from_index_rel(
+            repo.work_tree.as_ref().unwrap(),
+            b"gone.txt",
+        ))
+        .unwrap();
 
         let summary = stage_tracked_modifications(&repo, repo.work_tree.as_ref().unwrap()).unwrap();
-        assert_eq!(summary.removed, vec!["gone.txt"]);
+        assert_eq!(summary.removed, vec![b"gone.txt".to_vec()]);
         assert!(repo.load_index().unwrap().entries.is_empty());
     }
 
     #[test]
     fn unchanged_tracked_file_is_not_rehashed() {
         let (_dir, repo) = init_repo();
-        write_and_index(&repo, "clean.txt", b"same");
+        write_and_index(&repo, b"clean.txt", b"same");
         finalize_index_for_stat_trust(&repo);
 
         let objects_before = count_loose_objects(&repo);
         let summary = stage_tracked_modifications(&repo, repo.work_tree.as_ref().unwrap()).unwrap();
         let objects_after = count_loose_objects(&repo);
 
-        assert!(
-            summary.modified.is_empty(),
-            "unexpected modifications: {:?}",
-            summary.modified
-        );
+        assert!(summary.modified.is_empty());
         assert!(summary.removed.is_empty());
         assert_eq!(objects_before, objects_after);
     }
@@ -535,30 +529,31 @@ mod tests {
     fn racy_same_size_modification_is_detected() {
         let (_dir, repo) = init_repo();
         let wt = repo.work_tree.as_ref().unwrap();
-        write_and_index(&repo, "racy.txt", b"12345");
+        let content_a = b"12345";
+        let content_b = b"54321";
+        assert_eq!(content_a.len(), content_b.len());
 
-        let index_path = repo.index_path();
-        let file_path = wt.join("racy.txt");
-        fs::write(&file_path, b"54321").unwrap();
+        write_and_index(&repo, b"racy.txt", content_a);
+        let file_path = worktree_path_from_index_rel(wt, b"racy.txt");
+        fs::write(&file_path, content_b).unwrap();
+        pin_mtime(&file_path, INDEX_MTIME.0, INDEX_MTIME.1);
 
-        // Pin index mtime ahead of the entry so the matching stat looks racy.
-        let future = FileTime::from_unix_time(2_000_000_000, 0);
-        set_file_mtime(&index_path, future).unwrap();
+        let meta = fs::symlink_metadata(&file_path).unwrap();
+        let stale_oid = Odb::hash_object_data(ObjectKind::Blob, content_a);
         let mut index = repo.load_index().unwrap();
-        let entry = index
-            .entries
-            .iter_mut()
-            .find(|e| e.path == b"racy.txt")
-            .unwrap();
-        entry.mtime_sec = future.seconds() as u32;
-        entry.mtime_nsec = future.nanoseconds() as u32;
-        entry.size = 5;
-        repo.write_index(&mut index).unwrap();
-        set_file_mtime(&index_path, future).unwrap();
+        let entry = entry_from_metadata(&meta, b"racy.txt", stale_oid, MODE_REGULAR);
+        assert!(stat_matches(&entry, &meta));
+        assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
+
+        index.entries.clear();
+        index.add_or_replace(entry);
+        let index_path = repo.index_path();
+        index.write(&index_path).unwrap();
+        pin_mtime(&index_path, INDEX_MTIME.0, INDEX_MTIME.1);
 
         let summary = stage_tracked_modifications(&repo, wt).unwrap();
-        assert_eq!(summary.modified, vec!["racy.txt"]);
-        let expected = repo.odb.write(ObjectKind::Blob, b"54321").unwrap();
+        assert_eq!(summary.modified, vec![b"racy.txt".to_vec()]);
+        let expected = repo.odb.write(ObjectKind::Blob, content_b).unwrap();
         let loaded = repo.load_index().unwrap();
         let e = loaded
             .entries
@@ -569,20 +564,79 @@ mod tests {
     }
 
     #[test]
+    fn index_write_smudge_then_stage_detects_stale_oid() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree.as_ref().unwrap();
+        let content_a = b"aaaaa";
+        let content_b = b"bbbbb";
+        assert_eq!(content_a.len(), content_b.len());
+
+        let file_path = worktree_path_from_index_rel(wt, b"f.txt");
+        fs::write(&file_path, content_b).unwrap();
+        pin_mtime(&file_path, INDEX_MTIME.0, INDEX_MTIME.1);
+        let meta = fs::symlink_metadata(&file_path).unwrap();
+        let stale_oid = Odb::hash_object_data(ObjectKind::Blob, content_a);
+
+        let mut index = Index::new();
+        let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, MODE_REGULAR);
+        assert!(stat_matches(&entry, &meta));
+        assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
+        index.add_or_replace(entry);
+
+        let index_path = repo.index_path();
+        index.write(&index_path).unwrap();
+        pin_mtime(&index_path, INDEX_MTIME.0, INDEX_MTIME.1);
+
+        let later = (INDEX_MTIME.0 + 10, INDEX_MTIME.1);
+        pin_mtime(&index_path, later.0, later.1);
+
+        let mut index = repo.load_index().unwrap();
+        assert!(
+            stage_tracked_modifications_in_index(&repo, wt, &index_path, &mut index)
+                .unwrap()
+                .modified
+                .is_empty(),
+            "stale oid trusted when index mtime advanced without smudging"
+        );
+
+        pin_mtime(&index_path, INDEX_MTIME.0, INDEX_MTIME.1);
+        repo.write_index(&mut index).unwrap();
+        let index = repo.load_index().unwrap();
+        assert_eq!(
+            index.entries[0].size, 0,
+            "write_index should smudge racily-clean stale entries"
+        );
+
+        let summary = stage_tracked_modifications(&repo, wt).unwrap();
+        assert_eq!(summary.modified, vec![b"f.txt".to_vec()]);
+    }
+
+    #[test]
+    fn index_file_mtime_available_on_all_targets() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("index");
+        fs::write(&path, b"dummy").unwrap();
+        pin_mtime(&path, 1_234, 567);
+        let m = index_file_mtime(&path).expect("mtime");
+        assert_eq!(m.0, 1_234);
+        assert_eq!(m.1, 567);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn mode_only_change_is_staged() {
         use std::os::unix::fs::PermissionsExt;
 
         let (_dir, repo) = init_repo();
-        write_and_index(&repo, "run.sh", b"#!/bin/sh\n");
+        write_and_index(&repo, b"run.sh", b"#!/bin/sh\n");
         finalize_index_for_stat_trust(&repo);
-        let path = repo.work_tree.as_ref().unwrap().join("run.sh");
+        let path = worktree_path_from_index_rel(repo.work_tree.as_ref().unwrap(), b"run.sh");
         let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o100755);
         fs::set_permissions(&path, perms).unwrap();
 
         let summary = stage_tracked_modifications(&repo, repo.work_tree.as_ref().unwrap()).unwrap();
-        assert_eq!(summary.modified, vec!["run.sh"]);
+        assert_eq!(summary.modified, vec![b"run.sh".to_vec()]);
         let index = repo.load_index().unwrap();
         let e = index.entries.iter().find(|e| e.path == b"run.sh").unwrap();
         assert_eq!(e.mode, MODE_EXECUTABLE);
@@ -598,11 +652,11 @@ mod tests {
         fs::write(wt.join("realdir/file"), b"data").unwrap();
         std::os::unix::fs::symlink("realdir", wt.join("linkdir")).unwrap();
 
-        write_and_index(&repo, "linkdir/file", b"data");
+        write_and_index(&repo, b"linkdir/file", b"data");
         finalize_index_for_stat_trust(&repo);
 
         let summary = stage_tracked_modifications(&repo, wt).unwrap();
-        assert!(summary.removed.contains(&"linkdir/file".to_owned()));
+        assert!(summary.removed.contains(&b"linkdir/file".to_vec()));
         assert!(!repo
             .load_index()
             .unwrap()
@@ -614,18 +668,38 @@ mod tests {
     #[test]
     fn untracked_files_are_ignored() {
         let (_dir, repo) = init_repo();
-        write_and_index(&repo, "tracked.txt", b"x");
+        write_and_index(&repo, b"tracked.txt", b"x");
         finalize_index_for_stat_trust(&repo);
-        fs::write(repo.work_tree.as_ref().unwrap().join("new.txt"), b"new").unwrap();
+        fs::write(
+            worktree_path_from_index_rel(repo.work_tree.as_ref().unwrap(), b"new.txt"),
+            b"new",
+        )
+        .unwrap();
 
         let summary = stage_tracked_modifications(&repo, repo.work_tree.as_ref().unwrap()).unwrap();
         assert!(summary.modified.is_empty());
         assert!(summary.removed.is_empty());
-        assert!(!repo
-            .load_index()
-            .unwrap()
-            .entries
-            .iter()
-            .any(|e| e.path == b"new.txt"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn non_utf8_tracked_path_is_staged_not_removed() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree.as_ref().unwrap();
+        let rel = b"\xff";
+        let abs = wt.join(OsStr::from_bytes(rel));
+        fs::write(&abs, b"v1").unwrap();
+        write_and_index(&repo, rel, b"v1");
+        finalize_index_for_stat_trust(&repo);
+        fs::write(&abs, b"v2-longer").unwrap();
+
+        let summary = stage_tracked_modifications(&repo, wt).unwrap();
+        assert_eq!(summary.modified, vec![rel.to_vec()]);
+        assert!(summary.removed.is_empty());
+        let index = repo.load_index().unwrap();
+        assert!(index.entries.iter().any(|e| e.path == rel));
     }
 }

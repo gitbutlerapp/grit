@@ -16,9 +16,11 @@
 //! the authoritative format specification.
 
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(not(unix))]
+use std::borrow::Cow;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
@@ -2575,6 +2577,26 @@ pub(crate) fn index_file_mtime(path: &Path) -> Option<(u32, u32)> {
         return Some((0, 0));
     }
     Some((secs as u32, ft.nanoseconds()))
+}
+
+/// Join a repository work tree root with an index-relative path stored as raw bytes.
+///
+/// Index paths may be non-UTF-8 on Unix; this preserves bytes when building the absolute path.
+#[must_use]
+pub fn worktree_path_from_index_rel(work_tree: &Path, rel: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        work_tree.join(OsStr::from_bytes(rel))
+    }
+    #[cfg(not(unix))]
+    {
+        let rel = std::str::from_utf8(rel)
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|_| Cow::Owned(String::from_utf8_lossy(rel).into_owned()));
+        work_tree.join(rel.as_ref())
+    }
 }
 
 /// Build an [`IndexEntry`] from already-obtained metadata.
