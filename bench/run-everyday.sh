@@ -17,7 +17,7 @@ set -uo pipefail   # NOT -e: a failed state-mutation must not kill the whole swe
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GRIT="$REPO_ROOT/target/release/grit-git"
-GIT="$(which git)"
+GIT="$(command -v git)"
 RESULTS_DIR="$REPO_ROOT/bench/results"
 SCRATCH="${BENCH_SCRATCH:-/tmp/grit-bench-everyday}"
 WARMUP="${BENCH_WARMUP:-2}"
@@ -82,9 +82,11 @@ bench() {
 # Weekly:   merge rebase stash cherry-pick reset shortlog clone-local
 reset_repo() {
   # Restore the repo to a pristine main checkout (cheap; runs before each command).
+  # Grit may write index extensions C git cannot read; rebuild the index from HEAD.
   local R="$1"
+  rm -f "$R/.git/index" "$R/.git/objects/pack/multi-pack-index"
   $GIT -C "$R" checkout -q main 2>/dev/null || true
-  $GIT -C "$R" reset -q --hard main 2>/dev/null || true
+  $GIT -C "$R" reset -q --hard HEAD 2>/dev/null || $GRIT -C "$R" reset -q --hard HEAD 2>/dev/null || true
   $GIT -C "$R" clean -fdq 2>/dev/null || true
 }
 
@@ -103,7 +105,7 @@ run_cmds_for_scale() {
       bench "add@$scale" --prepare "$Gc reset -q; $Gc checkout -q -- . 2>/dev/null; for i in \$(seq 1 200); do echo x >> $R/d1/f\$i.txt 2>/dev/null; done; true" \
         "$Gc add -A" "$Rc add -A" ;;
     commit)
-      bench "commit@$scale" --prepare "echo c\$RANDOM >> $R/d1/f1.txt; $Gc add d1/f1.txt" -i \
+      bench "commit@$scale" --prepare "rm -f $R/.git/index $R/.git/objects/pack/multi-pack-index; $Gc reset -q --hard HEAD || $Rc reset -q --hard HEAD; echo c\$RANDOM >> $R/d1/f1.txt; $Gc add d1/f1.txt" -i \
         "$Gc commit -q -m b" "$Rc commit -q -m b" ;;
     log)
       bench "log-oneline@$scale" "$Gc log --oneline" "$Rc log --oneline"
@@ -148,7 +150,7 @@ run_cmds_for_scale() {
         "$Gc reset -q --mixed HEAD~1" "$Rc reset -q --mixed HEAD~1" ;;
     stash)
       bench "stash@$scale" --prepare "echo s\$RANDOM >> $R/d1/f1.txt" -i \
-        "$Gc stash -q && $Gc stash pop -q" "$Rc stash -q && $Gc stash pop -q" ;;
+        "$Gc stash -q && $Gc stash pop -q" "$Rc stash -q && $Rc stash pop -q" ;;
     ls-files)
       bench "ls-files@$scale" "$Gc ls-files" "$Rc ls-files" ;;
     write-tree)

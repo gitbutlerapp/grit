@@ -2,53 +2,68 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>grit-bench results</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>add — Grit vs Git</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-         max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1a1a2e; background: #fafafa; }
-  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
-  .meta { color: #666; font-size: 0.85rem; margin-bottom: 2rem; }
-  .bench { margin-bottom: 3rem; }
-  .bench h2 { font-size: 1.2rem; margin-bottom: 0.25rem; }
-  .bench .desc { color: #555; font-size: 0.85rem; margin-bottom: 1rem; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+         max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  a { color: #0969da; }
+  .meta { color: #656d76; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .bench { margin-bottom: 2rem; }
+  .bench h2 { font-size: 1.1rem; margin-bottom: 0.25rem; font-family: monospace; }
+  .desc { color: #656d76; font-size: 0.85rem; margin-bottom: 0.75rem; }
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-  th { text-align: right; padding: 0.5rem 0.75rem; border-bottom: 2px solid #ddd;
-       font-weight: 600; color: #444; }
-  th:first-child { text-align: left; }
-  td { text-align: right; padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
-  td:first-child { text-align: left; font-weight: 500; }
-  .faster { color: #16a34a; font-weight: 600; }
-  .slower { color: #dc2626; font-weight: 600; }
-  .bar-cell { text-align: left; padding-left: 0; }
-  .bar-wrap { display: flex; align-items: center; gap: 0.5rem; height: 1.4rem; }
-  .bar { height: 100%; border-radius: 3px; min-width: 2px; }
-  .bar.git { background: #94a3b8; }
-  .bar.grit { background: #3b82f6; }
-  .bar-label { font-size: 0.75rem; color: #888; white-space: nowrap; }
-  .legend { display: flex; gap: 1.5rem; margin-bottom: 0.5rem; font-size: 0.8rem; color: #666; }
-  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px;
-                          border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-  .legend .lg::before { background: #94a3b8; }
-  .legend .lr::before { background: #3b82f6; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #d0d7de; }
+  .ratio { font-weight: 600; border-bottom: none; padding-top: 0.5rem; }
+  .much-faster, .faster { color: #1a7f37; }
+  .similar { color: #9a6700; }
+  .slower, .much-slower { color: #cf222e; }
 </style>
 </head>
 <body>
-<h1>grit-bench</h1>
-<p class="meta">git version 2.47.0.grit-0.2.1 vs git version 2.39.5 (Apple Git-154) &mdash; 2026-06-06 11:07:17 CEST</p>
-<div class="bench">
-<h2>add</h2>
-<p class="desc">git/grit add -A after modifying ~20% of files</p>
-<div class="legend"><span class="lg">git</span><span class="lr">grit</span></div>
-<table>
-<tr><th>Files</th><th>git</th><th>grit</th><th>Speedup</th><th class="bar-cell">Comparison</th></tr>
-<tr><td>100</td><td>11.1ms <small>±1.6</small></td><td>8.6ms <small>±0.7</small></td><td class="faster">1.28x</td><td class="bar-cell"><div class="bar-wrap"><div class="bar git" style="width:0%"></div><div class="bar grit" style="width:0%"></div></div></td></tr>
-<tr><td>500</td><td>25.0ms <small>±1.2</small></td><td>29.3ms <small>±0.6</small></td><td class="slower">0.85x</td><td class="bar-cell"><div class="bar-wrap"><div class="bar git" style="width:0%"></div><div class="bar grit" style="width:0%"></div></div></td></tr>
-<tr><td>1K</td><td>13.6ms <small>±1.7</small></td><td>57.2ms <small>±1.9</small></td><td class="slower">0.24x</td><td class="bar-cell"><div class="bar-wrap"><div class="bar git" style="width:0%"></div><div class="bar grit" style="width:0%"></div></div></td></tr>
-<tr><td>5K</td><td>38.2ms <small>±2.2</small></td><td>417.7ms <small>±6.2</small></td><td class="slower">0.09x</td><td class="bar-cell"><div class="bar-wrap"><div class="bar git" style="width:0%"></div><div class="bar grit" style="width:1%"></div></div></td></tr>
-<tr><td>10K</td><td>72.5ms <small>±8.7</small></td><td>1202.1ms <small>±4.6</small></td><td class="slower">0.06x</td><td class="bar-cell"><div class="bar-wrap"><div class="bar git" style="width:0%"></div><div class="bar grit" style="width:3%"></div></div></td></tr>
-<tr><td>50K</td><td>464.9ms <small>±136.1</small></td><td>36563.0ms <small>±262.6</small></td><td class="slower">0.01x</td><td class="bar-cell"><div class="bar-wrap"><div class="bar git" style="width:1%"></div><div class="bar grit" style="width:100%"></div></div></td></tr>
-</table>
-</div>
+<p><a href="../bench.html">← All benchmarks</a></p>
+<h1>add</h1>
+<p class="meta">- **Date (UTC):** 2026-10-06 · - **CPU:** Intel(R) Xeon(R) Processor (4 vCPUs, 1 thread/core) · - **RAM:** 16 GiB · - **OS / kernel:** Linux 6.12.94+ x86_64 (Cursor cloud VM) · - **Git:** `git version 2.43.0` (`/usr/bin/git`) · - **Grit source commit:** `7967f0c3bc90060cd57ef030c8320693878adf4a` (branch tip at measurement time; used to build `target/release/grit-git` via `cargo build --release -p grit-git`)</p>
+
+  <section class="bench">
+    <h2>add@S</h2>
+    <p class="desc">100 files (S)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>3.3 ms</td><td>709.0 µs</td></tr>
+      <tr><td>Grit</td><td>13.1 ms</td><td>2.5 ms</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">4.0× slower (git/grit)</td></tr>
+    </table>
+  </section>
+  <section class="bench">
+    <h2>add@M</h2>
+    <p class="desc">1,000 files (M)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>5.0 ms</td><td>2.6 ms</td></tr>
+      <tr><td>Grit</td><td>52.2 ms</td><td>7.1 ms</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">10.4× slower (git/grit)</td></tr>
+    </table>
+  </section>
+  <section class="bench">
+    <h2>add@L</h2>
+    <p class="desc">10,000 files (L)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>16.2 ms</td><td>3.3 ms</td></tr>
+      <tr><td>Grit</td><td>1.51 s</td><td>89.5 ms</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">93.6× slower (git/grit)</td></tr>
+    </table>
+  </section>
+  <section class="bench">
+    <h2>add@H</h2>
+    <p class="desc">500 files (H)</p>
+    <table>
+      <tr><th>Tool</th><th>Mean</th><th>±</th></tr>
+      <tr><td>C Git</td><td>3.5 ms</td><td>406.6 µs</td></tr>
+      <tr><td>Grit</td><td>28.5 ms</td><td>3.0 ms</td></tr>
+      <tr><td colspan="3" class="ratio much-slower">8.2× slower (git/grit)</td></tr>
+    </table>
+  </section>
 </body>
 </html>

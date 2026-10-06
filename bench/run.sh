@@ -13,8 +13,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GRIT="$REPO_ROOT/target/release/grit"
-GIT="$(which git)"
+GRIT="$REPO_ROOT/target/release/grit-git"
+GIT="$(command -v git) -c commit.gpgsign=false -c tag.gpgsign=false"
 BENCH_DIR="$REPO_ROOT/bench"
 RESULTS_DIR="$BENCH_DIR/results"
 SCRATCH="/tmp/grit-bench-scratch"
@@ -23,7 +23,7 @@ SCRATCH="/tmp/grit-bench-scratch"
 
 if [[ ! -x "$GRIT" ]]; then
   echo "Building grit (release)..."
-  (cd "$REPO_ROOT" && cargo build --release --quiet)
+  (cd "$REPO_ROOT" && cargo build --release --quiet -p grit-git)
 fi
 
 command -v hyperfine >/dev/null 2>&1 || {
@@ -60,6 +60,12 @@ cleanup_scratch() {
   rm -rf "$SCRATCH"
 }
 trap cleanup_scratch EXIT
+
+restore_git_index() {
+  # Grit may leave index extensions C git cannot read; rebuild before git prepare steps.
+  rm -f "$SCRATCH/.git/index"
+  $GIT -C "$SCRATCH" reset -q --hard HEAD 2>/dev/null || true
+}
 
 make_scratch_repo() {
   cleanup_scratch
@@ -231,7 +237,7 @@ bench_add() {
     done
   done
   run_bench "add" \
-    --prepare "cd $SCRATCH && $GIT checkout -q -- ." \
+    --prepare "rm -f $SCRATCH/.git/index && $GIT -C $SCRATCH reset -q --hard HEAD" \
     "$GIT -C $SCRATCH add -A" \
     "$GRIT -C $SCRATCH add -A"
 }
@@ -303,7 +309,7 @@ bench_read_tree() {
 bench_commit() {
   make_large_scratch_repo
   run_bench "commit" \
-    --prepare "cd $SCRATCH && echo change-\$RANDOM >> dir1/file1.txt && $GIT add dir1/file1.txt" \
+    --prepare "rm -f $SCRATCH/.git/index; $GIT -C $SCRATCH reset -q --hard HEAD 2>/dev/null || $GRIT -C $SCRATCH reset -q --hard HEAD; echo change-\$RANDOM >> $SCRATCH/dir1/file1.txt 2>/dev/null; $GIT -C $SCRATCH add dir1/file1.txt 2>/dev/null || $GRIT -C $SCRATCH add dir1/file1.txt 2>/dev/null || true" \
     -i \
     "$GIT -C $SCRATCH commit -q -m benchcommit --allow-empty" \
     "$GRIT -C $SCRATCH commit -q -m benchcommit --allow-empty"
