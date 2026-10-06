@@ -2372,7 +2372,28 @@ fn init_in_repo(repo: &Repository, args: &InitArgs, quiet: bool) -> Result<()> {
             continue;
         };
         let url_key = format!("submodule.{}.url", m.name);
+        let update_key = format!("submodule.{}.update", m.name);
+        let branch_key = format!("submodule.{}.branch", m.name);
         let already = config.entries.iter().any(|e| e.key == url_key);
+        let has_local_update = config.entries.iter().any(|e| e.key == update_key);
+        let has_local_branch = config.entries.iter().any(|e| e.key == branch_key);
+
+        // Reject repository-controlled command update before writing any local policy (including
+        // `submodule.<name>.active`). An existing local URL must not bypass this check.
+        if let Some(ref u) = m.update {
+            let t = u.trim();
+            if t.starts_with('!') {
+                bail!(
+                    "error: invalid value for 'submodule.{}.update': '{}' cannot be specified in .gitmodules as a command exists\n\
+                     You can still add the config by using:\n\
+                     'git config submodule.{}.update {}'",
+                    m.name,
+                    t,
+                    m.name,
+                    t
+                );
+            }
+        }
 
         // Set the active flag (git: init_submodule sets submodule.<name>.active=true unless it
         // is already active, e.g. matched by an existing submodule.active pathspec).
@@ -2381,21 +2402,6 @@ fn init_in_repo(repo: &Repository, args: &InitArgs, quiet: bool) -> Result<()> {
         }
 
         if !already {
-            if let Some(ref u) = m.update {
-                let t = u.trim();
-                if t.starts_with('!') {
-                    bail!(
-                        "error: invalid value for 'submodule.{}.update': '{}' cannot be specified in .gitmodules as a command exists\n\
-                         You can still add the config by using:\n\
-                         'git config submodule.{}.update {}'",
-                        m.name,
-                        t,
-                        m.name,
-                        t
-                    );
-                }
-            }
-
             let resolved_url = resolve_submodule_super_url(work_tree, &repo.git_dir, &m.url)?;
             config.set(&url_key, &resolved_url)?;
             let reg_path = submodule_display_path_from_cwd(&work_tree.join(&m.path));
@@ -2407,11 +2413,17 @@ fn init_in_repo(repo: &Repository, args: &InitArgs, quiet: bool) -> Result<()> {
             }
         }
 
-        if let Some(ref u) = m.update {
-            config.set(&format!("submodule.{}.update", m.name), u)?;
+        // Copy update/branch from `.gitmodules` only when absent locally (see `init_submodule` in
+        // git's submodule--helper.c).
+        if !has_local_update {
+            if let Some(ref u) = m.update {
+                config.set(&update_key, u)?;
+            }
         }
-        if let Some(ref b) = m.branch {
-            config.set(&format!("submodule.{}.branch", m.name), b)?;
+        if !has_local_branch {
+            if let Some(ref b) = m.branch {
+                config.set(&branch_key, b)?;
+            }
         }
     }
 
