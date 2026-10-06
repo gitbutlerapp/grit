@@ -145,7 +145,7 @@ When matching Git behavior: read published docs and specs for *what* and *why*, 
 ```bash
 cargo fmt
 cargo check # fix warnings
-cargo clippy --fix --allow-dirty   # ensure no warnings remain
+cargo clippy --workspace -- -D warnings   # same gate as CI (optional: cargo clippy --fix --allow-dirty first)
 cargo test -p grit-lib --lib       # unit tests must pass
 ```
 

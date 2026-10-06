@@ -13,7 +13,6 @@ CARGO ?= cargo
 CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
 export CARGO_BUILD_JOBS
 
-SMOKE_DATA_DIR ?= /tmp/grit-smoke
 SMOKE_LIST := data/ci/smoke-tests.txt
 
 .PHONY: all build debug test clippy fmt ci smoke clean
@@ -38,9 +37,10 @@ fmt-check:
 	$(CARGO) fmt --all --check
 
 smoke: build
+	@dir="$${SMOKE_DATA_DIR:-$$(mktemp -d)}"; \
 	./scripts/run-tests.sh --strict --quiet --no-catalog \
 		--list $(SMOKE_LIST) \
-		--data-dir $(SMOKE_DATA_DIR)
+		--data-dir "$$dir"
 
 fmt:
 	$(CARGO) fmt --all
