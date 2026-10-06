@@ -265,13 +265,7 @@ fn chop_last_dir(remoteurl: &mut String, is_relative: bool) -> Result<bool, GitP
 }
 
 fn url_is_local_not_ssh(url: &str) -> bool {
-    let colon = url.find(':');
-    let slash = url.find('/');
-    match (colon, slash) {
-        (None, _) => true,
-        (Some(ci), Some(si)) if si < ci => true,
-        _ => false,
-    }
+    crate::transport_path::url_is_local_not_ssh(url)
 }
 
 fn starts_with_dot_slash_native(s: &str) -> bool {

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::error::Error;
+
 /// Errors returned while validating local transport paths.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum TransportPathError {
@@ -50,20 +52,137 @@ pub fn should_store_absolute_local_clone_url(url: &str) -> bool {
     !url.starts_with("file://") && is_local_path_remote_url(url)
 }
 
+/// Git `url_is_local_not_ssh` (`connect.c`): local unless scp-style `host:path` with no directory
+/// separator before the first `:` (Windows drive letters and `\` separators included).
+#[must_use]
+pub fn url_is_local_not_ssh(url: &str) -> bool {
+    let url = url.trim();
+    let colon = url.find(':');
+    match colon {
+        None => true,
+        Some(ci) => {
+            let sep = url[..ci].find(['/', '\\']);
+            if sep.is_some() {
+                return true;
+            }
+            let b = url.as_bytes();
+            ci == 1 && b.first().is_some_and(u8::is_ascii_alphabetic)
+        }
+    }
+}
+
+/// Strip the Windows verbatim `\\?\` prefix when present.
+#[must_use]
+pub fn strip_verbatim_path_prefix(path: &str) -> &str {
+    path.strip_prefix(r"\\?\").unwrap_or(path)
+}
+
+/// Normalize a local path for storage in `remote.*.url` (Git-style forward slashes, no `\\?\`).
+#[must_use]
+pub fn normalize_local_path_for_config(path: &Path) -> String {
+    let lossy = path.to_string_lossy();
+    let stripped = strip_verbatim_path_prefix(&lossy);
+    #[cfg(windows)]
+    {
+        stripped.replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        stripped.to_string()
+    }
+}
+
 /// Absolute form of a local clone source path, matching Git's `absolute_pathdup`: prepend the
 /// current directory when relative, but leave `.`/`..`/`./` components untouched (no
 /// normalization). The parent of `source_path` is canonicalized when possible (Git resolves
 /// the cwd via `getcwd`).
 #[must_use]
 pub fn absolute_local_clone_source_url(source_path: &Path) -> String {
-    if source_path.is_absolute() {
-        return source_path.to_string_lossy().to_string();
-    }
-    let cwd = match std::env::current_dir() {
-        Ok(c) => c.canonicalize().unwrap_or(c),
-        Err(_) => return source_path.to_string_lossy().to_string(),
+    let absolute = if source_path.is_absolute() {
+        source_path.to_path_buf()
+    } else {
+        let cwd = match std::env::current_dir() {
+            Ok(c) => c.canonicalize().unwrap_or(c),
+            Err(_) => return normalize_local_path_for_config(source_path),
+        };
+        cwd.join(source_path)
     };
-    cwd.join(source_path).to_string_lossy().to_string()
+    normalize_local_path_for_config(&absolute)
+}
+
+/// Decode a `file://` remote URL into a local filesystem path (percent-decoding and `/C:/` → `C:/`).
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when a `%` escape is truncated or invalid.
+pub fn file_url_to_local_path(url: &str) -> Result<String, Error> {
+    let trimmed = url.trim();
+    let mut path_part = trimmed
+        .strip_prefix("file://")
+        .ok_or_else(|| Error::Message("not a file:// URL".to_owned()))?;
+    if path_part.starts_with("localhost") {
+        path_part = &path_part["localhost".len()..];
+    }
+    let decoded = percent_decode_path(path_part)?;
+    let decoded = String::from_utf8(decoded).map_err(|_| {
+        Error::Message("file URL path is not valid UTF-8 after decoding".to_owned())
+    })?;
+    Ok(dos_file_url_path_to_local(&decoded))
+}
+
+fn dos_file_url_path_to_local(path: &str) -> String {
+    let path = strip_verbatim_path_prefix(path);
+    if path.len() >= 3 {
+        let b = path.as_bytes();
+        if b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\') {
+            return path.to_string();
+        }
+    }
+    if path.starts_with('/') && path.len() >= 4 {
+        let b = path.as_bytes();
+        if b[1].is_ascii_alphabetic() && b[2] == b':' && (b[3] == b'/' || b[3] == b'\\') {
+            return path[1..].to_string();
+        }
+    }
+    path.to_string()
+}
+
+fn percent_decode_path(path: &str) -> Result<Vec<u8>, Error> {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let h1 = bytes
+                .get(i + 1)
+                .ok_or_else(|| Error::Message("bad % escape in file URL".to_owned()))?;
+            let h2 = bytes
+                .get(i + 2)
+                .ok_or_else(|| Error::Message("bad % escape in file URL".to_owned()))?;
+            let byte = u8::from_str_radix(
+                std::str::from_utf8(&[*h1, *h2])
+                    .map_err(|_| Error::Message("bad % escape in file URL".to_owned()))?,
+                16,
+            )
+            .map_err(|_| Error::Message("bad % escape in file URL".to_owned()))?;
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
+fn local_path_from_remote_url(url: &str) -> Result<PathBuf, Error> {
+    let trimmed = url.trim();
+    let path_str = if trimmed.starts_with("file://") {
+        file_url_to_local_path(trimmed)?
+    } else {
+        dos_file_url_path_to_local(strip_verbatim_path_prefix(trimmed))
+    };
+    Ok(PathBuf::from(path_str))
 }
 
 /// True when `url` names a local filesystem remote (not `http(s)://`, `git://`, `ssh`, or `ext::`).
@@ -88,8 +207,8 @@ pub fn resolve_local_remote_git_dir(
     git_dir: &Path,
     work_tree: Option<&Path>,
 ) -> PathBuf {
-    let path_str = url.strip_prefix("file://").unwrap_or(url.trim());
-    let mut remote_path = PathBuf::from(path_str);
+    let mut remote_path = local_path_from_remote_url(url)
+        .unwrap_or_else(|_| PathBuf::from(strip_verbatim_path_prefix(url.trim())));
     if remote_path.is_relative() {
         let base = configured_remote_base(git_dir, work_tree);
         remote_path = base.join(&remote_path);
@@ -402,5 +521,102 @@ mod tests {
         assert!(!is_local_path_remote_url("https://example.com/x.git"));
         assert!(!is_local_path_remote_url("git://host/x.git"));
         assert!(!is_local_path_remote_url("host:repo.git"));
+        assert!(is_local_path_remote_url("C:/tmp/x"));
+        assert!(is_local_path_remote_url(r"C:\tmp\x"));
+    }
+
+    #[test]
+    fn url_is_local_not_ssh_windows_drive_and_scp() {
+        assert!(url_is_local_not_ssh("C:/tmp/src"));
+        assert!(url_is_local_not_ssh(r"C:\tmp\src"));
+        assert!(url_is_local_not_ssh(r"\\?\C:\tmp\src"));
+        assert!(url_is_local_not_ssh("../t/src"));
+        assert!(url_is_local_not_ssh("src"));
+        assert!(!url_is_local_not_ssh("host:repo.git"));
+    }
+
+    #[test]
+    fn file_url_to_local_path_decodes_drive() {
+        assert_eq!(
+            file_url_to_local_path("file:///C:/tmp/t/src").unwrap(),
+            "C:/tmp/t/src"
+        );
+        assert_eq!(file_url_to_local_path("file:///tmp/x").unwrap(), "/tmp/x");
+        assert_eq!(
+            file_url_to_local_path("file://localhost/tmp/x").unwrap(),
+            "/tmp/x"
+        );
+    }
+
+    #[test]
+    fn file_url_preserves_percent_encoded_question_mark() {
+        let base = std::env::temp_dir().join(format!("grit-file-qmark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("temp base");
+        let repo_dir = base.join("origin?repo.git");
+        std::fs::create_dir_all(&repo_dir).expect("repo dir");
+        std::fs::write(repo_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+
+        let url = format!(
+            "file://{}/origin%3Frepo.git",
+            base.to_str().expect("utf8 base")
+        );
+        let decoded = file_url_to_local_path(&url).expect("decode");
+        assert!(
+            decoded.ends_with("origin?repo.git"),
+            "decoded path must keep literal ?, got {decoded}"
+        );
+        let resolved =
+            resolve_local_remote_git_dir(&url, &base.join("clone/.git"), Some(&base.join("clone")));
+        assert_eq!(resolved, repo_dir);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn absolute_local_clone_source_url_keeps_dot_components() {
+        let base = std::env::temp_dir().join(format!("grit-abs-clone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("temp base");
+        let prev = std::env::current_dir().ok();
+        std::env::set_current_dir(&base).expect("chdir");
+        let stored = absolute_local_clone_source_url(Path::new("./nested/../peer"));
+        if let Some(p) = prev.as_ref() {
+            let _ = std::env::set_current_dir(p);
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(
+            stored.contains("nested/../peer") || stored.ends_with("peer"),
+            "expected dot components preserved, got {stored}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absolute_local_clone_source_url_preserves_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!("grit-abs-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("temp base");
+        let real = base.join("real-src");
+        std::fs::create_dir_all(&real).expect("real dir");
+        let link = base.join("link-src");
+        symlink(&real, &link).expect("symlink");
+
+        let stored = absolute_local_clone_source_url(&link);
+        let _ = std::fs::remove_dir_all(&base);
+
+        assert_eq!(stored, normalize_local_path_for_config(&link));
+        assert_ne!(stored, normalize_local_path_for_config(&real));
+    }
+
+    #[test]
+    fn normalize_local_path_for_config_strips_verbatim() {
+        let path = Path::new(r"\\?\C:\tmp\t\src");
+        #[cfg(windows)]
+        assert_eq!(normalize_local_path_for_config(path), "C:/tmp/t/src");
+        #[cfg(not(windows))]
+        assert_eq!(normalize_local_path_for_config(path), r"C:\tmp\t\src");
     }
 }

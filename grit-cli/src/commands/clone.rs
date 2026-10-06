@@ -3,6 +3,7 @@
 //! Composed from the pieces `grit` already has: initialize a repo, point `origin`
 //! at the source, fetch, then check out the remote's default branch.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -38,6 +39,11 @@ impl HumanRender for CloneOutcome {
 pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutcome> {
     let dir = dir.unwrap_or_else(|| derive_dir(url));
     let path = PathBuf::from(&dir);
+    let dest_preexisted_empty = path.is_dir()
+        && path
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
     if path.is_dir()
         && path
             .read_dir()
@@ -48,7 +54,17 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
     }
 
     progress(mode, &format!("Cloning into '{dir}' ..."));
-    let repo = init_repository(&path, false, "main", None, "files")
+    match clone_into(url, &path, &dir) {
+        Ok(outcome) => Ok(outcome),
+        Err(err) => {
+            cleanup_failed_clone(&path, dest_preexisted_empty);
+            Err(err)
+        }
+    }
+}
+
+fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
+    let repo = init_repository(path, false, "main", None, "files")
         .with_context(|| format!("could not initialize '{dir}'"))?;
 
     let origin_url = stored_clone_remote_url(url);
@@ -98,9 +114,28 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
 
     Ok(CloneOutcome {
         url: url.to_owned(),
-        path: dir,
+        path: dir.to_owned(),
         branch: default,
     })
+}
+
+/// Remove a partially created clone destination (mirrors grit-git `remove_junk_path`).
+fn cleanup_failed_clone(path: &Path, keep_toplevel: bool) {
+    if keep_toplevel {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                let _ = fs::remove_dir_all(p);
+            } else {
+                let _ = fs::remove_file(p);
+            }
+        }
+    } else {
+        let _ = fs::remove_dir_all(path);
+    }
 }
 
 /// URL stored in `remote.origin.url` after clone — absolute for local paths so later

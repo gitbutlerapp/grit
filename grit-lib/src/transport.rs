@@ -540,18 +540,7 @@ pub fn is_ssh_url(url: &str) -> bool {
     if u.contains("://") {
         return false;
     }
-    !url_is_local_not_ssh(u)
-}
-
-/// Git `url_is_local_not_ssh` (`connect.c`): local unless `host:path` with no
-/// `/` before the `:`.
-fn url_is_local_not_ssh(url: &str) -> bool {
-    let colon = url.find(':');
-    let slash = url.find('/');
-    match colon {
-        None => true,
-        Some(ci) => slash.is_some_and(|si| si < ci),
-    }
+    !crate::transport_path::url_is_local_not_ssh(u)
 }
 
 /// Parse and validate `url` as Git would for SSH (scp-style, `ssh://`, or
@@ -1153,6 +1142,9 @@ mod tests {
         assert!(!is_ssh_url("ext::sh -c foo"));
         // `host:path` with a `/` before the `:` is a local path, not ssh.
         assert!(!is_ssh_url("./a:b"));
+        assert!(!is_ssh_url(r"C:\tmp\repo.git"));
+        assert!(!is_ssh_url("C:/tmp/repo.git"));
+        assert!(!is_ssh_url(r"\\?\C:\tmp\repo.git"));
     }
 
     #[test]

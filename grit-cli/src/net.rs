@@ -45,6 +45,7 @@ pub fn fetch_refspecs(config: &ConfigSet, remote: &str) -> Vec<String> {
     }
 }
 
+/// True for remotes that use a wire transport. `file://` and plain paths stay local.
 fn is_url_scheme(url: &str) -> bool {
     url.starts_with("http://")
         || url.starts_with("https://")
