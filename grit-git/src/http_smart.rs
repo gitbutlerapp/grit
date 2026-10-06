@@ -15,7 +15,7 @@ use grit_lib::merge_base;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
-use grit_lib::rev_parse::resolve_revision;
+use grit_lib::rev_parse::{resolve_revision, try_peel_to_commit_for_merge_base};
 
 use crate::http_bundle_uri::strip_v0_service_advertisement_if_present;
 use crate::http_transport::{
@@ -519,6 +519,9 @@ pub struct LsRefEntry {
 /// Wire options for HTTP smart fetch requests.
 #[derive(Clone, Debug, Default)]
 pub struct HttpFetchOptions {
+    /// When set, restrict emitted `have` lines to commits reachable from these tips
+    /// (`git fetch --negotiation-tip`, peeled to commits). An empty slice suppresses haves.
+    pub negotiation_tip_oids: Option<Vec<ObjectId>>,
     /// Absolute depth requested by `--depth`.
     pub depth: Option<usize>,
     /// Relative deepening requested by `--deepen`.
@@ -739,6 +742,9 @@ pub fn http_ls_refs(
         pkt_line::write_line_to_vec(&mut req, &line)?;
     }
     pkt_line::write_delim(&mut req)?;
+    pkt_line::write_line_to_vec(&mut req, "ref-prefix HEAD")?;
+    pkt_line::write_line_to_vec(&mut req, "ref-prefix refs/heads/")?;
+    pkt_line::write_line_to_vec(&mut req, "ref-prefix refs/tags/")?;
     pkt_line::write_line_to_vec(&mut req, "peel")?;
     pkt_line::write_line_to_vec(&mut req, "symrefs")?;
     pkt_line::write_flush(&mut req)?;
@@ -750,7 +756,7 @@ pub fn http_ls_refs(
         &format!("application/x-{SERVICE}-request"),
         &format!("application/x-{SERVICE}-result"),
         &req,
-        None,
+        client.git_protocol_header(),
     )?;
 
     parse_ls_refs_v2_response(&resp.into_vec()?)
@@ -798,6 +804,9 @@ pub fn http_negotiate_only_common(
         pkt_line::write_line_to_vec(&mut req, &line)?;
     }
     pkt_line::write_delim(&mut req)?;
+    pkt_line::write_line_to_vec(&mut req, "ref-prefix HEAD")?;
+    pkt_line::write_line_to_vec(&mut req, "ref-prefix refs/heads/")?;
+    pkt_line::write_line_to_vec(&mut req, "ref-prefix refs/tags/")?;
     pkt_line::write_line_to_vec(&mut req, "peel")?;
     pkt_line::write_line_to_vec(&mut req, "symrefs")?;
     pkt_line::write_flush(&mut req)?;
@@ -809,7 +818,7 @@ pub fn http_negotiate_only_common(
         &format!("application/x-{SERVICE}-request"),
         &format!("application/x-{SERVICE}-result"),
         &req,
-        None,
+        client.git_protocol_header(),
     )?;
     let advertised = parse_ls_refs_v2_response(&resp.into_vec()?)?;
 
@@ -1557,6 +1566,56 @@ fn trace_clone_negotiation_line(line: &str) {
     crate::trace_packet::trace_packet_line(line.as_bytes());
 }
 
+fn fetch_negotiation_is_noop(local_git_dir: &Path) -> bool {
+    grit_lib::config::ConfigSet::load(Some(local_git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get("fetch.negotiationalgorithm"))
+        .is_some_and(|value| value.eq_ignore_ascii_case("noop"))
+}
+
+fn peel_commit_oid_for_negotiation(repo: &Repository, oid: ObjectId) -> Result<Option<ObjectId>> {
+    try_peel_to_commit_for_merge_base(repo, oid).map_err(|e| match e {
+        grit_lib::error::Error::InvalidRef(msg) => anyhow::anyhow!(msg),
+        other => other.into(),
+    })
+}
+
+fn negotiation_tip_filter(
+    repo: &Repository,
+    negotiation_tip_oids: Option<&[ObjectId]>,
+) -> Result<Option<HashSet<ObjectId>>> {
+    let Some(tips) = negotiation_tip_oids else {
+        return Ok(None);
+    };
+    let mut set = HashSet::new();
+    for tip in tips {
+        if let Some(peeled) = peel_commit_oid_for_negotiation(repo, *tip)? {
+            set.insert(peeled);
+        }
+    }
+    Ok(Some(set))
+}
+
+fn peeled_tip_passes_filter(
+    repo: &Repository,
+    tip: ObjectId,
+    tip_filter: &Option<HashSet<ObjectId>>,
+) -> Result<Option<ObjectId>> {
+    if repo.odb.read(&tip).is_err() {
+        return Ok(None);
+    }
+    let Some(peeled) = peel_commit_oid_for_negotiation(repo, tip)? else {
+        return Ok(None);
+    };
+    if tip_filter
+        .as_ref()
+        .is_some_and(|filter| !filter.contains(&peeled))
+    {
+        return Ok(None);
+    }
+    Ok(Some(peeled))
+}
+
 /// Parse a protocol-v2 `command=fetch` response stream; returns true when a packfile section was consumed.
 fn process_v2_fetch_response(
     reader: &mut impl Read,
@@ -1674,7 +1733,7 @@ pub fn http_fetch_pack(
             &format!("application/x-{SERVICE}-request"),
             &format!("application/x-{SERVICE}-result"),
             &req,
-            None,
+            client.git_protocol_header(),
         )?;
         let body = resp.into_vec()?;
         let mut cur = Cursor::new(body.as_slice());
@@ -1689,6 +1748,9 @@ pub fn http_fetch_pack(
             pkt_line::write_line_to_vec(&mut req, &line)?;
         }
         pkt_line::write_delim(&mut req)?;
+        pkt_line::write_line_to_vec(&mut req, "ref-prefix HEAD")?;
+        pkt_line::write_line_to_vec(&mut req, "ref-prefix refs/heads/")?;
+        pkt_line::write_line_to_vec(&mut req, "ref-prefix refs/tags/")?;
         pkt_line::write_line_to_vec(&mut req, "peel")?;
         pkt_line::write_line_to_vec(&mut req, "symrefs")?;
         pkt_line::write_flush(&mut req)?;
@@ -1700,7 +1762,7 @@ pub fn http_fetch_pack(
             &format!("application/x-{SERVICE}-request"),
             &format!("application/x-{SERVICE}-result"),
             &req,
-            None,
+            client.git_protocol_header(),
         )?;
         parse_ls_refs_v2_response(&resp.into_vec()?)?
     };
@@ -1753,61 +1815,86 @@ pub fn http_fetch_pack(
         }
     }
 
+    let suppress_haves = options
+        .negotiation_tip_oids
+        .as_ref()
+        .is_some_and(|tips| tips.is_empty())
+        || fetch_negotiation_is_noop(local_git_dir);
+
     let mut negotiator = if options.refetch {
         None
     } else {
         let local_repo = Repository::open(local_git_dir, None)
             .with_context(|| format!("open {}", local_git_dir.display()))?;
         let mut negotiator = SkippingNegotiator::new(local_repo);
+        let tip_filter =
+            negotiation_tip_filter(negotiator.repo(), options.negotiation_tip_oids.as_deref())?;
 
-        if let Ok(entries) = refs::list_refs(local_git_dir, "refs/bundles/") {
-            for (name, oid) in entries {
-                let t = if let Ok(resolved) = resolve_revision(negotiator.repo(), &name) {
-                    resolved
-                } else {
-                    oid
-                };
-                if negotiator.repo().odb.read(&t).is_ok() {
-                    negotiator.add_tip(t)?;
-                }
-            }
-        }
-
-        for w in &wants {
-            if negotiator.repo().odb.read(w).is_ok() {
-                negotiator.add_tip(*w)?;
-            }
-        }
-        let mut tips: Vec<ObjectId> = Vec::new();
-        for prefix in ["refs/heads/", "refs/tags/"] {
-            if let Ok(entries) = refs::list_refs(local_git_dir, prefix) {
+        if !suppress_haves {
+            if let Ok(entries) = refs::list_refs(local_git_dir, "refs/bundles/") {
                 for (name, oid) in entries {
-                    if let Ok(resolved) = resolve_revision(negotiator.repo(), &name) {
-                        tips.push(resolved);
+                    let t = if let Ok(resolved) = resolve_revision(negotiator.repo(), &name) {
+                        resolved
                     } else {
-                        tips.push(oid);
+                        oid
+                    };
+                    if let Some(peeled) =
+                        peeled_tip_passes_filter(negotiator.repo(), t, &tip_filter)?
+                    {
+                        negotiator.add_tip(peeled)?;
                     }
                 }
             }
-        }
-        if let Ok(h) = refs::resolve_ref(local_git_dir, "HEAD") {
-            tips.push(h);
-        }
-        for sym in ["HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
-            if let Ok(oid) = resolve_revision(negotiator.repo(), sym) {
-                tips.push(oid);
+
+            for w in &wants {
+                if negotiator.repo().odb.read(w).is_ok() {
+                    if let Some(peeled) = peel_commit_oid_for_negotiation(negotiator.repo(), *w)? {
+                        negotiator.add_tip(peeled)?;
+                    }
+                }
             }
-        }
-        tips.sort_by_key(|o| o.to_hex());
-        tips.dedup();
-        for t in tips {
-            if want_set.contains(&t) {
-                continue;
+            let mut tips: Vec<ObjectId> = Vec::new();
+            for prefix in ["refs/heads/", "refs/tags/"] {
+                if let Ok(entries) = refs::list_refs(local_git_dir, prefix) {
+                    for (name, oid) in entries {
+                        let tip = if let Ok(resolved) = resolve_revision(negotiator.repo(), &name) {
+                            resolved
+                        } else {
+                            oid
+                        };
+                        if let Some(peeled) =
+                            peeled_tip_passes_filter(negotiator.repo(), tip, &tip_filter)?
+                        {
+                            tips.push(peeled);
+                        }
+                    }
+                }
             }
-            if negotiator.repo().odb.read(&t).is_err() {
-                continue;
+            if let Ok(h) = refs::resolve_ref(local_git_dir, "HEAD") {
+                if let Some(peeled) = peeled_tip_passes_filter(negotiator.repo(), h, &tip_filter)? {
+                    tips.push(peeled);
+                }
             }
-            negotiator.add_tip(t)?;
+            for sym in ["HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+                if let Ok(oid) = resolve_revision(negotiator.repo(), sym) {
+                    if let Some(peeled) =
+                        peeled_tip_passes_filter(negotiator.repo(), oid, &tip_filter)?
+                    {
+                        tips.push(peeled);
+                    }
+                }
+            }
+            tips.sort_by_key(|o| o.to_hex());
+            tips.dedup();
+            for t in tips {
+                if want_set.contains(&t) {
+                    continue;
+                }
+                if negotiator.repo().odb.read(&t).is_err() {
+                    continue;
+                }
+                negotiator.add_tip(t)?;
+            }
         }
         for e in &advertised {
             if want_set.contains(&e.oid) {
@@ -1874,14 +1961,15 @@ pub fn http_fetch_pack(
             pkt_line::write_line_to_vec(&mut req, &format!("want-ref {name}"))?;
         }
         append_fetch_request_extensions_v2(&mut req, &caps, options, &local_shallow_oids)?;
+        let trace_label = crate::trace_packet::negotiation_packet_label();
         for h in &pending_haves {
-            let trace = format!("clone> have {}", h.to_hex());
+            let trace = format!("{trace_label}> have {}", h.to_hex());
             trace_clone_negotiation_line(&trace);
             pkt_line::write_line_to_vec(&mut req, &format!("have {}", h.to_hex()))?;
         }
         if include_done {
             pkt_line::write_line_to_vec(&mut req, "done")?;
-            trace_clone_negotiation_line("clone> done");
+            trace_clone_negotiation_line(&format!("{trace_label}> done"));
         }
         pkt_line::write_flush(&mut req)?;
         Ok(req)
