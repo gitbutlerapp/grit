@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import html
-import json
 import subprocess
 import sys
 import urllib.parse
@@ -18,8 +17,6 @@ REPO = Path(__file__).resolve().parent.parent
 OUT_INDEX = REPO / "docs" / "progress" / "index.html"
 OUT_FILES = REPO / "docs" / "testfiles.html"
 OUT_SVG = REPO / "docs" / "test-progress.svg"
-OUT_HOME = REPO / "docs" / "index.html"
-DOC_EXAMPLES = REPO / "docs" / "examples"
 
 # Published site root (GitHub Pages) for absolute og/twitter image URLs on index.html.
 GITHUB_PAGES_SITE = "https://gitbutlerapp.github.io/grit"
@@ -37,20 +34,6 @@ GROUP_DESC: dict[str, str] = {
     "t8": "Porcelainish commands concerning forensics",
     "t9": "Git tools",
 }
-
-HOME_GROUP_LABELS: dict[str, str] = {
-    "t0": "basics",
-    "t1": "database",
-    "t2": "worktree",
-    "t3": "ls-files",
-    "t4": "diff",
-    "t5": "fetch/push",
-    "t6": "revisions",
-    "t7": "porcelain",
-    "t8": "forensics",
-    "t9": "tools",
-}
-
 
 def git_full_sha() -> str:
     try:
@@ -283,140 +266,6 @@ def group_summaries(rows: list[dict[str, str]]) -> dict[str, dict[str, int]]:
         if (r.get("fully_passing") or "").lower() == "true" and tt > 0:
             groups[g]["full"] += 1
     return groups
-
-
-def generate_homepage_progress_section(rows: list[dict[str, str]]) -> str:
-    """Generate the homepage progress section from the same harness metrics."""
-    stats = harness_summary(rows)
-    total_tests = int(stats["total_tests"])
-    total_pass = int(stats["total_pass"])
-    pass_rate = float(stats["pass_rate"])
-    groups = group_summaries(rows)
-
-    suite_html = ""
-    for g in sorted(groups.keys(), key=lambda x: (len(x), x)):
-        st = groups[g]
-        pc = pct(st["pass"], st["tests"])
-        label = f"{g} {HOME_GROUP_LABELS.get(g, GROUP_DESC.get(g, 'tests').lower())}"
-        suite_html += f"""
-              <div class="suite-stat" style="--pct: {pc}%">
-                <span>{html.escape(label)}</span><strong>{pc}%</strong>
-              </div>"""
-
-    return f"""      <section class="wrap section progress-section" id="progress">
-        <div class="split">
-          <div>
-            <span class="num">Current status</span>
-            <h2>Git Test Suite Progress</h2>
-            <p class="section-intro">
-              Grit is tracked against the upstream Git harness. The generated
-              dashboard shows pass rate by family, skipped files, and per-file
-              status.
-            </p>
-            <ul class="list">
-              <li>
-                140+ Git commands are implemented in the
-                <a href="https://crates.io/crates/grit-git">grit-git</a>
-                crate / CLI.
-              </li>
-              <li>
-                grit-lib covers
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/objects/"
-                  >objects</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/pack/"
-                  >packs</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/index/"
-                  >index</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/refs/">refs</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/rev_parse/"
-                  >revisions</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/diff/">diff</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/merge_file/"
-                  >merge</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/config/"
-                  >config</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/ignore/"
-                  >ignore rules</a
-                >,
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/hooks/"
-                  >hooks</a
-                >, and
-                <a href="https://docs.rs/grit-lib/latest/grit_lib/">more</a>.
-              </li>
-              <li>
-                Development is agent-driven, with logs and generated progress
-                checked into the repo.
-              </li>
-            </ul>
-          </div>
-          <a
-            class="progress-card"
-            href="progress/"
-            aria-label="Open progress dashboard"
-          >
-            <div class="big-stat">{pass_rate}%</div>
-            <div class="bar" aria-hidden="true"><span style="width: {pass_rate}%"></span></div>
-            <div class="suite-grid" aria-label="Pass rate by Git test suite">{suite_html}
-            </div>
-            <p>
-              Latest generated harness pass rate: {total_pass:,} of
-              {total_tests:,} in-scope tests. Open the dashboard for exact
-              counts.
-            </p>
-          </a>
-        </div>
-      </section>"""
-
-
-def load_homepage_examples() -> dict[str, str]:
-    """Return docs/examples/*.rs content keyed by the browser-visible path."""
-    return {
-        f"examples/{path.name}": path.read_text(encoding="utf-8")
-        for path in sorted(DOC_EXAMPLES.glob("*.rs"))
-    }
-
-
-def refresh_homepage_inline_examples(text: str) -> str:
-    """Replace the inline example cache in docs/index.html from docs/examples."""
-    start_marker = "        const inlineExamples = "
-    end_marker = ";\n        let lastFocus"
-    start = text.find(start_marker)
-    if start == -1:
-        raise RuntimeError(f"Could not find inline example cache start in {OUT_HOME}")
-    value_start = start + len(start_marker)
-    end = text.find(end_marker, value_start)
-    if end == -1:
-        raise RuntimeError(f"Could not find inline example cache end in {OUT_HOME}")
-    examples_json = json.dumps(load_homepage_examples(), indent=10)
-    return text[:value_start] + examples_json + text[end:]
-
-
-def update_homepage_index(rows: list[dict[str, str]]) -> None:
-    """Replace homepage generated sections and inline examples from source files."""
-    text = OUT_HOME.read_text(encoding="utf-8")
-    start_marker = '      <section class="wrap section progress-section" id="progress">'
-    end_marker = '\n\n      <section class="wrap section" id="why">'
-    start = text.find(start_marker)
-    if start == -1:
-        raise RuntimeError(f"Could not find progress section start in {OUT_HOME}")
-    end = text.find(end_marker, start)
-    if end == -1:
-        raise RuntimeError(f"Could not find progress section end in {OUT_HOME}")
-    updated = (
-        text[:start]
-        + generate_homepage_progress_section(rows)
-        + text[end:]
-    )
-    updated = refresh_homepage_inline_examples(updated)
-    OUT_HOME.write_text(updated, encoding="utf-8")
 
 
 def generate_index(rows: list[dict[str, str]]) -> str:
@@ -1014,11 +863,9 @@ def main() -> None:
     OUT_INDEX.write_text(generate_index(rows), encoding="utf-8")
     OUT_FILES.write_text(generate_testfiles(rows), encoding="utf-8")
     OUT_SVG.write_text(generate_progress_svg(rows), encoding="utf-8")
-    update_homepage_index(rows)
     print(f"Wrote {OUT_INDEX}")
     print(f"Wrote {OUT_FILES}")
     print(f"Wrote {OUT_SVG}")
-    print(f"Updated {OUT_HOME}")
 
 
 if __name__ == "__main__":
