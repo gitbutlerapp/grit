@@ -645,6 +645,7 @@ fn is_alias_pair(a: &str, b: &str) -> bool {
     (a == "alias-source" && b == "alias-target") || (a == "alias-target" && b == "alias-source")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn long_abbrev(
     st: &mut PoState,
     s: &str,
