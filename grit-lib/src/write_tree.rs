@@ -434,6 +434,25 @@ fn path_strip_prefix(path: &[u8], prefix_len: usize) -> &[u8] {
         .unwrap_or(&path[prefix_len..])
 }
 
+#[cfg(test)]
+mod test_tree_write_counter {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TREE_WRITES: AtomicUsize = AtomicUsize::new(0);
+
+    pub fn reset() {
+        TREE_WRITES.store(0, Ordering::SeqCst);
+    }
+
+    pub fn tree_writes() -> usize {
+        TREE_WRITES.load(Ordering::SeqCst)
+    }
+
+    pub fn record_tree_write() {
+        TREE_WRITES.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 fn store_tree_payload(
     odb: &Odb,
     payload: &[u8],
@@ -444,10 +463,14 @@ fn store_tree_payload(
     match flags.persistence {
         WriteTreePersistence::DryRun => Ok((hashed, false)),
         WriteTreePersistence::Repair => Ok((hashed, !odb.exists(&hashed))),
-        WriteTreePersistence::Write => Ok((
-            odb.write_with_options(ObjectKind::Tree, payload, write_opts)?,
-            false,
-        )),
+        WriteTreePersistence::Write => {
+            #[cfg(test)]
+            test_tree_write_counter::record_tree_write();
+            Ok((
+                odb.write_with_options(ObjectKind::Tree, payload, write_opts)?,
+                false,
+            ))
+        }
     }
 }
 
@@ -505,15 +528,11 @@ pub fn write_tree_from_index_subset(
 }
 
 /// Build and write tree object(s) from index entries and return the tree OID.
+///
+/// Unlike [`write_tree_update_index`], this does not read or update the index cache-tree
+/// extension. Callers that need incremental reuse must use [`write_tree_update_index`] on a
+/// mutable index instead.
 pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<ObjectId> {
-    if prefix.is_empty() {
-        if let Some(root) = index.cache_tree_root {
-            if cache_tree_fully_valid(odb, index.cache_tree.as_ref()) {
-                return Ok(root);
-            }
-        }
-    }
-
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let prefix_bytes = prefix.as_bytes();
@@ -1412,6 +1431,9 @@ mod tests {
 
     #[test]
     fn cache_tree_update_rewrites_only_invalidated() {
+        use filetime::FileTime;
+        use std::fs;
+
         let dir = TempDir::new().unwrap();
         let odb = Odb::new(dir.path());
         let mut index = build_nested_index(&odb);
@@ -1419,15 +1441,36 @@ mod tests {
         let alpha_before = cache_tree_child_oid(&index, b"alpha");
         let wide_before = cache_tree_child_oid(&index, b"wide");
         let beta_before = cache_tree_child_oid(&index, b"beta");
+        let alpha_path = odb.object_path(&alpha_before);
+        let wide_path = odb.object_path(&wide_before);
+        let alpha_mtime =
+            FileTime::from_last_modification_time(&fs::metadata(&alpha_path).unwrap());
+        let wide_mtime = FileTime::from_last_modification_time(&fs::metadata(&wide_path).unwrap());
 
         index.invalidate_cache_tree_for_path(b"beta/four");
         let blob = odb.write(ObjectKind::Blob, b"updated").unwrap();
         index.add_or_replace(entry("beta/four/deep", MODE_REGULAR, blob));
 
+        test_tree_write_counter::reset();
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let tree_writes = test_tree_write_counter::tree_writes();
+        assert!(
+            (2..=3).contains(&tree_writes),
+            "expected root + beta subtree tree writes, got {tree_writes}"
+        );
         assert_eq!(cache_tree_child_oid(&index, b"alpha"), alpha_before);
         assert_eq!(cache_tree_child_oid(&index, b"wide"), wide_before);
         assert_ne!(cache_tree_child_oid(&index, b"beta"), beta_before);
+        assert_eq!(
+            FileTime::from_last_modification_time(&fs::metadata(&alpha_path).unwrap()),
+            alpha_mtime,
+            "unchanged alpha tree must not be rewritten"
+        );
+        assert_eq!(
+            FileTime::from_last_modification_time(&fs::metadata(&wide_path).unwrap()),
+            wide_mtime,
+            "unchanged wide tree must not be rewritten"
+        );
     }
 
     #[test]
