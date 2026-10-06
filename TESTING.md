@@ -141,7 +141,7 @@ cargo fmt --all --check
 cargo check --workspace
 ```
 
-For **`cargo clippy --workspace --all-targets -- -D warnings`**, the workspace still carries pre-existing lint debt outside touched crates; fix warnings in code you change. Do not treat a full-workspace clippy run as a green gate until that debt is burned down (CI stage 2 will enforce clippy).
+**`cargo clippy --workspace -- -D warnings`** must pass locally before you push; CI treats any Clippy warning as a failure.
 
 ## Continuous integration
 
@@ -156,10 +156,13 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | Job | What it runs | Reproduce locally |
 | --- | --- | --- |
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
+| **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **test** | `cargo test -p grit-lib -p grit-cli` | `CARGO_BUILD_JOBS=$(nproc) cargo test -p grit-lib -p grit-cli` |
 | **smoke** | Release **`grit-git`**, strict harness smoke list, then `git diff --exit-code` | See [Upstream shell harness](#upstream-shell-harness) (smoke commands); use an isolated `--data-dir` |
 
 Each job uses **`ubuntu-latest`**, **`timeout-minutes: 15`**, and runs in parallel. The smoke job uploads per-file harness logs from **`$RUNNER_TEMP/smoke/logs/`** as a workflow artifact when it fails.
+
+**Local CI gate:** `make ci` runs fmt check, clippy with **`-D warnings`**, unit tests, and the strict smoke list in sequence (see the root [`Makefile`](Makefile)).
 
 ## Upstream shell harness
 

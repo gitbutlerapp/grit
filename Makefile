@@ -4,13 +4,19 @@
 #   make build        - release build of the grit-git CLI
 #   make debug        - debug build of the grit-git CLI
 #   make test         - run the Rust unit/integration tests
-#   make clippy       - lint all crates
+#   make clippy       - lint all crates (warnings fail CI)
+#   make ci           - fmt check, clippy -D warnings, unit tests, strict smoke
 #   make fmt          - format all crates
 #   make clean        - remove build artifacts
 
 CARGO ?= cargo
+CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
+export CARGO_BUILD_JOBS
 
-.PHONY: all build debug test clippy fmt clean
+SMOKE_DATA_DIR ?= /tmp/grit-smoke
+SMOKE_LIST := data/ci/smoke-tests.txt
+
+.PHONY: all build debug test clippy fmt ci smoke clean
 
 all: build
 
@@ -24,7 +30,17 @@ test:
 	$(CARGO) test --workspace
 
 clippy:
-	$(CARGO) clippy --workspace --all-targets
+	$(CARGO) clippy --workspace -- -D warnings
+
+ci: fmt-check clippy test smoke
+
+fmt-check:
+	$(CARGO) fmt --all --check
+
+smoke: build
+	./scripts/run-tests.sh --strict --quiet --no-catalog \
+		--list $(SMOKE_LIST) \
+		--data-dir $(SMOKE_DATA_DIR)
 
 fmt:
 	$(CARGO) fmt --all
