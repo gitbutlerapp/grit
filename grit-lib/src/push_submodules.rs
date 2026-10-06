@@ -15,11 +15,11 @@ use crate::refs;
 use crate::repo::Repository;
 use crate::transport_path::{is_local_path_remote_url, resolve_local_remote_git_dir};
 
-fn resolve_remote_url_to_local_git_dir(url: &str, git_dir: &Path) -> Option<PathBuf> {
+fn resolve_remote_url_to_local_git_dir(url: &str, repo: &Repository) -> Option<PathBuf> {
     if !is_local_path_remote_url(url) {
         return None;
     }
-    let p = resolve_local_remote_git_dir(url, git_dir);
+    let p = resolve_local_remote_git_dir(url, &repo.git_dir, repo.work_tree.as_deref());
     if p.join("HEAD").is_file() {
         Some(p)
     } else {
@@ -411,7 +411,7 @@ pub fn submodule_needs_push_to_remote(
         let Some(val) = entry.value.as_deref() else {
             continue;
         };
-        let Some(remote_git_dir) = resolve_remote_url_to_local_git_dir(val, &sub.git_dir) else {
+        let Some(remote_git_dir) = resolve_remote_url_to_local_git_dir(val, &sub) else {
             continue;
         };
         if oids_not_on_remote_repo(&sub, oids, &remote_git_dir)? {

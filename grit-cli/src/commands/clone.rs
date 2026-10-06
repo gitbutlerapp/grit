@@ -10,7 +10,9 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
-use grit_lib::transport_path::{absolute_local_clone_source_url, is_local_path_remote_url};
+use grit_lib::transport_path::{
+    absolute_local_clone_source_url, should_store_absolute_local_clone_url,
+};
 use serde::Serialize;
 
 use crate::context;
@@ -104,7 +106,7 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
 /// URL stored in `remote.origin.url` after clone — absolute for local paths so later
 /// fetch/push resolve against the repository, not the process cwd.
 fn stored_clone_remote_url(url: &str) -> String {
-    if is_local_path_remote_url(url) {
+    if should_store_absolute_local_clone_url(url) {
         absolute_local_clone_source_url(Path::new(url.trim()))
     } else {
         url.to_owned()

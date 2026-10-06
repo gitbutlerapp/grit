@@ -253,7 +253,7 @@ grit-lib = { version = <span class="tok-str">"0.4"</span>, features = [<span cla
 <p>And a <strong>local</strong> (<code>file://</code> or path) fetch skips the transport entirely. Resolve configured relative URLs from the repository root (not the process cwd) with <code>transport_path::resolve_local_remote_git_dir</code>; store absolute paths at clone time via <code>absolute_local_clone_source_url</code> so later fetch/push hit the intended remote:</p>
 <pre><code><span class="tok-kw">use</span> grit_lib::transport_path::<span class="tok-fn">resolve_local_remote_git_dir</span>;
 
-<span class="tok-kw">let</span> remote_git_dir = <span class="tok-fn">resolve_local_remote_git_dir</span>(remote_url, git_dir);
+<span class="tok-kw">let</span> remote_git_dir = <span class="tok-fn">resolve_local_remote_git_dir</span>(remote_url, git_dir, work_tree);
 <span class="tok-kw">let</span> outcome = grit_lib::transfer::<span class="tok-fn">fetch_local</span>(git_dir, &remote_git_dir, &fetch_opts)?;</code></pre>
 
 <h2 id="push">6. Pushing</h2>
@@ -322,7 +322,7 @@ grit-lib = { version = <span class="tok-str">"0.4"</span>, features = [<span cla
         <span class="tok-kw">let mut</span> c = <span class="tok-ty">SshTransport</span>::<span class="tok-fn">new</span>().<span class="tok-fn">connect</span>(url, <span class="tok-ty">Service</span>::<span class="tok-ty">UploadPack</span>, &v2)?;
         <span class="tok-fn">fetch_remote</span>(git_dir, c.<span class="tok-fn">as_mut</span>(), opts, &<span class="tok-kw">mut</span> <span class="tok-ty">NoProgress</span>)
     } <span class="tok-kw">else</span> {
-        <span class="tok-kw">let</span> remote = grit_lib::transport_path::<span class="tok-fn">resolve_local_remote_git_dir</span>(url, git_dir);
+        <span class="tok-kw">let</span> remote = grit_lib::transport_path::<span class="tok-fn">resolve_local_remote_git_dir</span>(url, git_dir, work_tree);
         grit_lib::transfer::<span class="tok-fn">fetch_local</span>(git_dir, &remote, opts)
     }
 }</code></pre>

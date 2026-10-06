@@ -95,7 +95,8 @@ pub fn fetch(
     };
 
     let outcome = if !is_url_scheme(&url) {
-        let remote_git_dir = resolve_local_remote_git_dir(&url, &repo.git_dir);
+        let remote_git_dir =
+            resolve_local_remote_git_dir(&url, &repo.git_dir, repo.work_tree.as_deref());
         fetch_local(&repo.git_dir, &remote_git_dir, &opts)?
     } else if is_http(&url) {
         let client = http_client(config)?;
@@ -121,7 +122,8 @@ pub fn push(
     };
 
     let outcome = if !is_url_scheme(&url) {
-        let remote_git_dir = resolve_local_remote_git_dir(&url, &repo.git_dir);
+        let remote_git_dir =
+            resolve_local_remote_git_dir(&url, &repo.git_dir, repo.work_tree.as_deref());
         push_local(&repo.git_dir, &remote_git_dir, refs, &opts)?
     } else if is_http(&url) {
         let client = http_client(config)?;

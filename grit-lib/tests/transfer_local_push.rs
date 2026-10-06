@@ -12,7 +12,9 @@ use std::path::Path;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::push_report::PushRefStatus;
+use grit_lib::repo::Repository;
 use grit_lib::transfer::{push_local, PushOptions, PushRefSpec};
+use grit_lib::transport_path::resolve_local_remote_git_dir;
 use grit_test_support::{git, git_cmd};
 
 /// `git` that may fail; returns whether it succeeded plus combined output.
@@ -537,4 +539,130 @@ fn push_local_missing_remote_is_error() {
         "unexpected error: {msg}"
     );
     assert!(!missing.exists(), "must not create a new repository path");
+}
+
+#[test]
+fn push_local_does_not_use_decoy_repo_when_parent_relative_target_missing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let parent = tmp.path();
+    let clone_wt = parent.join("clone");
+    let local_git = clone_wt.join(".git");
+    std::fs::create_dir_all(&clone_wt).unwrap();
+
+    git(&clone_wt, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(clone_wt.join("a.txt"), "one\n").unwrap();
+    git(&clone_wt, &["add", "a.txt"]);
+    git(&clone_wt, &["commit", "-q", "-m", "c1"]);
+    let c1 = rev_parse(&clone_wt, "HEAD");
+
+    // Valid bare repo inside the worktree — must not be used when remote is `../wrong.git`.
+    let decoy = clone_wt.join("wrong.git");
+    std::fs::create_dir_all(&decoy).unwrap();
+    git(&decoy, &["init", "-q", "--bare", "-b", "main", "."]);
+
+    let intended = parent.join("wrong.git");
+    assert!(!intended.exists());
+
+    let remote_git = grit_lib::transport_path::resolve_local_remote_git_dir(
+        "../wrong.git",
+        &local_git,
+        Some(&clone_wt),
+    );
+    assert_eq!(remote_git, clone_wt.join("../wrong.git"));
+
+    let err = push_local(
+        &local_git,
+        &remote_git,
+        &[PushRefSpec {
+            src: Some(c1),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+    )
+    .expect_err("missing ../wrong.git must fail");
+    assert!(
+        err.to_string().contains("could not find repository"),
+        "{}",
+        err
+    );
+    assert_eq!(remote_ref(&decoy, "refs/heads/main"), None);
+}
+
+#[test]
+fn linked_worktree_resolves_relative_remote_from_worktree_root() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let origin = root.join("origin.git");
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "--bare", "-b", "main", "."]);
+
+    let seed = root.join("seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(seed.join("f"), "1\n").unwrap();
+    git(&seed, &["add", "f"]);
+    git(&seed, &["commit", "-q", "-m", "seed"]);
+    git(
+        &seed,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    git(&seed, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+
+    let main = root.join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "-b", "main", "."]);
+    git(&main, &["remote", "add", "origin", "../origin.git"]);
+    git(&main, &["fetch", "origin"]);
+    git(&main, &["reset", "--hard", "origin/main"]);
+
+    let linked = root.join("linked");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "linked",
+            linked.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    let repo = Repository::discover(Some(&linked)).expect("discover linked worktree");
+    assert!(
+        repo.work_tree
+            .as_ref()
+            .is_some_and(|wt| wt.ends_with("linked")),
+        "expected work_tree at linked checkout, got {:?}",
+        repo.work_tree
+    );
+
+    let resolved =
+        resolve_local_remote_git_dir("../origin.git", &repo.git_dir, repo.work_tree.as_deref());
+    assert_eq!(
+        resolved.canonicalize().expect("origin path"),
+        origin.canonicalize().expect("origin canonical")
+    );
+
+    let head = rev_parse(&linked, "HEAD");
+    let outcome = push_local(
+        &repo.git_dir,
+        &resolved,
+        &[PushRefSpec {
+            src: Some(head),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+    )
+    .expect("push from linked worktree with resolved remote");
+    assert_eq!(outcome.results.len(), 1);
+    assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);
 }

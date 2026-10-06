@@ -204,7 +204,7 @@ fn ssh_command() -> String {
 }
 
 fn local_git_dir(url: &str, git_dir: &Path) -> PathBuf {
-    grit_lib::transport_path::resolve_local_remote_git_dir(url, git_dir)
+    grit_lib::transport_path::resolve_local_remote_git_dir(url, git_dir, None)
 }
 
 /// Build an HTTP client honoring the repo's request-shaping config

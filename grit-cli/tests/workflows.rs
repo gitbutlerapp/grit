@@ -436,6 +436,54 @@ fn relative_local_clone_push_reaches_real_remote() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn file_url_clone_preserves_url_and_push_succeeds() -> TestResult {
+    let scratch = Scratch::new("file-url-clone")?;
+    let remote = scratch.child("origin.git");
+    let clone = scratch.child("dst");
+    let seed = scratch.child("seed");
+    fs::create_dir_all(&seed)?;
+
+    gs_ok(
+        scratch.path(),
+        ["init", "--bare", path_arg(&remote)?.as_str()],
+    )?;
+    gs_ok(&seed, ["init", "."])?;
+    write_file(&seed.join("f"), "1\n")?;
+    gs_ok(&seed, ["commit", "-m", "seed"])?;
+    git_in(
+        &seed,
+        &["remote", "add", "origin", path_arg(&remote)?.as_str()],
+    )?;
+    git_in(&seed, &["push", "-q", "origin", "HEAD:refs/heads/main"])?;
+
+    let remote_abs = remote.canonicalize().unwrap_or(remote.clone());
+    let file_url = format!("file://{}", path_arg(&remote_abs)?);
+    gs_ok(
+        scratch.path(),
+        ["clone", file_url.as_str(), path_arg(&clone)?.as_str()],
+    )?;
+
+    let remotes = gs_ok(&clone, ["remote"])?;
+    assert!(
+        remotes.stdout.contains(&format!("origin\t{file_url}")),
+        "file:// URL must be preserved in config:\n{}",
+        remotes.dump()
+    );
+
+    write_file(&clone.join("g"), "x\n")?;
+    gs_ok(&clone, ["commit", "-am", "two"])?;
+    gs_ok(&clone, ["push"])?;
+
+    let remote_log = git_in(&remote, &["log", "--oneline", "main"])?;
+    assert!(
+        remote_log.stdout.contains("two"),
+        "push via file:// remote should update real origin:\n{}",
+        remote_log.stdout
+    );
+    Ok(())
+}
+
 /// Mirrors GitHub issue #903: a gitlink whose commit object is not in the superproject ODB
 /// must not make `grit diff` fail on a clean tree.
 #[test]

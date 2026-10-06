@@ -19,14 +19,19 @@ pub fn looks_like_command_line_option(s: &str) -> bool {
     !s.is_empty() && s.starts_with('-')
 }
 
-/// Rejects repository path strings that could be mistaken for options when passed to a shell.
-///
-/// Git dies with `strange pathname '%s' blocked` when the parsed local path starts with `-`.
-/// Absolute paths like `/tmp/-repo.git` are allowed because the path string begins with `/`.
-/// Repository root used to resolve relative `remote.<name>.url` values — the worktree
-/// directory for a linked worktree, or the bare repo path itself.
+/// Repository root used to resolve relative `remote.<name>.url` values — the linked or main
+/// worktree directory when known, otherwise inferred from `git_dir` (including linked
+/// worktree admin dirs via `gitdir` / `commondir`).
 #[must_use]
-pub fn configured_remote_base(git_dir: &Path) -> PathBuf {
+pub fn configured_remote_base(git_dir: &Path, work_tree: Option<&Path>) -> PathBuf {
+    if let Some(wt) = work_tree {
+        return wt.to_path_buf();
+    }
+    if git_dir.join("commondir").is_file() {
+        if let Ok(wt) = crate::worktree::read_worktree_path(git_dir) {
+            return wt;
+        }
+    }
     if git_dir.file_name().is_some_and(|name| name == ".git") {
         git_dir
             .parent()
@@ -35,6 +40,14 @@ pub fn configured_remote_base(git_dir: &Path) -> PathBuf {
     } else {
         git_dir.to_path_buf()
     }
+}
+
+/// True when a clone source should be stored as an absolute filesystem path (scheme-less
+/// local paths only — not `file://`, HTTP, SSH, etc.).
+#[must_use]
+pub fn should_store_absolute_local_clone_url(url: &str) -> bool {
+    let url = url.trim();
+    !url.starts_with("file://") && is_local_path_remote_url(url)
 }
 
 /// Absolute form of a local clone source path, matching Git's `absolute_pathdup`: prepend the
@@ -66,30 +79,20 @@ pub fn is_local_path_remote_url(url: &str) -> bool {
 
 /// Resolve a local remote URL to the remote repository's git directory.
 ///
-/// Relative paths are interpreted from [`configured_remote_base`] (`git_dir`), not from the
-/// process current working directory. This matches Git's handling of configured
-/// `remote.<name>.url` during fetch and push.
+/// Relative paths are interpreted from [`configured_remote_base`], not from the process
+/// current working directory. This matches Git's handling of configured `remote.<name>.url`
+/// during fetch and push.
 #[must_use]
-pub fn resolve_local_remote_git_dir(url: &str, git_dir: &Path) -> PathBuf {
+pub fn resolve_local_remote_git_dir(
+    url: &str,
+    git_dir: &Path,
+    work_tree: Option<&Path>,
+) -> PathBuf {
     let path_str = url.strip_prefix("file://").unwrap_or(url.trim());
     let mut remote_path = PathBuf::from(path_str);
     if remote_path.is_relative() {
-        let base = configured_remote_base(git_dir);
+        let base = configured_remote_base(git_dir, work_tree);
         remote_path = base.join(&remote_path);
-        if !remote_path.exists() {
-            let mut trimmed = url.trim();
-            let mut stripped_any_parent = false;
-            while let Some(rest) = trimmed.strip_prefix("../") {
-                stripped_any_parent = true;
-                trimmed = rest;
-            }
-            if stripped_any_parent {
-                let fallback = base.join(trimmed);
-                if fallback.exists() {
-                    remote_path = fallback;
-                }
-            }
-        }
     }
     local_git_dir_from_filesystem_path(&remote_path)
 }
@@ -106,6 +109,10 @@ fn local_git_dir_from_filesystem_path(path: &Path) -> PathBuf {
     }
 }
 
+/// Rejects repository path strings that could be mistaken for options when passed to a shell.
+///
+/// Git dies with `strange pathname '%s' blocked` when the parsed local path starts with `-`.
+/// Absolute paths like `/tmp/-repo.git` are allowed because the path string begins with `/`.
 pub fn check_local_url_path_not_option_like(url: &str) -> Result<(), TransportPathError> {
     let path = url
         .strip_prefix("file://")
@@ -352,12 +359,19 @@ mod tests {
     #[test]
     fn configured_remote_base_worktree_and_bare() {
         assert_eq!(
-            configured_remote_base(Path::new("/tmp/wt/.git")),
+            configured_remote_base(Path::new("/tmp/wt/.git"), None),
             PathBuf::from("/tmp/wt")
         );
         assert_eq!(
-            configured_remote_base(Path::new("/tmp/remote.git")),
+            configured_remote_base(Path::new("/tmp/remote.git"), None),
             PathBuf::from("/tmp/remote.git")
+        );
+        assert_eq!(
+            configured_remote_base(
+                Path::new("/tmp/main/.git/worktrees/feature"),
+                Some(Path::new("/tmp/linked"))
+            ),
+            PathBuf::from("/tmp/linked")
         );
     }
 
@@ -365,8 +379,19 @@ mod tests {
     fn resolve_local_remote_git_dir_from_relative_url() {
         let base = PathBuf::from("/tmp/parent/clone");
         let git_dir = base.join(".git");
-        let resolved = resolve_local_remote_git_dir("origin.git", &git_dir);
+        let resolved = resolve_local_remote_git_dir("origin.git", &git_dir, Some(&base));
         assert_eq!(resolved, base.join("origin.git"));
+    }
+
+    #[test]
+    fn should_store_absolute_local_clone_url_classification() {
+        assert!(super::should_store_absolute_local_clone_url("origin.git"));
+        assert!(!super::should_store_absolute_local_clone_url(
+            "file:///tmp/x.git"
+        ));
+        assert!(!super::should_store_absolute_local_clone_url(
+            "https://h/r.git"
+        ));
     }
 
     #[test]
