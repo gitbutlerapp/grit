@@ -272,6 +272,11 @@ mod midx_cache {
     struct State {
         bytes: HashMap<PathBuf, (Stamp, Arc<Vec<u8>>)>,
         hash_version: HashMap<PathBuf, (Option<Stamp>, u8)>,
+        /// Tip-MIDX resolution per pack dir, held for the process lifetime and
+        /// evicted by in-process MIDX writers. Only the object-read hot path may
+        /// use this: a stale entry there degrades to the regular pack lookup,
+        /// which stays correct, whereas midx subcommands need the live state.
+        tip_path: HashMap<PathBuf, Option<PathBuf>>,
     }
 
     static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
@@ -328,9 +333,25 @@ mod midx_cache {
         v
     }
 
-    /// Drop cached MIDX bytes under `pack_dir` (called by in-process writers).
+    /// Cached tip-MIDX resolution for `pack_dir`, computing it with `resolve` on
+    /// first use. Object-read hot path only (see [`State::tip_path`]): resolving
+    /// the tip costs two filesystem probes per call (root file + chain), which
+    /// history walks and pack building would otherwise pay per object.
+    pub fn tip_path(pack_dir: &Path, resolve: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+        if let Some(tip) = lock().tip_path.get(pack_dir) {
+            return tip.clone();
+        }
+        let tip = resolve();
+        lock().tip_path.insert(pack_dir.to_path_buf(), tip.clone());
+        tip
+    }
+
+    /// Drop cached MIDX bytes and tip resolutions under `pack_dir` (called by
+    /// in-process writers).
     pub fn evict_pack_dir(pack_dir: &Path) {
-        lock().bytes.retain(|p, _| !p.starts_with(pack_dir));
+        let mut g = lock();
+        g.bytes.retain(|p, _| !p.starts_with(pack_dir));
+        g.tip_path.retain(|p, _| !p.starts_with(pack_dir));
     }
 }
 
@@ -1782,10 +1803,17 @@ pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result
 /// [`None`] means there is no MIDX at the pack tip. [`Some`] is the lookup result when a MIDX exists.
 pub fn midx_oid_listed_in_tip(objects_dir: &Path, oid: &ObjectId) -> Result<Option<bool>> {
     let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = resolve_tip_midx_path(&pack_dir) else {
+    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
+    else {
         return Ok(None);
     };
-    let data = midx_cache::get_bytes(&midx_path)?;
+    let data = match midx_cache::get_bytes(&midx_path) {
+        Ok(data) => data,
+        // A tip cached before another process removed the MIDX: fall back to
+        // the regular pack lookup instead of failing the read.
+        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
     let hash_len = midx_hash_len(&data);
     let MidxReadView {
         oidf_off,
@@ -2087,10 +2115,17 @@ pub fn try_read_object_via_midx(
     oid: &ObjectId,
 ) -> Result<Option<crate::objects::Object>> {
     let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = resolve_tip_midx_path(&pack_dir) else {
+    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
+    else {
         return Ok(None);
     };
-    let data = midx_cache::get_bytes(&midx_path)?;
+    let data = match midx_cache::get_bytes(&midx_path) {
+        Ok(data) => data,
+        // A tip cached before another process removed the MIDX: fall back to
+        // the regular pack lookup instead of failing the read.
+        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
 
     // Load-time validation, mirroring `load_multi_pack_index` in git/midx.c.
     // Fatal corruptions `die()` (print error + fatal, exit 128); recoverable
@@ -2242,6 +2277,7 @@ pub fn clear_pack_midx_state(pack_dir: &Path) -> Result<()> {
     if midx_d.exists() {
         let _ = fs::remove_dir_all(&midx_d);
     }
+    midx_cache::evict_pack_dir(pack_dir);
     Ok(())
 }
 
@@ -2839,4 +2875,159 @@ fn scrub_root_midx_sidecars_except(pack_dir: &Path, keep_hex: Option<&str>) -> R
         let _ = fs::remove_file(ent.path());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        clear_pack_midx_state, resolve_tip_midx_path, try_read_object_via_midx,
+        write_multi_pack_index,
+    };
+    use crate::objects::ObjectId;
+    use crate::odb::Odb;
+    use crate::pack::{clear_pack_cache, read_object_from_packs};
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_available() -> bool {
+        Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Pack fixture: one commit, all objects in a single pack (no MIDX yet).
+    fn midx_fixture(with_midx: bool) -> Option<(tempfile::TempDir, ObjectId)> {
+        if !git_available() {
+            return None;
+        }
+        let tmp = tempfile::tempdir().ok()?;
+        let dir = tmp.path();
+        git(dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("f.txt"), b"hello midx cache").ok()?;
+        git(dir, &["add", "f.txt"]);
+        git(dir, &["commit", "-q", "-m", "c"]);
+        git(dir, &["repack", "-adf"]);
+        let pack_dir = dir.join(".git/objects/pack");
+        if with_midx {
+            write_multi_pack_index(&pack_dir).ok()?;
+        }
+        let hex = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .ok()?;
+        if !hex.status.success() {
+            return None;
+        }
+        let oid = ObjectId::from_hex(std::str::from_utf8(&hex.stdout).ok()?.trim()).ok()?;
+        Some((tmp, oid))
+    }
+
+    #[test]
+    fn vanished_cached_tip_falls_back() {
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let git_dir = tmp.path().join(".git");
+        let objects = git_dir.join("objects");
+        let pack_dir = objects.join("pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        assert!(midx_path.is_file(), "expected root MIDX");
+
+        assert!(
+            try_read_object_via_midx(&objects, &oid)
+                .expect("prime midx read")
+                .is_some(),
+            "object should be reachable via MIDX"
+        );
+
+        std::fs::remove_file(&midx_path).expect("simulate external MIDX removal");
+
+        assert!(
+            try_read_object_via_midx(&objects, &oid)
+                .expect("vanished tip must not fail reads")
+                .is_none(),
+            "cached tip path to a removed MIDX should degrade to absent"
+        );
+
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        let via_pack = odb.read(&oid).expect("pack fallback after vanished MIDX");
+        assert_eq!(via_pack.kind, crate::objects::ObjectKind::Commit);
+    }
+
+    #[test]
+    fn writer_evicts_tip_cache() {
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+
+        assert!(try_read_object_via_midx(&objects, &oid)
+            .expect("prime caches")
+            .is_some());
+        assert!(resolve_tip_midx_path(&pack_dir).is_some());
+
+        clear_pack_midx_state(&pack_dir).expect("clear midx");
+        assert!(resolve_tip_midx_path(&pack_dir).is_none());
+
+        // Tip-path cache was evicted: listing must not resurrect the removed MIDX.
+        assert!(try_read_object_via_midx(&objects, &oid)
+            .expect("read after clear")
+            .is_none());
+
+        write_multi_pack_index(&pack_dir).expect("rewrite midx");
+        assert!(
+            try_read_object_via_midx(&objects, &oid)
+                .expect("read after rewrite")
+                .is_some(),
+            "fresh MIDX must be visible after in-process rewrite"
+        );
+    }
+
+    #[test]
+    fn read_after_in_process_pack_swap() {
+        let Some((tmp, oid)) = midx_fixture(false) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let before = read_object_from_packs(&objects, &oid).expect("read from pack");
+
+        std::fs::write(tmp.path().join("f2.txt"), b"replacement pack").expect("write");
+        git(tmp.path(), &["add", "f2.txt"]);
+        git(tmp.path(), &["commit", "-q", "-m", "c2"]);
+        git(tmp.path(), &["repack", "-adf"]);
+        clear_pack_cache();
+
+        let after = read_object_from_packs(&objects, &oid).expect("historical commit still packed");
+        assert_eq!(before.kind, after.kind);
+        assert_eq!(before.data, after.data);
+    }
 }

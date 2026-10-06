@@ -477,7 +477,39 @@ mod pack_cache {
 
     /// Get the raw bytes of a pack file from cache, re-reading from disk when the
     /// file's mtime/size changes.
+    ///
+    /// Whether `path` names a final, content-addressed pack file (`pack-<hash>.pack`).
+    ///
+    /// Git allows arbitrary basenames such as `pack-custom.pack`; only names whose
+    /// hash segment is exactly 40 (SHA-1) or 64 (SHA-256) lowercase/uppercase hex
+    /// digits are treated as immutable for the stat-free fast path.
+    fn is_content_addressed_pack(path: &Path) -> bool {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        let Some(hash_part) = name
+            .strip_prefix("pack-")
+            .and_then(|s| s.strip_suffix(".pack"))
+        else {
+            return false;
+        };
+        if hash_part.len() != 40 && hash_part.len() != 64 {
+            return false;
+        }
+        hash_part.bytes().all(|b| b.is_ascii_hexdigit())
+    }
+
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
+        // Content-addressed packs are immutable in practice: in-process rewrites go
+        // through `repack`/`gc`, which clear this cache, and cross-process mutation
+        // cannot outlive the process boundary. Serving the cached copy without a
+        // stat removes one syscall per packed-object read on hot walks.
+        if is_content_addressed_pack(pack_path) {
+            let g = lock();
+            if let Some(c) = g.by_pack.get(pack_path) {
+                return Ok(Arc::clone(&c.bytes));
+            }
+        }
         let sig = file_signature(pack_path);
         if let Some((mtime, size)) = sig {
             {
@@ -2931,5 +2963,51 @@ mod cached_lookup_tests {
         let objects = dir.path().join(".git").join("objects");
         let miss = ObjectId::from_hex("0101010101010101010101010101010101010101").unwrap();
         assert!(packed_delta_base_oid(&objects, &miss).unwrap().is_none());
+    }
+
+    #[test]
+    fn content_addressed_pack_bytes_skip_stat_revalidation() {
+        clear_pack_cache();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack_path = dir
+            .path()
+            .join("pack-1111111111111111111111111111111111111111.pack");
+        let v1 = b"PACK\x00\x00\x00\x02\x00\x00\x00\x00";
+        std::fs::write(&pack_path, v1).expect("write v1");
+        let cached = read_pack_bytes_cached(&pack_path).expect("prime cache");
+        assert_eq!(&*cached, v1);
+
+        let v2 = b"PACK-replaced-by-repack";
+        std::fs::write(&pack_path, v2).expect("overwrite on disk");
+        let again = read_pack_bytes_cached(&pack_path).expect("cached without stat");
+        assert_eq!(
+            &*again, v1,
+            "content-addressed name pins cached bytes in-process"
+        );
+    }
+
+    #[test]
+    fn temporary_pack_bytes_revalidated_after_change() {
+        clear_pack_cache();
+        let dir = tempfile::tempdir().expect("tempdir");
+        for pack_path in [
+            dir.path().join("tmp_pack_abc123.pack"),
+            dir.path().join("pack-custom.pack"),
+        ] {
+            clear_pack_cache();
+            let v1 = b"PACK-temp-v1";
+            std::fs::write(&pack_path, v1).expect("write v1");
+            let _ = read_pack_bytes_cached(&pack_path).expect("prime cache");
+
+            let v2 = b"PACK-temp-v2-longer-body";
+            std::fs::write(&pack_path, v2).expect("overwrite pack");
+            let again = read_pack_bytes_cached(&pack_path).expect("re-read pack");
+            assert_eq!(
+                &*again,
+                v2,
+                "{} must observe on-disk changes",
+                pack_path.display()
+            );
+        }
     }
 }
