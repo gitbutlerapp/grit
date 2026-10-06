@@ -12,13 +12,10 @@ bench_setup_env() {
   fi
   _bench_env_initialized=1
 
-  # Drop inherited GIT_* that could skew one side (keep what we set below).
+  # Drop every inherited GIT_*; only the exports below may remain.
   local _v
   while IFS= read -r _v; do
-    case "$_v" in
-      GIT_CONFIG_NOSYSTEM|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_DIR|GIT_WORK_TREE) ;;
-      GIT_*) unset "$_v" ;;
-    esac
+    unset "$_v"
   done < <(compgen -e | grep '^GIT_' || true)
 
   if [[ -z "${BENCH_HOME:-}" ]]; then
