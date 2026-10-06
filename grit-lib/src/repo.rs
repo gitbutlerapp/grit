@@ -493,6 +493,9 @@ impl Repository {
         }
         let mut idx = Index::load_expand_sparse_optional(path, &self.odb)?;
         crate::split_index::resolve_split_index_if_needed(&mut idx, &self.git_dir, path)?;
+        if idx.source_mtime.is_none() {
+            idx.source_mtime = crate::index::index_file_mtime(path);
+        }
         if let Some(ref wt) = self.work_tree {
             crate::sparse_checkout::clear_skip_worktree_from_present_files(
                 &self.git_dir,

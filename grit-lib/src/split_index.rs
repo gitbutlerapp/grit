@@ -699,6 +699,7 @@ pub(crate) fn write_index_file_split(
             cache_tree_root: None,
             cache_tree: None,
             hash_algo: index.hash_algo,
+            source_mtime: None,
         };
         let tmp = match tempfile::NamedTempFile::new_in(git_dir) {
             Ok(t) => t,
@@ -833,6 +834,7 @@ pub(crate) fn write_index_file_split(
         cache_tree_root: index.cache_tree_root,
         cache_tree: index.cache_tree.clone(),
         hash_algo: index.hash_algo,
+        source_mtime: index.source_mtime,
     };
 
     out_index.write_to_path(path, skip_hash)?;

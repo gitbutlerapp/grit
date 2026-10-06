@@ -2392,6 +2392,8 @@ pub fn diff_index_to_worktree_with_options(
     use crate::config::ConfigSet;
     use crate::crlf;
 
+    let index_mtime = index_mtime_for_diff(index, options.index_mtime);
+
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
     let simplify_gitlinks = options.simplify_gitlinks;
 
@@ -2651,7 +2653,7 @@ pub fn diff_index_to_worktree_with_options(
 
                 // Fast path: unchanged stat + unchanged mode + non-racy timestamp means this entry
                 // is clean without re-hashing blob data.
-                if stat_same && worktree_mode == ie.mode && !entry_is_racy(ie, options.index_mtime) {
+                if stat_same && worktree_mode == ie.mode && !entry_is_racy(ie, index_mtime) {
                     continue;
                 }
 
@@ -2673,7 +2675,7 @@ pub fn diff_index_to_worktree_with_options(
                 let mut eff_oid = worktree_oid;
                 if eff_oid != ie.oid {
                     if let Ok(raw) = fs::read(&file_path) {
-                        let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+                        let raw_oid = odb.hash(ObjectKind::Blob, &raw);
                         if raw_oid == ie.oid {
                             eff_oid = ie.oid;
                         }
@@ -2795,6 +2797,15 @@ fn index_entry_worktree_abs(
     } else {
         work_tree.join(index_relpath)
     }
+}
+
+/// Effective index-file mtime for racy-git checks.
+///
+/// Uses an explicit override when provided, otherwise [`Index::source_mtime`] from the last
+/// on-disk read.
+#[must_use]
+pub fn index_mtime_for_diff(index: &Index, explicit: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    explicit.or(index.source_mtime)
 }
 
 impl SymlinkDirCache {
@@ -2991,7 +3002,7 @@ pub fn worktree_differs_from_index_entry(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(&file_path) {
-            let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
             if raw_oid == ie.oid {
                 eff_oid = ie.oid;
             }
@@ -3068,11 +3079,21 @@ pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
 /// Returns `true` when at least one entry was refreshed or invalidated, so callers can write
 /// the index opportunistically (Git only persists a refresh that changed something).
 pub fn refresh_index_stat_content_verified(
+    odb: &Odb,
+    git_dir: &Path,
     index: &mut Index,
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
 ) -> bool {
+    use crate::config::ConfigSet;
+    use crate::crlf;
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+
+    let index_mtime = index_mtime_for_diff(index, index_mtime);
+    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let conv = crlf::ConversionConfig::from_config(&config);
+    let attrs = crlf::load_gitattributes(work_tree);
+
     let mut changed = false;
     for ie in &mut index.entries {
         if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
@@ -3094,15 +3115,31 @@ pub fn refresh_index_stat_content_verified(
             // stat can be refreshed from the work tree without matching the indexed blob (e.g.
             // after merge stat refresh while local edits remain) — invalidate so diff/status
             // re-hash.
-            if entry_is_racy(ie, index_mtime)
-                && !worktree_content_matches_index_oid(ie, &abs, &meta)
-            {
-                invalidate_index_stat_cache(ie);
-                changed = true;
+            if entry_is_racy(ie, index_mtime) {
+                let Ok(path) = std::str::from_utf8(&ie.path) else {
+                    continue;
+                };
+                let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
+                let content_matches =
+                    hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
+                        .map(|oid| oid == ie.oid)
+                        .unwrap_or(false);
+                if !content_matches {
+                    invalidate_index_stat_cache(ie);
+                    changed = true;
+                }
             }
             continue;
         }
-        if !worktree_content_matches_index_oid(ie, &abs, &meta) {
+        let Ok(path) = std::str::from_utf8(&ie.path) else {
+            continue;
+        };
+        let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
+        let content_matches =
+            hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
+                .map(|oid| oid == ie.oid)
+                .unwrap_or(false);
+        if !content_matches {
             continue;
         }
         let refreshed = crate::index::entry_from_metadata(&meta, &ie.path, ie.oid, ie.mode);
@@ -3118,6 +3155,77 @@ pub fn refresh_index_stat_content_verified(
         changed = true;
     }
     changed
+}
+
+/// Whether path-only checkout can skip writing a blob because the worktree is up to date.
+///
+/// Git's `checkout_entry` trusts matching stat data via `ie_match_stat` unless the entry is
+/// racy relative to the on-disk index mtime, in which case blob content must match the expected
+/// OID using the repository hash algorithm and clean/filter conversion ([`hash_worktree_file`]).
+///
+/// Returns `Ok(true)` when the caller should skip rewriting the path.
+///
+/// # Errors
+///
+/// Propagates I/O or hashing failures from [`hash_worktree_file`].
+#[allow(clippy::too_many_arguments)] // mirrors Git `checkout_entry` stat/OID inputs
+pub fn path_checkout_skip_blob_write_when_up_to_date(
+    odb: &Odb,
+    git_dir: &Path,
+    work_tree: &Path,
+    index: &Index,
+    entry: &IndexEntry,
+    expected_oid: &ObjectId,
+    expected_mode: u32,
+    rel_path: &str,
+) -> Result<bool> {
+    use crate::config::ConfigSet;
+    use crate::crlf;
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR};
+
+    if entry.oid != *expected_oid || entry.mode != expected_mode {
+        return Ok(false);
+    }
+    if expected_mode != MODE_REGULAR && expected_mode != MODE_EXECUTABLE {
+        return Ok(false);
+    }
+    let abs_path = work_tree.join(rel_path);
+    let meta = match fs::symlink_metadata(&abs_path) {
+        Ok(m) => m,
+        Err(_) => return Ok(false),
+    };
+    if !meta.is_file() || !stat_matches(entry, &meta) {
+        return Ok(false);
+    }
+    let index_mtime = index_mtime_for_diff(index, None);
+    if !entry_is_racy(entry, index_mtime) {
+        return Ok(true);
+    }
+    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let conv = crlf::ConversionConfig::from_config(&config);
+    let attrs = crlf::load_gitattributes(work_tree);
+    let file_attrs = crlf::get_file_attrs(&attrs, rel_path, false, &config);
+    let wt_oid = hash_worktree_file(
+        odb,
+        &abs_path,
+        &meta,
+        &conv,
+        &file_attrs,
+        rel_path,
+        Some(entry),
+    )?;
+    Ok(wt_oid == *expected_oid)
+}
+
+/// Clear cached stat fields so the next diff/status pass re-reads the work tree.
+fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
+    ie.ctime_sec = 0;
+    ie.ctime_nsec = 0;
+    ie.mtime_sec = 0;
+    ie.mtime_nsec = 0;
+    ie.dev = 0;
+    ie.ino = 0;
+    ie.size = 0;
 }
 
 /// Symlink target as the byte string Git hashes for the blob OID.
@@ -3137,39 +3245,6 @@ fn symlink_target_bytes(target: &Path) -> Vec<u8> {
     }
 }
 
-/// Whether the work tree blob at `abs` matches the index entry OID (raw bytes, no CRLF smudge).
-fn worktree_content_matches_index_oid(ie: &IndexEntry, abs: &Path, meta: &fs::Metadata) -> bool {
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
-    if ie.mode == MODE_SYMLINK {
-        if !meta.file_type().is_symlink() {
-            return false;
-        }
-        fs::read_link(abs)
-            .map(|t| Odb::hash_object_data(ObjectKind::Blob, &symlink_target_bytes(&t)) == ie.oid)
-            .unwrap_or(false)
-    } else if ie.mode == MODE_REGULAR || ie.mode == MODE_EXECUTABLE {
-        if !meta.file_type().is_file() {
-            return false;
-        }
-        fs::read(abs)
-            .map(|bytes| Odb::hash_object_data(ObjectKind::Blob, &bytes) == ie.oid)
-            .unwrap_or(false)
-    } else {
-        false
-    }
-}
-
-/// Clear cached stat fields so the next diff/status pass re-reads the work tree.
-fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
-    ie.ctime_sec = 0;
-    ie.ctime_nsec = 0;
-    ie.mtime_sec = 0;
-    ie.mtime_nsec = 0;
-    ie.dev = 0;
-    ie.ino = 0;
-    ie.size = 0;
-}
-
 pub fn hash_worktree_file(
     odb: &Odb,
     path: &Path,
@@ -3183,9 +3258,8 @@ pub fn hash_worktree_file(
         .filter(|e| e.oid != zero_oid())
         .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data));
     let data = if meta.file_type().is_symlink() {
-        // For symlinks, hash the target path
         let target = fs::read_link(path)?;
-        target.to_string_lossy().into_owned().into_bytes()
+        symlink_target_bytes(&target)
     } else if meta.is_dir() {
         // `read()` on a directory fails with EISDIR; unmerged paths may leave an empty
         // placeholder directory (e.g. t4027 combined submodule conflict).
@@ -7235,6 +7309,127 @@ mod gitlink_tree_worktree_tests {
         assert!(
             entries.is_empty(),
             "untracked-only submodule dirt must not appear in default tree→worktree diff: {entries:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod racy_index_mtime_diff_tests {
+    use super::*;
+    use crate::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use crate::objects::{HashAlgo, ObjectKind};
+    use filetime::FileTime;
+    use std::fs;
+    use std::path::PathBuf;
+
+    const INDEX_MTIME: (u32, u32) = (1_700_000_000, 123_456_789);
+
+    fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
+        filetime::set_file_mtime(path, FileTime::from_unix_time(i64::from(sec), nsec))
+            .expect("set mtime");
+    }
+
+    fn minimal_sha256_repo(work_tree: &Path) -> (PathBuf, Odb) {
+        let git_dir = work_tree.join(".git");
+        fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
+        fs::write(
+            git_dir.join("config"),
+            "[extensions]\n\tobjectformat = sha256\n",
+        )
+        .expect("config");
+        let odb = Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.clone());
+        (git_dir, odb)
+    }
+
+    #[test]
+    fn detects_same_size_change_when_entry_mtime_matches_index_mtime() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let content_a = b"same length!!";
+        let content_b = b"same length??";
+        assert_eq!(content_a.len(), content_b.len());
+
+        fs::write(wt.join("f.txt"), content_a).expect("write");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let git_dir = wt.join(".git");
+        fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
+        let odb = Odb::new(&git_dir.join("objects"));
+        let oid_a = odb.hash(ObjectKind::Blob, content_a);
+        let entry = entry_from_metadata(&meta, b"f.txt", oid_a, MODE_REGULAR);
+
+        let mut index = Index::new();
+        index.source_mtime = Some(INDEX_MTIME);
+        index.entries.push(entry);
+
+        fs::write(wt.join("f.txt"), content_b).expect("rewrite");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+
+        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        assert_eq!(
+            diff.len(),
+            1,
+            "racy entry must be re-hashed, not stat-trusted"
+        );
+        assert_eq!(diff[0].path(), "f.txt");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn non_utf8_symlink_clean_racy_equal_mtime_reports_no_diff() {
+        use crate::index::MODE_SYMLINK;
+        use std::os::unix::ffi::OsStrExt as _;
+        use std::os::unix::fs::symlink;
+
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let target = std::ffi::OsStr::from_bytes(b"bad-\xff-target");
+        let link_path = wt.join("link");
+        symlink(target, &link_path).expect("symlink");
+
+        let ft = FileTime::from_unix_time(i64::from(INDEX_MTIME.0), INDEX_MTIME.1);
+        filetime::set_symlink_file_times(&link_path, ft, ft).expect("set symlink mtime");
+        let meta = fs::symlink_metadata(&link_path).expect("stat");
+        let git_dir = wt.join(".git");
+        fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
+        let odb = Odb::new(&git_dir.join("objects"));
+        let oid = odb.hash(ObjectKind::Blob, target.as_bytes());
+        let entry = entry_from_metadata(&meta, b"link", oid, MODE_SYMLINK);
+
+        let mut index = Index::new();
+        index.source_mtime = Some(INDEX_MTIME);
+        index.entries.push(entry);
+
+        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        assert!(
+            diff.is_empty(),
+            "clean non-UTF-8 symlink must not be reported modified: {diff:?}"
+        );
+    }
+
+    #[test]
+    fn sha256_clean_racy_equal_mtime_reports_no_diff() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (_git_dir, odb) = minimal_sha256_repo(wt);
+        assert_eq!(odb.hash_algo(), HashAlgo::Sha256);
+
+        let bytes = b"sha256 width!!";
+        fs::write(wt.join("f.txt"), bytes).expect("write");
+        pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let oid = odb.hash(ObjectKind::Blob, bytes);
+        let entry = entry_from_metadata(&meta, b"f.txt", oid, MODE_REGULAR);
+
+        let mut index = Index::new();
+        index.hash_algo = HashAlgo::Sha256;
+        index.source_mtime = Some(INDEX_MTIME);
+        index.entries.push(entry);
+
+        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        assert!(
+            diff.is_empty(),
+            "clean SHA-256 racy entry must not be reported modified: {diff:?}"
         );
     }
 }

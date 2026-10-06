@@ -709,7 +709,13 @@ pub fn apply_stash(
     // the recorded OID, so a following `git diff-files` reflects only genuine differences (t3903
     // 'stash apply --index refreshes the index').
     if !has_conflicts {
-        crate::diff::refresh_index_stat_content_verified(&mut new_index, work_tree, None);
+        crate::diff::refresh_index_stat_content_verified(
+            &repo.odb,
+            &repo.git_dir,
+            &mut new_index,
+            work_tree,
+            None,
+        );
     }
     repo.write_index(&mut new_index)
         .map_err(|e| Error::Message(format!("writing index after stash apply: {e}")))?;

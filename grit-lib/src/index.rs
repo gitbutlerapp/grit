@@ -248,6 +248,8 @@ pub struct Index {
     /// object IDs and the trailing checksum on disk. Set authoritatively from
     /// the object database when loaded via the repository; defaults to SHA-1.
     pub hash_algo: HashAlgo,
+    /// On-disk index mtime when this index was last read (Git `istate->timestamp`).
+    pub source_mtime: Option<(u32, u32)>,
 }
 
 /// One node from Git's `TREE` index extension.
@@ -606,6 +608,7 @@ impl Index {
             cache_tree_root: None,
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
+            source_mtime: None,
         }
     }
 
@@ -631,6 +634,7 @@ impl Index {
             cache_tree_root: None,
             cache_tree: None,
             hash_algo: HashAlgo::Sha1,
+            source_mtime: None,
         }
     }
 
@@ -656,6 +660,7 @@ impl Index {
                 cache_tree_root: None,
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
+                source_mtime: None,
             };
         }
 
@@ -693,6 +698,7 @@ impl Index {
             cache_tree_root: None,
             cache_tree: None,
             hash_algo: HashAlgo::default(),
+            source_mtime: None,
         }
     }
 
@@ -716,6 +722,7 @@ impl Index {
                 cache_tree_root: None,
                 cache_tree: None,
                 hash_algo: HashAlgo::default(),
+                source_mtime: None,
             };
         }
 
@@ -756,6 +763,7 @@ impl Index {
             cache_tree_root: None,
             cache_tree: None,
             hash_algo: HashAlgo::default(),
+            source_mtime: None,
         }
     }
 
@@ -768,7 +776,11 @@ impl Index {
     /// Returns [`Error::IndexError`] if the file is present but corrupt.
     pub fn load(path: &Path) -> Result<Self> {
         match fs::read(path) {
-            Ok(data) => Self::parse(&data),
+            Ok(data) => {
+                let mut idx = Self::parse(&data)?;
+                idx.source_mtime = index_file_mtime(path);
+                Ok(idx)
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self {
                 sparse_directories: false,
                 ..Self::new()
@@ -791,6 +803,7 @@ impl Index {
             },
             Err(e) => return Err(Error::Io(e)),
         };
+        idx.source_mtime = index_file_mtime(path);
         idx.expand_sparse_directory_placeholders(odb)?;
         Ok(idx)
     }
@@ -813,6 +826,7 @@ impl Index {
             },
             Err(e) => return Err(Error::Io(e)),
         };
+        idx.source_mtime = index_file_mtime(path);
         idx.expand_sparse_directory_placeholders(odb)?;
         Ok(idx)
     }
@@ -1116,6 +1130,7 @@ impl Index {
             cache_tree_root,
             cache_tree,
             hash_algo,
+            source_mtime: None,
         })
     }
 
