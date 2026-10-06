@@ -111,4 +111,4 @@ Implements a minimal **cherry-pick**: `main` and `topic` diverge such that `topi
 ## See also
 
 - API reference: `cargo doc -p grit-lib --open`
-- The `grit` repo runs upstream-style shell tests against the same library; see `tests/` and `TESTING.md`.
+- The `grit` repo runs shell harness tests against the same library via `grit-git`; see `tests/` and `TESTING.md`.

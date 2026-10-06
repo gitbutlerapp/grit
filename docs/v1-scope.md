@@ -2,15 +2,15 @@
 
 **Updated:** 2026-06-01
 
-Grit is a from-scratch reimplementation of Git in idiomatic, library-focused Rust.
-`grit-lib` is the engine; `grit` (the `grit`/`git`-compatible binary) is a thin CLI
-over it. This document states what the **v1** library release covers and — just as
-importantly — what it deliberately does **not**, so users know what to expect.
+Grit is a Git engine in idiomatic Rust with a linkable **`grit-lib`** and a modern
+**`grit-cli`** client. **`grit-git`** plus the shell harness in **`tests/`** remain a
+regression gate for Git-compatible behavior. This document states what the **v1**
+library release covers and — just as importantly — what it deliberately does **not**.
 
 ## In scope for v1
 
 v1 targets the **commonly used, non-interactive** local and network Git workflows,
-driven through `grit-lib` APIs and validated against the upstream Git test suite
+driven through `grit-lib` APIs and covered by Rust tests plus the ported harness
 (`tests/`, tracked in the per-test status TOMLs under `data/tests/`).
 
 | Area | Status |

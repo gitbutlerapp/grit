@@ -21,7 +21,7 @@ OUT_SVG = REPO / "docs" / "test-progress.svg"
 # Published site root (GitHub Pages) for absolute og/twitter image URLs on index.html.
 GITHUB_PAGES_SITE = "https://gitbutlerapp.github.io/grit"
 
-# Labels from git/t/README "Naming Tests" (first digit = family).
+# Harness file family labels (first digit after ``t`` = group t0–t9).
 GROUP_DESC: dict[str, str] = {
     "t0": "Absolute basics and global stuff",
     "t1": "Basic commands concerning the database",

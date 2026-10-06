@@ -2,7 +2,7 @@
 """Build or merge data/tests/<group>/<stem>.toml status files from tests/t*.sh.
 
 Scans tests/ for harness files, assigns ``group`` from the first decimal digit
-after ``t`` (Git upstream families; see ``git/t/README`` “Naming Tests”):
+after ``t`` (harness families ``t0``–``t9``; labels in ``generate-dashboard-from-test-files.py``):
 ``t0``–``t9``. Counts test markers per file and merges with any existing status
 TOMLs so run results are preserved for files that still exist; TOMLs for
 removed test files are pruned.

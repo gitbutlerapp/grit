@@ -4,17 +4,13 @@ Grit is a **Git engine in idiomatic Rust**. It started as a test-suite reimpleme
 
 The Grit project is brought to you by the mad geniuses at [GitButler ⧓](https://gitbutler.com).
 
-## Progress
-
-![Harness test progress](docs/test-progress.svg)
-
 ## Motivation
 
 Grit reached much of Git's upstream test coverage, but carried workarounds, slow paths, and every legacy subcommand. **The new focus:** [grit-lib](https://crates.io/crates/grit-lib) as a clean, **linkable** library for Rust embedders; [grit-cli](https://crates.io/crates/grit-cli) as a **modern Git client** with human, **`--json`**, and **`--markdown`** output; [grit-git](https://crates.io/crates/grit-git) kept as a **compatibility test bed**. **Performance is the top priority**, measured against real `git` on large-repo scenarios.
 
 ## Approach
 
-Core Git semantics live in **`grit-lib`** (pluggable ODB and ref backends over time). The install script ships **`grit`** from **`grit-cli`**; **`grit-git`** runs the ported harness as a **regression gate** while **relevant upstream tests convert to Rust** on the library API. Unused areas (archive, email workflow, foreign-VCS bridges) are dropped from active development. Docs and benchmarks stay in sync with each change. Background: [True Grit](https://blog.gitbutler.com/true-grit).
+Core Git semantics live in **`grit-lib`** (pluggable ODB and ref backends over time). The install script ships **`grit`** from **`grit-cli`**; **`grit-git`** and the **`tests/`** harness remain a **regression gate** for Git-compatible behavior while **Rust tests on the library API** are the primary way coverage grows. Unused areas (archive, email workflow, foreign-VCS bridges) are dropped from active development. Docs and benchmarks stay in sync with each change. Background: [True Grit](https://blog.gitbutler.com/true-grit).
 
 The headline CLI shipped by the install script is `grit`, a simpler, opinionated interface from the [grit-cli](https://crates.io/crates/grit-cli) crate. It is the only binary the install script installs, on every platform including Windows.
 

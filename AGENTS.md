@@ -110,21 +110,22 @@ New behavior belongs in **Rust tests** (`grit-lib` / workspace integration tests
 
 ## Source of truth
 
-- Reference implementation and manpages: **`git/`** (C source, **`git/t/`** tests, **`git/Documentation/*.doc`**).
-- Ported harness copies: **`tests/`** (run against `grit-git` as `git`).
+- On-disk formats and wire protocols: the Git specification and observed compatibility with the **`git`** command where benchmarks and tests require it.
+- Command behavior reference: [git-scm.com documentation](https://git-scm.com/docs) and the ported shell harness in **`tests/`** (run against `grit-git` as `git`).
+- Library correctness: **`grit-lib`** Rust unit and integration tests (primary growth path).
 
 ## Licensing hard rule — no copied expression in `grit-lib`
 
-`grit-lib` is **MIT-licensed**; Git's C source under `git/` is **GPLv2**. To keep the library clean, this rule is absolute:
+`grit-lib` is **MIT-licensed**; Git's reference implementation is **GPLv2**. To keep the library clean, this rule is absolute:
 
-**Never copy protected expression from Git's C source into `grit-lib`. Use the C source only for ideas, methods, interfaces, and behavior.**
+**Never copy protected expression from Git's C sources into `grit-lib`. Use upstream Git only for ideas, methods, interfaces, and behavior.**
 
 - **Allowed** (not protectable): the *algorithm or method* (e.g. Myers diff, the approxidate parser, name-hash math), the *interface/behavior* it must produce, byte-for-byte *output compatibility*, and *facts* (keyword lists, opcode tables, format constants). Reimplement these in your own idiomatic Rust.
 - **Forbidden** (protected expression copied verbatim or near-verbatim): Git's prose **comments**, multi-line **user-facing message strings**, and code whose **structure, naming, and layout** track the C beyond what the method requires.
 
 If Git-identical user-facing text or other copied expression is genuinely needed, it lives in the **`grit-git` CLI crate (`grit-git/src`), which is GPL-2.0** and may reuse Git's strings and expression — not in `grit-lib`. Have the library return a **structured/typed error or value**, and render the Git-compatible text at the CLI boundary.
 
-When porting from `git/`: read the C to understand *what* and *why*, then write the Rust from that understanding — do not transcribe.
+When matching Git behavior: read published docs and specs for *what* and *why*, then write idiomatic Rust — do not transcribe GPL prose or code layout into **`grit-lib`**.
 
 ### Before committing Rust code
 
@@ -142,8 +143,7 @@ grit/
 ├── grit-lib/src/          # Core library (product)
 ├── grit-cli/src/          # Modern `grit` CLI (--json / --markdown)
 ├── grit-git/src/commands/ # Git-compatible CLI (compatibility bed)
-├── tests/                 # Upstream-style harness + test-lib.sh
-├── git/t/                 # Upstream Git tests (reference)
+├── tests/                 # Shell harness + test-lib.sh (regression gate for grit-git)
 ├── data/tests/            # Per-file harness status TOMLs
 ├── bench/                 # Benchmarks vs git
 ├── docs/                  # Site + harness dashboards
@@ -226,7 +226,7 @@ Run affected harness files before/after substantive changes. Add Rust integratio
 ## Do not
 
 - Modify `tests/test-lib.sh` (causes regressions)
-- Create stub/partial harness files (use full upstream tests when porting)
+- Create stub/partial harness files (extend `tests/` with complete scenarios when adding coverage)
 - Skip harness tests by adding `SKIP` prereqs (fix the code instead)
 - Weaken or delete tests to green a run
 - Run `cargo build` in worktrees (build in main repo, copy binary)

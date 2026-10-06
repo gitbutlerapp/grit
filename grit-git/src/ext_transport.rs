@@ -1,6 +1,6 @@
 //! `ext::` remote URLs (Git's `git-remote-ext` / connect helper).
 //!
-//! See `git/Documentation/git-remote-ext.adoc` and `git/builtin/remote-ext.c`.
+//! See [git-remote-ext](https://git-scm.com/docs/git-remote-ext).
 
 use std::fs;
 use std::io::Write;

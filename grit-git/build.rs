@@ -1,89 +1,32 @@
-//! Regenerate `git <cmd> -h` synopsis snippets from vendored `git/Documentation/*.adoc` for t0450.
-//! Also install `git-sh-setup` and `git-sh-i18n` next to the `grit` binary (Git exec-path layout).
-//!
-//! When building from a published crate tarball (`cargo package`), the workspace `scripts/` and
-//! `git/Documentation` trees are not present; we copy the bundled `upstream_help_synopsis.rs`
-//! checked into this crate instead.
+//! Copy bundled `upstream_help_synopsis.rs` into `OUT_DIR` for t0450 help parity.
+//! Install `git-sh-setup` and `git-sh-i18n` next to the `grit-git` binary (Git exec-path layout).
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn main() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let dst = out_dir.join("upstream_help_synopsis.rs");
-
-    let script = manifest_dir.join("../scripts/generate-upstream-help-synopsis.py");
-    let docs_dir = manifest_dir.join("../git/Documentation");
     let bundled = manifest_dir.join("upstream_help_synopsis.rs");
 
-    // Regenerate from the vendored git docs only when the full source tree AND a
-    // usable `python3` are present. Otherwise fall back to the copy checked into
-    // this crate. This covers crates.io tarball builds (no `scripts/` /
-    // `git/Documentation`) and cross-builds in a container that has the source
-    // tree but no `python3` (e.g. the musl release built with `cross`) — there we
-    // must NOT hard-fail, since the bundled copy is the source of truth anyway.
-    if script.is_file() && docs_dir.is_dir() && try_generate(&script, &dst) {
-        println!("cargo:rerun-if-changed={}", script.display());
-        println!("cargo:rerun-if-changed={}", docs_dir.display());
-    } else {
-        fs::copy(&bundled, &dst).unwrap_or_else(|e| {
-            panic!(
-                "copy bundled {} to {}: {e} (expected when building from crates.io tarball)",
-                bundled.display(),
-                dst.display()
-            );
-        });
-        println!("cargo:rerun-if-changed={}", bundled.display());
-    }
+    fs::copy(&bundled, &dst).unwrap_or_else(|e| {
+        panic!(
+            "copy bundled {} to {}: {e}",
+            bundled.display(),
+            dst.display()
+        );
+    });
+    println!("cargo:rerun-if-changed={}", bundled.display());
 
     install_shell_libs(&manifest_dir);
 }
 
-/// Run `python3 <script>` to (re)generate `dst`. Returns `true` on success.
-///
-/// Returns `false` — emitting a `cargo:warning` rather than panicking — when
-/// `python3` is unavailable (e.g. a `cross` musl container) or the script fails,
-/// so the caller can fall back to the bundled, checked-in copy. The synopsis file
-/// only feeds a git-compatibility test, so the bundled copy is a correct,
-/// reproducible substitute for a release build.
-fn try_generate(script: &Path, dst: &Path) -> bool {
-    let out_file = match fs::File::create(dst) {
-        Ok(f) => f,
-        Err(e) => {
-            println!("cargo:warning=create {}: {e}", dst.display());
-            return false;
-        }
-    };
-    match Command::new("python3")
-        .arg(script)
-        .stdout(out_file)
-        .status()
-    {
-        Ok(status) if status.success() => true,
-        Ok(status) => {
-            println!(
-                "cargo:warning=generate-upstream-help-synopsis.py failed with {status}; \
-                 using bundled upstream_help_synopsis.rs"
-            );
-            false
-        }
-        Err(e) => {
-            println!(
-                "cargo:warning=python3 unavailable ({e}); \
-                 using bundled upstream_help_synopsis.rs"
-            );
-            false
-        }
-    }
-}
-
-/// Writes `git-sh-setup` and `git-sh-i18n` into `target/<profile>/` (same directory as `grit`).
+/// Writes `git-sh-setup` and `git-sh-i18n` into `target/<profile>/` (same directory as `grit-git`).
 fn install_shell_libs(manifest_dir: &Path) {
     let profile = std::env::var("PROFILE").unwrap_or_default();
     let target_dir = manifest_dir.join("../target").join(&profile);
@@ -91,8 +34,9 @@ fn install_shell_libs(manifest_dir: &Path) {
         return;
     }
 
-    let git_sh_i18n_src = manifest_dir.join("../git/git-sh-i18n.sh");
-    let git_sh_setup_src = manifest_dir.join("../git/git-sh-setup.sh");
+    let shell_lib = manifest_dir.join("shell-lib");
+    let git_sh_i18n_src = shell_lib.join("git-sh-i18n.sh");
+    let git_sh_setup_src = shell_lib.join("git-sh-setup.sh");
     if !git_sh_i18n_src.is_file() || !git_sh_setup_src.is_file() {
         return;
     }

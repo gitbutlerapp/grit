@@ -138,12 +138,12 @@
 **Goal.** Build a safety net before the ODB refactor.
 
 **Scope.**
-- Convert the core-functionality and edge-case tests for loose objects, packs, idx/rev/midx, deltas, commit-graph, alternates, promisor packs and fsck from `git/t` (t1xxx, t5xxx pack tests, t6xxx where relevant) into Rust integration tests against the grit-lib API, not the CLI.
+- Add Rust integration tests for loose objects, packs, idx/rev/midx, deltas, commit-graph, alternates, promisor packs and fsck (harness families t1xxx, t5xxx, t6xxx where relevant) against the grit-lib API, not the CLI.
 - Skip UX and option-compatibility tests.
 - Add `cargo llvm-cov` reporting for these modules.
 
 **Acceptance.**
-- A mapping table from upstream test to Rust test lives in TESTING.md.
+- A mapping table from harness scenarios to Rust tests lives in TESTING.md.
 - Line coverage of odb/pack/midx/commit-graph modules is ≥85%.
 - Everything runs in CI.
 
@@ -169,11 +169,11 @@
 **Goal.** Build a safety net before the ref backend refactor.
 
 **Scope.**
-- Convert the core upstream tests for refs (loose, packed, reftable, symrefs, transactions, locking), reflog, config parsing/writing/includes, ignore rules and attributes into Rust library tests.
+- Add Rust library tests for refs (loose, packed, reftable, symrefs, transactions, locking), reflog, config parsing/writing/includes, ignore rules and attributes.
 - Add coverage reporting for these modules.
 
 **Acceptance.**
-- The upstream-to-Rust mapping table is in TESTING.md.
+- The harness-to-Rust mapping table is in TESTING.md.
 - Coverage of these modules is ≥85%.
 - Everything runs in CI.
 
@@ -240,10 +240,10 @@
 ## 16. Rust tests: index, diff, revwalk, revparse, merge
 *Workstream: Testing*
 
-**Goal.** Finish converting the core upstream tests.
+**Goal.** Finish Rust coverage for core repository operations.
 
 **Scope.**
-- Convert the core upstream tests for the index (extensions, split index, untracked cache, sparse), diff (tree/blob, rename/copy detection, algorithms), revwalk ordering and limiting, rev-parse syntax, merge (ort-equivalent cases), stash, notes, worktrees and patch-ids into Rust library tests.
+- Add Rust library tests for the index (extensions, split index, untracked cache, sparse), diff (tree/blob, rename/copy detection, algorithms), revwalk ordering and limiting, rev-parse syntax, merge (ort-equivalent cases), stash, notes, worktrees and patch-ids.
 
 **Acceptance.**
 - The mapping table is in TESTING.md.

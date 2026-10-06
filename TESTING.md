@@ -4,7 +4,7 @@
 
 Testing follows **AGENTS.md — Project direction**:
 
-1. **Convert relevant Git unit tests to Rust** — core functionality and edge cases from `git/t` / harness knowledge, exercised against the **`grit-lib`** public API. Skip command UX and option-compatibility matrices.
+1. **Grow Rust tests for core Git semantics** — functionality and edge cases drawn from the harness and Git specs, exercised against the **`grit-lib`** public API. Skip command UX and option-compatibility matrices.
 2. **Coverage tests for every public library interface** — each public API surface gets explicit tests; line coverage targets are in **ROADMAP.md** (testing items).
 3. **Upstream harness as regression gate** — `tests/*.sh` run via **`grit-git`** (`scripts/run-tests.sh`). In-scope pass counts **must not regress**; **do not weaken** harness tests to green a change.
 
@@ -59,7 +59,7 @@ Re-run **`python3 scripts/generate-test-files-catalog.py`** if you add or rename
 
 ## Data pipeline (step by step)
 
-1. **`scripts/generate-test-files-catalog.py`** — Scans `tests/t*.sh`, counts `test_expect_success` / `test_expect_failure` per file, assigns `group` (`t0`–`t9` from the first digit of the `tNNNN…` prefix, matching **`git/t/README`** test families), and writes or merges the **`data/tests/<group>/<stem>.toml`** files. Invoked automatically at the start of **`run-tests.sh`**.
+1. **`scripts/generate-test-files-catalog.py`** — Scans `tests/t*.sh`, counts `test_expect_success` / `test_expect_failure` per file, assigns `group` (`t0`–`t9` from the first digit of the `tNNNN…` prefix; see **`scripts/generate-dashboard-from-test-files.py`** for family labels), and writes or merges the **`data/tests/<group>/<stem>.toml`** files. Invoked automatically at the start of **`run-tests.sh`**.
 
 2. **`scripts/run-tests.sh`** — Copies `target/release/grit-git` to `tests/grit`, builds the file list (honoring **`in_scope`**), runs each selected script under `timeout`, parses the `# Tests:` summary line, writes a small batch TSV for **`scripts/apply-test-run-results.py`**.
 
@@ -123,7 +123,7 @@ Before "fixing grit" for a failing file, rule this out first — it is a **test-
 `./test-lib.sh: line NNNN: cd: repo: No such file or directory`.
 
 **Cause:** `test-lib.sh` *persists* the working directory across top-level `test_expect_success`
-blocks (matching upstream `git/t`). If the setup test does `git init repo && cd repo && …` it
+blocks (historical harness behavior). If the setup test does `git init repo && cd repo && …` it
 leaves the shell **inside** `repo/`. Every later block that starts with a bare `cd repo` then runs
 *before* it is back at the trash root, so the `cd` fails and the block aborts before any `git`/`grit`
 command runs.
@@ -161,5 +161,4 @@ python3 scripts/generate-dashboard-from-test-files.py
 
 These do **not** update `data/tests/` by default:
 
-- **`scripts/run-upstream-tests.sh`** / **`scripts/aggregate-upstream.sh`** — run upstream `git/t/` against grit in isolation (see **AGENTS.md**).
 - **`tests/harness/run-all-count.sh`** — separate harness; not wired to `data/tests/`.

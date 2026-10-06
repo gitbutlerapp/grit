@@ -72,7 +72,7 @@ the command stay at their current pass counts (the harness TOMLs in
 
 **Watch out:** some upstream tests *observe* child processes (`GIT_TRACE2`
 `child_start` counts, e.g. t2080's checkout--worker accounting). Before
-removing a spawn, grep `git/t/` for trace expectations on that command.
+removing a spawn, grep `tests/` for trace expectations on that command.
 
 ### Phase 2 — pack machinery as streaming APIs (medium effort)
 

@@ -3,7 +3,7 @@
 
 These ported harness files assume cwd resets to the trash root before each
 test, but test-lib.sh persists cwd across top-level test blocks (matching
-upstream git/t). The setup test cd's into a subdir and stays there, so every
+ported harness). The setup test cd's into a subdir and stays there, so every
 later block's bare `cd repo` fails. Wrapping each cd-using body in a subshell
 contains the cwd change, so the parent stays at the trash root and every test
 starts fresh — restoring the reset semantics the files were written for.
