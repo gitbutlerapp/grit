@@ -287,3 +287,15 @@ impl Default for EwahBitmap {
         Self::new()
     }
 }
+
+/// Whether two EWAH bitmaps encode the same set bits (Git-compatible equality for FSMN).
+pub(crate) fn ewah_bitmaps_equal(a: &EwahBitmap, b: &EwahBitmap) -> bool {
+    if a.bit_size != b.bit_size {
+        return false;
+    }
+    let mut a_bits = Vec::new();
+    a.each_set_bit(|i| a_bits.push(i));
+    let mut b_bits = Vec::new();
+    b.each_set_bit(|i| b_bits.push(i));
+    a_bits == b_bits
+}

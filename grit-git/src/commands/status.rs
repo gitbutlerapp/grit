@@ -605,7 +605,7 @@ pub fn run(mut args: Args) -> Result<()> {
     let fsmonitor_query =
         query_status_fsmonitor_paths(work_tree, &config, index.fsmonitor_last_update.as_deref());
     if let Some((new_token, _)) = fsmonitor_query.as_ref() {
-        index.fsmonitor_last_update = Some(new_token.clone());
+        index.set_fsmonitor_last_update(Some(new_token.clone()));
     }
     if let (Some(trace2_event), Some((_, reported))) = (
         std::env::var("GIT_TRACE2_EVENT")

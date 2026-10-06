@@ -71,6 +71,18 @@ pub enum Error {
     #[error("index error: {0}")]
     IndexError(String),
 
+    /// The `FSMN` index extension ends before its header, token, or EWAH payload.
+    #[error("index fsmonitor extension payload is truncated")]
+    IndexFsmonitorExtensionTruncated,
+
+    /// The `FSMN` extension header version is not supported.
+    #[error("index fsmonitor extension has unsupported header version {0}")]
+    IndexFsmonitorExtensionBadVersion(u32),
+
+    /// The EWAH bitmap embedded in `FSMN` could not be decoded.
+    #[error("index fsmonitor extension EWAH bitmap is invalid")]
+    IndexFsmonitorExtensionEwahInvalid,
+
     /// The cache-tree extension references more entries than the index contains. Git emits this
     /// (verbatim, prefixed with `error: `) when a tree with duplicate path entries is read into the
     /// index (`t4058-diff-duplicates`).
