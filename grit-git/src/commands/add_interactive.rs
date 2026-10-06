@@ -296,9 +296,9 @@ fn list_and_choose(
         for tok in line.split([' ', '\t', '\r', ',']).filter(|t| !t.is_empty()) {
             match parse_range(tok, n, files) {
                 Some((from, to, choose)) => {
-                    for idx in from..to.min(n) {
-                        if selected[idx] != choose {
-                            selected[idx] = choose;
+                    for sel in &mut selected[from..to.min(n)] {
+                        if *sel != choose {
+                            *sel = choose;
                             count += if choose { 1 } else { -1 };
                         }
                     }
@@ -466,7 +466,7 @@ fn print_command_menu(out: &mut impl Write, commands: &[&str]) {
             writeln!(out).ok();
         }
     }
-    if commands.len() % cols != 0 {
+    if !commands.len().is_multiple_of(cols) {
         writeln!(out).ok();
     }
 }
@@ -702,9 +702,9 @@ fn run_add_untracked(
         for tok in line.split([' ', '\t', '\r', ',']).filter(|t| !t.is_empty()) {
             match parse_range(tok, n, &files) {
                 Some((from, to, choose)) => {
-                    for idx in from..to.min(n) {
-                        if selected[idx] != choose {
-                            selected[idx] = choose;
+                    for sel in &mut selected[from..to.min(n)] {
+                        if *sel != choose {
+                            *sel = choose;
                             count += if choose { 1 } else { -1 };
                         }
                     }

@@ -284,9 +284,9 @@ impl Args {
         // explicit `--recurse-submodules=<spec>` yields the user's spec(s). We cannot perfectly
         // distinguish a lone explicit "." from the default, but git treats both as "activate all"
         // when there is a single "." and as a pathspec list otherwise.
-        if self.recurse_submodules_specs.len() == 1 && self.recurse_submodules_specs[0] == "." {
-            None
-        } else if self.recurse_submodules_specs.is_empty() {
+        if (self.recurse_submodules_specs.len() == 1 && self.recurse_submodules_specs[0] == ".")
+            || self.recurse_submodules_specs.is_empty()
+        {
             None
         } else {
             Some(&self.recurse_submodules_specs)
@@ -1008,7 +1008,7 @@ pub fn run(mut args: Args) -> Result<()> {
             work_tree_keep_toplevel: empty_dir_ok,
             git_dir,
             git_dir_keep_toplevel,
-            mode: JunkMode::LeaveNone,
+            mode: JunkMode::RemoveOnFailure,
         }
     };
 
@@ -2735,10 +2735,10 @@ fn initialize_partial_clone_state_http(
                         let is_tree = (e.mode & 0o170000) == 0o040000;
                         if is_tree {
                             queue.push_back(e.oid);
-                        } else if e.mode == 0o100644 || e.mode == 0o100755 || e.mode == 0o120000 {
-                            if dest.odb.read(&e.oid).is_err() {
-                                missing.push(e.oid.to_hex());
-                            }
+                        } else if (e.mode == 0o100644 || e.mode == 0o100755 || e.mode == 0o120000)
+                            && dest.odb.read(&e.oid).is_err()
+                        {
+                            missing.push(e.oid.to_hex());
                         }
                     }
                 }
@@ -3748,6 +3748,7 @@ fn collect_gitlink_paths(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn clone_with_optional_superproject_refs(
     grit_bin: &Path,
     resolved_url: &str,
@@ -4028,7 +4029,7 @@ fn clone_submodules(work_tree: &Path, repo: &Repository, clone_args: &Args) -> R
         }
     } else {
         let mut handles = Vec::new();
-        let chunk_size = (jobs.len() + n_workers - 1) / n_workers;
+        let chunk_size = jobs.len().div_ceil(n_workers);
         for chunk in jobs.chunks(chunk_size.max(1)) {
             let chunk: Vec<SubmoduleCloneJob> = chunk.to_vec();
             let grit = grit_bin.clone();
@@ -4431,13 +4432,13 @@ fn remove_junk_path(path: &Path, keep_toplevel: bool) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum JunkMode {
     /// Remove both the git dir and work tree (the default while the repo is still being set up).
-    LeaveNone,
+    RemoveOnFailure,
     /// Leave the partially populated repository on disk; only warn the user. Git switches to this
     /// mode immediately before the worktree checkout, so a checkout failure (e.g. a corrupt object)
     /// keeps `<dest>/.git` and the index around for inspection instead of deleting everything.
-    LeaveRepo,
+    KeepRepoOnFailure,
     /// Leave everything in place (the clone succeeded). Equivalent to disarming the guard.
-    LeaveAll,
+    Disarmed,
 }
 
 /// RAII cleanup guard mirroring upstream Git's `remove_junk` (builtin/clone.c).
@@ -4446,10 +4447,10 @@ enum JunkMode {
 /// clean up manually before retrying. If those directories already existed (empty) before the
 /// clone, only their contents are removed — the pre-existing directory is preserved.
 ///
-/// The guard runs cleanup when dropped while in [`JunkMode::LeaveNone`]. Once the clone reaches the
-/// worktree checkout phase, [`JunkGuard::leave_repo`] switches it to [`JunkMode::LeaveRepo`] so a
+/// The guard runs cleanup when dropped while in [`JunkMode::RemoveOnFailure`]. Once the clone reaches the
+/// worktree checkout phase, [`JunkGuard::leave_repo`] switches it to [`JunkMode::KeepRepoOnFailure`] so a
 /// checkout failure leaves the repository intact (matching Git's `junk_mode = JUNK_LEAVE_REPO`).
-/// On success [`JunkGuard::disarm`] selects [`JunkMode::LeaveAll`] (Git's `JUNK_LEAVE_ALL`).
+/// On success [`JunkGuard::disarm`] selects [`JunkMode::Disarmed`] (Git's `JUNK_LEAVE_ALL`).
 struct JunkGuard {
     /// Work tree directory to remove (absent for bare clones).
     work_tree: Option<PathBuf>,
@@ -4466,22 +4467,22 @@ struct JunkGuard {
 impl JunkGuard {
     /// Disarm the guard so dropping it performs no cleanup (the clone succeeded).
     fn disarm(&mut self) {
-        self.mode = JunkMode::LeaveAll;
+        self.mode = JunkMode::Disarmed;
     }
 
     /// Switch to "leave the repo" cleanup: a later failure keeps the partial repository on disk and
     /// only warns. Called before the worktree checkout so a corrupt-object checkout failure does not
     /// delete `<dest>/.git` (upstream `junk_mode = JUNK_LEAVE_REPO`, t1060).
     fn leave_repo(&mut self) {
-        self.mode = JunkMode::LeaveRepo;
+        self.mode = JunkMode::KeepRepoOnFailure;
     }
 }
 
 impl Drop for JunkGuard {
     fn drop(&mut self) {
         match self.mode {
-            JunkMode::LeaveAll => return,
-            JunkMode::LeaveRepo => {
+            JunkMode::Disarmed => return,
+            JunkMode::KeepRepoOnFailure => {
                 eprintln!(
                     "warning: Clone succeeded, but checkout failed.\n\
                      You can inspect what was checked out with 'git status'\n\
@@ -4489,7 +4490,7 @@ impl Drop for JunkGuard {
                 );
                 return;
             }
-            JunkMode::LeaveNone => {}
+            JunkMode::RemoveOnFailure => {}
         }
         // Upstream removes the git dir first, then the work tree. For a normal (non-separate)
         // clone the git dir lives inside the work tree, so removing the work tree afterwards
@@ -4614,7 +4615,7 @@ fn bundle_clone_fsck_pack(pack_data: &[u8], odb: &grit_lib::odb::Odb) -> Result<
 
     // Sort by oid for deterministic reporting order.
     let mut entries: Vec<_> = objects.iter().collect();
-    entries.sort_by(|a, b| a.0.to_hex().cmp(&b.0.to_hex()));
+    entries.sort_by_key(|a| a.0.to_hex());
 
     for (oid, obj) in entries {
         if let Err(err) = grit_lib::fsck_standalone::fsck_object(obj.kind, &obj.data) {
@@ -4971,12 +4972,10 @@ fn objects_dir_has_no_data(git_dir: &Path) -> bool {
     if let Ok(rd) = fs::read_dir(&objects) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.len() == 2 && name.chars().all(|c| c.is_ascii_hexdigit()) {
-                if e.path().is_dir() {
-                    if let Ok(sub) = fs::read_dir(e.path()) {
-                        if sub.count() > 0 {
-                            return false;
-                        }
+            if name.len() == 2 && name.chars().all(|c| c.is_ascii_hexdigit()) && e.path().is_dir() {
+                if let Ok(sub) = fs::read_dir(e.path()) {
+                    if sub.count() > 0 {
+                        return false;
                     }
                 }
             }
@@ -5587,10 +5586,10 @@ fn copy_refs_direct(src_git_dir: &Path, dst_git_dir: &Path) -> Result<()> {
                 continue;
             };
 
-            if refname.starts_with("refs/heads/") || refname.starts_with("refs/tags/") {
-                if !clone_ref_file_exists(dst_git_dir, refname) {
-                    clone_write_direct_ref(dst_git_dir, refname, oid)?;
-                }
+            if (refname.starts_with("refs/heads/") || refname.starts_with("refs/tags/"))
+                && !clone_ref_file_exists(dst_git_dir, refname)
+            {
+                clone_write_direct_ref(dst_git_dir, refname, oid)?;
             }
         }
     }
@@ -6372,7 +6371,8 @@ fn collect_reachable_missing_oids_in_dest(dest: &Repository) -> Result<HashSet<O
     let mut seen_tags = HashSet::new();
     let mut queue = VecDeque::new();
 
-    for refname in ["HEAD"] {
+    {
+        let refname = "HEAD";
         if let Ok(oid) = grit_lib::refs::resolve_ref(&dest.git_dir, refname) {
             queue.push_back(oid);
         }
@@ -6681,7 +6681,7 @@ pub(crate) fn ensure_index_from_head_if_missing(repo: &Repository) -> Result<()>
         return Ok(());
     };
     let oid = commit_oid;
-    let obj = repo.odb.read(&oid).context("reading HEAD commit")?;
+    let obj = repo.odb.read(oid).context("reading HEAD commit")?;
     let commit = parse_commit(&obj.data).context("parsing HEAD commit")?;
     write_index_from_tree(repo, &commit.tree)?;
     Ok(())
@@ -6993,9 +6993,7 @@ fn run_bundle_clone(args: Args) -> Result<()> {
     let orphan_bundle_head = if has_bundle_head_line {
         head_oid_in_bundle.is_some()
             && (branches_matching_head.is_empty()
-                || !branches_matching_head
-                    .iter()
-                    .any(|b| *b == fallback_branch.as_str()))
+                || !branches_matching_head.contains(&fallback_branch.as_str()))
     } else {
         let branches: Vec<_> = refs
             .iter()

@@ -1586,9 +1586,7 @@ fn cmd_blob(args: &Args, blob_spec: &str) -> Result<()> {
         for entry in matches {
             let bare_boolean = entry.value.is_none();
             let want_bool_text = regexp_type_requests_bool_output(args);
-            if args.name_only {
-                print!("{}{}", entry.key, terminator);
-            } else if bare_boolean && !want_bool_text {
+            if args.name_only || (bare_boolean && !want_bool_text) {
                 print!("{}{}", entry.key, terminator);
             } else {
                 let val = entry.value.as_deref().unwrap_or("true");

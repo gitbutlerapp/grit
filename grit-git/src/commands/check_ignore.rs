@@ -141,6 +141,7 @@ fn run_inner(args: Args) -> Result<()> {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn process_one_path(
     parsed: &ParsedArgs,
     repo: &Repository,

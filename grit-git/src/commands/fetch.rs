@@ -747,7 +747,7 @@ pub fn run(mut args: Args) -> Result<()> {
         // remote name contains '/' or matches an existing directory.
         let url_key = format!("remote.{remote_name}.url");
         if config.get(&url_key).is_some() {
-            fetch_remote(&git_dir, &config, &remote_name, None, &args)
+            fetch_remote(&git_dir, &config, remote_name, None, &args)
         } else {
             let group_key = format!("remotes.{remote_name}");
             let group_lines = config.get_all(&group_key);
@@ -777,9 +777,9 @@ pub fn run(mut args: Args) -> Result<()> {
                 if remote_name.starts_with('-') {
                     bail!("fatal: repository '{remote_name}' does not exist");
                 }
-                fetch_remote(&git_dir, &config, &remote_name, Some(remote_name), &args)
+                fetch_remote(&git_dir, &config, remote_name, Some(remote_name), &args)
             } else {
-                fetch_remote(&git_dir, &config, &remote_name, None, &args)
+                fetch_remote(&git_dir, &config, remote_name, None, &args)
             }
         }
     };
@@ -1736,13 +1736,11 @@ fn fetch_remote(
         resolve_negotiation_tip_oids(git_dir, &args.negotiation_tip)?
     };
 
-    if is_ssh_url {
-        if remote_repo.is_some() {
-            if let Ok(spec) = crate::ssh_transport::parse_ssh_url(&url) {
-                let _ = crate::ssh_transport::record_resolved_git_ssh_upload_pack_for_tests(
-                    &spec, None, false, false,
-                );
-            }
+    if is_ssh_url && remote_repo.is_some() {
+        if let Ok(spec) = crate::ssh_transport::parse_ssh_url(&url) {
+            let _ = crate::ssh_transport::record_resolved_git_ssh_upload_pack_for_tests(
+                &spec, None, false, false,
+            );
         }
     }
 
@@ -1932,11 +1930,10 @@ fn fetch_remote(
     });
     let should_fetch_tags = if args.tags {
         true
-    } else if args.no_tags {
-        false
-    } else if implicit_path_fetch {
-        false
-    } else if user_passed_cli_refspecs && !cli_refspecs_have_dst {
+    } else if args.no_tags
+        || implicit_path_fetch
+        || (user_passed_cli_refspecs && !cli_refspecs_have_dst)
+    {
         false
     } else {
         let tagopt_key = format!("remote.{tagopt_remote}.tagopt");
@@ -1988,7 +1985,7 @@ fn fetch_remote(
         None
     };
 
-    let effective_filter = effective_fetch_filter(config, remote_name, &args);
+    let effective_filter = effective_fetch_filter(config, remote_name, args);
     let filter_active = effective_filter
         .as_deref()
         .is_some_and(|s| !s.trim().is_empty());
@@ -2363,7 +2360,7 @@ fn fetch_remote(
     }
     maybe_lazy_fetch_parent_tree_blobs_for_promisor_trace(
         &local_repo_for_tag_filter,
-        &config,
+        config,
         &remote_heads,
     );
 
@@ -2446,7 +2443,7 @@ fn fetch_remote(
             )?;
         }
     } else if args.update_shallow {
-        if let Some(ref rr) = ext_resolved_remote.as_ref().or(remote_repo.as_ref()) {
+        if let Some(rr) = ext_resolved_remote.as_ref().or(remote_repo.as_ref()) {
             write_remote_shallow_info_for_tips(git_dir, &rr.git_dir, &tip_oids)?;
         }
     }
@@ -2632,8 +2629,8 @@ fn fetch_remote(
                 continue;
             }
             // Check for force prefix '+'
-            let (force, spec_clean) = if spec.starts_with('+') {
-                (true, &spec[1..])
+            let (force, spec_clean) = if let Some(stripped) = spec.strip_prefix('+') {
+                (true, stripped)
             } else {
                 (false, spec.as_str())
             };
@@ -3467,7 +3464,7 @@ fn fetch_remote(
                 }
                 // Prepend so for-merge merge-config lines precede the not-for-merge refspec lines.
                 if !merge_lines.is_empty() {
-                    merge_lines.extend(fetch_head_entries.drain(..));
+                    merge_lines.append(&mut fetch_head_entries);
                     fetch_head_entries = merge_lines;
                 }
             }
@@ -3892,15 +3889,7 @@ fn fetch_remote(
         }
         let fetch_head_path = git_dir.join("FETCH_HEAD");
         let content = fetch_head_entries.join("\n") + "\n";
-        let should_write_fetch_head = if args.dry_run {
-            false
-        } else if args.no_write_fetch_head {
-            false
-        } else if args.write_fetch_head {
-            true
-        } else {
-            true
-        };
+        let should_write_fetch_head = !args.dry_run && !args.no_write_fetch_head;
         if should_write_fetch_head {
             if args.append {
                 let mut file = OpenOptions::new()
@@ -4369,10 +4358,10 @@ fn verify_repository_format_allows_upgrade_to_v1(git_dir: &Path) -> Result<()> {
         let Some(ext) = key.strip_prefix("extensions.") else {
             continue;
         };
-        if EXTENSIONS_V0.iter().any(|k| *k == ext) {
+        if EXTENSIONS_V0.contains(&ext) {
             continue;
         }
-        if EXTENSIONS_V1_ONLY.iter().any(|k| *k == ext) {
+        if EXTENSIONS_V1_ONLY.contains(&ext) {
             v1_only.push(ext.to_string());
             continue;
         }
@@ -5817,12 +5806,10 @@ fn copy_objects(src_git_dir: &Path, dst_git_dir: &Path, refetch: bool) -> Result
             let entry = entry?;
             if entry.file_type()?.is_file() {
                 let dst_file = dst_pack.join(entry.file_name());
-                if refetch || !dst_file.exists() {
-                    if refetch {
-                        fs::copy(entry.path(), &dst_file)?;
-                    } else if fs::hard_link(entry.path(), &dst_file).is_err() {
-                        fs::copy(entry.path(), &dst_file)?;
-                    }
+                if (refetch || !dst_file.exists())
+                    && (refetch || fs::hard_link(entry.path(), &dst_file).is_err())
+                {
+                    fs::copy(entry.path(), &dst_file)?;
                 }
             }
         }
@@ -5912,8 +5899,7 @@ fn has_hide_refs_for_fetch_connectivity(git_dir: &Path) -> bool {
 }
 
 /// Remove remote-tracking refs that no longer exist on the remote.
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn prune_stale_refs(
     args: &Args,
     git_dir: &Path,

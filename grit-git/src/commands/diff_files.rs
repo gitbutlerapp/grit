@@ -249,17 +249,11 @@ pub fn run(mut args: Args) -> Result<()> {
 
             let show_patch = emit_patch && !options.suppress_diff;
             if show_patch {
-                let prefix_raw = options.patch_with_raw
-                    && !options
-                        .emit_queue
-                        .iter()
-                        .any(|k| *k == DiffFilesEmitKind::Raw);
+                let prefix_raw =
+                    options.patch_with_raw && !options.emit_queue.contains(&DiffFilesEmitKind::Raw);
                 let prefix_stat = options.patch_with_stat
                     && options.stat_variant != DiffFilesStatVariant::CompactSummary
-                    && !options
-                        .emit_queue
-                        .iter()
-                        .any(|k| *k == DiffFilesEmitKind::Stat);
+                    && !options.emit_queue.contains(&DiffFilesEmitKind::Stat);
                 if prefix_raw {
                     for entry in &diff_entries {
                         println!(
@@ -291,11 +285,7 @@ pub fn run(mut args: Args) -> Result<()> {
                 }
             }
         } else {
-            if options
-                .emit_queue
-                .iter()
-                .any(|k| *k == DiffFilesEmitKind::Summary)
-            {
+            if options.emit_queue.contains(&DiffFilesEmitKind::Summary) {
                 print_diff_files_summary(&diff_entries)?;
                 wrote_any = true;
                 need_blank_before_patch = true;
@@ -303,10 +293,7 @@ pub fn run(mut args: Args) -> Result<()> {
             if !options.suppress_diff {
                 match options.format {
                     OutputFormat::Raw => {
-                        let summary_only = options
-                            .emit_queue
-                            .iter()
-                            .any(|k| *k == DiffFilesEmitKind::Summary);
+                        let summary_only = options.emit_queue.contains(&DiffFilesEmitKind::Summary);
                         if !(summary_only && !options.explicit_raw) {
                             for entry in &diff_entries {
                                 println!(
@@ -712,8 +699,8 @@ fn parse_options(argv: &[String]) -> Result<Options> {
                 }
                 _ if arg.starts_with("-M") && arg.len() > 2 => {
                     let val = &arg[2..];
-                    let pct = if val.ends_with('%') {
-                        val[..val.len() - 1].parse::<u32>().unwrap_or(50)
+                    let pct = if let Some(stripped) = val.strip_suffix('%') {
+                        stripped.parse::<u32>().unwrap_or(50)
                     } else {
                         val.parse::<u32>().unwrap_or(50)
                     };
@@ -721,8 +708,8 @@ fn parse_options(argv: &[String]) -> Result<Options> {
                 }
                 _ if arg.starts_with("--find-renames=") => {
                     let val = &arg["--find-renames=".len()..];
-                    let pct = if val.ends_with('%') {
-                        val[..val.len() - 1].parse::<u32>().unwrap_or(50)
+                    let pct = if let Some(stripped) = val.strip_suffix('%') {
+                        stripped.parse::<u32>().unwrap_or(50)
                     } else {
                         val.parse::<u32>().unwrap_or(50)
                     };
@@ -1150,7 +1137,7 @@ fn collect_changes(
         if let Some(spec) = options.diff_filter.as_deref() {
             out.retain(|change| matches_diff_filter(change.status, spec));
         }
-        return Ok(out);
+        Ok(out)
     } else {
         // Stage-specific mode (`diff-files -1/-2/-3`). git emits, for *every*
         // unmerged path, a ":000000 <wt-mode> 0 0 U" line (diff_unmerge), and
@@ -1850,7 +1837,7 @@ fn index_file_mtime_pair(index_path: &Path) -> Option<(u32, u32)> {
     {
         use std::os::unix::fs::MetadataExt;
         let meta = fs::metadata(index_path).ok()?;
-        return Some((meta.mtime() as u32, meta.mtime_nsec() as u32));
+        Some((meta.mtime() as u32, meta.mtime_nsec() as u32))
     }
     #[cfg(not(unix))]
     {

@@ -693,20 +693,18 @@ fn build_ref_map(
                     }
                 }
             }
-            ObjectKind::Commit => {
+            ObjectKind::Commit if use_all_tags || use_all_refs => {
                 // Lightweight tag pointing directly at a commit
-                if use_all_tags || use_all_refs {
-                    insert_ref_candidate(
-                        &mut map,
-                        *oid,
-                        RefCandidate {
-                            name: short_name.clone(),
-                            annotated: false,
-                            tagger_time: 0,
-                            misnamed_ref: None,
-                        },
-                    );
-                }
+                insert_ref_candidate(
+                    &mut map,
+                    *oid,
+                    RefCandidate {
+                        name: short_name.clone(),
+                        annotated: false,
+                        tagger_time: 0,
+                        misnamed_ref: None,
+                    },
+                );
             }
             _ => {}
         }

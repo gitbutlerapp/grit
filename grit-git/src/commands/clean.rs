@@ -736,6 +736,7 @@ fn check_require_force(repo: &Repository) -> bool {
 }
 
 /// Walk the working tree collecting untracked files/directories.
+#[expect(clippy::too_many_arguments)]
 fn collect_untracked(
     dir: &Path,
     work_tree: &Path,
@@ -782,7 +783,7 @@ fn collect_untracked(
             .map(path_to_slash)
             .unwrap_or_else(|_| name.clone());
 
-        if should_preserve_home_config_file(&rel, &work_tree) {
+        if should_preserve_home_config_file(&rel, work_tree) {
             continue;
         }
 
@@ -942,24 +943,11 @@ fn collect_untracked(
                             // `git clean -d -X`: remove ignored-only untracked trees wholesale.
                             out.push((rel, true));
                         }
-                    } else if has_any_ignored {
-                        collect_untracked(
-                            &path,
-                            work_tree,
-                            cwd_prefix,
-                            tracked,
-                            matcher,
-                            repo,
-                            index,
-                            args,
-                            pathspecs,
-                            submodule_paths,
-                            out,
-                        )?;
-                    } else if args.force < 2
-                        && dir_contains_nested_git_or_gitlink(
-                            &path, work_tree, index, cwd_prefix, pathspecs,
-                        )?
+                    } else if has_any_ignored
+                        || (args.force < 2
+                            && dir_contains_nested_git_or_gitlink(
+                                &path, work_tree, index, cwd_prefix, pathspecs,
+                            )?)
                     {
                         collect_untracked(
                             &path,
@@ -1607,6 +1595,7 @@ fn dir_all_ignored(
 
 /// When a directory removal is blocked because it contains the process cwd, still remove
 /// eligible untracked paths inside it (matches Git / `t2501-cwd-empty`).
+#[expect(clippy::too_many_arguments)]
 fn remove_cleanable_untracked_under_dir(
     cwd: &Path,
     work_tree: &Path,

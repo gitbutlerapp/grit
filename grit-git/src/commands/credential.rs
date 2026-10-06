@@ -112,9 +112,7 @@ impl Credential {
     }
 
     fn has_capability(&self, capability: &str) -> bool {
-        self.values("capability[]")
-            .iter()
-            .any(|value| *value == capability)
+        self.values("capability[]").contains(&capability)
     }
 
     fn set(&mut self, key: &str, value: String) {
@@ -802,13 +800,12 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
                 anyhow::anyhow!("failed to run built-in credential helper '{subcmd}': {e}")
             })?
     } else {
-        let helper_program = if first_word.contains('/') {
-            first_word.to_string()
-        } else if first_word.starts_with("git-credential-") {
-            first_word.to_string()
-        } else {
-            format!("git-credential-{first_word}")
-        };
+        let helper_program =
+            if first_word.contains('/') || first_word.starts_with("git-credential-") {
+                first_word.to_string()
+            } else {
+                format!("git-credential-{first_word}")
+            };
         let resolved = resolve_credential_helper_executable(&helper_program);
         let mut cmd = Command::new(&resolved);
         for arg in extra_args {

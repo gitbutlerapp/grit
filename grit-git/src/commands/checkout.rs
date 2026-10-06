@@ -356,15 +356,12 @@ fn parse_checkout_merge_flags_from_raw(raw: &[String]) -> CheckoutMergeCli {
                 }
             }
         } else if a == "--conflict" && i + 1 < raw.len() {
-            match parse_conflict_style_name(&raw[i + 1]) {
-                Ok(style) => {
-                    out.conflict_style = Some(style);
-                    if out.merge_tri != 1 {
-                        out.merge_tri = -1;
-                    }
-                    i += 1;
+            if let Ok(style) = parse_conflict_style_name(&raw[i + 1]) {
+                out.conflict_style = Some(style);
+                if out.merge_tri != 1 {
+                    out.merge_tri = -1;
                 }
-                Err(_) => {}
+                i += 1;
             }
         }
         i += 1;
@@ -772,7 +769,7 @@ pub fn run(mut args: Args) -> Result<()> {
     // trailing arguments. A bare blob OID (e.g. stage `:A` from `git cat-file -p :A`) is a valid
     // revision but not a commit-ish; interpret the full argv list as pathspecs so
     // `git checkout A B` matches Git (t2082 parallel-checkout attributes).
-    if !has_separator && !args.switch_mode && paths.len() >= 1 {
+    if !has_separator && !args.switch_mode && !paths.is_empty() {
         if let Some(ref t) = target {
             if let Ok(oid) = resolve_revision(&repo, t) {
                 if let Ok(obj) = repo.odb.read(&oid) {
@@ -805,26 +802,23 @@ pub fn run(mut args: Args) -> Result<()> {
         }
     }
 
-    if args.ours || args.theirs {
-        if paths.is_empty() {
-            if let Some(ref t) = target {
-                let is_branch_switch = t == "HEAD"
-                    || t == "@"
-                    || refs::resolve_ref(&repo.git_dir, &format!("refs/heads/{t}")).is_ok();
-                if is_branch_switch {
-                    bail!("fatal: '--ours/--theirs' cannot be used with switching branches");
-                }
-                paths.push(t.clone());
-                target = None;
-            } else {
-                bail!("fatal: option '--ours/--theirs' needs the paths to check out");
+    if (args.ours || args.theirs) && paths.is_empty() {
+        if let Some(ref t) = target {
+            let is_branch_switch = t == "HEAD"
+                || t == "@"
+                || refs::resolve_ref(&repo.git_dir, &format!("refs/heads/{t}")).is_ok();
+            if is_branch_switch {
+                bail!("fatal: '--ours/--theirs' cannot be used with switching branches");
             }
+            paths.push(t.clone());
+            target = None;
+        } else {
+            bail!("fatal: option '--ours/--theirs' needs the paths to check out");
         }
     }
 
     // Resolve @{-N} in start point if present
     let mut target = target.map(|t| resolve_at_minus(&repo, &t).unwrap_or(t));
-    let mut paths = paths;
 
     // `checkout -f a b c` without `--`: when every token exists in the work tree, treat them all
     // as pathspecs (t7201 `checkout -f` on unmerged paths), not `tree-ish` + paths.
@@ -2053,7 +2047,6 @@ fn merge_branch_working_tree(
             entry.size = meta.size() as u32;
         }
     }
-    let mut final_index = final_index;
     set_checkout_cache_tree(repo, &mut final_index)?;
     repo.write_index_at_with_post_index_change(&index_path, &mut final_index, true, false)
         .context("writing index after merge checkout")?;
@@ -3928,8 +3921,7 @@ pub(crate) fn check_untracked_overwrite(
             // check_leading_path. This must be checked even when `abs_path.exists()` reports true
             // by resolving the full path *through* the untracked symlink ancestor (e.g. `a/b` is a
             // symlink to `b-2`, so `a/b/c/d` resolves to the still-present `a/b-2/c/d`).
-            if let Some(blocker) =
-                untracked_leading_path_in_the_way(&work_tree, rel_str, &old_paths)
+            if let Some(blocker) = untracked_leading_path_in_the_way(work_tree, rel_str, &old_paths)
             {
                 let blocker_ignored = match &mut ignore_matcher {
                     Some(m) => {
@@ -4666,6 +4658,7 @@ pub fn checkout_head_to_worktree(repo: &Repository) -> Result<()> {
 }
 
 /// Checkout specific paths from the index or a tree-ish.
+#[expect(clippy::too_many_arguments)]
 fn checkout_paths(
     repo: &Repository,
     source: Option<&str>,
@@ -5236,9 +5229,9 @@ checking out of the index."
                 let is_dir_prefix = rel.is_empty() || {
                     // Check if the path is a tree (directory) in the source
                     match find_in_tree(repo, tree_oid, &rel)? {
-                        Some((_, mode)) if mode == 0o40000 => true,
+                        Some((_, 0o40000)) => true,
                         Some(_) => false,
-                        None => rel.is_empty(),
+                        None => false,
                     }
                 };
 
@@ -5566,6 +5559,7 @@ fn run_grit_apply_stdin(
 /// `checkout -p HEAD` / `@`: match Git's `apply_for_checkout` (add-patch.c) — verify with
 /// `apply --check` / `apply --cached --check`, then apply, or prompt when the index rejects
 /// the hunk while the worktree still accepts it.
+#[expect(clippy::too_many_arguments)]
 fn apply_checkout_head_mode(
     repo: &Repository,
     index: &mut Index,
@@ -5699,7 +5693,8 @@ fn checkout_patch_inner(
         }
     };
 
-    let mut file_diffs: Vec<(String, Vec<u8>, Vec<u8>, Vec<u8>, u32)> = Vec::new();
+    type PatchFileEntry = (String, Vec<u8>, Vec<u8>, Vec<u8>, u32);
+    let mut file_diffs: Vec<PatchFileEntry> = Vec::new();
     // (path, source_bytes, staged_bytes, worktree_bytes, index_mode)
 
     match patch_mode {
@@ -6975,7 +6970,7 @@ fn refuse_populated_submodule_tree_replacement_inner(
                 continue;
             }
             let prefix_bytes = prefix.to_string_lossy().replace('\\', "/").into_bytes();
-            if old_gitlinks.iter().any(|gp| *gp == prefix_bytes.as_slice()) {
+            if old_gitlinks.contains(&prefix_bytes.as_slice()) {
                 continue;
             }
             if ne.path == prefix_bytes {
@@ -7124,6 +7119,7 @@ pub(crate) fn checkout_index_to_worktree_allowing_submodule_replacement(
     )
 }
 
+#[expect(clippy::too_many_arguments)]
 fn checkout_index_to_worktree_inner(
     repo: &Repository,
     old_index: &Index,
@@ -7624,6 +7620,7 @@ fn finish_delayed_path_checkout(
 ///
 /// `full_smudge_meta`: when true, process smudge gets `ref=` / `treeish=` (branch/tree checkout).
 /// Path-only checkout passes blob id only.
+#[expect(clippy::too_many_arguments)]
 fn write_blob_to_worktree(
     repo: &Repository,
     work_tree: &std::path::Path,
