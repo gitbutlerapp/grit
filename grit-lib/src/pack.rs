@@ -15,6 +15,7 @@ use std::io;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// A parsed entry from an index file.
 #[derive(Debug, Clone)]
@@ -308,13 +309,10 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 
 /// Process-wide cache of parsed pack indexes and pack file bytes.
 ///
-/// Object lookups in a busy command (`status`, `log`, ancestor walks, packing) re-issue
-/// `read_local_pack_indexes` for every single object, which used to mean re-opening,
-/// re-reading, re-SHA1-verifying every `.idx` (and re-reading the entire `.pack` for each
-/// object). This cache keeps parsed indexes and pack bytes in memory keyed by path with
-/// mtime-based invalidation: if a pack/index is rewritten on disk, we re-parse it on the
-/// next access. New packs added to a directory invalidate the directory listing via the
-/// dir's mtime.
+/// Hot lookups serve cached directory listings, parsed `.idx` files, and `.pack` bytes
+/// without `stat` per access (Git prepares the pack list once and only re-scans on a
+/// lookup miss when the pack directory's mtime changed). Pack bytes are re-read only on
+/// cache miss or when parsing a pack object fails and the on-disk signature changed.
 ///
 /// SHA-1 verification of the index trailer is **not** performed on cached reads: Git only
 /// verifies pack indexes during `fsck`/`verify-pack`, not on every object lookup. Use
@@ -334,8 +332,6 @@ mod pack_cache {
     }
 
     struct CachedIdx {
-        mtime: SystemTime,
-        size: u64,
         idx: Arc<PackIndex>,
     }
 
@@ -364,6 +360,9 @@ mod pack_cache {
         /// FIFO eviction order for `delta_bases` (size-bounded).
         delta_order: VecDeque<(PathBuf, u64)>,
         delta_bytes: usize,
+        /// Per `objects/pack` directory rescan count (parallel-safe; tests only).
+        #[cfg(test)]
+        test_dir_rescan_counts: HashMap<PathBuf, u64>,
     }
 
     static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
@@ -387,52 +386,28 @@ mod pack_cache {
         Some((mtime, m.len()))
     }
 
-    /// Get a parsed pack index from cache, re-parsing from disk only when the file
-    /// is missing from the cache or its mtime/size has changed since last parse.
+    /// Get a parsed pack index from cache, parsing from disk only on cache miss.
     pub fn get_index(idx_path: &Path) -> Result<Arc<PackIndex>> {
-        let sig = file_signature(idx_path);
-        if let Some((mtime, size)) = sig {
-            {
-                let g = lock();
-                if let Some(c) = g.by_idx.get(idx_path) {
-                    if c.mtime == mtime && c.size == size {
-                        return Ok(Arc::clone(&c.idx));
-                    }
-                }
-            }
-            let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
-            let mut g = lock();
-            g.by_idx.insert(
-                idx_path.to_path_buf(),
-                CachedIdx {
-                    mtime,
-                    size,
-                    idx: Arc::clone(&parsed),
-                },
-            );
-            Ok(parsed)
-        } else {
-            Err(Error::Io(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("idx not found: {}", idx_path.display()),
-            )))
-        }
-    }
-
-    /// Get all `.idx` files for `objects_dir`, with each parsed index served from cache.
-    /// The directory listing itself is cached and invalidated by the directory mtime.
-    pub fn get_dir_indexes(objects_dir: &Path) -> Result<Vec<Arc<PackIndex>>> {
-        let pack_dir = objects_dir.join("pack");
-        let dir_mt = dir_mtime(&pack_dir);
-
         {
             let g = lock();
-            if let Some(c) = g.by_dir.get(&pack_dir) {
-                if c.dir_mtime == dir_mt {
-                    return Ok(c.indexes.clone());
-                }
+            if let Some(c) = g.by_idx.get(idx_path) {
+                return Ok(Arc::clone(&c.idx));
             }
         }
+        let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
+        let mut g = lock();
+        g.by_idx.insert(
+            idx_path.to_path_buf(),
+            CachedIdx {
+                idx: Arc::clone(&parsed),
+            },
+        );
+        Ok(parsed)
+    }
+
+    fn rescan_dir_indexes(objects_dir: &Path) -> Result<Vec<Arc<PackIndex>>> {
+        let pack_dir = objects_dir.join("pack");
+        let dir_mt = dir_mtime(&pack_dir);
 
         let rd = match fs::read_dir(&pack_dir) {
             Ok(rd) => rd,
@@ -457,7 +432,9 @@ mod pack_cache {
             if path.extension().and_then(|s| s.to_str()) != Some("idx") {
                 continue;
             }
-            let Ok(idx) = get_index(&path) else { continue };
+            let Ok(idx) = get_index(&path) else {
+                continue;
+            };
             if !idx.pack_path.is_file() {
                 continue;
             }
@@ -465,6 +442,12 @@ mod pack_cache {
         }
 
         let mut g = lock();
+        #[cfg(test)]
+        {
+            *g.test_dir_rescan_counts
+                .entry(pack_dir.clone())
+                .or_insert(0) += 1;
+        }
         g.by_dir.insert(
             pack_dir,
             CachedDir {
@@ -475,14 +458,58 @@ mod pack_cache {
         Ok(out)
     }
 
-    /// Get the raw bytes of a pack file from cache, re-reading from disk when the
-    /// file's mtime/size changes.
-    ///
+    /// Get all `.idx` files for `objects_dir`, using the cached directory listing when present.
+    pub fn get_dir_indexes(objects_dir: &Path) -> Result<Vec<Arc<PackIndex>>> {
+        let pack_dir = objects_dir.join("pack");
+        {
+            let g = lock();
+            if let Some(c) = g.by_dir.get(&pack_dir) {
+                return Ok(c.indexes.clone());
+            }
+        }
+        rescan_dir_indexes(objects_dir)
+    }
+
+    /// Re-scan `objects_dir`/`pack/` when its mtime changed since the cached listing (Git
+    /// `reprepare_packed_git`). Returns true if the listing was refreshed.
+    pub fn reprepare_dir_on_miss(objects_dir: &Path) -> Result<bool> {
+        let pack_dir = objects_dir.join("pack");
+        let dir_mt = dir_mtime(&pack_dir);
+        let needs_rescan = {
+            let g = lock();
+            match g.by_dir.get(&pack_dir) {
+                None => true,
+                Some(c) => c.dir_mtime != dir_mt,
+            }
+        };
+        if !needs_rescan {
+            return Ok(false);
+        }
+        rescan_dir_indexes(objects_dir)?;
+        Ok(true)
+    }
+
+    fn load_pack_bytes_from_disk(
+        pack_path: &Path,
+        mtime: SystemTime,
+        size: u64,
+    ) -> Result<Arc<Vec<u8>>> {
+        let bytes = Arc::new(fs::read(pack_path).map_err(Error::Io)?);
+        let mut g = lock();
+        drop_delta_entries_locked(&mut g, pack_path);
+        g.by_pack.insert(
+            pack_path.to_path_buf(),
+            CachedPack {
+                mtime,
+                size,
+                bytes: Arc::clone(&bytes),
+            },
+        );
+        Ok(bytes)
+    }
+
     /// Whether `path` names a final, content-addressed pack file (`pack-<hash>.pack`).
-    ///
-    /// Git allows arbitrary basenames such as `pack-custom.pack`; only names whose
-    /// hash segment is exactly 40 (SHA-1) or 64 (SHA-256) lowercase/uppercase hex
-    /// digits are treated as immutable for the stat-free fast path.
+    #[allow(dead_code)]
     fn is_content_addressed_pack(path: &Path) -> bool {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             return false;
@@ -499,47 +526,111 @@ mod pack_cache {
         hash_part.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
+    /// Get the raw bytes of a pack file from cache, reading from disk only on cache miss.
+    ///
+    /// Cache hits skip `stat` for all pack basenames; in-process repack/gc clears the cache
+    /// when packs change.
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
-        // Content-addressed packs are immutable in practice: in-process rewrites go
-        // through `repack`/`gc`, which clear this cache, and cross-process mutation
-        // cannot outlive the process boundary. Serving the cached copy without a
-        // stat removes one syscall per packed-object read on hot walks.
-        if is_content_addressed_pack(pack_path) {
+        {
             let g = lock();
             if let Some(c) = g.by_pack.get(pack_path) {
                 return Ok(Arc::clone(&c.bytes));
             }
         }
-        let sig = file_signature(pack_path);
-        if let Some((mtime, size)) = sig {
-            {
-                let g = lock();
-                if let Some(c) = g.by_pack.get(pack_path) {
-                    if c.mtime == mtime && c.size == size {
-                        return Ok(Arc::clone(&c.bytes));
-                    }
-                }
-            }
-            let bytes = Arc::new(fs::read(pack_path).map_err(Error::Io)?);
-            let mut g = lock();
-            // The pack's content (re)entered the cache: any delta bases
-            // inflated from a previous read of this path are now suspect.
-            drop_delta_entries_locked(&mut g, pack_path);
-            g.by_pack.insert(
-                pack_path.to_path_buf(),
-                CachedPack {
-                    mtime,
-                    size,
-                    bytes: Arc::clone(&bytes),
-                },
-            );
-            Ok(bytes)
-        } else {
-            Err(Error::Io(io::Error::new(
+        let (mtime, size) = file_signature(pack_path).ok_or_else(|| {
+            Error::Io(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("pack not found: {}", pack_path.display()),
-            )))
+            ))
+        })?;
+        load_pack_bytes_from_disk(pack_path, mtime, size)
+    }
+
+    /// Re-read `pack_path` when its on-disk signature differs from the cached entry.
+    ///
+    /// Returns true when bytes were reloaded or the cache entry was dropped.
+    pub fn revalidate_stale_pack_bytes(pack_path: &Path) -> Result<bool> {
+        let Some((mtime, size)) = file_signature(pack_path) else {
+            let mut g = lock();
+            let removed = g.by_pack.remove(pack_path).is_some();
+            if removed {
+                drop_delta_entries_locked(&mut g, pack_path);
+            }
+            return Ok(removed);
+        };
+        let stale = {
+            let g = lock();
+            match g.by_pack.get(pack_path) {
+                Some(c) => c.mtime != mtime || c.size != size,
+                None => true,
+            }
+        };
+        if !stale {
+            return Ok(false);
         }
+        load_pack_bytes_from_disk(pack_path, mtime, size)?;
+        Ok(true)
+    }
+
+    /// After a pack parse/decompress failure, reload from disk when cached bytes differ.
+    ///
+    /// Signature-only checks miss in-memory stale entries (tests) and same-second replacements
+    /// with unchanged size; a byte comparison against the on-disk file catches those.
+    ///
+    /// Returns true when the cache was refreshed with disk contents.
+    pub fn reload_pack_bytes_after_parse_failure(pack_path: &Path) -> Result<bool> {
+        if revalidate_stale_pack_bytes(pack_path)? {
+            return Ok(true);
+        }
+        let Some((mtime, size)) = file_signature(pack_path) else {
+            return Ok(false);
+        };
+        let disk = fs::read(pack_path).map_err(Error::Io)?;
+        let needs_reload = lock()
+            .by_pack
+            .get(pack_path)
+            .is_some_and(|c| c.bytes.as_slice() != disk.as_slice());
+        if !needs_reload {
+            return Ok(false);
+        }
+        load_pack_bytes_from_disk(pack_path, mtime, size)?;
+        Ok(true)
+    }
+
+    #[cfg(test)]
+    pub fn test_reset_dir_rescan_count(pack_dir: &Path) {
+        lock()
+            .test_dir_rescan_counts
+            .insert(pack_dir.to_path_buf(), 0);
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_dir_rescan_count(pack_dir: &Path) -> u64 {
+        lock()
+            .test_dir_rescan_counts
+            .get(pack_dir)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Replace cached pack bytes (tests simulating a stale in-memory mapping).
+    #[cfg(test)]
+    pub fn test_inject_stale_pack_bytes(pack_path: &Path, stale: Arc<Vec<u8>>) {
+        let mut g = lock();
+        let stamp = g
+            .by_pack
+            .get(pack_path)
+            .map(|c| (c.mtime, c.size))
+            .unwrap_or((SystemTime::UNIX_EPOCH, stale.len() as u64));
+        g.by_pack.insert(
+            pack_path.to_path_buf(),
+            CachedPack {
+                mtime: stamp.0,
+                size: stamp.1,
+                bytes: stale,
+            },
+        );
     }
 
     /// Drop all cached pack indexes and pack bytes. Used by `repack`/`gc` and by tests
@@ -614,15 +705,12 @@ mod pack_cache {
     /// file's mtime (object freshening). Pack contents are immutable for a given pack name, so
     /// a self-inflicted mtime bump must not evict the cached bytes — without this, every
     /// `odb.write` of an already-packed object forced a full re-read of the pack on the next
-    /// lookup. External modifications still invalidate normally via the mtime/size check.
-    pub fn refresh_pack_signature(pack_path: &Path) {
-        if let Some((mtime, size)) = file_signature(pack_path) {
-            let mut g = lock();
-            if let Some(c) = g.by_pack.get_mut(pack_path) {
-                if c.size == size {
-                    c.mtime = mtime;
-                }
-            }
+    /// lookup. We bump the cached mtime to now without `stat` (the caller just utime'd the file).
+    /// External modifications still invalidate via [`revalidate_stale_pack_bytes`].
+    pub fn refresh_pack_signature(pack_path: &Path, touched_at: SystemTime) {
+        let mut g = lock();
+        if let Some(c) = g.by_pack.get_mut(pack_path) {
+            c.mtime = touched_at;
         }
     }
 }
@@ -631,8 +719,9 @@ mod pack_cache {
 ///
 /// Cached reads skip the `.idx` SHA-1 trailer verification that [`read_pack_index`]
 /// performs; corruption checks happen during `fsck`/`verify-pack`, not on every object
-/// lookup (matches Git). The directory listing itself is cached and invalidated when
-/// the pack directory's mtime changes (i.e. when packs are added or removed).
+/// lookup (matches Git). The directory listing is prepared once per process and
+/// re-scanned only on a lookup miss when the pack directory's mtime changed (Git
+/// `reprepare_packed_git`), or when [`clear_pack_cache`] drops the cache after repack/gc.
 ///
 /// # Errors
 ///
@@ -641,8 +730,20 @@ pub fn read_local_pack_indexes_cached(objects_dir: &Path) -> Result<Vec<Arc<Pack
     pack_cache::get_dir_indexes(objects_dir)
 }
 
-/// Read a single pack index from the process-wide cache (parses from disk on miss
-/// or when the file's mtime/size has changed). Skips trailer verification.
+/// Re-scan the pack directory when its mtime changed since the cached listing.
+///
+/// Called when an object was not found in loose storage or any known pack; returns
+/// `true` when the listing was refreshed so the caller can retry once.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the pack directory cannot be read.
+pub fn reprepare_pack_directory_on_miss(objects_dir: &Path) -> Result<bool> {
+    pack_cache::reprepare_dir_on_miss(objects_dir)
+}
+
+/// Read a single pack index from the process-wide cache (parses from disk on miss).
+/// Skips trailer verification.
 ///
 /// # Errors
 ///
@@ -668,8 +769,8 @@ pub fn clear_pack_cache() {
 
 /// Re-stamp the cached pack-bytes signature after deliberately touching `pack_path`'s mtime
 /// (object freshening). See [`pack_cache::refresh_pack_signature`].
-pub fn refresh_pack_bytes_signature(pack_path: &Path) {
-    pack_cache::refresh_pack_signature(pack_path);
+pub fn refresh_pack_bytes_signature(pack_path: &Path, touched_at: SystemTime) {
+    pack_cache::refresh_pack_signature(pack_path, touched_at);
 }
 
 /// Collect aggregate local pack metrics.
@@ -1492,6 +1593,15 @@ enum PackIndexHandle<'a> {
     Shared(Arc<PackIndex>),
 }
 
+impl<'a> Clone for PackIndexHandle<'a> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Borrowed(idx) => Self::Borrowed(idx),
+            Self::Shared(arc) => Self::Shared(Arc::clone(arc)),
+        }
+    }
+}
+
 impl PackIndexHandle<'_> {
     fn get(&self) -> &PackIndex {
         match self {
@@ -1556,16 +1666,46 @@ fn rescue_in_pack_base(
     Ok(None)
 }
 
+/// True when a pack parse failure might be stale cached bytes rather than on-disk corruption.
+fn pack_bytes_parse_may_be_stale(err: &Error) -> bool {
+    matches!(err, Error::CorruptObject(_) | Error::Zlib(_))
+}
+
 /// Resolve one pack object, walking delta chains iteratively across packs with shared
 /// [`DeltaChainState`] so cycles and depth limits surface as [`Error::DeltaChainTooDeep`].
+///
+/// On corruption/zlib errors, revalidates the starting pack's on-disk signature once and
+/// retries the full resolution before surfacing the error.
 fn resolve_pack_object_at(
     start_idx: PackIndexHandle<'_>,
     start_offset: u64,
     objects_dir: Option<&Path>,
     state: &mut DeltaChainState,
 ) -> Result<(ObjectKind, Vec<u8>)> {
-    let mut cur_idx = start_idx;
-    let mut cur_bytes = read_pack_bytes_cached(&cur_idx.get().pack_path)?;
+    let pack_path = start_idx.get().pack_path.clone();
+    for attempt in 0..2 {
+        match resolve_pack_object_at_body(start_idx.clone(), start_offset, objects_dir, state) {
+            Ok(v) => return Ok(v),
+            Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
+                if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
+                    state.visited.retain(|(p, _)| p != &pack_path);
+                    continue;
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("at most two resolution attempts")
+}
+
+fn resolve_pack_object_at_body(
+    cur_idx: PackIndexHandle<'_>,
+    start_offset: u64,
+    objects_dir: Option<&Path>,
+    state: &mut DeltaChainState,
+) -> Result<(ObjectKind, Vec<u8>)> {
+    let cur_bytes = read_pack_bytes_cached(&cur_idx.get().pack_path)?;
     let mut cur_offset = start_offset;
     let mut pending: Vec<PendingDeltaFrame> = Vec::new();
 
@@ -1711,10 +1851,20 @@ fn resolve_pack_object_at(
                             let Some(off) = other_idx.find_offset(&base_oid) else {
                                 return Err(Error::ObjectNotFound(base_oid.to_hex()));
                             };
-                            cur_idx = PackIndexHandle::Shared(other_idx);
-                            cur_bytes = read_pack_bytes_cached(&cur_idx.get().pack_path)?;
-                            cur_offset = off;
-                            continue;
+                            let (base_kind, base_data) = resolve_pack_object_at(
+                                PackIndexHandle::Shared(other_idx),
+                                off,
+                                objects_dir,
+                                state,
+                            )?;
+                            let result = finish_with_whole_base_fixed(
+                                base_kind,
+                                &base_data,
+                                &pending,
+                                &idx_ref.pack_path,
+                                object_start,
+                            )?;
+                            return Ok((base_kind, result));
                         }
                     }
                 }
@@ -1771,23 +1921,40 @@ fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize)
     };
 
     let pack_path = idx.pack_path.clone();
-    let pack_bytes = read_pack_bytes_cached(&pack_path)?;
-    validate_pack_index_object_count(&pack_bytes, idx)?;
-    let objects_dir = pack_path
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf);
-    let mut state = DeltaChainState {
-        depth,
-        visited: HashSet::new(),
-    };
-    let (kind, data) = resolve_pack_object_at(
-        PackIndexHandle::Borrowed(idx),
-        offset,
-        objects_dir.as_deref(),
-        &mut state,
-    )?;
-    Ok(Object::new(kind, data))
+    let objects_dir = idx.pack_path.parent().and_then(Path::parent);
+    for attempt in 0..2 {
+        let pack_bytes = read_pack_bytes_cached(&pack_path)?;
+        match validate_pack_index_object_count(&pack_bytes, idx) {
+            Ok(()) => {}
+            Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
+                if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
+                    continue;
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        }
+        let mut state = DeltaChainState {
+            depth,
+            visited: HashSet::new(),
+        };
+        match resolve_pack_object_at(
+            PackIndexHandle::Borrowed(idx),
+            offset,
+            objects_dir,
+            &mut state,
+        ) {
+            Ok((kind, data)) => return Ok(Object::new(kind, data)),
+            Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
+                if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
+                    continue;
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("at most two read attempts")
 }
 
 /// Resolve an object from already-loaded pack bytes (used by `verify-pack`).
@@ -1854,6 +2021,20 @@ fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8])
 ///
 /// Returns [`Error::ObjectNotFound`] if no pack contains the OID.
 pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
+    match try_read_object_from_packs(objects_dir, oid) {
+        Ok(obj) => Ok(obj),
+        Err(err @ Error::ObjectNotFound(_)) => {
+            if reprepare_pack_directory_on_miss(objects_dir)? {
+                try_read_object_from_packs(objects_dir, oid)
+            } else {
+                Err(err)
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn try_read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
     let indexes = read_local_pack_indexes_cached(objects_dir)?;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
@@ -2243,6 +2424,16 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
 }
 
 #[cfg(test)]
+static PACK_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+fn pack_cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    PACK_CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::delta_encode::encode_lcp_delta;
@@ -2252,6 +2443,7 @@ mod tests {
     use flate2::Compression;
     use std::io::Write;
     use std::process::Command;
+    use std::sync::Arc;
 
     fn git_try(dir: &std::path::Path, args: &[&str]) -> bool {
         Command::new("git")
@@ -2382,11 +2574,42 @@ mod tests {
         Ok(())
     }
 
+    fn single_blob_pack(data: &[u8]) -> (Vec<u8>, ObjectId, u64) {
+        let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
+        let oid = odb.hash(ObjectKind::Blob, data);
+        let mut pack = Vec::new();
+        pack.extend_from_slice(b"PACK");
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        pack.extend_from_slice(&1u32.to_be_bytes());
+        let off = append_whole_blob(&mut pack, data);
+        append_sha1_pack_trailer(&mut pack);
+        (pack, oid, off)
+    }
+
     fn install_synthetic_pack(
         objects_dir: &Path,
         stem: &str,
         pack: &[u8],
         entries: &[(ObjectId, u64)],
+    ) -> PackIndex {
+        install_synthetic_pack_inner(objects_dir, stem, pack, entries, true)
+    }
+
+    fn install_synthetic_pack_no_clear(
+        objects_dir: &Path,
+        stem: &str,
+        pack: &[u8],
+        entries: &[(ObjectId, u64)],
+    ) -> PackIndex {
+        install_synthetic_pack_inner(objects_dir, stem, pack, entries, false)
+    }
+
+    fn install_synthetic_pack_inner(
+        objects_dir: &Path,
+        stem: &str,
+        pack: &[u8],
+        entries: &[(ObjectId, u64)],
+        clear_cache: bool,
     ) -> PackIndex {
         let pack_dir = objects_dir.join("pack");
         std::fs::create_dir_all(&pack_dir).expect("pack dir");
@@ -2394,7 +2617,9 @@ mod tests {
         let idx_path = pack_dir.join(format!("{stem}.idx"));
         std::fs::write(&pack_path, pack).expect("write pack");
         write_v2_idx_for_test(&idx_path, &pack_path, entries).expect("write idx");
-        clear_pack_cache();
+        if clear_cache {
+            clear_pack_cache();
+        }
         read_pack_index(&idx_path).expect("read idx")
     }
 
@@ -2476,6 +2701,7 @@ mod tests {
 
     #[test]
     fn reads_delta_chain_deeper_than_50() {
+        let _guard = pack_cache_test_guard();
         let Some((_repo, tip, odb)) = build_deep_delta_repo(120) else {
             eprintln!("SKIP: git unavailable for deep delta fixture");
             return;
@@ -2512,6 +2738,7 @@ mod tests {
 
     #[test]
     fn cyclic_ref_delta_chain_errors() {
+        let _guard = pack_cache_test_guard();
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let content_a = b"aaa".as_slice();
         let content_b = b"bbb".as_slice();
@@ -2622,6 +2849,7 @@ mod tests {
 
     #[test]
     fn cyclic_ref_delta_chain_across_two_packs_errors() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let content_a = b"aaa".as_slice();
@@ -2664,7 +2892,47 @@ mod tests {
     }
 
     #[test]
+    fn cross_pack_ref_delta_resolves_through_odb_read() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let odb = Odb::new(&objects);
+        let base = b"common prefix base";
+        let target = b"common prefix target";
+        let oid_base = odb.hash(ObjectKind::Blob, base);
+        let delta = encode_lcp_delta(base, target).expect("delta");
+        let oid_target = odb.hash(ObjectKind::Blob, target);
+
+        let mut pack_base = Vec::new();
+        pack_base.extend_from_slice(b"PACK");
+        pack_base.extend_from_slice(&2u32.to_be_bytes());
+        pack_base.extend_from_slice(&1u32.to_be_bytes());
+        let off_base = append_whole_blob(&mut pack_base, base);
+        append_sha1_pack_trailer(&mut pack_base);
+
+        let mut pack_tip = Vec::new();
+        pack_tip.extend_from_slice(b"PACK");
+        pack_tip.extend_from_slice(&2u32.to_be_bytes());
+        pack_tip.extend_from_slice(&1u32.to_be_bytes());
+        let off_tip = pack_tip.len() as u64;
+        append_ref_delta(&mut pack_tip, &oid_base, &delta);
+        append_sha1_pack_trailer(&mut pack_tip);
+
+        install_synthetic_pack(&objects, "base", &pack_base, &[(oid_base, off_base)]);
+        install_synthetic_pack(&objects, "tip", &pack_tip, &[(oid_target, off_tip)]);
+
+        let got = odb
+            .read(&oid_target)
+            .expect("Odb::read cross-pack ref-delta");
+        assert_eq!(got.kind, ObjectKind::Blob);
+        assert_eq!(got.data.as_slice(), target);
+        assert_eq!(odb.hash(got.kind, &got.data), oid_target);
+    }
+
+    #[test]
     fn corrupt_in_pack_base_rescued_from_loose() {
+        let _guard = pack_cache_test_guard();
         let tmp = tempfile::tempdir().expect("tempdir");
         let objects = tmp.path().join("objects");
         std::fs::create_dir_all(objects.join("pack")).expect("dirs");
@@ -2692,10 +2960,152 @@ mod tests {
         assert_eq!(got.kind, ObjectKind::Blob);
         assert_eq!(got.data, tip);
     }
+
+    #[test]
+    fn pack_added_after_first_lookup_found_on_miss() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let pack_dir = objects.join("pack");
+        let (pack_a, oid_a, off_a) = single_blob_pack(b"pack-a");
+        install_synthetic_pack(&objects, "first", &pack_a, &[(oid_a, off_a)]);
+        pack_cache::test_reset_dir_rescan_count(&pack_dir);
+
+        read_object_from_packs(&objects, &oid_a).expect("warm cache");
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&pack_dir),
+            1,
+            "initial lookup should scan the pack directory once"
+        );
+
+        // Ensure the pack directory mtime advances past the cached stamp (second resolution).
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        let (pack_b, oid_b, off_b) = single_blob_pack(b"pack-b");
+        install_synthetic_pack_no_clear(&objects, "second", &pack_b, &[(oid_b, off_b)]);
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&pack_dir),
+            1,
+            "adding a pack must not rescan until a miss"
+        );
+
+        read_object_from_packs(&objects, &oid_b).expect("new pack via miss path");
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&pack_dir),
+            2,
+            "miss path should re-scan when pack dir mtime changed"
+        );
+    }
+
+    #[test]
+    fn known_object_lookup_does_not_rescan() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let pack_dir = objects.join("pack");
+        pack_cache::test_reset_dir_rescan_count(&pack_dir);
+        let (pack, oid, off) = single_blob_pack(b"cached-blob");
+        install_synthetic_pack(&objects, "only", &pack, &[(oid, off)]);
+
+        read_object_from_packs(&objects, &oid).expect("prime cache");
+        let after_first = pack_cache::test_dir_rescan_count(&pack_dir);
+        for _ in 0..64 {
+            read_object_from_packs(&objects, &oid).expect("repeat read");
+        }
+        assert_eq!(
+            pack_cache::test_dir_rescan_count(&pack_dir),
+            after_first,
+            "repeated hits must not re-scan the pack directory"
+        );
+    }
+
+    #[test]
+    fn pack_dir_rescan_counts_are_per_directory_under_parallel_tests() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp_a = tempfile::tempdir().expect("tempdir a");
+        let tmp_b = tempfile::tempdir().expect("tempdir b");
+        let objects_a = tmp_a.path().join("objects");
+        let objects_b = tmp_b.path().join("objects");
+        let pack_a_dir = objects_a.join("pack");
+        let pack_b_dir = objects_b.join("pack");
+        pack_cache::test_reset_dir_rescan_count(&pack_a_dir);
+        pack_cache::test_reset_dir_rescan_count(&pack_b_dir);
+
+        let (pack_a, oid_a, off_a) = single_blob_pack(b"parallel-a");
+        let (pack_b, oid_b, off_b) = single_blob_pack(b"parallel-b");
+        install_synthetic_pack(&objects_a, "a", &pack_a, &[(oid_a, off_a)]);
+        install_synthetic_pack(&objects_b, "b", &pack_b, &[(oid_b, off_b)]);
+
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let b0 = Arc::clone(&barrier);
+        let b1 = Arc::clone(&barrier);
+        let oa = objects_a.clone();
+        let ob = objects_b.clone();
+        let id_a = oid_a;
+        let id_b = oid_b;
+
+        let h1 = std::thread::spawn(move || {
+            b0.wait();
+            read_object_from_packs(&oa, &id_a).expect("read a");
+        });
+        let h2 = std::thread::spawn(move || {
+            b1.wait();
+            read_object_from_packs(&ob, &id_b).expect("read b");
+        });
+        h1.join().expect("thread a");
+        h2.join().expect("thread b");
+
+        assert_eq!(pack_cache::test_dir_rescan_count(&pack_a_dir), 1);
+        assert_eq!(pack_cache::test_dir_rescan_count(&pack_b_dir), 1);
+    }
+
+    #[test]
+    fn stale_cached_pack_bytes_revalidated_before_corruption_error() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let (pack, oid, off) = single_blob_pack(b"revalidate-me");
+        let idx = install_synthetic_pack(&objects, "good", &pack, &[(oid, off)]);
+        read_object_from_pack(&idx, &oid).expect("prime pack bytes cache");
+
+        let good_on_disk = std::fs::read(&idx.pack_path).expect("read pack");
+        pack_cache::test_inject_stale_pack_bytes(&idx.pack_path, Arc::new(b"BAD".to_vec()));
+        std::fs::write(&idx.pack_path, &good_on_disk).expect("refresh on-disk pack");
+        let got = read_object_from_pack(&idx, &oid).expect("revalidate from disk");
+        assert_eq!(got.data, b"revalidate-me");
+    }
+
+    #[test]
+    fn cleared_cache_sees_removed_packs_disappear() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let (pack, oid, off) = single_blob_pack(b"ephemeral");
+        install_synthetic_pack(&objects, "gone", &pack, &[(oid, off)]);
+        read_object_from_packs(&objects, &oid).expect("warm cache");
+
+        let pack_path = objects.join("pack/gone.pack");
+        let idx_path = objects.join("pack/gone.idx");
+        std::fs::remove_file(&pack_path).expect("remove pack");
+        std::fs::remove_file(&idx_path).expect("remove idx");
+        clear_pack_cache();
+
+        let indexes = read_local_pack_indexes_cached(&objects).expect("rescan");
+        assert!(
+            indexes.is_empty(),
+            "after clear, listing should not retain removed packs"
+        );
+    }
 }
 #[cfg(test)]
 mod cached_lookup_tests {
     use super::*;
+    use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -2819,6 +3229,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn cached_lookup_hit_v2_idx() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         let tree = init_repo_with_pack(dir.path());
@@ -2832,6 +3243,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn cached_lookup_hit_v1_idx() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         let tree = init_repo_with_pack(dir.path());
@@ -2847,6 +3259,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn cached_lookup_miss() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         init_repo_with_pack(dir.path());
@@ -2864,6 +3277,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn cached_lookup_loose_only() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         git(dir.path(), &["init", "-q"]);
@@ -2897,6 +3311,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn cached_lookup_multiple_packs() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         git(dir.path(), &["init", "-q"]);
@@ -2957,6 +3372,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn packed_delta_base_oid_uses_cached_index() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         init_repo_with_pack(dir.path());
@@ -2967,6 +3383,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn content_addressed_pack_bytes_skip_stat_revalidation() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = tempfile::tempdir().expect("tempdir");
         let pack_path = dir
@@ -2987,7 +3404,8 @@ mod cached_lookup_tests {
     }
 
     #[test]
-    fn temporary_pack_bytes_revalidated_after_change() {
+    fn temporary_pack_bytes_served_from_cache_until_cleared() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = tempfile::tempdir().expect("tempdir");
         for pack_path in [
@@ -3001,13 +3419,44 @@ mod cached_lookup_tests {
 
             let v2 = b"PACK-temp-v2-longer-body";
             std::fs::write(&pack_path, v2).expect("overwrite pack");
-            let again = read_pack_bytes_cached(&pack_path).expect("re-read pack");
+            let stale = read_pack_bytes_cached(&pack_path).expect("cache hit");
             assert_eq!(
-                &*again,
+                &*stale,
+                v1,
+                "{} serves cached bytes without stat on hit",
+                pack_path.display()
+            );
+            clear_pack_cache();
+            let fresh = read_pack_bytes_cached(&pack_path).expect("after clear");
+            assert_eq!(
+                &*fresh,
                 v2,
-                "{} must observe on-disk changes",
+                "{} reloads from disk after clear",
                 pack_path.display()
             );
         }
+    }
+
+    #[test]
+    fn system_git_repack_requires_clear_pack_cache_for_fresh_listing() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        read_local_pack_indexes_cached(&objects).expect("warm listing");
+        for entry in pack_dir(&objects).read_dir().unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "pack" || e == "idx") {
+                fs::remove_file(path).unwrap();
+            }
+        }
+        clear_pack_cache();
+        let indexes =
+            read_local_pack_indexes_cached(&objects).expect("list after repack-like delete");
+        assert!(
+            indexes.is_empty(),
+            "callers must clear_pack_cache after removing pack files"
+        );
     }
 }

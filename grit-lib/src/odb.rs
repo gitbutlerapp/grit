@@ -69,6 +69,16 @@ fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> boo
     if loose.exists() {
         return true;
     }
+    if object_in_local_packs(objects_dir, oid) {
+        return true;
+    }
+    if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true) {
+        return object_in_local_packs(objects_dir, oid);
+    }
+    false
+}
+
+fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
     let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
         return false;
     };
@@ -407,12 +417,13 @@ impl Odb {
         if loose.exists() {
             return true;
         }
-        if let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) {
-            for idx in &indexes {
-                if idx.contains(oid) {
-                    return true;
-                }
-            }
+        if object_in_local_packs(objects_dir, oid) {
+            return true;
+        }
+        if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
+            && object_in_local_packs(objects_dir, oid)
+        {
+            return true;
         }
         if objects_dir == self.objects_dir.as_path()
             && self.config_git_dir.is_some()
@@ -442,7 +453,7 @@ impl Odb {
 
         let loose = self.object_path(oid);
         if loose.is_file() {
-            return touch_path_mtime(&loose);
+            return touch_path_mtime(&loose).is_some();
         }
 
         if freshen_object_in_objects_dir(&self.objects_dir, oid) {
@@ -602,11 +613,7 @@ impl Odb {
                 return Ok(obj);
             }
         }
-        match pack::read_object_from_packs(objects_dir, oid) {
-            Ok(obj) => Ok(obj),
-            Err(Error::ObjectNotFound(_)) => Err(Error::ObjectNotFound(oid.to_hex())),
-            Err(err) => Err(err),
-        }
+        pack::read_object_from_packs(objects_dir, oid)
     }
 
     /// Hash raw content of a given kind with SHA-1 and return the [`ObjectId`].
@@ -917,10 +924,13 @@ fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
 }
 
 /// Update `path`'s mtime to "now" (Git `utime(path, NULL)`), returning whether it succeeded.
-fn touch_path_mtime(path: &Path) -> bool {
+fn touch_path_mtime(path: &Path) -> Option<std::time::SystemTime> {
     // `utime(path, NULL)` sets both atime and mtime to the current time.
-    let now = filetime::FileTime::now();
-    filetime::set_file_times(path, now, now).is_ok()
+    let touched_at = std::time::SystemTime::now();
+    let now = filetime::FileTime::from_system_time(touched_at);
+    filetime::set_file_times(path, now, now)
+        .ok()
+        .map(|()| touched_at)
 }
 
 fn freshen_object_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
@@ -929,12 +939,12 @@ fn freshen_object_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
     };
     for idx in &indexes {
         if idx.contains(oid) {
-            let touched = touch_path_mtime(&idx.pack_path);
-            if touched {
+            if let Some(touched_at) = touch_path_mtime(&idx.pack_path) {
                 // Keep the cached pack bytes valid: this mtime bump is ours, not a content change.
-                pack::refresh_pack_bytes_signature(&idx.pack_path);
+                pack::refresh_pack_bytes_signature(&idx.pack_path, touched_at);
+                return true;
             }
-            return touched;
+            return false;
         }
     }
     false
