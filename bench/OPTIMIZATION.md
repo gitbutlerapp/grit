@@ -13,6 +13,14 @@ of once. The single highest-leverage fix is to **cache attribute + config loadin
 
 ## Method
 
+`bench/run.sh` and `bench/run-everyday.sh` source `bench/env.sh` so **git and grit-git
+see the same hermetic config**: a temp `HOME`, `GIT_CONFIG_NOSYSTEM=1`, and a generated
+global config (`user.name`/`user.email`, `commit.gpgsign=false`, `init.defaultBranch=main`).
+Inherited `GIT_*` variables are stripped so a runner's signing program cannot skew grit
+only. **Earlier commit ratios (e.g. 6–21× at M/L) measured grit waiting on an external
+GPG/SSH signer** while git had `-c commit.gpgsign=false`; those numbers are not
+comparable.
+
 `bench/run-everyday.sh` benchmarks the commands people run daily/weekly (status, add,
 commit, log, diff, checkout, restore, branch, show, grep, blame, shortlog, merge, rebase,
 cherry-pick, reset, stash, ls-files, write-tree, local clone) with `hyperfine`, across
@@ -36,7 +44,7 @@ four repo scales:
 | reset | 2.4× | 8× | **94×** | 1.7× |
 | add | 1.7× | 7.2× | **61×** | 3.7× |
 | cherry-pick | 1.8× | 7.8× | 44× | 2.3× |
-| commit | – | 6.9× | 21× | 3.0× |
+| commit (`commit@`, staged, `-q`) | 2.5× | 2.1× | 3.6× | 3.5× |
 | checkout | 1.5× | 0.5× | 17.5× | 3.1× |
 | log --stat | – | 13.6× | 15.8× | 15.4× |
 | log -p | – | 6.8× | 13.8× | 6.6× |

@@ -16,17 +16,28 @@
 set -uo pipefail   # NOT -e: a failed state-mutation must not kill the whole sweep
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BENCH_DIR="$REPO_ROOT/bench"
+# shellcheck source=env.sh
+source "$BENCH_DIR/env.sh"
+bench_setup_env
+
 GRIT="$REPO_ROOT/target/release/grit-git"
+GRIT_CLI="$REPO_ROOT/target/release/grit"
 GIT="$(command -v git)"
 RESULTS_DIR="$REPO_ROOT/bench/results"
 SCRATCH="${BENCH_SCRATCH:-/tmp/grit-bench-everyday}"
 WARMUP="${BENCH_WARMUP:-2}"
 MIN_RUNS="${BENCH_MIN_RUNS:-10}"
 
-[[ -x "$GRIT" ]] || { echo "Building grit (release)..."; (cd "$REPO_ROOT" && cargo build --release -q -p grit-git); }
+[[ -x "$GRIT" ]] || { echo "Building grit-git (release)..."; (cd "$REPO_ROOT" && cargo build --release -q -p grit-git); }
+[[ -x "$GRIT_CLI" ]] || { echo "Building grit-cli (release)..."; (cd "$REPO_ROOT" && cargo build --release -q -p grit-cli); }
 command -v hyperfine >/dev/null || { echo "ERROR: hyperfine not found (cargo install hyperfine)"; exit 1; }
 mkdir -p "$RESULTS_DIR"
-GIT="$GIT -c user.email=b@b -c user.name=bench -c init.defaultBranch=main -c commit.gpgsign=false"
+
+cleanup_everyday() {
+  bench_teardown_env
+}
+trap cleanup_everyday EXIT
 
 # ── Scale profiles: NAME = FILES DIRS COMMITS ──────────────────────────────
 # Files dimension stresses index/worktree/tree ops; commits dimension stresses
@@ -105,8 +116,16 @@ run_cmds_for_scale() {
       bench "add@$scale" --prepare "$Gc reset -q; $Gc checkout -q -- . 2>/dev/null; for i in \$(seq 1 200); do echo x >> $R/d1/f\$i.txt 2>/dev/null; done; true" \
         "$Gc add -A" "$Rc add -A" ;;
     commit)
-      bench "commit@$scale" --prepare "rm -f $R/.git/index $R/.git/objects/pack/multi-pack-index; $Gc reset -q --hard HEAD || $Rc reset -q --hard HEAD; echo c\$RANDOM >> $R/d1/f1.txt; $Gc add d1/f1.txt" -i \
-        "$Gc commit -q -m b" "$Rc commit -q -m b" ;;
+      local commit_prep="rm -f $R/.git/index $R/.git/objects/pack/multi-pack-index; $Gc reset -q --hard HEAD || $Rc reset -q --hard HEAD; echo c\$RANDOM >> $R/d1/f1.txt; $Gc add d1/f1.txt"
+      bench "commit@$scale" --prepare "$commit_prep" -i \
+        "$Gc commit -q -m b" "$Rc commit -q -m b"
+      bench "commit-summary@$scale" --prepare "$commit_prep" -i \
+        "$Gc commit -m b" "$Rc commit -m b"
+      bench "commit-empty@$scale" --prepare "rm -f $R/.git/index $R/.git/objects/pack/multi-pack-index; $Gc reset -q --hard HEAD || $Rc reset -q --hard HEAD" -i \
+        "$Gc commit -q --allow-empty -m b" "$Rc commit -q --allow-empty -m b"
+      local grit_prep="rm -f $R/.git/index $R/.git/objects/pack/multi-pack-index; $Gc reset -q --hard HEAD || $Rc reset -q --hard HEAD; echo c\$RANDOM >> $R/d1/f1.txt"
+      bench "grit-commit@$scale" --prepare "$grit_prep" -i \
+        "$Gc add -A && $Gc commit -q -m b" "( cd $R && $GRIT_CLI commit -m b )" ;;
     log)
       bench "log-oneline@$scale" "$Gc log --oneline" "$Rc log --oneline"
       bench "log-patch@$scale" "$Gc log -p -n 200" "$Rc log -p -n 200"

@@ -13,9 +13,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GRIT="$REPO_ROOT/target/release/grit-git"
-GIT="$(command -v git) -c commit.gpgsign=false -c tag.gpgsign=false"
 BENCH_DIR="$REPO_ROOT/bench"
+# shellcheck source=env.sh
+source "$BENCH_DIR/env.sh"
+bench_setup_env
+
+GRIT="$REPO_ROOT/target/release/grit-git"
+GIT="$(command -v git)"
 RESULTS_DIR="$BENCH_DIR/results"
 SCRATCH="/tmp/grit-bench-scratch"
 
@@ -59,7 +63,12 @@ run_bench() {
 cleanup_scratch() {
   rm -rf "$SCRATCH"
 }
-trap cleanup_scratch EXIT
+
+bench_exit() {
+  cleanup_scratch
+  bench_teardown_env
+}
+trap bench_exit EXIT
 
 restore_git_index() {
   # Grit may leave index extensions C git cannot read; rebuild before git prepare steps.
@@ -311,8 +320,8 @@ bench_commit() {
   run_bench "commit" \
     --prepare "rm -f $SCRATCH/.git/index; $GIT -C $SCRATCH reset -q --hard HEAD 2>/dev/null || $GRIT -C $SCRATCH reset -q --hard HEAD; echo change-\$RANDOM >> $SCRATCH/dir1/file1.txt 2>/dev/null; $GIT -C $SCRATCH add dir1/file1.txt 2>/dev/null || $GRIT -C $SCRATCH add dir1/file1.txt 2>/dev/null || true" \
     -i \
-    "$GIT -C $SCRATCH commit -q -m benchcommit --allow-empty" \
-    "$GRIT -C $SCRATCH commit -q -m benchcommit --allow-empty"
+    "$GIT -C $SCRATCH commit -q -m benchcommit" \
+    "$GRIT -C $SCRATCH commit -q -m benchcommit"
 }
 
 bench_tag() {
