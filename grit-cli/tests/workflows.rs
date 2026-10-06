@@ -226,9 +226,41 @@ fn branch_switch_and_merge_workflow() -> TestResult {
     let status = gs_ok(&repo, ["status"])?;
     assert!(status.stdout.contains("Nothing to commit"));
 
-    gs_ok(&repo, ["branch", "-d", "topic"])?;
+    let deleted = gs_ok(&repo, ["branch", "-d", "topic"])?;
+    assert!(deleted.stdout.contains("(was "));
     let branches = gs_ok(&repo, ["branch"])?;
     assert!(!branches.stdout.contains("topic"));
+    Ok(())
+}
+
+#[test]
+fn branch_delete_refuses_unmerged_and_force_deletes() -> TestResult {
+    let scratch = Scratch::new("branch-unmerged")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    write_file(&repo.join("base.txt"), "base\n")?;
+    gs_ok(&repo, ["commit", "base"])?;
+
+    gs_ok(&repo, ["switch", "-c", "feat"])?;
+    write_file(&repo.join("feat.txt"), "feat\n")?;
+    gs_ok(&repo, ["commit", "only on feat"])?;
+
+    gs_ok(&repo, ["switch", "main"])?;
+    let refused = gs(&repo, ["branch", "-d", "feat"])?;
+    assert_eq!(refused.status, Some(1), "{}", refused.dump());
+    assert!(
+        refused.stderr.contains("not fully merged"),
+        "{}",
+        refused.dump()
+    );
+    let branches = gs_ok(&repo, ["branch"])?;
+    assert!(branches.stdout.contains("feat"));
+
+    let deleted = gs_ok(&repo, ["branch", "-D", "feat"])?;
+    assert!(deleted.stdout.contains("Deleted branch feat (was "));
+    let branches = gs_ok(&repo, ["branch"])?;
+    assert!(!branches.stdout.contains("feat"));
     Ok(())
 }
 

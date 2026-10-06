@@ -1,6 +1,8 @@
 //! `grit branch` — list branches, or create / delete one.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::branch_tracking::upstream_tracking_full_ref;
+use grit_lib::merge_base::is_ancestor;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
@@ -23,6 +25,10 @@ pub enum BranchOutcome {
     },
     Delete {
         name: String,
+        /// Full object id of the branch tip before deletion.
+        oid: String,
+        /// Abbreviated tip id (seven hex digits when possible).
+        short_oid: String,
     },
 }
 
@@ -50,16 +56,20 @@ impl HumanRender for BranchOutcome {
                 }
             }
             BranchOutcome::Create { name } => println!("Created branch {name}"),
-            BranchOutcome::Delete { name } => println!("Deleted branch {name}"),
+            BranchOutcome::Delete {
+                name, short_oid, ..
+            } => println!("Deleted branch {name} (was {short_oid})."),
         }
     }
 }
 
-pub fn run(name: Option<String>, delete: bool) -> Result<BranchOutcome> {
+/// List, create, or delete a branch depending on `name` and the delete flags.
+pub fn run(name: Option<String>, delete: bool, force_delete: bool) -> Result<BranchOutcome> {
     let repo = context::discover()?;
+    let delete = delete || force_delete;
     match name {
         None => list(&repo),
-        Some(name) if delete => delete_branch(&repo, &name),
+        Some(name) if delete => delete_branch(&repo, &name, force_delete),
         Some(name) => create(&repo, &name),
     }
 }
@@ -111,7 +121,20 @@ fn create(repo: &Repository, name: &str) -> Result<BranchOutcome> {
     })
 }
 
-fn delete_branch(repo: &Repository, name: &str) -> Result<BranchOutcome> {
+fn branch_delete_base_oid(
+    repo: &Repository,
+    branch_name: &str,
+    head: &HeadState,
+) -> Option<grit_lib::objects::ObjectId> {
+    if let Some(upstream_ref) = upstream_tracking_full_ref(repo, branch_name) {
+        if let Ok(oid) = refs::resolve_ref(&repo.git_dir, &upstream_ref) {
+            return Some(oid);
+        }
+    }
+    head.oid().copied()
+}
+
+fn delete_branch(repo: &Repository, name: &str, force_delete: bool) -> Result<BranchOutcome> {
     if let HeadState::Branch { short_name, .. } = resolve_head(&repo.git_dir)? {
         if short_name == name {
             bail!("cannot delete '{name}' — it is the current branch");
@@ -119,12 +142,30 @@ fn delete_branch(repo: &Repository, name: &str) -> Result<BranchOutcome> {
     }
 
     let branch_ref = format!("refs/heads/{name}");
-    if refs::resolve_ref(&repo.git_dir, &branch_ref).is_err() {
-        bail!("no branch named '{name}'");
+    let branch_oid = refs::resolve_ref(&repo.git_dir, &branch_ref)
+        .map_err(|_| anyhow::anyhow!("no branch named '{name}'"))?;
+
+    let head = resolve_head(&repo.git_dir)?;
+    if !force_delete {
+        let merged = branch_delete_base_oid(repo, name, &head)
+            .map(|base_oid| is_ancestor(repo, branch_oid, base_oid).unwrap_or(false))
+            .unwrap_or(false);
+        if !merged {
+            bail!(
+                "the branch '{name}' is not fully merged.\nIf you are sure you want to delete it, run 'grit branch -D {name}'"
+            );
+        }
     }
 
     refs::delete_ref(&repo.git_dir, &branch_ref).context("could not delete branch")?;
+
+    let hex = branch_oid.to_hex();
+    let short_len = 7.min(hex.len());
+    let short_oid = hex[..short_len].to_owned();
+
     Ok(BranchOutcome::Delete {
         name: name.to_owned(),
+        oid: hex,
+        short_oid,
     })
 }

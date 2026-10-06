@@ -264,6 +264,8 @@ fn branch_json_list_create_delete() -> TestResult {
     let deleted = gs_json(&repo, &["branch", "-d", "topic"]);
     assert_eq!(deleted["action"], "delete");
     assert_eq!(deleted["name"], "topic");
+    assert!(deleted["oid"].as_str().unwrap().len() >= 40);
+    assert_eq!(deleted["short_oid"].as_str().unwrap().len(), 7);
     Ok(())
 }
 
