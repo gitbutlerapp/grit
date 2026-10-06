@@ -645,6 +645,79 @@ fn build_delta_fixture(algo: HashAlgo) -> Option<DeltaFixture> {
     Some(DeltaFixture { dir: tmp, tips })
 }
 
+/// Like [`build_delta_fixture`], but with `revisions` prefix-extending commits so
+/// in-pack delta chains can exceed the default `pack.depth` (50).
+struct DeepDeltaFixture {
+    dir: tempfile::TempDir,
+    tip: ObjectId,
+}
+
+fn build_deep_delta_fixture(revisions: usize) -> Option<DeepDeltaFixture> {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    if !git_try(dir, &["init", "-q", "-b", "main", "."]) {
+        return None;
+    }
+    let mut body = String::new();
+    for i in 0..4000 {
+        body.push_str(&format!(
+            "line {i:05} lorem ipsum dolor sit amet consectetur\n"
+        ));
+    }
+    std::fs::write(dir.join("big.txt"), body.as_bytes()).unwrap();
+    git(dir, &["add", "big.txt"]);
+    git(dir, &["commit", "-q", "-m", "c0"]);
+    for rev in 1..revisions {
+        body.push_str(&format!("--- revision {rev} ---\n"));
+        std::fs::write(dir.join("big.txt"), body.as_bytes()).unwrap();
+        git(dir, &["add", "big.txt"]);
+        git(dir, &["commit", "-q", "-m", &format!("c{rev}")]);
+    }
+    let tip = rev_parse(dir, "HEAD");
+    Some(DeepDeltaFixture { dir: tmp, tip })
+}
+
+/// Longest chain length reported by `git verify-pack -v` on a standalone pack file.
+fn git_verify_pack_max_chain(pack: &[u8]) -> u64 {
+    let scratch = tempfile::tempdir().expect("scratch");
+    let pack_path = scratch.path().join("in.pack");
+    std::fs::write(&pack_path, pack).expect("write pack");
+    let idx = Command::new("git")
+        .args(["index-pack", &pack_path.to_string_lossy()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git index-pack");
+    assert!(
+        idx.status.success(),
+        "git index-pack failed: {}",
+        String::from_utf8_lossy(&idx.stderr)
+    );
+    let out = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(&pack_path)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git verify-pack");
+    assert!(
+        out.status.success() || String::from_utf8_lossy(&out.stdout).contains(": ok"),
+        "git verify-pack failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mut max = 0u64;
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some(rest) = line.strip_prefix("chain length = ") {
+            if let Some(len_str) = rest.split(':').next() {
+                if let Ok(len) = len_str.trim().parse::<u64>() {
+                    max = max.max(len);
+                }
+            }
+        }
+    }
+    max
+}
+
 // ---------------------------------------------------------------------------
 // 1. whole-object vs delta correctness: same object set out either way.
 // ---------------------------------------------------------------------------
@@ -1311,4 +1384,83 @@ fn window_zero_disables_delta_selection() {
         git_index_and_fsck_ok(&pack, HashAlgo::Sha1),
         "window=0 pack failed index-pack + fsck"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 6. Long blob history: depth cap matches Git and survives index-pack + fsck.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn long_history_delta_depth_git_round_trip() {
+    let Some(fx) = build_deep_delta_fixture(71) else {
+        eprintln!("SKIP: could not init git repo");
+        return;
+    };
+    let odb = open_odb(fx.dir.path());
+    let tip = fx.tip;
+
+    let uncapped = build_pack(
+        &odb,
+        &[tip],
+        &[],
+        &PackBuildOptions {
+            delta: true,
+            max_depth: 250,
+            use_ofs_delta: true,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("uncapped pack");
+    let uncapped_depth = max_in_pack_delta_depth(&uncapped, 20);
+    assert!(
+        uncapped_depth >= 50,
+        "fixture must chain deeper than default depth 50 (saw {uncapped_depth})"
+    );
+
+    let capped = build_pack(
+        &odb,
+        &[tip],
+        &[],
+        &PackBuildOptions {
+            delta: true,
+            max_depth: 50,
+            use_ofs_delta: true,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("depth-50 pack");
+    assert_eq!(
+        max_in_pack_delta_depth(&capped, 20),
+        50,
+        "build_pack must honor max_depth=50 exactly"
+    );
+    assert_eq!(
+        git_verify_pack_max_chain(&capped),
+        50,
+        "git verify-pack must report the same chain cap"
+    );
+    assert!(
+        git_index_and_fsck_ok(&capped, HashAlgo::Sha1),
+        "depth-50 pack must index-pack and fsck under system git"
+    );
+    assert!(
+        uncapped_depth > max_in_pack_delta_depth(&capped, 20),
+        "capping must shorten chains"
+    );
+
+    let shallow = build_pack(
+        &odb,
+        &[tip],
+        &[],
+        &PackBuildOptions {
+            delta: true,
+            max_depth: 5,
+            use_ofs_delta: true,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("depth-5 pack");
+    assert_eq!(max_in_pack_delta_depth(&shallow, 20), 5);
+    assert_eq!(git_verify_pack_max_chain(&shallow), 5);
+    assert!(git_index_and_fsck_ok(&shallow, HashAlgo::Sha1));
 }

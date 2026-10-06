@@ -1239,6 +1239,64 @@ fn resolve_delta_depth(
     Ok(depth)
 }
 
+/// Default in-pack delta chain depth when `pack.depth` is unset (matches Git).
+pub const DEFAULT_PACK_DEPTH: usize = 50;
+
+/// Longest delta-chain depth among verify-pack records (number of edges from base to tip).
+#[must_use]
+pub fn max_verify_pack_delta_depth(records: &[VerifyObjectRecord]) -> u64 {
+    records.iter().filter_map(|r| r.depth).max().unwrap_or(0)
+}
+
+/// Break only delta chains longer than `max_depth` edges in a target→base map.
+///
+/// Each entry maps a delta object to its chosen in-pack base. Chains already within
+/// `max_depth` keep their original bases unchanged. Longer chains are broken on Git's
+/// `(depth + 1)` modulo rule by removing only the delta edges at cut points; links
+/// inside each resulting segment stay as originally chosen (matching `break_delta_chains`).
+pub fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usize) {
+    let keys: Vec<ObjectId> = map.keys().copied().collect();
+    let value_set: HashSet<ObjectId> = map.values().copied().collect();
+    let tips: Vec<ObjectId> = keys
+        .into_iter()
+        .filter(|k| !value_set.contains(k))
+        .collect();
+
+    let modulus = max_depth.saturating_add(1);
+    let mut snip: HashSet<ObjectId> = HashSet::new();
+
+    for tip in tips {
+        let mut chain: Vec<ObjectId> = Vec::new();
+        let mut cur = tip;
+        let mut seen = HashSet::new();
+        while seen.insert(cur) {
+            chain.push(cur);
+            let Some(&b) = map.get(&cur) else {
+                break;
+            };
+            cur = b;
+        }
+
+        let n = chain.len();
+        if n < 2 || n - 1 <= max_depth {
+            continue;
+        }
+
+        let mut total_depth = (n - 1) as u32;
+        for &oid in &chain {
+            let assigned = (total_depth as usize) % modulus;
+            total_depth = total_depth.saturating_sub(1);
+            if assigned == 0 {
+                snip.insert(oid);
+            }
+        }
+    }
+
+    for oid in snip {
+        map.remove(&oid);
+    }
+}
+
 /// Verify one pack/index pair and optionally return object records.
 ///
 /// # Errors
@@ -3436,7 +3494,6 @@ mod cached_lookup_tests {
             );
         }
     }
-
     #[test]
     fn system_git_repack_requires_clear_pack_cache_for_fresh_listing() {
         let _guard = pack_cache_test_guard();
@@ -3458,5 +3515,108 @@ mod cached_lookup_tests {
             indexes.is_empty(),
             "callers must clear_pack_cache after removing pack files"
         );
+    }
+
+    fn test_oid(n: u8) -> ObjectId {
+        ObjectId::from_hex(&format!("{n:040x}")).unwrap()
+    }
+
+    fn max_delta_map_chain_edges(map: &HashMap<ObjectId, ObjectId>) -> usize {
+        let value_set: HashSet<ObjectId> = map.values().copied().collect();
+        let tips: Vec<ObjectId> = map
+            .keys()
+            .copied()
+            .filter(|k| !value_set.contains(k))
+            .collect();
+        let mut max = 0usize;
+        for tip in tips {
+            let mut edges = 0usize;
+            let mut cur = tip;
+            let mut seen = HashSet::new();
+            while seen.insert(cur) {
+                let Some(&b) = map.get(&cur) else {
+                    break;
+                };
+                edges += 1;
+                cur = b;
+            }
+            max = max.max(edges);
+        }
+        max
+    }
+
+    #[test]
+    fn apply_delta_depth_limit_hits_exact_cap_on_seventy_edge_chain() {
+        let n = 70usize;
+        let oids: Vec<ObjectId> = (0..n as u8).map(test_oid).collect();
+        let mut map: HashMap<ObjectId, ObjectId> = HashMap::new();
+        for i in 1..n {
+            map.insert(oids[i], oids[i - 1]);
+        }
+        let original = map.clone();
+        apply_delta_depth_limit(&mut map, 50);
+        assert_eq!(max_delta_map_chain_edges(&map), 50);
+        let preserved = map
+            .iter()
+            .filter(|(t, b)| original.get(t) == Some(b))
+            .count();
+        assert!(
+            preserved > 40,
+            "non-cut edges should keep original bases (preserved {preserved})"
+        );
+    }
+
+    #[test]
+    fn apply_delta_depth_limit_leaves_short_chains_untouched() {
+        let a = test_oid(1);
+        let b = test_oid(2);
+        let c = test_oid(3);
+        let mut map = HashMap::from([(b, a), (c, b)]);
+        apply_delta_depth_limit(&mut map, 50);
+        assert_eq!(map.get(&b), Some(&a));
+        assert_eq!(map.get(&c), Some(&b));
+        assert_eq!(max_delta_map_chain_edges(&map), 2);
+    }
+
+    #[test]
+    fn apply_delta_depth_limit_caps_long_chain_and_preserves_blobs() {
+        let n = 120usize;
+        let oids: Vec<ObjectId> = (0..n as u8).map(test_oid).collect();
+        let mut blobs: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+        blobs.insert(oids[0], b"base".to_vec());
+        for i in 1..n {
+            let mut next = blobs[&oids[i - 1]].clone();
+            next.push(i as u8);
+            blobs.insert(oids[i], next);
+        }
+        let mut map: HashMap<ObjectId, ObjectId> = HashMap::new();
+        for i in 1..n {
+            map.insert(oids[i], oids[i - 1]);
+        }
+        let original = map.clone();
+        apply_delta_depth_limit(&mut map, 50);
+        assert_eq!(
+            max_delta_map_chain_edges(&map),
+            50,
+            "long chain must cap at exactly max_depth edges"
+        );
+        let preserved = map
+            .iter()
+            .filter(|(target, base)| original.get(target) == Some(base))
+            .count();
+        assert!(
+            preserved > 60,
+            "segment links should stay on original bases (preserved {preserved} of {})",
+            map.len()
+        );
+
+        use crate::delta_encode::encode_prefix_extension_delta;
+        use crate::unpack_objects::apply_delta;
+
+        for (&target, &base) in &map {
+            let delta = encode_prefix_extension_delta(&blobs[&base], &blobs[&target]).unwrap();
+            let got = apply_delta(&blobs[&base], &delta).unwrap();
+            assert_eq!(got, blobs[&target]);
+        }
     }
 }
