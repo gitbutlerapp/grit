@@ -231,11 +231,7 @@ impl Progress {
         tp.prev_ns = now_ns;
         tp.avg_bytes = tp.avg_bytes.saturating_add(count);
         tp.avg_misecs = tp.avg_misecs.saturating_add(u64::from(misecs));
-        let rate = if tp.avg_misecs > 0 {
-            (tp.avg_bytes / tp.avg_misecs) as u32
-        } else {
-            0
-        };
+        let rate = tp.avg_bytes.checked_div(tp.avg_misecs).unwrap_or(0) as u32;
         tp.avg_bytes = tp
             .avg_bytes
             .saturating_sub(u64::from(tp.last_bytes[tp.idx]));
