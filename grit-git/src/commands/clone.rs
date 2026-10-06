@@ -2441,6 +2441,7 @@ fn run_http_clone(args: Args) -> Result<()> {
         filter_spec: filter_spec.clone(),
         refetch: false,
         bundle_uri_override: args.bundle_uri.is_some(),
+        show_progress: args.progress || (!args.quiet && std::io::stderr().is_terminal()),
     };
     let crate::http_smart::HttpFetchResult {
         heads: remote_heads,

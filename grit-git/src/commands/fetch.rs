@@ -26,7 +26,7 @@ use grit_lib::state::HeadState;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -1997,6 +1997,7 @@ fn fetch_remote(
         filter_spec: effective_filter.clone(),
         refetch: args.refetch,
         bundle_uri_override: false,
+        show_progress: !args.quiet && std::io::stderr().is_terminal(),
     };
     let upload_pack_shallow_options = crate::fetch_transport::UploadPackShallowOptions {
         depth: args.depth,
