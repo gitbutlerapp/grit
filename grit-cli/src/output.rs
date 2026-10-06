@@ -174,3 +174,9 @@ pub fn change_json(entry: &DiffEntry) -> ChangeJson {
         status: change_status_str(&entry.status).to_owned(),
     }
 }
+
+// Throwaway CI negative-control (factory/ci-clippy-red-demo); do not merge.
+fn ci_clippy_red_demo_unused_binding() {
+    let unused_binding_for_ci = 1;
+    let _ = unused_binding_for_ci;
+}
