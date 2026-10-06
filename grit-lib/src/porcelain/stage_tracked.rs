@@ -13,7 +13,9 @@ use crate::diff::{
 };
 use crate::error::{Error, Result};
 use crate::index::index_file_mtime;
-use crate::index::{entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry};
+use crate::index::{
+    entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
+};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 
@@ -313,26 +315,8 @@ fn stage_gitlink_from_stat(
     oid: ObjectId,
     index: &mut Index,
 ) -> Result<()> {
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-    let meta = fs::symlink_metadata(abs_path)?;
-    let entry = IndexEntry {
-        ctime_sec: meta.ctime() as u32,
-        ctime_nsec: meta.ctime_nsec() as u32,
-        mtime_sec: meta.mtime() as u32,
-        mtime_nsec: meta.mtime_nsec() as u32,
-        dev: meta.dev() as u32,
-        ino: meta.ino() as u32,
-        mode: 0o160000,
-        uid: meta.uid(),
-        gid: meta.gid(),
-        size: 0,
-        oid,
-        flags: raw_path.len().min(0xFFF) as u16,
-        flags_extended: None,
-        path: raw_path.to_vec(),
-        base_index_pos: 0,
-    };
+    let mut entry = entry_from_stat(abs_path, raw_path, oid, MODE_GITLINK)?;
+    entry.size = 0;
     index.add_or_replace(entry);
     Ok(())
 }
