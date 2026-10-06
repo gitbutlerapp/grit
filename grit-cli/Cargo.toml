@@ -29,4 +29,6 @@ terminal_size.workspace = true
 similar = { workspace = true, features = ["inline"] }
 
 [dev-dependencies]
+grit-lib = { path = "../grit-lib" }
 serde_json.workspace = true
+tempfile = "3"

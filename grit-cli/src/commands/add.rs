@@ -16,10 +16,11 @@ use grit_lib::pathspec::{
     resolve_pathspec_in_worktree,
 };
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::precompose_config::index_relpath_from_worktree;
+use grit_lib::precompose_config::effective_core_precomposeunicode;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
+use grit_lib::unicode_normalization::resolve_worktree_path_for_staging;
 use serde::Serialize;
 
 use crate::context;
@@ -230,26 +231,27 @@ fn stage_worktree_file(
     rel_path: &str,
     index: &mut Index,
 ) -> Result<()> {
-    let abs = work_tree.join(rel_path);
+    let precompose = effective_core_precomposeunicode(Some(&repo.git_dir));
+    let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose);
+    let abs = &resolved.abs;
+    let rel_index = resolved.index_relpath;
     let meta =
-        std::fs::symlink_metadata(&abs).with_context(|| format!("could not read {rel_path}"))?;
+        std::fs::symlink_metadata(abs).with_context(|| format!("could not read {rel_path}"))?;
     let mode = mode_from_metadata(&meta);
 
     let data = if meta.file_type().is_symlink() {
-        let target = std::fs::read_link(&abs)
+        let target = std::fs::read_link(abs)
             .with_context(|| format!("could not read symlink {rel_path}"))?;
         target.to_string_lossy().into_owned().into_bytes()
     } else {
-        std::fs::read(&abs).with_context(|| format!("could not read {rel_path}"))?
+        std::fs::read(abs).with_context(|| format!("could not read {rel_path}"))?
     };
-
-    let rel_index = index_relpath_from_worktree(rel_path, &repo.git_dir);
 
     let oid = repo
         .odb
         .write(ObjectKind::Blob, &data)
         .with_context(|| format!("could not store {rel_path}"))?;
-    let entry = grit_lib::index::entry_from_stat(&abs, rel_index.as_bytes(), oid, mode)
+    let entry = grit_lib::index::entry_from_stat(abs, rel_index.as_bytes(), oid, mode)
         .with_context(|| format!("could not stage {rel_path}"))?;
     index.add_or_replace(entry);
     if index.fsmonitor_last_update.is_some() {
