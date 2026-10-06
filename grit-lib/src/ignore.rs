@@ -1112,7 +1112,8 @@ mod gitignore_glob_tests {
 
     #[test]
     fn dir_star_extension_matches_nested_path() {
-        assert!(gitignore_path_glob_matches(
+        // Slash in pattern → WM_PATHNAME: `*` does not cross `/` (gitignore(5)).
+        assert!(!gitignore_path_glob_matches(
             "doc/*.pdf",
             "doc/sub/manual.pdf"
         ));
@@ -1120,6 +1121,10 @@ mod gitignore_glob_tests {
         assert!(!gitignore_path_glob_matches(
             "doc/*.pdf",
             "other/manual.pdf"
+        ));
+        assert!(gitignore_path_glob_matches(
+            "doc/**/*.pdf",
+            "doc/sub/manual.pdf"
         ));
     }
 
@@ -1133,7 +1138,7 @@ mod gitignore_glob_tests {
 
     #[test]
     fn nested_dir_star_extension() {
-        assert!(gitignore_path_glob_matches(
+        assert!(!gitignore_path_glob_matches(
             "foo/bar/*.c",
             "foo/bar/baz/x.c"
         ));
