@@ -246,6 +246,13 @@ pub struct PackBuildOptions {
     /// fresh deltas. Reuse only applies to SHA-1 packs (the reuse helpers read
     /// 20-byte index entries) and is skipped silently otherwise.
     pub reuse_deltas: bool,
+    /// Copy verbatim packed bytes (header + zlib) for whole objects already stored
+    /// as non-delta entries in local packs, guarded by v2 index CRC32 when present.
+    /// Mirrors Git pack-objects object reuse (`--no-reuse-object` disables this).
+    ///
+    /// Applies only to SHA-1 repositories. When no reusable slice exists, the
+    /// object is stored using the normal inflate/recompress path.
+    pub reuse_objects: bool,
 }
 
 impl Default for PackBuildOptions {
@@ -258,6 +265,7 @@ impl Default for PackBuildOptions {
             use_ofs_delta: true,
             respect_islands: false,
             reuse_deltas: false,
+            reuse_objects: true,
         }
     }
 }
@@ -303,7 +311,7 @@ pub fn build_pack(
     if !opts.delta {
         // Phase-1 behavior: whole objects only. Correct and minimal in object
         // count, not byte-optimal.
-        return serialize_pack(odb, &send);
+        return serialize_pack(odb, &send, opts);
     }
 
     // Delta path: pick blob deltas (within the pack, and — when `thin` — against
@@ -433,7 +441,7 @@ fn encode_pack_object_header(buf: &mut Vec<u8>, type_code: u8, payload_len: usiz
 
 /// Serialize `oids` as a PACK v2 stream of whole (non-delta) objects, terminated
 /// by the trailing pack checksum at the repository hash width.
-fn serialize_pack(odb: &Odb, oids: &[ObjectId]) -> Result<Vec<u8>> {
+fn serialize_pack(odb: &Odb, oids: &[ObjectId], opts: &PackBuildOptions) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     buf.extend_from_slice(b"PACK");
     buf.extend_from_slice(&2u32.to_be_bytes());
@@ -443,15 +451,30 @@ fn serialize_pack(odb: &Odb, oids: &[ObjectId]) -> Result<Vec<u8>> {
 
     for oid in oids {
         let obj = odb.read(oid)?;
-        encode_pack_object_header(&mut buf, pack_type_code(obj.kind), obj.data.len());
-        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
-        enc.write_all(&obj.data).map_err(Error::Io)?;
-        let compressed = enc.finish().map_err(Error::Io)?;
-        buf.extend_from_slice(&compressed);
+        write_whole_pack_object(&mut buf, odb, *oid, obj.kind, &obj.data, opts)?;
     }
 
     append_pack_trailer(&mut buf, odb.hash_algo());
     Ok(buf)
+}
+
+/// Write one whole (non-delta) pack object, reusing on-disk bytes when allowed.
+fn write_whole_pack_object(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    oid: ObjectId,
+    kind: ObjectKind,
+    data: &[u8],
+    opts: &PackBuildOptions,
+) -> Result<()> {
+    if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
+        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
+            buf.extend_from_slice(&raw);
+            return Ok(());
+        }
+    }
+    encode_pack_object_header(buf, pack_type_code(kind), data.len());
+    write_zlib(buf, data)
 }
 
 /// Append the trailing pack checksum: the hash of everything written so far, at
@@ -556,11 +579,9 @@ fn plan_deltas(
     let mut reused: HashMap<ObjectId, Vec<u8>> = HashMap::new();
     let mut external_bases: HashSet<ObjectId> = HashSet::new();
 
-    if opts.window > 0 && opts.max_depth > 0 {
-        // (1) On-disk delta reuse: for each in-pack blob whose existing on-disk
-        // representation is a delta against another in-pack object, reuse that
-        // edge directly. Island rules still apply (never base on an incompatible
-        // island). SHA-256 packs are skipped inside the reuse helper.
+    if opts.max_depth > 0 {
+        // On-disk delta reuse runs even with `--window=0` (no new deltas), matching
+        // Git pack-objects. SHA-256 packs are skipped inside the reuse helper.
         if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
             let objects_dir = odb.objects_dir();
             for &t in send {
@@ -577,7 +598,9 @@ fn plan_deltas(
                 }
             }
         }
+    }
 
+    if opts.window > 0 && opts.max_depth > 0 {
         // Blobs in the pack, smallest-first (size-sorted window proximity).
         let mut blobs: Vec<ObjectId> = send
             .iter()
@@ -690,7 +713,9 @@ fn plan_deltas(
                 }
             }
         }
+    }
 
+    if opts.max_depth > 0 && !delta_to_base.is_empty() {
         // Cap chain length. After snipping, any removed target reverts to whole.
         crate::pack::apply_delta_depth_limit(&mut delta_to_base, opts.max_depth);
 
@@ -783,8 +808,7 @@ fn serialize_pack_with_deltas(
         let start = buf.len() as u64;
         match entry.base {
             None => {
-                encode_pack_object_header(&mut buf, pack_type_code(entry.kind), entry.data.len());
-                write_zlib(&mut buf, &entry.data)?;
+                write_whole_pack_object(&mut buf, odb, entry.oid, entry.kind, &entry.data, opts)?;
                 oid_to_offset.insert(entry.oid, start);
             }
             Some(base_oid) => {

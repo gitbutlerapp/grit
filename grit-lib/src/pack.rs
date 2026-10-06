@@ -24,6 +24,9 @@ pub struct PackIndexEntry {
     pub oid: Vec<u8>,
     /// Byte offset of the object in the corresponding `.pack`.
     pub offset: u64,
+    /// CRC32 of the raw packed entry bytes (header + payload), from the v2 index CRC table.
+    /// `None` for version-1 indexes, which do not record CRCs.
+    pub crc32: Option<u32>,
 }
 
 /// Parsed data from a `.idx` file (version 2).
@@ -884,7 +887,11 @@ fn read_pack_index_v1(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
                 idx_path.display()
             )));
         }
-        entries.push(PackIndexEntry { oid, offset });
+        entries.push(PackIndexEntry {
+            oid,
+            offset,
+            crc32: None,
+        });
     }
 
     if verify {
@@ -968,7 +975,10 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
         oids.push(slice.to_vec());
     }
 
-    pos += object_count * 4;
+    let mut crcs = Vec::with_capacity(object_count);
+    for _ in 0..object_count {
+        crcs.push(read_u32_be(bytes, &mut pos)?);
+    }
 
     let mut offsets32 = Vec::with_capacity(object_count);
     let mut large_count = 0usize;
@@ -1004,7 +1014,11 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
             next_large += 1;
             off
         };
-        entries.push(PackIndexEntry { oid, offset });
+        entries.push(PackIndexEntry {
+            oid,
+            offset,
+            crc32: Some(crcs[i]),
+        });
     }
 
     let mut pack_path = idx_path.to_path_buf();
@@ -2291,6 +2305,94 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
     Ok(None)
 }
 
+/// End offset (exclusive) of the raw packed bytes for the object at `entry_offset`.
+///
+/// Uses the next larger pack offset from the index, or the pack trailer when this is the last object.
+fn pack_entry_raw_end(idx: &PackIndex, pack_bytes: &[u8], entry_offset: u64) -> Option<usize> {
+    let hb = idx.hash_bytes;
+    let pack_end = pack_bytes.len().checked_sub(hb)?;
+    let start = entry_offset as usize;
+    if start >= pack_end {
+        return None;
+    }
+    let next = idx
+        .entries
+        .iter()
+        .map(|e| e.offset)
+        .filter(|&o| o > entry_offset && (o as usize) <= pack_end)
+        .min();
+    Some(next.map(|o| o as usize).unwrap_or(pack_end))
+}
+
+/// When `oid` is stored as a full (non-delta) object in a local pack, return its verbatim packed
+/// bytes: the varint type+size header followed by the zlib stream.
+///
+/// The header of a non-delta pack entry is position-independent, so the returned slice can be
+/// copied into a new pack unchanged — skipping both inflate and deflate. This is Git
+/// pack-objects' object reuse for objects that stay full in the output pack.
+///
+/// # Parameters
+/// - `objects_dir` — the repository's `objects/` directory.
+/// - `oid` — the object to look up.
+///
+/// Returns `None` when the object is loose only, stored as a delta, or the repository uses a
+/// hash width other than SHA-1.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when pack files cannot be read; a malformed candidate entry is skipped
+/// rather than reported so another pack (or the recompression path) can serve the object.
+pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Option<Vec<u8>>> {
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
+    sort_pack_indexes_newest_first(&mut indexes);
+    for idx in &indexes {
+        if idx.hash_bytes != 20 {
+            continue;
+        }
+        let Some(entry_offset) = idx.find_offset(oid) else {
+            continue;
+        };
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        let start = entry_offset as usize;
+        let mut p = start;
+        let Ok((packed_type, _size)) = parse_pack_object_header(&pack_bytes, &mut p) else {
+            continue;
+        };
+        if matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta) {
+            // The same OID may be a full object in another pack; keep scanning.
+            continue;
+        }
+        let Some(end) = pack_entry_raw_end(idx, &pack_bytes, entry_offset) else {
+            continue;
+        };
+        if end <= start {
+            continue;
+        }
+        let slice = &pack_bytes[start..end];
+        // Git `check_pack_crc`: verbatim reuse copies bytes unparsed, so guard with the pack
+        // index's CRC32. A corrupt copy is skipped, letting a redundant pack or the normal
+        // (validating) read path serve the object instead (t5303).
+        let recorded_crc = idx
+            .entries
+            .iter()
+            .find(|e| e.offset == entry_offset)
+            .and_then(|e| e.crc32);
+        match recorded_crc {
+            Some(crc) if crc32fast::hash(slice) != crc => continue,
+            // v1 indexes carry no CRC; verify by inflating and re-hashing the content.
+            None if read_object_from_pack(idx, oid)
+                .map(|obj| crate::odb::Odb::hash_object_data(obj.kind, &obj.data) != *oid)
+                .unwrap_or(true) =>
+            {
+                continue;
+            }
+            _ => {}
+        }
+        return Ok(Some(slice.to_vec()));
+    }
+    Ok(None)
+}
+
 fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
     let first = *bytes.get(*pos).ok_or_else(|| {
         Error::CorruptObject("unexpected end of pack header while decoding object".to_owned())
@@ -2593,7 +2695,6 @@ mod tests {
     ) -> Result<()> {
         let mut sorted: Vec<(ObjectId, u64)> = entries.to_vec();
         sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-        let n = sorted.len();
         let mut fanout = [0u32; 256];
         for byte in 0u32..256 {
             let count = sorted
@@ -2611,14 +2712,19 @@ mod tests {
         for (oid, _) in &sorted {
             buf.extend_from_slice(oid.as_bytes());
         }
-        for _ in 0..n {
-            buf.extend_from_slice(&0u32.to_be_bytes());
+        let pack_bytes = std::fs::read(pack_path)?;
+        for (_, off) in &sorted {
+            let start = *off as usize;
+            let mut end = start;
+            skip_one_pack_object(&pack_bytes, &mut end, *off, 20)
+                .map_err(|e| Error::CorruptObject(format!("idx crc walk: {e}")))?;
+            let crc = crc32fast::hash(&pack_bytes[start..end]);
+            buf.extend_from_slice(&crc.to_be_bytes());
         }
         for (_, off) in &sorted {
             let v = u32::try_from(*off).unwrap_or(0x8000_0000);
             buf.extend_from_slice(&v.to_be_bytes());
         }
-        let pack_bytes = std::fs::read(pack_path)?;
         if pack_bytes.len() < 20 {
             return Err(Error::CorruptObject(
                 "pack too small for idx trailer".into(),
@@ -2690,6 +2796,7 @@ mod tests {
             .map(|(oid, offset)| PackIndexEntry {
                 oid: oid.as_bytes().to_vec(),
                 offset: *offset,
+                crc32: None,
             })
             .collect();
         entries.sort_by(|a, b| a.oid.cmp(&b.oid));
@@ -3251,6 +3358,7 @@ mod cached_lookup_tests {
             .map(|(oid, off)| PackIndexEntry {
                 oid: oid.clone(),
                 offset: *off,
+                crc32: None,
             })
             .collect();
         pack_entries.sort_by(|a, b| a.oid.cmp(&b.oid));
@@ -3618,5 +3726,112 @@ mod cached_lookup_tests {
             let got = apply_delta(&blobs[&base], &delta).unwrap();
             assert_eq!(got, blobs[&target]);
         }
+    }
+
+    #[test]
+    fn v2_idx_crc_matches_crc32fast_over_entry_bytes() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let tree = init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let idx_path = v2_idx_path(&objects);
+        let idx = read_pack_index(&idx_path).expect("read idx");
+        let pack_bytes = std::fs::read(&idx.pack_path).expect("read pack");
+        for entry in &idx.entries {
+            let crc = entry.crc32.expect("v2 idx entry crc");
+            let start = entry.offset as usize;
+            let end =
+                super::pack_entry_raw_end(&idx, &pack_bytes, entry.offset).expect("entry end");
+            assert_eq!(crc32fast::hash(&pack_bytes[start..end]), crc);
+        }
+        let _ = tree;
+    }
+
+    #[test]
+    fn packed_full_object_slice_returns_on_disk_bytes() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let tree = init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let idx = read_pack_index(&v2_idx_path(&objects)).expect("idx");
+        let pack_bytes = std::fs::read(&idx.pack_path).expect("pack");
+        let off = idx.find_offset(&tree).expect("tree in pack");
+        let start = off as usize;
+        let end = super::pack_entry_raw_end(&idx, &pack_bytes, off).expect("entry end");
+        let expected = &pack_bytes[start..end];
+        let slice = packed_full_object_slice(&objects, &tree)
+            .expect("lookup")
+            .expect("full tree slice");
+        assert_eq!(slice, expected);
+    }
+
+    fn touch_mtime(path: &Path, when: filetime::FileTime) {
+        filetime::set_file_mtime(path, when).expect("set mtime");
+    }
+
+    #[test]
+    fn packed_full_object_slice_crc_mismatch_falls_back_to_redundant_pack() {
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let tree = init_repo_with_pack(dir.path());
+        let objects = dir.path().join(".git").join("objects");
+        let pack_dir = pack_dir(&objects);
+        let primary_idx = read_pack_index(&v2_idx_path(&objects)).expect("idx");
+        let primary_pack = primary_idx.pack_path.clone();
+        let primary_idx_path = primary_idx.idx_path.clone();
+
+        let redundant_pack = pack_dir.join("pack-redundant.pack");
+        let redundant_idx = pack_dir.join("pack-redundant.idx");
+        fs::copy(&primary_pack, &redundant_pack).expect("copy pack");
+        fs::copy(&primary_idx_path, &redundant_idx).expect("copy idx");
+
+        let older = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+        let newer = filetime::FileTime::from_unix_time(1_700_000_100, 0);
+        touch_mtime(&primary_pack, older);
+        touch_mtime(&primary_idx_path, older);
+        touch_mtime(&redundant_pack, newer);
+        touch_mtime(&redundant_idx, newer);
+        clear_pack_cache();
+
+        let off = primary_idx.find_offset(&tree).expect("tree offset");
+        let start = off as usize;
+        let end = super::pack_entry_raw_end(&primary_idx, &fs::read(&primary_pack).unwrap(), off)
+            .expect("entry end");
+        let flip = start + (end - start) / 2;
+        let mut corrupt = fs::read(&redundant_pack).expect("read redundant");
+        corrupt[flip] ^= 0x01;
+        let mut perms = fs::metadata(&redundant_pack).unwrap().permissions();
+        perms.set_readonly(false);
+        fs::set_permissions(&redundant_pack, perms).unwrap();
+        fs::write(&redundant_pack, &corrupt).expect("corrupt redundant pack");
+        clear_pack_cache();
+
+        let recorded_crc = read_pack_index(&redundant_idx)
+            .expect("redundant idx")
+            .entries
+            .iter()
+            .find(|e| e.offset == off)
+            .and_then(|e| e.crc32)
+            .expect("crc");
+        let corrupt_slice = &corrupt[start..end];
+        assert_ne!(
+            crc32fast::hash(corrupt_slice),
+            recorded_crc,
+            "test must flip bytes without updating idx CRC"
+        );
+        assert!(
+            packed_full_object_slice(&objects, &tree)
+                .expect("lookup")
+                .is_some(),
+            "valid redundant pack should serve the slice after CRC rejects corrupt copy"
+        );
+
+        let obj = read_object_from_packs(&objects, &tree).expect("read tree");
+        assert_eq!(obj.kind, ObjectKind::Tree);
+        let slice = packed_full_object_slice(&objects, &tree)
+            .expect("lookup")
+            .expect("slice");
+        let good_pack = fs::read(&primary_pack).expect("primary pack");
+        assert_eq!(&slice, &good_pack[start..end]);
     }
 }
