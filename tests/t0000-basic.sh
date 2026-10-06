@@ -1250,6 +1250,8 @@ test_expect_success 'test_must_fail rejects a non-git command with env' '
 	grep -F "test_must_fail: only '"'"'git'"'"' is allowed" err
 '
 
-test_done
+test_expect_success 'CI smoke failure demo (throwaway)' '
+	false
+'
 
-test_expect_success "CI smoke failure demo (throwaway)" "false"
+test_done
