@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A new site, and a new focus - the Grit project</title>
+<meta name="description" content="Grit got far enough on Git&#x27;s own test suite that the next problem isn&#x27;t compatibility. It&#x27;s speed and a library worth linking. Here&#x27;s what changes." />
+<link rel="alternate" type="application/rss+xml" title="Grit blog feed" href="../feed.xml" />
+<script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="canonical" href="./" />
+<meta property="og:title" content="A new site, and a new focus" />
+<style>
+:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--code-fg:#e9e4d8;--chip:#e9e4d8;--rail:clamp(48px,8vw,120px);--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+a{color:inherit}a:hover{opacity:.7}
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(20px,4vw,56px)}
+.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:24px 0}
+.brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;text-decoration:none}
+.brand::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent)}
+.nav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:15px}.nav a{text-decoration:none}
+.nav .pill{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px}
+.commit{display:grid;grid-template-columns:var(--rail) minmax(0,1fr)}
+.commit+.commit{border-top:1px solid var(--line)}
+.rail{position:relative}.rail>span{position:absolute;display:block}
+.line{left:20px;top:0;bottom:0;width:3px;background:var(--ink)}
+.line.from-head{top:110px}.line.stub{bottom:auto;height:46px}
+.dot{left:15px;top:44px;width:13px;height:13px;border-radius:50%;background:var(--ink)}
+.head-dot{left:8px;top:96px;width:27px;height:27px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--ink)}
+.head-dot.small{left:13px;top:41px;width:17px;height:17px;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--ink)}
+.root-dot{left:14px;top:44px;width:15px;height:15px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px var(--ink)}
+.hero{padding:56px 0 72px}
+.refs{display:flex;flex-wrap:wrap;gap:14px;font:14px var(--mono);color:var(--muted)}
+.refs a{text-decoration:none}.refs .ref{color:var(--accent)}
+h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spacing:-.06em;font-weight:700}
+.post-hero h1{font-size:clamp(44px,7vw,88px);line-height:.95;letter-spacing:-.045em;max-width:16ch;text-wrap:balance}
+.tagline{margin:24px 0 0;font-size:clamp(26px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:500}
+.lede{max-width:640px;margin:20px 0 0;font-size:clamp(17px,1.6vw,20px);line-height:1.5;color:var(--soft);text-wrap:pretty}
+.entry{padding:36px 0 40px}
+.sha{font:13px var(--mono);color:var(--muted)}.sha.hot{color:var(--accent)}.sha a{color:inherit}
+.entry h2{margin:12px 0 0;font-size:clamp(28px,3.4vw,40px);line-height:1.05;letter-spacing:-.03em}
+.entry h2 a{text-decoration:none}
+.entry p{max-width:680px;margin:14px 0 0;font-size:18px;line-height:1.55;color:var(--soft);text-wrap:pretty}
+.post-body{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:56px;padding:48px 0 64px}
+.content{font-size:19px;line-height:1.65;color:var(--soft)}
+.content>:first-child{margin-top:0}
+.content h2{margin:2.2em 0 .5em;font-size:clamp(26px,3vw,34px);line-height:1.1;letter-spacing:-.025em;color:var(--ink)}
+.content h3{margin:1.8em 0 .4em;font-size:22px;letter-spacing:-.015em;color:var(--ink)}
+.content p{margin:0 0 1.1em;text-wrap:pretty}
+.content ul,.content ol{margin:0 0 1.1em;padding-left:1.2em}.content li{margin:.3em 0}
+.content li::marker{color:var(--accent)}
+.content a{color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.content strong{color:var(--ink)}
+.content code{font:.86em var(--mono);background:var(--chip);border-radius:6px;padding:.1em .35em}
+.content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
+.content pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
+.foot{padding:40px 0 64px}
+.foot .links{display:flex;flex-wrap:wrap;gap:28px;margin-top:14px;font-size:17px}
+@media(max-width:900px){.post-body{display:block}.toc{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="topbar">
+  <a class="brand" href="../../" aria-label="grit homepage">grit</a>
+  <nav class="nav" aria-label="Primary">
+    <a href="https://docs.rs/grit-lib">Docs</a>
+    <a href="https://crates.io/crates/grit-lib">Library</a>
+    <a href="../">Blog</a>
+    <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
+  </nav>
+</header>
+<main>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
+  <div class="hero post-hero">
+    <div class="refs"><a class="ref" href="../">← blog</a><span>e4534df</span><time datetime="2026-10-06">October 6, 2026</time><span>schacon</span></div>
+    <h1>A new site, and a new focus</h1>
+    <p class="lede">Grit got far enough on Git&#x27;s own test suite that the next problem isn&#x27;t compatibility. It&#x27;s speed and a library worth linking. Here&#x27;s what changes.</p>
+  </div>
+</section>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line"></span></div>
+  <div class="post-body">
+    <article class="content"><p>If you&#x27;ve been here before, you&#x27;ll notice the site looks different. The new homepage is laid out as a commit graph: each section is a commit, the library work branches off and merges back in, and the whole thing ends at the root commit. It&#x27;s a small visual joke, but it&#x27;s also a fair summary of where the project is. We&#x27;ve reached a point where it makes sense to look back at the history and decide what the next branch is.</p>
+<h2 id="where-we-are">Where we are</h2>
+<p>Grit started with one goal: reimplement Git in Rust well enough to pass Git&#x27;s own test suite. As of today, the compatibility CLI, <code>grit-git</code>, passes more than 41,700 of the 42,001 upstream tests we run.</p>
+<p>That number is real, but it hides a lot. Getting there meant workarounds, slow paths, and faithful support for every odd subcommand and legacy interface Git has picked up over twenty years. Passing the tests showed that the on-disk formats and wire protocols are right. It didn&#x27;t make Grit a library you&#x27;d want to put in your product, or a client you&#x27;d want to use every day.</p>
+<h2 id="the-new-focus">The new focus</h2>
+<p>The project is now organized around three crates with distinct jobs:</p>
+<ul>
+<li><strong><code>grit-lib</code></strong> is a clean, linkable Git library that any Rust project can use. This is the heart of the project.</li>
+<li><strong><code>grit-cli</code></strong> is the <code>grit</code> binary: a Git client with a modern command line. It&#x27;s what the installer gives you.</li>
+<li><strong><code>grit-git</code></strong> stays a command-for-command Git mirror, but its job is now to be our <strong>compatibility test bed</strong>, not our product.</li>
+</ul>
+<p>The upstream harness doesn&#x27;t go away. It becomes a regression gate: in-scope tests must not get worse, and nobody gets to weaken a test to make a change pass.</p>
+<h2 id="performance-comes-first">Performance comes first</h2>
+<p>The library and CLI need to be as fast as we can make them, and we want to prove it with measurements, not claims. That means benchmarks for core operations in <code>grit-lib</code>, plus real-world scenarios compared directly against <code>git</code>. Those scenarios cover large repositories, deep history, big packs, many refs and network operations.</p>
+<p>Some of the planned work:</p>
+<ul>
+<li>Fix the super-linear hot paths where we reload attributes and config inside per-file loops.</li>
+<li>Move to a single hashing abstraction with hardware-accelerated SHA-1. We&#x27;re deliberately not implementing sha1dc.</li>
+<li>Rework the object database read path: no reading whole packs into memory, a delta-base cache, faster index lookups.</li>
+<li>Add reachability bitmaps, and parallelize status, checkout, index-pack and delta search.</li>
+</ul>
+<p>Most targets are written as ratios against Git, usually within 1.2× or better on the same machine and the same repository.</p>
+<h2 id="a-library-worth-linking">A library worth linking</h2>
+<p>A library that prints to stdout, calls <code>process::exit</code>, reads environment variables deep inside, or keeps state in process-wide globals isn&#x27;t really a library. Cleaning that up is explicit roadmap work:</p>
+<ul>
+<li>Caches and config are owned by a <code>Repository</code> value.</li>
+<li>The environment is read only at the CLI boundary.</li>
+<li>Errors are typed, and the Git-formatted text is rendered in <code>grit-git</code>.</li>
+<li>The library doesn&#x27;t shell out.</li>
+</ul>
+<p>We&#x27;re also adding pluggable backends: an object database abstraction like the one Git core is introducing, and ref backends for loose, packed and reftable refs.</p>
+<p>Alongside that, the relevant upstream tests get converted into Rust tests against the library API, covering core behavior and edge cases rather than command-line UX. Every public interface gets coverage.</p>
+<h2 id="what-we-re-dropping">What we&#x27;re dropping</h2>
+<p>Some parts of Git are rarely used and expensive to carry. Archive, the email workflow (<code>am</code>, <code>format-patch</code>, <code>send-email</code>, <code>imap-send</code>, <code>request-pull</code>) and the foreign-VCS bridges get no CLI and no further work. Where removing them simplifies <code>grit-lib</code>, they come out of the library too, and the matching harness files are marked out of scope with a reason.</p>
+<h2 id="the-cli-contract">The CLI contract</h2>
+<p>Every <code>grit</code> command should work well for three audiences. By default it prints clean output for people. With <code>--json</code> it prints stable, documented output for scripts. With <code>--markdown</code> it prints output that&#x27;s easy for agents to read. Today&#x27;s commands already support <code>--json</code>; <code>--markdown</code> and published schemas are next.</p>
+<h2 id="following-along">Following along</h2>
+<p>The full plan is in <a href="https://github.com/gitbutlerapp/grit/blob/main/ROADMAP.md">ROADMAP.md</a>, and the live version is on the <a href="https://maint.grit-scm.com/roadmap">Grit Factory dashboard</a>. The items are worked one at a time, in order. The first few are a CI gate for every change, a benchmark baseline against Git, and a real documentation site that has to stay current with every change.</p>
+<p>If you want to try it:</p>
+<pre><code>curl -fsSL https://grit-scm.com/install | sh
+cargo add grit-lib</code></pre>
+<p>Compatibility got us here. Speed and a clean library are what come next.</p></article>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#where-we-are">Where we are</a></li>
+<li class="toc-level-2"><a href="#the-new-focus">The new focus</a></li>
+<li class="toc-level-2"><a href="#performance-comes-first">Performance comes first</a></li>
+<li class="toc-level-2"><a href="#a-library-worth-linking">A library worth linking</a></li>
+<li class="toc-level-2"><a href="#what-we-re-dropping">What we&#x27;re dropping</a></li>
+<li class="toc-level-2"><a href="#the-cli-contract">The CLI contract</a></li>
+<li class="toc-level-2"><a href="#following-along">Following along</a></li></ol></aside>
+  </div>
+</section>
+</main>
+<footer class="commit">
+  <div class="rail" aria-hidden="true"><span class="line stub"></span><span class="root-dot"></span></div>
+  <div class="foot">
+    <div class="sha">0000001 · initial commit · by <a href="https://gitbutler.com">GitButler</a></div>
+    <div class="links"><a href="../">All posts</a><a href="../../">Home</a><a href="../feed.xml">RSS feed</a></div>
+  </div>
+</footer>
+</div>
+</body>
+</html>
