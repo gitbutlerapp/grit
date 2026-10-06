@@ -418,6 +418,20 @@ fn find_descendant_in_sorted_extras(
     }
 }
 
+/// Whether a network-advertised ref name is safe to accept during fetch.
+///
+/// Delegates to [`crate::check_ref_format::is_valid_fetch_advertised_ref`].
+#[must_use]
+pub fn is_valid_fetch_advertised_ref(name: &str) -> bool {
+    crate::check_ref_format::is_valid_fetch_advertised_ref(name)
+}
+
+/// Whether a ref name is safe to store under the ref backend (post-refspec mapping).
+#[must_use]
+pub fn is_valid_storable_ref_name(name: &str) -> bool {
+    is_valid_fetch_advertised_ref(name)
+}
+
 /// Verify that `refname` can be created without directory/file conflicts with the ref store
 /// and with other refnames queued in the same transaction (`extras`).
 ///

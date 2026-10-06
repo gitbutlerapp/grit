@@ -1,4 +1,7 @@
 // API docs: https://docs.rs/grit-lib/latest/grit_lib/refs/index.html
+//
+// Network fetch paths reject malformed advertised ref names via
+// `grit_lib::refs::is_valid_fetch_advertised_ref` before refspec mapping.
 use grit_lib::refs::{list_refs, read_head};
 use std::path::Path;
 

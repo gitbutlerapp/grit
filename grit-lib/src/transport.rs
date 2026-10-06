@@ -216,7 +216,9 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
                 if refname == "HEAD" {
                     continue;
                 }
-                adv.refs.push((refname, oid));
+                if crate::refs::is_valid_fetch_advertised_ref(&refname) {
+                    adv.refs.push((refname, oid));
+                }
             }
         }
     }

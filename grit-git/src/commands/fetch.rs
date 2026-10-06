@@ -4899,6 +4899,9 @@ fn apply_single_ref_update(
     if args.dry_run {
         return Ok(());
     }
+    if !grit_lib::refs::is_valid_storable_ref_name(refname) {
+        return Ok(());
+    }
     if args.atomic {
         pending_atomic_ref_ops.push(PendingRefOp::Write {
             refname: refname.to_owned(),

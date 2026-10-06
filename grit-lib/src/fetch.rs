@@ -663,16 +663,15 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
                     continue;
                 }
                 if name == "HEAD" {
-                    if let Some(t) = symref_target {
+                    if let Some(t) =
+                        symref_target.filter(|t| crate::refs::is_valid_fetch_advertised_ref(t))
+                    {
                         head_symref = Some(t);
                     }
                     // HEAD itself is not a fetchable ref here; refspecs target heads/tags.
                     continue;
                 }
-                if name.starts_with("refs/heads/")
-                    || name.starts_with("refs/tags/")
-                    || name.starts_with("refs/")
-                {
+                if crate::refs::is_valid_fetch_advertised_ref(&name) {
                     advertised.push((name, oid));
                 }
             }
@@ -1141,7 +1140,9 @@ pub fn fetch_remote(
         let remote_refs: Vec<(String, ObjectId)> = conn
             .advertised_refs()
             .iter()
-            .filter(|(n, _)| n != "HEAD" && !n.ends_with("^{}"))
+            .filter(|(n, _)| {
+                n != "HEAD" && !n.ends_with("^{}") && crate::refs::is_valid_fetch_advertised_ref(n)
+            })
             .cloned()
             .collect();
         (remote_refs, default_branch, None)
@@ -1390,6 +1391,17 @@ pub fn fetch_remote(
             UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
         );
         if write && !opts.dry_run {
+            if !crate::refs::is_valid_storable_ref_name(local_ref) {
+                updates.push(RefUpdate {
+                    remote_ref: m.remote_ref.clone(),
+                    local_ref: Some(local_ref.clone()),
+                    old_oid: old,
+                    new_oid: Some(m.oid),
+                    mode,
+                    note: Some("skipped (invalid ref name)".to_owned()),
+                });
+                continue;
+            }
             let t = std::time::Instant::now();
             crate::refs::write_ref_cached(local_git_dir, local_ref, &m.oid, &packed)?;
             d_write += t.elapsed();
@@ -1591,4 +1603,23 @@ fn peel_tag_target(odb: &crate::odb::Odb, oid: ObjectId) -> ObjectId {
         }
     }
     current
+}
+
+#[cfg(test)]
+mod fetch_advertised_ref_tests {
+    use super::*;
+    use crate::objects::ObjectId;
+    use std::io::Cursor;
+
+    #[test]
+    fn parse_v2_ls_refs_drops_traversal_ref() {
+        let oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let line = format!("{oid} refs/heads/../../../config");
+        let mut body = Vec::new();
+        crate::pkt_line::write_line(&mut body, &line).unwrap();
+        crate::pkt_line::write_flush(&mut body).unwrap();
+
+        let (refs, _) = parse_v2_ls_refs_response(&mut Cursor::new(body)).unwrap();
+        assert!(refs.is_empty());
+    }
 }

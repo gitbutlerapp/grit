@@ -965,6 +965,9 @@ pub(crate) fn parse_v2_ls_refs_output(data: &[u8], args: &Args) -> Result<Vec<Re
         };
 
         let (name, oid, peeled, symref_target) = parse_ls_refs_v2_line(&pkt)?;
+        if !grit_lib::refs::is_valid_fetch_advertised_ref(&name) {
+            continue;
+        }
         if !grit_lib::ls_remote::ref_matches_ls_remote_patterns(&name, &args.patterns) {
             continue;
         }

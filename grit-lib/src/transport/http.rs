@@ -313,10 +313,12 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                 let oid = ObjectId::from_hex(oid_hex).map_err(|e| {
                     Error::Message(format!("bad oid in advertisement: {oid_hex}: {e}"))
                 })?;
-                refs.push(AdvRef {
-                    name: refname.to_owned(),
-                    oid,
-                });
+                if refname == "HEAD" || crate::refs::is_valid_fetch_advertised_ref(refname) {
+                    refs.push(AdvRef {
+                        name: refname.to_owned(),
+                        oid,
+                    });
+                }
             }
             Some(other) => {
                 return Err(Error::Message(format!(

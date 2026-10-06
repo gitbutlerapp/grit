@@ -297,6 +297,20 @@ pub fn collapse_slashes(refname: &str) -> String {
     result
 }
 
+/// Whether a ref name from a fetch or upload-pack advertisement should be kept.
+///
+/// Matches Git's `check_ref()` in `connect.c` with `REF_NORMAL`: the name must
+/// begin with `refs/` and pass [`check_refname_format`] without
+/// `--allow-onelevel` (rejecting `..`, illegal characters, and other malformed
+/// paths). Peeled `^{}` carriers are handled separately by callers.
+#[must_use]
+pub fn is_valid_fetch_advertised_ref(name: &str) -> bool {
+    if !name.starts_with("refs/") {
+        return false;
+    }
+    check_refname_format(name, &RefNameOptions::default()).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +490,14 @@ mod tests {
         assert!(!receive_pack_refname_ok("heads/main", false));
         assert!(receive_pack_refname_ok("refs/heads/main", false));
         assert!(receive_pack_refname_ok("refs/tags/v1", true));
+    }
+
+    #[test]
+    fn fetch_advertised_ref_rejects_traversal_and_illegal() {
+        assert!(is_valid_fetch_advertised_ref("refs/heads/main"));
+        assert!(is_valid_fetch_advertised_ref("refs/tags/v1.0"));
+        assert!(!is_valid_fetch_advertised_ref("refs/heads/../../../config"));
+        assert!(!is_valid_fetch_advertised_ref("heads/main"));
+        assert!(!is_valid_fetch_advertised_ref("refs/heads/foo..bar"));
     }
 }

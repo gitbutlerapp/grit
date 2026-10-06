@@ -355,11 +355,13 @@ fn v2_ls_refs_for_fetch(
             continue;
         }
         if name == "HEAD" {
-            if let Some(t) = symref_target {
+            if let Some(t) =
+                symref_target.filter(|t| grit_lib::refs::is_valid_fetch_advertised_ref(t))
+            {
                 head_symref = Some(t);
             }
             advertised.push((name, oid));
-        } else if name.starts_with("refs/heads/") || name.starts_with("refs/tags/") {
+        } else if grit_lib::refs::is_valid_fetch_advertised_ref(&name) {
             advertised.push((name, oid));
         }
     }
@@ -527,7 +529,9 @@ pub(crate) fn read_advertisement(
                 if refname.ends_with("^{}") {
                     continue;
                 }
-                out.push((refname, oid));
+                if grit_lib::refs::is_valid_fetch_advertised_ref(&refname) {
+                    out.push((refname, oid));
+                }
             }
             _ => {}
         }

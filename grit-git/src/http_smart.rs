@@ -826,6 +826,9 @@ fn parse_ls_refs_v2_response(data: &[u8]) -> Result<Vec<LsRefEntry>> {
         if name.is_empty() {
             continue;
         }
+        if !grit_lib::refs::is_valid_fetch_advertised_ref(&name) {
+            continue;
+        }
         out.push(LsRefEntry { name, oid });
     }
     Ok(out)

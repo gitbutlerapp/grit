@@ -975,6 +975,9 @@ pub fn fetch_local(
         if entry.name.ends_with("^{}") {
             continue;
         }
+        if !crate::refs::is_valid_fetch_advertised_ref(&entry.name) {
+            continue;
+        }
         remote_refs.push((entry.name.clone(), entry.oid));
     }
 
@@ -1116,6 +1119,17 @@ pub fn fetch_local(
             UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
         );
         if write && !opts.dry_run {
+            if !crate::refs::is_valid_storable_ref_name(local_ref) {
+                updates.push(RefUpdate {
+                    remote_ref: m.remote_ref.clone(),
+                    local_ref: Some(local_ref.clone()),
+                    old_oid: old,
+                    new_oid: Some(m.oid),
+                    mode,
+                    note: Some("skipped (invalid ref name)".to_owned()),
+                });
+                continue;
+            }
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
         }
 
