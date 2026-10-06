@@ -60,8 +60,8 @@ pub fn apply_json_filter(input: &Value, filter: &str) -> Result<Value> {
     let mut results = Vec::new();
     for item in out {
         let val = item.map_err(|e| anyhow::anyhow!("filter {filter:?}: {e}"))?;
-        let json = serde_json::from_str(&val.to_string())
-            .context("converting filter output to JSON")?;
+        let json =
+            serde_json::from_str(&val.to_string()).context("converting filter output to JSON")?;
         results.push(json);
     }
 

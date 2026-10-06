@@ -942,9 +942,8 @@ fn diff_use_color(cli_color: Option<&str>, config: &ConfigSet, output_path: Opti
         .map(|s| s.to_ascii_lowercase());
     // `auto` colors only when writing to a terminal that can render ANSI: not a
     // file/pipe, and on Windows only when the console understands VT sequences.
-    let auto = output_path.is_none()
-        && io::stdout().is_terminal()
-        && grit_lib::terminal::ansi_supported();
+    let auto =
+        output_path.is_none() && io::stdout().is_terminal() && grit_lib::terminal::ansi_supported();
     match cli_color.map(|s| s.to_ascii_lowercase()).as_deref() {
         Some("always") => true,
         Some("never") => false,

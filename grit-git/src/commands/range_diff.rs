@@ -181,8 +181,7 @@ fn run(args: Args) -> Result<()> {
                 .as_deref()
                 .map(|c| c == "always" || c.is_empty())
                 .unwrap_or_else(|| {
-                    (std::io::stdout().is_terminal()
-                        && grit_lib::terminal::ansi_supported())
+                    (std::io::stdout().is_terminal() && grit_lib::terminal::ansi_supported())
                         || std::env::var_os("GIT_PAGER_IN_USE").is_some()
                 }));
     let use_color = use_color

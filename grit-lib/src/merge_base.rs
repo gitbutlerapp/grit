@@ -591,8 +591,7 @@ impl<'r> CommitGraphCache<'r> {
 
         // Compare against commit OIDs (the form the walk yields), peeling tags.
         let ancestor = peel_to_commit_for_merge_base(self.repo, ancestor).unwrap_or(ancestor);
-        let descendant =
-            peel_to_commit_for_merge_base(self.repo, descendant).unwrap_or(descendant);
+        let descendant = peel_to_commit_for_merge_base(self.repo, descendant).unwrap_or(descendant);
         if ancestor == descendant {
             return Ok(true);
         }
