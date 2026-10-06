@@ -259,7 +259,7 @@ fn http_get_ok(addr: SocketAddr) -> Result<bool> {
 fn server_running(pid_file: &Path) -> bool {
     read_pid(pid_file)
         .ok()
-        .and_then(|pid| signal_process_alive(pid))
+        .and_then(signal_process_alive)
         .unwrap_or(false)
 }
 
