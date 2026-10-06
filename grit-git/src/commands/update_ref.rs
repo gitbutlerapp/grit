@@ -7,7 +7,7 @@ use std::io::{self, Read};
 use std::path::Path;
 use time::OffsetDateTime;
 
-use grit_lib::check_ref_format::{check_refname_format, RefNameOptions};
+use grit_lib::check_ref_format::{check_refname_format, refname_is_safe, RefNameOptions};
 use grit_lib::config::{parse_bool, ConfigSet};
 use grit_lib::error::Error as GritError;
 use grit_lib::objects::ObjectId;
@@ -1319,44 +1319,6 @@ fn validate_batch_refname(cmd: &str, raw_line: &str, null_terminated: bool) -> R
         ))));
     }
     Ok(())
-}
-
-/// Port of `refname_is_safe()` from `refs.c`: a delete may target a ref that no
-/// longer passes `check_refname_format` (e.g. a broken name), but only if the
-/// name is "safe" — either it lives under `refs/` without escaping that prefix,
-/// or it is a root-style ref made solely of uppercase letters and underscores
-/// (e.g. `HEAD`).
-fn refname_is_safe(refname: &str) -> bool {
-    if let Some(rest) = refname.strip_prefix("refs/") {
-        if rest.is_empty() || rest.starts_with('/') || rest.ends_with('/') {
-            return false;
-        }
-        // The refname must not escape `refs/` once normalized.
-        return normalize_path_copy(rest).as_deref() == Some(rest);
-    }
-
-    if refname.is_empty() {
-        return false;
-    }
-    refname.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
-}
-
-/// Minimal port of `normalize_path_copy()` (collapse `.`/`..`/`//`). Returns
-/// `None` when the path tries to escape above its root (a leading `..`).
-fn normalize_path_copy(path: &str) -> Option<String> {
-    let mut out: Vec<&str> = Vec::new();
-    for component in path.split('/') {
-        match component {
-            "" | "." => continue,
-            ".." => {
-                if out.pop().is_none() {
-                    return None;
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    Some(out.join("/"))
 }
 
 fn validate_delete_refname(refname: &str) -> Result<()> {
