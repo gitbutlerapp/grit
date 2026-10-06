@@ -335,10 +335,7 @@ impl CommitGraphLayer {
         }
 
         let bloom_indexes_ok = if let (Some(bidx), Some(bsize)) = (bloom_idx_off, bidx_len) {
-            if bsize / 4 != num_commits as usize {
-                eprintln!("warning: commit-graph changed-path index chunk is too small");
-                false
-            } else if bidx + bsize > body.len() {
+            if bsize / 4 != num_commits as usize || bidx + bsize > body.len() {
                 eprintln!("warning: commit-graph changed-path index chunk is too small");
                 false
             } else {
@@ -1055,7 +1052,7 @@ impl CommitGraphChain {
                         all_keys_maybe = false;
                         break;
                     }
-                    Err(()) => {
+                    Err(crate::bloom::BloomFilterInvalid) => {
                         all_keys_maybe = true;
                         break;
                     }

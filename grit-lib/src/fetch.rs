@@ -38,6 +38,9 @@ use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::protocol_v2;
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
+
+type LsRefsAdvertised = (Vec<(String, ObjectId)>, Option<String>);
+type V2FetchRemoteRefs = (Vec<(String, ObjectId)>, Option<String>, Option<Vec<String>>);
 use crate::transfer::{
     classify_update, match_positive, open_odb, prune_tracking_refs, ref_excluded, refspecs_force,
     FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
@@ -104,10 +107,7 @@ fn parse_ack(line: &str) -> Option<(ObjectId, AckKind)> {
 /// negotiator. Lifted from `read_ack_round_with_negotiator`.
 fn read_ack_round(reader: &mut dyn Read, negotiator: &mut SkippingNegotiator) -> Result<()> {
     let mut reader = reader;
-    loop {
-        let Some(pkt) = pkt_line::read_packet(&mut reader)? else {
-            break;
-        };
+    while let Some(pkt) = pkt_line::read_packet(&mut reader)? {
         match pkt {
             pkt_line::Packet::Flush => break,
             pkt_line::Packet::Data(ln) => {
@@ -170,10 +170,7 @@ fn read_sideband_pack(
 ) -> Result<()> {
     let mut seen_pack = false;
     let mut pending: Vec<u8> = Vec::new();
-    loop {
-        let Some(payload) = read_pkt_payload_raw(r)? else {
-            break;
-        };
+    while let Some(payload) = read_pkt_payload_raw(r)? {
         if payload.is_empty() {
             continue;
         }
@@ -577,7 +574,7 @@ fn v2_ls_refs(
     local_odb: &crate::odb::Odb,
     tags: crate::transfer::TagMode,
     refspecs: &[String],
-) -> Result<(Vec<(String, ObjectId)>, Option<String>)> {
+) -> Result<LsRefsAdvertised> {
     let req = build_v2_ls_refs_request(server_caps, local_odb, tags, refspecs)?;
     conn.writer().write_all(&req)?;
     conn.writer().flush()?;
@@ -645,9 +642,7 @@ pub(crate) fn build_v2_ls_refs_request(
 /// Reads `<oid> <refname>[ symref-target:…][ peeled:…]` lines up to the
 /// terminating flush, dropping peeled `^{}` carriers and recording the `HEAD`
 /// symref target. Shared by the streaming and stateless-HTTP v2 paths.
-pub(crate) fn parse_v2_ls_refs_response(
-    reader: &mut dyn Read,
-) -> Result<(Vec<(String, ObjectId)>, Option<String>)> {
+pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsAdvertised> {
     // Response: `<oid> <refname>[ symref-target:…][ peeled:…]` lines, flush-terminated.
     let mut advertised: Vec<(String, ObjectId)> = Vec::new();
     let mut head_symref: Option<String> = None;
@@ -884,7 +879,7 @@ impl V2DeepenArgs {
             || !self.local_shallow.is_empty()
     }
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Write a v2 `command=fetch` request: capability echo, `0001`, the standard
 /// `thin-pack`/`no-progress`/`ofs-delta` (+ `sideband-all`/`include-tag`)
 /// arguments, the shallow/deepen arguments, the `want <oid>` lines, the
@@ -1132,11 +1127,8 @@ pub fn fetch_remote(
     // capability block); we obtain them now with an `ls-refs` command, derived
     // from the fetch refspecs. For v0/v1 they come from the connect-time
     // advertisement directly.
-    let (remote_refs, default_branch, v2_caps): (
-        Vec<(String, ObjectId)>,
-        Option<String>,
-        Option<Vec<String>>,
-    ) = if conn.protocol_version() >= 2 {
+    let (remote_refs, default_branch, v2_caps): V2FetchRemoteRefs = if conn.protocol_version() >= 2
+    {
         let caps: Vec<String> = conn.capabilities().to_vec();
         let (refs, head_symref) = v2_ls_refs(conn, &caps, &local_odb, opts.tags, &opts.refspecs)?;
         let default_branch =

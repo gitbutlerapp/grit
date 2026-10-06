@@ -110,9 +110,7 @@ pub fn prepare_parent_dirs_for_checkout(work_tree: &Path, rel_path: &str) -> Res
         if let Component::Normal(name) = comp {
             cur.push(name);
             if let Ok(meta) = std::fs::symlink_metadata(&cur) {
-                if meta.file_type().is_symlink() {
-                    std::fs::remove_file(&cur)?;
-                } else if !meta.is_dir() {
+                if meta.file_type().is_symlink() || !meta.is_dir() {
                     std::fs::remove_file(&cur)?;
                 }
             }

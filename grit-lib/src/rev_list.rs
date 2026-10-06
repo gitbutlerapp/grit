@@ -57,6 +57,22 @@ impl MissingAction {
     }
 }
 
+type ResolvedSpecsWithTagMap = (Vec<ObjectId>, Vec<RootObject>, HashMap<ObjectId, ObjectId>);
+type StdinRevisionSpecs = (Vec<String>, Vec<String>, bool, Vec<String>);
+type ReachableObjectsTriple = (Vec<(ObjectId, String)>, Vec<ObjectId>, Vec<ObjectId>);
+type ReachableObjectsSegmented = (
+    Vec<(ObjectId, String)>,
+    Vec<ObjectId>,
+    Vec<ObjectId>,
+    Vec<Vec<(ObjectId, String)>>,
+);
+type ReachableObjectsInOrder = (
+    Vec<(ObjectId, String)>,
+    Vec<ObjectId>,
+    Vec<ObjectId>,
+    Vec<usize>,
+);
+
 /// Kind selector for `object:type=<kind>` filters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterObjectKind {
@@ -258,7 +274,6 @@ impl ObjectFilter {
 
 /// Reachable object IDs enumerated the same way as `git rev-list --objects --no-object-names --all`,
 /// optionally with `--filter` and `--filter-provided-objects` (used by `git cat-file --batch-all-objects`).
-#[must_use]
 pub fn reachable_object_ids_for_cat_file(
     repo: &Repository,
     filter: Option<&ObjectFilter>,
@@ -288,7 +303,6 @@ pub fn reachable_object_ids_for_cat_file(
 
 /// Objects matching `filter`, for `cat-file --batch-all-objects --filter` (same set as
 /// `rev-list --objects --all --filter --filter-provided-objects`).
-#[must_use]
 pub fn object_ids_for_cat_file_filtered(
     repo: &Repository,
     filter: &ObjectFilter,
@@ -333,7 +347,6 @@ fn combine_subfilter_has_reserved(encoded: &str) -> Option<char> {
 }
 
 /// Expand a user filter for protocol lines (`blob:limit=1k` → `blob:limit=1024`).
-#[must_use]
 pub fn expand_object_filter_for_protocol(spec: &str) -> std::result::Result<String, String> {
     let f = ObjectFilter::parse(spec)?;
     match f {
@@ -2072,35 +2085,35 @@ pub fn render_commit_with_color(
                 Center,
             }
             #[derive(Clone, Copy)]
-            enum Trunc {
+            enum ColTruncate {
                 None,
-                Trunc,
-                LTrunc,
-                MTrunc,
+                End,
+                Start,
+                Middle,
             }
             struct ColSpec {
                 width: usize,
                 align: Align,
-                trunc: Trunc,
+                trunc: ColTruncate,
             }
             fn apply_col(spec: &ColSpec, s: &str) -> String {
                 let char_len = s.chars().count();
                 if char_len > spec.width {
                     match spec.trunc {
-                        Trunc::None => s.to_owned(),
-                        Trunc::Trunc => {
+                        ColTruncate::None => s.to_owned(),
+                        ColTruncate::End => {
                             let mut out: String =
                                 s.chars().take(spec.width.saturating_sub(2)).collect();
                             out.push_str("..");
                             out
                         }
-                        Trunc::LTrunc => {
+                        ColTruncate::Start => {
                             let skip = char_len - spec.width + 2;
                             let mut out = String::from("..");
                             out.extend(s.chars().skip(skip));
                             out
                         }
-                        Trunc::MTrunc => {
+                        ColTruncate::Middle => {
                             let keep = spec.width.saturating_sub(2);
                             let left_half = keep / 2;
                             let right_half = keep - left_half;
@@ -2174,13 +2187,13 @@ pub fn render_commit_with_color(
                         chars.next();
                     }
                     match mode.as_str() {
-                        "trunc" => Trunc::Trunc,
-                        "ltrunc" => Trunc::LTrunc,
-                        "mtrunc" => Trunc::MTrunc,
-                        _ => Trunc::None,
+                        "trunc" => ColTruncate::End,
+                        "ltrunc" => ColTruncate::Start,
+                        "mtrunc" => ColTruncate::Middle,
+                        _ => ColTruncate::None,
                     }
                 } else {
-                    Trunc::None
+                    ColTruncate::None
                 };
                 // Consume ')'
                 if chars.peek() == Some(&')') {
@@ -3003,7 +3016,7 @@ pub fn resolve_object_walk_roots(
 fn resolve_specs_for_objects(
     repo: &Repository,
     specs: &[String],
-) -> Result<(Vec<ObjectId>, Vec<RootObject>, HashMap<ObjectId, ObjectId>)> {
+) -> Result<ResolvedSpecsWithTagMap> {
     resolve_specs_for_objects_with_options(repo, specs, false, MissingAction::Error)
 }
 
@@ -3012,7 +3025,7 @@ fn resolve_specs_for_objects_with_options(
     specs: &[String],
     ignore_missing: bool,
     missing_action: MissingAction,
-) -> Result<(Vec<ObjectId>, Vec<RootObject>, HashMap<ObjectId, ObjectId>)> {
+) -> Result<ResolvedSpecsWithTagMap> {
     let mut commits = Vec::new();
     let mut roots = Vec::new();
     let mut tip_annotated_tag_by_commit: HashMap<ObjectId, ObjectId> = HashMap::new();
@@ -3627,6 +3640,7 @@ fn reorder_symmetric_topo_right_first(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn simplify_merges_commit_list(
     repo: &Repository,
     commits: &[ObjectId],
@@ -3937,6 +3951,7 @@ fn first_parent_anchor_in_set_lib(
     Ok(None)
 }
 
+#[expect(clippy::only_used_in_recursion)]
 fn collect_visible_parent_for_graph_lib(
     repo: &Repository,
     candidate: ObjectId,
@@ -4773,9 +4788,7 @@ fn parse_long_opt_value(opt: &str, argv0: &str, argv1: Option<&str>) -> Option<(
     if !rest.is_empty() {
         return None;
     }
-    let Some(next) = argv1 else {
-        return None;
-    };
+    let next = argv1?;
     Some((2, next.to_owned()))
 }
 
@@ -4956,9 +4969,7 @@ fn apply_stdin_pseudo_opt(
 }
 
 /// Read `--stdin` revision lines and pathspec tail (after `--`), matching Git `read_revisions_from_stdin`.
-fn read_revisions_from_stdin_lines(
-    git_dir: &Path,
-) -> Result<(Vec<String>, Vec<String>, bool, Vec<String>)> {
+fn read_revisions_from_stdin_lines(git_dir: &Path) -> Result<StdinRevisionSpecs> {
     let stdin = std::io::read_to_string(std::io::stdin()).map_err(Error::Io)?;
     let lines: Vec<String> = stdin.lines().map(std::borrow::ToOwned::to_owned).collect();
 
@@ -5031,7 +5042,7 @@ pub fn collect_revision_specs_with_stdin(
     git_dir: &Path,
     args_specs: &[String],
     read_stdin: bool,
-) -> Result<(Vec<String>, Vec<String>, bool, Vec<String>)> {
+) -> Result<StdinRevisionSpecs> {
     let mut positive = Vec::new();
     let mut negative = Vec::new();
 
@@ -5807,6 +5818,7 @@ fn union_parent_reachable_objects(
 
 /// Collect all reachable non-commit objects (trees and blobs) from a set of commits.
 /// Returns (included, omitted) object lists.
+#[expect(clippy::too_many_arguments)]
 #[allow(dead_code)]
 fn collect_reachable_objects(
     repo: &Repository,
@@ -5822,7 +5834,7 @@ fn collect_reachable_objects(
     omit_object_paths: bool,
     packed_set: Option<&HashSet<ObjectId>>,
     collect_tree_omits: bool,
-) -> Result<(Vec<(ObjectId, String)>, Vec<ObjectId>, Vec<ObjectId>)> {
+) -> Result<ReachableObjectsTriple> {
     let mut tree_state = TreeWalkState::new();
     let mut top_tree_omit =
         walk_needs_top_tree_omit_set(filter, collect_tree_omits).then(HashSet::<ObjectId>::new);
@@ -6034,6 +6046,7 @@ fn collect_pathspec_matching_tree_objects_inner(
 ///
 /// Matches Git `traverse_commit_list_filtered`: each commit's tree is processed before moving to
 /// the next commit, with global de-duplication of emitted object OIDs across the full walk.
+#[expect(clippy::too_many_arguments)]
 fn collect_reachable_objects_segmented(
     repo: &Repository,
     graph: &mut CommitGraph<'_>,
@@ -6048,12 +6061,7 @@ fn collect_reachable_objects_segmented(
     omit_object_paths: bool,
     packed_set: Option<&HashSet<ObjectId>>,
     collect_tree_omits: bool,
-) -> Result<(
-    Vec<(ObjectId, String)>,
-    Vec<ObjectId>,
-    Vec<ObjectId>,
-    Vec<Vec<(ObjectId, String)>>,
-)> {
+) -> Result<ReachableObjectsSegmented> {
     let mut emitted = HashSet::new();
     let mut result = Vec::new();
     let mut omitted = Vec::new();
@@ -6462,6 +6470,7 @@ impl CombineSubState {
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 #[allow(dead_code)]
 fn collect_tree_objects_filtered(
     repo: &Repository,
@@ -6713,15 +6722,11 @@ fn collect_tree_objects_filtered(
         }
     }
 
-    if let Some(f) = filter {
-        if let ObjectFilter::Combine(_) = f {
-            if let Some(states) = combine_states.as_mut() {
-                for st in states.iter_mut() {
-                    if st.is_skipping_tree && st.skip_tree_oid == Some(tree_oid) {
-                        st.is_skipping_tree = false;
-                        st.skip_tree_oid = None;
-                    }
-                }
+    if let (Some(ObjectFilter::Combine(_)), Some(states)) = (filter, combine_states.as_mut()) {
+        for st in states.iter_mut() {
+            if st.is_skipping_tree && st.skip_tree_oid == Some(tree_oid) {
+                st.is_skipping_tree = false;
+                st.skip_tree_oid = None;
             }
         }
     }
@@ -6729,6 +6734,7 @@ fn collect_tree_objects_filtered(
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments)]
 fn collect_root_object(
     repo: &Repository,
     root: &RootObject,
@@ -6968,6 +6974,7 @@ fn collect_root_object(
 /// Collect reachable objects in commit order: objects for each commit are emitted
 /// right after that commit, rather than all objects after all commits.
 /// Returns (objects, omitted, per_commit_counts).
+#[expect(clippy::too_many_arguments)]
 fn collect_reachable_objects_in_commit_order(
     repo: &Repository,
     _graph: &mut CommitGraph<'_>,
@@ -6982,12 +6989,7 @@ fn collect_reachable_objects_in_commit_order(
     omit_object_paths: bool,
     packed_set: Option<&HashSet<ObjectId>>,
     collect_tree_omits: bool,
-) -> Result<(
-    Vec<(ObjectId, String)>,
-    Vec<ObjectId>,
-    Vec<ObjectId>,
-    Vec<usize>,
-)> {
+) -> Result<ReachableObjectsInOrder> {
     let mut tree_state = TreeWalkState::new();
     let mut top_tree_omit =
         walk_needs_top_tree_omit_set(filter, collect_tree_omits).then(HashSet::<ObjectId>::new);

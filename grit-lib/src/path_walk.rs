@@ -21,6 +21,8 @@ const ROOT_PATH: &str = "";
 const TAG_PATH: &str = "/tags";
 const TAGGED_BLOBS_PATH: &str = "/tagged-blobs";
 
+type PathWalkCliArgs = (PathWalkOptions, Vec<String>, Vec<String>, bool, bool);
+
 /// Options for [`walk_objects_by_path`], aligned with Git's `struct path_walk_info`.
 #[derive(Debug, Clone)]
 pub struct PathWalkOptions {
@@ -1037,10 +1039,7 @@ fn setup_pending_objects(
 /// Parse `test-tool path-walk` argv after the subcommand name.
 ///
 /// Returns options, positive revision specs, negative revision specs, stdin `--all`, and `--boundary`.
-pub fn parse_path_walk_cli(
-    git_dir: &Path,
-    args: &[String],
-) -> Result<(PathWalkOptions, Vec<String>, Vec<String>, bool, bool)> {
+pub fn parse_path_walk_cli(git_dir: &Path, args: &[String]) -> Result<PathWalkCliArgs> {
     let mut opts = PathWalkOptions::default();
     let mut positive = Vec::new();
     let mut negative = Vec::new();

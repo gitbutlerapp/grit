@@ -95,15 +95,16 @@ fn config_info_list(cfg: &ConfigSet, field_names: &[String]) -> Vec<PromisorInfo
         let Some(rest) = e.key.strip_prefix("remote.") else {
             continue;
         };
-        let is_promisor = if let Some(name) = rest.strip_suffix(".promisor") {
-            // Bare boolean keys store None -> treated as "true".
-            let val = e.value.clone().unwrap_or_else(|| "true".to_owned());
-            val.eq_ignore_ascii_case("true").then(|| name.to_string())
-        } else if let Some(name) = rest.strip_suffix(".partialclonefilter") {
-            Some(name.to_string())
-        } else {
-            None
-        };
+        let is_promisor = rest
+            .strip_suffix(".promisor")
+            .and_then(|name| {
+                let val = e.value.clone().unwrap_or_else(|| "true".to_owned());
+                val.eq_ignore_ascii_case("true").then(|| name.to_string())
+            })
+            .or_else(|| {
+                rest.strip_suffix(".partialclonefilter")
+                    .map(|name| name.to_string())
+            });
         if let Some(name) = is_promisor {
             if !names.contains(&name) {
                 names.push(name);

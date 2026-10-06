@@ -312,7 +312,7 @@ pub fn parse_hg_patch(input: &str) -> Result<Vec<MboxPatch>> {
         format_patch_commit: None,
     }])
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Parse patches from input, auto-detecting or using the specified format.
 ///
 /// `warnings` collects stderr warnings (`format=flowed`, quoted CRLF) that `git am`
@@ -357,11 +357,7 @@ fn unflow_format_flowed(lines: &[&str]) -> Vec<String> {
 
     for line in lines {
         // Space-unstuffing: remove one leading space
-        let unstuffed = if line.starts_with(' ') {
-            &line[1..]
-        } else {
-            line
-        };
+        let unstuffed = line.strip_prefix(' ').unwrap_or(line);
 
         if unstuffed.ends_with(' ') {
             // Flowed line: keep the trailing space (it's content), join with next
@@ -550,7 +546,7 @@ fn parse_format_patch_commit_oid_from_mbox_line(line: &str) -> Option<ObjectId> 
     }
     ObjectId::from_hex(token).ok()
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Parse an mbox file into individual patches with options.
 ///
 /// `warnings` collects stderr warnings (`format=flowed`, quoted CRLF) that `git am`

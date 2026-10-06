@@ -161,8 +161,7 @@ pub fn ws_fix_copy(dst: &mut Vec<u8>, src: &[u8], rule: u32) {
                 last = last_tab_in_indent as usize + 1;
             }
         }
-        for idx in 0..last {
-            let ch = src[idx];
+        for &ch in &src[..last] {
             if ch != b' ' {
                 consecutive_spaces = 0;
                 dst.push(ch);
@@ -181,8 +180,8 @@ pub fn ws_fix_copy(dst: &mut Vec<u8>, src: &[u8], rule: u32) {
     } else if (rule & WS_TAB_IN_INDENT) != 0 && last_tab_in_indent >= 0 {
         let start = dst.len();
         let last = last_tab_in_indent as usize + 1;
-        for idx in 0..last {
-            if src[idx] == b'\t' {
+        for &ch in &src[..last] {
+            if ch == b'\t' {
                 loop {
                     dst.push(b' ');
                     if (dst.len() - start).is_multiple_of(tw) {
@@ -190,7 +189,7 @@ pub fn ws_fix_copy(dst: &mut Vec<u8>, src: &[u8], rule: u32) {
                     }
                 }
             } else {
-                dst.push(src[idx]);
+                dst.push(ch);
             }
         }
         dst.extend_from_slice(&src[last..len]);

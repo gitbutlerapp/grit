@@ -77,7 +77,7 @@ pub fn revision_set_newest_first(
     }
 
     // Newest first: descending committer timestamp (stable on ties).
-    collected.sort_by(|a, b| b.0.cmp(&a.0));
+    collected.sort_by_key(|a| std::cmp::Reverse(a.0));
     Ok(collected.into_iter().map(|(_, oid)| oid).collect())
 }
 
@@ -85,7 +85,7 @@ pub fn revision_set_newest_first(
 #[must_use]
 pub fn committer_timestamp(ident: &str) -> i64 {
     ident
-        .rsplitn(3, ' ')
+        .rsplit(' ')
         .nth(1)
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(0)

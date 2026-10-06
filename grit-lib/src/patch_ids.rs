@@ -576,10 +576,12 @@ fn patch_id_add_mode(ctx: &mut Sha1, mode: u32) {
 }
 
 /// Strip ASCII whitespace in-place; returns new length (prefix of `buf` is valid).
-fn remove_space_bytes(buf: &mut Vec<u8>) -> usize {
+fn remove_space_bytes(buf: &mut [u8]) -> usize {
     let mut dst = 0usize;
-    for i in 0..buf.len() {
-        let c = buf[i];
+    let mut src = 0usize;
+    while src < buf.len() {
+        let c = buf[src];
+        src += 1;
         if !c.is_ascii_whitespace() {
             buf[dst] = c;
             dst += 1;

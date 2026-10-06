@@ -161,9 +161,7 @@ pub fn sanitize_worktree_id_component(name: &str) -> String {
         if ch.is_ascii_control()
             || matches!(ch, ':' | '?' | '[' | '\\' | '^' | '~' | ' ' | '\t' | '*')
         {
-            if out.is_empty() && last != '-' {
-                out.push('-');
-            } else if !out.is_empty() {
+            if (out.is_empty() && last != '-') || !out.is_empty() {
                 out.push('-');
             }
             last = '-';

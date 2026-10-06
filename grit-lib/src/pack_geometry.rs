@@ -49,8 +49,8 @@ pub fn compute_geometry_split(weights: &[usize], split_factor: i32) -> usize {
     }
 
     let mut total_size: u64 = 0;
-    for j in 0..split {
-        total_size = total_size.saturating_add(weights[j] as u64);
+    for &w in &weights[..split] {
+        total_size = total_size.saturating_add(w as u64);
     }
 
     let mut j = split;

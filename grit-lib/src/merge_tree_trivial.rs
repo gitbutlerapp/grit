@@ -338,7 +338,7 @@ fn link_entry(
         link: tail,
     })
 }
-
+#[expect(clippy::too_many_arguments)]
 fn resolve(
     records: &mut Vec<(String, String)>,
     repo: &Repository,
@@ -376,8 +376,8 @@ fn unresolved_list_only(
     path: String,
 ) -> Result<()> {
     let mut dirmask = 0u8;
-    for i in 0..3 {
-        if n[i].mode == 0 || is_tree_mode(n[i].mode) {
+    for (i, entry) in n.iter().enumerate() {
+        if entry.mode == 0 || is_tree_mode(entry.mode) {
             dirmask |= 1 << i;
         }
     }
@@ -429,7 +429,7 @@ fn cmp_merge_records(a: &(String, String), b: &(String, String)) -> Ordering {
     let kb = merge_record_sort_key(&b.0);
     ka.0.cmp(&kb.0).then_with(|| ka.1.cmp(kb.1))
 }
-
+#[expect(clippy::too_many_arguments)]
 fn merge_trees_at(
     records: &mut Vec<(String, String)>,
     repo: &Repository,

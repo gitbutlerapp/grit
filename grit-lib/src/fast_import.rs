@@ -188,11 +188,7 @@ impl<'a, R: BufRead> Importer<'a, R> {
     }
 
     fn run(&mut self) -> Result<()> {
-        loop {
-            let line = match self.next_command_line()? {
-                Some(l) => l,
-                None => break,
-            };
+        while let Some(line) = self.next_command_line()? {
             let trimmed = line.trim_end();
             if trimmed.is_empty() {
                 continue;
@@ -228,8 +224,8 @@ impl<'a, R: BufRead> Importer<'a, R> {
                 self.read_reset(&refname)?;
                 continue;
             }
-            if trimmed.starts_with("tag ") {
-                let name = trimmed["tag ".len()..].trim().to_string();
+            if let Some(rest) = trimmed.strip_prefix("tag ") {
+                let name = rest.trim().to_string();
                 self.read_tag(&name)?;
                 continue;
             }
@@ -410,10 +406,7 @@ impl<'a, R: BufRead> Importer<'a, R> {
         let mut pending_inline: Option<(u32, Vec<u8>)> = None;
         let notes_ref = refname.starts_with("refs/notes/");
 
-        loop {
-            let Some(line) = self.read_line_any()? else {
-                break;
-            };
+        while let Some(line) = self.read_line_any()? {
             let t = line.trim_end();
             if t.is_empty() {
                 continue;
@@ -433,13 +426,12 @@ impl<'a, R: BufRead> Importer<'a, R> {
                 });
                 continue;
             }
-            if t.starts_with("from ") {
-                let spec = t["from ".len()..].trim();
-                from_oid = Some(self.resolve_commit_ish(spec)?);
+            if let Some(spec) = t.strip_prefix("from ") {
+                from_oid = Some(self.resolve_commit_ish(spec.trim())?);
                 continue;
             }
-            if t.starts_with("merge ") {
-                let spec = t["merge ".len()..].trim();
+            if let Some(spec) = t.strip_prefix("merge ") {
+                let spec = spec.trim();
                 merge_oids.push(self.resolve_commit_ish(spec)?);
                 continue;
             }

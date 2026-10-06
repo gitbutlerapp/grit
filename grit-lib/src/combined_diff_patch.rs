@@ -79,11 +79,11 @@ fn coalesce_lost(
     }
     let mut lcs = vec![vec![0usize; nw + 1]; ob + 1];
     let mut dir = vec![vec![Dir::Base; nw + 1]; ob + 1];
-    for j in 1..=nw {
-        dir[0][j] = Dir::New;
+    for item in dir[0].iter_mut().skip(1) {
+        *item = Dir::New;
     }
-    for i in 1..=ob {
-        dir[i][0] = Dir::Base;
+    for row in dir.iter_mut().skip(1) {
+        row[0] = Dir::Base;
     }
     for i in 1..=ob {
         for j in 1..=nw {
@@ -253,19 +253,18 @@ fn combine_one_parent(
     }
 
     let mut p_lno = 1u32;
-    for lno in 0..=cnt {
-        slines[lno].p_lno[n] = p_lno;
-        if !slines[lno].plost.is_empty() {
-            let incoming = std::mem::take(&mut slines[lno].plost);
-            slines[lno].lost =
-                coalesce_lost(std::mem::take(&mut slines[lno].lost), incoming, nmask, ws);
+    for (lno, sline) in slines.iter_mut().take(cnt + 1).enumerate() {
+        sline.p_lno[n] = p_lno;
+        if !sline.plost.is_empty() {
+            let incoming = std::mem::take(&mut sline.plost);
+            sline.lost = coalesce_lost(std::mem::take(&mut sline.lost), incoming, nmask, ws);
         }
-        for seg in &slines[lno].lost {
+        for seg in &sline.lost {
             if seg.parent_map & nmask != 0 {
                 p_lno = p_lno.saturating_add(1);
             }
         }
-        if lno < cnt && slines[lno].flag & nmask == 0 {
+        if lno < cnt && sline.flag & nmask == 0 {
             p_lno = p_lno.saturating_add(1);
         }
     }
@@ -352,11 +351,11 @@ fn make_hunks(slines: &mut [Sline], cnt: usize, num_parent: usize, dense: bool, 
     let all_mask = (1u32 << num_parent) - 1;
     let mark = 1u32 << num_parent;
 
-    for i in 0..=cnt {
-        if interesting(&slines[i], all_mask) {
-            slines[i].flag |= mark;
+    for sline in slines.iter_mut().take(cnt + 1) {
+        if interesting(sline, all_mask) {
+            sline.flag |= mark;
         } else {
-            slines[i].flag &= !mark;
+            sline.flag &= !mark;
         }
     }
 
@@ -421,8 +420,8 @@ fn make_hunks(slines: &mut [Sline], cnt: usize, num_parent: usize, dense: bool, 
                 jj += 1;
             }
             if !has_interesting && same_diff != 0 && same_diff != all_mask {
-                for k in hunk_begin..hunk_end {
-                    slines[k].flag &= !mark;
+                for sline in slines.iter_mut().take(hunk_end).skip(hunk_begin) {
+                    sline.flag &= !mark;
                 }
             }
             i = hunk_end;
@@ -462,8 +461,8 @@ fn dump_slines(slines: &[Sline], cnt: usize, num_parent: usize, context: usize) 
         }
         let mut null_ctx = 0u32;
         if context == 0 {
-            for j in h_start..h_end {
-                if slines[j].flag & (mark - 1) == 0 {
+            for sl in slines.iter().take(h_end).skip(h_start) {
+                if sl.flag & (mark - 1) == 0 {
                     null_ctx = null_ctx.saturating_add(1);
                 }
             }
@@ -532,16 +531,16 @@ fn dump_slines(slines: &[Sline], cnt: usize, num_parent: usize, context: usize) 
 fn reuse_parent(slines: &mut [Sline], cnt: usize, i: usize, j: usize) {
     let im = 1u32 << i;
     let jm = 1u32 << j;
-    for lno in 0..=cnt {
-        for seg in &mut slines[lno].lost {
+    for sline in slines.iter_mut().take(cnt + 1) {
+        for seg in &mut sline.lost {
             if seg.parent_map & jm != 0 {
                 seg.parent_map |= im;
             }
         }
-        if slines[lno].flag & jm != 0 {
-            slines[lno].flag |= im;
+        if sline.flag & jm != 0 {
+            sline.flag |= im;
         }
-        slines[lno].p_lno[i] = slines[lno].p_lno[j];
+        sline.p_lno[i] = sline.p_lno[j];
     }
     // Mirror the trailer (sline[cnt + 1]) so an EOF-spanning hunk reports the right
     // end line number for the reused parent.

@@ -1,5 +1,12 @@
 //! Git-compatible date parsing (`parse_date_basic`, `parse_date`).
 
+use thiserror::Error;
+
+/// Date string could not be parsed.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Error)]
+#[error("invalid date string")]
+pub struct DateParseError;
+
 use super::compat::{self, time_t, tm};
 use super::tm::{
     empty_tm, get_time_sec, init_tm_unknown, is_date_known, match_string, maybeiso8601, nodate,
@@ -272,13 +279,13 @@ pub fn date_string(date: u64, offset: i32) -> String {
 }
 
 /// Git `parse_date` — returns canonical `date_string` output.
-pub fn parse_date(date: &str) -> Result<String, ()> {
+pub fn parse_date(date: &str) -> Result<String, DateParseError> {
     let (ts, off) = parse_date_basic(date)?;
     Ok(date_string(ts, off))
 }
 
 /// Git `parse_date_basic` — UTC seconds and timezone offset in **minutes** (signed).
-pub fn parse_date_basic(date: &str) -> Result<(u64, i32), ()> {
+pub fn parse_date_basic(date: &str) -> Result<(u64, i32), DateParseError> {
     let bytes = date.as_bytes();
     let mut tm = init_tm_unknown();
     let mut offset: i32 = -1;
@@ -312,7 +319,7 @@ pub fn parse_date_basic(date: &str) -> Result<(u64, i32), ()> {
 
     let tts = tm_to_time_t(&tm);
     if tts < 0 {
-        return Err(());
+        return Err(DateParseError);
     }
     let mut ts = tts as u64;
 
@@ -330,17 +337,17 @@ pub fn parse_date_basic(date: &str) -> Result<(u64, i32), ()> {
 
     if tm_gmt == 0 {
         if offset > 0 && (offset as i64) * 60 > ts as i64 {
-            return Err(());
+            return Err(DateParseError);
         }
         if offset < 0 && (-(offset as i128)) * 60 > (TIMESTAMP_MAX as i128 - ts as i128) {
-            return Err(());
+            return Err(DateParseError);
         }
         // Git: *timestamp -= *offset * 60 (signed; negative offset adds to the instant).
         let ts128 = ts as i128;
         let adj = (offset as i128) * 60;
         let new_ts = ts128 - adj;
         if new_ts < 0 {
-            return Err(());
+            return Err(DateParseError);
         }
         ts = new_ts as u64;
     }
@@ -649,11 +656,9 @@ fn match_digit(date: &[u8], tm: &mut tm, offset: &mut i32, tm_gmt: &mut i32) -> 
     }
     let end = n;
 
-    if num >= 100_000_000 && nodate(tm) {
-        if compat::gmtime(num as time_t, tm) {
-            *tm_gmt = 1;
-            return end;
-        }
+    if num >= 100_000_000 && nodate(tm) && compat::gmtime(num as time_t, tm) {
+        *tm_gmt = 1;
+        return end;
     }
 
     if let Some(&sep) = date.get(end) {

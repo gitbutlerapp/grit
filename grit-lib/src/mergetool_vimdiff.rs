@@ -146,7 +146,6 @@ fn gen_cmd_aux(layout: &str, mut cmd: String) -> String {
         nested_min = nested_min.min(nested);
     }
 
-    let mut nested_min = nested_min;
     while nested_min > 0 {
         start += 1;
         end -= 1;

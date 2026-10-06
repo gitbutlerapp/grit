@@ -249,7 +249,7 @@ pub struct BloomWriteStats {
     pub filter_trunc_large: u32,
     pub filter_upgraded: u32,
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Build raw commit-graph bytes (without touching the filesystem).
 pub fn build_commit_graph_bytes(
     sorted_oids: &[ObjectId],
@@ -482,7 +482,6 @@ pub fn collect_reachable_commit_oids(
     let mut stack: Vec<ObjectId> = Vec::new();
 
     fn collect_ref_tips(
-        git_dir: &std::path::Path,
         dir: &std::path::Path,
         stack: &mut Vec<ObjectId>,
     ) -> crate::error::Result<()> {
@@ -493,7 +492,7 @@ pub fn collect_reachable_commit_oids(
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                collect_ref_tips(git_dir, &path, stack)?;
+                collect_ref_tips(&path, stack)?;
             } else if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(oid) = ObjectId::from_hex(content.trim()) {
                     stack.push(oid);
@@ -504,7 +503,7 @@ pub fn collect_reachable_commit_oids(
     }
 
     let refs_dir = git_dir.join("refs");
-    collect_ref_tips(git_dir, &refs_dir, &mut stack)?;
+    collect_ref_tips(&refs_dir, &mut stack)?;
 
     let packed_refs = git_dir.join("packed-refs");
     if packed_refs.exists() {

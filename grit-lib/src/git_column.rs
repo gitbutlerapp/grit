@@ -314,7 +314,7 @@ pub fn print_columns(
             if x == 0 {
                 write!(out, "{}", opts.indent)?;
             }
-            write!(out, "{}", &list[i])?;
+            write!(out, "{}", list[i])?;
             if newline {
                 write!(out, "{}", opts.nl)?;
             } else {

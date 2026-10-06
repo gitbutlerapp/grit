@@ -615,9 +615,7 @@ fn refine_match_for_check_ignore_verbose(
     matched: Option<IgnoreMatch>,
     rules: &[&IgnoreRule],
 ) -> Option<IgnoreMatch> {
-    let Some(m) = matched else {
-        return None;
-    };
+    let m = matched?;
     if m.negative {
         return Some(m);
     }

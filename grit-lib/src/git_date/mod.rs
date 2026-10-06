@@ -91,7 +91,7 @@ pub fn test_tool_date(args: &[String]) -> Result<TestToolDateResult, String> {
                             lines.push(format!("{a} -> bad"));
                         }
                     }
-                    Err(()) => lines.push(format!("{a} -> bad")),
+                    Err(parse::DateParseError) => lines.push(format!("{a} -> bad")),
                 }
             }
             Ok(TestToolDateResult::Output(lines))

@@ -365,7 +365,7 @@ pub fn list_hooks_display_lines(
     }
     Ok(lines)
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Spawn a traditional hook executable. On ENOEXEC, retry with `/bin/sh`.
 fn spawn_traditional_hook(
     argv0: &Path,
@@ -417,7 +417,7 @@ fn spawn_traditional_hook(
         }
     }
 }
-
+#[expect(clippy::too_many_arguments)]
 /// Spawn a configured hook (`/bin/sh -c <command>`) with optional extra args as `$1`, `$2`, …
 fn spawn_configured_hook(
     command: &str,
@@ -450,11 +450,7 @@ fn spawn_configured_hook(
 fn report_spawn_error(path: &Path, err: &std::io::Error) {
     let msg = format!("{err}");
     let p = path.display();
-    if msg.contains("No such file") || msg.contains("not found") {
-        eprintln!("error: cannot exec '{p}': {msg}");
-    } else {
-        eprintln!("error: cannot exec '{p}': {msg}");
-    }
+    eprintln!("error: cannot exec '{p}': {msg}");
 }
 
 /// Result of running a hook.
@@ -550,9 +546,8 @@ pub fn run_hook_opts(
         };
 
         let capture_mode = capture_output.is_some();
-        let (stdout_piped, stderr_piped) = if capture_mode {
-            (true, true)
-        } else if opts.stdout_to_stderr {
+        let pipe_stderr_to_capture = capture_mode || opts.stdout_to_stderr;
+        let (stdout_piped, stderr_piped) = if pipe_stderr_to_capture {
             (true, true)
         } else {
             (false, false)

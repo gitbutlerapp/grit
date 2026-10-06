@@ -251,7 +251,7 @@ pub fn load_tree(repo: &Repository, oid: &ObjectId) -> Result<Vec<TreeRow>> {
     entries.sort_by(|a, b| {
         crate::objects::tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
     });
-    Ok(entries.into_iter().map(|e| tree_entry_to_row(e)).collect())
+    Ok(entries.into_iter().map(tree_entry_to_row).collect())
 }
 
 fn tree_entry_to_row(entry: TreeEntry) -> TreeRow {

@@ -174,30 +174,28 @@ fn score_add_split(m: &SplitMeasurement, s: &mut SplitScore) {
 
     s.effective_indent += indent;
 
-    if indent == -1 {
-        // no-op
-    } else if m.pre_indent == -1 {
-        // no-op
-    } else if indent > m.pre_indent {
-        s.penalty += if any_blanks {
-            RELATIVE_INDENT_WITH_BLANK_PENALTY
-        } else {
-            RELATIVE_INDENT_PENALTY
-        };
-    } else if indent == m.pre_indent {
-        // no-op
-    } else if m.post_indent != -1 && m.post_indent > indent {
-        s.penalty += if any_blanks {
-            RELATIVE_OUTDENT_WITH_BLANK_PENALTY
-        } else {
-            RELATIVE_OUTDENT_PENALTY
-        };
-    } else {
-        s.penalty += if any_blanks {
-            RELATIVE_DEDENT_WITH_BLANK_PENALTY
-        } else {
-            RELATIVE_DEDENT_PENALTY
-        };
+    if indent != -1 && m.pre_indent != -1 {
+        if indent > m.pre_indent {
+            s.penalty += if any_blanks {
+                RELATIVE_INDENT_WITH_BLANK_PENALTY
+            } else {
+                RELATIVE_INDENT_PENALTY
+            };
+        } else if indent != m.pre_indent {
+            if m.post_indent != -1 && m.post_indent > indent {
+                s.penalty += if any_blanks {
+                    RELATIVE_OUTDENT_WITH_BLANK_PENALTY
+                } else {
+                    RELATIVE_OUTDENT_PENALTY
+                };
+            } else {
+                s.penalty += if any_blanks {
+                    RELATIVE_DEDENT_WITH_BLANK_PENALTY
+                } else {
+                    RELATIVE_DEDENT_PENALTY
+                };
+            }
+        }
     }
 }
 

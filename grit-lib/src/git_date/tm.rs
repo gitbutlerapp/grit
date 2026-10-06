@@ -81,6 +81,10 @@ pub fn time_to_tm(time: u64, tz: TzHhmm, out: &mut tm) -> bool {
 }
 
 /// `time_to_tm_local` — `localtime_r` for the current `TZ` environment.
+///
+/// # Safety
+///
+/// `out` must point to a valid, writable `tm` for the duration of the call.
 pub unsafe fn time_to_tm_local(time: u64, out: *mut tm) -> Option<*mut tm> {
     let tt = time as time_t;
     let p = compat::localtime_r(&tt, out);
@@ -92,6 +96,10 @@ pub unsafe fn time_to_tm_local(time: u64, out: *mut tm) -> Option<*mut tm> {
 }
 
 /// Git's `local_time_tzoffset` — offset for `t` in the **local** zone, as HHMM encoding.
+///
+/// # Safety
+///
+/// `tm_out` must point to a valid, writable `tm` for the duration of the call.
 pub unsafe fn local_time_tzoffset(t: time_t, tm_out: *mut tm) -> TzHhmm {
     let p = compat::localtime_r(&t, tm_out);
     if p.is_null() {

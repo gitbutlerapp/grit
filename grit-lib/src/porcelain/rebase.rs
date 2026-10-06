@@ -199,8 +199,8 @@ pub fn message_body_after_subject(message: &str) -> &str {
 pub fn skip_blank_lines(mut message: &str) -> &str {
     loop {
         let trimmed = message.trim_start_matches([' ', '\t']);
-        if trimmed.starts_with('\n') {
-            message = &trimmed[1..];
+        if let Some(rest) = trimmed.strip_prefix('\n') {
+            message = rest;
             continue;
         }
         return message;

@@ -71,8 +71,7 @@ fn is_hfs_dot_generic(path: &str, needle: &str) -> bool {
         }
     }
     match next_hfs_char(&mut chars) {
-        None => true,
-        Some(ch) if ch == '/' => true,
+        None | Some('/') => true,
         Some(_) => false,
     }
 }
@@ -133,9 +132,7 @@ fn is_ntfs_dot_generic(name: &str, dotgit_name: &str, short_prefix: &str) -> boo
                 return false;
             }
             saw_tilde = true;
-        } else if i >= 6 {
-            return false;
-        } else if c & 0x80 != 0 {
+        } else if i >= 6 || c & 0x80 != 0 {
             return false;
         } else {
             let sc = short_prefix.as_bytes().get(i).copied().unwrap_or(0);

@@ -553,8 +553,8 @@ pub fn head_ref_short_name(git_dir: &Path) -> Result<String> {
 }
 
 fn refspec_is_pushable_for_validation(spec: &str) -> bool {
-    if spec.starts_with('+') {
-        return refspec_is_pushable_for_validation(&spec[1..]);
+    if let Some(rest) = spec.strip_prefix('+') {
+        return refspec_is_pushable_for_validation(rest);
     }
     if spec == ":" || spec == "+:" {
         return false;

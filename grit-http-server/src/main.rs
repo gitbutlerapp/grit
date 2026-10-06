@@ -107,7 +107,7 @@ impl AppState {
 impl AppState {
     /// `Ok(())` when the request is authorized (or auth is not required); `Err`
     /// is a ready-to-return `401` challenge response otherwise.
-    fn check_auth(&self, headers: &HeaderMap) -> Result<(), Response> {
+    fn check_auth(&self, headers: &HeaderMap) -> Result<(), Box<Response>> {
         let Some(expected) = &self.expected_auth else {
             return Ok(());
         };
@@ -117,7 +117,7 @@ impl AppState {
         if presented == Some(expected.as_str()) {
             return Ok(());
         }
-        Err(unauthorized())
+        Err(Box::new(unauthorized()))
     }
 }
 
@@ -141,14 +141,16 @@ fn expected_basic_auth(user_pass: &str) -> String {
 }
 
 impl AppState {
-    fn repo_path(&self, repo: &str) -> Result<PathBuf, Response> {
+    fn repo_path(&self, repo: &str) -> Result<PathBuf, Box<Response>> {
         // Sanitize: reject path traversal
         if repo.contains("..") {
-            return Err((StatusCode::BAD_REQUEST, "invalid repository path").into_response());
+            return Err(Box::new(
+                (StatusCode::BAD_REQUEST, "invalid repository path").into_response(),
+            ));
         }
         let path = self.root.join(repo);
         grit_protocol::validate_repo_path(&path)
-            .map_err(|_| (StatusCode::NOT_FOUND, "repository not found").into_response())
+            .map_err(|_| Box::new((StatusCode::NOT_FOUND, "repository not found").into_response()))
     }
 }
 
@@ -206,7 +208,7 @@ async fn info_refs(
 
     let repo_path = match state.repo_path(&repo) {
         Ok(p) => p,
-        Err(e) => return e,
+        Err(e) => return *e,
     };
 
     // Protocol v2 is requested via the `Git-Protocol: version=2` header; absent
@@ -252,7 +254,7 @@ async fn upload_pack_rpc(
 ) -> Response {
     let repo_path = match state.repo_path(&repo) {
         Ok(p) => p,
-        Err(e) => return e,
+        Err(e) => return *e,
     };
 
     match grit_protocol::upload_pack::stateless_rpc(&repo_path, &body, protocol_version) {
@@ -276,7 +278,7 @@ async fn receive_pack_rpc(
 ) -> Response {
     let repo_path = match state.repo_path(&repo) {
         Ok(p) => p,
-        Err(e) => return e,
+        Err(e) => return *e,
     };
 
     match grit_protocol::receive_pack::stateless_rpc(&repo_path, &body) {
@@ -342,7 +344,7 @@ async fn info_refs_dispatch(
             return (StatusCode::BAD_REQUEST, "missing repository").into_response();
         }
         if let Err(resp) = state.check_auth(&headers) {
-            return resp;
+            return *resp;
         }
         let protocol_version = protocol_version_from_headers(&headers);
         info_refs(state, Path(repo.to_string()), query, protocol_version).await
@@ -360,7 +362,7 @@ async fn rpc_dispatch(
 ) -> Response {
     state.log_request_headers(&headers);
     if let Err(resp) = state.check_auth(&headers) {
-        return resp;
+        return *resp;
     }
     if let Some(repo) = full_path.strip_suffix("/git-upload-pack") {
         if repo.is_empty() {

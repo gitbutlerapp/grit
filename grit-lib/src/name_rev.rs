@@ -192,6 +192,7 @@ fn get_parent_name(current: &RevName, parent_number: u32) -> String {
 /// Walk backwards from `start_oid`, assigning names to all reachable ancestors.
 ///
 /// Uses an explicit stack to avoid deep recursion on long histories.
+#[expect(clippy::too_many_arguments)]
 fn name_from_tip(
     repo: &Repository,
     names: &mut HashMap<ObjectId, RevName>,

@@ -236,7 +236,7 @@ pub fn load_delta_islands(
     let mut islands: Vec<RemoteIsland> = by_name.into_values().collect();
     // Stable order for determinism (Git's order is hash-map iteration; result is the same
     // because dedup only drops exact-hash duplicates and marking is order-independent).
-    islands.sort_by(|a, b| a.hash.cmp(&b.hash));
+    islands.sort_by_key(|a| a.hash);
     let mut deduped: Vec<RemoteIsland> = Vec::new();
     for isl in islands {
         if deduped.iter().any(|d| d.hash == isl.hash) {

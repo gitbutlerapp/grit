@@ -538,9 +538,9 @@ fn submodule_blob_spec(
 }
 
 fn find_commit_containing_tree(repo: &Repository, tree_oid: ObjectId) -> Result<ObjectId, ()> {
-    let mut stack = vec![format!("HEAD^{{commit}}")];
+    let mut stack = vec!["HEAD^{commit}".to_owned()];
     for name in ["HEAD", "refs/heads/master", "refs/heads/main"] {
-        stack.push(name.to_string());
+        stack.push(name.into());
     }
     for spec in stack {
         let Ok(oid) = resolve_revision(repo, spec.as_str()) else {

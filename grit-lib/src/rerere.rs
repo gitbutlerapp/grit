@@ -153,10 +153,8 @@ fn is_cmarker(line: &str, marker_char: u8, marker_size: usize) -> bool {
     if b.len() < marker_size {
         return false;
     }
-    for i in 0..marker_size {
-        if b[i] != marker_char {
-            return false;
-        }
+    if !b[..marker_size].iter().all(|&byte| byte == marker_char) {
+        return false;
     }
     let want_sp = marker_char == b'<' || marker_char == b'>';
     if want_sp {

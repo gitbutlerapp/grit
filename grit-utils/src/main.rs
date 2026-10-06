@@ -248,7 +248,7 @@ fn create_repo(git: &Path, file_count: usize) -> Result<PathBuf> {
 
     // Spread files across subdirectories (100 files per dir)
     let files_per_dir = 100;
-    let num_dirs = (file_count + files_per_dir - 1) / files_per_dir;
+    let num_dirs = file_count.div_ceil(files_per_dir);
     let mut created = 0;
 
     for d in 0..num_dirs {
@@ -574,7 +574,7 @@ fn render_html(report: &Report) -> String {
 "#,
     );
 
-    h.push_str(&format!("<h1>grit-bench</h1>\n"));
+    h.push_str("<h1>grit-bench</h1>\n");
     h.push_str(&format!(
         "<p class=\"meta\">{} vs {} &mdash; {}</p>\n",
         html_escape(&report.grit_version),
