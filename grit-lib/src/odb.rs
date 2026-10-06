@@ -1802,7 +1802,6 @@ mod tests {
             "pack/alternate write path must call exists() exactly once"
         );
     }
-
     #[test]
     fn write_existing_object_freshens() {
         use filetime::FileTime;
@@ -2049,5 +2048,27 @@ mod tests {
 
         odb.write(ObjectKind::Blob, payload).unwrap();
         assert!(odb.object_path(&oid).exists());
+    }
+    #[test]
+    fn write_with_options_silent_skips_freshen_on_existing_loose_object() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let oid = odb.write(ObjectKind::Blob, b"stable").unwrap();
+        let path = odb.object_path(&oid);
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let again = odb
+            .write_with_options(ObjectKind::Blob, b"stable", WriteOptions { silent: true })
+            .unwrap();
+        assert_eq!(oid, again);
+        let after = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(before, after);
+
+        let touched = odb
+            .write_with_options(ObjectKind::Blob, b"stable", WriteOptions { silent: false })
+            .unwrap();
+        assert_eq!(oid, touched);
+        let freshened = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(freshened >= before);
     }
 }
