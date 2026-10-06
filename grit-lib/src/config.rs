@@ -1737,6 +1737,72 @@ impl ConfigSet {
         self.get(key).map(|v| parse_i64(&v))
     }
 
+    /// Parse `core.compression` / `core.looseCompression` style zlib level integers.
+    ///
+    /// `-1` selects zlib's default (level 6). Valid values are `-1` or `0..=9`; anything else
+    /// is a configuration error.
+    fn parse_zlib_compression_level(raw: &str) -> Result<i32> {
+        const Z_DEFAULT_COMPRESSION: i32 = 6;
+        const Z_BEST_COMPRESSION: i32 = 9;
+
+        let v = parse_git_config_int_strict(raw.trim()).map_err(|_| {
+            Error::ConfigError(format!("bad numeric config value '{raw}' for compression"))
+        })?;
+        if v == -1 {
+            return Ok(Z_DEFAULT_COMPRESSION);
+        }
+        if v < 0 || v > i64::from(Z_BEST_COMPRESSION) {
+            return Err(Error::ConfigError(format!(
+                "bad zlib compression level {v}"
+            )));
+        }
+        Ok(v as i32)
+    }
+
+    /// Zlib deflate level for loose objects (Git's `zlib_compression_level`).
+    ///
+    /// Walks [`Self::entries`] in load order. Every `core.compression` and `core.looseCompression`
+    /// entry is parsed and validated (including shadowed or overridden values); bare keys and
+    /// invalid numbers return [`Error::ConfigError`]. `core.compression` sets the loose level until
+    /// the first valid `core.looseCompression` is seen; later `core.compression` entries are still
+    /// validated but ignored for the loose level. When neither key appears, returns
+    /// [`Self::LOOSE_OBJECTS_ZLIB_DEFAULT`] (`Z_BEST_SPEED`, level 1).
+    ///
+    /// `-1` means zlib default (level 6). Valid values are `-1` or `0..=9`.
+    pub fn loose_objects_zlib_level(&self) -> Result<i32> {
+        let mut loose_level = Self::LOOSE_OBJECTS_ZLIB_DEFAULT;
+        let mut loose_compression_seen = false;
+
+        for e in self.entries() {
+            match e.key.as_str() {
+                "core.compression" => {
+                    let val = e.value.as_deref().ok_or_else(|| {
+                        Error::ConfigError("bad numeric config value '' for compression".to_owned())
+                    })?;
+                    let level = Self::parse_zlib_compression_level(val)?;
+                    if !loose_compression_seen {
+                        loose_level = level;
+                    }
+                }
+                "core.loosecompression" => {
+                    let val = e.value.as_deref().ok_or_else(|| {
+                        Error::ConfigError("bad numeric config value '' for compression".to_owned())
+                    })?;
+                    let level = Self::parse_zlib_compression_level(val)?;
+                    loose_level = level;
+                    loose_compression_seen = true;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(loose_level)
+    }
+
+    /// Git's default zlib level for loose objects when neither `core.looseCompression` nor
+    /// `core.compression` is set (`Z_BEST_SPEED`).
+    pub const LOOSE_OBJECTS_ZLIB_DEFAULT: i32 = 1;
+
     /// Zlib deflate level for `git pack-objects` (Git's `pack_compression_level`).
     ///
     /// Entries are applied in [`Self::entries`] order. `core.compression` sets the pack level
@@ -1746,22 +1812,9 @@ impl ConfigSet {
     /// `-1` means zlib default (level 6). Valid values are `-1` or `0..=9`.
     pub fn pack_objects_zlib_level(&self) -> Result<i32> {
         const Z_DEFAULT_COMPRESSION: i32 = 6;
-        const Z_BEST_COMPRESSION: i32 = 9;
 
-        let parse_compression = |raw: &str| -> Result<i32> {
-            let v = parse_git_config_int_strict(raw.trim()).map_err(|_| {
-                Error::ConfigError(format!("bad numeric config value '{raw}' for compression"))
-            })?;
-            if v == -1 {
-                return Ok(Z_DEFAULT_COMPRESSION);
-            }
-            if v < 0 || v > i64::from(Z_BEST_COMPRESSION) {
-                return Err(Error::ConfigError(format!(
-                    "bad zlib compression level {v}"
-                )));
-            }
-            Ok(v as i32)
-        };
+        let parse_compression =
+            |raw: &str| -> Result<i32> { Self::parse_zlib_compression_level(raw) };
 
         // `core.loosecompression` affects loose objects only (Git `zlib_compression_level`), not pack.
         let mut pack_level = Z_DEFAULT_COMPRESSION;
@@ -3891,6 +3944,86 @@ mod get_regexp_tests {
         let set = set_from_snippet("[user]\n\tname = x\n");
         let err = set.get_regexp("(").expect_err("unclosed group");
         assert!(err.contains("invalid key pattern"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod loose_compression_tests {
+    use std::path::Path;
+
+    use super::{ConfigFile, ConfigScope, ConfigSet, Error};
+
+    fn set_from_snippet(text: &str) -> ConfigSet {
+        let path = Path::new(".git/config");
+        let file = ConfigFile::parse(path, text, ConfigScope::Local).expect("parse config snippet");
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn loose_compression_cascade() {
+        let set = ConfigSet::new();
+        assert_eq!(
+            set.loose_objects_zlib_level().unwrap(),
+            ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT
+        );
+
+        let set = set_from_snippet("[core]\n\tcompression = 0\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 0);
+
+        let set = set_from_snippet("[core]\n\tcompression = 9\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 9);
+
+        let set = set_from_snippet("[core]\n\tcompression = 0\n\tloosecompression = 9\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 9);
+
+        let set = set_from_snippet("[core]\n\tloosecompression = 3\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 3);
+
+        let set = set_from_snippet("[core]\n\tcompression = -1\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 6);
+
+        for level in 0..=9 {
+            let set = set_from_snippet(&format!("[core]\n\tloosecompression = {level}\n"));
+            assert_eq!(set.loose_objects_zlib_level().unwrap(), level);
+        }
+
+        let set = set_from_snippet("[core]\n\tloosecompression = -1\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 6);
+
+        let err = set_from_snippet("[core]\n\tloosecompression = 10\n")
+            .loose_objects_zlib_level()
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigError(_)));
+
+        let err = set_from_snippet("[core]\n\tloosecompression = not-a-number\n")
+            .loose_objects_zlib_level()
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigError(_)));
+
+        let err = set_from_snippet("[core]\n\tcompression = 42\n")
+            .loose_objects_zlib_level()
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigError(_)));
+
+        let err = set_from_snippet("[core]\n\tcompression = nope\n\tloosecompression = 1\n")
+            .loose_objects_zlib_level()
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigError(_)));
+
+        let err = set_from_snippet("[core]\n\tloosecompression = nope\n\tloosecompression = 1\n")
+            .loose_objects_zlib_level()
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigError(_)));
+
+        let set = set_from_snippet("[core]\n\tloosecompression = 1\n\tcompression = 9\n");
+        assert_eq!(set.loose_objects_zlib_level().unwrap(), 1);
+
+        let err = set_from_snippet("[core]\n\tloosecompression\n")
+            .loose_objects_zlib_level()
+            .unwrap_err();
+        assert!(matches!(err, Error::ConfigError(_)));
     }
 }
 

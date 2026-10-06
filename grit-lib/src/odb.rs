@@ -108,6 +108,8 @@ pub struct Odb {
     /// detected lazily from the config and cached. Determines the hash used
     /// when writing objects. Defaults to SHA-1 when no config is available.
     hash_algo_cache: Arc<OnceLock<HashAlgo>>,
+    /// Zlib level for loose-object writes, resolved from config and cached.
+    loose_zlib_cache: Arc<OnceLock<Compression>>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -136,6 +138,7 @@ impl Odb {
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
+            loose_zlib_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -150,6 +153,7 @@ impl Odb {
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
+            loose_zlib_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -259,6 +263,34 @@ impl Odb {
                 .and_then(|v| HashAlgo::from_name(&v))
                 .unwrap_or(HashAlgo::Sha1)
         })
+    }
+
+    fn resolve_loose_zlib_level(&self) -> Result<u32> {
+        let git_dir = self
+            .config_git_dir
+            .clone()
+            .or_else(|| self.objects_dir.parent().map(Path::to_path_buf));
+        let Some(git_dir) = git_dir else {
+            return Ok(ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT as u32);
+        };
+        let cfg = ConfigSet::load(Some(&git_dir), true)?;
+        Ok(cfg.loose_objects_zlib_level()? as u32)
+    }
+
+    /// Zlib compression used for loose-object writes ([`ConfigSet::loose_objects_zlib_level`]),
+    /// cached for the lifetime of this `Odb`.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from loading the config cascade or from invalid compression settings.
+    fn loose_compression(&self) -> Result<Compression> {
+        if let Some(cached) = self.loose_zlib_cache.get() {
+            return Ok(*cached);
+        }
+        let level = self.resolve_loose_zlib_level()?;
+        let compression = Compression::new(level);
+        let _ = self.loose_zlib_cache.set(compression);
+        Ok(compression)
     }
 
     fn core_multi_pack_index_enabled(&self) -> bool {
@@ -623,11 +655,12 @@ impl Odb {
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         fs::create_dir_all(prefix_dir)?;
 
+        let compression = self.loose_compression()?;
         // Write to a temp file in the same directory, then rename atomically.
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, compression);
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -677,10 +710,11 @@ impl Odb {
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         fs::create_dir_all(prefix_dir)?;
 
+        let compression = self.loose_compression()?;
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, compression);
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -716,10 +750,11 @@ impl Odb {
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         fs::create_dir_all(prefix_dir)?;
 
+        let compression = self.loose_compression()?;
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, compression);
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -764,10 +799,11 @@ impl Odb {
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         fs::create_dir_all(prefix_dir)?;
 
+        let compression = self.loose_compression()?;
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, compression);
             encoder
                 .write_all(store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -809,10 +845,11 @@ impl Odb {
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         fs::create_dir_all(prefix_dir)?;
 
+        let compression = self.loose_compression()?;
         let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
         {
             let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, Compression::default());
+            let mut encoder = ZlibEncoder::new(tmp_file, compression);
             encoder
                 .write_all(store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -1136,5 +1173,84 @@ mod tests {
         //        => b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0
         let oid = Odb::hash_object_data(ObjectKind::Blob, b"hello");
         assert_eq!(oid.to_hex(), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
+    }
+
+    fn git_dir_with_config(config: &str) -> (TempDir, PathBuf, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let git_dir = dir.path().join(".git");
+        let objects = git_dir.join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        fs::write(git_dir.join("config"), config).unwrap();
+        (dir, git_dir, objects)
+    }
+
+    /// Zlib FLEVEL flag (upper two bits of the second header byte).
+    fn zlib_flevel(compressed: &[u8]) -> u8 {
+        assert!(compressed.len() >= 2);
+        (compressed[1] >> 6) & 3
+    }
+
+    fn tmp_loose_object_paths(objects: &Path) -> Vec<PathBuf> {
+        let mut tmp = Vec::new();
+        let Ok(shards) = fs::read_dir(objects) else {
+            return tmp;
+        };
+        for shard in shards.flatten() {
+            if !shard.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let Ok(files) = fs::read_dir(shard.path()) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let name = file.file_name();
+                if name.to_string_lossy().starts_with("tmp_") {
+                    tmp.push(file.path());
+                }
+            }
+        }
+        tmp
+    }
+
+    #[test]
+    fn loose_write_honours_level() {
+        let payload: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+
+        let (_dir, git_dir, objects) = git_dir_with_config("");
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+        let oid_default = odb.write(ObjectKind::Blob, &payload).unwrap();
+        let bytes_default = fs::read(odb.object_path(&oid_default)).unwrap();
+        assert!(zlib_flevel(&bytes_default) <= 1);
+        assert_eq!(odb.read(&oid_default).unwrap().data, payload);
+
+        for level in -1i32..=9 {
+            let config = format!("[core]\n\tloosecompression = {level}\n");
+            let (_dir, git_dir, objects) = git_dir_with_config(&config);
+            let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+            let byte = u8::try_from(level.rem_euclid(256)).unwrap_or(0);
+            let bytes: Vec<u8> = vec![byte; 512];
+            let oid = odb.write(ObjectKind::Blob, &bytes).unwrap();
+            let on_disk = fs::read(odb.object_path(&oid)).unwrap();
+            assert!(on_disk.len() >= 2, "level {level}");
+            assert_eq!(odb.read(&oid).unwrap().data, bytes.as_slice());
+        }
+
+        let config = "[core]\n\tcompression = 9\n";
+        let (_dir, git_dir, objects) = git_dir_with_config(config);
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        let oid = odb.write(ObjectKind::Blob, &payload).unwrap();
+        assert_eq!(zlib_flevel(&fs::read(odb.object_path(&oid)).unwrap()), 3);
+
+        let config = "[core]\n\tcompression = 0\n\tloosecompression = 1\n";
+        let (_dir, git_dir, objects) = git_dir_with_config(config);
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        let oid = odb.write(ObjectKind::Blob, &payload).unwrap();
+        assert_eq!(zlib_flevel(&fs::read(odb.object_path(&oid)).unwrap()), 0);
+
+        let config = "[core]\n\tloosecompression = 99\n";
+        let (_dir, git_dir, objects) = git_dir_with_config(config);
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        assert!(odb.write(ObjectKind::Blob, b"x").is_err());
+        assert!(tmp_loose_object_paths(&objects).is_empty());
     }
 }
