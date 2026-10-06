@@ -401,7 +401,7 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
                 "fatal: push.default simple: upstream and push ref differ".to_owned(),
             ))
         }
-        "current" | "matching" | _ => {
+        _ => {
             if refs::resolve_ref(&repo.git_dir, &current_tracking).is_ok() {
                 Ok(current_tracking)
             } else if let Some(up) = upstream_tracking {
@@ -1177,6 +1177,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
     (count, first)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn resolve_revision_impl(
     repo: &Repository,
     spec: &str,
@@ -2118,6 +2119,7 @@ fn try_resolve_describe_name(repo: &Repository, spec: &str) -> Result<Option<Obj
     }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn resolve_base(
     repo: &Repository,
     spec: &str,
@@ -2125,8 +2127,8 @@ fn resolve_base(
     commit_only_hex: bool,
     use_disambiguate_config: bool,
     peel_for_disambig: Option<&str>,
-    implicit_tree_abbrev: bool,
-    implicit_blob_abbrev: bool,
+    #[expect(clippy::only_used_in_recursion)] implicit_tree_abbrev: bool,
+    #[expect(clippy::only_used_in_recursion)] implicit_blob_abbrev: bool,
     remote_branch_name_guess: bool,
 ) -> Result<ObjectId> {
     // Standalone `@` is an alias for `HEAD` in revision parsing.
@@ -2175,12 +2177,12 @@ fn resolve_base(
     }
 
     // `@{-N}` must run before reflog parsing so `@{-1}@{1}` is not misread as `@{-1}` + `@{1}`.
-    if spec.starts_with("@{-") {
-        if let Some(close) = spec[3..].find('}') {
-            let n_str = &spec[3..3 + close];
+    if let Some(after_open) = spec.strip_prefix("@{-") {
+        if let Some(close) = after_open.find('}') {
+            let n_str = &after_open[..close];
             if let Ok(n) = n_str.parse::<usize>() {
                 if n >= 1 {
-                    let suffix = &spec[3 + close + 1..];
+                    let suffix = &after_open[close + 1..];
                     if suffix.is_empty() {
                         if let Some(oid) = try_resolve_at_minus(repo, spec)? {
                             return Ok(oid);
@@ -2992,9 +2994,7 @@ fn approxidate(s: &str) -> Option<i64> {
         // Try to parse "N unit ago" or just "N unit". Both are past-relative: git's
         // approxidate treats a bare "N unit" the same as "N unit ago" (it parses times for
         // --since/--until), so the result is always `now - N*unit`.
-        let (n_str, unit) = if parts.len() >= 3 && parts[2] == "ago" {
-            (parts[0], parts[1])
-        } else if parts.len() == 2 {
+        let (n_str, unit) = if (parts.len() >= 3 && parts[2] == "ago") || parts.len() == 2 {
             (parts[0], parts[1])
         } else {
             ("", "")
@@ -3746,11 +3746,11 @@ fn resolve_commit_message_search(
     pattern: &str,
 ) -> Result<ObjectId> {
     // Handle negated pattern: /! means negate; /!! means literal /!
-    let (negate, effective_pattern) = if pattern.starts_with('!') {
-        if pattern.starts_with("!!") {
-            (false, &pattern[1..]) // !! = literal !
+    let (negate, effective_pattern) = if let Some(rest) = pattern.strip_prefix('!') {
+        if rest.starts_with('!') {
+            (false, rest) // !! = literal leading !
         } else {
-            (true, &pattern[1..]) // ! = negate
+            (true, rest) // ! = negate
         }
     } else {
         (false, pattern)
