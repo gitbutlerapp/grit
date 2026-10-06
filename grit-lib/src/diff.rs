@@ -1501,15 +1501,29 @@ fn diff_trees_opts(
 }
 
 #[cfg(test)]
+use std::cell::RefCell;
+#[cfg(test)]
+use std::rc::Rc;
+#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(test)]
-static DIFF_TREE_READ_COUNT: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static DIFF_TREE_READ_HOOK: RefCell<Option<Rc<AtomicUsize>>> = const { RefCell::new(None) };
+}
+
+/// Install a per-thread tree read counter for unit tests (cleared when `hook` is `None`).
+#[cfg(test)]
+pub(crate) fn set_diff_tree_read_hook_for_tests(hook: Option<Rc<AtomicUsize>>) {
+    DIFF_TREE_READ_HOOK.with(|cell| *cell.borrow_mut() = hook);
+}
 
 /// Read and parse a tree object from the ODB.
 fn read_tree(odb: &Odb, oid: &ObjectId) -> Result<Vec<TreeEntry>> {
     #[cfg(test)]
-    DIFF_TREE_READ_COUNT.fetch_add(1, Ordering::Relaxed);
+    if let Some(counter) = DIFF_TREE_READ_HOOK.with(|cell| cell.borrow().clone()) {
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
     let obj = odb.read(oid)?;
     if obj.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
@@ -1735,34 +1749,49 @@ pub fn diff_index_to_tree(
     tree_oid: Option<&ObjectId>,
     ignore_submodules: bool,
 ) -> Result<Vec<DiffEntry>> {
-    if index_cache_tree_diff_fast_ok(index, tree_oid) {
-        diff_index_to_tree_with_cache_tree(
-            odb,
-            index,
-            tree_oid.expect("checked Some above"),
-            index.cache_tree.as_ref().expect("checked Some above"),
-            ignore_submodules,
-        )
-    } else {
-        diff_index_to_tree_flatten(odb, index, tree_oid, ignore_submodules)
+    match index_cache_tree_walk(index, tree_oid) {
+        CacheTreeWalk::Fast {
+            head_tree,
+            cache_root,
+        } => {
+            diff_index_to_tree_with_cache_tree(odb, index, head_tree, cache_root, ignore_submodules)
+        }
+        CacheTreeWalk::Flatten => {
+            diff_index_to_tree_flatten(odb, index, tree_oid, ignore_submodules)
+        }
     }
 }
 
-/// Whether the index cache-tree is safe to use for [`diff_index_to_tree`].
-fn index_cache_tree_diff_fast_ok(index: &Index, tree_oid: Option<&ObjectId>) -> bool {
+enum CacheTreeWalk<'a> {
+    Fast {
+        head_tree: &'a ObjectId,
+        cache_root: &'a CacheTreeNode,
+    },
+    Flatten,
+}
+
+/// Whether the index may use the cache-tree walker (possibly with an invalid root and valid
+/// descendant nodes after partial invalidation).
+fn index_cache_tree_walk<'a>(
+    index: &'a Index,
+    tree_oid: Option<&'a ObjectId>,
+) -> CacheTreeWalk<'a> {
     let Some(head_tree) = tree_oid else {
-        return false;
+        return CacheTreeWalk::Flatten;
     };
     let Some(cache_root) = index.cache_tree.as_ref() else {
-        return false;
+        return CacheTreeWalk::Flatten;
     };
     if index.entries.iter().any(|e| e.stage() != 0) {
-        return false;
+        return CacheTreeWalk::Flatten;
     }
-    if index.cache_tree_root.as_ref() != Some(head_tree) || !cache_root.is_valid() {
-        return false;
+    if crate::write_tree::verify_cache_tree(index).is_err() {
+        return CacheTreeWalk::Flatten;
     }
-    crate::write_tree::verify_cache_tree(index).is_ok()
+    CacheTreeWalk::Fast {
+        head_tree,
+        cache_root,
+    }
 }
 
 /// Flatten-tree index-vs-tree diff (used when the index has no cache-tree extension).
@@ -1929,8 +1958,12 @@ fn diff_index_to_tree_with_cache_tree(
         ignore_submodules,
         result: &mut result,
         stage0_paths: &mut stage0_paths,
+        abort_to_flatten: false,
     };
     diff_index_tree_at(&mut walk, head_tree, Some(cache_root), "")?;
+    if walk.abort_to_flatten {
+        return diff_index_to_tree_flatten(odb, index, Some(head_tree), ignore_submodules);
+    }
 
     // Index entries not consumed by the tree walk (added paths).
     while idx_cursor < index.entries.len() {
@@ -2101,6 +2134,18 @@ struct DiffIndexTreeWalk<'a, 'b> {
     ignore_submodules: bool,
     result: &'b mut Vec<DiffEntry>,
     stage0_paths: &'b mut std::collections::BTreeSet<String>,
+    /// Set when a tree object has duplicate entry names; the caller falls back to flatten.
+    abort_to_flatten: bool,
+}
+
+fn tree_entries_have_duplicate_names(entries: &[TreeEntry]) -> bool {
+    let mut seen = std::collections::BTreeSet::<&[u8]>::new();
+    for entry in entries {
+        if !seen.insert(entry.name.as_slice()) {
+            return true;
+        }
+    }
+    false
 }
 
 fn diff_index_tree_at(
@@ -2110,6 +2155,10 @@ fn diff_index_tree_at(
     dir_prefix: &str,
 ) -> Result<()> {
     let tree_entries = read_tree(walk.odb, tree_oid)?;
+    if tree_entries_have_duplicate_names(&tree_entries) {
+        walk.abort_to_flatten = true;
+        return Ok(());
+    }
     let mut ti = 0usize;
 
     while ti < tree_entries.len()
@@ -6835,11 +6884,46 @@ fn orderfile_glob_match(pattern: &str, text: &str) -> bool {
 
 #[cfg(test)]
 mod diff_index_to_tree_cache_tree_tests {
+    use std::rc::Rc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use crate::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
     use crate::objects::ObjectKind;
     use crate::write_tree::{build_cache_tree_from_index, write_tree_from_index};
     use tempfile::TempDir;
+
+    struct TreeReadCounter {
+        counter: Rc<AtomicUsize>,
+    }
+
+    impl TreeReadCounter {
+        fn start() -> Self {
+            let counter = Rc::new(AtomicUsize::new(0));
+            set_diff_tree_read_hook_for_tests(Some(counter.clone()));
+            Self { counter }
+        }
+
+        fn get(&self) -> usize {
+            self.counter.load(Ordering::Relaxed)
+        }
+    }
+
+    impl Drop for TreeReadCounter {
+        fn drop(&mut self) {
+            set_diff_tree_read_hook_for_tests(None);
+        }
+    }
+
+    fn diff_index_to_tree_flatten_reference(
+        odb: &Odb,
+        index: &Index,
+        head_tree: &ObjectId,
+    ) -> Result<Vec<DiffEntry>> {
+        let mut flat_index = index.clone();
+        flat_index.clear_cache_tree();
+        diff_index_to_tree(odb, &flat_index, Some(head_tree), false)
+    }
 
     fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
         IndexEntry {
@@ -6883,42 +6967,50 @@ mod diff_index_to_tree_cache_tree_tests {
 
     #[test]
     fn diff_index_to_tree_cache_tree_fast_path_matches_slow() {
-        let (_temp, odb, head_tree, mut index) = repo_with_tree(3, 4);
-        index.invalidate_cache_tree_for_path(b"unchanged/d1/f2.txt");
-        let mut other = index.clone();
-        other.clear_cache_tree();
+        let (_temp, odb, head_tree, mut index) = repo_with_tree(4, 5);
+        assert!(index.cache_tree.as_ref().is_some_and(|c| c.is_valid()));
 
-        let fast = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("fast");
-        let slow = diff_index_to_tree(&odb, &other, Some(&head_tree), false).expect("slow");
-        assert_eq!(fast, slow);
-
-        // Touch a random subset of paths and compare again.
-        for path in ["unchanged/d0/f1.txt", "unchanged/d2/f3.txt"] {
+        let mut state: u64 = 0xDEAD_BEEF;
+        for _ in 0..24 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let d = (state % 4) as usize;
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let w = (state % 5) as usize;
+            let path = format!("unchanged/d{d}/f{w}.txt");
             index.invalidate_cache_tree_for_path(path.as_bytes());
+            assert!(
+                index.cache_tree_root.is_none(),
+                "partial invalidation clears cache_tree_root like Index::add"
+            );
+            assert!(
+                index.cache_tree.as_ref().is_some_and(|r| !r.is_valid()),
+                "root cache node must be invalid after partial invalidation"
+            );
             if let Some(e) = index.get_mut(path.as_bytes(), 0) {
-                let new_oid = odb.write(ObjectKind::Blob, b"new").expect("blob");
+                let new_oid = odb
+                    .write(ObjectKind::Blob, format!("new-{d}-{w}").as_bytes())
+                    .expect("blob");
                 e.oid = new_oid;
             }
+            let fast = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("fast");
+            let flat =
+                diff_index_to_tree_flatten_reference(&odb, &index, &head_tree).expect("flat");
+            assert_eq!(fast, flat, "mismatch after mutating {path}");
         }
-        let mut other2 = index.clone();
-        other2.clear_cache_tree();
-        let fast = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("fast");
-        let slow = diff_index_to_tree(&odb, &other2, Some(&head_tree), false).expect("slow");
-        assert_eq!(fast, slow);
     }
 
     #[test]
     fn diff_index_to_tree_skips_unchanged_subtrees() {
         let (_temp, odb, head_tree, index) = repo_with_tree(5, 6);
-        DIFF_TREE_READ_COUNT.store(0, Ordering::Relaxed);
+        let reads = TreeReadCounter::start();
         diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("cached diff");
-        let cached_reads = DIFF_TREE_READ_COUNT.load(Ordering::Relaxed);
+        let cached_reads = reads.get();
 
         let mut no_cache = index.clone();
         no_cache.clear_cache_tree();
-        DIFF_TREE_READ_COUNT.store(0, Ordering::Relaxed);
+        let reads = TreeReadCounter::start();
         diff_index_to_tree(&odb, &no_cache, Some(&head_tree), false).expect("flat diff");
-        let flat_reads = DIFF_TREE_READ_COUNT.load(Ordering::Relaxed);
+        let flat_reads = reads.get();
 
         assert!(
             cached_reads < flat_reads,
@@ -6927,6 +7019,30 @@ mod diff_index_to_tree_cache_tree_tests {
         assert_eq!(
             cached_reads, 1,
             "unchanged repo should only read the root tree"
+        );
+    }
+
+    #[test]
+    fn diff_index_to_tree_partial_invalidation_skips_sibling_subtree() {
+        let (_temp, odb, head_tree, mut index) = repo_with_tree(5, 6);
+        let path = "unchanged/d1/f2.txt";
+        index.invalidate_cache_tree_for_path(path.as_bytes());
+        let new_oid = odb.write(ObjectKind::Blob, b"changed").expect("blob");
+        index.get_mut(path.as_bytes(), 0).expect("entry").oid = new_oid;
+
+        let flat = diff_index_to_tree_flatten_reference(&odb, &index, &head_tree).expect("flat");
+        let reads = TreeReadCounter::start();
+        let fast = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("fast");
+        let cached_reads = reads.get();
+        assert_eq!(fast, flat);
+
+        let reads = TreeReadCounter::start();
+        diff_index_to_tree_flatten_reference(&odb, &index, &head_tree).expect("flat");
+        let flat_reads = reads.get();
+
+        assert!(
+            cached_reads < flat_reads,
+            "partial cache-tree should skip sibling dirs (cached={cached_reads}, flat={flat_reads})"
         );
     }
 
@@ -6988,11 +7104,11 @@ mod diff_index_to_tree_cache_tree_tests {
             deep.add_or_replace(index_entry(&format!("deep/n{i}.txt"), MODE_REGULAR, leaf));
         }
         let tree = write_tree_from_index(&odb, &deep, "").expect("tree");
-        DIFF_TREE_READ_COUNT.store(0, Ordering::Relaxed);
+        let reads = TreeReadCounter::start();
         let entries = diff_trees(&odb, Some(&tree), Some(&tree), "").expect("diff");
         assert!(entries.is_empty());
         assert_eq!(
-            DIFF_TREE_READ_COUNT.load(Ordering::Relaxed),
+            reads.get(),
             2,
             "identical trees should read each root once and skip shared subtrees"
         );
