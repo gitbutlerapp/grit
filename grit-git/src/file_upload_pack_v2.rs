@@ -108,8 +108,7 @@ pub(crate) fn read_pkt_lines_until_flush(
     let mut total = 0usize;
     loop {
         let mut len_buf = [0u8; 4];
-        r.read_exact(&mut len_buf)
-            .map_err(|e| anyhow::Error::from(e))?;
+        r.read_exact(&mut len_buf).map_err(anyhow::Error::from)?;
         total += 4;
         if total > max_total {
             bail!("v2 response exceeds size limit");
@@ -121,7 +120,7 @@ pub(crate) fn read_pkt_lines_until_flush(
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         match n {
             0 => return Ok(()),
-            1 | 2 => {
+            1..=2 => {
                 bail!("unexpected special pkt-line in ls-refs response");
             }
             n if n <= 4 => {
@@ -134,8 +133,7 @@ pub(crate) fn read_pkt_lines_until_flush(
                     bail!("v2 response exceeds size limit");
                 }
                 let mut payload = vec![0u8; payload_len];
-                r.read_exact(&mut payload)
-                    .map_err(|e| anyhow::Error::from(e))?;
+                r.read_exact(&mut payload).map_err(anyhow::Error::from)?;
                 out.extend_from_slice(&payload);
             }
         }
@@ -506,10 +504,7 @@ pub(crate) fn skip_v2_section_until_boundary(stdout: &mut impl Read) -> Result<(
 
 fn read_sideband_discard_pack(stdout: &mut impl Read) -> Result<()> {
     let mut seen_pack = false;
-    loop {
-        let Some(payload) = read_pkt_payload_raw(stdout)? else {
-            break;
-        };
+    while let Some(payload) = read_pkt_payload_raw(stdout)? {
         if payload.is_empty() {
             if seen_pack {
                 break;
@@ -543,7 +538,7 @@ fn read_pkt_payload_raw(r: &mut impl Read) -> std::io::Result<Option<Vec<u8>>> {
     let len = usize::from_str_radix(len_str, 16)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     match len {
-        0 | 1 | 2 => Ok(None),
+        0..=2 => Ok(None),
         n if n <= 4 => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("invalid pkt-line length: {n}"),

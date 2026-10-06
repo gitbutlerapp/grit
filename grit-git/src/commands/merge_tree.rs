@@ -2,6 +2,7 @@
 //!
 //! Implements `git merge-tree` including `--write-tree`, `--stdin`, `-z`, and related options.
 
+#![allow(clippy::if_same_then_else)]
 use anyhow::{bail, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::merge_file::MergeFavor;
@@ -576,6 +577,7 @@ fn write_merge_tree_stdout(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_merge_tree_stdout_to(
     w: &mut dyn Write,
     repo: &Repository,

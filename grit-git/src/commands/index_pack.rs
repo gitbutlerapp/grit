@@ -864,6 +864,7 @@ fn append_full_object_to_pack(
 /// Parse all pack objects and resolve deltas. When `fix_thin`, missing `REF_DELTA` bases are read
 /// from the ODB and appended to the pack (Git `index-pack --fix-thin`), and the object count in
 /// the header is updated.
+#[allow(clippy::type_complexity)]
 fn parse_and_resolve(
     pack_body: &mut Vec<u8>,
     fix_thin: bool,
@@ -1148,6 +1149,7 @@ fn parse_and_resolve(
 }
 
 /// Read a single pack entry starting at `pos`, return (type_code, size, decompressed_data, base_oid, base_offset).
+#[allow(clippy::type_complexity)]
 fn read_pack_entry(
     pack_bytes: &[u8],
     pos: &mut usize,

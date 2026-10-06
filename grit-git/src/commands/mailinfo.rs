@@ -1,5 +1,6 @@
 //! `grit mailinfo` — extract patch from email message.
 
+#![allow(clippy::field_reassign_with_default)]
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
 use grit_lib::config::ConfigSet;

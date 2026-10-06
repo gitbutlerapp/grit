@@ -2161,3 +2161,56 @@ fn effective_index_path(repo: &Repository) -> Result<PathBuf> {
     }
     Ok(repo.index_path())
 }
+
+#[cfg(test)]
+mod stat_fast_path_tests {
+    use super::*;
+    use grit_lib::repo::init_repository;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    fn index_entry_from_metadata(meta: &fs::Metadata, oid: ObjectId) -> IndexEntry {
+        use std::os::unix::fs::MetadataExt;
+        IndexEntry {
+            ctime_sec: meta.ctime() as u32,
+            ctime_nsec: meta.ctime_nsec() as u32,
+            mtime_sec: meta.mtime() as u32,
+            mtime_nsec: meta.mtime_nsec() as u32,
+            dev: meta.dev() as u32,
+            ino: meta.ino() as u32,
+            mode: MODE_REGULAR,
+            uid: meta.uid(),
+            gid: meta.gid(),
+            size: meta.len() as u32,
+            oid,
+            flags: 0,
+            flags_extended: None,
+            path: b"file.txt".to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    /// When stat and mode match the index, `read_worktree_info_fast` must not read file bytes
+    /// (stat-only fast path). Removing read permission after indexing must still yield `Unchanged`.
+    #[test]
+    fn stat_matching_regular_file_skips_content_hash() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init repo");
+        let file = tmp.path().join("file.txt");
+        fs::write(&file, b"hello").expect("write file");
+        let meta = fs::symlink_metadata(&file).expect("metadata");
+        let oid = Odb::hash_object_data(ObjectKind::Blob, b"hello");
+        let entry = index_entry_from_metadata(&meta, oid);
+        // Index file mtime after entry mtime => entry is not racy-clean.
+        let index_mtime = Some((entry.mtime_sec.saturating_add(60), 0));
+
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).expect("chmod");
+
+        let status = read_worktree_info_fast(&repo, tmp.path(), &file, &entry, index_mtime)
+            .expect("probe worktree");
+        assert!(
+            matches!(status, WorktreeStatus::Unchanged),
+            "stat fast path must not read file contents"
+        );
+    }
+}

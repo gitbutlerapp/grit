@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 use std::fs::OpenOptions;
-use std::io::{BufReader, Cursor, IsTerminal, Read, Write};
+use std::io::{BufReader, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -30,7 +30,9 @@ static TRACED_HTTPS_URLS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 /// Clear deduplication state for `GIT_TRACE2_EVENT` `child_start` lines (new top-level command).
 pub fn clear_trace2_https_url_dedup() {
     if let Some(m) = TRACED_HTTPS_URLS.get() {
-        m.lock().ok().map(|mut g| g.clear());
+        if let Ok(mut g) = m.lock() {
+            g.clear();
+        }
     }
 }
 
@@ -1116,6 +1118,7 @@ fn trace_fetch_pack_packet(direction: char, payload: &str) {
     crate::wire_trace::trace_packet_line_ident("fetch-pack", direction, payload);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fetch_pack_v0_v1_stateless_http(
     local_git_dir: &Path,
     base: &str,
@@ -1267,10 +1270,7 @@ fn fetch_pack_v0_v1_stateless_http(
     let mut flush_at: usize = INITIAL_FLUSH;
     if let Some(negotiator) = negotiator.as_mut() {
         let mut round = Vec::new();
-        loop {
-            let Some(oid) = negotiator.next_have()? else {
-                break;
-            };
+        while let Some(oid) = negotiator.next_have()? {
             let line = format!("have {}", oid.to_hex());
             pkt_line::write_line_to_vec(&mut round, &line)?;
             trace_fetch_pack_packet('>', &line);
@@ -1285,41 +1285,22 @@ fn fetch_pack_v0_v1_stateless_http(
             pkt_line::write_flush(&mut req)?;
             round.clear();
 
-            let round_result = if no_done {
-                let mut resp = http_post(
-                    client,
-                    &post_url,
-                    &format!("application/x-{SERVICE}-request"),
-                    &format!("application/x-{SERVICE}-result"),
-                    &req,
-                )?;
-                let mut reader = resp.reader()?;
-                read_v0_stateless_response_reader(
-                    &mut reader,
-                    local_git_dir,
-                    sideband,
-                    depth_requested,
-                    progress,
-                    &mut pack_path,
-                )?
-            } else {
-                let mut resp = http_post(
-                    client,
-                    &post_url,
-                    &format!("application/x-{SERVICE}-request"),
-                    &format!("application/x-{SERVICE}-result"),
-                    &req,
-                )?;
-                let mut reader = resp.reader()?;
-                read_v0_stateless_response_reader(
-                    &mut reader,
-                    local_git_dir,
-                    sideband,
-                    depth_requested,
-                    progress,
-                    &mut pack_path,
-                )?
-            };
+            let mut resp = http_post(
+                client,
+                &post_url,
+                &format!("application/x-{SERVICE}-request"),
+                &format!("application/x-{SERVICE}-result"),
+                &req,
+            )?;
+            let mut reader = resp.reader()?;
+            let round_result = read_v0_stateless_response_reader(
+                &mut reader,
+                local_git_dir,
+                sideband,
+                depth_requested,
+                progress,
+                &mut pack_path,
+            )?;
             if depth_requested && !shallow_applied {
                 apply_shallow_updates(
                     local_git_dir,
@@ -1484,10 +1465,7 @@ fn read_v0_stateless_response_reader(
     let mut got_pack = false;
 
     let mut in_shallow = expect_shallow;
-    loop {
-        let Some(payload) = crate::fetch_transport::read_pkt_payload_raw(&mut cur)? else {
-            break;
-        };
+    while let Some(payload) = crate::fetch_transport::read_pkt_payload_raw(&mut cur)? {
         if payload.is_empty() {
             if in_shallow {
                 in_shallow = false;
@@ -1585,9 +1563,9 @@ fn process_v2_fetch_response(
     local_git_dir: &Path,
     filter_active: bool,
     progress: SidebandProgress,
-    remote_heads: &mut Vec<LsRefEntry>,
-    remote_tags: &mut Vec<LsRefEntry>,
-    all_advertised: &mut Vec<LsRefEntry>,
+    remote_heads: &mut [LsRefEntry],
+    remote_tags: &mut [LsRefEntry],
+    all_advertised: &mut [LsRefEntry],
 ) -> Result<bool> {
     let mut cur = BufReader::new(reader);
     loop {

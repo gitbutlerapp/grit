@@ -4,6 +4,7 @@
 //! `git merge-recursive [options] <base> -- <ours> <theirs>`.
 //! It updates index + working tree and exits non-zero on conflicts.
 
+#![allow(clippy::manual_contains)]
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use grit_lib::index::IndexEntry;

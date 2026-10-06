@@ -3,6 +3,14 @@
 //! Displays the commit history starting from HEAD (or specified revisions),
 //! with configurable formatting and filtering.
 
+#![allow(
+    clippy::collapsible_if,
+    clippy::manual_map,
+    clippy::match_like_matches_macro,
+    clippy::needless_borrow,
+    clippy::unnecessary_sort_by,
+    clippy::useless_conversion
+)]
 use crate::explicit_exit::ExplicitExit;
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
@@ -1821,7 +1829,7 @@ fn parse_date_to_epoch(s: &str) -> Option<i64> {
 /// Git: `--oneline` sets the default pretty, but `--format=%s` (or any format other than
 /// `oneline`) overrides that default while still leaving `--oneline` set for other effects.
 fn log_uses_builtin_oneline(args: &Args) -> bool {
-    (args.oneline && args.format.as_deref().map_or(true, |f| f == "oneline"))
+    (args.oneline && args.format.as_deref().is_none_or(|f| f == "oneline"))
         || (!args.oneline && args.format.as_deref() == Some("oneline"))
 }
 
@@ -2612,6 +2620,7 @@ fn extract_log_cli_revision_specs(
     Ok((revision_specs, implied_pathspecs))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_rev_list_log(
     repo: &Repository,
     args: &Args,
@@ -3657,6 +3666,7 @@ fn visible_parents_for_graph_inner(
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn visible_parents_for_path_limited_log(
     repo: &Repository,
     oid: ObjectId,
@@ -4020,6 +4030,7 @@ fn load_commit_info(repo: &Repository, oid: ObjectId) -> Result<CommitInfo> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_graph_commit_text(
     node: &GraphCommitNode,
     info: &CommitInfo,
@@ -7416,6 +7427,7 @@ fn reflog_display_name_for(log_ref: &str, user_spec: &str) -> String {
 }
 
 /// Run the reflog walk mode (`log -g` / `log --walk-reflogs`).
+#[allow(clippy::too_many_arguments)]
 fn run_reflog_walk(
     repo: &Repository,
     args: &Args,
@@ -8045,6 +8057,7 @@ fn run_reflog_walk(
 
 /// Apply format placeholders for reflog walk entries.
 /// Supports %H, %h, %s, %gd, %gs, %gn, %ge, %an, %ae, %cn, %ce, %cd, %B, %b, %N, %n.
+#[allow(clippy::too_many_arguments)]
 fn apply_reflog_format_string(
     fmt: &str,
     oid: &ObjectId,
@@ -8489,6 +8502,7 @@ struct WalkCommitsIter<'a> {
 }
 
 impl<'a> WalkCommitsIter<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         repo: &'a Repository,
         odb: &'a Odb,
@@ -8751,6 +8765,7 @@ fn collect_reachable(odb: &Odb, starts: &[ObjectId]) -> Result<HashSet<ObjectId>
     Ok(visited)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_commits(
     repo: &Repository,
     git_dir: &Path,
@@ -8818,6 +8833,7 @@ fn walk_commits(
 }
 
 /// Check if a commit touches any of the given pathspecs by diffing against parents.
+#[allow(clippy::too_many_arguments)]
 fn commit_touches_paths(
     odb: &Odb,
     commit_oid: ObjectId,
@@ -9896,6 +9912,7 @@ fn count_ascii_case_insensitive(haystack: &str, needle: &str) -> usize {
 }
 
 /// Post-walk filters applied after [`walk_commits`] (diff-filter, find-object, decoration, dates).
+#[allow(clippy::too_many_arguments)]
 fn commit_passes_post_walk_filters(
     repo: &Repository,
     odb: &Odb,
@@ -10200,6 +10217,7 @@ impl<W: Write> Write for LinePrefixWriter<'_, W> {
 ///
 /// When `parent_line_override` is set (e.g. `log --parents` after line-log rewrite), `%p` / `%P`
 /// and the `Merge:` header use these hashes instead of the raw commit parents.
+#[allow(clippy::too_many_arguments)]
 fn format_commit(
     out: &mut impl Write,
     oid: &ObjectId,
@@ -10898,6 +10916,7 @@ thread_local! {
     static GRAPH_PREFIX_WIDTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_format_string(
     template: &str,
     oid: &ObjectId,
@@ -10936,6 +10955,7 @@ fn apply_format_string(
         Right,
         Center,
     }
+    #[allow(clippy::enum_variant_names)]
     #[derive(Clone, Copy)]
     enum Trunc {
         None,
@@ -12845,6 +12865,7 @@ fn compute_commit_diff_against_parent(
 }
 
 /// Write diff output for a single commit.
+#[allow(clippy::too_many_arguments)]
 fn write_commit_diff(
     out: &mut impl Write,
     repo: &Repository,
@@ -13418,6 +13439,7 @@ fn log_entry_hidden_by_line_ignore(
 }
 
 /// Write a unified-diff block for one entry.
+#[allow(clippy::too_many_arguments)]
 fn log_write_patch_entry(
     out: &mut impl Write,
     odb: &Odb,
@@ -13691,6 +13713,7 @@ fn apply_diff_output_indicators(patch: &str, args: &Args) -> String {
 /// vertical rail that the *caller* prints separately (regular `--graph` path): it is not
 /// printed here, but its display width is subtracted from the terminal columns so the stat
 /// graph is scaled exactly like Git's `width = term_columns() - utf8_strnwidth(line_prefix)`.
+#[allow(clippy::too_many_arguments)]
 fn log_print_stat_summary(
     out: &mut impl Write,
     odb: &Odb,
@@ -14128,6 +14151,7 @@ struct FollowDisplay {
 /// `try_to_follow_renames`: the commit that first introduces the file as a copy
 /// of a still-existing source shows `C100 <source> <dest>`, and older commits
 /// show the file under its earlier name.
+#[allow(clippy::type_complexity)]
 fn follow_filter(
     odb: &Odb,
     commits: Vec<(ObjectId, CommitInfo)>,
@@ -14236,6 +14260,7 @@ fn follow_filter(
 /// Collect bisect ref tips for `git log --bisect`: positive `refs/bisect/bad*` tips (with their
 /// ref names, for `%S`) and negative `refs/bisect/good*` OIDs. Mirrors `rev-list`'s
 /// `append_bisect_ref_specs` (a "bad"/"good" prefix is matched whole or followed by `-`).
+#[allow(clippy::type_complexity)]
 fn collect_bisect_ref_tips(git_dir: &Path) -> Result<(Vec<(ObjectId, String)>, Vec<ObjectId>)> {
     let refs =
         grit_lib::refs::list_refs(git_dir, "refs/bisect/").context("failed to list bisect refs")?;

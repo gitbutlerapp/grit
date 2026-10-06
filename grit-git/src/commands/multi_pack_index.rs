@@ -4,6 +4,7 @@
 //! `multi-pack-index.d`). [`write`](MpiCommand::Write) builds a new MIDX from pack indexes,
 //! including incremental split layout when `--incremental` is set.
 
+#![allow(clippy::unnecessary_sort_by)]
 use anyhow::{bail, Context, Result};
 use clap::{Args as ClapArgs, Subcommand};
 use grit_lib::midx::{

@@ -4,6 +4,7 @@
 //!   git hook run [--ignore-missing] [--to-stdin=<path>] <hook-name> [-- <hook-args>...]
 //!   git hook list [-z] <hook-name>
 
+#![allow(clippy::let_unit_value)]
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
 use grit_lib::hooks::{list_hooks_display_lines, run_hook_opts, HookResult, RunHookOptions};

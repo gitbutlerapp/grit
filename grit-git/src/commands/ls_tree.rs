@@ -1,5 +1,6 @@
 //! `grit ls-tree` — list the contents of a tree object.
 
+#![allow(clippy::collapsible_match)]
 use anyhow::{bail, Context, Result};
 use clap::Args as ClapArgs;
 use std::io::{self, Write};
@@ -541,6 +542,7 @@ fn make_cwd_relative(path: &str, cwd_prefix: Option<&str>) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn list_tree(
     repo: &Repository,
     data: &[u8],

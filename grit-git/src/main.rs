@@ -226,11 +226,11 @@ fn is_broken_pipe_error(err: &anyhow::Error) -> bool {
                 return true;
             }
         }
-        if let Some(lib_err) = cause.downcast_ref::<grit_lib::error::Error>() {
-            if let grit_lib::error::Error::Io(ioe) = lib_err {
-                if ioe.kind() == ErrorKind::BrokenPipe {
-                    return true;
-                }
+        if let Some(grit_lib::error::Error::Io(ioe)) =
+            cause.downcast_ref::<grit_lib::error::Error>()
+        {
+            if ioe.kind() == ErrorKind::BrokenPipe {
+                return true;
             }
         }
     }
@@ -885,8 +885,10 @@ fn run_test_tool_bitmap(rest: &[String]) -> Result<()> {
     }
 
     let repo = grit_lib::repo::Repository::discover(None)?;
-    let mut opts = grit_lib::rev_list::RevListOptions::default();
-    opts.all_refs = true;
+    let opts = grit_lib::rev_list::RevListOptions {
+        all_refs: true,
+        ..grit_lib::rev_list::RevListOptions::default()
+    };
     let result = grit_lib::rev_list::rev_list(&repo, &[], &[], &opts)
         .context("failed to list bitmap commits")?;
     let mut commits = result.commits;
@@ -3622,21 +3624,17 @@ fn preprocess_blame_argv(rest: &[String]) -> Vec<String> {
                 true
             }
             tt if tt == "-M" || tt.starts_with("-M") => {
-                if tt == "-M" {
-                    if slice.len() > *i + 1 {
-                        *i += 2;
-                        return true;
-                    }
+                if tt == "-M" && slice.len() > *i + 1 {
+                    *i += 2;
+                    return true;
                 }
                 *i += 1;
                 true
             }
             tt if tt == "-C" || tt.starts_with("-C") => {
-                if tt == "-C" {
-                    if slice.len() > *i + 1 {
-                        *i += 2;
-                        return true;
-                    }
+                if tt == "-C" && slice.len() > *i + 1 {
+                    *i += 2;
+                    return true;
                 }
                 *i += 1;
                 true
@@ -5385,9 +5383,7 @@ fn handle_unknown_git_command(subcmd: &str, rest: &[String], opts: &GlobalOpts) 
     scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     let prefix_n = scored.iter().take_while(|(s, _)| *s == 0).count();
-    let (best_similarity, tie_count) = if scored.is_empty() {
-        (SIMILARITY_FLOOR + 1, 0usize)
-    } else if prefix_n == scored.len() {
+    let (best_similarity, tie_count) = if scored.is_empty() || prefix_n == scored.len() {
         (SIMILARITY_FLOOR + 1, 0usize)
     } else {
         let mut n = prefix_n + 1;
@@ -5966,7 +5962,7 @@ pub(crate) fn dispatch(subcmd: &str, rest: &[String], opts: &GlobalOpts) -> Resu
                         "list", "add", "show", "remove", "append", "edit", "copy", "merge",
                         "prune", "get-ref",
                     ];
-                    if !NOTES_SUBS.iter().any(|s| *s == first) {
+                    if !NOTES_SUBS.contains(&first) {
                         eprintln!("error: unknown subcommand: `{first}`");
                         std::process::exit(129);
                     }
@@ -6171,7 +6167,7 @@ pub(crate) fn dispatch(subcmd: &str, rest: &[String], opts: &GlobalOpts) -> Resu
                         text.as_bytes().to_vec()
                     };
                     let pat_bytes = if pattern.starts_with("XXX/") {
-                        pattern[3..].as_bytes().to_vec()
+                        pattern.as_bytes()[3..].to_vec()
                     } else {
                         pattern.as_bytes().to_vec()
                     };
@@ -6427,8 +6423,7 @@ pub(crate) fn dispatch(subcmd: &str, rest: &[String], opts: &GlobalOpts) -> Resu
                         let last = content
                             .lines()
                             .map(str::trim)
-                            .filter(|l| !l.is_empty())
-                            .next_back()
+                            .rfind(|l| !l.is_empty())
                             .unwrap_or("");
                         if last.len() != 40 {
                             bail!("read-graph: invalid commit-graph chain");
@@ -6937,7 +6932,7 @@ fn run_test_tool_path_utils(rest: &[String]) -> Result<()> {
             let rel = git_path::relative_path(path, base, &mut sb);
             match rel {
                 None => println!("(null)"),
-                Some(s) if s.is_empty() => println!("(empty)"),
+                Some("") => println!("(empty)"),
                 Some(s) => println!("{s}"),
             }
             Ok(())
@@ -7318,7 +7313,7 @@ fn run_test_tool_dump_untracked_cache() -> Result<()> {
         }
         println!();
 
-        let mut names: Vec<_> = ucd.untracked.iter().cloned().collect();
+        let mut names: Vec<_> = ucd.untracked.to_vec();
         names.sort();
         for n in &names {
             println!("{n}");

@@ -845,6 +845,7 @@ fn run_open_in_pager(
 }
 
 /// `git grep` with a single `rev:path` pathspec (e.g. `HEAD:a`): search one blob from that revision.
+#[allow(clippy::too_many_arguments)]
 fn grep_one_blob_at_revision(
     repo: &Repository,
     rev: &str,
@@ -944,6 +945,7 @@ fn grep_one_blob_at_revision(
 
 /// Grep the index (--cached mode), optionally recursing into submodules.
 /// `path_prefix` is prepended to filenames for submodule display (e.g. "submodule/").
+#[allow(clippy::too_many_arguments)]
 fn grep_cached(
     repo: &Repository,
     path_prefix: &str,
@@ -1214,6 +1216,7 @@ fn grep_cached(
 
 /// Grep the working tree, optionally recursing into submodules.
 /// `path_prefix` is prepended to filenames for submodule display.
+#[allow(clippy::too_many_arguments)]
 fn grep_worktree(
     repo: &Repository,
     path_prefix: &str,
@@ -1572,6 +1575,7 @@ fn grep_worktree(
 }
 
 /// Grep untracked files under `work_tree` (paths with no index entry), honoring pathspecs.
+#[allow(clippy::too_many_arguments)]
 fn grep_untracked_worktree_files(
     work_tree: &Path,
     dir: &Path,
@@ -2057,13 +2061,8 @@ fn grep_is_binary(
         BinaryOverride::ForceBinary => true,
         BinaryOverride::ForceText => false,
         BinaryOverride::None => {
-            if !content_is_binary {
-                false
-            } else if path_has_active_textconv(repo, path_for_attrs, args, binary_override) {
-                false
-            } else {
-                true
-            }
+            content_is_binary
+                && !path_has_active_textconv(repo, path_for_attrs, args, binary_override)
         }
     }
 }
@@ -2123,6 +2122,7 @@ fn validate_no_index_pathspecs(cwd: &Path, pathspecs: &[String]) -> Result<()> {
 }
 
 /// Grep the filesystem recursively (--no-index mode).
+#[allow(clippy::too_many_arguments)]
 fn grep_filesystem(
     dir: &Path,
     prefix: &str,
@@ -2532,10 +2532,12 @@ fn build_one_regex(pat: &str, args: &Args) -> Result<Regex> {
 
     let use_bre = !args.extended_regexp && !args.fixed_strings && !args.perl_regexp;
     // Git ERE does not accept PCRE `\p{...}` / `\P{...}`; Rust's engine does — reject for parity.
-    if args.extended_regexp && !args.perl_regexp && !args.fixed_strings {
-        if pat.contains("\\p{") || pat.contains("\\P{") {
-            bail!("invalid pattern: '{pat}'");
-        }
+    if args.extended_regexp
+        && !args.perl_regexp
+        && !args.fixed_strings
+        && (pat.contains("\\p{") || pat.contains("\\P{"))
+    {
+        bail!("invalid pattern: '{pat}'");
     }
     let effective = if args.fixed_strings {
         regex::escape(pat)
@@ -3048,6 +3050,7 @@ fn function_context_range(
 /// the same as `relative_path`). Pass `None` so the pager receives `relative_path` (cwd-relative
 /// like Git's `-l` output).
 /// `rev_label` is e.g. `Some("HEAD")` for object-store grep (`HEAD:path` in output).
+#[allow(clippy::too_many_arguments)]
 fn grep_content(
     relative_path: &str,
     pager_open_path: Option<&str>,
@@ -3168,12 +3171,9 @@ fn grep_content(
             let mut bol = 0usize;
             let mut cno = 0usize;
             let mut first = true;
-            loop {
-                let Some((abs_s, abs_e)) =
-                    next_match_from_bol(line, bol, args, compiled, &atom_indices_all)
-                else {
-                    break;
-                };
+            while let Some((abs_s, abs_e)) =
+                next_match_from_bol(line, bol, args, compiled, &atom_indices_all)
+            {
                 if first {
                     cno = abs_s + 1;
                     first = false;
@@ -3319,6 +3319,7 @@ fn grep_content(
 }
 
 /// Recursively search a tree object.
+#[allow(clippy::too_many_arguments)]
 fn grep_tree(
     repo: &Repository,
     tree_data: &[u8],
