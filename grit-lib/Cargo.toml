@@ -47,6 +47,7 @@ shell-words.workspace = true
 # Optional: the default `ureq`-backed HTTP client (feature `http-ureq`).
 ureq = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
+crc32fast = "1.5.0"
 
 # `nix` (signals, poll, uid, uname, Unix sockets) is only used behind
 # `#[cfg(unix)]`, so it is not pulled in on Windows.
