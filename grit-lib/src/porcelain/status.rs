@@ -968,12 +968,22 @@ pub fn status(
     // Load the index, remembering whether it was sparse on disk, then expand
     // sparse-directory placeholders so the diffs see real entries.
     let index_path = repo.index_path();
-    let index_mtime = crate::index::index_file_mtime(&index_path);
     let mut index = match Index::load(&index_path) {
         Ok(i) => i,
         Err(crate::error::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Index::new(),
         Err(e) => return Err(e),
     };
+    let index_mtime = index.source_mtime;
+    if crate::diff::refresh_index_stat_content_verified(
+        &repo.odb,
+        &repo.git_dir,
+        &mut index,
+        work_tree,
+        index_mtime,
+    ) && repo.try_write_index(&mut index)?
+    {
+        index.source_mtime = crate::index::index_file_mtime(&index_path);
+    }
     let sparse_directory_prefixes: Vec<Vec<u8>> = index
         .entries
         .iter()
@@ -1007,7 +1017,7 @@ pub fn status(
         &index,
         work_tree,
         crate::diff::DiffIndexToWorktreeOptions {
-            index_mtime,
+            index_mtime: crate::diff::index_mtime_for_diff(&index, index_mtime),
             ignore_submodule_untracked: opts.untracked == UntrackedMode::No,
             repository_git_dir: Some(repo.git_dir.clone()),
             ..Default::default()
