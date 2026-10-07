@@ -40,12 +40,6 @@ mod tests {
         );
     }
 
-    fn measure_config_loads<R>(repo: &Repository, op: impl FnOnce(&Repository) -> R) -> R {
-        let _ = repo.config().expect("warm config snapshot");
-        cascade_load_counters::reset();
-        op(repo)
-    }
-
     #[test]
     fn porcelain_ops_load_config_cascade_once() {
         let tmp = TempDir::new().unwrap();
@@ -53,16 +47,16 @@ mod tests {
         let repo = init_repo(root);
         fs::write(root.join("README"), b"hello\n").unwrap();
 
-        measure_config_loads(&repo, |repo| {
-            status(repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+        cascade_load_counters::measure(|| {
+            status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
         });
         assert_at_most_one_config_load("status");
 
         let stage_root = root.join("stage-repo");
         let repo2 = init_repo(&stage_root);
         fs::write(stage_root.join("README2"), b"hello2\n").unwrap();
-        measure_config_loads(&repo2, |repo| {
-            stage(repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        cascade_load_counters::measure(|| {
+            stage(&repo2, &StageOptions::default(), &mut NullProgress).unwrap();
         });
         assert_at_most_one_config_load("stage");
 
@@ -76,8 +70,8 @@ mod tests {
             committer: ident(),
             allow_empty: false,
         };
-        measure_config_loads(&repo3, |repo| {
-            create_commit(repo, &req, &mut NullProgress).unwrap();
+        cascade_load_counters::measure(|| {
+            create_commit(&repo3, &req, &mut NullProgress).unwrap();
         });
         assert_at_most_one_config_load("create_commit");
 
@@ -97,13 +91,19 @@ mod tests {
         )
         .unwrap();
 
-        measure_config_loads(&repo3, |repo| {
-            checkout_between_trees(repo, Some(&parent_tree), &tree2).unwrap();
+        cascade_load_counters::measure(|| {
+            checkout_between_trees(&repo3, Some(&parent_tree), &tree2).unwrap();
         });
         assert_at_most_one_config_load("checkout_between_trees");
 
-        measure_config_loads(&repo3, |repo| {
-            rev_list(repo, &["HEAD".to_string()], &[], &RevListOptions::default()).unwrap();
+        cascade_load_counters::measure(|| {
+            rev_list(
+                &repo3,
+                &["HEAD".to_string()],
+                &[],
+                &RevListOptions::default(),
+            )
+            .unwrap();
         });
         assert_at_most_one_config_load("rev_list");
     }

@@ -2,7 +2,6 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::now_for_identity;
-use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -48,10 +47,15 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
         _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
     };
 
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = repo.config().context("could not load config")?;
     let now = now_for_identity();
-    let author = context::identity(&config, IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
-    let committer = context::identity(&config, IdentRole::Committer, "GIT_COMMITTER_DATE", now)?;
+    let author = context::identity(config.as_ref(), IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
+    let committer = context::identity(
+        config.as_ref(),
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        now,
+    )?;
 
     let subject = subject_line(&format!("{}\n", message.trim()));
 

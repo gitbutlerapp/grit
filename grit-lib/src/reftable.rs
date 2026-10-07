@@ -25,10 +25,11 @@
 //! footer
 //! ```
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -2432,56 +2433,28 @@ impl ReftableStack {
 // Integration helpers — used by refs.rs and commands
 // ---------------------------------------------------------------------------
 
+pub(crate) fn reftable_backend_cache() -> &'static Mutex<HashMap<PathBuf, bool>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Detect whether a git directory uses the reftable backend.
 pub fn is_reftable_repo(git_dir: &Path) -> bool {
-    fn config_uses_reftable(config_path: &Path) -> bool {
-        let Ok(content) = fs::read_to_string(config_path) else {
-            return false;
-        };
-
-        let mut in_extensions = false;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') {
-                in_extensions = trimmed.eq_ignore_ascii_case("[extensions]");
-                continue;
-            }
-            if in_extensions {
-                if let Some((key, value)) = trimmed.split_once('=') {
-                    if key.trim().eq_ignore_ascii_case("refstorage")
-                        && value.trim().eq_ignore_ascii_case("reftable")
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+    let key = git_dir
+        .canonicalize()
+        .unwrap_or_else(|_| git_dir.to_path_buf());
+    let mut guard = reftable_backend_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(v) = guard.get(&key) {
+        return *v;
     }
-
-    let local_config = git_dir.join("config");
-    if config_uses_reftable(&local_config) {
-        return true;
-    }
-
-    // Linked worktrees typically store the shared repository configuration
-    // in the common directory pointed to by `commondir`.
-    if let Ok(raw) = fs::read_to_string(git_dir.join("commondir")) {
-        let rel = raw.trim();
-        if !rel.is_empty() {
-            let common = if Path::new(rel).is_absolute() {
-                PathBuf::from(rel)
-            } else {
-                git_dir.join(rel)
-            };
-            let common_config = common.canonicalize().unwrap_or(common).join("config");
-            if config_uses_reftable(&common_config) {
-                return true;
-            }
-        }
-    }
-
-    false
+    let v = ConfigSet::load(Some(git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get("extensions.refstorage"))
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("reftable"));
+    guard.insert(key, v);
+    v
 }
 
 /// Resolve a ref in a reftable repo, following symbolic refs.

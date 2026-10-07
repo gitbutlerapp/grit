@@ -42,10 +42,27 @@ use crate::error::{Error, Result};
 /// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
 #[cfg(test)]
 pub mod cascade_load_counters {
+    use std::cell::Cell;
+
     use super::{AtomicUsize, Ordering};
+
+    thread_local! {
+        static MEASURING: Cell<bool> = const { Cell::new(false) };
+    }
 
     static UNCACHED: AtomicUsize = AtomicUsize::new(0);
     static CACHE_VALIDATED: AtomicUsize = AtomicUsize::new(0);
+
+    /// Run `f` while recording cascade loads on this thread only (parallel-safe).
+    pub fn measure<R>(f: impl FnOnce() -> R) -> R {
+        MEASURING.with(|m| {
+            m.set(true);
+            reset();
+            let out = f();
+            m.set(false);
+            out
+        })
+    }
 
     /// Reset counters before an operation under test.
     pub fn reset() {
@@ -72,11 +89,19 @@ pub mod cascade_load_counters {
     }
 
     pub(crate) fn record_uncached() {
-        UNCACHED.fetch_add(1, Ordering::SeqCst);
+        MEASURING.with(|m| {
+            if m.get() {
+                UNCACHED.fetch_add(1, Ordering::SeqCst);
+            }
+        });
     }
 
     pub(crate) fn record_cache_validated() {
-        CACHE_VALIDATED.fetch_add(1, Ordering::SeqCst);
+        MEASURING.with(|m| {
+            if m.get() {
+                CACHE_VALIDATED.fetch_add(1, Ordering::SeqCst);
+            }
+        });
     }
 }
 use crate::refs;
@@ -1785,7 +1810,7 @@ impl ConfigSet {
     /// Resolved `core.logAllRefUpdates` using this merged set (includes `git -c` / env), then Git's
     /// bare-repo default when the key is unset everywhere.
     #[must_use]
-    pub fn effective_log_refs_config(&self, git_dir: &Path) -> refs::LogRefsConfig {
+    pub fn effective_log_refs_config(&self, _git_dir: &Path) -> refs::LogRefsConfig {
         if let Some(v) = self.get("core.logAllRefUpdates") {
             let lower = v.trim().to_ascii_lowercase();
             let parsed = match lower.as_str() {
@@ -1798,7 +1823,15 @@ impl ConfigSet {
                 return c;
             }
         }
-        refs::effective_log_refs_config(git_dir)
+        if self
+            .get_bool("core.bare")
+            .and_then(|r| r.ok())
+            .unwrap_or(false)
+        {
+            refs::LogRefsConfig::None
+        } else {
+            refs::LogRefsConfig::Normal
+        }
     }
 
     /// Get an integer value, supporting Git's `k`/`m`/`g` suffixes.

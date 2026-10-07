@@ -262,12 +262,26 @@ impl Repository {
     /// Propagates errors from [`ConfigSet::load`].
     pub fn reload_config(&self) -> Result<()> {
         let config = Arc::new(ConfigSet::load(Some(&self.git_dir), true)?);
+        self.install_config_snapshot(config);
+        Ok(())
+    }
+
+    /// Install a pre-loaded config snapshot (used during discovery to avoid duplicate cascade loads).
+    pub(crate) fn install_config_snapshot(&self, config: Arc<ConfigSet>) {
+        let is_reftable = config
+            .get("extensions.refstorage")
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("reftable"));
+        if let Ok(key) = self.git_dir.canonicalize() {
+            let mut guard = crate::reftable::reftable_backend_cache()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.insert(key, is_reftable);
+        }
         let mut guard = self
             .config_snapshot
             .lock()
-            .map_err(|e| Error::Message(format!("config snapshot lock poisoned: {e}")))?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = Some((config, local_repo_config_identity(&self.git_dir)));
-        Ok(())
     }
 
     fn cached_settings(&self) -> RepoCachedSettings {
@@ -287,9 +301,11 @@ impl Repository {
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
-        validate_repository_format(&git_dir)?;
-
-        Self::from_canonical_git_dir(git_dir, work_tree)
+        let cfg = Arc::new(ConfigSet::load(Some(&git_dir), true)?);
+        validate_repository_format_from_config(&cfg)?;
+        let repo = Self::from_canonical_git_dir(git_dir, work_tree)?;
+        repo.install_config_snapshot(cfg);
+        Ok(repo)
     }
 
     /// Like [`Self::open`] but skips repository format validation (`validate_repository_format`).
@@ -435,7 +451,9 @@ impl Repository {
                 // `repositoryformatversion = 0` repo; t0001 #60). Discovery itself opens with
                 // validation skipped so an empty `.git/` is walked past, but a *found* repository
                 // must satisfy the format check.
-                validate_repository_format(&repo.git_dir)?;
+                let cfg = Arc::new(ConfigSet::load(Some(&repo.git_dir), true)?);
+                validate_repository_format_from_config(&cfg)?;
+                repo.install_config_snapshot(Arc::clone(&cfg));
                 if let Some(ref wt) = env_work_tree {
                     repo.work_tree = Some(wt.canonicalize().unwrap_or_else(|_| wt.clone()));
                     repo.work_tree_from_env = true;
@@ -448,7 +466,7 @@ impl Repository {
                     let linked_gitfile =
                         repo.discovery_via_gitfile && resolve_common_dir(&repo.git_dir).is_some();
                     if !linked_gitfile {
-                        let (is_bare, core_wt) = read_core_bare_and_worktree(&repo.git_dir)?;
+                        let (is_bare, core_wt) = read_core_bare_and_worktree_from_config(&cfg);
                         if is_bare {
                             repo.work_tree = None;
                         } else if let Some(raw) = core_wt {
@@ -1570,13 +1588,29 @@ pub fn validate_repo_format(git_dir: &Path) -> Result<()> {
     validate_repository_format(git_dir)
 }
 
-fn validate_repository_format(git_dir: &Path) -> Result<()> {
-    let Some(config_path) = repository_config_path(git_dir) else {
-        return Ok(());
-    };
+fn repository_format_from_config(cfg: &ConfigSet) -> RepositoryFormat {
+    let repo_version = cfg
+        .get("core.repositoryformatversion")
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    let mut extensions = BTreeSet::new();
+    for entry in cfg.entries() {
+        if let Some(ext) = entry.key.strip_prefix("extensions.") {
+            if !ext.is_empty() {
+                extensions.insert(ext.to_ascii_lowercase());
+            }
+        }
+    }
+    let ref_storage = cfg.get("extensions.refstorage").map(|s| s.to_owned());
+    RepositoryFormat {
+        repo_version,
+        extensions,
+        ref_storage,
+    }
+}
 
-    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
-    let parsed = parse_repository_format(&content, &config_path)?;
+fn validate_repository_format_from_config(cfg: &ConfigSet) -> Result<()> {
+    let parsed = repository_format_from_config(cfg);
 
     if parsed.repo_version > 1 {
         return Err(Error::UnsupportedRepositoryFormatVersion(
@@ -1602,6 +1636,11 @@ fn validate_repository_format(git_dir: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn validate_repository_format(git_dir: &Path) -> Result<()> {
+    let cfg = ConfigSet::load(Some(git_dir), true)?;
+    validate_repository_format_from_config(&cfg)
 }
 
 /// The result of parsing `core.repositoryformatversion` and `extensions.*` from a
@@ -2328,37 +2367,18 @@ fn warn_core_bare_worktree_conflict(git_dir: &Path) {
     }
 }
 
+fn read_core_bare_and_worktree_from_config(cfg: &ConfigSet) -> (bool, Option<String>) {
+    let bare = cfg
+        .get_bool("core.bare")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let worktree = cfg.get("core.worktree").map(|s| s.to_owned());
+    (bare, worktree)
+}
+
 fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)> {
-    let Some(config_path) = repository_config_path(git_dir) else {
-        return Ok((false, None));
-    };
-    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
-    let mut in_core = false;
-    let mut bare = false;
-    let mut worktree: Option<String> = None;
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
-            continue;
-        }
-        if line.starts_with('[') {
-            in_core = line.eq_ignore_ascii_case("[core]");
-            continue;
-        }
-        if !in_core {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            let key = k.trim();
-            let val = v.trim();
-            if key.eq_ignore_ascii_case("bare") {
-                bare = val.eq_ignore_ascii_case("true");
-            } else if key.eq_ignore_ascii_case("worktree") {
-                worktree = Some(val.to_owned());
-            }
-        }
-    }
-    Ok((bare, worktree))
+    let cfg = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    Ok(read_core_bare_and_worktree_from_config(&cfg))
 }
 
 /// Reject impossible `GIT_WORK_TREE` values before repository setup (matches Git's

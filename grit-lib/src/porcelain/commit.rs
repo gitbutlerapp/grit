@@ -8,7 +8,7 @@ use crate::diff::{diff_trees, zero_oid};
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::progress::ProgressSink;
-use crate::refs::{update_branch_for_commit, BranchCommitRefUpdate};
+use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
@@ -136,7 +136,8 @@ pub fn create_commit(
 
     let changes = diff_trees(&repo.odb, parent_tree.as_ref(), Some(&tree), "")?.len();
 
-    update_branch_for_commit(
+    let config = repo.config()?;
+    update_branch_for_commit_with_config(
         &repo.git_dir,
         &BranchCommitRefUpdate {
             branch_ref: &refname,
@@ -145,6 +146,7 @@ pub fn create_commit(
             identity: &req.committer,
             reflog_message: &reflog_msg,
         },
+        config.as_ref(),
     )?;
 
     progress.finish();

@@ -15,8 +15,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    diff_tree_to_worktree, diff_trees, read_submodule_head_oid, submodule_porcelain_flags,
-    DiffEntry, DiffStatus,
+    diff_tree_to_worktree_with_git_dir, diff_trees, read_submodule_head_oid,
+    submodule_porcelain_flags, DiffEntry, DiffStatus,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
@@ -151,9 +151,17 @@ fn worktree_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
         None => None,
     };
     let index = repo.load_index().context("could not load the index")?;
+    let config = repo.config().context("could not load config")?;
 
-    let mut entries = diff_tree_to_worktree(&repo.odb, head_tree.as_ref(), work_tree, &index)
-        .context("could not diff the working tree")?;
+    let mut entries = diff_tree_to_worktree_with_git_dir(
+        &repo.odb,
+        head_tree.as_ref(),
+        work_tree,
+        &repo.git_dir,
+        &index,
+        Some(config.as_ref()),
+    )
+    .context("could not diff the working tree")?;
     sort_entries(&mut entries);
 
     entries

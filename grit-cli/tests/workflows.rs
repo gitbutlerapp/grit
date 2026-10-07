@@ -917,3 +917,52 @@ fn diff_moved_submodule_head_with_tracked_dirt_shows_dirty_suffix() -> TestResul
     );
     Ok(())
 }
+
+/// Linked worktree: `core.autocrlf` from the common git dir must apply to `grit diff`.
+#[test]
+fn diff_linked_worktree_autocrlf_matches_git() -> TestResult {
+    let scratch = Scratch::new("linked-autocrlf-diff")?;
+    let main = scratch.child("main");
+    fs::create_dir_all(&main)?;
+    git_ok(&main, &["init", "-q", "-b", "main"])?;
+    git_ok(&main, &["config", "core.autocrlf", "true"])?;
+    write_file(&main.join("seed.txt"), "s\n")?;
+    git_ok(&main, &["add", "seed.txt"])?;
+    git_ok(&main, &["commit", "-qm", "seed"])?;
+
+    let linked = scratch.child("linked");
+    git_ok(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "linked-branch",
+            linked.to_str().unwrap(),
+            "HEAD",
+        ],
+    )?;
+
+    write_file(&linked.join("f.txt"), "line\r\n")?;
+    let git_diff = Command::new("git")
+        .args(["diff", "--quiet", "f.txt"])
+        .current_dir(&linked)
+        .status()?;
+    assert!(
+        git_diff.success(),
+        "git should treat CRLF checkout as clean with autocrlf"
+    );
+
+    let out = gs(&linked, ["--json", "diff"])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let v: serde_json::Value = serde_json::from_str(&out.stdout)?;
+    let files = v
+        .get("files")
+        .and_then(|f| f.as_array())
+        .expect("diff json must include files array");
+    assert!(
+        files.is_empty(),
+        "grit diff must match git on linked worktree autocrlf: {files:?}"
+    );
+    Ok(())
+}

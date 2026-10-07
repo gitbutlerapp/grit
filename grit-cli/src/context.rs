@@ -50,9 +50,9 @@ pub fn find_target_branch(repo: &Repository) -> Result<Option<TargetBranch>> {
 }
 
 fn target_branch_candidates(repo: &Repository) -> Result<Vec<String>> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = repo.config().context("could not load config")?;
     let mut candidates = Vec::new();
-    if let Some(target) = config.get("target.branch") {
+    if let Some(target) = config.as_ref().get("target.branch") {
         let trimmed = target.trim();
         if !trimmed.is_empty() {
             candidates.push(trimmed.to_owned());

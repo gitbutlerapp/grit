@@ -1241,80 +1241,29 @@ pub enum LogRefsConfig {
 ///
 /// Returns [`LogRefsConfig::Unset`] when the key is absent.
 pub fn read_log_refs_config(git_dir: &Path) -> LogRefsConfig {
-    let config_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-    let config_path = config_dir.join("config");
-    let content = match fs::read_to_string(config_path) {
-        Ok(c) => c,
-        Err(_) => return LogRefsConfig::Unset,
-    };
-
-    let mut in_core = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_core = trimmed.to_ascii_lowercase().starts_with("[core]");
-            continue;
-        }
-        if !in_core {
-            continue;
-        }
-        let Some((key, value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        if !key.trim().eq_ignore_ascii_case("logallrefupdates") {
-            continue;
-        }
-        let v = value.trim();
-        let lower = v.to_ascii_lowercase();
-        return match lower.as_str() {
-            "always" => LogRefsConfig::Always,
-            "1" | "true" | "yes" | "on" => LogRefsConfig::Normal,
-            "0" | "false" | "no" | "off" | "never" => LogRefsConfig::None,
-            _ => LogRefsConfig::Unset,
-        };
-    }
-    LogRefsConfig::Unset
+    ConfigSet::load(Some(git_dir), true)
+        .map(|cfg| log_refs_config_from_set(&cfg))
+        .unwrap_or(LogRefsConfig::Unset)
 }
 
-fn read_core_bare(git_dir: &Path) -> bool {
-    let config_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-    let config_path = config_dir.join("config");
-    let Ok(content) = fs::read_to_string(config_path) else {
-        return false;
+fn log_refs_config_from_set(cfg: &ConfigSet) -> LogRefsConfig {
+    let Some(v) = cfg.get("core.logAllRefUpdates") else {
+        return LogRefsConfig::Unset;
     };
-    let mut in_core = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_core = trimmed.to_ascii_lowercase().starts_with("[core]");
-            continue;
-        }
-        if !in_core {
-            continue;
-        }
-        let Some((key, value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        if key.trim().eq_ignore_ascii_case("bare") {
-            let v = value.trim().to_ascii_lowercase();
-            return matches!(v.as_str(), "1" | "true" | "yes" | "on");
-        }
+    let lower = v.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "always" => LogRefsConfig::Always,
+        "1" | "true" | "yes" | "on" => LogRefsConfig::Normal,
+        "0" | "false" | "no" | "off" | "never" => LogRefsConfig::None,
+        _ => LogRefsConfig::Unset,
     }
-    false
 }
 
 /// Effective `logAllRefUpdates` after applying Git's `LOG_REFS_UNSET` rule.
 pub fn effective_log_refs_config(git_dir: &Path) -> LogRefsConfig {
-    match read_log_refs_config(git_dir) {
-        LogRefsConfig::Unset => {
-            if read_core_bare(git_dir) {
-                LogRefsConfig::None
-            } else {
-                LogRefsConfig::Normal
-            }
-        }
-        other => other,
-    }
+    ConfigSet::load(Some(git_dir), true)
+        .map(|cfg| cfg.effective_log_refs_config(git_dir))
+        .unwrap_or(LogRefsConfig::Normal)
 }
 
 /// Whether a new reflog file may be auto-created for `refname` given an already-resolved
@@ -1336,7 +1285,18 @@ pub fn should_autocreate_reflog_for_mode(refname: &str, mode: LogRefsConfig) -> 
 /// Whether a new reflog file may be auto-created for `refname` (Git `should_autocreate_reflog`).
 #[must_use]
 pub fn should_autocreate_reflog(git_dir: &Path, refname: &str) -> bool {
-    should_autocreate_reflog_for_mode(refname, effective_log_refs_config(git_dir))
+    let cfg = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    should_autocreate_reflog_with_config(&cfg, git_dir, refname)
+}
+
+/// Like [`should_autocreate_reflog`], using an already-loaded repository config snapshot.
+#[must_use]
+pub fn should_autocreate_reflog_with_config(
+    config: &ConfigSet,
+    git_dir: &Path,
+    refname: &str,
+) -> bool {
+    should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config(git_dir))
 }
 
 /// Write a reflog entry.
@@ -1412,6 +1372,30 @@ pub fn append_reflog(
     message: &str,
     force_create: bool,
 ) -> Result<()> {
+    append_reflog_with_config(
+        git_dir,
+        refname,
+        old_oid,
+        new_oid,
+        identity,
+        message,
+        force_create,
+        None,
+    )
+}
+
+/// Like [`append_reflog`], reusing `config` for reflog auto-create policy when provided.
+#[allow(clippy::too_many_arguments)]
+pub fn append_reflog_with_config(
+    git_dir: &Path,
+    refname: &str,
+    old_oid: &ObjectId,
+    new_oid: &ObjectId,
+    identity: &str,
+    message: &str,
+    force_create: bool,
+    config: Option<&ConfigSet>,
+) -> Result<()> {
     test_inject_reflog_fail(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_append_reflog(
@@ -1427,7 +1411,11 @@ pub fn append_reflog(
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let log_path = storage_dir.join("logs").join(&stor);
-    let may_create = force_create || should_autocreate_reflog(git_dir, refname);
+    let may_create = force_create
+        || match config {
+            Some(cfg) => should_autocreate_reflog_with_config(cfg, git_dir, refname),
+            None => should_autocreate_reflog(git_dir, refname),
+        };
     if !may_create && !log_path.exists() {
         return Ok(());
     }
@@ -1617,6 +1605,7 @@ fn update_branch_for_commit_files(
     git_dir: &Path,
     update: &BranchCommitRefUpdate<'_>,
     reflog_old: &ObjectId,
+    config: &ConfigSet,
 ) -> Result<()> {
     ensure_refname_safe_for_storage(update.branch_ref)?;
     let storage_dir = ref_storage_dir(git_dir, update.branch_ref);
@@ -1656,8 +1645,8 @@ fn update_branch_for_commit_files(
     }
 
     let mut branch_reflog_written = false;
-    if should_autocreate_reflog(git_dir, update.branch_ref) {
-        match append_reflog(
+    if should_autocreate_reflog_with_config(config, git_dir, update.branch_ref) {
+        match append_reflog_with_config(
             git_dir,
             update.branch_ref,
             reflog_old,
@@ -1665,6 +1654,7 @@ fn update_branch_for_commit_files(
             update.identity,
             update.reflog_message,
             false,
+            Some(config),
         ) {
             Ok(()) => branch_reflog_written = true,
             Err(err) => {
@@ -1674,8 +1664,8 @@ fn update_branch_for_commit_files(
         }
     }
 
-    if should_autocreate_reflog(git_dir, "HEAD") {
-        if let Err(err) = append_reflog(
+    if should_autocreate_reflog_with_config(config, git_dir, "HEAD") {
+        if let Err(err) = append_reflog_with_config(
             git_dir,
             "HEAD",
             reflog_old,
@@ -1683,6 +1673,7 @@ fn update_branch_for_commit_files(
             update.identity,
             update.reflog_message,
             false,
+            Some(config),
         ) {
             if branch_reflog_written {
                 let _ = crate::reflog::truncate_last_reflog_line(git_dir, update.branch_ref);
@@ -1751,6 +1742,16 @@ fn update_branch_for_commit_reftable(
 
 /// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
 pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'_>) -> Result<()> {
+    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    update_branch_for_commit_with_config(git_dir, update, &config)
+}
+
+/// Like [`update_branch_for_commit`], using a repository config snapshot for reflog policy.
+pub fn update_branch_for_commit_with_config(
+    git_dir: &Path,
+    update: &BranchCommitRefUpdate<'_>,
+    config: &ConfigSet,
+) -> Result<()> {
     let head_target = read_head(git_dir)?;
     if head_target.as_deref() != Some(update.branch_ref) {
         return Err(Error::Message(format!(
@@ -1765,7 +1766,7 @@ pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'
         return update_branch_for_commit_reftable(git_dir, update, &reflog_old);
     }
 
-    update_branch_for_commit_files(git_dir, update, &reflog_old)
+    update_branch_for_commit_files(git_dir, update, &reflog_old, config)
 }
 
 /// Filesystem path to the reflog file for `refname` (same layout as [`append_reflog`]).
