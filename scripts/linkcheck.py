@@ -41,6 +41,15 @@ def is_external(url: str) -> bool:
     return url.startswith(("http://", "https://", "//"))
 
 
+def normalize_external_url(url: str) -> str:
+    """Return an absolute URL suitable for ``urllib.request``."""
+    if url.startswith("//"):
+        return f"https:{url}"
+    if url.startswith(("http://", "https://")):
+        return url
+    raise ValueError(f"unsupported external URL scheme: {url!r}")
+
+
 def page_ids(html: str) -> set[str]:
     return set(ID_RE.findall(html))
 
@@ -111,7 +120,11 @@ def check_link(
     if is_external(url):
         if not check_external:
             return None
-        request = urllib.request.Request(url, method="HEAD")
+        try:
+            fetch_url = normalize_external_url(url)
+        except ValueError as exc:
+            return LinkIssue(ref.source, ref.raw, str(exc), ref.line)
+        request = urllib.request.Request(fetch_url, method="HEAD")
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
                 if response.status >= 400:
@@ -120,6 +133,8 @@ def check_link(
             return LinkIssue(ref.source, ref.raw, f"HTTP {exc.code}", ref.line)
         except urllib.error.URLError as exc:
             return LinkIssue(ref.source, ref.raw, str(exc.reason), ref.line)
+        except ValueError as exc:
+            return LinkIssue(ref.source, ref.raw, str(exc), ref.line)
         return None
 
     target, fragment = resolve_target(ref.source, url)
