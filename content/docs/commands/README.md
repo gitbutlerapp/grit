@@ -10,8 +10,8 @@ Use this section order:
 4. **Examples** — human-readable terminal output from a real `grit` run.
 5. **JSON output** — for commands that emit JSON with `--json`:
    - at least one fenced ` ```json ` block containing real `grit <cmd> --json` output;
-   - a field table documenting every top-level key in each example.
-   Plumbing commands (`manager`, `upload-pack`, `receive-pack`) explain that stdout is not JSON instead.
+   - a **markdown field table** (`| Field | … |`) documenting every top-level key in each example (prose lists of keys are not enough).
+   **Exception:** plumbing commands (`manager`, `upload-pack`, `receive-pack`) do not use fenced JSON; their JSON output section explains that stdout carries the credential or wire protocol instead. Every other command follows the fenced-JSON + field-table rule.
 6. **Markdown output** — only when the command (or global flags) includes `--markdown`. Do not add this section until the flag exists.
 7. **See also** — links to related command pages.
 

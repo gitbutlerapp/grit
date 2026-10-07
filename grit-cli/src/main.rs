@@ -419,17 +419,103 @@ mod tests {
             .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
     }
 
-    fn key_documented_in_section(section: &str, key: &str) -> bool {
-        section.contains(&format!("`{key}`"))
-            || section.contains(&format!("`{key}."))
-            || section.contains(&format!("`{key}["))
-    }
-
     fn top_level_keys(value: &Value) -> HashSet<String> {
         match value {
             Value::Object(map) => map.keys().cloned().collect(),
             _ => HashSet::new(),
         }
+    }
+
+    /// Keys named in the first column of a markdown field table inside the JSON section.
+    fn field_table_top_level_keys(section: &str) -> HashSet<String> {
+        let mut keys = HashSet::new();
+        let mut past_header = false;
+        for line in section.lines() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('|') {
+                continue;
+            }
+            if trimmed.contains("---") {
+                past_header = true;
+                continue;
+            }
+            if !past_header {
+                continue;
+            }
+            let Some(first_cell) = trimmed.split('|').nth(1) else {
+                continue;
+            };
+            let cell = first_cell.trim().trim_matches('`');
+            let top = cell.split(['.', '[']).next().unwrap_or(cell).trim();
+            if top.is_empty() || top.eq_ignore_ascii_case("field") {
+                continue;
+            }
+            keys.insert(top.to_owned());
+        }
+        keys
+    }
+
+    fn json_section_has_field_table(section: &str) -> bool {
+        let has_header = section
+            .lines()
+            .any(|line| line.contains('|') && line.to_lowercase().contains("field"));
+        let has_separator = section
+            .lines()
+            .any(|line| line.trim().starts_with('|') && line.contains("---"));
+        has_header && has_separator && !field_table_top_level_keys(section).is_empty()
+    }
+
+    fn page_mentions_markdown(body: &str) -> bool {
+        body.contains("## Markdown output") || body.contains("--markdown")
+    }
+
+    /// Validate `##` heading order, allowing `Markdown output` only between JSON output and See also.
+    fn validate_page_headings(name: &str, headings: &[String]) -> Vec<String> {
+        let see_also_idx = TEMPLATE_HEADINGS.len() - 1;
+        let mut problems = Vec::new();
+        let mut template_idx = 0usize;
+        let mut heading_idx = 0usize;
+        while heading_idx < headings.len() {
+            let heading = &headings[heading_idx];
+            if template_idx < TEMPLATE_HEADINGS.len() && heading == &TEMPLATE_HEADINGS[template_idx]
+            {
+                template_idx += 1;
+                heading_idx += 1;
+                continue;
+            }
+            if heading == "Markdown output" {
+                if template_idx == see_also_idx {
+                    heading_idx += 1;
+                    continue;
+                }
+                if template_idx > see_also_idx {
+                    problems.push(format!("{name}.md: unexpected ## Markdown output"));
+                } else {
+                    problems.push(format!(
+                        "{name}.md: ## Markdown output must appear only after ## JSON output and before ## See also"
+                    ));
+                }
+                heading_idx += 1;
+                continue;
+            }
+            if template_idx < TEMPLATE_HEADINGS.len() {
+                problems.push(format!(
+                    "{name}.md: expected ## {} but found ## {heading}",
+                    TEMPLATE_HEADINGS[template_idx]
+                ));
+            } else {
+                problems.push(format!("{name}.md: unexpected ## {heading}"));
+            }
+            heading_idx += 1;
+            template_idx = TEMPLATE_HEADINGS.len();
+        }
+        if template_idx < TEMPLATE_HEADINGS.len() {
+            problems.push(format!(
+                "{name}.md: missing ## {}",
+                TEMPLATE_HEADINGS[template_idx]
+            ));
+        }
+        problems
     }
 
     /// Every command page uses the documented section order.
@@ -448,37 +534,29 @@ mod tests {
                 continue;
             };
             let (_, body) = split_front_matter(&text);
-            let headings = h2_headings(body);
-            let mut expected = 0usize;
-            for heading in &headings {
-                if expected < TEMPLATE_HEADINGS.len() && heading == TEMPLATE_HEADINGS[expected] {
-                    expected += 1;
-                    continue;
-                }
-                if heading == "Markdown output" {
-                    if !headings.contains(&"JSON output".to_string()) {
-                        problems.push(format!("{name}.md: Markdown output before JSON output"));
-                    }
-                    continue;
-                }
-                if expected < TEMPLATE_HEADINGS.len() {
-                    problems.push(format!(
-                        "{name}.md: expected ## {} but found ## {heading}",
-                        TEMPLATE_HEADINGS[expected]
-                    ));
-                    expected = TEMPLATE_HEADINGS.len();
-                } else {
-                    problems.push(format!("{name}.md: unexpected ## {heading}"));
-                }
-            }
-            if expected < TEMPLATE_HEADINGS.len() {
-                problems.push(format!(
-                    "{name}.md: missing ## {}",
-                    TEMPLATE_HEADINGS[expected]
-                ));
-            }
+            problems.extend(validate_page_headings(name, &h2_headings(body)));
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn command_pages_follow_template_rejects_markdown_after_see_also() {
+        let headings = vec![
+            "Synopsis".into(),
+            "Description".into(),
+            "Options".into(),
+            "Examples".into(),
+            "JSON output".into(),
+            "See also".into(),
+            "Markdown output".into(),
+        ];
+        let problems = validate_page_headings("commit", &headings);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("unexpected ## Markdown output")),
+            "{problems:?}"
+        );
     }
 
     /// JSON examples in the JSON output section must parse, and document top-level keys.
@@ -520,6 +598,13 @@ mod tests {
                 ));
                 continue;
             }
+            if !json_section_has_field_table(&section) {
+                problems.push(format!(
+                    "{name}.md: JSON output section needs a field table (| Field | … |)"
+                ));
+                continue;
+            }
+            let table_keys = field_table_top_level_keys(&section);
             for (i, block) in blocks.iter().enumerate() {
                 let parsed: Value = serde_json::from_str(block).unwrap_or_else(|e| {
                     problems.push(format!("{name}.md: JSON example {i} does not parse: {e}"));
@@ -529,7 +614,7 @@ mod tests {
                     continue;
                 }
                 for key in top_level_keys(&parsed) {
-                    if !key_documented_in_section(&section, &key) {
+                    if !table_keys.contains(&key) {
                         problems.push(format!(
                             "{name}.md: JSON example documents `{key}` but the field table does not"
                         ));
@@ -538,6 +623,21 @@ mod tests {
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn json_examples_parse_requires_field_table_not_prose() {
+        let section = r#"Pass `--json` for output.
+
+The keys are `initialized`, `path`, `bare`, and `branch`.
+
+```json
+{"initialized": true, "path": "/tmp/x", "bare": false, "branch": "main"}
+```
+"#;
+        assert!(!json_section_has_field_table(section));
+        let keys = field_table_top_level_keys(section);
+        assert!(keys.is_empty());
     }
 
     /// `--markdown` is documented only when clap exposes a `markdown` flag.
@@ -556,8 +656,7 @@ mod tests {
                 continue;
             };
             let (_, body) = split_front_matter(&text);
-            let mentions_markdown =
-                body.contains("## Markdown output") || body.contains("`--markdown`");
+            let mentions_markdown = page_mentions_markdown(body);
             let supported = global_markdown || command_supports_markdown(command);
             if mentions_markdown && !supported {
                 problems.push(format!(
@@ -566,6 +665,12 @@ mod tests {
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    #[test]
+    fn markdown_output_only_when_supported_detects_unbackticked_flag() {
+        let body = "## JSON output\n\nPass --markdown for agent output.\n";
+        assert!(page_mentions_markdown(body));
     }
 
     /// Every command (including hidden plumbing) has a man page in
