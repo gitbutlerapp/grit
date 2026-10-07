@@ -60,13 +60,13 @@ fn racy_same_size_change_matches_git_diff() {
         "system git must detect same-size racy modification"
     );
 
-    let grit_index = grit_repo.load_index().expect("reload index");
+    let mut grit_index = grit_repo.load_index().expect("reload index");
     assert_eq!(
         grit_index.source_mtime,
         Some(index_mtime),
         "source mtime preserved across reload"
     );
-    let diff = diff_index_to_worktree(&grit_repo.odb, &grit_index, repo, false, false)
+    let diff = diff_index_to_worktree(&grit_repo.odb, &mut grit_index, repo, false, false)
         .expect("diff_index_to_worktree");
     assert_eq!(diff.len(), 1, "grit must re-hash racy entry");
     assert_eq!(diff[0].path(), "f.txt");
@@ -102,8 +102,8 @@ fn racy_unchanged_content_matches_git_clean_diff() {
         "system git must treat racy clean file as unmodified: {git_names:?}"
     );
 
-    let grit_index = grit_repo.load_index().expect("reload index");
-    let diff = diff_index_to_worktree(&grit_repo.odb, &grit_index, repo, false, false)
+    let mut grit_index = grit_repo.load_index().expect("reload index");
+    let diff = diff_index_to_worktree(&grit_repo.odb, &mut grit_index, repo, false, false)
         .expect("diff_index_to_worktree");
     assert!(
         diff.is_empty(),

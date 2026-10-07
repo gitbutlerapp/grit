@@ -120,13 +120,14 @@ pub fn stage(
             index_mtime,
             ..DiffIndexToWorktreeOptions::default()
         };
-        crate::diff::diff_index_to_worktree_for_staging(
+        let (unstaged, _) = crate::diff::diff_index_to_worktree_for_staging(
             &repo.odb,
             &repo.git_dir,
-            &index,
+            &mut index,
             work_tree,
             diff_opts,
-        )?
+        )?;
+        unstaged
     };
 
     let bulk_empty_index_add =

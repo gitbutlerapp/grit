@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
 use crate::diff::{
-    entry_is_racy, mode_from_metadata, read_submodule_head_oid, stat_matches, symlink_target_bytes,
+    entry_is_racy, index_entry_worktree_abs, mode_from_metadata, read_submodule_head_oid,
+    stat_matches, symlink_target_bytes, SymlinkDirCache,
 };
 use crate::error::{Error, Result};
 use crate::index::index_file_mtime;
@@ -21,6 +22,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::precompose_config::effective_core_precomposeunicode;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
+use crate::worktree_scan::{for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup};
 
 /// Summary of paths updated while staging tracked modifications/deletions.
 ///
@@ -111,11 +113,9 @@ pub fn stage_tracked_modifications_in_index(
         .and_then(|cfg| cfg.get_bool("core.filemode").and_then(|r| r.ok()))
         .unwrap_or(true);
 
-    let mut path_keys: HashSet<Vec<u8>> = HashSet::new();
     let mut unmerged_paths: HashSet<Vec<u8>> = HashSet::new();
     let mut stage0: HashMap<Vec<u8>, IndexEntry> = HashMap::new();
     for e in &index.entries {
-        path_keys.insert(e.path.clone());
         if e.stage() != 0 {
             unmerged_paths.insert(e.path.clone());
         } else {
@@ -125,54 +125,95 @@ pub fn stage_tracked_modifications_in_index(
 
     let mut symlink_parent_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut summary = StageTrackedSummary::default();
+    let ignorecase = ConfigSet::load(Some(&repo.git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
+        .unwrap_or(false);
+    let mut dir_symlinks = SymlinkDirCache::default();
 
-    for raw_path in path_keys {
-        let abs_path = std::str::from_utf8(&raw_path)
-            .ok()
-            .filter(|_| precompose_unicode)
-            .map_or_else(
-                || worktree_path_from_index_rel(work_tree, &raw_path),
-                |rel| resolve_worktree_path_for_staging(work_tree, rel, true).abs,
-            );
-        if path_has_symlink_parent_cached(work_tree, &abs_path, &mut symlink_parent_cache) {
-            if index.remove(&raw_path) {
-                summary.removed.push(raw_path.clone());
-            }
-            continue;
-        }
+    for raw_path in &unmerged_paths {
+        let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode);
+        refresh_unmerged_tracked_path(repo, index, raw_path, &abs_path, &mut summary)?;
+    }
 
-        if unmerged_paths.contains(&raw_path) {
-            refresh_unmerged_tracked_path(repo, index, &raw_path, &abs_path, &mut summary)?;
-            continue;
-        }
-
-        let Some(idx_e) = stage0.get(&raw_path) else {
-            continue;
-        };
-
-        match symlink_metadata_for_staging(&abs_path)? {
-            Some(_) => {
-                let ctx = PresentRefreshCtx {
-                    repo,
-                    index,
-                    raw_path: &raw_path,
-                    abs_path: &abs_path,
-                    idx_e,
-                    index_mtime,
-                    trust_filemode,
-                };
-                if refresh_present_tracked_path(ctx)? {
-                    summary.modified.push(raw_path);
-                }
-            }
-            None if idx_e.skip_worktree() => continue,
-            None => {
-                if index.remove(&raw_path) {
-                    summary.removed.push(raw_path);
-                }
-            }
+    for (raw_path, idx_e) in &stage0 {
+        if idx_e.mode == MODE_GITLINK || std::str::from_utf8(raw_path).is_err() {
+            stage_tracked_path_individual(
+                repo,
+                work_tree,
+                index,
+                raw_path,
+                idx_e,
+                index_mtime,
+                trust_filemode,
+                precompose_unicode,
+                &mut symlink_parent_cache,
+                &mut summary,
+            )?;
         }
     }
+
+    let blob_dirs = group_blob_entries_by_dir(index);
+    let dir_abs = |dir: &str| {
+        if dir.is_empty() {
+            work_tree.to_path_buf()
+        } else {
+            index_entry_worktree_abs(work_tree, dir, precompose_unicode, ignorecase)
+        }
+    };
+    let file_abs =
+        |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
+    for_each_blob_by_directory(
+        &blob_dirs,
+        dir_abs,
+        file_abs,
+        |rel_path| {
+            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+                || {
+                    let abs = file_abs(rel_path);
+                    path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
+                }
+        },
+        |entry_index, _rel_path, lookup| {
+            let idx_snapshot = index.entries[entry_index].clone();
+            let raw_path = idx_snapshot.path.clone();
+            let skip_worktree = idx_snapshot.skip_worktree();
+            let abs_path = abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode);
+            match lookup {
+                BlobDiskLookup::Missing => {
+                    if skip_worktree {
+                        return Ok(());
+                    }
+                    if rel_path_has_symlink_parent(work_tree, _rel_path) {
+                        if index.remove(&raw_path) {
+                            summary.removed.push(raw_path);
+                        }
+                        return Ok(());
+                    }
+                    if symlink_metadata_for_staging(&abs_path)?.is_none() && index.remove(&raw_path)
+                    {
+                        summary.removed.push(raw_path);
+                    }
+                }
+                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+                BlobDiskLookup::Present(meta) => {
+                    let ctx = PresentRefreshCtx {
+                        repo,
+                        index,
+                        raw_path: &raw_path,
+                        abs_path: &abs_path,
+                        idx_e: &idx_snapshot,
+                        index_mtime,
+                        trust_filemode,
+                    };
+                    if refresh_present_tracked_path(ctx, &meta)? {
+                        summary.modified.push(raw_path);
+                    }
+                }
+            }
+            Ok(())
+        },
+    )?;
 
     summary.modified.sort();
     summary.removed.sort();
@@ -243,7 +284,66 @@ fn worktree_path_is_missing(err: &std::io::Error) -> bool {
     matches!(err.kind(), std::io::ErrorKind::NotFound)
 }
 
-fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
+fn abs_path_for_stage_tracked(
+    work_tree: &Path,
+    raw_path: &[u8],
+    precompose_unicode: bool,
+) -> PathBuf {
+    std::str::from_utf8(raw_path)
+        .ok()
+        .filter(|_| precompose_unicode)
+        .map_or_else(
+            || worktree_path_from_index_rel(work_tree, raw_path),
+            |rel| resolve_worktree_path_for_staging(work_tree, rel, true).abs,
+        )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_tracked_path_individual(
+    repo: &Repository,
+    work_tree: &Path,
+    index: &mut Index,
+    raw_path: &[u8],
+    idx_e: &IndexEntry,
+    index_mtime: Option<(u32, u32)>,
+    trust_filemode: bool,
+    precompose_unicode: bool,
+    symlink_parent_cache: &mut HashMap<PathBuf, bool>,
+    summary: &mut StageTrackedSummary,
+) -> Result<()> {
+    let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode);
+    if path_has_symlink_parent_cached(work_tree, &abs_path, symlink_parent_cache) {
+        if index.remove(raw_path) {
+            summary.removed.push(raw_path.to_vec());
+        }
+        return Ok(());
+    }
+    match symlink_metadata_for_staging(&abs_path)? {
+        Some(meta) => {
+            let ctx = PresentRefreshCtx {
+                repo,
+                index,
+                raw_path,
+                abs_path: &abs_path,
+                idx_e,
+                index_mtime,
+                trust_filemode,
+            };
+            if refresh_present_tracked_path(ctx, &meta)? {
+                summary.modified.push(raw_path.to_vec());
+            }
+        }
+        None if idx_e.skip_worktree() => {}
+        None => {
+            if index.remove(raw_path) {
+                summary.removed.push(raw_path.to_vec());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>, meta: &fs::Metadata) -> Result<bool> {
     let PresentRefreshCtx {
         repo,
         index,
@@ -261,7 +361,6 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
         return refresh_gitlink(repo, index, raw_path, abs_path, idx_e);
     }
 
-    let meta = fs::symlink_metadata(abs_path)?;
     if meta.is_dir() && !meta.file_type().is_symlink() {
         if abs_path.join(".git").exists() {
             if let Some(oid) = read_submodule_head_oid(abs_path) {
@@ -282,8 +381,8 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
         }
     }
 
-    let wt_mode = mode_from_metadata(&meta);
-    let stat_same = stat_matches(idx_e, &meta);
+    let wt_mode = mode_from_metadata(meta);
+    let stat_same = stat_matches(idx_e, meta);
     let racy = entry_is_racy(idx_e, index_mtime);
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
         if wt_mode == idx_mode || !trust_filemode {
@@ -294,7 +393,7 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
         return Ok(true);
     }
 
-    let oid = read_worktree_blob_oid(repo, abs_path, &meta)?;
+    let oid = read_worktree_blob_oid(repo, abs_path, meta)?;
     let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
     if !idx_intent_to_add && idx_oid == oid && (wt_mode == idx_mode || !trust_filemode) {
         return Ok(false);
@@ -381,6 +480,28 @@ fn read_worktree_blob_oid(
     repo.odb.write(ObjectKind::Blob, &data)
 }
 
+fn rel_path_has_symlink_parent(work_tree: &Path, rel_path: &str) -> bool {
+    let components: Vec<&str> = rel_path.split('/').collect();
+    if components.len() <= 1 {
+        return false;
+    }
+    let mut prefix = String::new();
+    for component in &components[..components.len() - 1] {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(component);
+        let abs = work_tree.join(&prefix);
+        if fs::symlink_metadata(&abs)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn path_has_symlink_parent_cached(
     work_tree: &Path,
     abs_path: &Path,
@@ -438,6 +559,31 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let repo = init_repository(dir.path(), false, "main", None, "files").unwrap();
         (dir, repo)
+    }
+
+    #[test]
+    fn staging_scan_stats_each_tracked_path_once() {
+        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree.as_ref().unwrap();
+        const FILE_COUNT: usize = 2000;
+        for i in 0..FILE_COUNT {
+            let rel = format!("d{:04}/f{:05}.txt", i / 100, i);
+            write_and_index(&repo, rel.as_bytes(), b"x\n");
+        }
+        reset_worktree_metadata_probe();
+        let index_path = repo.index_path_for_env().unwrap();
+        let mut index = repo.load_index().unwrap();
+        stage_tracked_modifications_in_index(&repo, wt, &index_path, &mut index).unwrap();
+        let tracked = index.entries.len();
+        let dir_count = (FILE_COUNT + 99) / 100;
+        let calls = worktree_metadata_probe_count();
+        assert!(
+            calls <= tracked + dir_count + 5,
+            "staging scan metadata calls {calls} exceeded budget {} (tracked {tracked}, dirs {dir_count})",
+            tracked + dir_count + 5
+        );
     }
 
     fn pin_mtime(path: &Path, sec: u32, nsec: u32) {

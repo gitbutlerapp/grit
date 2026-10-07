@@ -2332,7 +2332,7 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &str)
 /// Returns errors from I/O or hashing.
 pub fn diff_index_to_worktree(
     odb: &Odb,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     ignore_submodule_untracked: bool,
     simplify_gitlinks: bool,
@@ -2347,6 +2347,7 @@ pub fn diff_index_to_worktree(
             ..DiffIndexToWorktreeOptions::default()
         },
     )
+    .map(|(entries, _)| entries)
 }
 
 /// Additional inputs for [`diff_index_to_worktree_with_options`].
@@ -2369,6 +2370,9 @@ pub struct DiffIndexToWorktreeOptions {
     ///
     /// When unset, defaults to `work_tree/.git`, which is wrong for gitfile layouts.
     pub repository_git_dir: Option<std::path::PathBuf>,
+    /// When true, adopt refreshed stat data for unchanged blobs during the same directory scan
+    /// as the worktree diff (one lstat per tracked path).
+    pub refresh_index_stat_in_pass: bool,
 }
 
 /// Compare the index against the working tree with optional racy-timestamp context.
@@ -2494,10 +2498,10 @@ fn push_index_blob_worktree_diff(
 /// Returns errors from I/O or hashing.
 pub fn diff_index_to_worktree_with_options(
     odb: &Odb,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     options: DiffIndexToWorktreeOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<(Vec<DiffEntry>, bool)> {
     let default_git_dir = work_tree.join(".git");
     let git_dir = options
         .repository_git_dir
@@ -2512,21 +2516,21 @@ pub fn diff_index_to_worktree_with_options(
 pub fn diff_index_to_worktree_for_staging(
     odb: &Odb,
     repository_git_dir: &Path,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     options: DiffIndexToWorktreeOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<(Vec<DiffEntry>, bool)> {
     diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
 }
 
 fn diff_index_to_worktree_inner(
     odb: &Odb,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     repository_git_dir: &Path,
     options: DiffIndexToWorktreeOptions,
     materialize_dirty_blobs: bool,
-) -> Result<Vec<DiffEntry>> {
+) -> Result<(Vec<DiffEntry>, bool)> {
     use crate::config::ConfigSet;
     use crate::crlf;
 
@@ -2553,7 +2557,9 @@ fn diff_index_to_worktree_inner(
         .unwrap_or(false);
 
     let mut result = Vec::new();
-    let mut unmerged_base: std::collections::BTreeMap<String, (u8, &IndexEntry)> =
+    let refresh_index_stat_in_pass = options.refresh_index_stat_in_pass;
+    let mut index_stat_refresh_changed = false;
+    let mut unmerged_base: std::collections::BTreeMap<String, (u8, IndexEntry)> =
         std::collections::BTreeMap::new();
 
     // Cache of ancestor-directory symlink-ness so we stat each directory at most
@@ -2573,7 +2579,7 @@ fn diff_index_to_worktree_inner(
             match unmerged_base.get(&path) {
                 Some((existing_rank, _)) if *existing_rank <= rank => {}
                 _ => {
-                    unmerged_base.insert(path, (rank, ie));
+                    unmerged_base.insert(path, (rank, ie.clone()));
                 }
             }
             continue;
@@ -2784,18 +2790,18 @@ fn diff_index_to_worktree_inner(
     let file_abs =
         |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
     for_each_blob_by_directory(
-        index,
         &blob_dirs,
         dir_abs,
         file_abs,
         |rel_path| {
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
         },
-        |_entry_index, ie, path_str_ref, lookup| {
+        |entry_index, path_str_ref, lookup| {
             let file_path =
                 index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
             match lookup {
                 BlobDiskLookup::Missing => {
+                    let ie = &index.entries[entry_index];
                     result.push(DiffEntry {
                         status: DiffStatus::Deleted,
                         old_path: Some(path_str_ref.to_owned()),
@@ -2809,6 +2815,23 @@ fn diff_index_to_worktree_inner(
                 }
                 BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
                 BlobDiskLookup::Present(meta) => {
+                    if refresh_index_stat_in_pass {
+                        let ie = &mut index.entries[entry_index];
+                        if refresh_index_blob_stat_from_metadata(
+                            odb,
+                            ie,
+                            &meta,
+                            path_str_ref,
+                            &file_path,
+                            index_mtime,
+                            &config,
+                            &conv,
+                            &attrs,
+                        ) {
+                            index_stat_refresh_changed = true;
+                        }
+                    }
+                    let ie = &index.entries[entry_index];
                     push_index_blob_worktree_diff(
                         odb,
                         ie,
@@ -2829,8 +2852,8 @@ fn diff_index_to_worktree_inner(
         },
     )?;
 
-    for (path, (_, base_entry)) in unmerged_base {
-        let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode, ignorecase);
+    for (path, (_, base_entry)) in &unmerged_base {
+        let file_path = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
         let wt_meta = match fs::symlink_metadata(&file_path) {
             Ok(meta) => Some(meta),
             Err(e)
@@ -2858,14 +2881,14 @@ fn diff_index_to_worktree_inner(
         });
 
         if let Some(meta) = wt_meta {
-            let file_attrs = crlf::get_file_attrs(&attrs, &path, false, &config);
+            let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
             let wt_oid = worktree_file_oid(
                 odb,
                 &file_path,
                 &meta,
                 &conv,
                 &file_attrs,
-                &path,
+                path,
                 Some(base_entry),
                 materialize_dirty_blobs,
             )?;
@@ -2874,7 +2897,7 @@ fn diff_index_to_worktree_inner(
                 result.push(DiffEntry {
                     status: DiffStatus::Modified,
                     old_path: Some(path.clone()),
-                    new_path: Some(path),
+                    new_path: Some(path.clone()),
                     old_mode: format_mode(base_entry.mode),
                     new_mode: format_mode(wt_mode),
                     old_oid: base_entry.oid,
@@ -2885,20 +2908,20 @@ fn diff_index_to_worktree_inner(
         }
     }
 
-    Ok(result)
+    Ok((result, index_stat_refresh_changed))
 }
 
 /// Memoized cache of which ancestor directories are symlinks, so each directory
 /// is lstat'd at most once per `diff_index_to_worktree` call.
 #[derive(Default)]
-struct SymlinkDirCache {
+pub(crate) struct SymlinkDirCache {
     /// Relative dir prefixes confirmed to be symlinks.
     symlink: std::collections::HashSet<String>,
     /// Relative dir prefixes confirmed not to be symlinks.
     plain: std::collections::HashSet<String>,
 }
 
-fn index_entry_worktree_abs(
+pub(crate) fn index_entry_worktree_abs(
     work_tree: &Path,
     index_relpath: &str,
     precompose_unicode: bool,
@@ -2926,7 +2949,7 @@ pub fn index_mtime_for_diff(index: &Index, explicit: Option<(u32, u32)>) -> Opti
 
 impl SymlinkDirCache {
     /// Whether any parent component of `rel_path` is a symlink.
-    fn has_symlink_in_path(
+    pub(crate) fn has_symlink_in_path(
         &mut self,
         work_tree: &Path,
         rel_path: &str,
@@ -3356,149 +3379,136 @@ pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
 /// `parallelism` is the resolved worker count (from `core.preloadindex` / `index.threads`);
 /// callers pass [`crate::hash::index_parallelism_from_config`] output.
 ///
-/// Returns `true` when at least one entry was refreshed or invalidated, so callers can write
+/// Returns `Ok(true)` when at least one entry was refreshed or invalidated, so callers can write
 /// the index opportunistically (Git only persists a refresh that changed something).
+///
+/// # Errors
+///
+/// Propagates I/O errors from the directory-grouped worktree scan.
 pub fn refresh_index_stat_content_verified(
     odb: &Odb,
     git_dir: &Path,
     index: &mut Index,
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
-    parallelism: crate::hash::Parallelism,
-) -> bool {
+    _parallelism: crate::hash::Parallelism,
+) -> Result<bool> {
     use crate::config::ConfigSet;
     use crate::crlf;
-    use crate::worktree_batch::{
-        collect_refresh_hash_work, collect_refresh_hash_work_parallel,
-        parallel_refresh_index_stat_hashes, RefreshHashOutcome,
+    use crate::worktree_scan::{
+        for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup,
     };
 
     let index_mtime = index_mtime_for_diff(index, index_mtime);
     let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
+    let precompose_unicode = config
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
 
-    let work = match collect_refresh_hash_work_parallel(
-        &index.entries,
-        work_tree,
-        index_mtime,
-        parallelism,
-    ) {
-        Ok(work) => work,
-        Err(_) => collect_refresh_hash_work(&index.entries, work_tree, index_mtime),
-    };
-    let outcomes = match parallel_refresh_index_stat_hashes(
-        odb,
-        &index.entries,
-        &work,
-        &conv,
-        &attrs,
-        &config,
-        parallelism,
-    ) {
-        Ok(outcomes) => outcomes,
-        Err(_) => {
-            return serial_refresh_index_stat_content_verified(
-                odb,
-                git_dir,
-                index,
-                work_tree,
-                index_mtime,
-            );
+    let blob_dirs = group_blob_entries_by_dir(index);
+    let dir_abs = |dir: &str| {
+        if dir.is_empty() {
+            work_tree.to_path_buf()
+        } else {
+            index_entry_worktree_abs(work_tree, dir, precompose_unicode, ignorecase)
         }
     };
-
+    let file_abs =
+        |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
+    let mut dir_symlinks = SymlinkDirCache::default();
     let mut changed = false;
-    for (entry_index, outcome) in outcomes {
-        let ie = &mut index.entries[entry_index];
-        match outcome {
-            RefreshHashOutcome::InvalidateStat => {
-                invalidate_index_stat_cache(ie);
+    for_each_blob_by_directory(
+        &blob_dirs,
+        dir_abs,
+        file_abs,
+        |rel_path| {
+            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+        },
+        |entry_index, path_str_ref, lookup| {
+            let BlobDiskLookup::Present(meta) = lookup else {
+                return Ok(());
+            };
+            let file_path =
+                index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
+            let ie = &mut index.entries[entry_index];
+            if refresh_index_blob_stat_from_metadata(
+                odb,
+                ie,
+                &meta,
+                path_str_ref,
+                &file_path,
+                index_mtime,
+                &config,
+                &conv,
+                &attrs,
+            ) {
                 changed = true;
             }
-            RefreshHashOutcome::AdoptStat(meta) => {
-                let refreshed = crate::index::entry_from_metadata(&meta, &ie.path, ie.oid, ie.mode);
-                ie.ctime_sec = refreshed.ctime_sec;
-                ie.ctime_nsec = refreshed.ctime_nsec;
-                ie.mtime_sec = refreshed.mtime_sec;
-                ie.mtime_nsec = refreshed.mtime_nsec;
-                ie.dev = refreshed.dev;
-                ie.ino = refreshed.ino;
-                ie.uid = refreshed.uid;
-                ie.gid = refreshed.gid;
-                ie.size = refreshed.size;
-                changed = true;
-            }
-        }
-    }
-    changed
+            Ok(())
+        },
+    )?;
+    Ok(changed)
 }
 
-fn serial_refresh_index_stat_content_verified(
+#[allow(clippy::too_many_arguments)]
+fn refresh_index_blob_stat_from_metadata(
     odb: &Odb,
-    git_dir: &Path,
-    index: &mut Index,
-    work_tree: &Path,
+    ie: &mut IndexEntry,
+    meta: &fs::Metadata,
+    path: &str,
+    abs: &Path,
     index_mtime: Option<(u32, u32)>,
+    config: &ConfigSet,
+    conv: &crate::crlf::ConversionConfig,
+    attrs: &[crate::crlf::AttrRule],
 ) -> bool {
-    use crate::config::ConfigSet;
-    use crate::crlf;
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
-    let conv = crlf::ConversionConfig::from_config(&config);
-    let attrs = crlf::load_gitattributes(work_tree);
-
-    let mut changed = false;
-    for ie in &mut index.entries {
-        if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
-            continue;
-        }
-        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
-            continue;
-        }
-        let Ok(path) = std::str::from_utf8(&ie.path) else {
-            continue;
-        };
-        let abs = work_tree.join(path);
-        let Ok(meta) = fs::symlink_metadata(&abs) else {
-            continue;
-        };
-        if stat_matches(ie, &meta) {
-            if entry_is_racy(ie, index_mtime) {
-                let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
-                let content_matches =
-                    hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
-                        .map(|oid| oid == ie.oid)
-                        .unwrap_or(false);
-                if !content_matches {
-                    invalidate_index_stat_cache(ie);
-                    changed = true;
-                }
-            }
-            continue;
-        }
-        let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
-        let content_matches =
-            hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
-                .map(|oid| oid == ie.oid)
-                .unwrap_or(false);
-        if !content_matches {
-            continue;
-        }
-        let refreshed = crate::index::entry_from_metadata(&meta, &ie.path, ie.oid, ie.mode);
-        ie.ctime_sec = refreshed.ctime_sec;
-        ie.ctime_nsec = refreshed.ctime_nsec;
-        ie.mtime_sec = refreshed.mtime_sec;
-        ie.mtime_nsec = refreshed.mtime_nsec;
-        ie.dev = refreshed.dev;
-        ie.ino = refreshed.ino;
-        ie.uid = refreshed.uid;
-        ie.gid = refreshed.gid;
-        ie.size = refreshed.size;
-        changed = true;
+    if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+        return false;
     }
-    changed
+    if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+        return false;
+    }
+    if stat_matches(ie, meta) {
+        if entry_is_racy(ie, index_mtime) {
+            let file_attrs = crate::crlf::get_file_attrs(attrs, path, false, config);
+            let content_matches =
+                hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
+                    .map(|oid| oid == ie.oid)
+                    .unwrap_or(false);
+            if !content_matches {
+                invalidate_index_stat_cache(ie);
+                return true;
+            }
+        }
+        return false;
+    }
+    let file_attrs = crate::crlf::get_file_attrs(attrs, path, false, config);
+    let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
+        .map(|oid| oid == ie.oid)
+        .unwrap_or(false);
+    if !content_matches {
+        return false;
+    }
+    let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
+    ie.ctime_sec = refreshed.ctime_sec;
+    ie.ctime_nsec = refreshed.ctime_nsec;
+    ie.mtime_sec = refreshed.mtime_sec;
+    ie.mtime_nsec = refreshed.mtime_nsec;
+    ie.dev = refreshed.dev;
+    ie.ino = refreshed.ino;
+    ie.uid = refreshed.uid;
+    ie.gid = refreshed.gid;
+    ie.size = refreshed.size;
+    true
 }
 
 /// Whether path-only checkout can skip writing a blob because the worktree is up to date.
@@ -6943,7 +6953,7 @@ pub fn submodule_porcelain_flags(
     let new_commits = sub_head != recorded_oid;
 
     let index_path = sub_git_dir.join("index");
-    let sub_index = match crate::index::Index::load(&index_path) {
+    let mut sub_index = match crate::index::Index::load(&index_path) {
         Ok(ix) => ix,
         Err(_) => {
             return SubmodulePorcelainFlags {
@@ -6984,7 +6994,7 @@ pub fn submodule_porcelain_flags(
         .unwrap_or(Ok(false));
     let staged_dirty = staged_dirty.unwrap_or(false);
 
-    let unstaged_dirty = diff_index_to_worktree(&odb, &sub_index, &sub_dir, false, true)
+    let unstaged_dirty = diff_index_to_worktree(&odb, &mut sub_index, &sub_dir, false, true)
         .map(|v| !v.is_empty())
         .unwrap_or(false);
 
@@ -7763,7 +7773,7 @@ mod racy_index_mtime_diff_tests {
         fs::write(wt.join("f.txt"), content_b).expect("rewrite");
         pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
 
-        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        let diff = diff_index_to_worktree(&odb, &mut index, wt, false, false).expect("diff");
         assert_eq!(
             diff.len(),
             1,
@@ -7798,7 +7808,7 @@ mod racy_index_mtime_diff_tests {
         index.source_mtime = Some(INDEX_MTIME);
         index.entries.push(entry);
 
-        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        let diff = diff_index_to_worktree(&odb, &mut index, wt, false, false).expect("diff");
         assert!(
             diff.is_empty(),
             "clean non-UTF-8 symlink must not be reported modified: {diff:?}"
@@ -7824,7 +7834,7 @@ mod racy_index_mtime_diff_tests {
         index.source_mtime = Some(INDEX_MTIME);
         index.entries.push(entry);
 
-        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        let diff = diff_index_to_worktree(&odb, &mut index, wt, false, false).expect("diff");
         assert!(
             diff.is_empty(),
             "clean SHA-256 racy entry must not be reported modified: {diff:?}"
@@ -8028,7 +8038,7 @@ mod smudge_racily_clean_tests {
         assert!(smudged);
         assert_eq!(index.entries[0].size, 0);
 
-        let diff = diff_index_to_worktree(&odb, &index, wt, false, false).expect("diff");
+        let diff = diff_index_to_worktree(&odb, &mut index, wt, false, false).expect("diff");
         assert_eq!(diff.len(), 1);
         assert_eq!(diff[0].path(), "f.txt");
     }

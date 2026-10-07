@@ -147,6 +147,8 @@ pub struct WorktreeBenchFixtures {
     pub attr_stack: ParsedGitAttributes,
     pub attr_paths: Vec<String>,
     pub index_write_scratch: PathBuf,
+    /// Repository with 10k tracked files on disk for status/staging scan benchmarks.
+    pub scan_repo_10k: Repository,
 }
 
 impl WorktreeBenchFixtures {
@@ -244,6 +246,33 @@ impl WorktreeBenchFixtures {
 
         let index_write_scratch = index_dir.join("write-scratch");
 
+        let scan_root = base.join("scan-10k");
+        let scan_repo =
+            init_repository(&scan_root, false, "main", None, "files").expect("scan repo init");
+        let scan_wt = scan_repo.work_tree.as_ref().expect("work tree");
+        let mut scan_index = Index::empty(2);
+        for i in 0..10_000 {
+            let dir = format!("d{:04}", i / 100);
+            let rel = format!("{dir}/f{:05}.txt", i % 100);
+            let path = scan_wt.join(&rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("scan subdir");
+            }
+            let bytes = format!("payload {i}\n");
+            std::fs::write(&path, &bytes).expect("scan blob");
+            let oid = scan_repo
+                .odb
+                .write(grit_lib::objects::ObjectKind::Blob, bytes.as_bytes())
+                .expect("hash scan blob");
+            let meta = std::fs::symlink_metadata(&path).expect("stat scan file");
+            let entry =
+                grit_lib::index::entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR);
+            scan_index.add_or_replace(entry);
+        }
+        scan_index
+            .write(&scan_repo.index_path())
+            .expect("write scan index");
+
         Self {
             _root: root,
             index_v2_10k_path,
@@ -262,6 +291,7 @@ impl WorktreeBenchFixtures {
             attr_stack,
             attr_paths,
             index_write_scratch,
+            scan_repo_10k: scan_repo,
         }
     }
 

@@ -1119,19 +1119,6 @@ pub fn status(
         Err(e) => return Err(e),
     };
     let index_mtime = index.source_mtime;
-    let config = crate::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
-    let parallelism = crate::hash::index_parallelism_from_config(&config);
-    if crate::diff::refresh_index_stat_content_verified(
-        &repo.odb,
-        &repo.git_dir,
-        &mut index,
-        work_tree,
-        index_mtime,
-        parallelism,
-    ) && repo.try_write_index(&mut index)?
-    {
-        index.source_mtime = crate::index::index_file_mtime(&index_path);
-    }
     let sparse_directory_prefixes: Vec<Vec<u8>> = index
         .entries
         .iter()
@@ -1160,20 +1147,27 @@ pub fn status(
             .collect();
 
     // Unstaged: worktree vs index, narrowed before rename detection.
-    let mut unstaged: Vec<DiffEntry> = crate::diff::diff_index_to_worktree_with_options(
-        &repo.odb,
-        &index,
-        work_tree,
-        crate::diff::DiffIndexToWorktreeOptions {
-            index_mtime: crate::diff::index_mtime_for_diff(&index, index_mtime),
-            ignore_submodule_untracked: opts.untracked == UntrackedMode::No,
-            repository_git_dir: Some(repo.git_dir.clone()),
-            ..Default::default()
-        },
-    )?
-    .into_iter()
-    .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
-    .collect();
+    let diff_index_mtime = crate::diff::index_mtime_for_diff(&index, index_mtime);
+    let (unstaged_raw, index_stat_refresh_changed) =
+        crate::diff::diff_index_to_worktree_with_options(
+            &repo.odb,
+            &mut index,
+            work_tree,
+            crate::diff::DiffIndexToWorktreeOptions {
+                index_mtime: diff_index_mtime,
+                ignore_submodule_untracked: opts.untracked == UntrackedMode::No,
+                repository_git_dir: Some(repo.git_dir.clone()),
+                refresh_index_stat_in_pass: true,
+                ..Default::default()
+            },
+        )?;
+    if index_stat_refresh_changed && repo.try_write_index(&mut index)? {
+        index.source_mtime = crate::index::index_file_mtime(&index_path);
+    }
+    let mut unstaged: Vec<DiffEntry> = unstaged_raw
+        .into_iter()
+        .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
+        .collect();
 
     if let Some(rd) = opts.renames {
         staged = apply_status_renames(&repo.odb, staged, rd, head_tree.as_ref())?;
@@ -1332,6 +1326,39 @@ mod status_op_tests {
             entries_read <= 8,
             "check-only probe must stop at the first visible entry, not scan all \
              3000 files (read {entries_read} directory entries during probe)"
+        );
+    }
+
+    #[test]
+    fn status_scan_stats_each_tracked_path_once() {
+        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        const FILE_COUNT: usize = 2000;
+        for i in 0..FILE_COUNT {
+            let dir = format!("d{:04}", i / 100);
+            fs::create_dir_all(root.join(&dir)).unwrap();
+            fs::write(
+                root.join(&dir).join(format!("f{i:05}.txt")),
+                format!("body {i}\n"),
+            )
+            .unwrap();
+        }
+        grit_test_support::git(root, &["add", "."]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+
+        let repo = Repository::open(&root.join(".git"), Some(root)).unwrap();
+        reset_worktree_metadata_probe();
+        let _ = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+        let tracked = repo.load_index().unwrap().entries.len();
+        let dir_count = (FILE_COUNT + 99) / 100;
+        let calls = worktree_metadata_probe_count();
+        assert!(
+            calls <= tracked + dir_count + 5,
+            "status scan metadata calls {calls} exceeded budget {} (tracked {tracked}, dirs {dir_count})",
+            tracked + dir_count + 5
         );
     }
 

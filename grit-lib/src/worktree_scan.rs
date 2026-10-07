@@ -9,8 +9,40 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Test hook: incremented once per worktree metadata syscall used by directory scans.
+#[cfg(test)]
+pub(crate) static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn reset_worktree_metadata_probe() {
+    WORKTREE_METADATA_PROBE.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn worktree_metadata_probe_count() -> usize {
+    WORKTREE_METADATA_PROBE.load(Ordering::Relaxed)
+}
+
+fn probe_worktree_metadata_call() {
+    #[cfg(test)]
+    WORKTREE_METADATA_PROBE.fetch_add(1, Ordering::Relaxed);
+}
+
+fn dir_entry_metadata(entry: &fs::DirEntry) -> io::Result<fs::Metadata> {
+    probe_worktree_metadata_call();
+    entry.metadata()
+}
+
+fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
+    probe_worktree_metadata_call();
+    fs::symlink_metadata(path)
+}
+
 use crate::error::{Error, Result};
-use crate::index::{Index, IndexEntry, MODE_GITLINK};
+use crate::index::{Index, MODE_GITLINK};
 
 /// A tracked blob path grouped under its parent directory (repository-relative).
 #[derive(Debug, Clone)]
@@ -72,7 +104,6 @@ pub(crate) enum BlobDiskLookup {
 /// When `has_symlink_ancestor(rel_path)` is true, the entry is reported as [`BlobDiskLookup::Missing`]
 /// without extra I/O (symlink replaced a directory on the path).
 pub(crate) fn for_each_blob_by_directory<F>(
-    index: &Index,
     by_dir: &HashMap<String, Vec<BlobInDir>>,
     dir_abs: impl Fn(&str) -> PathBuf,
     file_abs: impl Fn(&str) -> PathBuf,
@@ -80,7 +111,7 @@ pub(crate) fn for_each_blob_by_directory<F>(
     mut visit: F,
 ) -> Result<()>
 where
-    F: FnMut(usize, &IndexEntry, &str, BlobDiskLookup) -> Result<()>,
+    F: FnMut(usize, &str, BlobDiskLookup) -> Result<()>,
 {
     let mut dirs: Vec<_> = by_dir.keys().cloned().collect();
     dirs.sort();
@@ -92,13 +123,7 @@ where
         // deleted without traversing the link target (even if the target is unreadable).
         if blobs.iter().all(|b| has_symlink_ancestor(&b.rel_path)) {
             for blob in blobs {
-                let ie = &index.entries[blob.entry_index];
-                visit(
-                    blob.entry_index,
-                    ie,
-                    &blob.rel_path,
-                    BlobDiskLookup::Missing,
-                )?;
+                visit(blob.entry_index, &blob.rel_path, BlobDiskLookup::Missing)?;
             }
             continue;
         }
@@ -106,14 +131,8 @@ where
         let abs_dir = dir_abs(&dir);
         let (dir_readable, on_disk) = read_directory_map(&abs_dir)?;
         for blob in blobs {
-            let ie = &index.entries[blob.entry_index];
             if has_symlink_ancestor(&blob.rel_path) {
-                visit(
-                    blob.entry_index,
-                    ie,
-                    &blob.rel_path,
-                    BlobDiskLookup::Missing,
-                )?;
+                visit(blob.entry_index, &blob.rel_path, BlobDiskLookup::Missing)?;
                 continue;
             }
             let target = file_abs(&blob.rel_path);
@@ -122,7 +141,7 @@ where
             } else {
                 lookup_blob_in_directory(&on_disk, &blob.file_name, &target)
             };
-            visit(blob.entry_index, ie, &blob.rel_path, lookup)?;
+            visit(blob.entry_index, &blob.rel_path, lookup)?;
         }
     }
     Ok(())
@@ -135,7 +154,7 @@ fn lookup_blob_in_directory(
 ) -> BlobDiskLookup {
     let try_entry = |entry: &fs::DirEntry| -> Option<std::result::Result<fs::Metadata, io::Error>> {
         if entry.path() == target_abs {
-            Some(entry.metadata())
+            Some(dir_entry_metadata(entry))
         } else {
             None
         }
@@ -157,7 +176,7 @@ fn lookup_blob_in_directory(
             };
         }
     }
-    match fs::symlink_metadata(target_abs) {
+    match symlink_metadata_path(target_abs) {
         Ok(meta) => BlobDiskLookup::Present(meta),
         Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
             BlobDiskLookup::Missing
@@ -234,14 +253,13 @@ mod tests {
         };
         let file_abs = |rel: &str| wt.join(rel);
         for_each_blob_by_directory(
-            &index,
             &grouped,
             dir_abs,
             file_abs,
             |_| false,
-            |_, ie, path, lookup| {
+            |entry_index, path, lookup| {
                 assert_eq!(path, "d0/f0.txt");
-                assert_eq!(ie.oid, oid);
+                assert_eq!(index.entries[entry_index].oid, oid);
                 assert!(matches!(lookup, BlobDiskLookup::Present(_)));
                 seen += 1;
                 Ok(())
@@ -274,12 +292,11 @@ mod tests {
         };
         let file_abs = |rel: &str| wt.join(rel);
         for_each_blob_by_directory(
-            &index,
             &grouped,
             dir_abs,
             file_abs,
             |_| false,
-            |_, _, _, lookup| {
+            |_, _, lookup| {
                 missing = matches!(lookup, BlobDiskLookup::Missing);
                 Ok(())
             },
@@ -313,9 +330,9 @@ mod tests {
         std::os::unix::fs::symlink(&secret, wt.join("dir")).unwrap();
 
         let odb = Odb::new(&wt.join(".git/objects"));
-        let diffs = diff_index_to_worktree_with_options(
+        let (diffs, _) = diff_index_to_worktree_with_options(
             &odb,
-            &index,
+            &mut index,
             wt,
             DiffIndexToWorktreeOptions {
                 index_mtime: None,

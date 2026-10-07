@@ -711,14 +711,14 @@ pub fn apply_stash(
     if !has_conflicts {
         let config = crate::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
         let parallelism = crate::hash::index_parallelism_from_config(&config);
-        crate::diff::refresh_index_stat_content_verified(
+        let _ = crate::diff::refresh_index_stat_content_verified(
             &repo.odb,
             &repo.git_dir,
             &mut new_index,
             work_tree,
             None,
             parallelism,
-        );
+        )?;
     }
     repo.write_index(&mut new_index)
         .map_err(|e| Error::Message(format!("writing index after stash apply: {e}")))?;

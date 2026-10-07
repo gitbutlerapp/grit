@@ -49,8 +49,9 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         repository_git_dir: Some(repo.git_dir.clone()),
         ..Default::default()
     };
-    let unstaged =
-        crate::diff::diff_index_to_worktree_with_options(&repo.odb, &index, work_tree, diff_opts)?;
+    let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
+        &repo.odb, &mut index, work_tree, diff_opts,
+    )?;
 
     let mut staged = 0usize;
     for entry in unstaged {

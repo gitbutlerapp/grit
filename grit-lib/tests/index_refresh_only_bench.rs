@@ -43,7 +43,8 @@ fn refresh_index_stat_only_timing() {
         root,
         index_mtime,
         parallelism,
-    );
+    )
+    .expect("refresh");
     let elapsed = start.elapsed();
     eprintln!("refresh_index_stat_content_verified only: {elapsed:?}");
     std::fs::write(

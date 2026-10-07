@@ -94,6 +94,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
 }
 
 /// Action to apply after parallel content verification during index stat refresh.
+#[allow(dead_code)]
 pub(crate) enum RefreshHashOutcome {
     /// Racy entry: content no longer matches the recorded OID.
     InvalidateStat,
@@ -158,6 +159,8 @@ fn refresh_work_item_for_entry(
     })
 }
 
+// Parallel stat/hash refresh helpers kept for embedders; index refresh uses directory-grouped scan in `diff`.
+#[allow(dead_code)]
 /// Build parallel refresh work items from a snapshot of index entries (read-only).
 pub(crate) fn collect_refresh_hash_work(
     entries: &[IndexEntry],
@@ -175,6 +178,7 @@ pub(crate) fn collect_refresh_hash_work(
     work
 }
 
+#[allow(dead_code)]
 /// Like [`collect_refresh_hash_work`], but stat-probes index entries in parallel when worthwhile.
 pub(crate) fn collect_refresh_hash_work_parallel(
     entries: &[IndexEntry],
@@ -205,6 +209,7 @@ pub(crate) fn collect_refresh_hash_work_parallel(
     Ok(rows.into_iter().flatten().collect())
 }
 
+#[allow(dead_code)]
 /// Hash refresh candidates in parallel; returns `(entry_index, action)` pairs in input order.
 ///
 /// # Errors
