@@ -119,6 +119,13 @@ pub struct FetchOptions {
     /// (`git fetch --unshallow`). Drives the wire `deepen 0x7fffffff` request and
     /// removes the local `shallow` boundaries that get reported as `unshallow`.
     pub unshallow: bool,
+    /// First fetch populating a remote-tracking namespace (clone): write `packed-refs`
+    /// and `refs/remotes/{remote}/HEAD`.
+    pub initial_remote_fetch: bool,
+    /// Remote name paired with [`Self::initial_remote_fetch`] (e.g. `"origin"`).
+    pub remote_name: Option<String>,
+    /// When set, append reflog entries for ref updates performed during this fetch.
+    pub reflog_message: Option<String>,
 }
 
 impl FetchOptions {
@@ -492,6 +499,222 @@ fn append_pack_trailer(buf: &mut Vec<u8>, algo: HashAlgo) {
             buf.extend_from_slice(&hasher.finalize());
         }
     }
+}
+
+/// Append whole objects from `odb` to an in-progress pack (header + body, no trailer).
+pub(crate) fn append_whole_objects_from_odb(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    oids: &[ObjectId],
+) -> Result<()> {
+    let opts = PackBuildOptions::default();
+    for oid in oids {
+        let obj = odb.read(oid)?;
+        write_whole_pack_object(buf, odb, *oid, obj.kind, &obj.data, &opts)?;
+    }
+    Ok(())
+}
+
+/// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
+/// `git index-pack --fix-thin`.
+pub(crate) fn fix_thin_pack(mut pack: Vec<u8>, odb: &Odb) -> Result<Vec<u8>> {
+    let algo = odb.hash_algo();
+    let hb = algo.len();
+    if !crate::unpack_objects::pack_is_thin(&pack, algo) {
+        return Ok(pack);
+    }
+    if pack.len() < 12 + hb {
+        return Err(Error::CorruptObject(
+            "thin pack fix: pack too small".to_owned(),
+        ));
+    }
+    let mut missing: Vec<ObjectId> = Vec::new();
+    let mut seen = HashSet::new();
+    let in_pack = in_pack_whole_object_ids(&pack, algo);
+    let mut pos = 12usize;
+    let pack_end = pack.len() - hb;
+    while pos < pack_end {
+        let (type_code, size, header_len) = read_pack_type_size_at(&pack, pos)?;
+        let payload_start = pos + header_len;
+        match type_code {
+            7 => {
+                if payload_start + hb > pack_end {
+                    return Err(Error::CorruptObject(
+                        "thin pack fix: truncated ref-delta".to_owned(),
+                    ));
+                }
+                let base_oid = ObjectId::from_bytes(&pack[payload_start..payload_start + hb])?;
+                if !in_pack.contains(&base_oid) && seen.insert(base_oid) {
+                    missing.push(base_oid);
+                }
+                pos = payload_start + hb + zlib_skip(&pack[payload_start + hb..], size)?;
+            }
+            6 => {
+                let (base_len, _) = read_ofs_delta_prefix_len(&pack[payload_start..])?;
+                pos =
+                    payload_start + base_len + zlib_skip(&pack[payload_start + base_len..], size)?;
+            }
+            1..=4 => {
+                pos = payload_start + zlib_skip(&pack[payload_start..], size)?;
+            }
+            _ => {
+                return Err(Error::CorruptObject(format!(
+                    "thin pack fix: unknown type {type_code}"
+                )));
+            }
+        }
+    }
+    if missing.is_empty() {
+        return Ok(pack);
+    }
+    pack.truncate(pack.len() - hb);
+    append_whole_objects_from_odb(&mut pack, odb, &missing)?;
+    let old_count = u32::from_be_bytes(
+        pack[8..12]
+            .try_into()
+            .map_err(|_| Error::CorruptObject("thin pack fix: bad object count".to_owned()))?,
+    );
+    let added = u32::try_from(missing.len())
+        .map_err(|_| Error::CorruptObject("thin pack fix: object count overflow".to_owned()))?;
+    let new_count = old_count
+        .checked_add(added)
+        .ok_or_else(|| Error::CorruptObject("thin pack fix: object count overflow".to_owned()))?;
+    pack[8..12].copy_from_slice(&new_count.to_be_bytes());
+    append_pack_trailer(&mut pack, algo);
+    Ok(pack)
+}
+
+fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    let hb = algo.len();
+    if pack.len() < 12 + hb {
+        return out;
+    }
+    let pack_end = pack.len() - hb;
+    let mut pos = 12usize;
+    while pos < pack_end {
+        let Ok((type_code, size, header_len)) = read_pack_type_size_at(pack, pos) else {
+            break;
+        };
+        let payload_start = pos + header_len;
+        if (1..=4).contains(&type_code) {
+            if let Ok(data) = zlib_decompress_fixed(&pack[payload_start..], size) {
+                if let Ok(kind) = pack_type_code_to_kind(type_code) {
+                    let oid = hash_object_with_algo(algo, kind, &data);
+                    out.insert(oid);
+                }
+            }
+        }
+        let advance = match type_code {
+            7 if payload_start + hb <= pack_end => {
+                header_len + hb + zlib_skip(&pack[payload_start + hb..], size).unwrap_or(0)
+            }
+            6 => {
+                let base_len = read_ofs_delta_prefix_len(&pack[payload_start..])
+                    .map(|(n, _)| n)
+                    .unwrap_or(0);
+                header_len
+                    + base_len
+                    + zlib_skip(&pack[payload_start + base_len..], size).unwrap_or(0)
+            }
+            1..=4 => header_len + zlib_skip(&pack[payload_start..], size).unwrap_or(0),
+            _ => break,
+        };
+        pos += advance;
+    }
+    out
+}
+
+#[allow(clippy::expect_used)]
+fn hash_object_with_algo(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
+    let header = format!("{kind} {}\0", data.len());
+    match algo {
+        HashAlgo::Sha1 => {
+            let mut h = Sha1::new();
+            h.update(header.as_bytes());
+            h.update(data);
+            ObjectId::from_bytes(&h.finalize()).expect("sha1 digest width")
+        }
+        HashAlgo::Sha256 => {
+            let mut h = Sha256::new();
+            h.update(header.as_bytes());
+            h.update(data);
+            ObjectId::from_bytes(&h.finalize()).expect("sha256 digest width")
+        }
+    }
+}
+
+fn pack_type_code_to_kind(code: u8) -> Result<ObjectKind> {
+    match code {
+        1 => Ok(ObjectKind::Commit),
+        2 => Ok(ObjectKind::Tree),
+        3 => Ok(ObjectKind::Blob),
+        4 => Ok(ObjectKind::Tag),
+        _ => Err(Error::CorruptObject(format!("bad pack type {code}"))),
+    }
+}
+
+fn read_pack_type_size_at(pack: &[u8], start: usize) -> Result<(u8, usize, usize)> {
+    let first = *pack
+        .get(start)
+        .ok_or_else(|| Error::CorruptObject("truncated pack header".to_owned()))?;
+    let type_code = (first >> 4) & 0x7;
+    let mut size = (first & 0x0f) as usize;
+    let mut pos = start + 1;
+    let mut shift = 4u32;
+    let mut cur = first;
+    while cur & 0x80 != 0 {
+        cur = *pack
+            .get(pos)
+            .ok_or_else(|| Error::CorruptObject("truncated pack header".to_owned()))?;
+        pos += 1;
+        size |= ((cur & 0x7f) as usize) << shift;
+        shift += 7;
+    }
+    Ok((type_code, size, pos - start))
+}
+
+fn read_ofs_delta_prefix_len(bytes: &[u8]) -> Result<(usize, u64)> {
+    let mut pos = 0usize;
+    let mut c = *bytes
+        .get(pos)
+        .ok_or_else(|| Error::CorruptObject("truncated ofs-delta".to_owned()))?;
+    pos += 1;
+    let mut value = (c & 0x7f) as u64;
+    while c & 0x80 != 0 {
+        c = *bytes
+            .get(pos)
+            .ok_or_else(|| Error::CorruptObject("truncated ofs-delta".to_owned()))?;
+        pos += 1;
+        value = (value + 1) << 7 | (c & 0x7f) as u64;
+    }
+    Ok((pos, value))
+}
+
+fn zlib_skip(bytes: &[u8], expected_size: usize) -> Result<usize> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+    let mut dec = ZlibDecoder::new(bytes);
+    let mut tmp = Vec::with_capacity(expected_size);
+    dec.read_to_end(&mut tmp)
+        .map_err(|e| Error::Zlib(e.to_string()))?;
+    Ok(dec.total_in() as usize)
+}
+
+fn zlib_decompress_fixed(bytes: &[u8], expected_size: usize) -> Result<Vec<u8>> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+    let mut dec = ZlibDecoder::new(bytes);
+    let mut out = Vec::with_capacity(expected_size);
+    dec.read_to_end(&mut out)
+        .map_err(|e| Error::Zlib(e.to_string()))?;
+    if out.len() != expected_size {
+        return Err(Error::CorruptObject(format!(
+            "zlib size mismatch: got {} expected {expected_size}",
+            out.len()
+        )));
+    }
+    Ok(out)
 }
 
 /// A single object to write, either whole or as a delta against a chosen base.
@@ -1044,14 +1267,13 @@ pub fn fetch_local(
 
     if !wants.is_empty() && !opts.dry_run {
         let pack = build_pack(&remote_odb, &wants, &haves, &PackBuildOptions::default())?;
-        let mut cursor = std::io::Cursor::new(pack);
-        crate::unpack_objects::unpack_objects(
-            &mut cursor,
+        crate::index_pack::ingest_received_pack(
+            pack,
             &local_odb,
-            &crate::unpack_objects::UnpackOptions {
-                quiet: true,
-                ..Default::default()
-            },
+            crate::config::ConfigSet::load(Some(local_git_dir), true)
+                .ok()
+                .as_ref(),
+            &crate::index_pack::IngestPackOptions { fix_thin: true },
         )?;
     }
 
@@ -1113,6 +1335,20 @@ pub fn fetch_local(
                 continue;
             }
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
+            if let Some(message) = opts.reflog_message.as_deref() {
+                if let Ok(identity) = crate::fetch::fetch_operation_identity(local_git_dir) {
+                    let old_oid = old.unwrap_or_else(ObjectId::zero);
+                    let _ = crate::refs::append_reflog(
+                        local_git_dir,
+                        local_ref,
+                        &old_oid,
+                        &m.oid,
+                        &identity,
+                        message,
+                        false,
+                    );
+                }
+            }
         }
 
         updates.push(RefUpdate {
@@ -1127,6 +1363,11 @@ pub fn fetch_local(
 
     // The local / file:// path copies the exact object closure and never grafts,
     // so it neither introduces nor resolves shallow boundaries.
+    crate::fetch::finish_initial_remote_fetch_layout(
+        local_git_dir,
+        opts,
+        default_branch.as_deref(),
+    )?;
     Ok(FetchOutcome {
         updates,
         default_branch,

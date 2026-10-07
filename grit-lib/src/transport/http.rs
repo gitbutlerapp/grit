@@ -1312,14 +1312,13 @@ pub fn http_fetch(
                     "did not receive a valid pack from HTTP fetch".to_owned(),
                 ));
             }
-            let mut cursor = Cursor::new(pack);
-            crate::unpack_objects::unpack_objects(
-                &mut cursor,
+            crate::index_pack::ingest_received_pack(
+                pack,
                 &local_odb,
-                &crate::unpack_objects::UnpackOptions {
-                    quiet: true,
-                    ..Default::default()
-                },
+                crate::config::ConfigSet::load(Some(local_git_dir), true)
+                    .ok()
+                    .as_ref(),
+                &crate::index_pack::IngestPackOptions { fix_thin: true },
             )?;
         }
     }
@@ -1376,6 +1375,20 @@ pub fn http_fetch(
         );
         if write && !opts.dry_run {
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
+            if let Some(message) = opts.reflog_message.as_deref() {
+                if let Ok(identity) = crate::fetch::fetch_operation_identity(local_git_dir) {
+                    let old_oid = old.unwrap_or_else(crate::objects::ObjectId::zero);
+                    let _ = crate::refs::append_reflog(
+                        local_git_dir,
+                        local_ref,
+                        &old_oid,
+                        &m.oid,
+                        &identity,
+                        message,
+                        false,
+                    );
+                }
+            }
         }
         updates.push(RefUpdate {
             remote_ref: m.remote_ref.clone(),
@@ -1388,6 +1401,11 @@ pub fn http_fetch(
     }
 
     net_trace!("http_fetch: done — {} ref update(s)", updates.len());
+    crate::fetch::finish_initial_remote_fetch_layout(
+        local_git_dir,
+        opts,
+        default_branch.as_deref(),
+    )?;
     Ok(FetchOutcome {
         updates,
         default_branch,
@@ -1529,14 +1547,13 @@ fn http_fetch_v2(
                     "did not receive a valid pack from v2 HTTP fetch".to_owned(),
                 ));
             }
-            let mut cursor = Cursor::new(pack);
-            crate::unpack_objects::unpack_objects(
-                &mut cursor,
+            crate::index_pack::ingest_received_pack(
+                pack,
                 &local_odb,
-                &crate::unpack_objects::UnpackOptions {
-                    quiet: true,
-                    ..Default::default()
-                },
+                crate::config::ConfigSet::load(Some(local_git_dir), true)
+                    .ok()
+                    .as_ref(),
+                &crate::index_pack::IngestPackOptions { fix_thin: true },
             )?;
         }
     }
@@ -1593,6 +1610,20 @@ fn http_fetch_v2(
         );
         if write && !opts.dry_run {
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
+            if let Some(message) = opts.reflog_message.as_deref() {
+                if let Ok(identity) = crate::fetch::fetch_operation_identity(local_git_dir) {
+                    let old_oid = old.unwrap_or_else(crate::objects::ObjectId::zero);
+                    let _ = crate::refs::append_reflog(
+                        local_git_dir,
+                        local_ref,
+                        &old_oid,
+                        &m.oid,
+                        &identity,
+                        message,
+                        false,
+                    );
+                }
+            }
         }
         updates.push(RefUpdate {
             remote_ref: m.remote_ref.clone(),
@@ -1605,6 +1636,11 @@ fn http_fetch_v2(
     }
 
     crate::net_trace::net_trace!("http_fetch (v2): done — {} ref update(s)", updates.len());
+    crate::fetch::finish_initial_remote_fetch_layout(
+        local_git_dir,
+        opts,
+        default_branch.as_deref(),
+    )?;
     Ok(FetchOutcome {
         updates,
         default_branch,

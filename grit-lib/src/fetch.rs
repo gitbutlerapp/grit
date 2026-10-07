@@ -1282,15 +1282,7 @@ pub fn fetch_remote(
             pack.len()
         );
         if !pack.is_empty() {
-            let mut cursor = std::io::Cursor::new(pack);
-            crate::unpack_objects::unpack_objects(
-                &mut cursor,
-                &local_odb,
-                &crate::unpack_objects::UnpackOptions {
-                    quiet: true,
-                    ..Default::default()
-                },
-            )?;
+            ingest_negotiated_pack(local_git_dir, &local_odb, pack)?;
         }
     }
 
@@ -1409,6 +1401,20 @@ pub fn fetch_remote(
             crate::refs::write_ref_cached(local_git_dir, local_ref, &m.oid, &packed)?;
             d_write += t.elapsed();
             n_written += 1;
+            if let Some(message) = opts.reflog_message.as_deref() {
+                if let Ok(identity) = fetch_operation_identity(local_git_dir) {
+                    let old_oid = old.unwrap_or_else(ObjectId::zero);
+                    let _ = crate::refs::append_reflog(
+                        local_git_dir,
+                        local_ref,
+                        &old_oid,
+                        &m.oid,
+                        &identity,
+                        message,
+                        false,
+                    );
+                }
+            }
         }
 
         updates.push(RefUpdate {
@@ -1444,12 +1450,59 @@ pub fn fetch_remote(
             .unwrap_or_default(),
         t_begin.elapsed()
     );
+    finish_initial_remote_fetch_layout(local_git_dir, opts, default_branch.as_deref())?;
     Ok(FetchOutcome {
         updates,
         default_branch,
         new_shallow: shallow_update.shallow,
         new_unshallow: shallow_update.unshallow,
     })
+}
+
+fn ingest_negotiated_pack(
+    local_git_dir: &Path,
+    local_odb: &crate::odb::Odb,
+    pack: Vec<u8>,
+) -> Result<()> {
+    let cfg = crate::config::ConfigSet::load(Some(local_git_dir), true).ok();
+    crate::index_pack::ingest_received_pack(
+        pack,
+        local_odb,
+        cfg.as_ref(),
+        &crate::index_pack::IngestPackOptions { fix_thin: true },
+    )
+}
+
+/// Identity string for fetch/clone reflog entries (`Name <email> epoch tz`).
+pub fn fetch_operation_identity(git_dir: &Path) -> Result<String> {
+    use crate::ident_config::ident_default_name;
+    let cfg = crate::config::ConfigSet::load(Some(git_dir), true)?;
+    let name = ident_default_name(&cfg);
+    let email = cfg
+        .get("user.email")
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let now = time::OffsetDateTime::now_utc();
+    Ok(format!("{name} <{email}> {} +0000", now.unix_timestamp()))
+}
+
+pub(crate) fn finish_initial_remote_fetch_layout(
+    git_dir: &Path,
+    opts: &FetchOptions,
+    default_branch: Option<&str>,
+) -> Result<()> {
+    if opts.dry_run || !opts.initial_remote_fetch {
+        return Ok(());
+    }
+    let Some(remote) = opts.remote_name.as_deref() else {
+        return Ok(());
+    };
+    crate::refs::pack_remote_tracking_refs_for_clone(git_dir, remote)?;
+    if let Some(branch) = default_branch {
+        let target = format!("refs/remotes/{remote}/{branch}");
+        crate::refs::write_symbolic_ref(git_dir, &format!("refs/remotes/{remote}/HEAD"), &target)?;
+    }
+    Ok(())
 }
 
 /// Add advertised tags to the matched set per [`crate::transfer::TagMode`].

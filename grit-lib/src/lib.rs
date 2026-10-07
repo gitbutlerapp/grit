@@ -54,8 +54,8 @@ pub mod prelude {
 /// Object storage: ids/kinds, the object database, packs, multi-pack index, deltas.
 pub mod object_store {
     pub use crate::{
-        delta_encode, delta_islands, midx, objects, odb, pack, pack_geometry, pack_name_hash,
-        pack_rev, promisor, promisor_remote, prune_packed, unpack_objects,
+        delta_encode, delta_islands, index_pack, midx, objects, odb, pack, pack_geometry,
+        pack_name_hash, pack_rev, promisor, promisor_remote, prune_packed, unpack_objects,
     };
 }
 
@@ -158,6 +158,7 @@ pub mod ident_resolve;
 pub mod ignore;
 pub mod index;
 pub mod index_name_hash_lazy;
+pub mod index_pack;
 pub mod init_filesystem;
 pub mod instaweb;
 pub mod interpret_trailers;
