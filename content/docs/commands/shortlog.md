@@ -41,19 +41,25 @@ $ grit sl --json --filter .ahead
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | Current branch name. |
+| `target` | string or null | Target branch used for comparison, or `null` when none was found. |
+| `ahead` | number | How many commits are on the branch but not on the target. |
+| `commits` | array | Those commits, newest first, each with `oid` and `subject`. |
+
+Example:
+
+```json
 {
   "branch": "feature",
-  "target": "origin/main",
-  "ahead": 2,
-  "commits": [
-    { "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d", "subject": "Say hi" },
-    { "oid": "9a1c2e0d4b6f8a1c3e5d7f9b0a2c4e6d8f0a1b3c", "subject": "Add a greeting test" }
-  ]
+  "target": "main",
+  "ahead": 0,
+  "commits": []
 }
 ```
-
-`target` is `null` when no target branch was found.
 
 ## See also
 

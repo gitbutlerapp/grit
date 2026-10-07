@@ -42,21 +42,25 @@ $ grit fetch upstream
 
 ## JSON output
 
-```
-{
-  "remote": "origin",
-  "updates": [
-    {
-      "ref": "refs/remotes/origin/main",
-      "old_oid": "a8e620a32cd86b483eaf4105fb215d4e920fcc14",
-      "new_oid": "b52cca65378cf17309f0b1f917c6dc4fdd9256f2"
-    }
-  ],
-  "updated": 1
-}
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `remote` | string | Remote that was fetched. |
+| `updates` | array | Ref updates, each with `ref`, `old_oid`, and `new_oid`. |
+| `updated` | number | Count of refs that changed. |
 
 `old_oid` is `null` for a ref that is new, and `new_oid` is `null` for one that was removed.
+
+Example:
+
+```json
+{
+  "remote": "origin",
+  "updates": [],
+  "updated": 0
+}
+```
 
 ## See also
 

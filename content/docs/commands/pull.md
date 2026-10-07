@@ -38,9 +38,18 @@ Already up to date.
 
 ## JSON output
 
-The same as [`grit merge`](../merge/#json-output). `result` can also be `set_upstream` when the branch had no commits and was set to the remote's. In that case the object also has an `upstream` field naming the remote branch.
+The same shape as [`grit merge`](../merge/#json-output). Pass `--json` for stable, scripting-friendly output:
 
-```
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `branch` | string | Remote branch that was integrated. |
+| `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
+| `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
+
+Example:
+
+```json
 {
   "result": "fast_forward",
   "branch": "origin/main",

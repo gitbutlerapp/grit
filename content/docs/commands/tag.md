@@ -44,12 +44,37 @@ Deleted tag v0.1
 
 ## JSON output
 
-The object's `action` field says what happened:
+Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `list`, `create`, or `delete`. |
+| `tags` | array | For `list`, each tag with `name` and `oid`. |
+| `name` | string | For `create` or `delete`, the tag name. |
+| `oid` | string | For `create`, full id of the commit the tag points at. |
+
+Listing tags:
+
+```json
+{
+  "action": "list",
+  "tags": [
+    {
+      "name": "v0.1",
+      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf"
+    }
+  ]
+}
 ```
-{ "action": "list", "tags": [ { "name": "v0.1", "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d" } ] }
-{ "action": "create", "name": "v0.1", "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d" }
-{ "action": "delete", "name": "v0.1" }
+
+Creating a tag:
+
+```json
+{
+  "action": "create",
+  "name": "v0.1",
+  "oid": "92501f188ae0815af09a0cef6e121eddda4113cf"
+}
 ```
 
 ## See also

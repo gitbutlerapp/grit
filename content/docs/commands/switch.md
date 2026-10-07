@@ -48,7 +48,16 @@ error: you have uncommitted changes — commit them before switching
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | The branch you switched to. |
+| `created` | boolean | `true` when `-c` created the branch; otherwise `false`. |
+
+Example:
+
+```json
 {
   "branch": "feature",
   "created": true

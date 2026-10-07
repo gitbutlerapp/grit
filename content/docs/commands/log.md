@@ -51,17 +51,30 @@ $ grit log --json --filter '.commits[].subject'
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `commits` | array | Up to ten commits, newest first, each with `oid` and `subject`. |
+| `next` | string or null | Full commit id to pass to `--before` for the next page, or `null` when there is no more history. |
+
+Example:
+
+```json
 {
   "commits": [
-    { "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d", "subject": "Say hi" },
-    { "oid": "217c6f958c3162926c9c9379e6d21b38f110e1ad", "subject": "Start the project" }
+    {
+      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+      "subject": "second"
+    },
+    {
+      "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
+      "subject": "initial"
+    }
   ],
   "next": null
 }
 ```
-
-`next` is the full id to pass to `--before` for the next page, or `null` when there is no more history.
 
 ## See also
 

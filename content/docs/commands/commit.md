@@ -69,16 +69,12 @@ Example:
 
 ```json
 {
-  "oid": "217c6f958c3162926c9c9379e6d21b38f110e1ad",
+  "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
   "branch": "main",
-  "subject": "Add the greeting",
-  "changes": 2
+  "subject": "second",
+  "changes": 1
 }
 ```
-
-## Markdown output
-
-Pass `--markdown` for the same fields as `--json`, rendered as a Markdown table for agents.
 
 ## See also
 

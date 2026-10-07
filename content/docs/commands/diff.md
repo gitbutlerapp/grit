@@ -58,7 +58,17 @@ $ grit diff v0.1 --json --filter '.files[].path'
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `files` | array | Changed files, each with `path`, `status`, `binary`, and `hunks`. |
+
+Nested fields include `files[].status` (`added`, `modified`, `deleted`, and so on), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, and `segments` with optional `emphasis` on intra-line changes.
+
+Example:
+
+```json
 {
   "files": [
     {
@@ -93,14 +103,6 @@ $ grit diff v0.1 --json --filter '.files[].path'
   ]
 }
 ```
-
-| Field | Description |
-| --- | --- |
-| `files[].status` | `added`, `modified`, `deleted`, `renamed`, `copied`, `type_changed` or `unmerged`. |
-| `files[].binary` | `true` for binary files, which have no hunks. |
-| `hunks[].lines[].kind` | `context`, `add` or `del`. |
-| `hunks[].lines[].old`, `new` | The line's number before and after the change. A line has the numbers that apply to it. |
-| `segments` | The line's text in pieces. `emphasis` marks the parts that changed within the line. |
 
 ## See also
 

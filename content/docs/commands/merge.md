@@ -53,19 +53,23 @@ Nothing was changed. grit can't resolve conflicts yet — run `git merge topic` 
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `branch` | string | The branch that was merged in (or set as upstream). |
+| `oid` | string or null | Commit the current branch points at after the merge, when applicable. |
+| `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
+
+Example:
+
+```json
 {
-  "result": "merged",
-  "branch": "origin/main",
-  "oid": "acd1d4b0c2f6e8a1b3d5c7e9f0a2b4c6d8e0f1a3"
+  "result": "up_to_date",
+  "branch": "main"
 }
 ```
-
-| Field | Description |
-| --- | --- |
-| `result` | `up_to_date`, `fast_forward` or `merged`. |
-| `branch` | The branch that was merged in. |
-| `oid` | The commit the current branch now points at. |
 
 ## See also
 

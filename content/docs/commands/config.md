@@ -90,13 +90,34 @@ $ grit config --unset target.branch
 
 ## JSON output
 
-The object's `action` field says what happened:
+Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `get`, `set`, `unset`, or `list`. |
+| `key` | string | Configuration key for `get`, `set`, or `unset`. |
+| `value` | string | Value for `get` or `set`. |
+| `entries` | array | For `list`, each entry with `key` and optional `value`. |
+
+Reading a value:
+
+```json
+{
+  "action": "get",
+  "key": "user.name",
+  "value": "Ada Lovelace"
+}
 ```
-{ "action": "get", "key": "user.name", "value": "Ada Lovelace" }
-{ "action": "set", "key": "user.name", "value": "Ada Lovelace" }
-{ "action": "unset", "key": "target.branch" }
-{ "action": "list", "entries": [ { "key": "user.name", "value": "Ada Lovelace" } ] }
+
+Listing values:
+
+```json
+{
+  "action": "list",
+  "entries": [
+    { "key": "user.name", "value": "Ada Lovelace" }
+  ]
+}
 ```
 
 ## See also

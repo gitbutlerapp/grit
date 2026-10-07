@@ -48,7 +48,18 @@ Initialized empty bare repository in /srv/git/project.git
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `initialized` | boolean | Whether the repository was created successfully. |
+| `path` | string | Repository directory (the `.git` directory for a normal repository). |
+| `bare` | boolean | Whether the repository is bare. |
+| `branch` | string | Initial branch name. |
+
+Example:
+
+```json
 {
   "initialized": true,
   "path": "/home/ada/project/.git",
@@ -56,8 +67,6 @@ Initialized empty bare repository in /srv/git/project.git
   "branch": "main"
 }
 ```
-
-`path` is the repository directory (the `.git` directory for a normal repository) and `branch` is the initial branch.
 
 ## See also
 

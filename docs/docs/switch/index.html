@@ -133,6 +133,9 @@ Switched to branch main</code></pre>
 <pre><code>$ grit switch main
 error: you have uncommitted changes — commit them before switching</code></pre>
 <h2 id="json-output">JSON output</h2>
+<p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>branch</code></td><td>string</td><td>The branch you switched to.</td></tr><tr><td><code>created</code></td><td>boolean</td><td><code>true</code> when <code>-c</code> created the branch; otherwise <code>false</code>.</td></tr></tbody></table></div>
+<p>Example:</p>
 <pre><code>{
   &quot;branch&quot;: &quot;feature&quot;,
   &quot;created&quot;: true

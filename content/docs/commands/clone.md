@@ -52,15 +52,23 @@ $ grit clone /srv/git/project.git
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `url` | string | The URL or path that was cloned. |
+| `path` | string | Directory the clone was created in. |
+| `branch` | string | Branch that was checked out. |
+
+Example:
+
+```json
 {
-  "url": "https://github.com/gitbutlerapp/grit.git",
-  "path": "grit",
+  "url": "/srv/git/project.git",
+  "path": "project",
   "branch": "main"
 }
 ```
-
-`branch` is the branch that was checked out.
 
 ## See also
 

@@ -38,9 +38,37 @@ origin	https://github.com/ada/project.git
 
 ## JSON output
 
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `list` or `add`. |
+| `remotes` | array | For `list`, each remote with `name` and `url`. |
+| `name` | string | For `add`, the remote name. |
+| `url` | string | For `add`, the remote URL or path. |
+
+Listing remotes:
+
+```json
+{
+  "action": "list",
+  "remotes": [
+    {
+      "name": "origin",
+      "url": "https://github.com/ada/project.git"
+    }
+  ]
+}
 ```
-{ "action": "list", "remotes": [ { "name": "origin", "url": "https://github.com/ada/project.git" } ] }
-{ "action": "add", "name": "origin", "url": "https://github.com/ada/project.git" }
+
+Adding a remote:
+
+```json
+{
+  "action": "add",
+  "name": "origin",
+  "url": "https://github.com/ada/project.git"
+}
 ```
 
 ## See also

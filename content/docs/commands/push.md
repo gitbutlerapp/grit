@@ -50,7 +50,18 @@ $ grit push
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `remote` | string | Remote that was pushed to. |
+| `branch` | string | Branch that was pushed, or `--tags`. |
+| `results` | array | Per-ref outcomes with `ref` and `status` (`ok`, `up_to_date`, or a rejection). |
+| `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
+
+Example:
+
+```json
 {
   "remote": "origin",
   "branch": "main",
@@ -60,12 +71,6 @@ $ grit push
   "rejected": false
 }
 ```
-
-| Field | Description |
-| --- | --- |
-| `branch` | The branch that was pushed, or `--tags`. |
-| `results[].status` | `ok`, `up_to_date`, or a rejection. A rejected ref also has a `reason`. |
-| `rejected` | `true` if any ref was rejected. The command also exits with status `1`. |
 
 ## See also
 

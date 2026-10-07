@@ -177,6 +177,8 @@ def validate_manifest(sections: list[SectionSpec], *, content_dir: Path | None =
             raise SystemExit(f"site.toml lists missing page {spec.file}")
 
     for path in sorted(root.rglob("*.md")):
+        if path.name.upper() == "README.MD" and path.parent.name == "commands":
+            continue
         if path.resolve() not in listed:
             raise SystemExit(f"Markdown file not listed in site.toml: {path.relative_to(root)}")
 
@@ -200,6 +202,8 @@ def collect_listed_sources_for_dir(sections: list[SectionSpec], root: Path) -> d
                 listed[path.resolve()] = PageSpec(rel, slug, label, section.title)
         if section.command_groups:
             for path in sorted((root / "commands").glob("*.md")):
+                if path.name.upper() == "README.MD":
+                    continue
                 rel = path.relative_to(root).as_posix()
                 listed[path.resolve()] = PageSpec(rel, path.stem, path.stem, section.title)
     return listed

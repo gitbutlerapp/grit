@@ -57,15 +57,38 @@ Deleted branch spike (was a7020c2).
 
 ## JSON output
 
-The object's `action` field says what happened:
+Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
-```
-{ "action": "list", "current": "main", "branches": [ { "name": "feature", "current": false }, { "name": "main", "current": true } ] }
-{ "action": "create", "name": "experiment" }
-{ "action": "delete", "name": "experiment", "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d", "short_oid": "cf18394" }
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `list`, `create`, or `delete`. |
+| `current` | string or null | For `list`, the current branch, or `null` when detached. |
+| `branches` | array | For `list`, each branch with `name` and `current`. |
+| `name` | string | For `create` or `delete`, the branch name. |
+| `oid` | string | For `delete`, full id of the tip before deletion. |
+| `short_oid` | string | For `delete`, abbreviated tip id. |
+
+Listing branches:
+
+```json
+{
+  "action": "list",
+  "current": "main",
+  "branches": [
+    { "name": "feature", "current": false },
+    { "name": "main", "current": true }
+  ]
+}
 ```
 
-When deleting, `oid` is the commit the branch pointed at, so you can recreate it if you need to.
+Creating a branch:
+
+```json
+{
+  "action": "create",
+  "name": "experiment"
+}
+```
 
 ## See also
 

@@ -144,8 +144,18 @@ Waiting for you to authorize… (press Ctrl-C to cancel)
 $ grit auth logout
 ✓ Signed out of GitHub — removed the stored token for github.com.</code></pre>
 <h2 id="json-output">JSON output</h2>
-<pre><code>{ &quot;authenticated&quot;: true, &quot;host&quot;: &quot;github.com&quot; }
-{ &quot;logged_out&quot;: true, &quot;host&quot;: &quot;github.com&quot; }</code></pre>
+<p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>authenticated</code></td><td>boolean</td><td>For sign-in, whether a token was stored.</td></tr><tr><td><code>logged_out</code></td><td>boolean</td><td>For <code>logout</code>, whether a stored token was removed.</td></tr><tr><td><code>host</code></td><td>string</td><td>GitHub host the credential applies to (usually <code>github.com</code>).</td></tr></tbody></table></div>
+<p>After sign-in:</p>
+<pre><code>{
+  &quot;authenticated&quot;: true,
+  &quot;host&quot;: &quot;github.com&quot;
+}</code></pre>
+<p>After logout:</p>
+<pre><code>{
+  &quot;logged_out&quot;: true,
+  &quot;host&quot;: &quot;github.com&quot;
+}</code></pre>
 <p><code>logged_out</code> is <code>false</code> when no credential helper is configured, since there&#x27;s nowhere a token could be stored.</p>
 <h2 id="see-also">See also</h2>
 <p><a href="../push/">grit push</a>, <a href="../config/">grit config</a>, <a href="../manager/">grit manager</a></p><div class="pager"><a href="../push/">← grit push</a><a href="../update/">grit update →</a></div></article>

@@ -57,36 +57,54 @@ $ grit show HEAD~1 --json --filter .commit.subject
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `kind` | string | `commit`, `branch`, `tag`, or `annotated_tag`. |
+| `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
+| `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
+| `commit` | object | Commit id, parents, author, committer, subject, and full message. |
+| `stat` | object | Change stats with `files`, `files_changed`, `insertions`, and `deletions`. |
+
+Example:
+
+```json
 {
   "kind": "branch",
   "ref_name": "feature",
   "commit": {
-    "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d",
-    "parents": ["217c6f958c3162926c9c9379e6d21b38f110e1ad"],
-    "author": { "name": "Ada Lovelace", "email": "ada@example.com", "date": "2026-10-07 10:00:00 +0000" },
-    "committer": { "name": "Ada Lovelace", "email": "ada@example.com", "date": "2026-10-07 10:00:00 +0000" },
-    "subject": "Say hi",
-    "message": "Say hi"
+    "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+    "parents": ["919c45f33de5e5c0bd05f8ffb089f697f4644976"],
+    "author": {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com",
+      "date": "2026-10-07 14:54:02 +0000"
+    },
+    "committer": {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com",
+      "date": "2026-10-07 14:54:02 +0000"
+    },
+    "subject": "second",
+    "message": "second"
   },
   "stat": {
     "files": [
-      { "path": "main.rs", "status": "modified", "insertions": 3, "deletions": 1, "binary": false }
+      {
+        "path": "README.md",
+        "status": "modified",
+        "insertions": 1,
+        "deletions": 0,
+        "binary": false
+      }
     ],
     "files_changed": 1,
-    "insertions": 3,
-    "deletions": 1
+    "insertions": 1,
+    "deletions": 0
   }
 }
 ```
-
-| Field | Description |
-| --- | --- |
-| `kind` | `commit`, `branch`, `tag` or `annotated_tag`. |
-| `ref_name` | The branch or tag name. Absent when you named a commit directly. |
-| `tag` | For an annotated tag: its `name`, `tagger` (`name`, `email`, `date`) and `message`. |
-| `commit` | The commit's id, parent ids, author, committer, subject and full message. |
-| `stat.files[]` | Each changed file, with its `status` and line counts. A renamed file also has `old_path`. |
 
 ## See also
 

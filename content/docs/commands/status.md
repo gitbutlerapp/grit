@@ -88,7 +88,24 @@ true
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string or null | Current branch, or `null` when HEAD is detached. |
+| `detached` | boolean | Whether HEAD is detached. |
+| `head` | string or null | Full id of the current commit, or `null` before the first commit. |
+| `target` | string or null | Target branch, or `null` when none was found. |
+| `ahead` | number | Commits on the branch that the target does not have. |
+| `commits` | array | Newest of those commits, up to ten, each with `oid` and `subject`. |
+| `staged` | array | Staged changes with `path` and `status`. |
+| `unstaged` | array | Unstaged changes with `path` and `status`. |
+| `untracked` | array | Paths of untracked files. |
+| `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
+
+Example:
+
+```json
 {
   "branch": "feature",
   "detached": false,
@@ -109,18 +126,6 @@ true
   "clean": false
 }
 ```
-
-| Field | Description |
-| --- | --- |
-| `branch` | The current branch, or `null` when HEAD is detached. |
-| `detached` | Whether HEAD is detached. |
-| `head` | The full id of the current commit, or `null` before the first commit. |
-| `target` | The target branch, or `null` when none was found. |
-| `ahead` | How many commits the branch has that the target doesn't. |
-| `commits` | The newest of those commits, newest first, up to ten. |
-| `staged`, `unstaged` | Changes, each with a `path` and a `status`: `added`, `modified`, `deleted`, `renamed`, `copied`, `type_changed` or `unmerged`. |
-| `untracked` | Paths of untracked files. |
-| `clean` | `true` when there is nothing to commit and nothing untracked. |
 
 ## See also
 

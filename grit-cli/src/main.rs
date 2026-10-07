@@ -329,15 +329,244 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::path::PathBuf;
 
     use clap::CommandFactory;
+    use serde_json::Value;
 
     use super::Cli;
 
     /// Options every command accepts; they're documented once on the docs
     /// overview page rather than on each command's page.
     const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "filter"];
+
+    /// Required `##` sections on every command page, in order. `Markdown output`
+    /// may appear after `JSON output` when the command supports `--markdown`.
+    const TEMPLATE_HEADINGS: &[&str] = &[
+        "Synopsis",
+        "Description",
+        "Options",
+        "Examples",
+        "JSON output",
+        "See also",
+    ];
+
+    /// Plumbing commands whose stdout is a wire protocol or credential stream,
+    /// not a JSON outcome object.
+    const NO_JSON_COMMANDS: &[&str] = &["manager", "upload-pack", "receive-pack"];
+
+    fn commands_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands")
+    }
+
+    fn split_front_matter(text: &str) -> (&str, &str) {
+        let Some(rest) = text.strip_prefix("---\n") else {
+            return ("", text);
+        };
+        let Some((_, body)) = rest.split_once("\n---\n") else {
+            return ("", text);
+        };
+        ("", body)
+    }
+
+    fn h2_headings(body: &str) -> Vec<String> {
+        body.lines()
+            .filter_map(|line| line.strip_prefix("## ").map(str::trim).map(String::from))
+            .collect()
+    }
+
+    fn section_body(body: &str, heading: &str) -> Option<String> {
+        let marker = format!("## {heading}");
+        let start = body.find(&marker)? + marker.len();
+        let rest = &body[start..];
+        let end = rest.find("\n## ").map(|i| start + i).unwrap_or(body.len());
+        Some(body[start..end].trim().to_owned())
+    }
+
+    fn fenced_json_blocks(section: &str) -> Vec<String> {
+        const OPEN: &str = "```json";
+        let mut blocks = Vec::new();
+        let mut rest = section;
+        while let Some(start) = rest.find(OPEN) {
+            let after = &rest[start + OPEN.len()..];
+            let Some(end) = after.find("```") else {
+                break;
+            };
+            blocks.push(after[..end].trim().to_owned());
+            rest = &after[end + 3..];
+        }
+        blocks
+    }
+
+    fn json_section_is_none(section: &str) -> bool {
+        let lower = section.to_ascii_lowercase();
+        lower.contains("none.")
+            || lower.contains("no json")
+            || lower.contains("has no effect")
+            || lower.contains("always speaks")
+    }
+
+    fn command_supports_markdown(command: &clap::Command) -> bool {
+        command
+            .get_arguments()
+            .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
+    }
+
+    fn cli_supports_markdown() -> bool {
+        Cli::command()
+            .get_arguments()
+            .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
+    }
+
+    fn key_documented_in_section(section: &str, key: &str) -> bool {
+        section.contains(&format!("`{key}`"))
+            || section.contains(&format!("`{key}."))
+            || section.contains(&format!("`{key}["))
+    }
+
+    fn top_level_keys(value: &Value) -> HashSet<String> {
+        match value {
+            Value::Object(map) => map.keys().cloned().collect(),
+            _ => HashSet::new(),
+        }
+    }
+
+    /// Every command page uses the documented section order.
+    #[test]
+    fn command_pages_follow_template() {
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let headings = h2_headings(body);
+            let mut expected = 0usize;
+            for heading in &headings {
+                if expected < TEMPLATE_HEADINGS.len() && heading == TEMPLATE_HEADINGS[expected] {
+                    expected += 1;
+                    continue;
+                }
+                if heading == "Markdown output" {
+                    if !headings.contains(&"JSON output".to_string()) {
+                        problems.push(format!("{name}.md: Markdown output before JSON output"));
+                    }
+                    continue;
+                }
+                if expected < TEMPLATE_HEADINGS.len() {
+                    problems.push(format!(
+                        "{name}.md: expected ## {} but found ## {heading}",
+                        TEMPLATE_HEADINGS[expected]
+                    ));
+                    expected = TEMPLATE_HEADINGS.len();
+                } else {
+                    problems.push(format!("{name}.md: unexpected ## {heading}"));
+                }
+            }
+            if expected < TEMPLATE_HEADINGS.len() {
+                problems.push(format!(
+                    "{name}.md: missing ## {}",
+                    TEMPLATE_HEADINGS[expected]
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// JSON examples in the JSON output section must parse, and document top-level keys.
+    #[test]
+    fn json_examples_parse() {
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let Some(section) = section_body(body, "JSON output") else {
+                problems.push(format!("{name}.md: no JSON output section"));
+                continue;
+            };
+            let blocks = fenced_json_blocks(&section);
+            if NO_JSON_COMMANDS.contains(&name) {
+                if !blocks.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: plumbing command must not include ```json examples"
+                    ));
+                }
+                if !json_section_is_none(&section) {
+                    problems.push(format!(
+                        "{name}.md: JSON output section must explain that there is no JSON"
+                    ));
+                }
+                continue;
+            }
+            if blocks.is_empty() {
+                problems.push(format!(
+                    "{name}.md: JSON output section needs a ```json example"
+                ));
+                continue;
+            }
+            for (i, block) in blocks.iter().enumerate() {
+                let parsed: Value = serde_json::from_str(block).unwrap_or_else(|e| {
+                    problems.push(format!("{name}.md: JSON example {i} does not parse: {e}"));
+                    Value::Null
+                });
+                if parsed.is_null() {
+                    continue;
+                }
+                for key in top_level_keys(&parsed) {
+                    if !key_documented_in_section(&section, &key) {
+                        problems.push(format!(
+                            "{name}.md: JSON example documents `{key}` but the field table does not"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// `--markdown` is documented only when clap exposes a `markdown` flag.
+    #[test]
+    fn markdown_output_only_when_supported() {
+        let dir = commands_dir();
+        let global_markdown = cli_supports_markdown();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let mentions_markdown =
+                body.contains("## Markdown output") || body.contains("`--markdown`");
+            let supported = global_markdown || command_supports_markdown(command);
+            if mentions_markdown && !supported {
+                problems.push(format!(
+                    "{name}.md documents --markdown but the command has no markdown flag"
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
 
     /// Every command (including hidden plumbing) has a man page in
     /// `content/docs/commands/`, and that page mentions each of its flags and

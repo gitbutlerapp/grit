@@ -47,15 +47,23 @@ $ grit pick 9a1c2e0
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `source` | string | Full id of the commit that was picked. |
+| `oid` | string | Full id of the new commit on the current branch. |
+| `subject` | string | Subject line of the picked commit. |
+
+Example:
+
+```json
 {
-  "source": "cf18394a62c3f845bd9c44927a5a55e014b2a99d",
-  "oid": "4be20a1f3c5e7d9b0a2c4e6f8a1b3d5c7e9f0a2b",
-  "subject": "Say hi"
+  "source": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+  "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+  "subject": "two"
 }
 ```
-
-`source` is the commit that was picked and `oid` is the new commit on the current branch.
 
 ## See also
 

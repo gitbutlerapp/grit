@@ -32,14 +32,23 @@ Install directory: /home/ada/.local/bin
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `updated` | boolean | Whether the install script was started successfully. |
+| `version` | string | Version of `grit` that ran the update (not necessarily the version installed). |
+
+Example:
+
+```json
 {
   "updated": true,
   "version": "0.5.0"
 }
 ```
 
-`version` is the version that ran the update, not the one that was installed. With `--json`, the installer's output goes to stderr so stdout carries only the JSON.
+With `--json`, the installer's progress goes to stderr so stdout carries only the JSON object.
 
 ## See also
 

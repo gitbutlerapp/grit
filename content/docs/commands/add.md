@@ -43,13 +43,19 @@ Staged 2 changes.
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `staged` | number | How many paths were staged by this invocation. |
+
+Example:
+
+```json
 {
   "staged": 2
 }
 ```
-
-`staged` is the number of paths that were staged.
 
 ## See also
 

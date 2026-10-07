@@ -58,9 +58,30 @@ $ grit auth logout
 
 ## JSON output
 
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `authenticated` | boolean | For sign-in, whether a token was stored. |
+| `logged_out` | boolean | For `logout`, whether a stored token was removed. |
+| `host` | string | GitHub host the credential applies to (usually `github.com`). |
+
+After sign-in:
+
+```json
+{
+  "authenticated": true,
+  "host": "github.com"
+}
 ```
-{ "authenticated": true, "host": "github.com" }
-{ "logged_out": true, "host": "github.com" }
+
+After logout:
+
+```json
+{
+  "logged_out": true,
+  "host": "github.com"
+}
 ```
 
 `logged_out` is `false` when no credential helper is configured, since there's nowhere a token could be stored.
