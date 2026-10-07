@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import benchpage  # noqa: E402
 import blog  # noqa: E402
 import rustdoc_links  # noqa: E402
 import site_util  # noqa: E402
@@ -211,7 +212,13 @@ def collect_listed_sources_for_dir(sections: list[SectionSpec], root: Path) -> d
     return listed
 
 
-def load_page(path: Path, spec: PageSpec, *, command_groups: tuple[str, ...]) -> Page:
+def load_page(
+    path: Path,
+    spec: PageSpec,
+    *,
+    command_groups: tuple[str, ...],
+    manifest_path: Path,
+) -> Page:
     meta, body = blog.parse_front_matter(path.read_text(encoding="utf-8"))
     title = meta.get("title") or spec.label
     group = meta.get("group", "")
@@ -219,7 +226,15 @@ def load_page(path: Path, spec: PageSpec, *, command_groups: tuple[str, ...]) ->
     if is_command and group not in command_groups:
         raise SystemExit(f"{path}: group {group!r} must be one of {command_groups}")
     body = expand_includes(body)
-    body_html, toc = blog.markdown_to_html(body)
+    if spec.slug == "benchmarks":
+        before, after = benchpage.split_benchmark_markdown(body)
+        before_html, toc_before = blog.markdown_to_html(before)
+        after_html, toc_after = blog.markdown_to_html(after)
+        tables = benchpage.benchmark_html_for_manifest(manifest_path)
+        body_html = before_html + tables + after_html
+        toc = toc_before + toc_after
+    else:
+        body_html, toc = blog.markdown_to_html(body)
     return Page(
         spec.slug,
         title,
@@ -249,7 +264,12 @@ def load_site(*, content_dir: Path | None = None) -> Site:
 
     by_slug: dict[str, Page] = {}
     for spec in listed.values():
-        page = load_page(spec.source_at(root), spec, command_groups=command_groups)
+        page = load_page(
+            spec.source_at(root),
+            spec,
+            command_groups=command_groups,
+            manifest_path=manifest_path,
+        )
         by_slug[page.slug] = page
 
     ordered_pages: list[Page] = []
@@ -488,6 +508,11 @@ CSS = r'''
 .content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none;color:var(--ink)}
+.content table.bench-results,.content table.bench-summary,.content table.bench-env{font:14px/1.5 var(--mono)}
+.content table.bench-results td,.content table.bench-results th,.content table.bench-summary td,.content table.bench-summary th{text-align:right}
+.content table.bench-results td:first-child,.content table.bench-results th:first-child,.content table.bench-summary td:first-child,.content table.bench-summary th:first-child{text-align:left}
+.content tr.bench-slow td{color:var(--accent);font-weight:600}
+.bench-meta{margin:1.5em 0 2em}
 @media(max-width:900px){.doc-body{display:flex;flex-direction:column}.doc-body.has-toc{display:flex}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}.toc{display:none}}
 '''
 

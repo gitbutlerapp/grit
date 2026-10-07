@@ -59,3 +59,7 @@ title = "Benchmarks"
 file = "benchmarks.md"
 slug = "benchmarks"
 label = "Benchmarks"
+
+# Baseline JSON paths are repo-root-relative; add entries when roadmap item 2 commits them on main.
+[benchmarks]
+baseline = ["grit-utils/baselines/hot-paths-before.json"]

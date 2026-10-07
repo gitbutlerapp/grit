@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Benchmarks - Grit docs</title>
-<meta name="description" content="How grit performance compares to Git." />
+<meta name="description" content="Grit vs Git on realistic workloads, from the committed grit-bench baseline." />
 <script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -87,6 +87,11 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 .content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none;color:var(--ink)}
+.content table.bench-results,.content table.bench-summary,.content table.bench-env{font:14px/1.5 var(--mono)}
+.content table.bench-results td,.content table.bench-results th,.content table.bench-summary td,.content table.bench-summary th{text-align:right}
+.content table.bench-results td:first-child,.content table.bench-results th:first-child,.content table.bench-summary td:first-child,.content table.bench-summary th:first-child{text-align:left}
+.content tr.bench-slow td{color:var(--accent);font-weight:600}
+.bench-meta{margin:1.5em 0 2em}
 @media(max-width:900px){.doc-body{display:flex;flex-direction:column}.doc-body.has-toc{display:flex}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}.toc{display:none}}
 </style>
 </head>
@@ -107,21 +112,47 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
   <div class="hero post-hero">
     <div class="refs"><a class="ref" href="../">← docs</a><span>guide</span></div>
     <h1>Benchmarks</h1>
-    <p class="lede">How grit performance compares to Git.</p>
+    <p class="lede">Grit vs Git on realistic workloads, from the committed grit-bench baseline.</p>
   </div>
 </section>
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line"></span></div>
-  <div class="doc-body">
-    <article class="content"><p>Performance work is measured on the factory VM and in CI against the <strong>system</strong> <code>git</code> binary. Micro-benchmarks live in <code>grit-lib</code> (Criterion) and command-level scenarios in <code>grit-bench</code> (<code>grit-utils</code>).</p>
+  <div class="doc-body has-toc">
+    <article class="content"><p>--- title: Benchmarks summary: Grit vs Git on realistic workloads, from the committed grit-bench baseline. ---</p>
+<p>Performance work is measured on the factory VM and in CI against the <strong>system</strong> <code>git</code> binary. Micro-benchmarks live in <code>grit-lib</code> (Criterion) and command-level scenarios in <code>grit-bench</code> (<code>grit-utils</code>).</p>
+<p>Command-level numbers below come from the committed <strong>grit-bench</strong> JSON baselines listed in <code>content/docs/site.toml</code>. Each scenario runs <strong>hyperfine</strong> against the system <strong><code>git</code></strong> binary and a release <strong><code>grit</code></strong> build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).</p>
 <h2 id="grit-lib-parallel-object-hashing">grit-lib: parallel object hashing</h2>
 <p>Criterion group <code>hash/batch_parallel</code> (<code>cargo bench -p grit-lib --bench objects hash/batch_parallel</code>) hashes <strong>20 000</strong> Git blob objects of <strong>16 KiB</strong> each using <a href="https://docs.rs/grit-lib/latest/grit_lib/hash/fn.hash_objects_parallel.html"><code>hash_objects_parallel</code></a> (SHA-1, release build).</p>
 <div class="table"><table><thead><tr><th>Threads</th><th>Time (median)</th><th>Throughput</th></tr></thead><tbody><tr><td>1</td><td>173 ms</td><td>1.76 GiB/s</td></tr><tr><td>8</td><td>44.5 ms</td><td>6.86 GiB/s</td></tr></tbody></table></div>
 <p><strong>Speedup (8 vs 1 thread): ~3.9×</strong> on the factory VM (2026-10-07).</p>
 <p>Parallel hashing falls back to a serial loop when there are fewer than <a href="https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html"><code>PAR_HASH_MIN_ITEMS</code></a> (32) objects or less than <a href="https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html"><code>PAR_HASH_MIN_TOTAL_BYTES</code></a> (256 KiB) of payload, so small batches avoid thread overhead.</p>
-<p>For broader command comparisons and baselines, see the generated benchmarks page when present in the docs tree and the <a href="https://docs.rs/grit-lib">grit-lib API on docs.rs</a> for the surfaces under test.</p><div class="pager"><a href="../library/repository/">← Repository</a><span></span></div></article>
+<h2 id="grit-bench-vs-git">grit-bench vs Git</h2>
+<h3 id="methodology">Methodology</h3>
+<ul>
+<li><strong>Fixtures</strong> use synthetic repos at large file counts and deep history, built deterministically in a scratch directory.</li>
+<li><strong>Drivers</strong> are CLI invocations of <code>grit</code> and <code>git</code> with equivalent semantics (not argv-for-argv compatibility).</li>
+<li><strong>Ratios</strong> are <strong>Grit mean ÷ Git mean</strong>. Values below <code>1.00×</code> mean Grit is faster; values above <code>2.00×</code> are highlighted as regressions worth investigating.</li>
+<li><strong>Spread</strong> shows Grit’s standard deviation across timed runs (hyperfine <code>--min-runs</code> / warmup settings from the baseline capture).</li>
+</ul>
+<h3 id="reproduce-locally">Reproduce locally</h3>
+<p>Build release binaries, install <a href="https://github.com/sharkdp/hyperfine">hyperfine</a>, then run matching grit-bench scenarios from the repo root (see <code>grit-utils/README.md</code> for the current subcommands):</p>
+<pre><code>cargo build --release -p grit-cli -p grit-utils
+
+# Example: hot-path scenarios at L/H tiers (switch, pick, merge)
+./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output /tmp/grit-bench-hot-paths.json</code></pre>
+<p>When roadmap item 2 adds more baseline JSON files on <code>main</code>, list their paths under <code>[benchmarks].baseline</code> in <code>content/docs/site.toml</code> and regenerate the site.</p>
+<p>Compare a fresh run against the committed baseline (exit non-zero if any scenario ratio drifts beyond tolerance):</p>
+<pre><code>./target/release/grit-bench compare grit-utils/baselines/hot-paths-before.json /tmp/grit-bench-hot-paths.json --tolerance 0.10</code></pre>
+<h3 id="results">Results</h3><div class="bench-meta table"><table class="bench-env"><tbody><tr><th scope="row">Git</th><td>git version 2.43.0</td></tr><tr><th scope="row">Grit</th><td>grit 0.5.0</td></tr><tr><th scope="row">CPU</th><td>Intel(R) Xeon(R) Processor</td></tr><tr><th scope="row">OS</th><td>linux (Linux 6.12.94+)</td></tr><tr><th scope="row">Recorded</th><td>2026-10-07 15:15:12.204218776</td></tr></tbody></table></div>
+<h2 id="bench-summary">Summary by operation</h2><div class="table"><table class="bench-summary"><thead><tr><th>Operation</th><th>Scenarios</th><th>Median Grit / Git</th><th>Worst Grit / Git</th></tr></thead><tbody><tr class="bench-slow"><td>merge</td><td>2</td><td>3.29×</td><td>3.96×</td></tr><tr class="bench-slow"><td>pick</td><td>4</td><td>9.10×</td><td>19.51×</td></tr><tr class="bench-slow"><td>switch</td><td>4</td><td>4.28×</td><td>27.42×</td></tr></tbody></table></div>
+<h3 id="bench-merge">merge</h3><div class="table"><table class="bench-results"><thead><tr><th>Scenario</th><th>Fixture</th><th>Git mean (ms)</th><th>Grit mean (ms)</th><th>Grit / Git</th><th>Spread</th></tr></thead><tbody><tr class="bench-slow"><td><code>merge-10000</code></td><td>synthetic-10000</td><td>104</td><td>272</td><td>2.61×</td><td>±11.6 ms</td></tr><tr class="bench-slow"><td><code>merge-100000</code></td><td>synthetic-100000</td><td>307</td><td>1,215</td><td>3.96×</td><td>±4.44 ms</td></tr></tbody></table></div>
+<h3 id="bench-pick">pick</h3><div class="table"><table class="bench-results"><thead><tr><th>Scenario</th><th>Fixture</th><th>Git mean (ms)</th><th>Grit mean (ms)</th><th>Grit / Git</th><th>Spread</th></tr></thead><tbody><tr><td><code>pick-10000</code></td><td>synthetic-10000</td><td>114</td><td>162</td><td>1.42×</td><td>±3.24 ms</td></tr><tr class="bench-slow"><td><code>pick-series-10000</code></td><td>synthetic-10000</td><td>126</td><td>1,604</td><td>12.72×</td><td>±40.4 ms</td></tr><tr class="bench-slow"><td><code>pick-100000</code></td><td>synthetic-100000</td><td>208</td><td>1,139</td><td>5.47×</td><td>±18.5 ms</td></tr><tr class="bench-slow"><td><code>pick-series-100000</code></td><td>synthetic-100000</td><td>1,052</td><td>20,538</td><td>19.51×</td><td>±299 ms</td></tr></tbody></table></div>
+<h3 id="bench-switch">switch</h3><div class="table"><table class="bench-results"><thead><tr><th>Scenario</th><th>Fixture</th><th>Git mean (ms)</th><th>Grit mean (ms)</th><th>Grit / Git</th><th>Spread</th></tr></thead><tbody><tr class="bench-slow"><td><code>switch-10000</code></td><td>synthetic-10000</td><td>22.9</td><td>83.6</td><td>3.64×</td><td>±31.0 ms</td></tr><tr class="bench-slow"><td><code>switch-wide-10000</code></td><td>synthetic-10000</td><td>46.2</td><td>163</td><td>3.53×</td><td>±1.55 ms</td></tr><tr class="bench-slow"><td><code>switch-100000</code></td><td>synthetic-100000</td><td>159</td><td>778</td><td>4.91×</td><td>±23.2 ms</td></tr><tr class="bench-slow"><td><code>switch-wide-100000</code></td><td>synthetic-100000</td><td>397</td><td>10,875</td><td>27.42×</td><td>±756 ms</td></tr></tbody></table></div><p>To refresh this page after updating a baseline JSON file, regenerate the static site:</p>
+<pre><code>make docs</code></pre>
+<p>The docs <code>--check</code> step fails if baseline numbers change without re-running <code>make docs</code>.</p>
+<p>For other library surfaces under test, see the <a href="https://docs.rs/grit-lib">grit-lib API on docs.rs</a>.</p><div class="pager"><a href="../library/repository/">← Repository</a><span></span></div></article>
     <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/objects/">Objects</a></li><li><a href="../library/repository/">Repository</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a class="current" href="../benchmarks/">Benchmarks</a></li></ol></nav>
-    
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#grit-lib-parallel-object-hashing">grit-lib: parallel object hashing</a></li><li class="toc-level-2"><a href="#grit-bench-vs-git">grit-bench vs Git</a></li><li class="toc-level-3"><a href="#methodology">Methodology</a></li><li class="toc-level-3"><a href="#reproduce-locally">Reproduce locally</a></li><li class="toc-level-3"><a href="#results">Results</a></li></ol></aside>
   </div>
 </section>
 </main>

@@ -87,6 +87,11 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 .content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none;color:var(--ink)}
+.content table.bench-results,.content table.bench-summary,.content table.bench-env{font:14px/1.5 var(--mono)}
+.content table.bench-results td,.content table.bench-results th,.content table.bench-summary td,.content table.bench-summary th{text-align:right}
+.content table.bench-results td:first-child,.content table.bench-results th:first-child,.content table.bench-summary td:first-child,.content table.bench-summary th:first-child{text-align:left}
+.content tr.bench-slow td{color:var(--accent);font-weight:600}
+.bench-meta{margin:1.5em 0 2em}
 @media(max-width:900px){.doc-body{display:flex;flex-direction:column}.doc-body.has-toc{display:flex}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}.toc{display:none}}
 </style>
 </head>
