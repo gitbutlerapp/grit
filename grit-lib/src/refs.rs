@@ -1412,6 +1412,7 @@ pub fn append_reflog(
     message: &str,
     force_create: bool,
 ) -> Result<()> {
+    test_inject_reflog_fail(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_append_reflog(
             git_dir,
@@ -1455,6 +1456,185 @@ pub fn append_reflog(
         .open(&log_path)?;
     use io::Write;
     file.write_all(line.as_bytes())?;
+    Ok(())
+}
+
+/// Test hook: when set to a ref name, the next [`append_reflog`] for that ref fails.
+///
+/// Only active in debug builds; used by regression tests for commit ref/reflog atomicity.
+#[cfg(debug_assertions)]
+mod reflog_fail_inject {
+    use std::cell::RefCell;
+
+    thread_local! {
+        pub static INJECT: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+}
+
+#[cfg(debug_assertions)]
+pub fn set_test_inject_reflog_fail(refname: Option<&str>) {
+    reflog_fail_inject::INJECT.with(|c| {
+        *c.borrow_mut() = refname.map(str::to_owned);
+    });
+}
+
+#[cfg(debug_assertions)]
+fn test_inject_reflog_fail(refname: &str) -> Result<()> {
+    reflog_fail_inject::INJECT.with(|c| {
+        if c.borrow().as_deref() == Some(refname) {
+            return Err(Error::Io(std::io::Error::other("injected reflog failure")));
+        }
+        Ok(())
+    })
+}
+
+#[cfg(not(debug_assertions))]
+fn test_inject_reflog_fail(_refname: &str) -> Result<()> {
+    Ok(())
+}
+
+/// Move a checked-out branch to `new_oid` and append matching branch and `HEAD` reflogs.
+///
+/// Verifies `HEAD` is a symbolic ref to `branch_ref`, applies the compare-and-swap
+/// expectation on the branch tip, then writes the branch ref and reflogs. If a reflog
+/// append fails after the branch ref moved, the branch tip is rolled back (and a
+/// partial branch reflog line is removed when possible).
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when `HEAD` does not point at `branch_ref`, when the
+/// CAS check fails, or when ref/reflog I/O fails.
+pub struct BranchCommitRefUpdate<'a> {
+    /// Branch ref to update (e.g. `refs/heads/main`).
+    pub branch_ref: &'a str,
+    /// Expected current tip; `None` when the branch must not exist yet (unborn).
+    pub expected_old: Option<ObjectId>,
+    /// New commit OID for the branch tip.
+    pub new_oid: ObjectId,
+    /// Committer identity for reflog lines.
+    pub identity: &'a str,
+    /// Reflog message (without trailing newline).
+    pub reflog_message: &'a str,
+}
+
+enum BranchRollback {
+    Absent,
+    Oid(ObjectId),
+}
+
+fn verify_branch_cas(
+    expected: Option<ObjectId>,
+    current: Option<ObjectId>,
+    refname: &str,
+) -> Result<()> {
+    match (expected, current) {
+        (Some(exp), Some(cur)) if exp == cur => Ok(()),
+        (None, None) => Ok(()),
+        (Some(exp), None) => Err(Error::Message(format!(
+            "ref transaction rejected: '{refname}' expected {} but found <absent>",
+            exp.to_hex()
+        ))),
+        (None, Some(cur)) => Err(Error::Message(format!(
+            "ref transaction rejected: '{refname}' expected <absent> but found {}",
+            cur.to_hex()
+        ))),
+        (Some(exp), Some(cur)) => Err(Error::Message(format!(
+            "ref transaction rejected: '{refname}' expected {} but found {}",
+            exp.to_hex(),
+            cur.to_hex()
+        ))),
+    }
+}
+
+fn rollback_branch_ref(git_dir: &Path, branch_ref: &str, plan: &BranchRollback) -> Result<()> {
+    match plan {
+        BranchRollback::Absent => delete_ref(git_dir, branch_ref),
+        BranchRollback::Oid(oid) => write_ref(git_dir, branch_ref, oid),
+    }
+}
+
+/// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
+pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'_>) -> Result<()> {
+    let head_target = read_head(git_dir)?;
+    if head_target.as_deref() != Some(update.branch_ref) {
+        return Err(Error::Message(format!(
+            "HEAD does not point at branch '{}'",
+            update.branch_ref
+        )));
+    }
+
+    let current = resolve_ref(git_dir, update.branch_ref).ok();
+    verify_branch_cas(update.expected_old, current, update.branch_ref)?;
+    let rollback = match current {
+        None => BranchRollback::Absent,
+        Some(oid) => BranchRollback::Oid(oid),
+    };
+    let reflog_old = update.expected_old.unwrap_or_else(crate::diff::zero_oid);
+
+    if crate::reftable::is_reftable_repo(git_dir) {
+        crate::reftable::reftable_write_ref(
+            git_dir,
+            update.branch_ref,
+            &update.new_oid,
+            Some(update.identity),
+            Some(update.reflog_message),
+        )?;
+        if should_autocreate_reflog(git_dir, "HEAD") {
+            if let Err(err) = append_reflog(
+                git_dir,
+                "HEAD",
+                &reflog_old,
+                &update.new_oid,
+                update.identity,
+                update.reflog_message,
+                false,
+            ) {
+                let _ = rollback_branch_ref(git_dir, update.branch_ref, &rollback);
+                return Err(err);
+            }
+        }
+        return Ok(());
+    }
+
+    write_ref(git_dir, update.branch_ref, &update.new_oid)?;
+
+    let mut branch_reflog_written = false;
+    if should_autocreate_reflog(git_dir, update.branch_ref) {
+        match append_reflog(
+            git_dir,
+            update.branch_ref,
+            &reflog_old,
+            &update.new_oid,
+            update.identity,
+            update.reflog_message,
+            false,
+        ) {
+            Ok(()) => branch_reflog_written = true,
+            Err(err) => {
+                rollback_branch_ref(git_dir, update.branch_ref, &rollback)?;
+                return Err(err);
+            }
+        }
+    }
+
+    if should_autocreate_reflog(git_dir, "HEAD") {
+        if let Err(err) = append_reflog(
+            git_dir,
+            "HEAD",
+            &reflog_old,
+            &update.new_oid,
+            update.identity,
+            update.reflog_message,
+            false,
+        ) {
+            if branch_reflog_written {
+                let _ = crate::reflog::truncate_last_reflog_line(git_dir, update.branch_ref);
+            }
+            rollback_branch_ref(git_dir, update.branch_ref, &rollback)?;
+            return Err(err);
+        }
+    }
+
     Ok(())
 }
 

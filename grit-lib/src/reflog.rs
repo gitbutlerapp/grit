@@ -43,6 +43,43 @@ pub fn reflog_path(git_dir: &Path, refname: &str) -> PathBuf {
     reflog_file_path(git_dir, refname)
 }
 
+/// Remove the last line from a loose-ref reflog file, if present.
+///
+/// Used when rolling back a branch update after a failed `HEAD` reflog append.
+///
+/// # Errors
+///
+/// Returns I/O errors from reading or writing the reflog file.
+pub fn truncate_last_reflog_line(git_dir: &Path, refname: &str) -> Result<()> {
+    if crate::reftable::is_reftable_repo(git_dir) {
+        return Ok(());
+    }
+    let path = reflog_path(git_dir, refname);
+    let Ok(mut content) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    if content.is_empty() {
+        return Ok(());
+    }
+    if content.ends_with('\n') {
+        content.pop();
+        if content.ends_with('\r') {
+            content.pop();
+        }
+    }
+    if let Some(pos) = content.rfind('\n') {
+        content.truncate(pos + 1);
+    } else {
+        content.clear();
+    }
+    if content.is_empty() {
+        let _ = fs::remove_file(&path);
+    } else {
+        fs::write(&path, content)?;
+    }
+    Ok(())
+}
+
 /// Apply `core.sharedRepository` permissions to a rewritten reflog file, matching Git's
 /// `adjust_shared_perm` call in `files_reflog_expire`. Best-effort: ignores config and FS errors.
 fn adjust_reflog_shared_perm(git_dir: &Path, path: &Path) {

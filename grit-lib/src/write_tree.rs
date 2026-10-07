@@ -473,7 +473,9 @@ fn store_tree_payload(
     }
 }
 
-fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
+/// Returns whether `oid` is Git's canonical empty tree (including the legacy hash).
+#[must_use]
+pub fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
     if *oid == odb.hash(ObjectKind::Tree, b"") {
         return true;
     }
