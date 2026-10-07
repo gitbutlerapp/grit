@@ -512,6 +512,39 @@ impl Repository {
         self.write_index_at(&self.index_path(), index)
     }
 
+    /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`).
+    ///
+    /// Opportunistic writers such as `status` stat refresh call this instead of
+    /// [`Repository::write_index`]: a held `.git/index.lock` or an unwritable repository
+    /// directory must not fail the parent operation.
+    ///
+    /// Returns `Ok(true)` when the index was written, `Ok(false)` when persistence was skipped.
+    ///
+    /// # Errors
+    ///
+    /// Propagates non-recoverable failures (for example cache-tree verification or split-index
+    /// constraints).
+    pub fn try_write_index(&self, index: &mut Index) -> Result<bool> {
+        match self.write_index(index) {
+            Ok(()) => Ok(true),
+            Err(e) if Self::opportunistic_index_write_skippable(&e) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn opportunistic_index_write_skippable(err: &crate::error::Error) -> bool {
+        use crate::error::Error;
+        match err {
+            Error::Io(e) => matches!(
+                e.kind(),
+                std::io::ErrorKind::AlreadyExists
+                    | std::io::ErrorKind::PermissionDenied
+                    | std::io::ErrorKind::ReadOnlyFilesystem
+            ),
+            _ => false,
+        }
+    }
+
     /// Write the index to the default path and pass explicit `post-index-change` hook flags.
     ///
     /// Parameters:

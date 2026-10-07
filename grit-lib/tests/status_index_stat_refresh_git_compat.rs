@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use grit_lib::diff::stat_matches;
@@ -96,4 +97,64 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
         first_elapsed,
         second_elapsed
     );
+}
+
+#[test]
+fn status_succeeds_when_index_lock_held_after_touch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+
+    fs::write(repo_root.join("tracked.txt"), "same content\n").expect("write");
+    git(repo_root, &["add", "tracked.txt"]);
+    git(repo_root, &["commit", "-qm", "initial"]);
+
+    filetime::set_file_mtime(repo_root.join("tracked.txt"), filetime::FileTime::now())
+        .expect("touch");
+
+    let git_dir = repo_root.join(".git");
+    let lock_path = git_dir.join("index.lock");
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&lock_path)
+        .expect("pre-create index.lock");
+
+    let git_exit = Command::new("git")
+        .arg("status")
+        .current_dir(repo_root)
+        .status()
+        .expect("git status");
+    assert!(
+        git_exit.success(),
+        "system git status must succeed with index.lock"
+    );
+
+    let grit_repo = Repository::open(&git_dir, Some(repo_root)).expect("open grit repo");
+    let index_path = grit_repo.index_path();
+    let index_mtime_before = fs::metadata(&index_path)
+        .expect("index metadata")
+        .modified()
+        .expect("index mtime");
+
+    let model = status(&grit_repo, &StatusOptions::default(), &mut NullProgress)
+        .expect("grit status must succeed when index.lock blocks refresh write");
+
+    assert!(
+        model.unstaged.is_empty(),
+        "unchanged content after touch must not appear unstaged"
+    );
+
+    let index_mtime_after = fs::metadata(&index_path)
+        .expect("index metadata")
+        .modified()
+        .expect("index mtime");
+    assert_eq!(
+        index_mtime_after, index_mtime_before,
+        "index must not be rewritten while index.lock is held"
+    );
+
+    let _ = fs::remove_file(&lock_path);
 }
