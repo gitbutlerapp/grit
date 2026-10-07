@@ -86,8 +86,10 @@ fn parse_timestamp(cli: &Cli) -> Result<OffsetDateTime> {
         {
             return Ok(parsed);
         }
-        let fmt = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]")
-            .context("build timestamp format")?;
+        let fmt = time::format_description::parse_borrowed::<1>(
+            "[year]-[month]-[day] [hour]:[minute]:[second]",
+        )
+        .context("build timestamp format")?;
         return OffsetDateTime::parse(ts, &fmt).context("parse --timestamp");
     }
     Ok(OffsetDateTime::now_utc())
