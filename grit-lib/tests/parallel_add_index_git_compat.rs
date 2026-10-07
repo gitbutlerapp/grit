@@ -59,12 +59,18 @@ fn reset_staging_area(repo: &Repository) {
     }
 }
 
+fn set_index_threads(repo: &Repository, threads: usize) {
+    let path = repo.git_dir.join("config");
+    let mut text = fs::read_to_string(&path).expect("config");
+    text.push_str(&format!("\n[index]\n\tthreads = {threads}\n"));
+    fs::write(&path, text).expect("write config");
+}
+
 fn stage_all(repo: &Repository, threads: Option<usize>) -> Vec<u8> {
-    let opts = StageOptions {
-        hash_threads: threads,
-        ..StageOptions::default()
-    };
-    stage(repo, &opts, &mut NullProgress).expect("stage");
+    if let Some(n) = threads {
+        set_index_threads(repo, n);
+    }
+    stage(repo, &StageOptions::default(), &mut NullProgress).expect("stage");
     fs::read(repo.index_path()).expect("read index")
 }
 

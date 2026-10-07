@@ -15,11 +15,14 @@ use crate::diff::{
     DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::hash::{index_parallelism_from_config, Parallelism};
+use crate::hash::{
+    index_parallelism_from_config, try_par_hash_with, ParallelHashError, Parallelism,
+};
 use crate::index::{
     entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
 };
-use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tree, ObjectId};
+use crate::odb::WriteOptions;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
@@ -52,8 +55,6 @@ pub struct StageOptions {
     pub pathspec_sources: Vec<String>,
     /// Whether to include untracked paths ([`StageMode::All`]) or only tracked changes ([`StageMode::Update`]).
     pub mode: StageMode,
-    /// Override parallel worker count for batch blob hashing (`None` = resolve from config).
-    pub hash_threads: Option<usize>,
 }
 
 /// Counts returned by [`stage`].
@@ -104,10 +105,7 @@ pub fn stage(
     let mut index = repo.load_index()?;
 
     let convert = StagingConvertContext::load(repo, work_tree);
-    let parallelism = opts
-        .hash_threads
-        .map(|n| Parallelism::resolve(Some(n)))
-        .unwrap_or_else(|| index_parallelism_from_config(&convert.config));
+    let parallelism = index_parallelism_from_config(&convert.config);
     let ignorecase = convert
         .config
         .get_bool("core.ignorecase")
@@ -131,15 +129,29 @@ pub fn stage(
         )?
     };
 
+    let bulk_empty_index_add =
+        opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
     let untracked = if opts.mode == StageMode::All {
-        let (untracked, _) = collect_untracked_and_ignored(
-            repo,
-            &index,
-            work_tree,
-            IgnoredMode::No,
-            true,
-            &opts.pathspecs,
-        )?;
+        let (untracked, _) = if bulk_empty_index_add {
+            crate::porcelain::status::collect_untracked_and_ignored_inner(
+                repo,
+                &index,
+                work_tree,
+                IgnoredMode::No,
+                true,
+                &opts.pathspecs,
+                false,
+            )?
+        } else {
+            collect_untracked_and_ignored(
+                repo,
+                &index,
+                work_tree,
+                IgnoredMode::No,
+                true,
+                &opts.pathspecs,
+            )?
+        };
         untracked
     } else {
         Vec::new()
@@ -420,6 +432,25 @@ fn stage_untracked_paths_parallel(
         parallelism,
     )?;
 
+    repo.odb.ensure_all_loose_prefix_dirs()?;
+    let write_opts = WriteOptions {
+        assume_loose_only_existence: true,
+        trust_new_loose: true,
+        ..WriteOptions::default()
+    };
+    let write_bytes: usize = prepared.iter().map(|p| p.zlib_store.len()).sum();
+    let threads = parallelism.threads();
+    let _written: Vec<ObjectId> = try_par_hash_with(&prepared, threads, write_bytes, |prep| {
+        repo.odb
+            .write_loose_zlib_prehashed(&prep.oid, &prep.zlib_store, write_opts)
+            .map_err(|e| Error::Message(format!("could not store {}: {e}", prep.index_relpath)))
+    })
+    .map_err(|e: ParallelHashError<Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+
+    let skip_per_path_cache_invalidate =
+        index.cache_tree.is_none() && index.untracked_cache.is_none();
     let mut batch_entries: Vec<IndexEntry> = Vec::with_capacity(prepared.len());
     for prep in prepared {
         let abs = work_tree.join(&prep.index_relpath);
@@ -431,15 +462,17 @@ fn stage_untracked_paths_parallel(
             continue;
         }
         icase_map.remove_alias_of(index, prep.index_relpath.as_bytes());
-        let oid = repo
-            .odb
-            .write(ObjectKind::Blob, &prep.data)
-            .map_err(|e| Error::Message(format!("could not store {}: {e}", prep.index_relpath)))?;
-        let mut entry =
-            entry_from_metadata(&prep.meta, prep.index_relpath.as_bytes(), oid, prep.mode);
+        let mut entry = entry_from_metadata(
+            &prep.meta,
+            prep.index_relpath.as_bytes(),
+            prep.oid,
+            prep.mode,
+        );
         entry.mode = prep.mode;
-        index.invalidate_untracked_cache_for_path(&prep.index_relpath);
-        index.invalidate_cache_tree_for_path(&entry.path);
+        if !skip_per_path_cache_invalidate {
+            index.invalidate_untracked_cache_for_path(&prep.index_relpath);
+            index.invalidate_cache_tree_for_path(&entry.path);
+        }
         batch_entries.push(entry);
         outcome.added += 1;
     }

@@ -1,4 +1,4 @@
-//! Parallel read, filter, and hash of worktree file blobs (add / index stat refresh).
+//! Parallel read, filter, hash, and compress of worktree file blobs (add / index refresh).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,13 +7,13 @@ use crate::config::ConfigSet;
 use crate::crlf::{self, ConversionConfig, GitAttributes};
 use crate::diff::{hash_worktree_file, mode_from_metadata, worktree_blob_bytes};
 use crate::error::{Error, Result};
-use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
+use crate::hash::{hash_object, try_par_hash_with, ParallelHashError, Parallelism};
 use crate::index::IndexEntry;
-use crate::objects::ObjectId;
-use crate::odb::Odb;
+use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+use crate::odb::{self, Odb};
 
 /// One worktree path to read and normalize in parallel.
-pub struct WorktreeBlobReadInput {
+pub(crate) struct WorktreeBlobReadInput {
     /// Absolute path to read.
     pub abs: PathBuf,
     /// Index-relative path (for attributes / CRLF).
@@ -22,24 +22,31 @@ pub struct WorktreeBlobReadInput {
     pub index_entry: Option<IndexEntry>,
 }
 
-/// Normalized blob bytes plus metadata needed to build an index entry.
-pub struct PreparedWorktreeBlob {
+/// Worktree blob after parallel read, hash, and zlib compression.
+pub(crate) struct PreparedWorktreeBlob {
     /// Index path spelling used for staging.
     pub index_relpath: String,
-    /// Git-normalized blob payload (ready for [`Odb::write`]).
-    pub data: Vec<u8>,
+    /// Object id of the normalized blob (computed in the parallel phase).
+    pub oid: ObjectId,
+    /// Zlib-compressed canonical store bytes for [`Odb::write_loose_zlib_prehashed`].
+    pub zlib_store: Vec<u8>,
     /// Worktree metadata captured during the read pass.
     pub meta: fs::Metadata,
     /// Git mode derived from `meta`.
     pub mode: u32,
 }
 
-/// Read and CRLF-filter many worktree blobs in parallel, preserving `items` order.
+struct PrepareBlobContext {
+    algo: HashAlgo,
+    compression: flate2::Compression,
+}
+
+/// Read, CRLF-filter, hash, and compress many worktree blobs in parallel (input order preserved).
 ///
 /// # Errors
 ///
-/// Propagates I/O, conversion, or object-store read failures from any worker.
-pub fn prepare_worktree_blobs_parallel(
+/// Propagates I/O, conversion, hashing, or compression failures from any worker.
+pub(crate) fn prepare_worktree_blobs_parallel(
     odb: &Odb,
     items: &[WorktreeBlobReadInput],
     conv: &ConversionConfig,
@@ -50,6 +57,10 @@ pub fn prepare_worktree_blobs_parallel(
     if items.is_empty() {
         return Ok(Vec::new());
     }
+    let ctx = PrepareBlobContext {
+        algo: odb.hash_algo(),
+        compression: odb.loose_compression()?,
+    };
     let total_bytes: usize = items
         .iter()
         .filter_map(|item| fs::metadata(&item.abs).ok())
@@ -68,10 +79,14 @@ pub fn prepare_worktree_blobs_parallel(
             &item.index_relpath,
             item.index_entry.as_ref(),
         )?;
+        let store_bytes = odb::blob_store_bytes(&data);
+        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data);
+        let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
         let mode = mode_from_metadata(&meta);
         Ok(PreparedWorktreeBlob {
             index_relpath: item.index_relpath.clone(),
-            data,
+            oid,
+            zlib_store,
             meta,
             mode,
         })
