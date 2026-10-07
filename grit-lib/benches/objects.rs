@@ -6,6 +6,7 @@ mod fixture;
 
 use std::hint::black_box;
 use std::io::Read;
+use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use fixture::ObjectBenchFixtures;
@@ -201,6 +202,19 @@ fn bench_hash_batch_parallel(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_exists_local_10k_oids_packed(c: &mut Criterion) {
+    static FIX: OnceLock<(tempfile::TempDir, Odb, Vec<grit_lib::objects::ObjectId>)> =
+        OnceLock::new();
+    let (_dir, odb, oids) = FIX.get_or_init(|| fixture::build_packed_exists_local_fixture(10_000));
+    c.bench_function("exists_local_10k_oids_packed", |b| {
+        b.iter(|| {
+            for oid in oids.iter().take(10_000) {
+                black_box(odb.exists_local(oid));
+            }
+        });
+    });
+}
+
 fn bench_delta_apply(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("delta_apply");
@@ -225,6 +239,7 @@ criterion_group!(
     bench_loose_read,
     bench_packed_read,
     bench_idx_lookup,
+    bench_exists_local_10k_oids_packed,
     bench_delta_apply
 );
 criterion_main!(objects);

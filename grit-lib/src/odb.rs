@@ -95,7 +95,7 @@ fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
         return false;
     };
     for idx in &indexes {
-        if idx.pack_path.with_extension("promisor").is_file() {
+        if idx.is_promisor {
             continue;
         }
         if idx.contains(oid) {
@@ -694,7 +694,7 @@ impl Odb {
         };
         for idx in &indexes {
             if idx.contains(oid) {
-                return self.freshen_pack_once(&idx.pack_path);
+                return self.freshen_pack_once(&idx.pack_path, idx.is_cruft);
             }
         }
         false
@@ -704,15 +704,15 @@ impl Odb {
     ///
     /// The path is recorded in [`Self::freshened_packs`] only after a successful touch, matching
     /// Git's `packed_git->freshened` assignment after `utime` succeeds.
-    fn freshen_pack_once(&self, pack_path: &Path) -> bool {
-        if pack_path.with_extension("mtimes").exists() {
-            return false;
-        }
+    fn freshen_pack_once(&self, pack_path: &Path, is_cruft: bool) -> bool {
         let Ok(mut guard) = self.freshened_packs.lock() else {
             return false;
         };
         if guard.contains(pack_path) {
             return true;
+        }
+        if is_cruft {
+            return false;
         }
         let Some(touched_at) = self.touch_object_mtime(pack_path) else {
             return false;
@@ -2045,5 +2045,147 @@ mod tests {
         assert_eq!(oid, touched);
         let freshened = std::fs::metadata(&path).unwrap().modified().unwrap();
         assert!(freshened >= before);
+    }
+
+    #[test]
+    fn promisor_marker_checked_once_per_prepare() {
+        use crate::objects::ObjectId;
+        use crate::pack::{
+            clear_pack_cache, test_pack_marker_stat_count, test_reset_pack_marker_stat_count,
+        };
+
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        for i in 0..64 {
+            fs::write(dir.path().join(format!("f{i}.txt")), format!("body {i}")).unwrap();
+            git_in(dir.path(), &["add", "."]);
+            git_in(dir.path(), &["commit", "-m", &format!("c{i}")]);
+        }
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let head_hex = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        let oid =
+            ObjectId::from_hex(std::str::from_utf8(&head_hex.stdout).unwrap().trim()).unwrap();
+
+        clear_pack_cache();
+        test_reset_pack_marker_stat_count();
+        let odb = Odb::new(&objects);
+        assert!(odb.exists_local(&oid));
+        assert!(
+            test_pack_marker_stat_count() >= 2,
+            "prepare should stat promisor and mtimes sidecars once per pack"
+        );
+
+        test_reset_pack_marker_stat_count();
+        for _ in 0..10_000 {
+            assert!(odb.exists_local(&oid));
+        }
+        assert_eq!(
+            test_pack_marker_stat_count(),
+            0,
+            "cached sidecar flags must not stat markers on each exists_local probe"
+        );
+    }
+
+    #[test]
+    fn promisor_marker_added_after_prepare_is_seen_after_reprepare() {
+        use crate::objects::ObjectId;
+        use crate::pack::clear_pack_cache;
+
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("one.txt"), b"x").unwrap();
+        git_in(dir.path(), &["add", "one.txt"]);
+        git_in(dir.path(), &["commit", "-m", "one"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let head_hex = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        let oid =
+            ObjectId::from_hex(std::str::from_utf8(&head_hex.stdout).unwrap().trim()).unwrap();
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        assert!(odb.exists_local(&oid));
+
+        let pack_path = fs::read_dir(objects.join("pack"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "pack"))
+            .unwrap();
+        fs::write(pack_path.with_extension("promisor"), b"").unwrap();
+        filetime::set_file_mtime(objects.join("pack"), filetime::FileTime::now()).unwrap();
+
+        assert!(
+            !odb.exists_local(&oid),
+            "promisor marker added after prepare must hide pack objects from exists_local"
+        );
+    }
+
+    #[test]
+    fn git_promisor_marker_pack_not_materialized_for_exists_local() {
+        use crate::objects::ObjectId;
+        use crate::pack::clear_pack_cache;
+
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("blob.txt"), b"git promisor compat").unwrap();
+        git_in(dir.path(), &["add", "blob.txt"]);
+        git_in(dir.path(), &["commit", "-m", "seed"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let head_hex = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        let oid =
+            ObjectId::from_hex(std::str::from_utf8(&head_hex.stdout).unwrap().trim()).unwrap();
+        let pack_path = fs::read_dir(objects.join("pack"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "pack"))
+            .unwrap();
+        fs::write(pack_path.with_extension("promisor"), b"").unwrap();
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        assert!(
+            !odb.exists_local(&oid),
+            "git-written pack with .promisor must not count as local materialization"
+        );
+
+        let cat = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["cat-file", "-e", &oid.to_hex()])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(
+            cat.status.success(),
+            "git still resolves the object in a promisor-marked pack"
+        );
     }
 }

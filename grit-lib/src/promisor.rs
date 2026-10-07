@@ -77,16 +77,15 @@ pub fn repo_treats_promisor_packs(_git_dir: &Path, config: &ConfigSet) -> bool {
 /// All object IDs stored in packfiles that have a sibling `.promisor` marker file.
 #[must_use]
 pub fn promisor_pack_object_ids(objects_dir: &Path) -> HashSet<ObjectId> {
-    let Ok(indexes) = pack::read_local_pack_indexes(objects_dir) else {
+    let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
         return HashSet::new();
     };
     let mut ids = HashSet::new();
     for idx in indexes {
-        let marker = idx.pack_path.with_extension("promisor");
-        if !marker.is_file() {
+        if !idx.is_promisor {
             continue;
         }
-        for e in idx.entries {
+        for e in &idx.entries {
             if let Ok(oid) = crate::objects::ObjectId::from_bytes(&e.oid) {
                 ids.insert(oid);
             }
