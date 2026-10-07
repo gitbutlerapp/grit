@@ -66,6 +66,8 @@ The script exports **`CARGO_BUILD_JOBS=$(nproc)`** for the run so builds use all
 
 For day-to-day edits before committing, you can run individual stages or narrower tests (for example **`cargo test -p grit-lib --lib`**); the gate is the required bar for integration.
 
+**`cargo clippy --workspace -- -D warnings`** must pass locally before you push; CI treats any Clippy warning as a failure (same invocation as **`make gate`**).
+
 ## Continuous integration
 
 GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It runs on push to **`main`**, on **pull requests**, and via **workflow_dispatch**. Superseded PR runs are cancelled via workflow **`concurrency`**.
@@ -79,6 +81,7 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | Job | What it runs | Reproduce locally |
 | --- | --- | --- |
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
+| **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **test** | `cargo test -p grit-lib -p grit-cli`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
 
 Each job uses **`ubuntu-latest`** and **`timeout-minutes: 15`**, and the jobs run in parallel.

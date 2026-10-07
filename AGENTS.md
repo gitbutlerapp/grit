@@ -141,7 +141,9 @@ Format and fix issues in the code you touch, then run library tests:
 
 ```bash
 cargo fmt
-cargo test -p grit-lib --lib
+cargo check # fix warnings
+cargo clippy --workspace -- -D warnings   # same gate as CI (optional: cargo clippy --fix --allow-dirty first)
+cargo test -p grit-lib --lib       # unit tests must pass
 ```
 
 Use **`cargo clippy --fix --allow-dirty`** on crates you change. The full workspace bar for integration is **`make gate`** (see **Committing** below).
@@ -260,4 +262,5 @@ Agents version-control with **GitButler (`but`)** and **GitButler Mesh**. Nothin
 - **No external services**: Build and test via Cargo.
 - **Pre-integration gate**: **`make gate`** (`scripts/gate.sh`: fmt, clippy with **`-D warnings`**, **`cargo test --workspace`**).
 - **Unit tests**: `cargo test -p grit-lib --lib` during development; the gate runs the full workspace suite.
+- **Lint**: `cargo clippy --workspace -- -D warnings` must pass; warnings fail CI (see **TESTING.md**).
 - **Benchmarks**: when touching hot paths, compare against system `git` (Criterion in `grit-lib`, `grit-bench`).
