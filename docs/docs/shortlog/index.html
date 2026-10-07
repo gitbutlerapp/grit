@@ -70,17 +70,24 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 @media(max-width:900px){.post-body{display:block}.toc{display:none}}
 
 .doc-body{display:grid;grid-template-columns:180px minmax(0,720px);gap:56px;padding:48px 0 64px}
+.doc-body.has-toc{grid-template-columns:180px minmax(0,720px) 180px}
 .post-hero h1.cmd{font-family:var(--mono);font-weight:500;letter-spacing:-.04em;max-width:none}
 .docnav{order:-1;position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted);max-height:calc(100vh - 48px);overflow-y:auto}
 .docnav h2{margin:20px 0 8px;font:inherit;color:var(--accent)}
+.docnav h2 a{color:inherit;text-decoration:none}
+.docnav h3{margin:16px 0 6px 14px;font:inherit;color:var(--muted);font-size:12px}
 .docnav ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
 .docnav li{margin:0 0 6px;padding-left:14px}.docnav a{text-decoration:none}
 .docnav a.current{color:var(--ink);font-weight:700}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
 .content h3 code{font-size:.9em}
 .content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none;color:var(--ink)}
-@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}}
+@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.doc-body.has-toc{display:flex}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}.toc{display:none}}
 </style>
 </head>
 <body>
@@ -89,7 +96,7 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
   <a class="brand" href="../../" aria-label="grit homepage">grit</a>
   <nav class="nav" aria-label="Primary">
     <a href="../../docs/">Docs</a>
-    <a href="https://crates.io/crates/grit-lib">Library</a>
+    <a href="../../docs/library/">Library</a>
     <a href="../../blog/">Blog</a>
     <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
   </nav>
@@ -105,7 +112,7 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 </section>
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line"></span></div>
-  <div class="doc-body">
+  <div class="doc-body has-toc">
     <article class="content"><h2 id="synopsis">Synopsis</h2>
 <pre><code>grit shortlog
 grit sl</code></pre>
@@ -113,7 +120,7 @@ grit sl</code></pre>
 <p>Shows the current branch, its target branch, and every commit on the current branch that the target doesn&#x27;t have, newest first. It&#x27;s the list of what you would be proposing if you opened a pull request now.</p>
 <p>The target branch is found the same way as for <a href="../status/#the-target-branch"><code>grit status</code></a>: the <code>target.branch</code> setting, then <code>origin/master</code>, <code>origin/main</code>, <code>master</code> and <code>main</code>. Unlike <code>grit status</code>, which shows at most ten commits, <code>grit shortlog</code> lists all of them.</p>
 <h2 id="options">Options</h2>
-<p><code>grit shortlog</code> takes no options beyond the <a href="../#options-for-every-command">global ones</a>.</p>
+<p><code>grit shortlog</code> takes no options beyond the <a href="../global-options/">global ones</a>.</p>
 <h2 id="examples">Examples</h2>
 <pre><code>$ grit shortlog
 On feature
@@ -136,7 +143,8 @@ Ahead of origin/main by 2 commits
 <p><code>target</code> is <code>null</code> when no target branch was found.</p>
 <h2 id="see-also">See also</h2>
 <p><a href="../status/">grit status</a>, <a href="../log/">grit log</a>, <a href="../config/">grit config</a></p><div class="pager"><a href="../log/">← grit log</a><a href="../show/">grit show →</a></div></article>
-    <nav class="docnav" aria-label="Docs"><ol><li><a href="../">Overview</a></li><li><a href="../tutorial/">Tutorial</a></li></ol><h2>Getting started</h2><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h2>Making changes</h2><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h2>History</h2><ol><li><a href="../log/">grit log</a></li><li><a class="current" href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h2>Branches and tags</h2><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h2>Remotes</h2><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h2>Maintenance</h2><ol><li><a href="../update/">grit update</a></li></ol><h2>Plumbing</h2><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2>Library</h2><ol><li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li></ol></nav>
+    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a class="current" href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#synopsis">Synopsis</a></li><li class="toc-level-2"><a href="#description">Description</a></li><li class="toc-level-2"><a href="#options">Options</a></li><li class="toc-level-2"><a href="#examples">Examples</a></li><li class="toc-level-2"><a href="#json-output">JSON output</a></li><li class="toc-level-2"><a href="#see-also">See also</a></li></ol></aside>
   </div>
 </section>
 </main>

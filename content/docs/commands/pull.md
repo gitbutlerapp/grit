@@ -21,7 +21,7 @@ Like `grit merge`, `grit pull` won't run with uncommitted changes or a detached 
 
 ## Options
 
-`grit pull` takes no options beyond the [global ones](../#options-for-every-command).
+`grit pull` takes no options beyond the [global ones](../global-options/).
 
 ## Examples
 

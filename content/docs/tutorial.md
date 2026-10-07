@@ -3,7 +3,7 @@ title: Tutorial
 summary: Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.
 ---
 
-This walkthrough covers the commands you'll use every day. It assumes you have [installed grit](../#install) and know roughly what a commit and a branch are. The output shown is what `grit` prints, minus the colors.
+This walkthrough covers the commands you'll use every day. It assumes you have [installed grit](../install/) and know roughly what a commit and a branch are. The output shown is what `grit` prints, minus the colors.
 
 ## Tell grit who you are
 
@@ -190,7 +190,7 @@ $ grit status --json --filter '{branch, clean}'
 }
 ```
 
-See the [overview](../#scripting-with-grit) for details, and each command's page for its JSON fields.
+See [Scripting with grit](../scripting/) for details, and each command's page for its JSON fields.
 
 ## Where to go next
 

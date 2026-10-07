@@ -20,7 +20,7 @@ The target branch is found the same way as for [`grit status`](../status/#the-ta
 
 ## Options
 
-`grit shortlog` takes no options beyond the [global ones](../#options-for-every-command).
+`grit shortlog` takes no options beyond the [global ones](../global-options/).
 
 ## Examples
 

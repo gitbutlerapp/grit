@@ -13,13 +13,13 @@ grit update
 
 ## Description
 
-Downloads the latest release of `grit` and installs it over the copy you're running. It does this by running the same install script as the one-line install on the [docs overview](../#install): `curl -fsSL https://grit-scm.com/install | sh` on macOS and Linux, which needs `sh` and `curl`, and `irm https://grit-scm.com/install.ps1 | iex` in PowerShell on Windows.
+Downloads the latest release of `grit` and installs it over the copy you're running. It does this by running the same install script as the one-line install on the [Install](../install/) page: `curl -fsSL https://grit-scm.com/install | sh` on macOS and Linux, which needs `sh` and `curl`, and `irm https://grit-scm.com/install.ps1 | iex` in PowerShell on Windows.
 
 The installer prints its own progress. If you installed `grit` with `cargo install`, update it with `cargo install grit-cli` instead.
 
 ## Options
 
-`grit update` takes no options beyond the [global ones](../#options-for-every-command).
+`grit update` takes no options beyond the [global ones](../global-options/).
 
 ## Examples
 

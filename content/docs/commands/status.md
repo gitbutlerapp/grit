@@ -45,7 +45,7 @@ $ grit config target.branch origin/develop
 
 ## Options
 
-`grit status` takes no options beyond the [global ones](../#options-for-every-command).
+`grit status` takes no options beyond the [global ones](../global-options/).
 
 ## Examples
 

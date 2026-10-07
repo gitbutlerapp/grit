@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Generate the static Grit docs (tutorial and command reference) from Markdown.
+"""Generate the static Grit docs site from Markdown and content/docs/site.toml.
 
 Sources live in content/docs/:
 
-- index.md     the docs landing page
-- tutorial.md  a short walkthrough of everyday use
-- commands/    one man page per `grit` command, named after the command
+- site.toml    section order, page list, and validation rules
+- index.md, tutorial.md, install.md, …  guides and CLI topics
+- commands/    one man page per `grit` command
+- library/     grit-lib usage guides
 
-Output goes to docs/docs/, served at https://grit-scm.com/docs/. The page
-chrome and Markdown renderer are shared with scripts/blog.py so the docs match
-the rest of the site.
+Output goes to docs/docs/, served at https://grit-scm.com/docs/. Command pages
+keep their existing URLs (/docs/<command>/). New sections use /docs/library/<page>/
+and /docs/benchmarks/. Page chrome and Markdown rendering are shared with
+scripts/blog.py.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import html
 import shutil
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,20 +30,33 @@ import site_util  # noqa: E402
 
 ROOT = blog.ROOT
 CONTENT_DIR = ROOT / "content" / "docs"
+MANIFEST_PATH = CONTENT_DIR / "site.toml"
 OUT_DIR = ROOT / "docs" / "docs"
 SITE_TITLE = "Grit docs"
 DESCRIPTION = "How to use grit, a simple Git client built on grit-lib: a short tutorial and a man page for every command."
+LIBRARY_GUIDE_SLUG = "library"
+TOC_MIN_HEADINGS = 2
 
-# Command groups, in sidebar order. Every command page names one of these.
-GROUPS = [
-    "Getting started",
-    "Making changes",
-    "History",
-    "Branches and tags",
-    "Remotes",
-    "Maintenance",
-    "Plumbing",
-]
+
+@dataclass(frozen=True)
+class PageSpec:
+    """One page entry from the site manifest."""
+
+    file: str
+    slug: str
+    label: str
+    section_title: str
+
+    def source_at(self, content_dir: Path) -> Path:
+        return content_dir / self.file
+
+
+@dataclass(frozen=True)
+class SectionSpec:
+    title: str
+    pages: tuple[PageSpec, ...] = ()
+    command_groups: tuple[str, ...] = ()
+    directory: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,75 +64,302 @@ class Page:
     slug: str
     title: str
     summary: str
+    section_title: str
     group: str
     order: int
     body_html: str
+    toc: tuple[blog.TocItem, ...]
+    is_command: bool = False
 
 
-def load_page(path: Path, slug: str) -> Page:
+@dataclass
+class Site:
+    sections: list[SectionSpec]
+    pages: list[Page]
+    command_pages: list[Page]
+
+    @property
+    def pager_order(self) -> list[Page]:
+        return self.pages
+
+
+def doc_depth(slug: str) -> int:
+    if slug == "index":
+        return 0
+    return len(slug.split("/"))
+
+
+def href_to(from_slug: str, to_slug: str) -> str:
+    ups = "../" * doc_depth(from_slug)
+    if to_slug == "index":
+        return ups or "./"
+    return f"{ups}{to_slug}/"
+
+
+def output_path(out_dir: Path, slug: str) -> Path:
+    if slug == "index":
+        return out_dir / "index.html"
+    parts = slug.split("/")
+    return out_dir.joinpath(*parts, "index.html")
+
+
+def load_manifest() -> list[SectionSpec]:
+    return load_manifest_from(MANIFEST_PATH, CONTENT_DIR)
+
+
+def load_manifest_from(manifest_path: Path, content_dir: Path) -> list[SectionSpec]:
+    if not manifest_path.is_file():
+        raise SystemExit(f"missing site manifest {manifest_path}")
+    data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    sections: list[SectionSpec] = []
+    for raw in data.get("section", []):
+        title = raw["title"]
+        pages: list[PageSpec] = []
+        for entry in raw.get("page", []):
+            rel = entry["file"]
+            pages.append(
+                PageSpec(
+                    file=rel,
+                    slug=entry.get("slug") or Path(rel).stem,
+                    label=entry.get("label") or entry.get("slug") or Path(rel).stem,
+                    section_title=title,
+                )
+            )
+        command_groups: tuple[str, ...] = ()
+        if "commands" in raw:
+            command_groups = tuple(raw["commands"]["groups"])
+        directory = raw.get("directory")
+        sections.append(
+            SectionSpec(
+                title=title,
+                pages=tuple(pages),
+                command_groups=command_groups,
+                directory=directory,
+            )
+        )
+    return sections
+
+
+def validate_manifest(sections: list[SectionSpec], *, content_dir: Path | None = None) -> None:
+    """Fail if a manifest page is missing or a Markdown file is not listed."""
+    root = content_dir or CONTENT_DIR
+    manifest = root / "site.toml"
+    if not manifest.is_file():
+        raise SystemExit(f"missing site manifest {manifest}")
+
+    listed = collect_listed_sources_for_dir(sections, root)
+
+    for spec in listed.values():
+        source = spec.source_at(root)
+        if not source.is_file():
+            raise SystemExit(f"site.toml lists missing page {spec.file}")
+
+    for path in sorted(root.rglob("*.md")):
+        if path.resolve() not in listed:
+            raise SystemExit(f"Markdown file not listed in site.toml: {path.relative_to(root)}")
+
+
+def collect_listed_sources_for_dir(sections: list[SectionSpec], root: Path) -> dict[Path, PageSpec]:
+    listed: dict[Path, PageSpec] = {}
+    for section in sections:
+        for page in section.pages:
+            source = page.source_at(root)
+            listed[source.resolve()] = page
+        if section.directory:
+            lib_dir = root / section.directory
+            for path in sorted(lib_dir.glob("*.md")):
+                rel = path.relative_to(root).as_posix()
+                if path.name == "index.md":
+                    slug = section.directory
+                    label = "Overview"
+                else:
+                    slug = f"{section.directory}/{path.stem}"
+                    label = path.stem.replace("-", " ").title()
+                listed[path.resolve()] = PageSpec(rel, slug, label, section.title)
+        if section.command_groups:
+            for path in sorted((root / "commands").glob("*.md")):
+                rel = path.relative_to(root).as_posix()
+                listed[path.resolve()] = PageSpec(rel, path.stem, path.stem, section.title)
+    return listed
+
+
+def load_page(path: Path, spec: PageSpec, *, command_groups: tuple[str, ...]) -> Page:
     meta, body = blog.parse_front_matter(path.read_text(encoding="utf-8"))
-    title = meta.get("title") or slug
+    title = meta.get("title") or spec.label
     group = meta.get("group", "")
-    if slug not in ("index", "tutorial") and group not in GROUPS:
-        raise SystemExit(f"{path}: group {group!r} must be one of {GROUPS}")
-    body_html, _ = blog.markdown_to_html(body)
-    return Page(slug, title, meta.get("summary", ""), group, int(meta.get("order", "0")), body_html)
+    is_command = path.parent.name == "commands"
+    if is_command and group not in command_groups:
+        raise SystemExit(f"{path}: group {group!r} must be one of {command_groups}")
+    body_html, toc = blog.markdown_to_html(body)
+    return Page(
+        spec.slug,
+        title,
+        meta.get("summary", ""),
+        spec.section_title,
+        group,
+        int(meta.get("order", "0")),
+        body_html,
+        tuple(toc),
+        is_command=is_command,
+    )
 
 
-def load_commands() -> list[Page]:
-    pages = [load_page(path, path.stem) for path in sorted((CONTENT_DIR / "commands").glob("*.md"))]
-    return sorted(pages, key=lambda p: (GROUPS.index(p.group), p.order, p.slug))
+def load_site(*, content_dir: Path | None = None) -> Site:
+    root = content_dir or CONTENT_DIR
+    manifest_path = root / "site.toml"
+    sections = load_manifest_from(manifest_path, root)
+    validate_manifest(sections, content_dir=root)
+    listed = collect_listed_sources_for_dir(sections, root)
+    command_groups: tuple[str, ...] = ()
+    for section in sections:
+        if section.command_groups:
+            command_groups = section.command_groups
+            break
+    if not command_groups:
+        raise SystemExit(f"{manifest_path}: no [section.commands] block with groups")
+
+    by_slug: dict[str, Page] = {}
+    for spec in listed.values():
+        page = load_page(spec.source_at(root), spec, command_groups=command_groups)
+        by_slug[page.slug] = page
+
+    ordered_pages: list[Page] = []
+    command_pages: list[Page] = []
+
+    for section in sections:
+        for spec in section.pages:
+            ordered_pages.append(by_slug[spec.slug])
+        if section.command_groups:
+            commands = [p for p in by_slug.values() if p.is_command]
+            commands.sort(key=lambda p: (command_groups.index(p.group), p.order, p.slug))
+            command_pages = commands
+            ordered_pages.extend(commands)
+        if section.directory:
+            lib_slugs = sorted(
+                slug
+                for slug in by_slug
+                if slug == section.directory or slug.startswith(f"{section.directory}/")
+            )
+            for slug in lib_slugs:
+                ordered_pages.append(by_slug[slug])
+
+    return Site(sections, ordered_pages, command_pages)
 
 
-def sidebar(commands: list[Page], current: str, prefix: str) -> str:
-    """Render the docs navigation. `prefix` is the path back to /docs/."""
+def section_landing_href(section: SectionSpec) -> str | None:
+    if section.pages:
+        return section.pages[0].slug
+    if section.directory:
+        return section.directory
+    if section.command_groups and section.pages:
+        return section.pages[0].slug
+    return None
 
-    def link(slug: str, label: str) -> str:
-        cls = ' class="current"' if slug == current else ""
-        href = prefix if slug == "index" else f"{prefix}{slug}/"
-        return f'<li><a{cls} href="{href}">{label}</a></li>'
 
-    parts = [
-        '<nav class="docnav" aria-label="Docs">',
-        f'<ol>{link("index", "Overview")}{link("tutorial", "Tutorial")}</ol>',
-    ]
-    for group in GROUPS:
-        items = "".join(link(p.slug, html.escape(p.title)) for p in commands if p.group == group)
-        if items:
-            parts.append(f"<h2>{html.escape(group)}</h2><ol>{items}</ol>")
-    parts.append('<h2>Library</h2><ol><li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li></ol>')
+def sidebar(site: Site, current: str) -> str:
+    def nav_link(to_slug: str, label: str) -> str:
+        cls = ' class="current"' if to_slug == current else ""
+        return f'<li><a{cls} href="{href_to(current, to_slug)}">{html.escape(label)}</a></li>'
+
+    parts = ['<nav class="docnav" aria-label="Docs">']
+    for section in site.sections:
+        landing = section_landing_href(section)
+        if landing:
+            heading = (
+                f'<h2><a href="{href_to(current, landing)}">{html.escape(section.title)}</a></h2>'
+            )
+        else:
+            heading = f"<h2>{html.escape(section.title)}</h2>"
+        blocks: list[str] = []
+        if section.pages:
+            page_links = []
+            for spec in section.pages:
+                label = spec.label
+                page_links.append(nav_link(spec.slug, label))
+            blocks.append(f"<ol>{''.join(page_links)}</ol>")
+        if section.command_groups:
+            for group in section.command_groups:
+                group_cmds = [p for p in site.command_pages if p.group == group]
+                if not group_cmds:
+                    continue
+                cmd_items = "".join(nav_link(p.slug, p.title) for p in group_cmds)
+                blocks.append(f"<h3>{html.escape(group)}</h3><ol>{cmd_items}</ol>")
+        if section.directory:
+            lib_links = []
+            lib_slugs = sorted(
+                p.slug
+                for p in site.pages
+                if p.slug == section.directory or p.slug.startswith(f"{section.directory}/")
+            )
+            for slug in lib_slugs:
+                page = next(p for p in site.pages if p.slug == slug)
+                label = "Overview" if slug == section.directory else page.title
+                lib_links.append(nav_link(slug, label))
+            lib_links.append('<li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li>')
+            blocks.append(f"<ol>{''.join(lib_links)}</ol>")
+        parts.append(heading + "".join(blocks))
     parts.append("</nav>")
     return "".join(parts)
 
 
-def command_index(commands: list[Page]) -> str:
-    """The grouped list of command pages shown on the docs landing page."""
+def command_index(site: Site, from_slug: str) -> str:
     sections = []
-    for group in GROUPS:
+    command_groups: tuple[str, ...] = ()
+    for section in site.sections:
+        if section.command_groups:
+            command_groups = section.command_groups
+            break
+    for group in command_groups:
         rows = "".join(
-            f'<tr><td><a href="{p.slug}/"><code>{html.escape(p.title)}</code></a></td><td>{html.escape(p.summary)}</td></tr>'
-            for p in commands
+            f'<tr><td><a href="{href_to(from_slug, p.slug)}"><code>{html.escape(p.title)}</code></a></td>'
+            f"<td>{html.escape(p.summary)}</td></tr>"
+            for p in site.command_pages
             if p.group == group
         )
         if rows:
             anchor = blog.slugify(group)
-            sections.append(f'<h3 id="{anchor}">{html.escape(group)}</h3><div class="table"><table class="cmds"><tbody>{rows}</tbody></table></div>')
+            sections.append(
+                f'<h3 id="{anchor}">{html.escape(group)}</h3>'
+                f'<div class="table"><table class="cmds"><tbody>{rows}</tbody></table></div>'
+            )
     return '<h2 id="commands">Commands</h2>' + "".join(sections)
 
 
-def pager(commands: list[Page], current: str) -> str:
-    order = ["tutorial"] + [p.slug for p in commands]
-    titles = {"tutorial": "Tutorial", **{p.slug: p.title for p in commands}}
-    if current not in order:
+def pager(site: Site, current: str) -> str:
+    order = site.pager_order
+    slugs = [p.slug for p in order]
+    titles = {p.slug: p.title for p in order}
+    if current not in slugs:
         return ""
-    i = order.index(current)
-    prev_link = f'<a href="../{order[i - 1]}/">← {html.escape(titles[order[i - 1]])}</a>' if i > 0 else '<a href="../">← Overview</a>'
-    next_link = f'<a href="../{order[i + 1]}/">{html.escape(titles[order[i + 1]])} →</a>' if i + 1 < len(order) else "<span></span>"
+    i = slugs.index(current)
+    prev_slug = slugs[i - 1] if i > 0 else None
+    next_slug = slugs[i + 1] if i + 1 < len(slugs) else None
+    prev_link = (
+        f'<a href="{href_to(current, prev_slug)}">← {html.escape(titles[prev_slug])}</a>'
+        if prev_slug
+        else f'<a href="{href_to(current, "index")}">← Overview</a>'
+    )
+    next_link = (
+        f'<a href="{href_to(current, next_slug)}">{html.escape(titles[next_slug])} →</a>'
+        if next_slug
+        else "<span></span>"
+    )
     return f'<div class="pager">{prev_link}{next_link}</div>'
+
+
+def page_toc(toc: tuple[blog.TocItem, ...]) -> str:
+    if len(toc) < TOC_MIN_HEADINGS:
+        return ""
+    items = "".join(
+        f'<li class="toc-level-{item.level}"><a href="#{item.anchor}">{html.escape(item.text)}</a></li>'
+        for item in toc
+    )
+    return f'<aside class="toc" aria-label="On this page"><h2>On this page</h2><ol>{items}</ol></aside>'
 
 
 def shell(title: str, description: str, body: str, base: str) -> str:
     home = f"{base}/"
+    library_href = f"{base}/docs/library/"
     return f"""<!doctype html>
 <html lang=\"en\">
 <head>
@@ -134,7 +377,7 @@ def shell(title: str, description: str, body: str, base: str) -> str:
   <a class=\"brand\" href=\"{home}\" aria-label=\"grit homepage\">grit</a>
   <nav class=\"nav\" aria-label=\"Primary\">
     <a href=\"{base}/docs/\">Docs</a>
-    <a href=\"https://crates.io/crates/grit-lib\">Library</a>
+    <a href=\"{library_href}\">Library</a>
     <a href=\"{base}/blog/\">Blog</a>
     <a class=\"pill\" href=\"https://github.com/gitbutlerapp/grit\">GitHub</a>
   </nav>
@@ -146,15 +389,32 @@ def shell(title: str, description: str, body: str, base: str) -> str:
 """
 
 
-def render(page: Page, commands: list[Page], *, is_index: bool) -> str:
-    prefix = "" if is_index else "../"
-    base = ".." if is_index else "../.."
-    ref = '<span class="ref">HEAD → docs</span>' if is_index else f'<a class="ref" href="../">← docs</a><span>{"man page" if page.group else "guide"}</span>'
-    h1_class = ' class="cmd"' if page.group else ""
+def render(page: Page, site: Site, *, is_index: bool) -> str:
+    if is_index:
+        base = ".."
+    elif doc_depth(page.slug) == 1:
+        base = "../.."
+    else:
+        base = "../" * (doc_depth(page.slug) + 1)
+    docs_home = href_to(page.slug, "index")
+    ref = (
+        '<span class="ref">HEAD → docs</span>'
+        if is_index
+        else f'<a class="ref" href="{docs_home}">← docs</a><span>{"man page" if page.is_command else "guide"}</span>'
+    )
+    h1_class = ' class="cmd"' if page.is_command else ""
     lede = f'<p class="lede">{html.escape(page.summary)}</p>' if page.summary else ""
-    content = page.body_html + (command_index(commands) if is_index else pager(commands, page.slug))
+    extra = command_index(site, page.slug) if is_index else pager(site, page.slug)
+    content = page.body_html + extra
+    toc_aside = page_toc(page.toc)
+    body_class = "doc-body has-toc" if toc_aside else "doc-body"
     hero_class = "hero" if is_index else "hero post-hero"
-    links = f'<a href="{prefix or "./"}">Docs</a><a href="{base}/">Home</a><a href="{base}/blog/">Blog</a><a href="https://github.com/gitbutlerapp/grit">GitHub</a>'
+    links = (
+        f'<a href="{docs_home}">Docs</a>'
+        f'<a href="{base}/">Home</a>'
+        f'<a href="{base}/blog/">Blog</a>'
+        f'<a href="https://github.com/gitbutlerapp/grit">GitHub</a>'
+    )
     body = f"""<main>
 <section class=\"commit\">
   {blog.rail("line from-head", "head-dot")}
@@ -166,9 +426,10 @@ def render(page: Page, commands: list[Page], *, is_index: bool) -> str:
 </section>
 <section class=\"commit\">
   {blog.rail("line")}
-  <div class=\"doc-body\">
+  <div class=\"{body_class}\">
     <article class=\"content\">{content}</article>
-    {sidebar(commands, page.slug, prefix)}
+    {sidebar(site, page.slug)}
+    {toc_aside}
   </div>
 </section>
 </main>
@@ -179,32 +440,38 @@ def render(page: Page, commands: list[Page], *, is_index: bool) -> str:
 
 CSS = r'''
 .doc-body{display:grid;grid-template-columns:180px minmax(0,720px);gap:56px;padding:48px 0 64px}
+.doc-body.has-toc{grid-template-columns:180px minmax(0,720px) 180px}
 .post-hero h1.cmd{font-family:var(--mono);font-weight:500;letter-spacing:-.04em;max-width:none}
 .docnav{order:-1;position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted);max-height:calc(100vh - 48px);overflow-y:auto}
 .docnav h2{margin:20px 0 8px;font:inherit;color:var(--accent)}
+.docnav h2 a{color:inherit;text-decoration:none}
+.docnav h3{margin:16px 0 6px 14px;font:inherit;color:var(--muted);font-size:12px}
 .docnav ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
 .docnav li{margin:0 0 6px;padding-left:14px}.docnav a{text-decoration:none}
 .docnav a.current{color:var(--ink);font-weight:700}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
 .content h3 code{font-size:.9em}
 .content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none;color:var(--ink)}
-@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}}
+@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.doc-body.has-toc{display:flex}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}.toc{display:none}}
 '''
 
 
-def generate(out_dir: Path) -> None:
-    commands = load_commands()
-    index = load_page(CONTENT_DIR / "index.md", "index")
-    tutorial = load_page(CONTENT_DIR / "tutorial.md", "tutorial")
+def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
+    site = load_site(content_dir=content_dir)
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
-    (out_dir / "index.html").write_text(render(index, commands, is_index=True), encoding="utf-8")
-    for page in [tutorial, *commands]:
-        page_dir = out_dir / page.slug
-        page_dir.mkdir()
-        (page_dir / "index.html").write_text(render(page, commands, is_index=False), encoding="utf-8")
+    all_pages = site.pager_order
+    for page in all_pages:
+        path = output_path(out_dir, page.slug)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        is_index = page.slug == "index"
+        path.write_text(render(page, site, is_index=is_index), encoding="utf-8")
 
 
 def check_committed() -> int:
@@ -232,8 +499,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         return check_committed()
     generate(OUT_DIR)
-    commands = load_commands()
-    print(f"generated docs for {len(commands)} command(s) in {OUT_DIR.relative_to(ROOT)}")
+    site = load_site()
+    print(
+        f"generated {len(site.pager_order)} doc page(s) "
+        f"({len(site.command_pages)} command(s)) in {OUT_DIR.relative_to(ROOT)}"
+    )
     return 0
 
 
