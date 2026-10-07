@@ -247,7 +247,7 @@ fn make_bare_target(root: &Path, name: &str) -> PathBuf {
 /// server guard + port, or `None` if anything required is unavailable (the
 /// caller then skips). `root` must already contain the served repo(s).
 fn start_authed_server(root: &Path) -> Option<(ServerGuard, u16)> {
-    let grit_bin = find_binary("grit-git")?;
+    let grit_bin = find_binary("grit")?;
     let server_bin = find_binary("grit-http-server")?;
     let port = free_port()?;
     let child = spawn_authed_server(&server_bin, &grit_bin, root, port)?;
@@ -260,7 +260,7 @@ fn start_authed_server(root: &Path) -> Option<(ServerGuard, u16)> {
 
 #[test]
 fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwise() {
-    if find_binary("grit-git").is_none() || find_binary("grit-http-server").is_none() {
+    if find_binary("grit").is_none() || find_binary("grit-http-server").is_none() {
         eprintln!("SKIP: `grit` / `grit-http-server` binary not found (build them first)");
         return;
     }
@@ -420,7 +420,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
 
 #[test]
 fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwise() {
-    if find_binary("grit-git").is_none() || find_binary("grit-http-server").is_none() {
+    if find_binary("grit").is_none() || find_binary("grit-http-server").is_none() {
         eprintln!("SKIP: `grit` / `grit-http-server` binary not found (build them first)");
         return;
     }

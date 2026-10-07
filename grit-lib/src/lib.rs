@@ -211,6 +211,7 @@ pub mod rerere;
 pub mod resolve_undo;
 pub mod rev_list;
 pub mod rev_parse;
+pub mod serve;
 pub mod shallow;
 pub mod shared_repo;
 pub mod signing;

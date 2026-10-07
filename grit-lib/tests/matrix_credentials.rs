@@ -859,7 +859,7 @@ mod http_401 {
         assert_send_sync::<HelperCredentialProvider>();
 
         let (Some(grit_bin), Some(server_bin)) =
-            (find_binary("grit-git"), find_binary("grit-http-server"))
+            (find_binary("grit"), find_binary("grit-http-server"))
         else {
             eprintln!("SKIP: grit / grit-http-server binary not found (build them first)");
             return;

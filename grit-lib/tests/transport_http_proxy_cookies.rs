@@ -162,7 +162,7 @@ struct Fixture {
 }
 
 fn setup(log_headers: Option<&Path>, set_cookie: Option<&str>) -> Option<Fixture> {
-    let grit_bin = find_binary("grit-git")?;
+    let grit_bin = find_binary("grit")?;
     let server_bin = find_binary("grit-http-server")?;
 
     let tmp = tempfile::tempdir().ok()?;

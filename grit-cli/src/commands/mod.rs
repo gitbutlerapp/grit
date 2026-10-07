@@ -16,6 +16,7 @@ pub mod pick;
 pub mod pull;
 pub mod push;
 pub mod remote;
+pub mod serve;
 pub mod shortlog;
 pub mod show;
 pub mod status;

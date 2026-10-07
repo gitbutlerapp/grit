@@ -197,6 +197,31 @@ enum Command {
         /// The credential operation: get, store, or erase.
         operation: String,
     },
+    /// Serve a fetch or clone over stdin/stdout (run by ssh and grit-http-server).
+    #[command(name = "upload-pack", hide = true)]
+    UploadPack {
+        #[command(flatten)]
+        args: ServeArgs,
+    },
+    /// Accept a push over stdin/stdout (run by ssh and grit-http-server).
+    #[command(name = "receive-pack", hide = true)]
+    ReceivePack {
+        #[command(flatten)]
+        args: ServeArgs,
+    },
+}
+
+/// Arguments shared by the `upload-pack` and `receive-pack` plumbing commands.
+#[derive(Debug, clap::Args)]
+struct ServeArgs {
+    /// Answer a single request without advertising refs first (smart HTTP).
+    #[arg(long)]
+    stateless_rpc: bool,
+    /// Print the ref advertisement and exit (smart HTTP discovery).
+    #[arg(long, alias = "http-backend-info-refs")]
+    advertise_refs: bool,
+    /// The repository to serve.
+    directory: String,
 }
 
 fn main() {
@@ -222,9 +247,11 @@ fn main() {
 /// Run the selected subcommand and render its outcome.
 ///
 /// Each command computes a typed, serializable outcome; [`emit`] renders it as
-/// human text or a single JSON object. The two exceptions are `manager` (a raw
-/// credential-helper protocol on stdin/stdout — no outcome) and `push` (which
-/// emits its per-ref outcome and then exits non-zero when a ref was rejected).
+/// human text or a single JSON object. The exceptions are `manager` (a raw
+/// credential-helper protocol on stdin/stdout — no outcome), `upload-pack` and
+/// `receive-pack` (the Git wire protocol on stdin/stdout — no outcome), and
+/// `push` (which emits its per-ref outcome and then exits non-zero when a ref
+/// was rejected).
 fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
     match cli.command.unwrap_or(Command::Status) {
         Command::Init { path, bare } => emit(&commands::init::run(path, bare)?, opts),
@@ -282,5 +309,18 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         ),
         // `manager` speaks Git's credential protocol on stdout; it has no JSON form.
         Command::Manager { operation } => commands::manager::run(&operation),
+        // The server programs speak the Git wire protocol on stdout.
+        Command::UploadPack { args } => commands::serve::run(
+            commands::serve::Service::UploadPack,
+            &args.directory,
+            args.stateless_rpc,
+            args.advertise_refs,
+        ),
+        Command::ReceivePack { args } => commands::serve::run(
+            commands::serve::Service::ReceivePack,
+            &args.directory,
+            args.stateless_rpc,
+            args.advertise_refs,
+        ),
     }
 }

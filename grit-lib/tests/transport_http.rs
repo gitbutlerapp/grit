@@ -153,8 +153,8 @@ impl Drop for ServerGuard {
 
 #[test]
 fn fetch_over_smart_http_lands_refs_and_objects() {
-    let Some(grit_bin) = find_binary("grit-git") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-git first)");
+    let Some(grit_bin) = find_binary("grit") else {
+        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
         return;
     };
     let Some(server_bin) = find_binary("grit-http-server") else {
@@ -512,8 +512,8 @@ impl HttpClient for RecordingClient {
 
 #[test]
 fn fetch_over_smart_http_v2_lands_refs_and_objects() {
-    let Some(grit_bin) = find_binary("grit-git") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-git first)");
+    let Some(grit_bin) = find_binary("grit") else {
+        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
         return;
     };
     let Some(server_bin) = find_binary("grit-http-server") else {
@@ -837,8 +837,8 @@ fn make_bare_target(root: &Path, name: &str) -> PathBuf {
 
 #[test]
 fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
-    let Some(grit_bin) = find_binary("grit-git") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-git first)");
+    let Some(grit_bin) = find_binary("grit") else {
+        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
         return;
     };
     let Some(server_bin) = find_binary("grit-http-server") else {
@@ -1108,8 +1108,8 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
 /// client-side gate, declines the update.
 #[test]
 fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
-    let Some(grit_bin) = find_binary("grit-git") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-git first)");
+    let Some(grit_bin) = find_binary("grit") else {
+        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
         return;
     };
     let Some(server_bin) = find_binary("grit-http-server") else {

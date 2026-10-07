@@ -292,7 +292,7 @@ impl Drop for ServerGuard {
 
 /// Resolve both the `grit` and `grit-http-server` binaries, or `None` (skip).
 fn http_binaries() -> Option<(PathBuf, PathBuf)> {
-    let grit = find_binary("grit-git")?;
+    let grit = find_binary("grit")?;
     let server = find_binary("grit-http-server")?;
     Some((grit, server))
 }
