@@ -7,7 +7,10 @@ use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::HeadState;
-use grit_lib::{refs, write_tree::write_tree_from_index};
+use grit_lib::{
+    refs,
+    write_tree::{build_cache_tree_from_tree, write_tree_from_index},
+};
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -68,8 +71,13 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     };
 
-    let index = model.index;
+    let mut index = model.index;
     let tree = write_tree_from_index(&repo.odb, &index, "").context("could not write tree")?;
+    let cache_tree = build_cache_tree_from_tree(&repo.odb, &tree)
+        .context("could not build cache-tree from commit tree")?;
+    index.set_cache_tree(cache_tree);
+    repo.write_index(&mut index)
+        .context("could not update index cache-tree")?;
 
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
     let now = OffsetDateTime::now_utc();
