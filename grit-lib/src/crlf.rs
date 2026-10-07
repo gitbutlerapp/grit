@@ -113,10 +113,6 @@ pub struct FileAttrs {
     pub eol: EolAttr,
     /// Effect of the `diff` gitattribute on diff output.
     pub diff_attr: DiffAttr,
-    /// `export-ignore` — omit from `git archive`.
-    pub export_ignore: bool,
-    /// `export-subst` — expand `$Format:` placeholders using the archived commit.
-    pub export_subst: bool,
     pub filter_clean: Option<String>,
     pub filter_smudge: Option<String>,
     /// `filter.<name>.process` — long-running filter (takes precedence over clean/smudge commands).
@@ -145,8 +141,6 @@ impl Default for FileAttrs {
             text: TextAttr::Unspecified,
             eol: EolAttr::Unspecified,
             diff_attr: DiffAttr::Unspecified,
-            export_ignore: false,
-            export_subst: false,
             filter_clean: None,
             filter_smudge: None,
             filter_process: None,
@@ -550,12 +544,6 @@ pub fn get_file_attrs(
                     }
                     "ident" => {
                         fa.ident = value == "set";
-                    }
-                    "export-ignore" => {
-                        fa.export_ignore = value != "unset";
-                    }
-                    "export-subst" => {
-                        fa.export_subst = value != "unset";
                     }
                     "merge" => {
                         fa.merge = match value.as_str() {
@@ -2231,16 +2219,12 @@ mod tests {
 
     #[test]
     fn attr_dir_only_pattern_does_not_match_same_named_file() {
-        let rules = parse_gitattributes_content("ignored-only-if-dir/ export-ignore\n");
+        let rules = parse_gitattributes_content("dir-only-pattern/ text\n");
         let rule = &rules[0];
         assert!(rule.must_be_dir);
         assert!(rule.basename_only);
-        assert!(!attr_rule_matches(
-            rule,
-            "not-ignored-dir/ignored-only-if-dir",
-            false
-        ));
-        assert!(attr_rule_matches(rule, "ignored-only-if-dir", true));
+        assert!(!attr_rule_matches(rule, "parent/dir-only-pattern", false));
+        assert!(attr_rule_matches(rule, "dir-only-pattern", true));
     }
 
     #[test]

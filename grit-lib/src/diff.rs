@@ -2445,9 +2445,7 @@ fn push_index_blob_worktree_diff(
         return Ok(());
     }
 
-    if stat_same
-        && (!trust_filemode || worktree_mode == ie.mode)
-        && !entry_is_racy(ie, index_mtime)
+    if stat_same && (!trust_filemode || worktree_mode == ie.mode) && !entry_is_racy(ie, index_mtime)
     {
         return Ok(());
     }

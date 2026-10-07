@@ -84,49 +84,6 @@ pub fn smudge_meta_for_reset(
     meta
 }
 
-/// Process-smudge metadata for `git archive` (matches Git / t0021).
-///
-/// `tree_ish_arg` is the user's argument (`main`, full commit hex, or tree hex).
-/// `resolved_tip` is the OID `archive` resolved; `tip_is_commit` is true when that object is a commit.
-#[must_use]
-pub fn smudge_meta_for_archive(
-    repo: &Repository,
-    tree_ish_arg: &str,
-    resolved_tip: &ObjectId,
-    tip_is_commit: bool,
-    blob_hex: &str,
-) -> FilterSmudgeMeta {
-    let mut meta = FilterSmudgeMeta {
-        blob_hex: Some(blob_hex.to_string()),
-        ..Default::default()
-    };
-    if !tip_is_commit {
-        meta.treeish_hex = Some(resolved_tip.to_string());
-        return meta;
-    }
-    let tip_hex = resolved_tip.to_string();
-    meta.treeish_hex = Some(tip_hex.clone());
-    let arg_lower = tree_ish_arg.to_ascii_lowercase();
-    let is_full_hex = arg_lower.len() == 40 && arg_lower.chars().all(|c| c.is_ascii_hexdigit());
-    if is_full_hex && arg_lower == tip_hex.to_ascii_lowercase() {
-        meta.ref_name = None;
-        return meta;
-    }
-    if let Ok(oid) = refs::resolve_ref(&repo.git_dir, tree_ish_arg) {
-        if oid == *resolved_tip {
-            meta.ref_name = Some(tree_ish_arg.to_string());
-            return meta;
-        }
-    }
-    let heads = format!("refs/heads/{tree_ish_arg}");
-    if let Ok(oid) = refs::resolve_ref(&repo.git_dir, &heads) {
-        if oid == *resolved_tip {
-            meta.ref_name = Some(heads);
-        }
-    }
-    meta
-}
-
 pub fn smudge_meta_for_checkout(repo: &Repository, blob_hex: &str) -> FilterSmudgeMeta {
     let mut meta = FilterSmudgeMeta {
         blob_hex: Some(blob_hex.to_string()),

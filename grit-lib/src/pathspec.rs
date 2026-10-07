@@ -1322,8 +1322,7 @@ pub fn matches_ls_tree_pathspec(
 
 /// Match a pathspec against a tree path, using `.gitattributes` for `:(attr:...)`.
 ///
-/// Used by `git archive` style tree walks: `mode` supplies directory/gitlink context for
-/// literal pathspecs ending in `/`.
+/// `mode` supplies directory/gitlink context for literal pathspecs ending in `/`.
 #[must_use]
 pub fn matches_pathspec_for_object(
     spec: &str,
