@@ -545,6 +545,9 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "shell-words",
+ "tempfile",
+ "time",
 ]
 
 [[package]]
