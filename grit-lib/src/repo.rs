@@ -268,9 +268,7 @@ impl Repository {
 
     /// Install a pre-loaded config snapshot (used during discovery to avoid duplicate cascade loads).
     pub(crate) fn install_config_snapshot(&self, config: Arc<ConfigSet>) {
-        let is_reftable = config
-            .get("extensions.refstorage")
-            .is_some_and(|v| v.trim().eq_ignore_ascii_case("reftable"));
+        let is_reftable = crate::reftable::reftable_declared_in_repository_config(&self.git_dir);
         if let Ok(key) = self.git_dir.canonicalize() {
             let mut guard = crate::reftable::reftable_backend_cache()
                 .lock()
@@ -301,8 +299,8 @@ impl Repository {
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
+        validate_repository_format(&git_dir)?;
         let cfg = Arc::new(ConfigSet::load(Some(&git_dir), true)?);
-        validate_repository_format_from_config(&cfg)?;
         let repo = Self::from_canonical_git_dir(git_dir, work_tree)?;
         repo.install_config_snapshot(cfg);
         Ok(repo)
@@ -451,8 +449,8 @@ impl Repository {
                 // `repositoryformatversion = 0` repo; t0001 #60). Discovery itself opens with
                 // validation skipped so an empty `.git/` is walked past, but a *found* repository
                 // must satisfy the format check.
+                validate_repository_format(&repo.git_dir)?;
                 let cfg = Arc::new(ConfigSet::load(Some(&repo.git_dir), true)?);
-                validate_repository_format_from_config(&cfg)?;
                 repo.install_config_snapshot(Arc::clone(&cfg));
                 if let Some(ref wt) = env_work_tree {
                     repo.work_tree = Some(wt.canonicalize().unwrap_or_else(|_| wt.clone()));
@@ -1588,30 +1586,7 @@ pub fn validate_repo_format(git_dir: &Path) -> Result<()> {
     validate_repository_format(git_dir)
 }
 
-fn repository_format_from_config(cfg: &ConfigSet) -> RepositoryFormat {
-    let repo_version = cfg
-        .get("core.repositoryformatversion")
-        .and_then(|v| v.trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    let mut extensions = BTreeSet::new();
-    for entry in cfg.entries() {
-        if let Some(ext) = entry.key.strip_prefix("extensions.") {
-            if !ext.is_empty() {
-                extensions.insert(ext.to_ascii_lowercase());
-            }
-        }
-    }
-    let ref_storage = cfg.get("extensions.refstorage").map(|s| s.to_owned());
-    RepositoryFormat {
-        repo_version,
-        extensions,
-        ref_storage,
-    }
-}
-
-fn validate_repository_format_from_config(cfg: &ConfigSet) -> Result<()> {
-    let parsed = repository_format_from_config(cfg);
-
+fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
     if parsed.repo_version > 1 {
         return Err(Error::UnsupportedRepositoryFormatVersion(
             parsed.repo_version,
@@ -1639,8 +1614,12 @@ fn validate_repository_format_from_config(cfg: &ConfigSet) -> Result<()> {
 }
 
 fn validate_repository_format(git_dir: &Path) -> Result<()> {
-    let cfg = ConfigSet::load(Some(git_dir), true)?;
-    validate_repository_format_from_config(&cfg)
+    let Some(config_path) = repository_config_path(git_dir) else {
+        return Ok(());
+    };
+    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
+    let parsed = parse_repository_format(&content, &config_path)?;
+    validate_repository_format_parsed(&parsed)
 }
 
 /// The result of parsing `core.repositoryformatversion` and `extensions.*` from a

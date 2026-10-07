@@ -2438,21 +2438,66 @@ pub(crate) fn reftable_backend_cache() -> &'static Mutex<HashMap<PathBuf, bool>>
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Path to the repository-local `config` file (linked worktree common dir when needed).
+fn repository_config_file(git_dir: &Path) -> Option<PathBuf> {
+    let local = git_dir.join("config");
+    if local.is_file() {
+        return Some(local);
+    }
+    let common = crate::refs::common_dir(git_dir)?;
+    let shared = common.join("config");
+    if shared.is_file() {
+        Some(shared)
+    } else {
+        None
+    }
+}
+
+/// Whether `extensions.refstorage = reftable` is declared in repository-local config only.
+pub(crate) fn reftable_declared_in_repository_config(git_dir: &Path) -> bool {
+    let Some(path) = repository_config_file(git_dir) else {
+        return false;
+    };
+    let Ok(content) = fs::read_to_string(&path) else {
+        return false;
+    };
+    let mut in_extensions = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_extensions = trimmed.eq_ignore_ascii_case("[extensions]");
+            continue;
+        }
+        if in_extensions {
+            if let Some((key, value)) = trimmed.split_once('=') {
+                if key.trim().eq_ignore_ascii_case("refstorage")
+                    && value.trim().eq_ignore_ascii_case("reftable")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Detect whether a git directory uses the reftable backend.
 pub fn is_reftable_repo(git_dir: &Path) -> bool {
     let key = git_dir
         .canonicalize()
         .unwrap_or_else(|_| git_dir.to_path_buf());
+    {
+        let guard = reftable_backend_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(v) = guard.get(&key) {
+            return *v;
+        }
+    }
+    let v = reftable_declared_in_repository_config(git_dir);
     let mut guard = reftable_backend_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    if let Some(v) = guard.get(&key) {
-        return *v;
-    }
-    let v = ConfigSet::load(Some(git_dir), true)
-        .ok()
-        .and_then(|cfg| cfg.get("extensions.refstorage"))
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("reftable"));
     guard.insert(key, v);
     v
 }

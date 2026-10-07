@@ -10,8 +10,10 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use std::env;
+
     use crate::config::cascade_load_counters;
-    use crate::config::{ConfigFile, ConfigScope};
+    use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::diff::diff_tree_to_worktree_with_git_dir;
     use crate::index::{entry_from_stat, Index, MODE_REGULAR};
     use crate::objects::ObjectKind;
@@ -20,6 +22,7 @@ mod tests {
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
+    use crate::reftable::is_reftable_repo;
     use crate::repo::{init_repository, init_repository_separate_git_dir, Repository};
     use crate::rev_list::{rev_list, RevListOptions};
 
@@ -299,7 +302,83 @@ mod tests {
                 "git fsck failed for skipHash={label}: {}",
                 String::from_utf8_lossy(&fsck.stderr)
             );
+
+            let index_bytes = fs::read(&path).expect("read index");
+            let hash_len = repo.odb.hash_algo().len();
+            let trailing = &index_bytes[index_bytes.len().saturating_sub(hash_len)..];
+            if skip {
+                assert!(
+                    trailing.iter().all(|&b| b == 0),
+                    "skipHash=true should write zero checksum"
+                );
+            } else {
+                assert!(
+                    trailing.iter().any(|&b| b != 0),
+                    "skipHash=false should write nonzero checksum"
+                );
+            }
             let _ = skip;
         }
+    }
+
+    #[test]
+    fn repository_format_ignores_global_extensions() {
+        let tmp = TempDir::new().unwrap();
+        let global = tmp.path().join("global.gitconfig");
+        fs::write(&global, "[extensions]\n\trefstorage = reftable\n").unwrap();
+        let root = tmp.path().join("repo");
+        fs::create_dir_all(&root).unwrap();
+        let repo = init_repo(&root);
+        fs::write(root.join("tracked.txt"), b"x\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        let prev_global = env::var("GIT_CONFIG_GLOBAL").ok();
+        let prev_system = env::var("GIT_CONFIG_SYSTEM").ok();
+        env::set_var("GIT_CONFIG_GLOBAL", &global);
+        env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+
+        let discovered = Repository::discover(Some(&root)).expect("discover");
+        let result = status(&discovered, &StatusOptions::default(), &mut NullProgress);
+
+        if let Some(v) = prev_global {
+            env::set_var("GIT_CONFIG_GLOBAL", v);
+        } else {
+            env::remove_var("GIT_CONFIG_GLOBAL");
+        }
+        if let Some(v) = prev_system {
+            env::set_var("GIT_CONFIG_SYSTEM", v);
+        } else {
+            env::remove_var("GIT_CONFIG_SYSTEM");
+        }
+
+        result.expect("global extensions must not fail repository format check");
+        assert!(
+            !is_reftable_repo(&discovered.git_dir),
+            "global refstorage must not enable reftable backend"
+        );
+    }
+
+    #[test]
+    fn includeif_onbranch_load_with_reftable_probe_does_not_deadlock() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("real");
+        let repo = init_repo(&root);
+        let git_dir = repo.git_dir.clone();
+        fs::write(
+            git_dir.join("config"),
+            "[includeIf \"onbranch:main\"]\n\tpath = branch.conf\n",
+        )
+        .unwrap();
+        fs::write(
+            git_dir.join("branch.conf"),
+            "[snapshotTest]\n\tkey = onmain\n",
+        )
+        .unwrap();
+
+        let git_dir_thread = git_dir.clone();
+        let probe = std::thread::spawn(move || is_reftable_repo(&git_dir_thread));
+        let cfg = ConfigSet::load(Some(&git_dir), true).expect("load cascade");
+        assert_eq!(cfg.get("snapshotTest.key"), Some("onmain".to_string()));
+        assert!(!probe.join().expect("probe thread panicked"));
     }
 }
