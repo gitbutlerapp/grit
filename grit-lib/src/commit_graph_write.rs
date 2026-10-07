@@ -3,9 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-use sha1::{Digest, Sha1};
-use sha2::{Digest as Sha256Digest, Sha256};
-
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
@@ -43,22 +40,9 @@ pub struct CommitGraphCommitInfo {
     pub commit_time: u64,
 }
 
-fn sha1_file_body(body: &[u8]) -> [u8; 20] {
-    let mut h = Sha1::new();
-    h.update(body);
-    h.finalize().into()
-}
-
 /// Hash a commit-graph/multi-pack-index file body with the repository algorithm.
 fn hash_file_body(body: &[u8], algo: HashAlgo) -> Vec<u8> {
-    match algo {
-        HashAlgo::Sha1 => sha1_file_body(body).to_vec(),
-        HashAlgo::Sha256 => {
-            let mut h = Sha256::new();
-            Sha256Digest::update(&mut h, body);
-            h.finalize().to_vec()
-        }
-    }
+    algo.digest(body).as_bytes().to_vec()
 }
 
 fn parse_commit_time(committer: &str) -> u64 {

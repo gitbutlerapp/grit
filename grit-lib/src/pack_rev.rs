@@ -2,9 +2,9 @@
 //!
 //! Maps pack-file order (sorted by object offset) to index positions in the `.idx` OID table.
 
+use crate::hash::verify_trailer;
+use crate::objects::HashAlgo;
 use crate::pack::PackIndex;
-use sha1::{Digest, Sha1};
-use sha2::{Digest as Sha256Digest, Sha256};
 use std::path::Path;
 
 /// Magic `RIDX` in big-endian form (same as Git's `RIDX_SIGNATURE`).
@@ -31,15 +31,8 @@ const fn ridx_hash_id(hash_len: usize) -> u32 {
 
 /// Append the hashfile body checksum (`hash_len`-wide) over `out` so far.
 fn append_hashfile_checksum(out: &mut Vec<u8>, hash_len: usize) {
-    if hash_len == SHA256_TRAILER {
-        let mut h = Sha256::new();
-        Sha256Digest::update(&mut h, &*out);
-        out.extend_from_slice(h.finalize().as_slice());
-    } else {
-        let mut h = Sha1::new();
-        Digest::update(&mut h, &*out);
-        out.extend_from_slice(h.finalize().as_slice());
-    }
+    let algo = HashAlgo::from_len(hash_len).unwrap_or(HashAlgo::Sha1);
+    out.extend_from_slice(algo.digest(&*out).as_bytes());
 }
 
 /// True if `data` is a valid hashfile of trailing width `hash_len`: the last
@@ -49,16 +42,7 @@ pub fn hashfile_checksum_valid(data: &[u8], hash_len: usize) -> bool {
     if data.len() < hash_len {
         return false;
     }
-    let body_len = data.len() - hash_len;
-    if hash_len == SHA256_TRAILER {
-        let mut h = Sha256::new();
-        Sha256Digest::update(&mut h, &data[..body_len]);
-        h.finalize().as_slice() == &data[body_len..]
-    } else {
-        let mut h = Sha1::new();
-        Digest::update(&mut h, &data[..body_len]);
-        h.finalize().as_slice() == &data[body_len..]
-    }
+    HashAlgo::from_len(hash_len).is_some_and(|algo| verify_trailer(algo, data).is_ok())
 }
 
 /// Build `.rev` file bytes for a pack index (RIDX body + trailing SHA-1 of the body).
@@ -129,10 +113,7 @@ pub fn hashfile_checksum_valid_sha1(data: &[u8]) -> bool {
     if data.len() < SHA1_TRAILER {
         return false;
     }
-    let body_len = data.len() - SHA1_TRAILER;
-    let mut h = Sha1::new();
-    h.update(&data[..body_len]);
-    h.finalize().as_slice() == &data[body_len..]
+    verify_trailer(HashAlgo::Sha1, data).is_ok()
 }
 
 fn read_u32_be(buf: &[u8], pos: &mut usize) -> Option<u32> {

@@ -14,11 +14,10 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use sha1::{Digest, Sha1};
-use sha2::{Digest as Sha256Digest, Sha256};
+use crate::hash::verify_trailer;
 
 use crate::error::{Error, Result};
-use crate::objects::ObjectId;
+use crate::objects::{HashAlgo, ObjectId};
 use crate::pack::{read_pack_index_no_verify, PackIndex};
 
 const MIDX_SIGNATURE: u32 = 0x4d49_4458;
@@ -853,15 +852,12 @@ fn build_midx_bytes_filtered(
     out.extend_from_slice(&body);
 
     // Trailing checksum matches the MIDX hash version (SHA-1 for 1, SHA-256 for 2).
-    if hash_version == 2 {
-        let mut hasher = Sha256::new();
-        Sha256Digest::update(&mut hasher, &out);
-        out.extend_from_slice(&hasher.finalize());
+    let algo = if hash_version == 2 {
+        HashAlgo::Sha256
     } else {
-        let mut hasher = Sha1::new();
-        hasher.update(&out);
-        out.extend_from_slice(&hasher.finalize());
-    }
+        HashAlgo::Sha1
+    };
+    out.extend_from_slice(algo.digest(&out).as_bytes());
 
     Ok((out, rev_sidecar_order))
 }
@@ -1317,17 +1313,7 @@ fn midx_checksum_is_valid(data: &[u8]) -> bool {
     if data.len() < hash_len {
         return false;
     }
-    let body = &data[..data.len() - hash_len];
-    let stored = &data[data.len() - hash_len..];
-    if hash_len == 32 {
-        let mut hasher = Sha256::new();
-        Sha256Digest::update(&mut hasher, body);
-        hasher.finalize().as_slice() == stored
-    } else {
-        let mut hasher = Sha1::new();
-        hasher.update(body);
-        hasher.finalize().as_slice() == stored
-    }
+    HashAlgo::from_len(hash_len).is_some_and(|algo| verify_trailer(algo, data).is_ok())
 }
 
 /// Return the `pack-*.idx` basename for the MIDX preferred pack (RIDX position 0).

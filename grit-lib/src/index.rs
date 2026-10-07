@@ -22,8 +22,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
+use crate::hash::verify_trailer;
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
@@ -1011,13 +1010,12 @@ impl Index {
         // all zeros when `index.skipHash` / `feature.manyFiles` skips it.
         let (body, checksum) = data.split_at(data.len() - hash_len);
         if !checksum.iter().all(|&b| b == 0) {
-            let computed = hash_index_body(hash_algo, body);
-            if computed != checksum {
-                return Err(Error::IndexError(format!(
-                    "{} checksum mismatch",
+            verify_trailer(hash_algo, data).map_err(|e| {
+                Error::IndexError(format!(
+                    "{} checksum mismatch: {e}",
                     hash_algo.name().to_uppercase()
-                )));
-            }
+                ))
+            })?;
         }
 
         // Header
@@ -2260,18 +2258,7 @@ fn is_process_running(pid: u64) -> bool {
 
 /// Hash an index body with the given algorithm, returning the raw checksum.
 fn hash_index_body(algo: HashAlgo, body: &[u8]) -> Vec<u8> {
-    match algo {
-        HashAlgo::Sha1 => {
-            let mut hasher = Sha1::new();
-            hasher.update(body);
-            hasher.finalize().to_vec()
-        }
-        HashAlgo::Sha256 => {
-            let mut hasher = Sha256::new();
-            hasher.update(body);
-            hasher.finalize().to_vec()
-        }
-    }
+    algo.digest(body).as_bytes().to_vec()
 }
 
 /// Best-effort detection of an index file's hash algorithm from its trailing

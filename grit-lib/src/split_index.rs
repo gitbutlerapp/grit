@@ -4,9 +4,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
-
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
@@ -334,19 +331,7 @@ fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &Objec
 }
 
 pub(crate) fn hash_index_body(body: &[u8], algo: HashAlgo) -> ObjectId {
-    let digest: Vec<u8> = match algo {
-        HashAlgo::Sha1 => {
-            let mut hasher = Sha1::new();
-            hasher.update(body);
-            hasher.finalize().to_vec()
-        }
-        HashAlgo::Sha256 => {
-            let mut hasher = Sha256::new();
-            hasher.update(body);
-            hasher.finalize().to_vec()
-        }
-    };
-    ObjectId::from_bytes(&digest).unwrap_or_else(|_| unreachable!("digest is a valid OID width"))
+    algo.digest(body)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

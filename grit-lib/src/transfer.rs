@@ -19,10 +19,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::Path;
 
+use crate::hash::hash_object;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
-use sha1::{Digest as _, Sha1};
-use sha2::Sha256;
 
 use crate::delta_encode::{encode_lcp_delta, encode_prefix_extension_delta};
 use crate::error::{Error, Result};
@@ -496,18 +495,7 @@ fn write_whole_pack_object(
 /// Append the trailing pack checksum: the hash of everything written so far, at
 /// the repository's hash width (SHA-1 → 20 bytes, SHA-256 → 32 bytes).
 fn append_pack_trailer(buf: &mut Vec<u8>, algo: HashAlgo) {
-    match algo {
-        HashAlgo::Sha1 => {
-            let mut hasher = Sha1::new();
-            hasher.update(&*buf);
-            buf.extend_from_slice(&hasher.finalize());
-        }
-        HashAlgo::Sha256 => {
-            let mut hasher = Sha256::new();
-            hasher.update(&*buf);
-            buf.extend_from_slice(&hasher.finalize());
-        }
-    }
+    buf.extend_from_slice(algo.digest(&*buf).as_bytes());
 }
 
 /// Append whole objects from `odb` to an in-progress pack (header + body, no trailer).
@@ -634,23 +622,8 @@ fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
     out
 }
 
-#[allow(clippy::expect_used)]
 fn hash_object_with_algo(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
-    let header = format!("{kind} {}\0", data.len());
-    match algo {
-        HashAlgo::Sha1 => {
-            let mut h = Sha1::new();
-            h.update(header.as_bytes());
-            h.update(data);
-            ObjectId::from_bytes(&h.finalize()).expect("sha1 digest width")
-        }
-        HashAlgo::Sha256 => {
-            let mut h = Sha256::new();
-            h.update(header.as_bytes());
-            h.update(data);
-            ObjectId::from_bytes(&h.finalize()).expect("sha256 digest width")
-        }
-    }
+    hash_object(algo, kind, data)
 }
 
 fn pack_type_code_to_kind(code: u8) -> Result<ObjectKind> {

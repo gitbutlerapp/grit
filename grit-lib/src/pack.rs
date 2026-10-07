@@ -4,11 +4,11 @@
 //! `count-objects`, `verify-pack`, and `show-index`.
 
 use crate::error::{Error, Result};
+use crate::hash::{hash_object, verify_trailer};
+use crate::objects::HashAlgo;
 use crate::objects::{Object, ObjectId, ObjectKind};
 use crate::unpack_objects::apply_delta;
 use flate2::read::ZlibDecoder;
-use sha1::{Digest, Sha1};
-use sha2::{Digest as Sha256Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -802,29 +802,17 @@ pub fn collect_local_pack_info(objects_dir: &Path) -> Result<LocalPackInfo> {
 }
 
 fn verify_idx_trailing_checksum(idx_path: &Path, bytes: &[u8], hash_bytes: usize) -> Result<()> {
-    if bytes.len() < hash_bytes {
+    let Some(algo) = HashAlgo::from_len(hash_bytes) else {
         return Err(Error::CorruptObject(format!(
-            "index file {} missing checksum",
-            idx_path.display()
+            "unsupported index hash width {hash_bytes}"
         )));
-    }
-    let idx_body_end = bytes.len() - hash_bytes;
-    let digest: Vec<u8> = if hash_bytes == 32 {
-        let mut h = Sha256::new();
-        Sha256Digest::update(&mut h, &bytes[..idx_body_end]);
-        h.finalize().to_vec()
-    } else {
-        let mut h = Sha1::new();
-        Digest::update(&mut h, &bytes[..idx_body_end]);
-        h.finalize().to_vec()
     };
-    if digest.as_slice() != &bytes[idx_body_end..] {
-        return Err(Error::CorruptObject(format!(
-            "index checksum mismatch for {}",
+    verify_trailer(algo, bytes).map_err(|e| {
+        Error::CorruptObject(format!(
+            "index checksum mismatch for {}: {e}",
             idx_path.display()
-        )));
-    }
-    Ok(())
+        ))
+    })
 }
 
 /// Validate that the 256-entry pack-index fanout table is non-decreasing.
@@ -1018,24 +1006,12 @@ fn write_v2_pack_index_body(
         buf.extend_from_slice(&off.to_be_bytes());
     }
     buf.extend_from_slice(pack_trailer);
-    let idx_trailer = match hash_bytes {
-        20 => {
-            let mut hasher = Sha1::new();
-            Digest::update(&mut hasher, &buf);
-            hasher.finalize().to_vec()
-        }
-        32 => {
-            let mut hasher = Sha256::new();
-            Sha256Digest::update(&mut hasher, &buf);
-            hasher.finalize().to_vec()
-        }
-        _ => {
-            return Err(Error::CorruptObject(format!(
-                "unsupported index hash width {hash_bytes}"
-            )));
-        }
+    let Some(algo) = HashAlgo::from_len(hash_bytes) else {
+        return Err(Error::CorruptObject(format!(
+            "unsupported index hash width {hash_bytes}"
+        )));
     };
-    buf.extend_from_slice(&idx_trailer);
+    buf.extend_from_slice(algo.digest(&buf).as_bytes());
     fs::write(idx_path, buf).map_err(Error::Io)?;
     Ok(())
 }
@@ -1206,25 +1182,12 @@ pub fn pack_index_entry_matches_sha1_oid(entry: &PackIndexEntry, oid: &ObjectId)
 
 /// Hash canonical loose object bytes (`kind SP size NUL data`) with the repo hash width.
 pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Result<Vec<u8>> {
-    let header = format!("{} {}\0", kind, data.len());
-    match hash_bytes {
-        20 => {
-            let mut hasher = Sha1::new();
-            hasher.update(header.as_bytes());
-            hasher.update(data);
-            Ok(hasher.finalize().to_vec())
-        }
-        32 => {
-            use sha2::Digest as _;
-            let mut hasher = Sha256::new();
-            hasher.update(header.as_bytes());
-            hasher.update(data);
-            Ok(hasher.finalize().to_vec())
-        }
-        other => Err(Error::CorruptObject(format!(
-            "unsupported object hash width: {other}"
-        ))),
-    }
+    let Some(algo) = HashAlgo::from_len(hash_bytes) else {
+        return Err(Error::CorruptObject(format!(
+            "unsupported object hash width: {hash_bytes}"
+        )));
+    };
+    Ok(hash_object(algo, kind, data).as_bytes().to_vec())
 }
 
 /// Parse a pack index file (version 1 legacy or version 2), verifying the SHA-1
@@ -1441,38 +1404,18 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
         )));
     }
     let pack_end = pack_bytes.len() - hb;
-    match hb {
-        20 => {
-            let mut h = Sha1::new();
-            h.update(&pack_bytes[..pack_end]);
-            let digest = h.finalize();
-            if digest.as_slice() != &pack_bytes[pack_end..] {
-                return Err(Error::CorruptObject(format!(
-                    "pack trailing checksum mismatch for {}",
-                    idx.pack_path.display()
-                )));
-            }
-        }
-        32 => {
-            use sha2::Digest as _;
-            let mut h = Sha256::new();
-            h.update(&pack_bytes[..pack_end]);
-            let digest = h.finalize();
-            if digest.as_slice() != &pack_bytes[pack_end..] {
-                return Err(Error::CorruptObject(format!(
-                    "pack trailing checksum mismatch for {}",
-                    idx.pack_path.display()
-                )));
-            }
-        }
-        _ => {
-            return Err(Error::CorruptObject(format!(
-                "unsupported OID width {} for pack {}",
-                hb,
-                idx.pack_path.display()
-            )));
-        }
-    }
+    let Some(algo) = HashAlgo::from_len(hb) else {
+        return Err(Error::CorruptObject(format!(
+            "unsupported OID width {hb} for pack {}",
+            idx.pack_path.display()
+        )));
+    };
+    verify_trailer(algo, &pack_bytes).map_err(|e| {
+        Error::CorruptObject(format!(
+            "pack trailing checksum mismatch for {}: {e}",
+            idx.pack_path.display()
+        ))
+    })?;
     // The `.idx` ends with the pack checksum followed by its own checksum, both
     // at the repository hash width `hb` (20 for SHA-1, 32 for SHA-256).
     if idx_file_bytes.len() >= 2 * hb {
@@ -2179,16 +2122,12 @@ fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8])
     if expected_oid.len() != 20 {
         return Ok(());
     }
-    let header = format!("{kind} {}\0", data.len());
-    let mut hasher = Sha1::new();
-    hasher.update(header.as_bytes());
-    hasher.update(data);
-    let actual = hasher.finalize();
-    if actual.as_slice() != expected_oid {
+    let actual = hash_object(HashAlgo::Sha1, kind, data);
+    if actual.as_bytes() != expected_oid {
         return Err(Error::CorruptObject(format!(
             "packed object {} hashes to {}",
             oid_bytes_to_hex(expected_oid),
-            oid_bytes_to_hex(actual.as_slice())
+            actual.to_hex()
         )));
     }
     Ok(())
@@ -2774,9 +2713,7 @@ mod tests {
     }
 
     fn append_sha1_pack_trailer(buf: &mut Vec<u8>) {
-        let mut hasher = Sha1::new();
-        Digest::update(&mut hasher, &*buf);
-        buf.extend_from_slice(&hasher.finalize());
+        buf.extend_from_slice(HashAlgo::Sha1.digest(&*buf).as_bytes());
     }
 
     fn append_ref_delta(buf: &mut Vec<u8>, base_oid: &ObjectId, delta: &[u8]) {
@@ -3421,9 +3358,7 @@ mod cached_lookup_tests {
             body.extend_from_slice(&(entry.offset as u32).to_be_bytes());
             body.extend_from_slice(&entry.oid);
         }
-        let mut hasher = Sha1::new();
-        Digest::update(&mut hasher, &body);
-        body.extend_from_slice(&hasher.finalize());
+        body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
         rewrite_test_file(&idx_path, &body);
         clear_pack_cache();
         idx_path
