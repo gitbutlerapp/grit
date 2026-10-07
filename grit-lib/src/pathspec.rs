@@ -1882,4 +1882,59 @@ mod resolve_pathspec_tests {
         assert!(pathspec_matches(&resolved, ":!foo"));
         assert!(!pathspec_matches(&resolved, "other"));
     }
+
+    #[test]
+    fn resolve_absolute_path_under_worktree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path().join("repo");
+        std::fs::create_dir_all(wt.join("d")).expect("mkdir");
+        let file = wt.join("d/b.txt");
+        std::fs::write(&file, b"x").expect("write");
+        let wt = wt.canonicalize().expect("canonicalize");
+        let abs = file.canonicalize().expect("canonicalize file");
+        let spec = abs.to_string_lossy();
+        assert_eq!(
+            resolve_pathspec(&spec, &wt, None),
+            "d/b.txt",
+            "absolute forward-slash pathspec"
+        );
+    }
+
+    #[cfg(windows)]
+    mod windows {
+        use super::*;
+
+        #[test]
+        fn resolve_backslash_relative_and_absolute_pathspecs() {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let wt = tmp.path().join("repo");
+            std::fs::create_dir_all(wt.join("d")).expect("mkdir");
+            let file_a = wt.join("d/a.txt");
+            let file_b = wt.join("d/b.txt");
+            std::fs::write(&file_a, b"a").expect("write");
+            std::fs::write(&file_b, b"b").expect("write");
+            let wt = wt.canonicalize().expect("canonicalize worktree");
+
+            assert_eq!(
+                resolve_pathspec(r"d\a.txt", &wt, None),
+                "d/a.txt",
+                "backslash relative pathspec (issue #915 A)"
+            );
+
+            let abs_back = file_b.canonicalize().expect("canonicalize");
+            let abs_back_spec = abs_back.display().to_string();
+            assert_eq!(
+                resolve_pathspec(&abs_back_spec, &wt, None),
+                "d/b.txt",
+                "absolute backslash pathspec (issue #915 B)"
+            );
+
+            let abs_forward = abs_back_spec.replace('\\', "/");
+            assert_eq!(
+                resolve_pathspec(&abs_forward, &wt, None),
+                "d/b.txt",
+                "absolute forward-slash pathspec (issue #915 C)"
+            );
+        }
+    }
 }

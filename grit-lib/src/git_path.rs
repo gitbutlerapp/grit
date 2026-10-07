@@ -743,7 +743,10 @@ pub fn path_to_git_slash(path: &Path) -> String {
         .join("/")
 }
 
-/// Path of `to` relative to `from`, for display (forward slashes), when `to` is under `from`.
+/// Path of `to` relative to `from`, for display (forward slashes).
+///
+/// Uses normalized paths (including Windows verbatim-prefix stripping) and walks up from
+/// the common ancestor with `..` when the target is not under `from`.
 #[must_use]
 pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
     let from_cmp = path_for_disk_compare(from);
@@ -751,11 +754,36 @@ pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
     if from_cmp == to_cmp {
         return Some(".".to_owned());
     }
-    let rel = to_cmp.strip_prefix(&from_cmp).ok()?;
-    if rel.as_os_str().is_empty() {
-        return Some(".".to_owned());
+
+    let from_parts: Vec<_> = from_cmp.components().collect();
+    let to_parts: Vec<_> = to_cmp.components().collect();
+    let common = from_parts
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let mut segments: Vec<String> = Vec::new();
+    for part in &from_parts[common..] {
+        if matches!(part, Component::Normal(_)) {
+            segments.push("..".to_owned());
+        }
     }
-    Some(path_to_git_slash(rel))
+    for part in &to_parts[common..] {
+        match part {
+            Component::Normal(name) => segments.push(name.to_string_lossy().into_owned()),
+            Component::ParentDir => {
+                segments.pop();
+            }
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+
+    if segments.is_empty() {
+        Some(".".to_owned())
+    } else {
+        Some(segments.join("/"))
+    }
 }
 
 /// Canonicalize a path for on-disk comparison (macOS `/private` aliasing).
@@ -886,6 +914,35 @@ mod git_path_component_tests {
         assert_eq!(
             user_display_path(Path::new(r"\\?\C:\tmp\p\.git")),
             "C:/tmp/p/.git"
+        );
+    }
+
+    #[test]
+    fn relative_path_for_display_above_and_below_cwd() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        let deep = repo.join("d");
+        std::fs::create_dir_all(&deep).expect("mkdir");
+        std::fs::write(repo.join("a.txt"), b"root").expect("write");
+        std::fs::write(deep.join("a.txt"), b"nested").expect("write");
+
+        let cwd = deep.canonicalize().expect("canonicalize cwd");
+        let above = repo
+            .join("a.txt")
+            .canonicalize()
+            .expect("canonicalize above");
+        let below = deep
+            .join("a.txt")
+            .canonicalize()
+            .expect("canonicalize below");
+
+        assert_eq!(
+            relative_path_for_display(&cwd, &above).as_deref(),
+            Some("../a.txt")
+        );
+        assert_eq!(
+            relative_path_for_display(&cwd, &below).as_deref(),
+            Some("a.txt")
         );
     }
 

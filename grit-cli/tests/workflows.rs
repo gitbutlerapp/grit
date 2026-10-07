@@ -213,6 +213,56 @@ fn add_pathspec_from_subdirectory() -> TestResult {
         after_fail.dump()
     );
 
+    let sibling = repo.join("d");
+    fs::create_dir_all(&sibling)?;
+    write_file(&repo.join("a.txt"), "root\n")?;
+    write_file(&sibling.join("a.txt"), "nested\n")?;
+    gs_ok(&repo, ["add", "a.txt", "d/a.txt"])?;
+    let dual = gs_ok(&sibling, ["status"])?;
+    assert!(
+        dual.stdout.contains("new           ../a.txt"),
+        "expected parent-dir display for repo-root file:\n{}",
+        dual.dump()
+    );
+    assert!(
+        dual.stdout.contains("new           a.txt"),
+        "expected cwd-local display for nested file:\n{}",
+        dual.dump()
+    );
+
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn add_windows_backslash_and_absolute_pathspecs() -> TestResult {
+    let scratch = Scratch::new("add-win-pathspec")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    let d = repo.join("d");
+    fs::create_dir_all(&d)?;
+    write_file(&d.join("a.txt"), "1\n")?;
+    write_file(&d.join("b.txt"), "2\n")?;
+    write_file(&d.join("c.txt"), "3\n")?;
+
+    gs_ok(&repo, ["add", r"d\a.txt"])?;
+    gs_ok(&repo, ["add", &path_arg(&d.join("b.txt"))?])?;
+    let forward = d.join("b.txt").to_string_lossy().replace('\\', "/");
+    gs_ok(&repo, ["add", &forward])?;
+
+    let status = gs_ok(&d, ["status"])?;
+    assert!(
+        status.stdout.contains("new           ../a.txt"),
+        "staged root-relative path via backslash pathspec:\n{}",
+        status.dump()
+    );
+    assert!(
+        status.stdout.contains("new           b.txt"),
+        "staged nested path via absolute pathspec:\n{}",
+        status.dump()
+    );
+
     Ok(())
 }
 
