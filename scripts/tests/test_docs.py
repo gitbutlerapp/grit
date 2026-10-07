@@ -51,6 +51,13 @@ label = "Missing"
         for section in site.sections:
             self.assertIn(section.title, html_out)
 
+    def test_sidebar_grit_lib_api_links_to_library_guide(self) -> None:
+        site = docs.load_site(content_dir=self.content)
+        for current in ("index", "status", "library"):
+            html_out = docs.sidebar(site, current)
+            expected = docs.href_to(current, docs.LIBRARY_GUIDE_SLUG)
+            self.assertIn(f'<a href="{expected}">grit-lib API</a>', html_out)
+
     def test_command_urls_unchanged(self) -> None:
         with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
             out = Path(tmp)

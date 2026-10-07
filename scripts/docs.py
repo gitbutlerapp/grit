@@ -295,7 +295,9 @@ def sidebar(site: Site, current: str) -> str:
                 page = next(p for p in site.pages if p.slug == slug)
                 label = "Overview" if slug == section.directory else page.title
                 lib_links.append(nav_link(slug, label))
-            lib_links.append('<li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li>')
+            lib_links.append(
+                f'<li><a href="{href_to(current, LIBRARY_GUIDE_SLUG)}">grit-lib API</a></li>'
+            )
             blocks.append(f"<ol>{''.join(lib_links)}</ol>")
         parts.append(heading + "".join(blocks))
     parts.append("</nav>")
