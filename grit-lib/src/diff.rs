@@ -1937,6 +1937,10 @@ pub fn diff_index_to_worktree_with_options(
     let config = ConfigSet::load(Some(&git_dir), true).unwrap_or_else(|_| ConfigSet::new());
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
+    let precompose_unicode = config
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
 
     let mut result = Vec::new();
     let mut unmerged_base: std::collections::BTreeMap<String, (u8, &IndexEntry)> =
@@ -2067,7 +2071,7 @@ pub fn diff_index_to_worktree_with_options(
             continue;
         }
 
-        let file_path = work_tree.join(path_str_ref);
+        let file_path = index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode);
 
         if is_intent_to_add {
             match fs::symlink_metadata(&file_path) {
@@ -2118,7 +2122,7 @@ pub fn diff_index_to_worktree_with_options(
 
         // If any parent component of the path is a symlink, the file is effectively
         // deleted from the working tree (a symlink replaced a directory).
-        if dir_symlinks.has_symlink_in_path(work_tree, path_str_ref) {
+        if dir_symlinks.has_symlink_in_path(work_tree, path_str_ref, precompose_unicode) {
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
                 old_path: Some(path_str_ref.to_owned()),
@@ -2247,7 +2251,7 @@ pub fn diff_index_to_worktree_with_options(
     }
 
     for (path, (_, base_entry)) in unmerged_base {
-        let file_path = work_tree.join(&path);
+        let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode);
         let wt_meta = match fs::symlink_metadata(&file_path) {
             Ok(meta) => Some(meta),
             Err(e)
@@ -2314,9 +2318,31 @@ struct SymlinkDirCache {
     plain: std::collections::HashSet<String>,
 }
 
+fn index_entry_worktree_abs(
+    work_tree: &Path,
+    index_relpath: &str,
+    precompose_unicode: bool,
+) -> PathBuf {
+    if precompose_unicode {
+        crate::unicode_normalization::resolve_worktree_path_for_staging(
+            work_tree,
+            index_relpath,
+            true,
+        )
+        .abs
+    } else {
+        work_tree.join(index_relpath)
+    }
+}
+
 impl SymlinkDirCache {
     /// Whether any parent component of `rel_path` is a symlink.
-    fn has_symlink_in_path(&mut self, work_tree: &Path, rel_path: &str) -> bool {
+    fn has_symlink_in_path(
+        &mut self,
+        work_tree: &Path,
+        rel_path: &str,
+        precompose_unicode: bool,
+    ) -> bool {
         let components: Vec<&str> = rel_path.split('/').collect();
         let mut prefix = String::new();
         // Check every ancestor directory (all components except the file itself).
@@ -2331,7 +2357,8 @@ impl SymlinkDirCache {
             if self.plain.contains(&prefix) {
                 continue;
             }
-            match fs::symlink_metadata(work_tree.join(&prefix)) {
+            let abs = index_entry_worktree_abs(work_tree, &prefix, precompose_unicode);
+            match fs::symlink_metadata(&abs) {
                 Ok(meta) if meta.file_type().is_symlink() => {
                     self.symlink.insert(prefix.clone());
                     return true;

@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::{parse_config_parameters, ConfigSet};
-use crate::unicode_normalization::probe_filesystem_normalizes_nfd_to_nfc;
+use crate::unicode_normalization::{precompose_utf8_path, probe_filesystem_normalizes_nfd_to_nfc};
 
 fn parse_ceiling_directories_paths() -> Vec<PathBuf> {
     let raw = match std::env::var("GIT_CEILING_DIRECTORIES") {
@@ -257,4 +257,15 @@ pub fn pathspec_precompose_enabled() -> bool {
         let gd = locate_git_dir_from_cwd(cwd);
         effective_core_precomposeunicode(gd.as_deref())
     })
+}
+
+/// Normalize a repository-relative worktree path for index and tree storage when
+/// `core.precomposeunicode` is enabled (NFC per path segment).
+#[must_use]
+pub fn index_relpath_from_worktree(rel_fs: &str, git_dir: &Path) -> String {
+    if effective_core_precomposeunicode(Some(git_dir)) {
+        precompose_utf8_path(rel_fs).into_owned()
+    } else {
+        rel_fs.to_owned()
+    }
 }

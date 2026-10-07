@@ -29,8 +29,10 @@ use crate::error::Result;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
+use crate::precompose_config::effective_core_precomposeunicode;
 use crate::repo::Repository;
 use crate::state::{HeadState, WtStatusState};
+use crate::unicode_normalization::precompose_utf8_segment;
 
 /// How untracked files are reported (`git status --untracked-files=<mode>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +172,7 @@ pub fn collect_untracked_and_ignored(
     let mut matcher = IgnoreMatcher::from_repository(repo)?;
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
+    let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
 
     visit_untracked_node(
         repo,
@@ -180,6 +183,7 @@ pub fn collect_untracked_and_ignored(
         &mut matcher,
         ignored_mode,
         show_all,
+        precompose_unicode,
         "",
         work_tree,
         effective_pathspecs,
@@ -202,6 +206,7 @@ fn visit_untracked_node(
     matcher: &mut IgnoreMatcher,
     ignored_mode: IgnoredMode,
     show_all: bool,
+    precompose_unicode: bool,
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
@@ -224,10 +229,15 @@ fn visit_untracked_node(
     sorted.sort_by_key(|e| e.file_name());
 
     for entry in sorted {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".git" {
+        let raw_name = entry.file_name().to_string_lossy().to_string();
+        if raw_name == ".git" {
             continue;
         }
+        let name = if precompose_unicode {
+            precompose_utf8_segment(&raw_name).into_owned()
+        } else {
+            raw_name
+        };
         let path = entry.path();
         let child_rel = relative_path(rel, &name);
         let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
@@ -253,6 +263,7 @@ fn visit_untracked_node(
                 matcher,
                 ignored_mode,
                 show_all,
+                precompose_unicode,
                 &child_rel,
                 &path,
                 pathspecs,
@@ -287,6 +298,7 @@ fn visit_untracked_directory(
     matcher: &mut IgnoreMatcher,
     ignored_mode: IgnoredMode,
     show_all: bool,
+    precompose_unicode: bool,
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
@@ -303,6 +315,7 @@ fn visit_untracked_directory(
             matcher,
             ignored_mode,
             show_all,
+            precompose_unicode,
             rel,
             abs,
             pathspecs,
@@ -360,6 +373,7 @@ fn visit_untracked_directory(
         matcher,
         ignored_mode,
         true,
+        precompose_unicode,
         rel,
         abs,
         pathspecs,

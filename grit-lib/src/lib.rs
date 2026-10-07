@@ -100,8 +100,8 @@ pub mod merging {
 /// Configuration and identity: config cascade, .gitmodules, author/committer idents.
 pub mod configuration {
     pub use crate::{
-        config, dotfile, gitmodules, ident, ident_config, ident_resolve, precompose_config,
-        url_rewrite,
+        config, dotfile, gitmodules, ident, ident_config, ident_resolve, init_filesystem,
+        precompose_config, url_rewrite,
     };
 }
 
@@ -158,6 +158,7 @@ pub mod ident_resolve;
 pub mod ignore;
 pub mod index;
 pub mod index_name_hash_lazy;
+pub mod init_filesystem;
 pub mod instaweb;
 pub mod interpret_trailers;
 pub mod line_log;
