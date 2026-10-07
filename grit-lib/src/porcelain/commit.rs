@@ -1,53 +1,62 @@
 //! Create a commit from the current index and move the checked-out branch.
 //!
 //! [`create_commit`] performs incremental cache-tree write-tree, writes the commit
-//! object, updates the branch ref with a compare-and-swap check, appends branch and
-//! `HEAD` reflogs, and persists the index with a valid cache-tree.
+//! object, updates the branch and `HEAD` reflogs through [`refs::update_branch_for_commit`],
+//! and persists the index with a valid cache-tree.
 
 use crate::diff::{diff_trees, zero_oid};
 use crate::error::{Error, Result};
-use crate::gc::{update_refs, RefTransactionItem};
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::progress::ProgressSink;
-use crate::refs::{append_reflog, should_autocreate_reflog};
+use crate::refs::{update_branch_for_commit, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
-use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
+use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 
 /// Inputs for [`create_commit`].
 #[derive(Debug, Clone)]
 pub struct CommitRequest {
-    /// Full commit message body; a trailing newline is added when missing.
+    /// Commit message body (first line becomes the subject). A trailing newline is added when missing.
     pub message: String,
-    /// Author identity line (`Name <email> epoch tz`).
+    /// Author identity in Git header form: `Name <email> <unix-time> <tz>`.
     pub author: String,
-    /// Committer identity line (`Name <email> epoch tz`).
+    /// Committer identity in the same form as [`Self::author`].
     pub committer: String,
-    /// When true, record a commit even if the new tree equals the parent's tree.
+    /// When false (default), reject commits whose tree equals the parent's tree or is the empty tree on an unborn branch.
     pub allow_empty: bool,
 }
 
 /// Result of [`create_commit`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
-    /// OID of the new commit object.
+    /// OID of the new commit object written to the object database.
     pub oid: ObjectId,
-    /// Short branch name (`main`, not `refs/heads/main`).
+    /// Short branch name (e.g. `main`, not `refs/heads/main`).
     pub branch: String,
-    /// Parent commit, if any.
+    /// Parent commit OID, or `None` for the root commit on an unborn branch.
     pub parent: Option<ObjectId>,
-    /// Number of path changes between the parent tree and the commit tree.
+    /// Number of path-level changes between the parent commit tree and this commit's tree.
     pub changes: usize,
 }
 
 /// Write a commit from the current index and advance the checked-out branch.
 ///
+/// Loads the index from disk, builds the commit tree with an incremental cache-tree
+/// write-tree, writes the commit object, atomically updates the branch ref and reflogs
+/// (see [`update_branch_for_commit`]), then writes the index back with an updated cache-tree.
+///
+/// # Parameters
+///
+/// - `repo` — open repository with a work tree and branch `HEAD`.
+/// - `req` — message, author/committer identities, and empty-commit policy.
+/// - `progress` — optional progress sink (single `commit` phase).
+///
 /// # Errors
 ///
 /// - [`Error::DetachedHead`] when `HEAD` is not on a branch.
-/// - [`Error::NothingToCommit`] when the index tree matches the parent and `allow_empty` is false.
+/// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false.
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
-/// - Ref update failures (including CAS mismatch) from [`update_refs`] or reflog I/O.
+/// - Ref/reflog failures from [`update_branch_for_commit`]; the branch tip is not left advanced without reflogs when logging is enabled.
 pub fn create_commit(
     repo: &Repository,
     req: &CommitRequest,
@@ -77,12 +86,13 @@ pub fn create_commit(
     let tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())?;
 
     if !req.allow_empty {
-        let same_tree = match (&parent_tree, &tree) {
-            (Some(old), new) => old == new,
-            (None, _) => false,
-        };
-        if same_tree {
+        if parent_tree.is_none() && is_empty_tree_oid(&repo.odb, &tree) {
             return Err(Error::NothingToCommit);
+        }
+        if let Some(ref old) = parent_tree {
+            if old == &tree {
+                return Err(Error::NothingToCommit);
+            }
         }
     }
 
@@ -120,37 +130,17 @@ pub fn create_commit(
             None
         }
     });
-    update_refs(
-        &repo.git_dir,
-        &[RefTransactionItem {
-            name: refname.clone(),
-            new_oid: Some(oid),
-            expected_old,
-        }],
-    )?;
 
-    if should_autocreate_reflog(&repo.git_dir, &refname) {
-        append_reflog(
-            &repo.git_dir,
-            &refname,
-            &reflog_old,
-            &oid,
-            &req.committer,
-            &reflog_msg,
-            false,
-        )?;
-    }
-    if should_autocreate_reflog(&repo.git_dir, "HEAD") {
-        append_reflog(
-            &repo.git_dir,
-            "HEAD",
-            &reflog_old,
-            &oid,
-            &req.committer,
-            &reflog_msg,
-            false,
-        )?;
-    }
+    update_branch_for_commit(
+        &repo.git_dir,
+        &BranchCommitRefUpdate {
+            branch_ref: &refname,
+            expected_old,
+            new_oid: oid,
+            identity: &req.committer,
+            reflog_message: &reflog_msg,
+        },
+    )?;
 
     repo.write_index(&mut index)?;
 
@@ -190,6 +180,7 @@ mod tests {
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
     use crate::reflog::read_reflog;
+    use crate::refs::{resolve_ref, set_test_inject_reflog_fail};
     use crate::write_tree::{cache_tree_fully_valid, verify_cache_tree};
     use std::fs;
     use std::path::Path;
@@ -252,9 +243,18 @@ mod tests {
         assert_eq!(outcome.branch, "main");
         assert_eq!(outcome.changes, 1);
         assert_eq!(
-            crate::refs::resolve_ref(&repo.git_dir, "refs/heads/main").unwrap(),
+            resolve_ref(&repo.git_dir, "refs/heads/main").unwrap(),
             outcome.oid
         );
+    }
+
+    #[test]
+    fn create_commit_rejects_empty_initial_index() {
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repo(tmp.path());
+        let err = create_commit(&repo, &commit_req("empty"), &mut NullProgress).unwrap_err();
+        assert!(matches!(err, Error::NothingToCommit));
+        assert!(resolve_ref(&repo.git_dir, "refs/heads/main").is_err());
     }
 
     #[test]
@@ -320,6 +320,29 @@ mod tests {
     }
 
     #[test]
+    fn create_commit_rolls_back_branch_when_head_reflog_fails() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        set_test_inject_reflog_fail(Some("HEAD"));
+        let err = create_commit(&repo, &commit_req("fail"), &mut NullProgress).unwrap_err();
+        set_test_inject_reflog_fail(None);
+        assert!(!matches!(err, Error::NothingToCommit));
+
+        assert!(
+            resolve_ref(&repo.git_dir, "refs/heads/main").is_err(),
+            "branch must not advance when HEAD reflog fails"
+        );
+        assert!(read_reflog(&repo.git_dir, "refs/heads/main")
+            .unwrap()
+            .is_empty());
+        assert!(read_reflog(&repo.git_dir, "HEAD").unwrap().is_empty());
+    }
+
+    #[test]
     fn create_commit_leaves_valid_cache_tree() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -350,7 +373,7 @@ mod tests {
 
         let mut req = commit_req("empty");
         req.allow_empty = true;
-        let parent = crate::refs::resolve_ref(&repo.git_dir, "refs/heads/main").unwrap();
+        let parent = resolve_ref(&repo.git_dir, "refs/heads/main").unwrap();
         let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
         assert_eq!(outcome.changes, 0);
         assert_eq!(outcome.parent, Some(parent));
