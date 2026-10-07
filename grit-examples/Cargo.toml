@@ -39,6 +39,18 @@ path = "src/bin/guide_revwalk.rs"
 name = "guide_network"
 path = "src/bin/guide_network.rs"
 
+[[bin]]
+name = "guide_refs"
+path = "src/bin/guide_refs.rs"
+
+[[bin]]
+name = "guide_index"
+path = "src/bin/guide_index.rs"
+
+[[bin]]
+name = "guide_diff"
+path = "src/bin/guide_diff.rs"
+
 [lints]
 workspace = true
 
