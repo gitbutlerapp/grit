@@ -90,7 +90,8 @@ def inline_md(value: str) -> str:
     protected: list[str] = []
 
     def protect_code(match: re.Match[str]) -> str:
-        protected.append(f"<code>{html.escape(match.group(1))}</code>")
+        # The text is already HTML-escaped, so it goes in as is.
+        protected.append(f"<code>{match.group(1)}</code>")
         return f"\u0000{len(protected) - 1}\u0000"
 
     escaped = html.escape(value)
@@ -112,6 +113,7 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
     list_kind: str | None = None
     in_code = False
     code_lines: list[str] = []
+    table_rows: list[list[str]] = []
 
     def unique_anchor(text: str) -> str:
         base = slugify(re.sub(r"<[^>]+>", "", text))
@@ -131,7 +133,25 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
             output.append(f"</{list_kind}>")
             list_kind = None
 
+    def flush_table() -> None:
+        nonlocal table_rows
+        if not table_rows:
+            return
+        head, *rest = table_rows
+        if rest and all(re.fullmatch(r":?-+:?", cell) for cell in rest[0]):
+            rest = rest[1:]
+        cells = "".join(f"<th>{inline_md(cell)}</th>" for cell in head)
+        body = "".join("<tr>" + "".join(f"<td>{inline_md(cell)}</td>" for cell in row) + "</tr>" for row in rest)
+        output.append(f'<div class="table"><table><thead><tr>{cells}</tr></thead><tbody>{body}</tbody></table></div>')
+        table_rows = []
+
     for line in lines:
+        if line.strip().startswith("|") and not in_code:
+            flush_paragraph(); close_list()
+            row = line.strip().strip("|")
+            table_rows.append([cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", row)])
+            continue
+        flush_table()
         if line.strip().startswith("```"):
             if in_code:
                 output.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
@@ -170,7 +190,7 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
             output.append(f"<blockquote>{inline_md(line[2:].strip())}</blockquote>")
             continue
         paragraph.append(line.strip())
-    flush_paragraph(); close_list()
+    flush_paragraph(); close_list(); flush_table()
     if in_code:
         output.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
     return "\n".join(output), toc
@@ -232,7 +252,7 @@ def page_shell(title: str, description: str, body: str, base: str, blog_href: st
 <header class=\"topbar\">
   <a class=\"brand\" href=\"{home_href}\" aria-label=\"grit homepage\">grit</a>
   <nav class=\"nav\" aria-label=\"Primary\">
-    <a href=\"https://docs.rs/grit-lib\">Docs</a>
+    <a href=\"{base}/docs/\">Docs</a>
     <a href=\"https://crates.io/crates/grit-lib\">Library</a>
     <a href=\"{blog_href}\">Blog</a>
     <a class=\"pill\" href=\"https://github.com/gitbutlerapp/grit\">GitHub</a>
@@ -380,6 +400,11 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 .content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
 .content pre code{background:none;padding:0;font-size:inherit;color:inherit}
 .content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
+.content .table{margin:1.4em 0;overflow-x:auto}
+.content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
+.content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
+.content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.content td:first-child{white-space:nowrap}
 .toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
 .toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
 .toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}

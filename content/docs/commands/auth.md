@@ -1,0 +1,70 @@
+---
+title: grit auth
+summary: Sign in to GitHub so HTTPS pushes and fetches just work.
+group: Remotes
+order: 5
+---
+
+## Synopsis
+
+```
+grit auth
+grit auth logout
+```
+
+## Description
+
+Signs you in to GitHub and saves the token, so that [`grit push`](../push/), [`grit fetch`](../fetch/) and [`grit clone`](../clone/) work with private repositories over HTTPS.
+
+`grit auth` uses GitHub's device flow. It prints a web address and a short code. Open `https://github.com/login/device` in your browser, enter the code and approve access. `grit` waits until you do, then saves the token with your credential helper. Every request goes straight to github.com.
+
+A credential helper has to be configured to store the token. On Windows, if none is set, `grit` uses its built-in one ([`grit manager`](../manager/)). Elsewhere, set one with [`grit config`](../config/):
+
+```
+$ grit config --global credential.helper osxkeychain   # macOS
+$ grit config --global credential.helper libsecret     # Linux
+$ grit config --global credential.helper store         # a plain-text file, any system
+```
+
+`grit auth logout` removes the saved GitHub token from your credential helper.
+
+`grit` signs in with its own GitHub OAuth app. To use a different one, set its client id in the `GRIT_GITHUB_CLIENT_ID` environment variable or the `grit.githubClientId` setting.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `logout` | Remove the saved GitHub token. |
+
+## Examples
+
+```
+$ grit auth
+To authorize grit, open this page in your browser:
+
+    https://github.com/login/device
+
+and enter the code:
+
+    1A2B-3C4D
+
+Waiting for you to authorize… (press Ctrl-C to cancel)
+
+✓ Signed in to GitHub — token stored for github.com.
+
+$ grit auth logout
+✓ Signed out of GitHub — removed the stored token for github.com.
+```
+
+## JSON output
+
+```
+{ "authenticated": true, "host": "github.com" }
+{ "logged_out": true, "host": "github.com" }
+```
+
+`logged_out` is `false` when no credential helper is configured, since there's nowhere a token could be stored.
+
+## See also
+
+[grit push](../push/), [grit config](../config/), [grit manager](../manager/)
