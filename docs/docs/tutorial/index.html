@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tutorial - Grit docs</title>
+<meta name="description" content="Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote." />
+<script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--code-fg:#e9e4d8;--chip:#e9e4d8;--rail:clamp(48px,8vw,120px);--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+a{color:inherit}a:hover{opacity:.7}
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(20px,4vw,56px)}
+.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:24px 0}
+.brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;text-decoration:none}
+.brand::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent)}
+.nav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:15px}.nav a{text-decoration:none}
+.nav .pill{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px}
+.commit{display:grid;grid-template-columns:var(--rail) minmax(0,1fr)}
+.commit+.commit{border-top:1px solid var(--line)}
+.rail{position:relative}.rail>span{position:absolute;display:block}
+.line{left:20px;top:0;bottom:0;width:3px;background:var(--ink)}
+.line.from-head{top:110px}.line.stub{bottom:auto;height:46px}
+.dot{left:15px;top:44px;width:13px;height:13px;border-radius:50%;background:var(--ink)}
+.head-dot{left:8px;top:96px;width:27px;height:27px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--ink)}
+.head-dot.small{left:13px;top:41px;width:17px;height:17px;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--ink)}
+.root-dot{left:14px;top:44px;width:15px;height:15px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px var(--ink)}
+.hero{padding:56px 0 72px}
+.refs{display:flex;flex-wrap:wrap;gap:14px;font:14px var(--mono);color:var(--muted)}
+.refs a{text-decoration:none}.refs .ref{color:var(--accent)}
+h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spacing:-.06em;font-weight:700}
+.post-hero h1{font-size:clamp(44px,7vw,88px);line-height:.95;letter-spacing:-.045em;max-width:16ch;text-wrap:balance}
+.tagline{margin:24px 0 0;font-size:clamp(26px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:500}
+.lede{max-width:640px;margin:20px 0 0;font-size:clamp(17px,1.6vw,20px);line-height:1.5;color:var(--soft);text-wrap:pretty}
+.entry{padding:36px 0 40px}
+.sha{font:13px var(--mono);color:var(--muted)}.sha.hot{color:var(--accent)}.sha a{color:inherit}
+.entry h2{margin:12px 0 0;font-size:clamp(28px,3.4vw,40px);line-height:1.05;letter-spacing:-.03em}
+.entry h2 a{text-decoration:none}
+.entry p{max-width:680px;margin:14px 0 0;font-size:18px;line-height:1.55;color:var(--soft);text-wrap:pretty}
+.post-body{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:56px;padding:48px 0 64px}
+.content{font-size:19px;line-height:1.65;color:var(--soft)}
+.content>:first-child{margin-top:0}
+.content h2{margin:2.2em 0 .5em;font-size:clamp(26px,3vw,34px);line-height:1.1;letter-spacing:-.025em;color:var(--ink)}
+.content h3{margin:1.8em 0 .4em;font-size:22px;letter-spacing:-.015em;color:var(--ink)}
+.content p{margin:0 0 1.1em;text-wrap:pretty}
+.content ul,.content ol{margin:0 0 1.1em;padding-left:1.2em}.content li{margin:.3em 0}
+.content li::marker{color:var(--accent)}
+.content a{color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.content strong{color:var(--ink)}
+.content code{font:.86em var(--mono);background:var(--chip);border-radius:6px;padding:.1em .35em}
+.content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
+.content pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
+.content .table{margin:1.4em 0;overflow-x:auto}
+.content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
+.content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
+.content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.content td:first-child{white-space:nowrap}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
+.foot{padding:40px 0 64px}
+.foot .links{display:flex;flex-wrap:wrap;gap:28px;margin-top:14px;font-size:17px}
+@media(max-width:900px){.post-body{display:block}.toc{display:none}}
+
+.doc-body{display:grid;grid-template-columns:180px minmax(0,720px);gap:56px;padding:48px 0 64px}
+.post-hero h1.cmd{font-family:var(--mono);font-weight:500;letter-spacing:-.04em;max-width:none}
+.docnav{order:-1;position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted);max-height:calc(100vh - 48px);overflow-y:auto}
+.docnav h2{margin:20px 0 8px;font:inherit;color:var(--accent)}
+.docnav ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.docnav li{margin:0 0 6px;padding-left:14px}.docnav a{text-decoration:none}
+.docnav a.current{color:var(--ink);font-weight:700}
+.content h3 code{font-size:.9em}
+.content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
+.pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
+.pager a{text-decoration:none;color:var(--ink)}
+@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="topbar">
+  <a class="brand" href="../../" aria-label="grit homepage">grit</a>
+  <nav class="nav" aria-label="Primary">
+    <a href="../../docs/">Docs</a>
+    <a href="https://crates.io/crates/grit-lib">Library</a>
+    <a href="../../blog/">Blog</a>
+    <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
+  </nav>
+</header>
+<main>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
+  <div class="hero post-hero">
+    <div class="refs"><a class="ref" href="../">← docs</a><span>guide</span></div>
+    <h1>Tutorial</h1>
+    <p class="lede">Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.</p>
+  </div>
+</section>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line"></span></div>
+  <div class="doc-body">
+    <article class="content"><p>This walkthrough covers the commands you&#x27;ll use every day. It assumes you have <a href="../#install">installed grit</a> and know roughly what a commit and a branch are. The output shown is what <code>grit</code> prints, minus the colors.</p>
+<h2 id="tell-grit-who-you-are">Tell grit who you are</h2>
+<p>Every commit records an author. Set your name and email once, in your global config:</p>
+<pre><code>$ grit config --global user.name &quot;Ada Lovelace&quot;
+$ grit config --global user.email ada@example.com</code></pre>
+<p><code>grit</code> reads and writes the same config files as Git, so if you&#x27;ve already set these up for Git, you can skip this step.</p>
+<h2 id="create-a-repository">Create a repository</h2>
+<pre><code>$ grit init project
+Initialized empty repository in /home/ada/project/.git
+$ cd project</code></pre>
+<p>To work on an existing project instead, copy it with <a href="../clone/"><code>grit clone</code></a> and skip ahead to the next section:</p>
+<pre><code>$ grit clone https://github.com/gitbutlerapp/grit.git</code></pre>
+<h2 id="your-home-base-grit-status">Your home base: grit status</h2>
+<p>Running <code>grit</code> with no arguments shows where you are and what&#x27;s changed. Add a couple of files and look:</p>
+<pre><code>$ echo &quot;# Notes&quot; &gt; README.md
+$ echo &quot;fn main() {}&quot; &gt; main.rs
+$ grit
+On main — no commits yet
+
+Untracked
+  ?  untracked     README.md
+  ?  untracked     main.rs
+
+→ grit add &lt;file&gt; to stage</code></pre>
+<p>The last line always suggests the next step. You&#x27;ll come back to this screen a lot; <a href="../status/"><code>grit status</code></a> (or <code>grit st</code>) shows the same thing.</p>
+<h2 id="record-a-commit">Record a commit</h2>
+<p><a href="../commit/"><code>grit commit</code></a> stages every change in the working tree and records it in one step:</p>
+<pre><code>$ grit commit &quot;Start the project&quot;
+[main 217c6f9] Start the project
+2 changes committed</code></pre>
+<p>There is no separate staging step to remember. <a href="../add/"><code>grit add</code></a> exists for when you want to stage particular files and check them in <code>grit status</code> first, but <code>grit commit</code> always records every change.</p>
+<p>Look at the history with <a href="../log/"><code>grit log</code></a>:</p>
+<pre><code>$ grit log
+  217c6f9  ada  just now  Start the project</code></pre>
+<h2 id="work-on-a-branch">Work on a branch</h2>
+<p>Create a branch and switch to it with <a href="../switch/"><code>grit switch -c</code></a>:</p>
+<pre><code>$ grit switch -c feature
+Created and switched to branch feature</code></pre>
+<p>Make a change and look at it with <a href="../diff/"><code>grit diff</code></a> before committing:</p>
+<pre><code>$ printf &#x27;fn main() {\n    println!(&quot;hi&quot;);\n}\n&#x27; &gt; main.rs
+$ grit diff
+
+main.rs
+@@ -1 +1 @@
+ 1    │ - fn main() {}
+    1 │ + fn main() {
+    2 │ +     println!(&quot;hi&quot;);
+    3 │ + }</code></pre>
+<p>The two number columns are the old and new line numbers. Commit the change:</p>
+<pre><code>$ grit commit &quot;Say hi&quot;
+[feature cf18394] Say hi
+1 change committed</code></pre>
+<p><a href="../show/"><code>grit show</code></a> displays a commit, its message and the files it changed. With no argument, it shows the latest commit:</p>
+<pre><code>$ grit show
+branch feature
+commit cf18394a62c3f845bd9c44927a5a55e014b2a99d
+Author: Ada Lovelace &lt;ada@example.com&gt;
+Date:   2026-10-07 10:00:00 +0000
+
+    Say hi
+
+ main.rs |   4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)</code></pre>
+<h2 id="merge-it-back">Merge it back</h2>
+<p>Switch back to <code>main</code> and <a href="../merge/">merge</a> the branch in. Nothing else has happened on <code>main</code>, so <code>grit</code> just moves <code>main</code> forward:</p>
+<pre><code>$ grit switch main
+Switched to branch main
+$ grit merge feature
+Fast-forwarded feature → cf18394</code></pre>
+<p>The branch is done, so <a href="../branch/">delete it</a>:</p>
+<pre><code>$ grit branch -d feature
+Deleted branch feature (was cf18394).</code></pre>
+<p><code>grit branch -d</code> refuses to delete a branch whose commits haven&#x27;t been merged into the branch you&#x27;re on. Use <code>-D</code> when you really mean it.</p>
+<h2 id="share-it-with-a-remote">Share it with a remote</h2>
+<p>A remote is another copy of the repository, usually on a server. Add one called <code>origin</code> with <a href="../remote/"><code>grit remote add</code></a>, then <a href="../push/">push</a>:</p>
+<pre><code>$ grit remote add origin https://github.com/ada/project.git
+Added remote origin → https://github.com/ada/project.git
+$ grit push
+  pushed main → origin refs/heads/main</code></pre>
+<p><code>grit push</code> sends the current branch to a branch with the same name on <code>origin</code>, creating it if needed. There are no upstream flags to set. For GitHub over HTTPS, <a href="../auth/"><code>grit auth</code></a> signs you in, and <code>grit</code> offers to run it if a push fails for lack of credentials.</p>
+<p>To get other people&#x27;s work, run <a href="../pull/"><code>grit pull</code></a>. It fetches from the remote and brings your branch up to date, fast-forwarding when it can and recording a merge commit when both sides have new commits:</p>
+<pre><code>$ grit pull
+Merged origin/main into the current branch (acd1d4b)</code></pre>
+<p>If someone pushed before you, <code>grit push</code> is rejected and tells you what to do:</p>
+<pre><code>$ grit push
+  rejected origin refs/heads/main: not a fast-forward — run `grit pull` first</code></pre>
+<h2 id="tag-a-release">Tag a release</h2>
+<p><a href="../tag/"><code>grit tag</code></a> marks the current commit, and <code>grit push --tags</code> publishes your tags:</p>
+<pre><code>$ grit tag v0.1
+Created tag v0.1
+$ grit push --tags
+  pushed --tags → origin refs/tags/v0.1</code></pre>
+<h2 id="when-things-conflict">When things conflict</h2>
+<p><code>grit merge</code>, <code>grit pull</code> and <code>grit pick</code> never leave a half-finished merge behind. If the two sides change the same lines, <code>grit</code> lists the conflicting files and leaves your branch and working tree as they were. To resolve the conflict, run the merge with <code>git</code>, fix the files and commit. Conflict resolution in <code>grit</code> itself is on the roadmap.</p>
+<p><code>grit</code> also refuses to switch branches, merge or pull while you have uncommitted changes, so work in progress can&#x27;t get mixed into a merge. Commit first.</p>
+<h2 id="scripting">Scripting</h2>
+<p>Every command takes <code>--json</code> and prints a single JSON object, which is handy for scripts and agents. <code>--filter</code> picks out the part you need:</p>
+<pre><code>$ grit status --json --filter &#x27;{branch, clean}&#x27;
+{
+  &quot;branch&quot;: &quot;main&quot;,
+  &quot;clean&quot;: true
+}</code></pre>
+<p>See the <a href="../#scripting-with-grit">overview</a> for details, and each command&#x27;s page for its JSON fields.</p>
+<h2 id="where-to-go-next">Where to go next</h2>
+<p>Every command has a man page with its options and examples. Start from the <a href="../#commands">command list</a>.</p><div class="pager"><a href="../">← Overview</a><a href="../init/">grit init →</a></div></article>
+    <nav class="docnav" aria-label="Docs"><ol><li><a href="../">Overview</a></li><li><a class="current" href="../tutorial/">Tutorial</a></li></ol><h2>Getting started</h2><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h2>Making changes</h2><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h2>History</h2><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h2>Branches and tags</h2><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h2>Remotes</h2><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h2>Maintenance</h2><ol><li><a href="../update/">grit update</a></li></ol><h2>Plumbing</h2><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2>Library</h2><ol><li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li></ol></nav>
+  </div>
+</section>
+</main>
+<footer class="commit">
+  <div class="rail" aria-hidden="true"><span class="line stub"></span><span class="root-dot"></span></div>
+  <div class="foot">
+    <div class="sha">0000001 · initial commit · by <a href="https://gitbutler.com">GitButler</a></div>
+    <div class="links"><a href="../">Docs</a><a href="../../">Home</a><a href="../../blog/">Blog</a><a href="https://github.com/gitbutlerapp/grit">GitHub</a></div>
+  </div>
+</footer>
+</div>
+</body>
+</html>

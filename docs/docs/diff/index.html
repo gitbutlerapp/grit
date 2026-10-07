@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>grit diff - Grit docs</title>
+<meta name="description" content="Show uncommitted changes, or the change a commit introduced." />
+<script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--code-fg:#e9e4d8;--chip:#e9e4d8;--rail:clamp(48px,8vw,120px);--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+a{color:inherit}a:hover{opacity:.7}
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(20px,4vw,56px)}
+.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:24px 0}
+.brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;text-decoration:none}
+.brand::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent)}
+.nav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:15px}.nav a{text-decoration:none}
+.nav .pill{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px}
+.commit{display:grid;grid-template-columns:var(--rail) minmax(0,1fr)}
+.commit+.commit{border-top:1px solid var(--line)}
+.rail{position:relative}.rail>span{position:absolute;display:block}
+.line{left:20px;top:0;bottom:0;width:3px;background:var(--ink)}
+.line.from-head{top:110px}.line.stub{bottom:auto;height:46px}
+.dot{left:15px;top:44px;width:13px;height:13px;border-radius:50%;background:var(--ink)}
+.head-dot{left:8px;top:96px;width:27px;height:27px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--ink)}
+.head-dot.small{left:13px;top:41px;width:17px;height:17px;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--ink)}
+.root-dot{left:14px;top:44px;width:15px;height:15px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px var(--ink)}
+.hero{padding:56px 0 72px}
+.refs{display:flex;flex-wrap:wrap;gap:14px;font:14px var(--mono);color:var(--muted)}
+.refs a{text-decoration:none}.refs .ref{color:var(--accent)}
+h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spacing:-.06em;font-weight:700}
+.post-hero h1{font-size:clamp(44px,7vw,88px);line-height:.95;letter-spacing:-.045em;max-width:16ch;text-wrap:balance}
+.tagline{margin:24px 0 0;font-size:clamp(26px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:500}
+.lede{max-width:640px;margin:20px 0 0;font-size:clamp(17px,1.6vw,20px);line-height:1.5;color:var(--soft);text-wrap:pretty}
+.entry{padding:36px 0 40px}
+.sha{font:13px var(--mono);color:var(--muted)}.sha.hot{color:var(--accent)}.sha a{color:inherit}
+.entry h2{margin:12px 0 0;font-size:clamp(28px,3.4vw,40px);line-height:1.05;letter-spacing:-.03em}
+.entry h2 a{text-decoration:none}
+.entry p{max-width:680px;margin:14px 0 0;font-size:18px;line-height:1.55;color:var(--soft);text-wrap:pretty}
+.post-body{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:56px;padding:48px 0 64px}
+.content{font-size:19px;line-height:1.65;color:var(--soft)}
+.content>:first-child{margin-top:0}
+.content h2{margin:2.2em 0 .5em;font-size:clamp(26px,3vw,34px);line-height:1.1;letter-spacing:-.025em;color:var(--ink)}
+.content h3{margin:1.8em 0 .4em;font-size:22px;letter-spacing:-.015em;color:var(--ink)}
+.content p{margin:0 0 1.1em;text-wrap:pretty}
+.content ul,.content ol{margin:0 0 1.1em;padding-left:1.2em}.content li{margin:.3em 0}
+.content li::marker{color:var(--accent)}
+.content a{color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.content strong{color:var(--ink)}
+.content code{font:.86em var(--mono);background:var(--chip);border-radius:6px;padding:.1em .35em}
+.content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
+.content pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
+.content .table{margin:1.4em 0;overflow-x:auto}
+.content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
+.content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
+.content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.content td:first-child{white-space:nowrap}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
+.foot{padding:40px 0 64px}
+.foot .links{display:flex;flex-wrap:wrap;gap:28px;margin-top:14px;font-size:17px}
+@media(max-width:900px){.post-body{display:block}.toc{display:none}}
+
+.doc-body{display:grid;grid-template-columns:180px minmax(0,720px);gap:56px;padding:48px 0 64px}
+.post-hero h1.cmd{font-family:var(--mono);font-weight:500;letter-spacing:-.04em;max-width:none}
+.docnav{order:-1;position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted);max-height:calc(100vh - 48px);overflow-y:auto}
+.docnav h2{margin:20px 0 8px;font:inherit;color:var(--accent)}
+.docnav ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.docnav li{margin:0 0 6px;padding-left:14px}.docnav a{text-decoration:none}
+.docnav a.current{color:var(--ink);font-weight:700}
+.content h3 code{font-size:.9em}
+.content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
+.pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
+.pager a{text-decoration:none;color:var(--ink)}
+@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="topbar">
+  <a class="brand" href="../../" aria-label="grit homepage">grit</a>
+  <nav class="nav" aria-label="Primary">
+    <a href="../../docs/">Docs</a>
+    <a href="https://crates.io/crates/grit-lib">Library</a>
+    <a href="../../blog/">Blog</a>
+    <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
+  </nav>
+</header>
+<main>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
+  <div class="hero post-hero">
+    <div class="refs"><a class="ref" href="../">← docs</a><span>man page</span></div>
+    <h1 class="cmd">grit diff</h1>
+    <p class="lede">Show uncommitted changes, or the change a commit introduced.</p>
+  </div>
+</section>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line"></span></div>
+  <div class="doc-body">
+    <article class="content"><h2 id="synopsis">Synopsis</h2>
+<pre><code>grit diff [&lt;commit&gt;]</code></pre>
+<h2 id="description">Description</h2>
+<p>With no argument, shows every uncommitted change: the working tree, staged or not, compared with the last commit. With a commit, shows the change that commit introduced, compared with its first parent.</p>
+<p>Each file starts with its path, and each hunk with its position. Lines have two number columns, the line number before and after the change. In a terminal, removed lines are red, added lines are green, and the words that changed within a line are highlighted. When the output isn&#x27;t a terminal, or <code>NO_COLOR</code> is set, lines are marked with <code>-</code> and <code>+</code> instead. Three lines of unchanged context are shown around each change. Binary files are reported but not shown.</p>
+<p><code>&lt;commit&gt;</code> can be anything that names a commit: a full or short commit id, a branch or tag name, or an expression like <code>HEAD~2</code>.</p>
+<h2 id="options">Options</h2>
+<div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;commit&gt;</code></td><td>The commit whose change to show. Omit to show uncommitted changes.</td></tr></tbody></table></div>
+<h2 id="examples">Examples</h2>
+<p>What have I changed since the last commit?</p>
+<pre><code>$ grit diff
+
+main.rs
+@@ -1 +1 @@
+ 1    │ - fn main() {}
+    1 │ + fn main() {
+    2 │ +     println!(&quot;hi&quot;);
+    3 │ + }</code></pre>
+<p>What did the commit before the last one change?</p>
+<pre><code>$ grit diff HEAD~1</code></pre>
+<p>List the files changed by a commit:</p>
+<pre><code>$ grit diff v0.1 --json --filter &#x27;.files[].path&#x27;
+[
+  &quot;README.md&quot;,
+  &quot;main.rs&quot;
+]</code></pre>
+<h2 id="json-output">JSON output</h2>
+<pre><code>{
+  &quot;files&quot;: [
+    {
+      &quot;path&quot;: &quot;main.rs&quot;,
+      &quot;status&quot;: &quot;modified&quot;,
+      &quot;binary&quot;: false,
+      &quot;hunks&quot;: [
+        {
+          &quot;old_start&quot;: 1,
+          &quot;new_start&quot;: 1,
+          &quot;lines&quot;: [
+            {
+              &quot;kind&quot;: &quot;del&quot;,
+              &quot;old&quot;: 1,
+              &quot;segments&quot;: [
+                { &quot;text&quot;: &quot;fn main() &quot;, &quot;emphasis&quot;: false },
+                { &quot;text&quot;: &quot;{}&quot;, &quot;emphasis&quot;: true }
+              ]
+            },
+            {
+              &quot;kind&quot;: &quot;add&quot;,
+              &quot;new&quot;: 1,
+              &quot;segments&quot;: [
+                { &quot;text&quot;: &quot;fn main() &quot;, &quot;emphasis&quot;: false },
+                { &quot;text&quot;: &quot;{&quot;, &quot;emphasis&quot;: true }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}</code></pre>
+<div class="table"><table><thead><tr><th>Field</th><th>Description</th></tr></thead><tbody><tr><td><code>files[].status</code></td><td><code>added</code>, <code>modified</code>, <code>deleted</code>, <code>renamed</code>, <code>copied</code>, <code>type_changed</code> or <code>unmerged</code>.</td></tr><tr><td><code>files[].binary</code></td><td><code>true</code> for binary files, which have no hunks.</td></tr><tr><td><code>hunks[].lines[].kind</code></td><td><code>context</code>, <code>add</code> or <code>del</code>.</td></tr><tr><td><code>hunks[].lines[].old</code>, <code>new</code></td><td>The line&#x27;s number before and after the change. A line has the numbers that apply to it.</td></tr><tr><td><code>segments</code></td><td>The line&#x27;s text in pieces. <code>emphasis</code> marks the parts that changed within the line.</td></tr></tbody></table></div>
+<h2 id="see-also">See also</h2>
+<p><a href="../status/">grit status</a>, <a href="../show/">grit show</a>, <a href="../log/">grit log</a></p><div class="pager"><a href="../commit/">← grit commit</a><a href="../log/">grit log →</a></div></article>
+    <nav class="docnav" aria-label="Docs"><ol><li><a href="../">Overview</a></li><li><a href="../tutorial/">Tutorial</a></li></ol><h2>Getting started</h2><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h2>Making changes</h2><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a class="current" href="../diff/">grit diff</a></li></ol><h2>History</h2><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h2>Branches and tags</h2><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h2>Remotes</h2><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h2>Maintenance</h2><ol><li><a href="../update/">grit update</a></li></ol><h2>Plumbing</h2><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2>Library</h2><ol><li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li></ol></nav>
+  </div>
+</section>
+</main>
+<footer class="commit">
+  <div class="rail" aria-hidden="true"><span class="line stub"></span><span class="root-dot"></span></div>
+  <div class="foot">
+    <div class="sha">0000001 · initial commit · by <a href="https://gitbutler.com">GitButler</a></div>
+    <div class="links"><a href="../">Docs</a><a href="../../">Home</a><a href="../../blog/">Blog</a><a href="https://github.com/gitbutlerapp/grit">GitHub</a></div>
+  </div>
+</footer>
+</div>
+</body>
+</html>

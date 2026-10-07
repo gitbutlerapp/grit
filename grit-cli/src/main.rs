@@ -324,3 +324,59 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use clap::CommandFactory;
+
+    use super::Cli;
+
+    /// Options every command accepts; they're documented once on the docs
+    /// overview page rather than on each command's page.
+    const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "filter"];
+
+    /// Every command (including hidden plumbing) has a man page in
+    /// `content/docs/commands/`, and that page mentions each of its flags and
+    /// subcommands. Positional arguments are named freely in the synopsis. Run `python3 scripts/docs.py` after editing the pages.
+    #[test]
+    fn every_command_is_documented() {
+        let pages = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands");
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = pages.join(format!("{name}.md"));
+            let Ok(page) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            for arg in command.get_arguments() {
+                let id = arg.get_id().as_str();
+                if GLOBAL_OPTIONS.contains(&id) {
+                    continue;
+                }
+                let spellings = arg
+                    .get_long()
+                    .map(|long| format!("--{long}"))
+                    .into_iter()
+                    .chain(arg.get_short().map(|short| format!("-{short}")));
+                for spelling in spellings {
+                    if !page.contains(&format!("`{spelling}")) {
+                        problems.push(format!("{name}.md does not document `{spelling}`"));
+                    }
+                }
+            }
+            for sub in command.get_subcommands() {
+                let sub_name = sub.get_name();
+                if sub_name != "help" && !page.contains(&format!("`{sub_name}")) {
+                    problems.push(format!("{name}.md does not document `{sub_name}`"));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+}

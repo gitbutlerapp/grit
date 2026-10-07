@@ -14,6 +14,9 @@ This installs the `grit` executable.
 
 ## Commands
 
+The full documentation, with a tutorial and a man page for every command, is at
+[grit-scm.com/docs](https://grit-scm.com/docs/).
+
 `grit` favors one obvious way to do the common thing, plain-language output, and a
 status screen that doubles as the home base.
 
