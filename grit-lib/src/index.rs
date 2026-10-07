@@ -3584,6 +3584,20 @@ mod tests {
     }
 
     #[test]
+    fn remove_paths_and_insert_replaces_equal_path_without_duplicates() {
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("path/a.txt"));
+        idx.add_or_replace(make_entry("path/b.txt"));
+        let mut replacement = make_entry("path/a.txt");
+        replacement.oid = dummy_oid();
+        idx.remove_paths_and_insert(["ghost.txt".as_bytes()], [replacement.clone()]);
+        assert_eq!(idx.entries.len(), 2);
+        assert_eq!(idx.entries[0].path, b"path/a.txt");
+        assert_eq!(idx.entries[0].oid, replacement.oid);
+        assert_eq!(idx.entries[1].path, b"path/b.txt");
+    }
+
+    #[test]
     fn remove_is_sublinear() {
         const N: usize = 100_000;
         const M: usize = 1_000;
