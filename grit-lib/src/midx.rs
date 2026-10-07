@@ -20,6 +20,7 @@ use crate::error::{Error, Result};
 use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::hash_algo_for_objects_dir;
 use crate::pack::{read_pack_index_no_verify, PackIndex};
+use crate::pack_rev::append_hashfile_checksum;
 
 const MIDX_SIGNATURE: u32 = 0x4d49_4458;
 const MIDX_VERSION_V1: u8 = 1;
@@ -707,7 +708,9 @@ fn build_midx_bytes_filtered(
 
     // BTMP: per-pack (bitmap_pos, bitmap_nr) in the pseudo-bitmap namespace, matching Git's
     // `write_midx_bitmapped_packs` (cumulative start + object count per pack).
-    let rev_sidecar_order = if omit_embedded_ridx_chunk && write_bitmap_placeholders {
+    // Standalone `.rev` sidecars (when the embedded RIDX chunk is omitted) carry the
+    // same object permutation as the embedded chunk would.
+    let rev_sidecar_order = if omit_embedded_ridx_chunk {
         Some(order.clone())
     } else {
         None
@@ -814,17 +817,28 @@ fn write_midx_rev_sidecar(
     midx_file_hash: &[u8],
     algo: HashAlgo,
 ) -> Result<()> {
+    let hash_len = algo.len();
     let hash_id = u32::from(u8::from(algo));
-    let mut body =
-        Vec::with_capacity(RIDX_HEADER_SIZE + pack_order.len() * 4 + midx_file_hash.len());
-    body.extend_from_slice(&RIDX_SIGNATURE.to_be_bytes());
-    body.extend_from_slice(&RIDX_VERSION.to_be_bytes());
-    body.extend_from_slice(&hash_id.to_be_bytes());
+    let body_len = RIDX_HEADER_SIZE + pack_order.len() * 4 + hash_len;
+    let mut out = Vec::with_capacity(body_len + hash_len);
+    out.extend_from_slice(&RIDX_SIGNATURE.to_be_bytes());
+    out.extend_from_slice(&RIDX_VERSION.to_be_bytes());
+    out.extend_from_slice(&hash_id.to_be_bytes());
     for idx in pack_order {
-        body.extend_from_slice(&idx.to_be_bytes());
+        out.extend_from_slice(&idx.to_be_bytes());
     }
-    body.extend_from_slice(midx_file_hash);
-    fs::write(path, body).map_err(Error::Io)
+    if midx_file_hash.len() >= hash_len {
+        out.extend_from_slice(&midx_file_hash[..hash_len]);
+    } else {
+        return Err(Error::CorruptObject(format!(
+            "MIDX checksum length {} does not match hash algorithm width {hash_len}",
+            midx_file_hash.len()
+        )));
+    }
+    debug_assert_eq!(out.len(), body_len);
+    append_hashfile_checksum(&mut out, hash_len);
+    debug_assert_eq!(out.len(), body_len + hash_len);
+    fs::write(path, out).map_err(Error::Io)
 }
 
 fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, usize)> {

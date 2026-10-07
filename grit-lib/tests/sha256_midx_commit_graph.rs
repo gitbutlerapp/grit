@@ -16,6 +16,7 @@ use grit_lib::midx::{
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::odb::{hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb};
 use grit_lib::pack::read_idx_object_ids;
+use grit_lib::pack_rev::hashfile_checksum_valid;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -162,6 +163,13 @@ fn sha256_grit_midx_and_rev_passes_git_verify() {
         !rev_sidecars.is_empty(),
         "expected a MIDX .rev sidecar after grit write"
     );
+    for rev in &rev_sidecars {
+        let data = std::fs::read(rev).expect("read .rev");
+        let hash_len = algo.len();
+        assert!(hashfile_checksum_valid(&data, hash_len), "RIDX checksum");
+        assert_eq!(data.len() % 4, 0, "RIDX length aligned");
+        assert!(data.len() >= 12 + hash_len + hash_len);
+    }
 
     git(_tmp.path(), &["multi-pack-index", "verify"]);
     git(_tmp.path(), &["fsck"]);
