@@ -57,5 +57,10 @@ nix.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Console"] }
 
+[[bench]]
+name = "objects"
+harness = false
+
 [dev-dependencies]
+criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
