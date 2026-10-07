@@ -1,6 +1,6 @@
 [workspace]
-members = ["grit-git", "grit-lib", "grit-protocol", "grit-http-server", "grit-cli", "grit-utils", "grit-examples", "grit-test-support"]
-default-members = ["grit-git", "grit-lib", "grit-protocol", "grit-cli"]
+members = ["grit-lib", "grit-protocol", "grit-http-server", "grit-cli", "grit-utils", "grit-examples", "grit-test-support"]
+default-members = ["grit-lib", "grit-protocol", "grit-cli"]
 resolver = "2"
 
 [workspace.package]

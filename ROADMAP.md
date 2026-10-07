@@ -2,7 +2,7 @@
 
 > The living version of this plan is maintained on the Grit Factory dashboard (https://maint.grit-scm.com/roadmap); this file is a snapshot. Items are worked one at a time, in order.
 
-> **Note:** The vendored Git C tree and upstream shell harness are removed. Validation is Rust tests plus **`bench/`** comparisons against system `git`. Some items below still mention the old harness; treat those as Rust-test / benchmark acceptance unless updated in a later roadmap edit.
+> **Note:** The project is now `grit-lib` and `grit-cli` only. The Git-compatible `grit-git` CLI, the ported upstream shell harness, the vendored Git source tree and the `bench/` scripts (which drove `grit-git`) have been removed. Validation is Rust tests cross-checked against the system `git` binary, plus benchmarks of `grit-lib` and `grit`.
 
 ## 1. CI gate for every integration
 *Workstream: Foundations*
@@ -26,11 +26,11 @@
 
 **Scope.**
 - Criterion micro-benchmarks in grit-lib for core operations: SHA-1, inflate/deflate, loose and packed object reads, pack index lookup, delta apply, index read/write, revwalk, rev-parse, tree diff, blob diff, config load, ignore/attribute matching.
-- A real-world scenario suite, extending `bench/run.sh` and `run-everyday.sh`. It compares grit to `git` with hyperfine on:
+- A real-world scenario suite built on `grit` and `grit-lib` (the old `bench/` scripts drove `grit-git` and were removed; `grit-bench` in `grit-utils` is a starting point). It compares grit to `git` with hyperfine on:
   - git.git and a synthetic large repo (≥100k files, deep history, many refs, big packs)
   - clone/fetch over file:// and a local smart-HTTP server
   - status, add, commit, log, diff, blame, rev-list --count, cat-file --batch
-- Results go out as machine-readable JSON with the machine description. A `bench/BASELINE.md` table lists the grit/git ratio per scenario.
+- Results go out as machine-readable JSON with the machine description. A committed baseline table lists the grit/git ratio per scenario.
 
 **Acceptance.**
 - One command runs each suite.
@@ -59,7 +59,7 @@
 ## 4. Fix super-linear hot paths
 *Workstream: Performance*
 
-**Goal.** Remove the 100–1000× slowdowns found in `bench/OPTIMIZATION.md`: grep, stash, merge, rebase, reset, add. Their root cause is reloading `.gitattributes` and the config cascade inside per-file loops.
+**Goal.** Remove the 100–1000× slowdowns found by the earlier optimization report (grep, stash, merge, rebase, reset, add). Their root cause is in `grit-lib`: reloading `.gitattributes` and the config cascade inside per-file loops.
 
 **Scope.**
 - Load attributes, config and ignore once per operation and pass them down.
@@ -68,7 +68,7 @@
 
 **Acceptance.**
 - At L scale, every listed command is within 2× of git; target ≤1.2×.
-- The harness shows no regressions.
+- The Rust tests show no regressions.
 - The benchmark page is updated.
 
 ## 5. Prune unused commands from the library
@@ -77,13 +77,13 @@
 **Goal.** Stop carrying the email workflow and archive code in grit-lib.
 
 **Scope.**
-- Move or remove from grit-lib: `am.rs`, `mailinfo.rs`, `porcelain/format_patch.rs`, plus archive and other code that serves only out-of-scope commands. grit-git may keep CLI shims for compatibility, or drop them.
-- Mark the out-of-scope harness files `in_scope = "skip"` with a reason. These cover archive, am, format-patch, mailinfo/mailsplit, imap-send, request-pull, send-email, instaweb, web--browse, daemon, http-backend, scalar, filter-branch, bugreport/diagnose, difftool/mergetool and the svn/p4/cvs bridges.
+- Remove from grit-lib: `am.rs`, `mailinfo.rs`, `porcelain/format_patch.rs`, plus archive and other code that served only `grit-git` commands that are out of scope (archive, am, format-patch, mailinfo/mailsplit, imap-send, request-pull, send-email, instaweb, web--browse, daemon, http-backend, scalar, filter-branch, bugreport/diagnose, difftool/mergetool and the svn/p4/cvs bridges).
+- Remove library code whose only caller was `grit-git` and that no `grit` command or library user needs.
 - Update `docs/v1-scope.md`.
 
 **Acceptance.**
 - grit-lib has no email or archive modules.
-- The workspace builds and in-scope harness numbers are unchanged.
+- The workspace builds and all Rust tests pass.
 - Scope docs are updated.
 
 ## 6. One hashing abstraction, accelerated SHA-1
@@ -120,19 +120,19 @@
 ## 8. Library hygiene: no globals, no printing, no exits
 *Workstream: Library*
 
-**Goal.** Make grit-lib linkable: this is KILL_SPAWNS phase 5.
+**Goal.** Make grit-lib linkable: no process-global state, no hidden environment reads, no printing, no subprocesses.
 
 **Scope.**
 - A `Repository`/context value owns caches and config, replacing the process-global `OnceLock<Mutex<HashMap>>` caches.
 - Read the environment only at the CLI boundary. The 108 `env::var` reads and the `GIT_TEST_*` checks move behind an explicit options struct.
 - Remove all 112 `println!`, 87 `eprintln!` and the `process::exit` from grit-lib. Use output sinks and progress traits instead.
-- Replace the 221 Git-formatted `fatal:/error:/hint:` strings in grit-lib with typed errors. Render them in grit-git.
+- Replace the 221 Git-formatted `fatal:/error:/hint:` strings in grit-lib with typed errors. Render them in grit-cli, in its own words.
 - Stop shelling out for `grep`, `iconv`, `kill` and `stty` in the library. `sh` remains only where Git semantics require it (hooks, filters) and goes through an injectable runner.
 
 **Acceptance.**
 - grep counts for these patterns in grit-lib are zero, or each remaining one is justified in a comment.
 - Two repositories can be used concurrently from one process in a test.
-- No regressions in the harness or benchmarks.
+- No regressions in the Rust tests or benchmarks.
 
 ## 9. Rust tests: objects, packs, odb
 *Workstream: Testing*
@@ -140,12 +140,12 @@
 **Goal.** Build a safety net before the ODB refactor.
 
 **Scope.**
-- Add Rust integration tests for loose objects, packs, idx/rev/midx, deltas, commit-graph, alternates, promisor packs and fsck (harness families t1xxx, t5xxx, t6xxx where relevant) against the grit-lib API, not the CLI.
+- Add Rust integration tests for loose objects, packs, idx/rev/midx, deltas, commit-graph, alternates, promisor packs and fsck (drawing scenarios from upstream Git's t1xxx, t5xxx and t6xxx test families where relevant) against the grit-lib API, not the CLI.
 - Skip UX and option-compatibility tests.
 - Add `cargo llvm-cov` reporting for these modules.
 
 **Acceptance.**
-- A mapping table from harness scenarios to Rust tests lives in TESTING.md.
+- A mapping table from upstream Git test scenarios to Rust tests lives in TESTING.md.
 - Line coverage of odb/pack/midx/commit-graph modules is ≥85%.
 - Everything runs in CI.
 
@@ -175,7 +175,7 @@
 - Add coverage reporting for these modules.
 
 **Acceptance.**
-- The harness-to-Rust mapping table is in TESTING.md.
+- The upstream-scenario-to-Rust mapping table is in TESTING.md.
 - Coverage of these modules is ≥85%.
 - Everything runs in CI.
 
@@ -197,16 +197,16 @@
 ## 13. Network, bundles and packing in the library
 *Workstream: Library*
 
-**Goal.** Put all core network and pack functionality in grit-lib, so grit-git is a thin CLI.
+**Goal.** Put all core network and pack functionality in grit-lib, and finish the server side.
 
 **Scope.**
-- Move bundle read, write and verify from grit-git into grit-lib.
-- Consolidate the duplicate transport code in grit-git (ssh, smart HTTP, push, protocol wire) onto the grit-lib `Transport`, `HttpClient` and protocol v2 implementations.
-- Move the pack-objects core into grit-lib.
-- Make `grit-protocol` call the library in-process instead of spawning `grit`.
+- Implement bundle read, write and verify in grit-lib (the `grit-git` implementation was removed, not moved).
+- Bring `transfer::build_pack` up to pack-objects quality (delta reuse, windowing, bitmaps from item 14); it backs both push and the `grit_lib::serve` upload-pack.
+- Extend `grit_lib::serve`: shallow/deepen, partial-clone filters, `want-ref`, and running hooks in receive-pack through an injectable runner.
+- Make `grit-protocol` call `grit_lib::serve` in-process instead of spawning `grit upload-pack` / `grit receive-pack`.
 
 **Acceptance.**
-- grit-git has no transport or bundle logic of its own.
+- Bundles round-trip with `git bundle`.
 - grit-protocol never spawns.
 - Fetch, push, clone and ls-remote benchmarks are within 1.2× of git.
 - The transport test matrices pass.

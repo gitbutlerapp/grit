@@ -1,10 +1,5 @@
 ---
-description: 
-alwaysApply: true
----
-
----
-description: "Grit: fast linkable Git library, modern grit CLI, optional grit-git compatibility CLI"
+description: "Grit: a fast, linkable Git library (grit-lib) and a modern Git client (grit-cli)"
 alwaysApply: true
 ---
 
@@ -14,13 +9,14 @@ Durable build contract for autonomous runs. Long-term plan: **ROADMAP.md** (snap
 
 ## Project direction
 
-Grit began as a Rust reimplementation of Git aimed at passing Git's own test suite. It largely got there, but with workarounds, inefficient code, and support for every odd subcommand and legacy interface. **The project now has a new focus:**
+Grit began as a Rust reimplementation of Git aimed at passing Git's own test suite. It largely got there, but with workarounds, inefficient code, and support for every odd subcommand and legacy interface. That compatibility CLI (`grit-git`), the ported upstream shell harness, and the vendored Git source tree have been **removed**. **The project is now exactly two things:**
 
 | Crate | Role |
 | ----- | ---- |
 | **`grit-lib`** | Clean, well-designed, **linkable** library any Rust project can use. **Where almost all implementation work belongs.** |
 | **`grit-cli`** | Git client with a **modern CLI** (`grit` binary). Primary UX — **thin shell** over the library. |
-| **`grit-git`** | Optional Git-compatible CLI for drop-in `git` behavior and **compatibility test bed** for the harness. **Thin shell**; Git-shaped text at the boundary. |
+
+Supporting crates exist only to serve those two: **`grit-protocol`** and **`grit-http-server`** (smart HTTP serving via `grit upload-pack` / `grit receive-pack`), **`grit-examples`** (small programs built on the library), **`grit-test-support`** (test helpers), and **`grit-utils`** (`grit-bench`). Do not add a Git-compatible command-line mirror back; Git compatibility means **on-disk formats and wire protocols**, not argv, messages or exit codes.
 
 Ordered work: **ROADMAP.md** (live plan on the [factory dashboard](https://maint.grit-scm.com/roadmap)).
 
@@ -32,16 +28,15 @@ Ordered work: **ROADMAP.md** (live plan on the [factory dashboard](https://maint
 | ---------------------- | --------------------------------- |
 | **`grit-lib`** — behavior, types, errors, tests, rustdoc | **Most** (aim for the bulk of the diff) |
 | **`grit-cli`** — clap parsing, exit codes, human / `--json` / `--markdown` output | **Minimal** |
-| **`grit-git`** — Git-compatible argv, messages, exit codes for the harness | Only what compatibility requires |
 
-**Default workflow:** design and implement in **`grit-lib`** first (or extend an existing type/method), add **Rust unit and coverage tests** there, document the **public API**, then wire **`grit-cli`** (and **`grit-git`** if the harness needs it) with the smallest possible glue.
+**Default workflow:** design and implement in **`grit-lib`** first (or extend an existing type/method), add **Rust unit and coverage tests** there, document the **public API**, then wire **`grit-cli`** with the smallest possible glue.
 
-**`grit-cli` and `grit-git` may only contain:**
+**`grit-cli` (and the other binary crates) may only contain:**
 
 - Argument and environment parsing
 - Opening a `Repository` (or other library handle) and calling library APIs
 - Mapping `grit_lib::Error` (and typed results) to exit codes and stdout/stderr
-- Output formatting (default, `--json`, `--markdown` in **`grit-cli`**; Git-compatible strings in **`grit-git`**)
+- Output formatting (default, `--json`, `--markdown`)
 
 **Do not put in CLI crates:** object/index/ref/transport logic, diff or merge algorithms, config semantics, pathspec evaluation, or other reusable Git behavior — even if “only one command” needs it today. Add or extend **`grit-lib`** instead.
 
@@ -65,7 +60,7 @@ On-disk formats and wire protocols must stay **correct and compatible with Git**
 
 ### What we drop
 
-Relatively unused commands get **no CLI and no further work:** archive; the email workflow (`am`, `format-patch`, `send-email`, `imap-send`, `request-pull`); foreign-VCS bridges. Remove from **`grit-lib`** where that simplifies the library (ROADMAP item 5, `docs/v1-scope.md`).
+Relatively unused commands get **no CLI and no further work:** archive; the email workflow (`am`, `format-patch`, `send-email`, `imap-send`, `request-pull`); foreign-VCS bridges; `instaweb`, `daemon` and the other peripheral tools. Some `grit-lib` code still exists only because `grit-git` used it; remove it where that simplifies the library (ROADMAP item 5, `docs/v1-scope.md`).
 
 ### The CLI (`grit-cli`)
 
@@ -80,13 +75,13 @@ Every command implemented in **`grit-cli`** must be friendly for users, agents, 
 The library and CLI must be **as fast as possible.**
 
 - Benchmark widely; speed up everything you touch.
-- Build and benchmark **real-world scenarios** (`bench/`): large repos, deep history, big packs, many refs, wide trees, network operations — no shortcuts that sacrifice compatibility.
+- Build and benchmark **real-world scenarios**: large repos, deep history, big packs, many refs, wide trees, network operations — no shortcuts that sacrifice compatibility. Benchmark **`grit-lib` operations and `grit` commands** (Criterion in `grit-lib`, `grit-bench` in `grit-utils`); the old `bench/` suite drove `grit-git` and was removed (ROADMAP item 2 rebuilds it).
 - Compare core operations against the equivalent **Git core** commands.
 - **Do not implement sha1dc.** Use plain SHA-1 and accelerate it (hardware SHA extensions, SIMD, parallel hashing).
 
 ### Testing
 
-- Exercise core functionality and edge cases with **Rust tests** on the **`grit-lib`** public API (and workspace integration tests where CLI wiring matters).
+- Exercise core functionality and edge cases with **Rust tests** on the **`grit-lib`** public API (and workspace integration tests where CLI wiring matters). Cross-check against the system **`git`** binary inside tests where compatibility matters (formats, protocols, fsck).
 - Write **coverage tests for every public library interface**.
 - Do not weaken or delete tests to green a change.
 
@@ -110,7 +105,6 @@ Detail: **TESTING.md** and ROADMAP testing items.
 ```bash
 # Build
 cargo build --release -p grit-cli
-cargo build --release -p grit-git   # optional Git-compatible CLI
 
 # Test
 cargo test -p grit-lib --lib
@@ -119,11 +113,11 @@ cargo test --workspace
 
 ## Testing
 
-**TESTING.md** describes the Rust-first strategy: `cargo test -p grit-lib --lib`, workspace integration tests, **`bench/`** comparisons against system `git`, and the GitHub Actions CI jobs (fmt, unit tests, harness smoke) with local reproduction commands.
+**TESTING.md** describes the strategy: `cargo test -p grit-lib --lib`, workspace integration tests (including the smart-HTTP transport tests served by `grit upload-pack` / `grit receive-pack`), and the GitHub Actions CI jobs with local reproduction commands.
 
 ## Source of truth
 
-- On-disk formats and wire protocols: the Git specification and observed compatibility with the **`git`** command where benchmarks and tests require it.
+- On-disk formats and wire protocols: the Git specification (`gitformat-*`, `gitprotocol-*` on [git-scm.com](https://git-scm.com/docs)) and observed compatibility with the system **`git`** command in tests. The Git source tree is no longer vendored in this repository.
 - Command behavior reference: [git-scm.com documentation](https://git-scm.com/docs) and **`grit-lib`** / workspace integration tests.
 - Product APIs: `grit-lib` rustdoc and the docs site.
 
@@ -136,7 +130,7 @@ cargo test --workspace
 - **Allowed** (not protectable): the *algorithm or method* (e.g. Myers diff, the approxidate parser, name-hash math), the *interface/behavior* it must produce, byte-for-byte *output compatibility*, and *facts* (keyword lists, opcode tables, format constants). Reimplement these in your own idiomatic Rust.
 - **Forbidden** (protected expression copied verbatim or near-verbatim): Git's prose **comments**, multi-line **user-facing message strings**, and code whose **structure, naming, and layout** track the C beyond what the method requires.
 
-If Git-identical user-facing text or other copied expression is genuinely needed, it lives in the **`grit-git` CLI crate (`grit-git/src`), which is GPL-2.0** and may reuse Git's strings and expression — not in `grit-lib`. Have the library return a **structured/typed error or value**, and render the Git-compatible text at the CLI boundary.
+The whole repository is **MIT**; there is no GPL crate to put Git's wording in. Have the library return a **structured/typed error or value**, and let `grit-cli` render it in **its own words**. Byte-for-byte machine formats (pack files, pkt-lines, protocol capability names) are facts and are fine.
 
 When matching Git behavior: read published docs and specs for *what* and *why*, then write idiomatic Rust — do not transcribe GPL prose or code layout into **`grit-lib`**.
 
@@ -157,8 +151,12 @@ Use **`cargo clippy --fix --allow-dirty`** on crates you change. The full worksp
 grit/
 ├── grit-lib/src/          # Core library (product)
 ├── grit-cli/src/          # Modern `grit` CLI (--json / --markdown)
-├── grit-git/src/commands/ # Git-compatible CLI (optional)
-├── bench/                 # Benchmarks vs system git
+├── grit-protocol/         # Smart-protocol glue (spawns `grit upload-pack` / `receive-pack`)
+├── grit-http-server/      # Smart HTTP server for serving repositories
+├── grit-examples/         # Example programs built on grit-lib
+├── grit-test-support/     # Shared test helpers
+├── grit-utils/            # grit-bench and other maintenance tools
+├── content/blog/          # Blog sources (rendered by scripts/blog.py)
 ├── docs/                  # Site + usage docs
 ├── scripts/               # Repo maintenance scripts
 ├── ROADMAP.md             # Ordered work plan (snapshot)
@@ -169,9 +167,9 @@ grit/
 
 Aligns with **how work is judged** above:
 
-- [ ] **Library-first** — new behavior and tests are in **`grit-lib`**; **`grit-cli`** / **`grit-git`** changes are mostly wiring and output.
+- [ ] **Library-first** — new behavior and tests are in **`grit-lib`**; **`grit-cli`** changes are mostly wiring and output.
 - [ ] **Compatibility** — formats/protocols match Git where implemented; Rust tests cover the change.
-- [ ] **Speed** — benchmarks before/after vs `git` for hot-path or performance work (`bench/`).
+- [ ] **Speed** — benchmarks before/after vs `git` for hot-path or performance work.
 - [ ] **Library hygiene** — typed errors, no lib printing/globals/shell-out; **`grit-cli`** adds **`--json`** and **`--markdown`** when touched.
 - [ ] **Rust tests** + **coverage tests** for new/changed public API.
 - [ ] **Docs** (site + rustdoc) updated in the same change.
@@ -206,12 +204,12 @@ Aligns with **how work is judged** above:
 - Avoid implicitly using the current time like `std::time::SystemTime::now()`; pass the current time as argument.
 - Keep public API surfaces small. Use `#[must_use]` where return values matter.
 - Prefer implementing core Git behavior in **`grit-lib`** even when only one CLI command currently needs it. If code parses Git data, walks repository state, mutates objects/index/refs/worktrees, evaluates config semantics, formats Git-compatible records, or implements transport/protocol rules, it belongs in the library unless there is a clear CLI-only reason.
-- Keep **`grit-git`** and **`grit-cli`** focused on argument parsing, environment/process setup, terminal interaction, exit-code mapping, and converting library results into stdout/stderr (human / JSON / Markdown).
+- Keep **`grit-cli`** focused on argument parsing, environment/process setup, terminal interaction, exit-code mapping, and converting library results into stdout/stderr (human / JSON / Markdown).
 - Do not add reusable domain helpers under binary crates as a staging area. If a helper would be useful to tests, another command, or an embedding caller, add it to an appropriate **`grit-lib`** module with narrow visibility and lift to `pub` only as needed.
 
 ## Library crate layout and public API
 
-The Git-compatible engine lives in **`grit-lib`**. Binaries stay thin: parse CLI, open a `Repository`, call library APIs, map `grit_lib::Error` to exit codes and output sinks.
+The Git engine lives in **`grit-lib`**. Binaries stay thin: parse CLI, open a `Repository`, call library APIs, map `grit_lib::Error` to exit codes and output sinks.
 
 ### When to use one crate vs several
 
@@ -235,11 +233,12 @@ The Git-compatible engine lives in **`grit-lib`**. Binaries stay thin: parse CLI
 
 ## Testing (agents)
 
-Run **`cargo test -p grit-lib --lib`** and relevant workspace tests before/after substantive changes. Add integration + **coverage tests** for new **`grit-lib`** API. For hot paths, use **`bench/`** against system `git`.
+Run **`cargo test -p grit-lib --lib`** and relevant workspace tests before/after substantive changes. Add integration + **coverage tests** for new **`grit-lib`** API. For hot paths, benchmark against system `git`.
 
 ## Do not
 
 - Weaken or delete tests to green a run
+- Reintroduce a Git-compatible CLI mirror, a ported upstream shell harness, or a vendored copy of Git's source
 - Run `cargo build` in worktrees (build in main repo, copy binary)
 
 ## Committing
@@ -259,4 +258,4 @@ Agents version-control with **GitButler (`but`)** and **GitButler Mesh**. Nothin
 - **No external services**: Build and test via Cargo.
 - **Pre-integration gate**: **`make gate`** (`scripts/gate.sh`: fmt, clippy with **`-D warnings`**, **`cargo test --workspace`**).
 - **Unit tests**: `cargo test -p grit-lib --lib` during development; the gate runs the full workspace suite.
-- **Benchmarks**: `bench/` when touching hot paths (compare against system `git`).
+- **Benchmarks**: when touching hot paths, compare against system `git` (Criterion in `grit-lib`, `grit-bench`).

@@ -538,28 +538,21 @@ fn grit_bin() -> OsString {
     if let Some(path) = std::env::var_os("GRIT_BIN") {
         return path;
     }
-    if let Some(path) = std::env::var_os("CARGO_BIN_EXE_grit-git") {
-        return path;
-    }
     if let Some(path) = std::env::var_os("CARGO_BIN_EXE_grit") {
         return path;
     }
+    let program = format!("grit{}", std::env::consts::EXE_SUFFIX);
     if let Ok(mut exe) = std::env::current_exe() {
         exe.pop();
         if exe.file_name().is_some_and(|name| name == "deps") {
             exe.pop();
         }
-        for name in ["grit-git", "grit"] {
-            let candidate = exe.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-            if candidate.is_file() {
-                return candidate.into_os_string();
-            }
+        let candidate = exe.join(&program);
+        if candidate.is_file() {
+            return candidate.into_os_string();
         }
     }
-    OsString::from(format!(
-        "target/debug/grit-git{}",
-        std::env::consts::EXE_SUFFIX
-    ))
+    OsString::from(format!("target/debug/{program}"))
 }
 
 fn copy_dir_contents(source: &Path, dest: &Path) -> io::Result<()> {

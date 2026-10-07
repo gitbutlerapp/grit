@@ -1,4 +1,4 @@
-# Stage 1 CI: format, unit tests, harness smoke (no workspace clippy gate yet).
+# CI: format, unit tests, and the smart-HTTP transport tests (no workspace clippy gate yet).
 #
 # Toolchain bump: change every `uses: dtolnay/rust-toolchain@…` pin below to the
 # same new version and document it in TESTING.md "Continuous integration".
@@ -58,41 +58,15 @@ jobs:
 
       - run: cargo test -p grit-lib -p grit-cli
 
-      - name: run-tests.sh strict list regression
-        run: python3 scripts/test_run_tests_strict_list.py
+      # The transport tests serve repositories with `grit upload-pack` /
+      # `grit receive-pack` behind grit-http-server; they skip when either
+      # binary is missing, so build both first.
+      - run: cargo build -p grit-cli -p grit-http-server
 
-  smoke:
-    name: smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
-        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: smoke
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - run: cargo build --release -p grit-git
-
-      - name: Harness smoke subset (strict)
+      - name: Smart-HTTP transport tests
         run: |
-          ./scripts/run-tests.sh --strict --quiet --no-catalog \
-            --list data/ci/smoke-tests.txt \
-            --data-dir "$RUNNER_TEMP/smoke"
-          git diff --exit-code
-
-      - name: Upload per-file smoke logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-harness-logs
-          path: ${{ runner.temp }}/smoke/logs/
-          if-no-files-found: ignore
+          cargo test -p grit-lib --features http-ureq \
+            --test transport_http --test transport_http_auth \
+            --test transport_http_proxy_cookies --test transport_http_redirect_auth \
+            --test matrix_fetch --test matrix_push --test matrix_sha256 \
+            --test matrix_credentials

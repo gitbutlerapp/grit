@@ -1,11 +1,5 @@
 target/*
-# Upstream harness runner artifacts (see scripts/run-tests.sh)
-tests/trash*
-tests/trash/
-tests/grit
-bench/.scratch/
 .claude/
-bench/.scratch
 scripts/__pycache__
 scripts/subscripts/__pycache__
 .env

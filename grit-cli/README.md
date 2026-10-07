@@ -2,7 +2,7 @@
 
 `grit-cli` provides `grit`, a small opinionated command line interface backed by [`grit-lib`](https://crates.io/crates/grit-lib).
 
-It is not intended to be a drop-in replacement for Git. For Git-compatible command behavior, use the `grit-git` CLI (the `grit-git` crate). `grit` is a simpler interface for workflows built on Grit's Rust implementation.
+It is not intended to be a drop-in replacement for Git. `grit` works on any Git repository and talks to any Git remote, but its commands, output and options are its own: a simpler interface for workflows built on Grit's Rust implementation.
 
 ## Install
 
@@ -185,3 +185,20 @@ Ahead of origin/main by 2 commits
 abc1234 Add example
 fed9876 Refine output
 ```
+
+### Serving repositories: `grit upload-pack` / `grit receive-pack`
+
+These hidden plumbing commands are the server side of fetch and push. They speak
+the Git wire protocol on stdin/stdout, so any Git client can clone from, fetch
+from and push to a repository served by `grit`. `grit-http-server` runs them to
+answer smart HTTP requests, and over ssh a client can be pointed at them:
+
+```sh
+git clone --upload-pack='grit upload-pack' ssh://host/srv/project.git
+git push --receive-pack='grit receive-pack' origin main
+```
+
+`upload-pack` speaks protocol v0, v1 and v2. `receive-pack` honors
+`receive.denyNonFastForwards`, `receive.denyDeletes`,
+`receive.denyCurrentBranch` and the `hideRefs` settings. Shallow fetches,
+partial-clone filters and server-side hooks are not supported yet.

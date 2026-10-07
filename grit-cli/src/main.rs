@@ -17,7 +17,7 @@ use clap::{Parser, Subcommand};
 
 use output::{emit, OutputMode, OutputOptions};
 
-/// A simplified alternative to the Git-compatible `grit-git` command line.
+/// A small, opinionated Git client built on `grit-lib`.
 #[derive(Debug, Parser)]
 #[command(name = "grit", version, about = "A simple Grit-powered CLI")]
 struct Cli {

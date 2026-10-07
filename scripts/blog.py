@@ -267,7 +267,7 @@ def render_index(posts: list[Post]) -> str:
 </section>"""
         for i, post in enumerate(posts)
     ) or '<section class="commit"><div class="rail"></div><div class="entry"><p>No posts yet.</p></div></section>'
-    links = '<a href="../">Home</a><a href="feed.xml">RSS feed</a><a href="../progress/">Compatibility report</a>'
+    links = '<a href="../">Home</a><a href="feed.xml">RSS feed</a><a href="https://github.com/gitbutlerapp/grit">GitHub</a>'
     body = f"""<main>
 <section class=\"commit\">
   {rail("line from-head", "head-dot")}

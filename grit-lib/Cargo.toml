@@ -16,9 +16,6 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 [features]
-# Gates the test-tool-only modules (`parse_options_test_tool`, `test_tool_progress`).
-# Empty by default; enabled transitively by `grit-git`'s default `test-tools` feature.
-test-tools = []
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport
 # (`transport::http::ureq_client`). Off by default so embedders can bring their
 # own HTTP stack.

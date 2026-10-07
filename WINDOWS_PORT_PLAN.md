@@ -1,13 +1,13 @@
 # Windows Compilation Plan — `grit-lib` + `grit-cli`
 
-Goal: get `grit-lib` and `grit-cli` to **compile for Windows**. `grit-git`
-(`grit/`) and the other workspace members (`grit-http-server`, `grit-protocol`,
-`grit-utils`, `grit-examples`) are explicitly **out of scope**.
+Goal: get `grit-lib` and `grit-cli` to **compile for Windows**. The other
+workspace members (`grit-http-server`, `grit-protocol`, `grit-utils`,
+`grit-examples`) are explicitly **out of scope**.
 
 `grit-cli` (the `grit` binary) contains **no platform-specific code of its
 own** — it only re-exports `grit-lib` operations through `clap`. So "make
 grit-cli build on Windows" reduces entirely to "make `grit-lib` build on
-Windows with its default feature set" (`test-tools` and `http-ureq` both off).
+Windows with its default feature set" (`http-ureq` off).
 
 ## Current state
 
@@ -21,9 +21,6 @@ infrastructure modules are gated:
 - `simple_ipc` and `unix_process` are `#[cfg(unix)]` modules with
   `#[cfg(not(unix))]` stubs in `lib.rs` (Unix-domain-socket IPC and
   `kill(2)`-based process control are Unix-only).
-- `test_tool_progress` (uses `AsRawFd`) and `parse_options_test_tool` are gated
-  behind the `test-tools` feature, which is **off** in `grit-cli`'s build, so
-  they never compile here.
 - Already-ported with both branches: `ident_resolve`, `signing`, `mailmap`,
   `index`, `crlf`, `attributes`, `untracked_cache`, `ident_config`, `repo`,
   `split_index`, `shared_repo`, `porcelain/stash`, `porcelain/status`, `odb`,
