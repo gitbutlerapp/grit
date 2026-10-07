@@ -212,6 +212,13 @@ def collect_listed_sources_for_dir(sections: list[SectionSpec], root: Path) -> d
     return listed
 
 
+def prepare_markdown_body(body: str) -> str:
+    """Expand includes and ``rustdoc:`` links for Markdown body text."""
+    body = expand_includes(body)
+    rustdoc_links.ensure_local_rustdoc(DOC_ROOT, repo_root=ROOT)
+    return rustdoc_links.expand_rustdoc_links(body, doc_root=DOC_ROOT)
+
+
 def load_page(
     path: Path,
     spec: PageSpec,
@@ -225,8 +232,8 @@ def load_page(
     is_command = path.parent.name == "commands"
     if is_command and group not in command_groups:
         raise SystemExit(f"{path}: group {group!r} must be one of {command_groups}")
-    body = expand_includes(body)
     if spec.slug == "benchmarks":
+        body = expand_includes(body)
         before, after = benchpage.split_benchmark_markdown(body)
         before_html, toc_before = blog.markdown_to_html(before)
         after_html, toc_after = blog.markdown_to_html(after)
@@ -234,6 +241,7 @@ def load_page(
         body_html = before_html + tables + after_html
         toc = toc_before + toc_after
     else:
+        body = prepare_markdown_body(body)
         body_html, toc = blog.markdown_to_html(body)
     return Page(
         spec.slug,
