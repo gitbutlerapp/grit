@@ -720,6 +720,7 @@ pub fn status(
     // Load the index, remembering whether it was sparse on disk, then expand
     // sparse-directory placeholders so the diffs see real entries.
     let index_path = repo.index_path();
+    let index_mtime = crate::index::index_file_mtime(&index_path);
     let mut index = match Index::load(&index_path) {
         Ok(i) => i,
         Err(crate::error::Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Index::new(),
@@ -758,6 +759,7 @@ pub fn status(
         &index,
         work_tree,
         crate::diff::DiffIndexToWorktreeOptions {
+            index_mtime,
             ignore_submodule_untracked: opts.untracked == UntrackedMode::No,
             ..Default::default()
         },

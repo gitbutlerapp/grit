@@ -158,6 +158,37 @@ fn init_checked_out_submodule(parent: &Path, name: &str) -> Result<String, Box<d
 }
 
 #[test]
+fn add_pathless_does_not_stage_ignored_files_in_new_directory() -> TestResult {
+    let scratch = Scratch::new("add-ignore-dir")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    write_file(&repo.join(".gitignore"), "*.log\n")?;
+    write_file(&repo.join("tracked.txt"), "t\n")?;
+    gs_ok(&repo, ["add", "tracked.txt"])?;
+    gs_ok(&repo, ["commit", "-m", "base"])?;
+
+    fs::create_dir_all(repo.join("new"))?;
+    write_file(&repo.join("new/keep.txt"), "keep\n")?;
+    write_file(&repo.join("new/ignored.log"), "noise\n")?;
+
+    gs_ok(&repo, ["add"])?;
+
+    git_ok(&repo, &["ls-files", "--stage"])?;
+    let listed = git_in(&repo, &["ls-files"])?;
+    let files: Vec<_> = listed.stdout.lines().collect();
+    assert!(
+        files.iter().any(|p| p.ends_with("new/keep.txt")),
+        "expected new/keep.txt staged, got: {files:?}"
+    );
+    assert!(
+        !files.iter().any(|p| p.ends_with("ignored.log")),
+        "ignored.log must not be staged, got: {files:?}"
+    );
+    Ok(())
+}
+
+#[test]
 #[cfg(unix)]
 fn add_explicit_pathspec_does_not_walk_ignored_subtree() -> TestResult {
     use std::os::unix::fs::PermissionsExt;

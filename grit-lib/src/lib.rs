@@ -258,5 +258,6 @@ pub mod wildmatch;
 pub mod worktree;
 pub mod worktree_cwd;
 pub mod worktree_ref;
+mod worktree_scan;
 pub mod write_tree;
 pub mod ws;

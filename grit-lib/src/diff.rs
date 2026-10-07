@@ -2380,6 +2380,108 @@ pub struct DiffIndexToWorktreeOptions {
 /// - `work_tree` — path to the working tree root.
 /// - `options` — optional context for racy timestamp checks.
 ///
+#[allow(clippy::too_many_arguments)]
+fn push_index_blob_worktree_diff(
+    odb: &Odb,
+    ie: &IndexEntry,
+    path_str_ref: &str,
+    file_path: &Path,
+    meta: fs::Metadata,
+    index_mtime: Option<(u32, u32)>,
+    config: &ConfigSet,
+    attrs: &[crate::crlf::AttrRule],
+    conv: &crate::crlf::ConversionConfig,
+    materialize_dirty_blobs: bool,
+    result: &mut Vec<DiffEntry>,
+) -> Result<()> {
+    if meta.is_dir() {
+        if file_path.join(".git").exists() {
+            let head = read_submodule_head_oid(file_path).unwrap_or_else(zero_oid);
+            let path_owned = path_str_ref.to_owned();
+            result.push(DiffEntry {
+                status: DiffStatus::TypeChanged,
+                old_path: Some(path_owned.clone()),
+                new_path: Some(path_owned),
+                old_mode: format_mode(ie.mode),
+                new_mode: format_mode(0o160000),
+                old_oid: ie.oid,
+                new_oid: head,
+                score: None,
+            });
+            return Ok(());
+        }
+        result.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(path_str_ref.to_owned()),
+            new_path: None,
+            old_mode: format_mode(ie.mode),
+            new_mode: String::new(),
+            old_oid: ie.oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+        return Ok(());
+    }
+
+    let worktree_mode = mode_from_metadata(&meta);
+    let stat_same = stat_matches(ie, &meta);
+    if stat_same && worktree_mode != ie.mode {
+        let path_owned = path_str_ref.to_owned();
+        result.push(DiffEntry {
+            status: DiffStatus::Modified,
+            old_path: Some(path_owned.clone()),
+            new_path: Some(path_owned),
+            old_mode: format_mode(ie.mode),
+            new_mode: format_mode(worktree_mode),
+            old_oid: ie.oid,
+            new_oid: ie.oid,
+            score: None,
+        });
+        return Ok(());
+    }
+
+    if stat_same && worktree_mode == ie.mode && !entry_is_racy(ie, index_mtime) {
+        return Ok(());
+    }
+
+    let file_attrs = crate::crlf::get_file_attrs(attrs, path_str_ref, false, config);
+    let worktree_oid = worktree_file_oid(
+        odb,
+        file_path,
+        &meta,
+        conv,
+        &file_attrs,
+        path_str_ref,
+        Some(ie),
+        materialize_dirty_blobs,
+    )?;
+
+    let mut eff_oid = worktree_oid;
+    if eff_oid != ie.oid {
+        if let Ok(raw) = fs::read(file_path) {
+            let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+            if raw_oid == ie.oid {
+                eff_oid = ie.oid;
+            }
+        }
+    }
+
+    if eff_oid != ie.oid || worktree_mode != ie.mode {
+        let path_owned = path_str_ref.to_owned();
+        result.push(DiffEntry {
+            status: DiffStatus::Modified,
+            old_path: Some(path_owned.clone()),
+            new_path: Some(path_owned),
+            old_mode: format_mode(ie.mode),
+            new_mode: format_mode(worktree_mode),
+            old_oid: ie.oid,
+            new_oid: eff_oid,
+            score: None,
+        });
+    }
+    Ok(())
+}
+
 /// # Errors
 ///
 /// Returns errors from I/O or hashing.
@@ -2651,136 +2753,62 @@ fn diff_index_to_worktree_inner(
             continue;
         }
 
-        // If any parent component of the path is a symlink, the file is effectively
-        // deleted from the working tree (a symlink replaced a directory).
-        if dir_symlinks.has_symlink_in_path(work_tree, path_str_ref, precompose_unicode) {
-            result.push(DiffEntry {
-                status: DiffStatus::Deleted,
-                old_path: Some(path_str_ref.to_owned()),
-                new_path: None,
-                old_mode: format_mode(ie.mode),
-                new_mode: "000000".to_owned(),
-                old_oid: ie.oid,
-                new_oid: zero_oid(),
-                score: None,
-            });
-            continue;
-        }
-
-        match fs::symlink_metadata(&file_path) {
-            Ok(meta) if meta.is_dir() => {
-                // A directory exists where the index expects a file. A populated submodule
-                // checkout (`.git` present) is a blob→gitlink typechange with the submodule HEAD on
-                // the new side (raw output re-zeros it); otherwise the indexed file is effectively
-                // deleted. See t4041/t4060 #13.
-                if file_path.join(".git").exists() {
-                    let head = read_submodule_head_oid(&file_path).unwrap_or_else(zero_oid);
-                    let path_owned = path_str_ref.to_owned();
-                    result.push(DiffEntry {
-                        status: DiffStatus::TypeChanged,
-                        old_path: Some(path_owned.clone()),
-                        new_path: Some(path_owned),
-                        old_mode: format_mode(ie.mode),
-                        new_mode: format_mode(0o160000),
-                        old_oid: ie.oid,
-                        new_oid: head,
-                        score: None,
-                    });
-                    continue;
-                }
-                result.push(DiffEntry {
-                    status: DiffStatus::Deleted,
-                    old_path: Some(path_str_ref.to_owned()),
-                    new_path: None,
-                    old_mode: format_mode(ie.mode),
-                    new_mode: String::new(),
-                    old_oid: ie.oid,
-                    new_oid: zero_oid(),
-                    score: None,
-                });
-            }
-            Ok(meta) => {
-                let worktree_mode = mode_from_metadata(&meta);
-                let stat_same = stat_matches(ie, &meta);
-                // Mode-only change: stat still matches the index entry but executable bit differs.
-                if stat_same && worktree_mode != ie.mode {
-                    let path_owned = path_str_ref.to_owned();
-                    result.push(DiffEntry {
-                        status: DiffStatus::Modified,
-                        old_path: Some(path_owned.clone()),
-                        new_path: Some(path_owned),
-                        old_mode: format_mode(ie.mode),
-                        new_mode: format_mode(worktree_mode),
-                        old_oid: ie.oid,
-                        new_oid: ie.oid,
-                        score: None,
-                    });
-                    continue;
-                }
-
-                // Fast path: unchanged stat + unchanged mode + non-racy timestamp means this entry
-                // is clean without re-hashing blob data.
-                if stat_same && worktree_mode == ie.mode && !entry_is_racy(ie, index_mtime) {
-                    continue;
-                }
-
-                // Hash the worktree blob for uncertain/racy entries.
-                let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref, false, &config);
-                let worktree_oid = worktree_file_oid(
-                    odb,
-                    &file_path,
-                    &meta,
-                    &conv,
-                    &file_attrs,
-                    path_str_ref,
-                    Some(ie),
-                    materialize_dirty_blobs,
-                )?;
-
-                // If clean conversion disagrees with the index but raw bytes match the
-                // blob (e.g. mixed line endings committed with autocrlf off), Git reports
-                // no diff (t0020: touch + git diff --exit-code).
-                let mut eff_oid = worktree_oid;
-                if eff_oid != ie.oid {
-                    if let Ok(raw) = fs::read(&file_path) {
-                        let raw_oid = odb.hash(ObjectKind::Blob, &raw);
-                        if raw_oid == ie.oid {
-                            eff_oid = ie.oid;
-                        }
-                    }
-                }
-
-                if eff_oid != ie.oid || worktree_mode != ie.mode {
-                    let path_owned = path_str_ref.to_owned();
-                    result.push(DiffEntry {
-                        status: DiffStatus::Modified,
-                        old_path: Some(path_owned.clone()),
-                        new_path: Some(path_owned),
-                        old_mode: format_mode(ie.mode),
-                        new_mode: format_mode(worktree_mode),
-                        old_oid: ie.oid,
-                        new_oid: eff_oid,
-                    score: None,
-                    });
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound
-                || e.raw_os_error() == Some(20) /* ENOTDIR */ => {
-                // File deleted from working tree (or parent replaced by a file)
-                result.push(DiffEntry {
-                    status: DiffStatus::Deleted,
-                    old_path: Some(path_str_ref.to_owned()),
-                    new_path: None,
-                    old_mode: format_mode(ie.mode),
-                    new_mode: "000000".to_owned(),
-                    old_oid: ie.oid,
-                    new_oid: zero_oid(),
-                    score: None,
-                });
-            }
-            Err(e) => return Err(Error::Io(e)),
-        }
+        // Regular blobs: compared in one `read_dir` pass per directory below.
     }
+
+    use crate::worktree_scan::{
+        for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup,
+    };
+    let blob_dirs = group_blob_entries_by_dir(index);
+    let dir_abs = |dir: &str| {
+        if dir.is_empty() {
+            work_tree.to_path_buf()
+        } else {
+            index_entry_worktree_abs(work_tree, dir, precompose_unicode)
+        }
+    };
+    let file_abs = |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode);
+    for_each_blob_by_directory(
+        index,
+        &blob_dirs,
+        dir_abs,
+        file_abs,
+        |rel_path| dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode),
+        |_entry_index, ie, path_str_ref, lookup| {
+            let file_path = index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode);
+            match lookup {
+                BlobDiskLookup::Missing => {
+                    result.push(DiffEntry {
+                        status: DiffStatus::Deleted,
+                        old_path: Some(path_str_ref.to_owned()),
+                        new_path: None,
+                        old_mode: format_mode(ie.mode),
+                        new_mode: "000000".to_owned(),
+                        old_oid: ie.oid,
+                        new_oid: zero_oid(),
+                        score: None,
+                    });
+                }
+                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+                BlobDiskLookup::Present(meta) => {
+                    push_index_blob_worktree_diff(
+                        odb,
+                        ie,
+                        path_str_ref,
+                        &file_path,
+                        meta,
+                        index_mtime,
+                        &config,
+                        &attrs,
+                        &conv,
+                        materialize_dirty_blobs,
+                        &mut result,
+                    )?;
+                }
+            }
+            Ok(())
+        },
+    )?;
 
     for (path, (_, base_entry)) in unmerged_base {
         let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode);
@@ -3325,11 +3353,6 @@ pub fn refresh_index_stat_content_verified(
             continue;
         };
         if stat_matches(ie, &meta) {
-            // Git `ie_match_stat`: a clean stat is trusted without reading the file unless the
-            // entry is racy (written within the index's own mtime). Only then re-verify content;
-            // stat can be refreshed from the work tree without matching the indexed blob (e.g.
-            // after merge stat refresh while local edits remain) — invalidate so diff/status
-            // re-hash.
             if entry_is_racy(ie, index_mtime) {
                 let Ok(path) = std::str::from_utf8(&ie.path) else {
                     continue;
