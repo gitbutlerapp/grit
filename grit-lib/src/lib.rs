@@ -175,6 +175,7 @@ pub mod pack_geometry;
 pub(crate) mod pack_index_build;
 pub mod pack_name_hash;
 pub mod pack_rev;
+pub(crate) mod pack_zlib;
 pub mod patch_ids;
 pub mod path;
 pub mod path_icase;
