@@ -4,6 +4,7 @@
 //! not a full `status` pass, so large trees with few edits stay fast.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::index::MODE_TREE;
