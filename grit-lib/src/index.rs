@@ -2569,7 +2569,7 @@ pub fn entry_from_stat(
 ///
 /// Uses the `filetime` crate so index mtime reads behave the same on Unix and Windows.
 #[must_use]
-pub(crate) fn index_file_mtime(path: &Path) -> Option<(u32, u32)> {
+pub fn index_file_mtime(path: &Path) -> Option<(u32, u32)> {
     let meta = fs::metadata(path).ok()?;
     let ft = filetime::FileTime::from_last_modification_time(&meta);
     let secs = ft.unix_seconds();

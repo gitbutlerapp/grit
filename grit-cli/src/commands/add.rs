@@ -1,27 +1,23 @@
 //! `grit add` — stage changes. With no paths, stages everything.
 //!
-//! Staging is driven by the same status model the dashboard uses, so `grit add`
-//! stages exactly what `grit status` reports as changed — including deletions and
-//! untracked files — without reimplementing worktree walking or ignore rules.
+//! Staging uses the library [`stage_worktree_changes`] engine (index/worktree diff),
+//! not a full `status` pass, so large trees with few edits stay fast.
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::diff::{mode_from_metadata, DiffStatus};
-use grit_lib::index::{Index, MODE_TREE};
-use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use grit_lib::index::MODE_TREE;
+use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
 use grit_lib::pathspec::{
     has_glob_chars, matches_pathspec_list, pathdiff, pathspec_is_exclude,
     resolve_pathspec_in_worktree,
 };
-use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
+use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::precompose_config::effective_core_precomposeunicode;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
-use grit_lib::unicode_normalization::resolve_worktree_path_for_staging;
 use serde::Serialize;
 
 use crate::context;
@@ -83,15 +79,6 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
         Some(specs)
     };
 
-    // Enumerate untracked *files* (not collapsed directories like `sub/`), so we
-    // can hash each one rather than trying to read a directory as a blob.
-    let opts = StatusOptions {
-        untracked: UntrackedMode::All,
-        ..StatusOptions::default()
-    };
-    let model = status(repo, &opts, &mut NullProgress).context("could not compute status")?;
-    let mut index = repo.load_index().context("could not load the index")?;
-
     if let Some(specs) = &resolved_specs {
         let positive = selectors
             .iter()
@@ -99,69 +86,27 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
             .filter(|(s, _)| !pathspec_is_exclude(s))
             .collect::<Vec<_>>();
         if !positive.is_empty() {
-            let known = known_paths(repo, &index, &model)?;
+            let known = known_paths(repo)?;
             for (orig, resolved) in positive {
                 if !selector_matches_known(resolved, &known, &work_tree)? {
                     bail!("pathspec '{orig}' did not match any files");
                 }
             }
         }
+        return stage_worktree_changes(repo, specs).context("could not stage changes");
     }
 
-    let matches = |path: &str| {
-        resolved_specs
-            .as_ref()
-            .is_none_or(|specs| matches_pathspec_list(path, specs))
-    };
-
-    let mut staged = 0;
-    if selectors.is_empty() {
-        let tracked = stage_tracked_modifications(repo, &work_tree)
-            .context("could not stage tracked modifications")?;
-        staged += tracked.change_count();
-        index = repo.load_index().context("could not reload the index")?;
-        for path in &model.untracked {
-            stage_worktree_file(repo, &work_tree, path, &mut index)?;
-            staged += 1;
-        }
-    } else {
-        for entry in &model.unstaged {
-            let path = entry_path(entry);
-            if !matches(path) {
-                continue;
-            }
-            if entry.status == DiffStatus::Deleted {
-                if index.remove(path.as_bytes()) {
-                    staged += 1;
-                }
-            } else {
-                stage_worktree_file(repo, &work_tree, path, &mut index)?;
-                staged += 1;
-            }
-        }
-        for path in &model.untracked {
-            if !matches(path) {
-                continue;
-            }
-            stage_worktree_file(repo, &work_tree, path, &mut index)?;
-            staged += 1;
-        }
-    }
-
-    if staged > 0 {
-        index.sort();
-        repo.write_index(&mut index)
-            .context("could not write the index")?;
-    }
-    Ok(staged)
+    stage_worktree_changes(repo, &[]).context("could not stage changes")
 }
 
-/// Paths that may satisfy an explicit pathspec (index, HEAD tree, and status).
-fn known_paths(
-    repo: &Repository,
-    index: &Index,
-    model: &grit_lib::porcelain::status::StatusModel,
-) -> Result<Vec<String>> {
+/// Paths that may satisfy an explicit pathspec (index, HEAD tree, and a status snapshot).
+fn known_paths(repo: &Repository) -> Result<Vec<String>> {
+    let index = repo.load_index().context("could not load the index")?;
+    let opts = StatusOptions {
+        untracked: UntrackedMode::All,
+        ..StatusOptions::default()
+    };
+    let model = status(repo, &opts, &mut NullProgress).context("could not compute status")?;
     let mut set = HashSet::<String>::new();
     for entry in &index.entries {
         if entry.stage() == 0 {
@@ -234,42 +179,4 @@ fn selector_matches_known(resolved: &str, known: &[String], work_tree: &Path) ->
         }
     }
     Ok(false)
-}
-
-/// Hash a working-tree file into a blob and (re)stage it in the index.
-fn stage_worktree_file(
-    repo: &Repository,
-    work_tree: &std::path::Path,
-    rel_path: &str,
-    index: &mut Index,
-) -> Result<()> {
-    let precompose = effective_core_precomposeunicode(Some(&repo.git_dir));
-    let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose);
-    let abs = &resolved.abs;
-    let rel_index = resolved.index_relpath;
-    let meta =
-        std::fs::symlink_metadata(abs).with_context(|| format!("could not read {rel_path}"))?;
-    let mode = mode_from_metadata(&meta);
-
-    let data = if meta.file_type().is_symlink() {
-        let target = std::fs::read_link(abs)
-            .with_context(|| format!("could not read symlink {rel_path}"))?;
-        target.to_string_lossy().into_owned().into_bytes()
-    } else {
-        std::fs::read(abs).with_context(|| format!("could not read {rel_path}"))?
-    };
-
-    let oid = repo
-        .odb
-        .write(ObjectKind::Blob, &data)
-        .with_context(|| format!("could not store {rel_path}"))?;
-    let entry = grit_lib::index::entry_from_stat(abs, rel_index.as_bytes(), oid, mode)
-        .with_context(|| format!("could not stage {rel_path}"))?;
-    index.add_or_replace(entry);
-    if index.fsmonitor_last_update.is_some() {
-        if let Some(staged) = index.get_mut(rel_index.as_bytes(), 0) {
-            staged.set_fsmonitor_valid(true);
-        }
-    }
-    Ok(())
 }
