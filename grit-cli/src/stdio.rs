@@ -1,7 +1,7 @@
 //! Stdout behavior when the reader closes early (e.g. `grit log | head`).
 //!
 //! Rust ignores `SIGPIPE` by default, so writes to a closed pipe return
-//! [`ErrorKind::BrokenPipe`] and `println!` panics. Git restores the default
+//! `std::io::ErrorKind::BrokenPipe` and `println!` panics. Git restores the default
 //! handler so the process terminates with signal 13 (exit 141) instead of
 //! printing a backtrace.
 
