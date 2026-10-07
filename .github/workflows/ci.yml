@@ -16,6 +16,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docs freshness and link check
+        run: make docs-check
+
+      - name: Site script unit tests
+        run: python3 -m unittest discover scripts/tests
+
   fmt:
     name: fmt
     runs-on: ubuntu-latest

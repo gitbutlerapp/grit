@@ -2,16 +2,22 @@
 """Generate the static Grit blog from Markdown content."""
 from __future__ import annotations
 
+import argparse
 import email.utils
 import hashlib
 import html
 import re
 import shutil
+import sys
+import tempfile
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_util  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_DIR = ROOT / "content" / "blog"
@@ -416,19 +422,48 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 '''
 
 
-def main() -> None:
+def generate(out_dir: Path) -> None:
     posts = load_posts()
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
-    OUT_DIR.mkdir(parents=True)
-    (OUT_DIR / "index.html").write_text(render_index(posts), encoding="utf-8")
-    (OUT_DIR / "feed.xml").write_text(render_feed(posts), encoding="utf-8")
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    (out_dir / "index.html").write_text(render_index(posts), encoding="utf-8")
+    (out_dir / "feed.xml").write_text(render_feed(posts), encoding="utf-8")
     for post in posts:
-        post_dir = OUT_DIR / post.slug
+        post_dir = out_dir / post.slug
         post_dir.mkdir(parents=True)
         (post_dir / "index.html").write_text(render_post(post), encoding="utf-8")
+
+
+def check_committed() -> int:
+    with tempfile.TemporaryDirectory(prefix="grit-blog-check-") as tmp:
+        generated = Path(tmp) / "blog"
+        generate(generated)
+        issues = site_util.compare_directories(generated, OUT_DIR, label="blog")
+        if issues:
+            for line in issues:
+                print(line, file=sys.stderr)
+            print("blog output is stale; run: make docs", file=sys.stderr)
+            return 1
+    print(f"blog output is up to date ({OUT_DIR.relative_to(ROOT)})")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Render to a temp directory and fail if docs/blog/ differs from committed output.",
+    )
+    args = parser.parse_args(argv)
+    if args.check:
+        return check_committed()
+    generate(OUT_DIR)
+    posts = load_posts()
     print(f"generated {len(posts)} blog post(s) in {OUT_DIR.relative_to(ROOT)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

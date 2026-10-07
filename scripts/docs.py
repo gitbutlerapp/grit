@@ -13,14 +13,17 @@ the rest of the site.
 """
 from __future__ import annotations
 
+import argparse
 import html
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import blog  # noqa: E402
+import site_util  # noqa: E402
 
 ROOT = blog.ROOT
 CONTENT_DIR = ROOT / "content" / "docs"
@@ -190,20 +193,49 @@ CSS = r'''
 '''
 
 
-def main() -> None:
+def generate(out_dir: Path) -> None:
     commands = load_commands()
     index = load_page(CONTENT_DIR / "index.md", "index")
     tutorial = load_page(CONTENT_DIR / "tutorial.md", "tutorial")
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
-    OUT_DIR.mkdir(parents=True)
-    (OUT_DIR / "index.html").write_text(render(index, commands, is_index=True), encoding="utf-8")
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    (out_dir / "index.html").write_text(render(index, commands, is_index=True), encoding="utf-8")
     for page in [tutorial, *commands]:
-        page_dir = OUT_DIR / page.slug
+        page_dir = out_dir / page.slug
         page_dir.mkdir()
         (page_dir / "index.html").write_text(render(page, commands, is_index=False), encoding="utf-8")
+
+
+def check_committed() -> int:
+    with tempfile.TemporaryDirectory(prefix="grit-docs-check-") as tmp:
+        generated = Path(tmp) / "docs"
+        generate(generated)
+        issues = site_util.compare_directories(generated, OUT_DIR, label="docs")
+        if issues:
+            for line in issues:
+                print(line, file=sys.stderr)
+            print("docs output is stale; run: make docs", file=sys.stderr)
+            return 1
+    print(f"docs output is up to date ({OUT_DIR.relative_to(ROOT)})")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Render to a temp directory and fail if docs/docs/ differs from committed output.",
+    )
+    args = parser.parse_args(argv)
+    if args.check:
+        return check_committed()
+    generate(OUT_DIR)
+    commands = load_commands()
     print(f"generated docs for {len(commands)} command(s) in {OUT_DIR.relative_to(ROOT)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

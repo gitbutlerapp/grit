@@ -13,7 +13,7 @@ CARGO ?= cargo
 CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
 export CARGO_BUILD_JOBS
 
-.PHONY: all build debug test clippy fmt gate clean
+.PHONY: all build debug test clippy fmt gate clean docs docs-check
 
 all: build
 
@@ -37,3 +37,10 @@ gate:
 
 clean:
 	$(CARGO) clean
+
+docs:
+	python3 scripts/site.py
+
+docs-check:
+	python3 scripts/site.py --check
+	python3 scripts/linkcheck.py

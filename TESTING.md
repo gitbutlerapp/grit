@@ -80,6 +80,7 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 | Job | What it runs | Reproduce locally |
 | --- | --- | --- |
+| **docs** | `make docs-check` and `python3 -m unittest discover scripts/tests` | `make docs-check && python3 -m unittest discover scripts/tests` |
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **test** | `cargo test -p grit-lib -p grit-cli`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
