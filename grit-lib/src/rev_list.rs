@@ -551,6 +551,9 @@ pub struct RevListOptions {
     pub include_indexed_objects: bool,
     /// Exclude index blobs and valid cache-tree nodes as object roots (`--not --indexed-objects`).
     pub exclude_indexed_objects: bool,
+    /// When true, read parent links and committer dates from the on-disk commit-graph
+    /// when a commit is present in the file (Git commit-graph walk acceleration).
+    pub use_commit_graph: bool,
     /// When true with pathspecs, consult commit-graph Bloom filters (matches `core.commitGraph`).
     pub use_commit_graph_bloom: bool,
     /// `commitGraph.readChangedPaths` (default true).
@@ -617,6 +620,7 @@ impl Default for RevListOptions {
             include_reflog_entries: false,
             include_indexed_objects: false,
             exclude_indexed_objects: false,
+            use_commit_graph: false,
             use_commit_graph_bloom: false,
             commit_graph_read_changed_paths: true,
             commit_graph_changed_paths_version: -1,
@@ -807,7 +811,8 @@ pub fn rev_list(
     negative_specs: &[String],
     options: &RevListOptions,
 ) -> Result<RevListResult> {
-    let mut graph = CommitGraph::new(repo, options.first_parent);
+    let mut graph =
+        CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
 
     let (mut include, mut object_roots, tip_annotated_tag_by_commit) = if options.objects {
         resolve_specs_for_objects_with_options(
@@ -5157,6 +5162,7 @@ pub fn tag_targets(git_dir: &Path) -> Result<HashSet<ObjectId>> {
 pub(crate) struct CommitGraph<'r> {
     repo: &'r Repository,
     first_parent_only: bool,
+    graph_chain: Option<CommitGraphChain>,
     parents: HashMap<ObjectId, Vec<ObjectId>>,
     committer_time: HashMap<ObjectId, i64>,
     author_time: HashMap<ObjectId, i64>,
@@ -5166,11 +5172,25 @@ pub(crate) struct CommitGraph<'r> {
 
 impl<'r> CommitGraph<'r> {
     pub(crate) fn new(repo: &'r Repository, first_parent_only: bool) -> Self {
+        Self::with_commit_graph(repo, first_parent_only, false)
+    }
+
+    pub(crate) fn with_commit_graph(
+        repo: &'r Repository,
+        first_parent_only: bool,
+        use_commit_graph: bool,
+    ) -> Self {
         let shallow_boundaries = load_shallow_boundaries(&repo.git_dir);
         let graft_parents = crate::rev_parse::load_graft_parents(&repo.git_dir);
+        let graph_chain = if use_commit_graph {
+            CommitGraphChain::load(&repo.git_dir.join("objects"))
+        } else {
+            None
+        };
         Self {
             repo,
             first_parent_only,
+            graph_chain,
             parents: HashMap::new(),
             committer_time: HashMap::new(),
             author_time: HashMap::new(),
@@ -5195,7 +5215,17 @@ impl<'r> CommitGraph<'r> {
         if self.populate(oid).is_err() {
             return 0;
         }
+        if !self.author_time.contains_key(&oid) {
+            self.fill_author_time_from_object(oid);
+        }
         self.author_time.get(&oid).copied().unwrap_or(0)
+    }
+
+    fn fill_author_time_from_object(&mut self, oid: ObjectId) {
+        if let Ok(commit) = load_commit(self.repo, oid) {
+            self.author_time
+                .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+        }
     }
 
     fn sort_key(&mut self, oid: ObjectId, author: bool) -> i64 {
@@ -5209,6 +5239,22 @@ impl<'r> CommitGraph<'r> {
     fn populate(&mut self, oid: ObjectId) -> Result<()> {
         if self.parents.contains_key(&oid) {
             return Ok(());
+        }
+        if let Some(chain) = &self.graph_chain {
+            if let Some((mut parents, ctime)) = chain.graph_commit(&oid) {
+                if self.shallow_boundaries.contains(&oid) {
+                    parents.clear();
+                }
+                if let Some(graft_parents) = self.graft_parents.get(&oid) {
+                    parents = graft_parents.clone();
+                }
+                if self.first_parent_only && parents.len() > 1 {
+                    parents.truncate(1);
+                }
+                self.committer_time.insert(oid, ctime);
+                self.parents.insert(oid, parents);
+                return Ok(());
+            }
         }
         let commit = load_commit(self.repo, oid)?;
         // Shallow boundaries: treat commit as having no parents
