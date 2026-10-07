@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use crate::config::{parse_path, ConfigSet};
+use crate::config::parse_path;
 use crate::error::{Error, Result};
 use crate::index::{Index, MODE_GITLINK};
 use crate::objects::ObjectKind;
@@ -352,7 +352,7 @@ impl IgnoreMatcher {
 }
 
 fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let config = repo.config()?;
     let Some(raw_path) = config
         .get("core.excludesfile")
         .or_else(default_global_ignore_path)

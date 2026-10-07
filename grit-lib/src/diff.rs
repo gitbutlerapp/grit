@@ -2373,6 +2373,8 @@ pub struct DiffIndexToWorktreeOptions {
     /// When true, adopt refreshed stat data for unchanged blobs during the same directory scan
     /// as the worktree diff (one lstat per tracked path).
     pub refresh_index_stat_in_pass: bool,
+    /// When set, used instead of loading config from [`Self::repository_git_dir`].
+    pub config: Option<std::sync::Arc<crate::config::ConfigSet>>,
 }
 
 /// Compare the index against the working tree with optional racy-timestamp context.
@@ -2539,8 +2541,13 @@ fn diff_index_to_worktree_inner(
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
     let simplify_gitlinks = options.simplify_gitlinks;
 
-    let config =
-        ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let config = options
+        .config
+        .as_ref()
+        .map(|c| c.as_ref().clone())
+        .unwrap_or_else(|| {
+            ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new())
+        });
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
     let precompose_unicode = config
@@ -3022,6 +3029,7 @@ pub fn smudge_racily_clean_entries(
     index: &mut Index,
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
+    config: Option<&ConfigSet>,
 ) -> bool {
     use crate::crlf;
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
@@ -3030,7 +3038,9 @@ pub fn smudge_racily_clean_entries(
         return false;
     };
 
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = config
+        .cloned()
+        .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default());
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
 
@@ -3391,6 +3401,7 @@ pub fn refresh_index_stat_content_verified(
     index: &mut Index,
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
+    config: Option<&ConfigSet>,
     _parallelism: crate::hash::Parallelism,
 ) -> Result<bool> {
     use crate::config::ConfigSet;
@@ -3400,7 +3411,9 @@ pub fn refresh_index_stat_content_verified(
     };
 
     let index_mtime = index_mtime_for_diff(index, index_mtime);
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = config
+        .cloned()
+        .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default());
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
     let precompose_unicode = config
@@ -3724,11 +3737,33 @@ pub fn diff_tree_to_worktree(
     work_tree: &Path,
     index: &Index,
 ) -> Result<Vec<DiffEntry>> {
+    diff_tree_to_worktree_with_git_dir(
+        odb,
+        tree_oid,
+        work_tree,
+        &work_tree.join(".git"),
+        index,
+        None,
+    )
+}
+
+/// Like [`diff_tree_to_worktree`], but loads config from `repository_git_dir` (linked worktrees / gitfiles).
+///
+/// Pass `config` when the caller already holds a repository config snapshot.
+pub fn diff_tree_to_worktree_with_git_dir(
+    odb: &Odb,
+    tree_oid: Option<&ObjectId>,
+    work_tree: &Path,
+    repository_git_dir: &Path,
+    index: &Index,
+    config: Option<&ConfigSet>,
+) -> Result<Vec<DiffEntry>> {
     use crate::config::ConfigSet;
     use crate::crlf;
 
-    let git_dir = work_tree.join(".git");
-    let config = ConfigSet::load(Some(&git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let config = config.cloned().unwrap_or_else(|| {
+        ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new())
+    });
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
 
@@ -8034,7 +8069,7 @@ mod smudge_racily_clean_tests {
         assert!(entry_is_racy(&entry, Some(index_mtime)));
 
         let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime));
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
         assert!(smudged);
         assert_eq!(index.entries[0].size, 0);
 
@@ -8062,7 +8097,7 @@ mod smudge_racily_clean_tests {
 
         assert!(!entry_is_racy(&entry, Some(index_mtime)));
         let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime));
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
         assert!(!smudged);
         assert_eq!(index.entries[0].size, entry.size);
     }
@@ -8081,7 +8116,7 @@ mod smudge_racily_clean_tests {
 
         assert!(entry_is_racy(&entry, Some(index_mtime)));
         let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime));
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
         assert!(!smudged);
         assert_eq!(index.entries[0].size, entry.size);
     }
@@ -8102,7 +8137,7 @@ mod smudge_racily_clean_tests {
 
         assert!(entry_is_racy(&entry, Some(index_mtime)));
         let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime));
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
         assert!(!smudged, "matching SHA-256 blob must not be smudged");
         assert_eq!(index.entries[0].size, entry.size);
     }
@@ -8123,7 +8158,7 @@ mod smudge_racily_clean_tests {
 
         assert!(entry_is_racy(&entry, Some(index_mtime)));
         let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime));
+            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
         assert!(
             !smudged,
             "CRLF worktree matching clean index OID must not be smudged"
@@ -8151,7 +8186,8 @@ mod smudge_racily_clean_tests {
             &git_dir,
             &mut index,
             wt,
-            Some(index_mtime)
+            Some(index_mtime),
+            None,
         ));
         assert_ne!(index.entries[0].size, 0);
 
@@ -8166,7 +8202,8 @@ mod smudge_racily_clean_tests {
             &git_dir,
             &mut index,
             wt,
-            Some(index_mtime)
+            Some(index_mtime),
+            None,
         ));
         assert_ne!(index.entries[0].size, 0);
     }
@@ -8184,7 +8221,7 @@ mod smudge_racily_clean_tests {
         fs::write(wt.join("f.txt"), b"same length??").expect("rewrite");
         pin_mtime_and_sample(&wt.join("f.txt"), index_mtime.0, index_mtime.1);
 
-        let smudged = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None);
+        let smudged = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None, None);
         assert!(!smudged);
         assert_ne!(index.entries[0].size, 0);
     }

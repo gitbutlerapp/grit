@@ -174,7 +174,7 @@ fn branch_head_ref(short_name: &str) -> String {
 /// Full ref for the configured upstream of `branch_short` (`refs/remotes/...` or `refs/heads/...`).
 #[must_use]
 pub fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Option<String> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true).ok()?;
+    let config = repo.config().ok()?;
     let remote = config.get(&format!("branch.{branch_short}.remote"))?;
     let merge = config.get(&format!("branch.{branch_short}.merge"))?;
     if remote == "." {
@@ -196,7 +196,7 @@ pub fn upstream_tracking_full_ref(repo: &Repository, branch_short: &str) -> Opti
 /// refspec was narrowed is NOT a valid tracking branch and must not be used for `--track`.
 #[must_use]
 pub fn remote_tracking_ref_is_mapped(repo: &Repository, tracking_ref: &str) -> bool {
-    let Ok(config) = ConfigSet::load(Some(&repo.git_dir), true) else {
+    let Ok(config) = repo.config() else {
         return false;
     };
     for entry in config.entries() {

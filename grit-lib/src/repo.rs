@@ -21,7 +21,8 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
@@ -94,12 +95,52 @@ pub struct Repository {
     pub work_tree_from_env: bool,
     /// `.git` was a gitfile (not a directory) when the repo was discovered.
     pub discovery_via_gitfile: bool,
-    /// Cached settings derived from config that are stable for the process lifetime.
+    /// Lazily loaded repository config snapshot (system / global / local / worktree cascade).
     ///
-    /// Cached the first time they are needed; recreated on each `Repository` open. Used to
-    /// avoid re-loading the system/global/local config cascade on every object read in hot
-    /// paths like `Repository::read_replaced`.
-    cached_settings: std::sync::Arc<std::sync::OnceLock<RepoCachedSettings>>,
+    /// Hot paths should call [`Repository::config`] once per operation and pass `&ConfigSet`
+    /// down instead of calling [`ConfigSet::load`] repeatedly. [`Repository::reload_config`]
+    /// replaces the snapshot after in-process config writes so subsequent operations see updates
+    /// without reopening the repository.
+    config_snapshot: RepositoryConfigSnapshot,
+}
+
+pub(crate) type RepositoryConfigSnapshot =
+    Arc<Mutex<Option<(Arc<ConfigSet>, Option<(SystemTime, u64)>)>>>;
+
+fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
+    let meta = fs::metadata(git_dir.join("config")).ok()?;
+    Some((
+        meta.modified().ok()?,
+        meta.len(),
+    ))
+}
+
+pub(crate) fn ensure_shared_config_snapshot(
+    state: &Mutex<Option<(Arc<ConfigSet>, Option<(SystemTime, u64)>)>>,
+    git_dir: Option<&Path>,
+) -> Result<Arc<ConfigSet>> {
+    let mut guard = state
+        .lock()
+        .map_err(|e| Error::Message(format!("config snapshot lock poisoned: {e}")))?;
+    let disk_identity = git_dir.and_then(local_repo_config_identity);
+    let stale = match guard.as_ref() {
+        None => true,
+        Some((_, cached_identity)) => disk_identity != *cached_identity,
+    };
+    if stale {
+        let config = if let Some(git_dir) = git_dir {
+            Arc::new(ConfigSet::load(Some(git_dir), true)?)
+        } else {
+            Arc::new(ConfigSet::new())
+        };
+        *guard = Some((config, disk_identity));
+    }
+    Ok(Arc::clone(
+        &guard
+            .as_ref()
+            .ok_or_else(|| Error::Message("config snapshot missing after init".into()))?
+            .0,
+    ))
 }
 
 /// Repository-level settings derived from config that are read on hot paths.
@@ -151,10 +192,15 @@ impl Repository {
             None => None,
         };
 
+        let config_snapshot = Arc::new(Mutex::new(None));
         let odb = if let Some(ref wt) = work_tree {
-            Odb::with_work_tree(&objects_dir, wt).with_config_git_dir(git_dir.clone())
+            Odb::with_work_tree(&objects_dir, wt)
+                .with_config_git_dir(git_dir.clone())
+                .with_shared_config_state(config_snapshot.clone())
         } else {
-            Odb::new(&objects_dir).with_config_git_dir(git_dir.clone())
+            Odb::new(&objects_dir)
+                .with_config_git_dir(git_dir.clone())
+                .with_shared_config_state(config_snapshot.clone())
         };
 
         Ok(Self {
@@ -165,36 +211,69 @@ impl Repository {
             discovery_root: None,
             work_tree_from_env: false,
             discovery_via_gitfile: false,
-            cached_settings: std::sync::Arc::new(std::sync::OnceLock::new()),
+            config_snapshot,
         })
     }
 
-    /// Lazily compute and return the cached repo-level settings used on hot paths.
+    fn repo_cached_settings_from_config(cfg: &ConfigSet) -> RepoCachedSettings {
+        let use_replace_refs = cfg
+            .get_bool("core.useReplaceRefs")
+            .and_then(|r| r.ok())
+            .unwrap_or(true);
+        let replace_ref_base = std::env::var("GIT_REPLACE_REF_BASE")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "refs/replace/".to_owned());
+        let replace_ref_base = if replace_ref_base.ends_with('/') {
+            replace_ref_base
+        } else {
+            format!("{replace_ref_base}/")
+        };
+        RepoCachedSettings {
+            use_replace_refs,
+            replace_ref_base,
+        }
+    }
+
+    fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
+        ensure_shared_config_snapshot(&self.config_snapshot, Some(&self.git_dir))
+    }
+
+    /// Return the merged configuration cascade for this repository.
     ///
-    /// The settings are computed once per `Repository` instance: they read the system / global
-    /// / local config cascade and may stat env vars. Because `Repository` is reopened per
-    /// command invocation, this matches Git's process-lifetime caching of the same values.
-    fn cached_settings(&self) -> &RepoCachedSettings {
-        self.cached_settings.get_or_init(|| {
-            let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
-            let use_replace_refs = cfg
-                .get_bool("core.useReplaceRefs")
-                .and_then(|r| r.ok())
-                .unwrap_or(true);
-            let replace_ref_base = std::env::var("GIT_REPLACE_REF_BASE")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "refs/replace/".to_owned());
-            let replace_ref_base = if replace_ref_base.ends_with('/') {
-                replace_ref_base
-            } else {
-                format!("{replace_ref_base}/")
-            };
-            RepoCachedSettings {
-                use_replace_refs,
-                replace_ref_base,
-            }
-        })
+    /// The snapshot is loaded lazily on first use and reused while the repository `config`
+    /// file's modification time and size are unchanged. Prefer [`Self::reload_config`] after
+    /// in-process config writes so related caches update immediately.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from reading or parsing config files.
+    pub fn config(&self) -> Result<Arc<ConfigSet>> {
+        self.ensure_config_arc()
+    }
+
+    /// Drop the in-memory config snapshot and load a fresh cascade from disk.
+    ///
+    /// Call after writing `.git/config` (or other cascade files) through library APIs on this
+    /// repository handle so subsequent [`Self::config`] and hot-path readers observe the new data.
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors from [`ConfigSet::load`].
+    pub fn reload_config(&self) -> Result<()> {
+        let config = Arc::new(ConfigSet::load(Some(&self.git_dir), true)?);
+        let mut guard = self
+            .config_snapshot
+            .lock()
+            .map_err(|e| Error::Message(format!("config snapshot lock poisoned: {e}")))?;
+        *guard = Some((config, local_repo_config_identity(&self.git_dir)));
+        Ok(())
+    }
+
+    fn cached_settings(&self) -> RepoCachedSettings {
+        self.ensure_config_arc()
+            .map(|cfg| Self::repo_cached_settings_from_config(cfg.as_ref()))
+            .unwrap_or_else(|_| Self::repo_cached_settings_from_config(&ConfigSet::new()))
     }
 
     /// Open a repository from an explicit git-dir and optional work-tree.
@@ -487,8 +566,8 @@ impl Repository {
     /// Like [`Repository::load_index`], but reads from an explicit index file path
     /// (e.g. `GIT_INDEX_FILE` or a worktree-specific index).
     pub fn load_index_at(&self, path: &std::path::Path) -> Result<Index> {
-        let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
-        if let Some(res) = cfg.get_bool("index.sparse") {
+        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
+        if let Some(res) = cfg.as_ref().get_bool("index.sparse") {
             res.map_err(Error::ConfigError)?;
         }
         let mut idx = Index::load_expand_sparse_optional(path, &self.odb)?;
@@ -501,6 +580,7 @@ impl Repository {
                 &self.git_dir,
                 wt,
                 &mut idx,
+                Some(cfg.as_ref()),
             );
         }
         Ok(idx)
@@ -590,9 +670,9 @@ impl Repository {
         if index.split_index_base_oid().is_some() {
             return false;
         }
-        let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
+        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         matches!(
-            crate::split_index::split_index_config(&cfg),
+            crate::split_index::split_index_config(cfg.as_ref()),
             crate::split_index::SplitIndexConfig::Enabled
         ) || crate::split_index::git_test_split_index_env()
     }
@@ -662,6 +742,7 @@ impl Repository {
         index.hash_algo = self.odb.hash_algo();
         self.finalize_sparse_index_if_needed(index)?;
         let prev_index_mtime = crate::index::index_file_mtime(path);
+        let cfg = self.config()?;
         if let Some(work_tree) = self.work_tree.as_deref() {
             crate::diff::smudge_racily_clean_entries(
                 &self.odb,
@@ -669,11 +750,11 @@ impl Repository {
                 index,
                 work_tree,
                 prev_index_mtime,
+                Some(cfg.as_ref()),
             );
         }
-        let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
-        let skip_hash = crate::index::index_skip_hash_for_write(Some(&cfg));
-        write_index_file_split(path, &self.git_dir, index, &cfg, split, skip_hash)?;
+        let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
+        write_index_file_split(path, &self.git_dir, index, cfg.as_ref(), split, skip_hash)?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
         let updated_skipworktree_arg = if updated_skipworktree { "1" } else { "0" };
@@ -687,7 +768,7 @@ impl Repository {
     }
 
     fn finalize_sparse_index_if_needed(&self, index: &mut Index) -> Result<()> {
-        let cfg = ConfigSet::load(Some(&self.git_dir), true).unwrap_or_default();
+        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         let sparse_enabled = cfg
             .get("core.sparseCheckout")
             .map(|v| v == "true")
@@ -753,7 +834,7 @@ impl Repository {
     /// Whether this is a bare repository (no working tree).
     #[must_use]
     pub fn is_bare(&self) -> bool {
-        if let Ok(cfg) = ConfigSet::load(Some(&self.git_dir), true) {
+        if let Ok(cfg) = self.config() {
             if let Some(Ok(bare)) = cfg.get_bool("core.bare") {
                 return bare;
             }

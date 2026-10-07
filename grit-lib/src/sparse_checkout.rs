@@ -611,9 +611,11 @@ pub fn clear_skip_worktree_from_present_files(
     git_dir: &std::path::Path,
     work_tree: &std::path::Path,
     index: &mut crate::index::Index,
+    config: Option<&crate::config::ConfigSet>,
 ) {
-    let config = crate::config::ConfigSet::load(Some(git_dir), true)
-        .unwrap_or_else(|_| crate::config::ConfigSet::new());
+    let config = config
+        .cloned()
+        .unwrap_or_else(|| crate::config::ConfigSet::load(Some(git_dir), true).unwrap_or_default());
     let sparse_enabled = config
         .get_bool("core.sparsecheckout")
         .and_then(|r| r.ok())

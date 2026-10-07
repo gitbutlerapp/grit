@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{parse_config_parameters, ConfigSet};
+use crate::config::parse_config_parameters;
 use crate::unicode_normalization::{precompose_utf8_path, probe_filesystem_normalizes_nfd_to_nfc};
 
 fn parse_ceiling_directories_paths() -> Vec<PathBuf> {
@@ -204,19 +204,34 @@ fn precompose_from_git_config_parameters() -> Option<bool> {
 }
 
 /// Effective `core.precomposeunicode` after the normal config cascade (system, global, local,
-/// `GIT_CONFIG_PARAMETERS`), matching [`ConfigSet::load`].
+/// `GIT_CONFIG_PARAMETERS`), matching [`crate::config::ConfigSet::load`].
 ///
 /// Does not imply argv should be rewritten: Git only runs `precompose_argv_prefix` when the
 /// filesystem aliases NFD/NFC (or the test harness forces that probe for `git init`).
 #[must_use]
 pub fn effective_core_precomposeunicode(git_dir: Option<&Path>) -> bool {
+    effective_core_precomposeunicode_with_config(git_dir, None)
+}
+
+/// Like [`effective_core_precomposeunicode`], but uses an already-loaded config snapshot when provided.
+#[must_use]
+pub fn effective_core_precomposeunicode_with_config(
+    git_dir: Option<&Path>,
+    config: Option<&crate::config::ConfigSet>,
+) -> bool {
     if let Some(v) = precompose_from_git_config_parameters() {
         return v;
+    }
+    if let Some(cfg) = config {
+        return cfg
+            .get_bool("core.precomposeunicode")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
     }
     let Some(gd) = git_dir else {
         return false;
     };
-    ConfigSet::load(Some(gd), true)
+    crate::config::ConfigSet::load(Some(gd), true)
         .ok()
         .and_then(|cfg| cfg.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
         .unwrap_or(false)

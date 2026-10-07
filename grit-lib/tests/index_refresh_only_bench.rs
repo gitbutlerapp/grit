@@ -42,6 +42,7 @@ fn refresh_index_stat_only_timing() {
         &mut index,
         root,
         index_mtime,
+        Some(&config),
         parallelism,
     )
     .expect("refresh");

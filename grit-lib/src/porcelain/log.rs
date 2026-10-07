@@ -168,8 +168,9 @@ pub fn collect_decorations_inner(
     let odb = &repo.odb;
 
     let head = resolve_head(git_dir)?;
-    let hide_remote_update_noise = ConfigSet::load(Some(git_dir), true)
-        .unwrap_or_default()
+    let hide_remote_update_noise = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()))
         .get("grit.submoduleUpdateRemoteDecorations")
         .as_deref()
         .and_then(|value| parse_bool(value).ok())

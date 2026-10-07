@@ -595,7 +595,7 @@ pub(crate) fn write_index_file_split(
         for e in &mut index.entries {
             e.base_index_pos = 0;
         }
-        index.write_to_path(path, skip_hash)?;
+        index.write_to_path_with_config(path, skip_hash, Some(cfg))?;
         adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
         return Ok(());
     }
@@ -614,7 +614,7 @@ pub(crate) fn write_index_file_split(
         for e in &mut index.entries {
             e.base_index_pos = 0;
         }
-        index.write_to_path(path, skip_hash)?;
+        index.write_to_path_with_config(path, skip_hash, Some(cfg))?;
         adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
         return Ok(());
     }
@@ -695,14 +695,14 @@ pub(crate) fn write_index_file_split(
                 for e in &mut index.entries {
                     e.base_index_pos = 0;
                 }
-                index.write_to_path(path, skip_hash)?;
+                index.write_to_path_with_config(path, skip_hash, Some(cfg))?;
                 adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
                 return Ok(());
             }
             Err(e) => return Err(Error::Io(e)),
         };
         let tmp_path = tmp.path().to_path_buf();
-        shared_index.write_to_path(&tmp_path, skip_hash)?;
+        shared_index.write_to_path_with_config(&tmp_path, skip_hash, Some(cfg))?;
         adjust_shared_perm_file(&tmp_path, shared_repo).map_err(Error::Io)?;
         let file_data = fs::read(&tmp_path).map_err(Error::Io)?;
         let hash_len = index.hash_algo.len();
@@ -719,7 +719,7 @@ pub(crate) fn write_index_file_split(
                 for ent in &mut index.entries {
                     ent.base_index_pos = 0;
                 }
-                index.write_to_path(path, skip_hash)?;
+                index.write_to_path_with_config(path, skip_hash, Some(cfg))?;
                 adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
                 return Ok(());
             }
@@ -824,7 +824,7 @@ pub(crate) fn write_index_file_split(
         source_mtime: index.source_mtime,
     };
 
-    out_index.write_to_path(path, skip_hash)?;
+    out_index.write_to_path_with_config(path, skip_hash, Some(cfg))?;
     adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
 
     for e in &mut index.entries {

@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
-use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
@@ -603,7 +602,7 @@ struct CommitGraphCache<'r> {
 
 impl<'r> CommitGraphCache<'r> {
     fn new(repo: &'r Repository) -> Self {
-        let cfg = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+        let cfg = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         // Stop ancestry traversal only at genuinely-missing promisor objects, not
         // at every member of a promisor pack. The clone base commit lives in a
         // promisor pack but is fully present locally; treating it as a stop point

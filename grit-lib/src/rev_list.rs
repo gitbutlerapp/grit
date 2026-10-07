@@ -811,6 +811,9 @@ pub fn rev_list(
     negative_specs: &[String],
     options: &RevListOptions,
 ) -> Result<RevListResult> {
+    let repo_config = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     let mut graph =
         CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
 
@@ -975,7 +978,7 @@ pub fn rev_list(
     // counters; doing it later (after the set is already reduced) would miss TREESAME-dropped
     // commits like the latest layer's empty filters.
     let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) = if !options.paths.is_empty() {
-        let cfg = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+        let cfg = repo_config.as_ref();
         let mut core_cg = match cfg.get_bool("core.commitgraph") {
             Some(Ok(b)) => b,
             _ => true,
@@ -1427,7 +1430,7 @@ pub fn rev_list(
 
     let sparse_lines = sparse_oid_lines_from_filter(repo, options.filter.as_ref())?;
     let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
-    let walk_cfg = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let walk_cfg = repo_config.as_ref().clone();
     let promisor_repo = crate::promisor::repo_treats_promisor_packs(&repo.git_dir, &walk_cfg);
     let object_walk_missing_action = if options.objects
         && options.missing_action == MissingAction::Error
@@ -1921,7 +1924,7 @@ pub fn render_commit_with_color(
             // in the format (matches git's lazy `%G?`/`%GS` evaluation).
             let signature: Option<crate::signing::SignatureCheck> = if raw_fmt.contains("%G") {
                 repo.odb.read(&oid).ok().map(|obj| {
-                    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+                    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
                     match crate::signing::GpgConfig::from_config(&config) {
                         Ok(cfg) => crate::signing::verify_commit(&cfg, &obj.data)
                             .unwrap_or_else(|_| crate::signing::SignatureCheck::default_none()),

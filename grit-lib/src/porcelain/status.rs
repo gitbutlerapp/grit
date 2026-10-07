@@ -32,7 +32,7 @@ use crate::hash::{index_parallelism_from_config, try_par_hash_with, ParallelHash
 use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
-use crate::precompose_config::effective_core_precomposeunicode;
+use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::state::{HeadState, WtStatusState};
 use crate::unicode_normalization::precompose_utf8_segment;
@@ -180,7 +180,8 @@ pub(crate) fn collect_untracked_and_ignored_inner(
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
     // pathspec-based pruning entirely.
     let effective_pathspecs: &[String] = if pathspecs.is_empty() { &[] } else { pathspecs };
-    let ignorecase = crate::config::ConfigSet::load(Some(&repo.git_dir), true)
+    let ignorecase = repo
+        .config()
         .ok()
         .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
@@ -202,7 +203,10 @@ pub(crate) fn collect_untracked_and_ignored_inner(
     let matcher = IgnoreMatcher::from_repository(repo)?;
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
-    let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
+    let precompose_unicode = effective_core_precomposeunicode_with_config(
+        Some(&repo.git_dir),
+        repo.config().ok().as_deref(),
+    );
 
     if !sort_paths && effective_pathspecs.is_empty() && tracked.is_empty() && gitlinks.is_empty() {
         untracked = collect_untracked_parallel_top_level(
@@ -1109,6 +1113,7 @@ pub fn status(
 
     let head = crate::state::resolve_head(&repo.git_dir)?;
     let state = crate::state::wt_status_get_state(&repo.git_dir, &head, true)?;
+    let repo_config = repo.config().ok();
 
     // Load the index, remembering whether it was sparse on disk, then expand
     // sparse-directory placeholders so the diffs see real entries.
@@ -1158,6 +1163,7 @@ pub fn status(
                 ignore_submodule_untracked: opts.untracked == UntrackedMode::No,
                 repository_git_dir: Some(repo.git_dir.clone()),
                 refresh_index_stat_in_pass: true,
+                config: repo_config.clone(),
                 ..Default::default()
             },
         )?;

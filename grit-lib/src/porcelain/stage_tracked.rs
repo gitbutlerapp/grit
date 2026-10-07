@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::ConfigSet;
 use crate::diff::{
     entry_is_racy, index_entry_worktree_abs, mode_from_metadata, read_submodule_head_oid,
     stat_matches, symlink_target_bytes, SymlinkDirCache,
@@ -19,7 +18,7 @@ use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
 };
 use crate::objects::{ObjectId, ObjectKind};
-use crate::precompose_config::effective_core_precomposeunicode;
+use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_scan::{for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup};
@@ -107,8 +106,12 @@ pub fn stage_tracked_modifications_in_index(
     index: &mut Index,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
-    let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
-    let trust_filemode = ConfigSet::load(Some(&repo.git_dir), true)
+    let precompose_unicode = effective_core_precomposeunicode_with_config(
+        Some(&repo.git_dir),
+        repo.config().ok().as_deref(),
+    );
+    let trust_filemode = repo
+        .config()
         .ok()
         .and_then(|cfg| cfg.get_bool("core.filemode").and_then(|r| r.ok()))
         .unwrap_or(true);

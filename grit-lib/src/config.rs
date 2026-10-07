@@ -34,7 +34,51 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::error::{Error, Result};
+
+/// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
+#[cfg(test)]
+pub mod cascade_load_counters {
+    use super::{AtomicUsize, Ordering};
+
+    static UNCACHED: AtomicUsize = AtomicUsize::new(0);
+    static CACHE_VALIDATED: AtomicUsize = AtomicUsize::new(0);
+
+    /// Reset counters before an operation under test.
+    pub fn reset() {
+        UNCACHED.store(0, Ordering::SeqCst);
+        CACHE_VALIDATED.store(0, Ordering::SeqCst);
+    }
+
+    /// Full cascade parses (cache miss).
+    #[must_use]
+    pub fn uncached_loads() -> usize {
+        UNCACHED.load(Ordering::SeqCst)
+    }
+
+    /// Served from the process-global config cache after stat revalidation.
+    #[must_use]
+    pub fn cache_validated_loads() -> usize {
+        CACHE_VALIDATED.load(Ordering::SeqCst)
+    }
+
+    /// Total [`ConfigSet::load`] / [`ConfigSet::load_with_options`] invocations.
+    #[must_use]
+    pub fn total_loads() -> usize {
+        uncached_loads().saturating_add(cache_validated_loads())
+    }
+
+    pub(crate) fn record_uncached() {
+        UNCACHED.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn record_cache_validated() {
+        CACHE_VALIDATED.fetch_add(1, Ordering::SeqCst);
+    }
+}
 use crate::refs;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
 
@@ -1914,13 +1958,19 @@ impl ConfigSet {
     /// `ConfigCacheKey` type).
     pub fn load_with_options(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Result<Self> {
         let Some(env_fp) = config_env_fingerprint() else {
+            #[cfg(test)]
+            cascade_load_counters::record_uncached();
             return Self::load_with_options_uncached(git_dir, opts, &mut Vec::new());
         };
         let key = ConfigCacheKey::new(git_dir, opts);
         let base_stamps = config_file_stamps(git_dir, opts);
         if let Some(cached) = config_cache_lookup(&key, &env_fp, &base_stamps) {
+            #[cfg(test)]
+            cascade_load_counters::record_cache_validated();
             return Ok(cached);
         }
+        #[cfg(test)]
+        cascade_load_counters::record_uncached();
         let mut included_files = Vec::new();
         let set = Self::load_with_options_uncached(git_dir, opts, &mut included_files)?;
         included_files.sort_unstable();

@@ -113,11 +113,14 @@ pub fn stage(
         .unwrap_or(false);
     let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
+    let repo_config = repo.config().ok();
     let unstaged = if index.entries.is_empty() {
         Vec::new()
     } else {
         let diff_opts = DiffIndexToWorktreeOptions {
             index_mtime,
+            repository_git_dir: Some(repo.git_dir.clone()),
+            config: repo_config.clone(),
             ..DiffIndexToWorktreeOptions::default()
         };
         let (unstaged, _) = crate::diff::diff_index_to_worktree_for_staging(
@@ -227,7 +230,7 @@ struct StagingConvertContext {
 
 impl StagingConvertContext {
     fn load(repo: &Repository, work_tree: &Path) -> Self {
-        let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+        let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conv = crlf::ConversionConfig::from_config(&config);
         let attrs = crlf::load_gitattributes(work_tree);
         Self {

@@ -154,6 +154,8 @@ pub struct Odb {
     hash_algo_cache: Arc<OnceLock<HashAlgo>>,
     /// Zlib level for loose-object writes, resolved from config and cached.
     loose_zlib_cache: Arc<OnceLock<Compression>>,
+    /// Shared with [`crate::repo::Repository`] so config is loaded once per open handle.
+    shared_config_state: Option<crate::repo::RepositoryConfigSnapshot>,
     /// Pack files whose mtimes were already bumped for object freshening on this [`Odb`]
     /// (Git's `packed_git->freshened`: at most one `utimensat` per pack per process).
     freshened_packs: Arc<Mutex<HashSet<PathBuf>>>,
@@ -216,6 +218,7 @@ impl Odb {
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            shared_config_state: None,
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
@@ -245,6 +248,7 @@ impl Odb {
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            shared_config_state: None,
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
@@ -258,6 +262,36 @@ impl Odb {
     #[must_use]
     pub fn hot_path_test_metrics(&self) -> &crate::hot_path_test_metrics::HotPathTestMetrics {
         &self.hot_path_test_metrics
+    }
+
+    /// Share the repository's lazy config snapshot (see [`crate::repo::Repository::config`]).
+    #[must_use]
+    pub(crate) fn with_shared_config_state(
+        mut self,
+        state: crate::repo::RepositoryConfigSnapshot,
+    ) -> Self {
+        self.shared_config_state = Some(state);
+        self
+    }
+
+    fn load_config_cascade(&self) -> Result<ConfigSet> {
+        if let Some(state) = &self.shared_config_state {
+            let git_dir = self
+                .config_git_dir
+                .as_deref()
+                .or_else(|| self.objects_dir.parent());
+            let cfg = crate::repo::ensure_shared_config_snapshot(state, git_dir)?;
+            return Ok(cfg.as_ref().clone());
+        }
+        let git_dir = self
+            .config_git_dir
+            .as_deref()
+            .or_else(|| self.objects_dir.parent());
+        if let Some(git_dir) = git_dir {
+            ConfigSet::load(Some(git_dir), true)
+        } else {
+            Ok(ConfigSet::new())
+        }
     }
 
     fn env_alternate_dirs_snapshot(&self) -> Arc<Vec<PathBuf>> {
@@ -513,22 +547,21 @@ impl Odb {
     #[must_use]
     pub fn hash_algo(&self) -> HashAlgo {
         *self.hash_algo_cache.get_or_init(|| {
-            if let Some(git_dir) = self.config_git_dir.as_deref() {
-                return hash_algo_for_git_dir(git_dir);
+            if self.config_git_dir.is_none() && self.objects_dir.parent().is_none() {
+                return HashAlgo::Sha1;
             }
-            hash_algo_for_objects_dir(&self.objects_dir)
+            let cfg = self.load_config_cascade().unwrap_or_default();
+            cfg.get("extensions.objectformat")
+                .and_then(|v| HashAlgo::from_name(&v))
+                .unwrap_or(HashAlgo::Sha1)
         })
     }
 
     fn resolve_loose_zlib_level(&self) -> Result<u32> {
-        let git_dir = self
-            .config_git_dir
-            .clone()
-            .or_else(|| self.objects_dir.parent().map(Path::to_path_buf));
-        let Some(git_dir) = git_dir else {
+        if self.config_git_dir.is_none() && self.objects_dir.parent().is_none() {
             return Ok(ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT as u32);
-        };
-        let cfg = ConfigSet::load(Some(&git_dir), true)?;
+        }
+        let cfg = self.load_config_cascade()?;
         Ok(cfg.loose_objects_zlib_level()? as u32)
     }
 
@@ -553,10 +586,10 @@ impl Odb {
         // file from `/etc/gitconfig` through `.git/config`); calling it once per object lookup
         // dominated `status` runtime. Cache the result for the lifetime of this `Odb`.
         *self.core_multi_pack_index_cache.get_or_init(|| {
-            let Some(git_dir) = &self.config_git_dir else {
+            if self.config_git_dir.is_none() {
                 return false;
-            };
-            let cfg = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+            }
+            let cfg = self.load_config_cascade().unwrap_or_default();
             match cfg.get_bool("core.multiPackIndex") {
                 Some(Ok(b)) => b,
                 Some(Err(_)) => true,

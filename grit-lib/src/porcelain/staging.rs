@@ -16,7 +16,7 @@ use crate::index::{index_file_mtime, Index, MODE_TREE};
 use crate::objects::ObjectKind;
 use crate::pathspec::matches_pathspec_list;
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
-use crate::precompose_config::effective_core_precomposeunicode;
+use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
@@ -36,10 +36,16 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
     let mut index = repo.load_index()?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let config_arc = repo.config().ok();
+    let config = config_arc
+        .as_ref()
+        .map(|c| c.as_ref())
+        .cloned()
+        .unwrap_or_default();
     let conv = crlf::ConversionConfig::from_config(&config);
     let attr_rules = crlf::load_gitattributes(work_tree);
-    let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
+    let precompose_unicode =
+        effective_core_precomposeunicode_with_config(Some(&repo.git_dir), config_arc.as_deref());
 
     let matches = |path: &str| pathspecs.is_empty() || matches_pathspec_list(path, pathspecs);
 
@@ -47,6 +53,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         index_mtime,
         ignore_submodule_untracked: false,
         repository_git_dir: Some(repo.git_dir.clone()),
+        config: config_arc,
         ..Default::default()
     };
     let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(

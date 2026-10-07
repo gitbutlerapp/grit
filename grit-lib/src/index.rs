@@ -1161,10 +1161,30 @@ impl Index {
         self.write_to_path(path, skip_hash)
     }
 
+    /// Write the index using an already-loaded config snapshot (avoids re-loading the cascade).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::write`].
+    pub fn write_with_config(&self, path: &Path, config: &ConfigSet) -> Result<()> {
+        let skip_hash = index_skip_hash_for_write(Some(config));
+        self.write_to_path_with_config(path, skip_hash, Some(config))
+    }
+
     /// Write this index to `path` with an explicit trailing-checksum policy.
     ///
     /// When `skip_hash` is true, the trailing SHA-1 is written as all zeros (Git `index.skipHash`).
     pub fn write_to_path(&self, path: &Path, skip_hash: bool) -> Result<()> {
+        self.write_to_path_with_config(path, skip_hash, None)
+    }
+
+    /// Like [`Self::write_to_path`], but uses `config` for `core.lockfilepid` instead of reloading.
+    pub(crate) fn write_to_path_with_config(
+        &self,
+        path: &Path,
+        skip_hash: bool,
+        config: Option<&ConfigSet>,
+    ) -> Result<()> {
         let mut body = Vec::new();
         // Fast path: entries loaded from disk (or maintained via `add_or_replace`) are already in
         // canonical order; serializing from `&self` skips a full clone of every entry. The
@@ -1186,7 +1206,7 @@ impl Index {
 
         let tmp_path = path.with_extension("lock");
         let pid_path = pid_path_for_lock(&tmp_path);
-        let lockfile_pid_enabled = lockfile_pid_enabled(path);
+        let lockfile_pid_enabled = lockfile_pid_enabled(path, config);
 
         let mut lock_file = match fs::OpenOptions::new()
             .write(true)
@@ -2517,15 +2537,16 @@ fn flatten_tree_blobs(odb: &Odb, tree_oid: &ObjectId, prefix: &[u8]) -> Result<V
     Ok(out)
 }
 
-fn lockfile_pid_enabled(index_path: &Path) -> bool {
+fn lockfile_pid_enabled(index_path: &Path, config: Option<&ConfigSet>) -> bool {
     let git_dir = match index_path.parent() {
         Some(dir) => dir,
         None => return false,
     };
 
-    ConfigSet::load(Some(git_dir), true)
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.lockfilepid"))
+    let cfg = config
+        .cloned()
+        .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default());
+    cfg.get_bool("core.lockfilepid")
         .and_then(|res| res.ok())
         .unwrap_or(false)
 }

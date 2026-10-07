@@ -220,10 +220,7 @@ enum ResolvedHook {
 
 /// Resolve the hooks directory from config or fall back to `$GIT_DIR/hooks`.
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
-    resolve_hooks_dir_for_config(
-        Some(&repo.git_dir),
-        ConfigSet::load(Some(&repo.git_dir), true).ok().as_ref(),
-    )
+    resolve_hooks_dir_for_config(Some(&repo.git_dir), repo.config().ok().as_deref())
 }
 
 fn resolve_hooks_dir_for_config(git_dir: Option<&Path>, config: Option<&ConfigSet>) -> PathBuf {
@@ -293,9 +290,9 @@ fn traditional_hook_candidate(
     let meta = fs::metadata(&path).ok()?;
     #[cfg(unix)]
     if meta.permissions().mode() & 0o111 == 0 {
-        let config = ConfigSet::load(Some(&repo.git_dir), true).ok();
+        let config = repo.config().ok();
         let show_warning = config
-            .as_ref()
+            .as_deref()
             .and_then(|c| c.get("advice.ignoredHook"))
             .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "no" | "off" | "0"))
             .unwrap_or(true);
@@ -663,7 +660,7 @@ pub fn run_commit_hook(
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
 ) -> Result<HookResult, String> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true).map_err(|e| format!("{e}"))?;
+    let config = repo.config().map_err(|e| format!("{e}"))?.as_ref().clone();
     let stdout_to_stderr = hook_name != "pre-push";
     run_hook_opts(
         Some(repo),
@@ -691,16 +688,15 @@ pub fn run_hook(
     args: &[&str],
     stdin_data: Option<&[u8]>,
 ) -> HookResult {
-    let config = match ConfigSet::load(Some(&repo.git_dir), true) {
-        Ok(c) => c,
-        Err(_) => return HookResult::Failed(1),
+    let Some(config) = repo.config().ok() else {
+        return HookResult::Failed(1);
     };
     let stdout_to_stderr = hook_name != "pre-push";
     match run_hook_opts(
         Some(repo),
         hook_name,
         args,
-        &config,
+        config.as_ref(),
         RunHookOptions {
             stdout_to_stderr,
             path_to_stdin: None,
@@ -727,16 +723,15 @@ pub fn run_hook_in_git_dir(
     stdin_data: Option<&[u8]>,
     env_vars: &[(&str, &str)],
 ) -> (HookResult, Vec<u8>) {
-    let config = match ConfigSet::load(Some(&repo.git_dir), true) {
-        Ok(c) => c,
-        Err(_) => return (HookResult::Failed(1), Vec::new()),
+    let Some(config) = repo.config().ok() else {
+        return (HookResult::Failed(1), Vec::new());
     };
     let mut captured = Vec::new();
     match run_hook_opts(
         Some(repo),
         hook_name,
         args,
-        &config,
+        config.as_ref(),
         RunHookOptions {
             stdout_to_stderr: true,
             path_to_stdin: None,
@@ -760,16 +755,15 @@ pub fn run_hook_with_env(
     stdin_data: Option<&[u8]>,
     env_vars: &[(&str, &str)],
 ) -> (HookResult, Vec<u8>) {
-    let config = match ConfigSet::load(Some(&repo.git_dir), true) {
-        Ok(c) => c,
-        Err(_) => return (HookResult::Failed(1), Vec::new()),
+    let Some(config) = repo.config().ok() else {
+        return (HookResult::Failed(1), Vec::new());
     };
     let mut captured = Vec::new();
     match run_hook_opts(
         Some(repo),
         hook_name,
         args,
-        &config,
+        config.as_ref(),
         RunHookOptions {
             stdout_to_stderr: true,
             path_to_stdin: None,

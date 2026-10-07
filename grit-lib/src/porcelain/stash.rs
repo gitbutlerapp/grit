@@ -717,6 +717,7 @@ pub fn apply_stash(
             &mut new_index,
             work_tree,
             None,
+            repo.config().ok().as_deref(),
             parallelism,
         )?;
     }
