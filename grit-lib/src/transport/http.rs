@@ -1146,6 +1146,33 @@ fn match_refspecs(
     }
 }
 
+fn extend_match_plan_with_tags(
+    plan: &mut MatchPlan,
+    mode: TagMode,
+    remote_refs: &[(String, ObjectId)],
+    advertised_peel: &std::collections::HashMap<String, ObjectId>,
+    negatives: &[RefspecItem],
+) {
+    if mode == TagMode::None {
+        return;
+    }
+    let mut matched_oids: std::collections::HashSet<ObjectId> =
+        plan.matched.iter().map(|m| m.oid).collect();
+    let following_only = crate::fetch::add_wire_tags(
+        mode,
+        remote_refs,
+        advertised_peel,
+        negatives,
+        &mut plan.matched,
+        &mut matched_oids,
+        &mut plan.seen,
+    );
+    plan.wants = matched_oids
+        .into_iter()
+        .filter(|oid| !following_only.contains(oid))
+        .collect();
+}
+
 fn advertised_peel_from_v0_refs(refs: &[AdvRef]) -> std::collections::HashMap<String, ObjectId> {
     let mut peel = std::collections::HashMap::new();
     for r in refs {
@@ -1260,35 +1287,17 @@ pub fn http_fetch(
     }
 
     // 3. Match refs to refspecs.
+    let mut plan = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
+    extend_match_plan_with_tags(
+        &mut plan,
+        opts.tags,
+        &remote_refs,
+        &advertised_peel,
+        &negatives,
+    );
     let MatchPlan {
-        mut matched,
-        mut wants,
-        mut seen,
-    } = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
-
-    // 4. TagMode: add tags (the wire `include-tag` capability brings tag
-    // objects with the pack; All adds every advertised tag, Following adds them
-    // provisionally and prunes unreachable ones after the pack lands).
-    if opts.tags != TagMode::None {
-        for (name, oid) in &remote_refs {
-            if !name.starts_with("refs/tags/") {
-                continue;
-            }
-            if seen.contains(name) || ref_excluded(name, &negatives) {
-                continue;
-            }
-            seen.insert(name.clone());
-            wants.insert(*oid);
-            matched.push(crate::transfer::MatchedRef {
-                remote_ref: name.clone(),
-                local_ref: Some(name.clone()),
-                oid: *oid,
-                force: false,
-                is_tag: true,
-                advertised_peel: advertised_peel.get(name).copied(),
-            });
-        }
-    }
+        mut matched, wants, ..
+    } = plan;
 
     // 5. Wants → negotiate + ingest the pack. Normally the matched oids absent
     // locally; for a deepen/`--unshallow` request we must still `want` the tips
@@ -1306,6 +1315,7 @@ pub fn http_fetch(
     };
 
     let mut shallow_update = crate::fetch::ShallowUpdate::default();
+    let mut pack_oids = std::collections::HashSet::new();
 
     if !need.is_empty() && !opts.dry_run {
         let (pack, su) = negotiate_pack_http(
@@ -1326,7 +1336,7 @@ pub fn http_fetch(
                     "did not receive a valid pack from HTTP fetch".to_owned(),
                 ));
             }
-            crate::index_pack::ingest_received_pack(
+            pack_oids = crate::index_pack::ingest_received_pack(
                 pack,
                 &local_odb,
                 &crate::index_pack::IngestPackOptions { fix_thin: true },
@@ -1345,7 +1355,7 @@ pub fn http_fetch(
 
     // 6. For TagMode::Following, drop tags whose target did not arrive.
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &wants);
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
     }
 
     // 7. Classify + apply ref updates.
@@ -1476,35 +1486,17 @@ fn http_fetch_v2(
     }
 
     // 3. Match refs to refspecs (shared with the v0/v1 path).
+    let mut plan = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
+    extend_match_plan_with_tags(
+        &mut plan,
+        opts.tags,
+        &remote_refs,
+        &advertised_peel,
+        &negatives,
+    );
     let MatchPlan {
-        mut matched,
-        mut wants,
-        mut seen,
-    } = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
-
-    // 4. TagMode: add tags (the wire `include-tag` capability brings tag objects
-    // with the pack; All adds every advertised tag, Following adds them
-    // provisionally and prunes unreachable ones after the pack lands).
-    if opts.tags != TagMode::None {
-        for (name, oid) in &remote_refs {
-            if !name.starts_with("refs/tags/") {
-                continue;
-            }
-            if seen.contains(name) || ref_excluded(name, &negatives) {
-                continue;
-            }
-            seen.insert(name.clone());
-            wants.insert(*oid);
-            matched.push(crate::transfer::MatchedRef {
-                remote_ref: name.clone(),
-                local_ref: Some(name.clone()),
-                oid: *oid,
-                force: false,
-                is_tag: true,
-                advertised_peel: advertised_peel.get(name).copied(),
-            });
-        }
-    }
+        mut matched, wants, ..
+    } = plan;
 
     // 5. Wants → negotiate + ingest the pack. Normally the matched oids absent
     // locally; for a deepen/`--unshallow` request we must still `want` the tips
@@ -1522,6 +1514,7 @@ fn http_fetch_v2(
     };
 
     let mut shallow_update = crate::fetch::ShallowUpdate::default();
+    let mut pack_oids = std::collections::HashSet::new();
 
     if !need.is_empty() && !opts.dry_run {
         let deepen = crate::fetch::V2DeepenArgs::from_opts(opts, &local_shallow);
@@ -1545,7 +1538,7 @@ fn http_fetch_v2(
                     "did not receive a valid pack from v2 HTTP fetch".to_owned(),
                 ));
             }
-            crate::index_pack::ingest_received_pack(
+            pack_oids = crate::index_pack::ingest_received_pack(
                 pack,
                 &local_odb,
                 &crate::index_pack::IngestPackOptions { fix_thin: true },
@@ -1564,7 +1557,7 @@ fn http_fetch_v2(
 
     // 6. For TagMode::Following, drop tags whose target did not arrive.
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &wants);
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
     }
 
     // 7. Classify + apply ref updates (shared with the v0/v1 path).

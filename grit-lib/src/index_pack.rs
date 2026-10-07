@@ -4,10 +4,13 @@
 //! exploding every object into loose storage. Small receive-pack pushes may still
 //! use [`crate::unpack_objects`] via [`crate::receive_pack::should_use_unpack_objects`].
 
+use std::collections::HashSet;
+use std::path::Path;
+
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::odb::Odb;
-use crate::pack::{clear_pack_cache, write_v2_pack_index};
+use crate::pack::{clear_pack_cache, write_v2_pack_index_with_trailer};
 use crate::transfer::fix_thin_pack;
 use crate::unpack_objects::{pack_index_records_from_bytes, PackIndexRecord};
 
@@ -21,16 +24,14 @@ pub struct IngestPackOptions {
 
 /// Ingest a pack received from fetch/clone by installing it under `objects/pack/`.
 ///
-/// Fetch and clone always index the received pack (Git `fetch-pack` / `index-pack`).
-/// Call [`crate::receive_pack::should_use_unpack_objects`] only on the receive-pack path.
-///
-/// # Errors
-///
-/// Returns [`Error::CorruptObject`] when the pack cannot be validated or indexed,
-/// or I/O / zlib failures from indexing.
-pub fn ingest_received_pack(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) -> Result<()> {
+/// Returns the set of object ids recorded in the pack index.
+pub fn ingest_received_pack(
+    pack: Vec<u8>,
+    odb: &Odb,
+    opts: &IngestPackOptions,
+) -> Result<HashSet<ObjectId>> {
     if pack.is_empty() {
-        return Ok(());
+        return Ok(HashSet::new());
     }
     if pack.len() < 12 || &pack[0..4] != b"PACK" {
         return Err(Error::CorruptObject(
@@ -42,10 +43,12 @@ pub fn ingest_received_pack(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) 
 
 /// Write `pack` into `odb`'s `objects/pack/` directory with a v2 index.
 ///
-/// # Errors
-///
-/// Same as [`ingest_received_pack`].
-pub fn install_pack_bytes(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) -> Result<()> {
+/// Builds under temporary names and publishes the `.pack`/`.idx` pair atomically.
+pub fn install_pack_bytes(
+    pack: Vec<u8>,
+    odb: &Odb,
+    opts: &IngestPackOptions,
+) -> Result<HashSet<ObjectId>> {
     let pack = if opts.fix_thin {
         fix_thin_pack(pack, odb)?
     } else {
@@ -61,16 +64,43 @@ pub fn install_pack_bytes(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) ->
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
     let pack_path = pack_dir.join(format!("{stem}.pack"));
     let idx_path = pack_dir.join(format!("{stem}.idx"));
-    std::fs::write(&pack_path, &pack).map_err(Error::Io)?;
+    let tmp_pack = pack_dir.join(format!("{stem}.pack.tmp"));
+    let tmp_idx = pack_dir.join(format!("{stem}.idx.tmp"));
 
-    let records = pack_index_records_from_bytes(&pack, odb)?;
-    let entries: Vec<(ObjectId, u64, u32)> = records
-        .into_iter()
-        .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
-        .collect();
-    write_v2_pack_index(&idx_path, &pack_path, &entries, hb)?;
+    cleanup_stale_install_temps(&tmp_pack, &tmp_idx);
+
+    let install_result = (|| -> Result<HashSet<ObjectId>> {
+        std::fs::write(&tmp_pack, &pack).map_err(Error::Io)?;
+        let records = pack_index_records_from_bytes(&pack, odb)?;
+        let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
+        let entries: Vec<(ObjectId, u64, u32)> = records
+            .into_iter()
+            .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
+            .collect();
+        let trailer = &pack[pack.len() - hb..];
+        write_v2_pack_index_with_trailer(&tmp_idx, &entries, trailer, hb)?;
+        std::fs::rename(&tmp_pack, &pack_path).map_err(Error::Io)?;
+        std::fs::rename(&tmp_idx, &idx_path).map_err(|e| {
+            let _ = std::fs::remove_file(&pack_path);
+            Error::Io(e)
+        })?;
+        Ok(oids)
+    })();
+
+    if install_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_pack);
+        let _ = std::fs::remove_file(&tmp_idx);
+        let _ = std::fs::remove_file(&pack_path);
+        let _ = std::fs::remove_file(&idx_path);
+    }
+    let oids = install_result?;
     clear_pack_cache();
-    Ok(())
+    Ok(oids)
+}
+
+fn cleanup_stale_install_temps(tmp_pack: &Path, tmp_idx: &Path) {
+    let _ = std::fs::remove_file(tmp_pack);
+    let _ = std::fs::remove_file(tmp_idx);
 }
 
 #[cfg(test)]
@@ -118,6 +148,14 @@ mod tests {
             },
         )
         .expect("build pack")
+    }
+
+    fn pack_dir_entries(pack_dir: &Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(pack_dir)
+            .expect("read pack dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect()
     }
 
     #[test]
@@ -183,15 +221,42 @@ mod tests {
         let idx_path = pack_path.with_extension("idx");
         let fake_oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
         let huge_off = 1u64 << 31;
-        write_v2_pack_index(
+        write_v2_pack_index_with_trailer(
             &idx_path,
-            &pack_path,
             &[(fake_oid, huge_off, 0x1234_5678)],
+            &pack[pack.len() - 20..],
             20,
         )
         .expect("write idx");
         let idx = read_pack_index(&idx_path).expect("read idx");
         assert_eq!(idx.entries.len(), 1);
         assert_eq!(idx.entries[0].offset, huge_off);
+    }
+
+    #[test]
+    fn install_failure_leaves_no_published_pack_or_index() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        let mut pack = single_blob_pack(b"truncated");
+        pack.truncate(pack.len().saturating_sub(8));
+        let err = install_pack_bytes(pack, &odb, &IngestPackOptions { fix_thin: false })
+            .expect_err("truncated pack must fail");
+        assert!(
+            matches!(err, Error::CorruptObject(_)),
+            "expected corrupt object, got {err:?}"
+        );
+        let pack_dir = tmp.path().join("pack");
+        if pack_dir.exists() {
+            let entries = pack_dir_entries(&pack_dir);
+            assert!(
+                entries.iter().all(|p| {
+                    p.extension().is_some_and(|e| e == "tmp")
+                        || p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.ends_with(".pack.tmp") || n.ends_with(".idx.tmp"))
+                }),
+                "must not publish partial .pack/.idx, got {entries:?}"
+            );
+        }
     }
 }

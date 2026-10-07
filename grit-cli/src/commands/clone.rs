@@ -84,12 +84,12 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
     let refspecs = net::fetch_refspecs(&config, net::DEFAULT_REMOTE);
     let clone_message = format!("clone: from {url}");
-    let clone_reflog = grit_lib::fetch::fetch_operation_identity(&repo.git_dir)
-        .ok()
-        .map(|identity| CloneReflog {
-            identity,
-            message: clone_message.clone(),
-        });
+    let identity = grit_lib::fetch::fetch_operation_identity(&repo.git_dir)
+        .context("could not build clone reflog identity")?;
+    let clone_reflog = CloneReflog {
+        identity: identity.clone(),
+        message: clone_message.clone(),
+    };
     let outcome = net::fetch_with_options(
         &repo,
         &config,
@@ -99,7 +99,7 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
             tags: TagMode::Following,
             initial_remote_fetch: true,
             remote_name: Some(net::DEFAULT_REMOTE.to_owned()),
-            clone_reflog,
+            clone_reflog: Some(clone_reflog),
             ..Default::default()
         },
     )
@@ -118,32 +118,28 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
 
     let branch_ref = format!("refs/heads/{default}");
     refs::write_ref(&repo.git_dir, &branch_ref, &oid).context("could not create local branch")?;
-    if let Ok(identity) = grit_lib::fetch::fetch_operation_identity(&repo.git_dir) {
-        let zero = ObjectId::zero();
-        let _ = refs::append_reflog(
-            &repo.git_dir,
-            &branch_ref,
-            &zero,
-            &oid,
-            &identity,
-            &clone_message,
-            false,
-        );
-        refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref)
-            .context("could not set HEAD")?;
-        let _ = refs::append_reflog(
-            &repo.git_dir,
-            "HEAD",
-            &zero,
-            &oid,
-            &identity,
-            &clone_message,
-            false,
-        );
-    } else {
-        refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref)
-            .context("could not set HEAD")?;
-    }
+    let zero = ObjectId::zero();
+    refs::append_reflog(
+        &repo.git_dir,
+        &branch_ref,
+        &zero,
+        &oid,
+        &identity,
+        &clone_message,
+        false,
+    )
+    .context("could not write branch reflog")?;
+    refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref).context("could not set HEAD")?;
+    refs::append_reflog(
+        &repo.git_dir,
+        "HEAD",
+        &zero,
+        &oid,
+        &identity,
+        &clone_message,
+        false,
+    )
+    .context("could not write HEAD reflog")?;
     set_config(
         &repo,
         &[

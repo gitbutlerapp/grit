@@ -775,6 +775,7 @@ fn matrix_tag_modes_all_following_none() {
         &|w| build_source_work(w),
         &|driver, fetch, served, local_git| {
             let v1_oid = rev_parse(served, "refs/tags/v1");
+            let side_tip = rev_parse(served, "refs/heads/side");
             // --- TagMode::Following: v1 reachable from main kept; vside dropped. ---
             let opts = FetchOptions {
                 refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
@@ -793,6 +794,12 @@ fn matrix_tag_modes_all_following_none() {
             assert!(
                 resolve_ref(local_git, "refs/tags/vside").is_err(),
                 "[{}] Following must drop the unreachable vside tag",
+                driver.name
+            );
+            let local_odb = Odb::new(&local_git.join("objects"));
+            assert!(
+                !local_odb.exists(&side_tip),
+                "[{}] Following must not download objects reachable only from the side branch",
                 driver.name
             );
             fsck_clean(local_git.parent().unwrap());

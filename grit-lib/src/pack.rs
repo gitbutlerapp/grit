@@ -937,10 +937,41 @@ fn compute_fanout_from_entries(entries: &[PackIndexEntry]) -> [u32; 256] {
 ///
 /// Returns [`Error::CorruptObject`] when the pack is too small or an entry
 /// offset cannot be walked, or [`Error::Io`] on filesystem failure.
+pub fn write_v2_pack_index_with_trailer(
+    idx_path: &Path,
+    entries: &[(ObjectId, u64, u32)],
+    pack_trailer: &[u8],
+    hash_bytes: usize,
+) -> Result<()> {
+    if pack_trailer.len() != hash_bytes {
+        return Err(Error::CorruptObject(format!(
+            "pack trailer length {} does not match hash width {hash_bytes}",
+            pack_trailer.len()
+        )));
+    }
+    write_v2_pack_index_body(idx_path, entries, pack_trailer, hash_bytes)
+}
+
 pub fn write_v2_pack_index(
     idx_path: &Path,
     pack_path: &Path,
     entries: &[(ObjectId, u64, u32)],
+    hash_bytes: usize,
+) -> Result<()> {
+    let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
+    if pack_bytes.len() < hash_bytes {
+        return Err(Error::CorruptObject(
+            "pack too small for idx trailer".into(),
+        ));
+    }
+    let trailer = &pack_bytes[pack_bytes.len() - hash_bytes..];
+    write_v2_pack_index_with_trailer(idx_path, entries, trailer, hash_bytes)
+}
+
+fn write_v2_pack_index_body(
+    idx_path: &Path,
+    entries: &[(ObjectId, u64, u32)],
+    pack_trailer: &[u8],
     hash_bytes: usize,
 ) -> Result<()> {
     let mut sorted: Vec<(ObjectId, u64, u32)> = entries.to_vec();
@@ -971,7 +1002,6 @@ pub fn write_v2_pack_index(
     for (_, _, crc) in &sorted {
         buf.extend_from_slice(&crc.to_be_bytes());
     }
-    let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
     let mut large_offsets: Vec<u64> = Vec::new();
     for (_, off, _) in &sorted {
         if *off < (1u64 << 31) {
@@ -987,12 +1017,7 @@ pub fn write_v2_pack_index(
     for off in large_offsets {
         buf.extend_from_slice(&off.to_be_bytes());
     }
-    if pack_bytes.len() < hash_bytes {
-        return Err(Error::CorruptObject(
-            "pack too small for idx trailer".into(),
-        ));
-    }
-    buf.extend_from_slice(&pack_bytes[pack_bytes.len() - hash_bytes..]);
+    buf.extend_from_slice(pack_trailer);
     let idx_trailer = match hash_bytes {
         20 => {
             let mut hasher = Sha1::new();

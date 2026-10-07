@@ -1270,6 +1270,7 @@ pub fn fetch_remote(
     // Shallow-boundary updates the server reports (`shallow`/`unshallow`), applied
     // to the local `shallow` file and surfaced in the outcome.
     let mut shallow_update = ShallowUpdate::default();
+    let mut pack_oids: HashSet<ObjectId> = HashSet::new();
 
     net_trace!(
         "fetch_remote: {} matched ref(s), want {} object(s){} [+{:?} since begin]",
@@ -1305,7 +1306,7 @@ pub fn fetch_remote(
             pack.len()
         );
         if !pack.is_empty() {
-            ingest_negotiated_pack(local_git_dir, &local_odb, pack)?;
+            pack_oids = ingest_negotiated_pack(local_git_dir, &local_odb, pack)?;
         }
     }
 
@@ -1333,7 +1334,7 @@ pub fn fetch_remote(
     // objects). All/None already handled; Following kept only when reachable.
     if opts.tags == crate::transfer::TagMode::Following {
         let t = std::time::Instant::now();
-        retain_following_tags(&local_odb, &mut matched, &matched_oids);
+        retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
         net_trace!("fetch_remote: retain_following_tags {:?}", t.elapsed());
     }
 
@@ -1472,7 +1473,7 @@ fn ingest_negotiated_pack(
     _local_git_dir: &Path,
     local_odb: &crate::odb::Odb,
     pack: Vec<u8>,
-) -> Result<()> {
+) -> Result<HashSet<ObjectId>> {
     crate::index_pack::ingest_received_pack(
         pack,
         local_odb,
@@ -1512,7 +1513,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
         if let Some(ref log) = opts.clone_reflog {
             let zero = ObjectId::zero();
             let tip = crate::refs::resolve_ref(git_dir, &target).unwrap_or(zero);
-            let _ = crate::refs::append_reflog(
+            crate::refs::append_reflog(
                 git_dir,
                 &head_ref,
                 &zero,
@@ -1520,7 +1521,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
                 &log.identity,
                 &log.message,
                 true,
-            );
+            )?;
         }
     }
     Ok(())
@@ -1537,7 +1538,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
 /// Returns the oids of tags added under `Following` — the caller must keep these
 /// out of the `want` list so an unreachable tag does not drag its target into
 /// the pack (which would make it look reachable and survive the prune).
-fn add_wire_tags(
+pub(crate) fn add_wire_tags(
     mode: crate::transfer::TagMode,
     remote_refs: &[(String, ObjectId)],
     advertised_peel: &std::collections::HashMap<String, ObjectId>,
@@ -1581,10 +1582,10 @@ fn add_wire_tags(
 pub(crate) fn retain_following_tags(
     local_odb: &crate::odb::Odb,
     matched: &mut Vec<crate::transfer::MatchedRef>,
-    _matched_oids: &HashSet<ObjectId>,
-) {
+    pack_oids: &HashSet<ObjectId>,
+) -> Result<()> {
     if !matched.iter().any(|m| m.is_tag) {
-        return;
+        return Ok(());
     }
 
     let roots: Vec<ObjectId> = matched
@@ -1592,23 +1593,75 @@ pub(crate) fn retain_following_tags(
         .filter(|m| !m.is_tag)
         .map(|m| m.oid)
         .collect();
-    let Ok(closure) = crate::transfer::reachable_closure(local_odb, &roots, &HashSet::new(), true)
-    else {
-        return;
-    };
     let commit_reach = reachable_commits(local_odb, &roots);
+    let pack_reach = pack_delivered_reachable(local_odb, &roots, pack_oids)?;
     matched.retain(|m| {
         if !m.is_tag {
             return true;
         }
-        if !local_odb.exists(&m.oid) {
+        if !pack_oids.contains(&m.oid) {
             return false;
         }
         let peeled = m
             .advertised_peel
             .unwrap_or_else(|| peel_tag_target(local_odb, m.oid));
-        closure.contains(&m.oid) || commit_reach.contains(&peeled)
+        if commit_reach.contains(&peeled) {
+            return true;
+        }
+        pack_reach.contains(&peeled)
     });
+    Ok(())
+}
+
+/// Objects reachable from `roots` by following only links whose target oid is in `pack_oids`.
+fn pack_delivered_reachable(
+    odb: &crate::odb::Odb,
+    roots: &[ObjectId],
+    pack_oids: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectKind};
+
+    let mut seen: HashSet<ObjectId> = HashSet::new();
+    let mut stack: Vec<ObjectId> = roots
+        .iter()
+        .copied()
+        .filter(|oid| pack_oids.contains(oid))
+        .collect();
+    while let Some(oid) = stack.pop() {
+        if !seen.insert(oid) {
+            continue;
+        }
+        let obj = odb.read(&oid)?;
+        match obj.kind {
+            ObjectKind::Commit => {
+                let c = parse_commit(&obj.data)?;
+                if pack_oids.contains(&c.tree) {
+                    stack.push(c.tree);
+                }
+                for p in c.parents {
+                    if pack_oids.contains(&p) {
+                        stack.push(p);
+                    }
+                }
+            }
+            ObjectKind::Tag => {
+                let t = parse_tag(&obj.data)?;
+                if pack_oids.contains(&t.object) {
+                    stack.push(t.object);
+                }
+            }
+            ObjectKind::Tree => {
+                let entries = parse_tree(&obj.data)?;
+                for entry in entries {
+                    if pack_oids.contains(&entry.oid) {
+                        stack.push(entry.oid);
+                    }
+                }
+            }
+            ObjectKind::Blob => {}
+        }
+    }
+    Ok(seen)
 }
 
 /// Commit-level reachability from `roots`: the set of commit OIDs reachable by

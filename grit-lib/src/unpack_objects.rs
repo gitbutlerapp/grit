@@ -521,7 +521,7 @@ pub fn pack_is_thin(data: &[u8], algo: HashAlgo) -> bool {
 }
 
 fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
-    let mut rd = PackReader::new(data.to_vec());
+    let mut rd = PackReader::new(data);
     if rd.read_exact(4)? != b"PACK" {
         return Ok(false);
     }
@@ -564,7 +564,7 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
 ///
 /// Thin-pack bases may be resolved from `odb` when they are not present in the pack.
 pub fn pack_bytes_to_object_map(data: &[u8], odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
-    build_pack_object_map(PackReader::new(data.to_vec()), odb)
+    build_pack_object_map(PackReader::new(data), odb)
 }
 
 /// Resolved `(oid, pack_offset)` pairs for every object slot in a pack byte stream.
@@ -584,9 +584,10 @@ pub struct PackIndexRecord {
 
 /// Build index records by walking `data` once with bounded retention for delta bases.
 ///
-/// Does not materialize the full pack into loose objects or retain every blob in RAM.
+/// Does not copy the pack buffer, retain every inflated object, or duplicate payloads
+/// across lookup maps — only offsets still referenced by unresolved deltas are kept.
 pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackIndexRecord>> {
-    pack_index_records_inner(PackReader::new(data.to_vec()), data, odb)
+    pack_index_records_inner(PackReader::new(data), data, odb)
 }
 
 struct PendingIndexDelta {
@@ -597,13 +598,72 @@ struct PendingIndexDelta {
     delta_data: Vec<u8>,
 }
 
+#[derive(Clone)]
+struct IndexBase {
+    kind: ObjectKind,
+    data: Vec<u8>,
+}
+
+/// Header-only scan: count how many unresolved deltas reference each in-pack base.
+fn pack_index_base_ref_counts(
+    data: &[u8],
+    hash_bytes: usize,
+) -> Result<(HashMap<usize, u32>, HashMap<ObjectId, u32>)> {
+    let mut rd = PackReader::new(data);
+    if rd.read_exact(4)? != b"PACK" {
+        return Err(Error::CorruptObject(
+            "not a pack stream: invalid signature".to_owned(),
+        ));
+    }
+    let version = rd.read_u32_be()?;
+    if version != 2 && version != 3 {
+        return Err(Error::CorruptObject(format!(
+            "unsupported pack version {version}"
+        )));
+    }
+    let nr_objects = rd.read_u32_be()? as usize;
+    let mut ofs_refs: HashMap<usize, u32> = HashMap::new();
+    let mut oid_refs: HashMap<ObjectId, u32> = HashMap::new();
+    for _ in 0..nr_objects {
+        let obj_offset = rd.pos;
+        let (type_code, size) = rd.read_type_size()?;
+        match type_code {
+            1..=4 => {
+                rd.skip_object_payload(type_code, size, hash_bytes)?;
+            }
+            6 => {
+                let neg = rd.read_ofs_neg_offset()?;
+                let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
+                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
+                })?;
+                *ofs_refs.entry(base_offset).or_insert(0) += 1;
+                let _ = rd.decompress(size)?;
+            }
+            7 => {
+                let base_bytes = rd.read_exact(hash_bytes)?;
+                let base_oid = ObjectId::from_bytes(base_bytes)?;
+                *oid_refs.entry(base_oid).or_insert(0) += 1;
+                let _ = rd.decompress(size)?;
+            }
+            other => {
+                return Err(Error::CorruptObject(format!(
+                    "unknown packed-object type {other}"
+                )))
+            }
+        }
+    }
+    Ok((ofs_refs, oid_refs))
+}
+
 fn pack_index_records_inner(
-    mut rd: PackReader,
+    mut rd: PackReader<'_>,
     pack: &[u8],
     odb: &Odb,
 ) -> Result<Vec<PackIndexRecord>> {
-    const MAX_RETAIN_BYTES: usize = 1024 * 1024;
     let algo = odb.hash_algo();
+    let hb = algo.len();
+    let (mut ofs_base_refs, mut oid_base_refs) = pack_index_base_ref_counts(pack, hb)?;
+
     let sig = rd.read_exact(4)?;
     if sig != b"PACK" {
         return Err(Error::CorruptObject(
@@ -618,8 +678,8 @@ fn pack_index_records_inner(
     }
     let nr_objects = rd.read_u32_be()? as usize;
 
-    let mut by_offset: HashMap<usize, PackedObjectEntry> = HashMap::new();
-    let mut by_oid: HashMap<ObjectId, PackedObjectEntry> = HashMap::new();
+    let mut ofs_bases: HashMap<usize, IndexBase> = HashMap::new();
+    let mut oid_bases: HashMap<ObjectId, IndexBase> = HashMap::new();
     let mut pending: Vec<PendingIndexDelta> = Vec::new();
     let mut records: Vec<PackIndexRecord> = Vec::with_capacity(nr_objects);
 
@@ -633,24 +693,50 @@ fn pack_index_records_inner(
                 let pack_end = rd.pos;
                 let crc32 = crc32fast::hash(&pack[obj_offset..pack_end]);
                 let oid = odb.hash(kind, &obj_data);
-                let entry = packed_entry_after_write(
-                    kind,
-                    obj_data,
-                    oid,
-                    odb,
-                    &UnpackOptions {
-                        dry_run: true,
-                        ..Default::default()
-                    },
-                    MAX_RETAIN_BYTES,
-                );
-                by_offset.insert(obj_offset, entry.clone());
-                by_oid.insert(oid, entry);
                 records.push(PackIndexRecord {
                     oid,
                     offset: u64::try_from(obj_offset).unwrap_or(u64::MAX),
                     crc32,
                 });
+                let retain_ofs = ofs_base_refs.get(&obj_offset).copied().unwrap_or(0) > 0;
+                let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
+                match (retain_ofs, retain_oid) {
+                    (true, true) => {
+                        ofs_bases.insert(
+                            obj_offset,
+                            IndexBase {
+                                kind,
+                                data: obj_data.clone(),
+                            },
+                        );
+                        oid_bases.insert(
+                            oid,
+                            IndexBase {
+                                kind,
+                                data: obj_data,
+                            },
+                        );
+                    }
+                    (true, false) => {
+                        ofs_bases.insert(
+                            obj_offset,
+                            IndexBase {
+                                kind,
+                                data: obj_data,
+                            },
+                        );
+                    }
+                    (false, true) => {
+                        oid_bases.insert(
+                            oid,
+                            IndexBase {
+                                kind,
+                                data: obj_data,
+                            },
+                        );
+                    }
+                    (false, false) => {}
+                }
             }
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
@@ -668,7 +754,7 @@ fn pack_index_records_inner(
                 });
             }
             7 => {
-                let base_bytes = rd.read_exact(algo.len())?;
+                let base_bytes = rd.read_exact(hb)?;
                 let base_oid = ObjectId::from_bytes(base_bytes)?;
                 let delta_data = rd.decompress(size)?;
                 let pack_end = rd.pos;
@@ -691,9 +777,9 @@ fn pack_index_records_inner(
     let consumed = rd.pos;
     {
         let mut hasher = PackHasher::new(algo);
-        hasher.update(&rd.data[..consumed]);
+        hasher.update(&pack[..consumed]);
         let digest = hasher.finalize();
-        let trailing = rd.read_exact(algo.len())?;
+        let trailing = rd.read_exact(hb)?;
         if digest.as_slice() != trailing {
             return Err(Error::CorruptObject(
                 "pack trailing checksum mismatch".to_owned(),
@@ -709,40 +795,64 @@ fn pack_index_records_inner(
         let before = remaining.len();
         let mut still_pending: Vec<PendingIndexDelta> = Vec::new();
         for delta in remaining {
-            let base = if let Some(base_off) = delta.base_offset {
-                by_offset
-                    .get(&base_off)
-                    .and_then(|e| entry_object_bytes(e, odb).ok().map(|data| (e.kind(), data)))
-            } else if let Some(ref base_id) = delta.base_oid {
-                if let Some(e) = by_oid.get(base_id) {
-                    entry_object_bytes(e, odb).ok().map(|data| (e.kind(), data))
+            let base: Option<(ObjectKind, Cow<'_, [u8]>)> =
+                if let Some(base_off) = delta.base_offset {
+                    ofs_bases
+                        .get(&base_off)
+                        .map(|b| (b.kind, Cow::Borrowed(b.data.as_slice())))
+                } else if let Some(ref base_id) = delta.base_oid {
+                    if let Some(b) = oid_bases.get(base_id) {
+                        Some((b.kind, Cow::Borrowed(b.data.as_slice())))
+                    } else if let Ok(obj) = odb.read(base_id) {
+                        Some((obj.kind, Cow::Owned(obj.data)))
+                    } else {
+                        None
+                    }
                 } else {
-                    odb.read(base_id).ok().map(|o| (o.kind, Cow::Owned(o.data)))
-                }
-            } else {
-                None
-            };
+                    None
+                };
             if let Some((base_kind, base_data)) = base {
                 let result = apply_delta(base_data.as_ref(), &delta.delta_data)?;
                 let oid = odb.hash(base_kind, &result);
-                let entry = packed_entry_after_write(
-                    base_kind,
-                    result,
-                    oid,
-                    odb,
-                    &UnpackOptions {
-                        dry_run: true,
-                        ..Default::default()
-                    },
-                    MAX_RETAIN_BYTES,
-                );
-                by_offset.insert(delta.offset, entry.clone());
-                by_oid.insert(oid, entry);
                 records.push(PackIndexRecord {
                     oid,
                     offset: u64::try_from(delta.offset).unwrap_or(u64::MAX),
                     crc32: delta.crc32,
                 });
+                if ofs_base_refs.get(&delta.offset).copied().unwrap_or(0) > 0 {
+                    ofs_bases.insert(
+                        delta.offset,
+                        IndexBase {
+                            kind: base_kind,
+                            data: result.clone(),
+                        },
+                    );
+                }
+                if oid_base_refs.get(&oid).copied().unwrap_or(0) > 0 {
+                    oid_bases.insert(
+                        oid,
+                        IndexBase {
+                            kind: base_kind,
+                            data: result,
+                        },
+                    );
+                }
+                if let Some(base_off) = delta.base_offset {
+                    if let Some(n) = ofs_base_refs.get_mut(&base_off) {
+                        *n = n.saturating_sub(1);
+                        if *n == 0 {
+                            ofs_bases.remove(&base_off);
+                        }
+                    }
+                }
+                if let Some(ref base_id) = delta.base_oid {
+                    if let Some(n) = oid_base_refs.get_mut(base_id) {
+                        *n = n.saturating_sub(1);
+                        if *n == 0 {
+                            oid_bases.remove(base_id);
+                        }
+                    }
+                }
             } else {
                 still_pending.push(delta);
             }
@@ -758,7 +868,7 @@ fn pack_index_records_inner(
     Ok(records)
 }
 
-fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
+fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
     let algo = odb.hash_algo();
     let sig = rd.read_exact(4)?;
     if sig != b"PACK" {
@@ -914,14 +1024,32 @@ fn type_code_to_kind(code: u8) -> Result<ObjectKind> {
 }
 
 /// Low-level cursor over a buffered pack byte stream (in-memory pack parsing).
-struct PackReader {
-    data: Vec<u8>,
+struct PackReader<'a> {
+    data: &'a [u8],
     pos: usize,
 }
 
-impl PackReader {
-    fn new(data: Vec<u8>) -> Self {
+impl<'a> PackReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
         Self { data, pos: 0 }
+    }
+
+    /// Skip one packed object body (used for header-only pre-scans).
+    fn skip_object_payload(&mut self, type_code: u8, size: usize, hash_bytes: usize) -> Result<()> {
+        match type_code {
+            1..=4 | 6 | 7 => {
+                if type_code == 6 {
+                    let _ = self.read_ofs_neg_offset()?;
+                } else if type_code == 7 {
+                    let _ = self.read_exact(hash_bytes)?;
+                }
+                let _ = self.decompress(size)?;
+                Ok(())
+            }
+            other => Err(Error::CorruptObject(format!(
+                "unknown packed-object type {other}"
+            ))),
+        }
     }
 
     /// Read exactly `n` bytes and advance the cursor, returning a slice into
@@ -1767,5 +1895,27 @@ mod tests {
         let delta = [3u8, 2u8, 2u8, b'h', b'i']; // src_size=3 != base.len()=2
         let err = apply_delta(base, &delta).unwrap_err();
         assert!(err.to_string().contains("source size"));
+    }
+
+    #[test]
+    fn pack_index_many_blobs_without_retaining_all_payloads() {
+        const N: usize = 1500;
+        let blobs: Vec<(ObjectKind, Vec<u8>)> = (0..N)
+            .map(|i| (ObjectKind::Blob, format!("blob-{i}\n").into_bytes()))
+            .collect();
+        let blob_refs: Vec<(ObjectKind, &[u8])> =
+            blobs.iter().map(|(k, d)| (*k, d.as_slice())).collect();
+        let pack = make_pack(&blob_refs);
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        let started = std::time::Instant::now();
+        let records = pack_index_records_from_bytes(&pack, &odb).expect("index records");
+        let elapsed = started.elapsed();
+        assert_eq!(records.len(), N, "one index row per object");
+        assert!(
+            elapsed.as_secs() < 30,
+            "indexing {N} blobs took {:?}; expected linear scan without full retention blow-up",
+            elapsed
+        );
     }
 }
