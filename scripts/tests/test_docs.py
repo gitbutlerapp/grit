@@ -66,6 +66,20 @@ label = "Missing"
                 path = out / name / "index.html"
                 self.assertTrue(path.is_file(), f"missing command page {name}")
 
+    def test_missing_include_file_fails(self) -> None:
+        page = self.content / "library-quickstart.md"
+        text = page.read_text(encoding="utf-8")
+        page.write_text(
+            text.replace(
+                "grit-examples/src/bin/quickstart.rs",
+                "grit-examples/src/bin/does-not-exist.rs",
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaises(SystemExit) as ctx:
+            docs.load_site(content_dir=self.content)
+        self.assertIn("include missing file", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

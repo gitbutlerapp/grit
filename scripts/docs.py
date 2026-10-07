@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import re
 import shutil
 import sys
 import tempfile
@@ -36,6 +37,27 @@ SITE_TITLE = "Grit docs"
 DESCRIPTION = "How to use grit, a simple Git client built on grit-lib: a short tutorial and a man page for every command."
 LIBRARY_GUIDE_SLUG = "library"
 TOC_MIN_HEADINGS = 2
+INCLUDE_RE = re.compile(r"<!--\s*include:\s*(\S+)\s*-->")
+
+
+def expand_includes(body: str) -> str:
+    """Replace ``<!-- include: path -->`` with a fenced copy of that file."""
+
+    def replace(match: re.Match[str]) -> str:
+        rel = match.group(1)
+        source = (ROOT / rel).resolve()
+        try:
+            source.relative_to(ROOT.resolve())
+        except ValueError as err:
+            raise SystemExit(f"include path escapes repository: {rel}") from err
+        if not source.is_file():
+            raise SystemExit(f"include missing file: {rel}")
+        text = source.read_text(encoding="utf-8").rstrip()
+        lang = "rust" if source.suffix == ".rs" else ""
+        fence = f"```{lang}\n{text}\n```"
+        return fence
+
+    return INCLUDE_RE.sub(replace, body)
 
 
 @dataclass(frozen=True)
@@ -190,6 +212,7 @@ def load_page(path: Path, spec: PageSpec, *, command_groups: tuple[str, ...]) ->
     is_command = path.parent.name == "commands"
     if is_command and group not in command_groups:
         raise SystemExit(f"{path}: group {group!r} must be one of {command_groups}")
+    body = expand_includes(body)
     body_html, toc = blog.markdown_to_html(body)
     return Page(
         spec.slug,

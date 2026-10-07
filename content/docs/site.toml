@@ -19,6 +19,11 @@ file = "tutorial.md"
 slug = "tutorial"
 label = "Tutorial"
 
+[[section.page]]
+file = "library-quickstart.md"
+slug = "library-quickstart"
+label = "Library quick start"
+
 [[section]]
 title = "The grit CLI"
 

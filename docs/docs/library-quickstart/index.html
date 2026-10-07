@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>grit fetch - Grit docs</title>
-<meta name="description" content="Download new commits, branches and tags from a remote." />
+<title>Library quick start - Grit docs</title>
+<meta name="description" content="Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD." />
 <script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -105,47 +105,61 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
   <div class="hero post-hero">
-    <div class="refs"><a class="ref" href="../">← docs</a><span>man page</span></div>
-    <h1 class="cmd">grit fetch</h1>
-    <p class="lede">Download new commits, branches and tags from a remote.</p>
+    <div class="refs"><a class="ref" href="../">← docs</a><span>guide</span></div>
+    <h1>Library quick start</h1>
+    <p class="lede">Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.</p>
   </div>
 </section>
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line"></span></div>
   <div class="doc-body has-toc">
-    <article class="content"><h2 id="synopsis">Synopsis</h2>
-<pre><code>grit fetch [&lt;remote&gt;]</code></pre>
-<h2 id="description">Description</h2>
-<p>Downloads everything new from a remote and updates your remote-tracking branches, such as <code>origin/main</code>, along with any new tags. Your own branches and working tree are left alone; to bring the new commits into your branch, use <a href="../merge/"><code>grit merge</code></a> or <a href="../pull/"><code>grit pull</code></a>.</p>
-<p>Each updated ref is listed with its old and new commit.</p>
-<h2 id="options">Options</h2>
-<div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;remote&gt;</code></td><td>The remote to fetch from. Defaults to <code>origin</code>.</td></tr></tbody></table></div>
-<h2 id="examples">Examples</h2>
-<pre><code>$ grit fetch
-  refs/remotes/origin/main  a8e620a → b52cca6
-Fetched 1 update from origin.
+    <article class="content"><p>This page walks through a minimal program that discovers a Git repository in the current directory (or a parent), resolves <code>HEAD</code>, and prints the commit id and subject line. The source below is the real example binary in the Grit repository; it is included automatically so the docs cannot drift from compiled code.</p>
+<h2 id="add-the-dependency">Add the dependency</h2>
+<p>In your crate:</p>
+<pre><code>cargo add grit-lib</code></pre>
+<p>Or add to <code>Cargo.toml</code>:</p>
+<pre><code>[dependencies]
+grit-lib = &quot;0.5.0&quot;</code></pre>
+<p>Use the <a href="https://crates.io/crates/grit-lib">latest version on crates.io</a> if the number above is stale.</p>
+<h2 id="example-program">Example program</h2>
+<p>Save as <code>src/main.rs</code> (or copy from <code>grit-examples</code> in the Grit repo):</p>
+<pre><code>//! Minimal grit-lib program: discover a repository and print HEAD&#x27;s commit id.
+//!
+//! Source for the library quick start in the docs; kept in sync via an include directive.
 
-$ grit fetch
-Already up to date with origin.</code></pre>
-<p>Fetch from another remote:</p>
-<pre><code>$ grit fetch upstream</code></pre>
-<h2 id="json-output">JSON output</h2>
-<pre><code>{
-  &quot;remote&quot;: &quot;origin&quot;,
-  &quot;updates&quot;: [
-    {
-      &quot;ref&quot;: &quot;refs/remotes/origin/main&quot;,
-      &quot;old_oid&quot;: &quot;a8e620a32cd86b483eaf4105fb215d4e920fcc14&quot;,
-      &quot;new_oid&quot;: &quot;b52cca65378cf17309f0b1f917c6dc4fdd9256f2&quot;
+use grit_lib::objects::{parse_commit, ObjectKind};
+use grit_lib::repo::Repository;
+
+fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let repo = Repository::discover(None)?;
+    let head = grit_lib::refs::resolve_ref(&amp;repo.git_dir, &quot;HEAD&quot;)?;
+    let object = repo.odb.read(&amp;head)?;
+    if object.kind != ObjectKind::Commit {
+        return Err(&quot;HEAD is not a commit&quot;.into());
     }
-  ],
-  &quot;updated&quot;: 1
+    let commit = parse_commit(&amp;object.data)?;
+    println!(&quot;{head}&quot;);
+    let subject = commit.message.lines().next().unwrap_or(&quot;&quot;);
+    if !subject.is_empty() {
+        println!(&quot;{subject}&quot;);
+    }
+    Ok(())
 }</code></pre>
-<p><code>old_oid</code> is <code>null</code> for a ref that is new, and <code>new_oid</code> is <code>null</code> for one that was removed.</p>
-<h2 id="see-also">See also</h2>
-<p><a href="../pull/">grit pull</a>, <a href="../merge/">grit merge</a>, <a href="../remote/">grit remote</a></p><div class="pager"><a href="../remote/">← grit remote</a><a href="../pull/">grit pull →</a></div></article>
-    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a class="current" href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
-    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#synopsis">Synopsis</a></li><li class="toc-level-2"><a href="#description">Description</a></li><li class="toc-level-2"><a href="#options">Options</a></li><li class="toc-level-2"><a href="#examples">Examples</a></li><li class="toc-level-2"><a href="#json-output">JSON output</a></li><li class="toc-level-2"><a href="#see-also">See also</a></li></ol></aside>
+<h2 id="run-it">Run it</h2>
+<p>From the root of any Git repository with at least one commit:</p>
+<pre><code>cargo run</code></pre>
+<p>Example output (your commit id will differ):</p>
+<pre><code>217c6f9a1b2c3d4e5f6789012345678901234567
+Start the project</code></pre>
+<p>The first line is the full object id of <code>HEAD</code>; the second is the first line of the commit message.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="../library/">Library guide overview</a> — longer-form guides for objects, refs, diff, and network code.</li>
+<li><a href="https://docs.rs/grit-lib">grit-lib on docs.rs</a> — API reference for <code>Repository</code> and the rest of the public surface.</li>
+<li><a href="../tutorial/">Tutorial</a> — the same repository operations from the <code>grit</code> CLI.</li>
+</ul><div class="pager"><a href="../tutorial/">← Tutorial</a><a href="../global-options/">Global options →</a></div></article>
+    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a class="current" href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#add-the-dependency">Add the dependency</a></li><li class="toc-level-2"><a href="#example-program">Example program</a></li><li class="toc-level-2"><a href="#run-it">Run it</a></li><li class="toc-level-2"><a href="#next-steps">Next steps</a></li></ol></aside>
   </div>
 </section>
 </main>

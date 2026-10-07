@@ -5,6 +5,8 @@ summary: Fifteen minutes with grit. Create a repository, record some changes, wo
 
 This walkthrough covers the commands you'll use every day. It assumes you have [installed grit](../install/) and know roughly what a commit and a branch are. The output shown is what `grit` prints, minus the colors.
 
+Regenerated on 2026-10-07 by running the listed commands with `grit` built from this repository (`cargo build --release -p grit-cli`), with `NO_COLOR=1` and author identity `Ada Lovelace <ada@example.com>`.
+
 ## Tell grit who you are
 
 Every commit records an author. Set your name and email once, in your global config:
@@ -20,7 +22,7 @@ $ grit config --global user.email ada@example.com
 
 ```
 $ grit init project
-Initialized empty repository in /home/ada/project/.git
+Initialized empty repository in /workspace/project/.git
 $ cd project
 ```
 
@@ -55,7 +57,7 @@ The last line always suggests the next step. You'll come back to this screen a l
 
 ```
 $ grit commit "Start the project"
-[main 217c6f9] Start the project
+[main 310fdb0] Start the project
 2 changes committed
 ```
 
@@ -65,7 +67,7 @@ Look at the history with [`grit log`](../log/):
 
 ```
 $ grit log
-  217c6f9  ada  just now  Start the project
+  310fdb0  ada  just now  Start the project
 ```
 
 ## Work on a branch
@@ -95,7 +97,7 @@ The two number columns are the old and new line numbers. Commit the change:
 
 ```
 $ grit commit "Say hi"
-[feature cf18394] Say hi
+[feature 2e409e2] Say hi
 1 change committed
 ```
 
@@ -104,9 +106,9 @@ $ grit commit "Say hi"
 ```
 $ grit show
 branch feature
-commit cf18394a62c3f845bd9c44927a5a55e014b2a99d
+commit 2e409e26f8b370ea1928a8fb93dcf2e025418e1f
 Author: Ada Lovelace <ada@example.com>
-Date:   2026-10-07 10:00:00 +0000
+Date:   2026-10-07 14:55:47 +0000
 
     Say hi
 
@@ -122,14 +124,14 @@ Switch back to `main` and [merge](../merge/) the branch in. Nothing else has hap
 $ grit switch main
 Switched to branch main
 $ grit merge feature
-Fast-forwarded feature → cf18394
+Fast-forwarded feature → 2e409e2
 ```
 
 The branch is done, so [delete it](../branch/):
 
 ```
 $ grit branch -d feature
-Deleted branch feature (was cf18394).
+Deleted branch feature (was 2e409e2).
 ```
 
 `grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `-D` when you really mean it.
@@ -151,7 +153,7 @@ To get other people's work, run [`grit pull`](../pull/). It fetches from the rem
 
 ```
 $ grit pull
-Merged origin/main into the current branch (acd1d4b)
+Merged origin/main into the current branch (91275a2)
 ```
 
 If someone pushed before you, `grit push` is rejected and tells you what to do:

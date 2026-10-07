@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Install grit - Grit docs</title>
-<meta name="description" content="Install the grit CLI on your machine and keep it up to date." />
+<meta name="description" content="Install the grit CLI on your machine, try nightly builds, and keep your copy up to date." />
 <script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -107,17 +107,40 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
   <div class="hero post-hero">
     <div class="refs"><a class="ref" href="../">← docs</a><span>guide</span></div>
     <h1>Install grit</h1>
-    <p class="lede">Install the grit CLI on your machine and keep it up to date.</p>
+    <p class="lede">Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.</p>
   </div>
 </section>
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line"></span></div>
-  <div class="doc-body">
-    <article class="content"><h2 id="install">Install</h2>
+  <div class="doc-body has-toc">
+    <article class="content"><h2 id="stable-release-recommended">Stable release (recommended)</h2>
+<p>On macOS and Linux:</p>
 <pre><code>curl -fsSL https://grit-scm.com/install | sh</code></pre>
-<p>On Windows, run <code>irm https://grit-scm.com/install.ps1 | iex</code> in PowerShell. With a Rust toolchain you can also run <code>cargo install grit-cli</code>. Once installed, <a href="../update/"><code>grit update</code></a> keeps it current.</p><div class="pager"><a href="../">← Docs</a><a href="../tutorial/">Tutorial →</a></div></article>
-    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a class="current" href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
-    
+<p>On Windows, run this in PowerShell:</p>
+<pre><code>irm https://grit-scm.com/install.ps1 | iex</code></pre>
+<p>The script downloads the latest release from GitHub, installs the <code>grit</code> binary (by default into <code>~/.local/bin</code> on Unix), and prints the version it installed.</p>
+<h2 id="nightly-builds">Nightly builds</h2>
+<p>CI publishes a rolling <strong>nightly</strong> prerelease when the release workflow is triggered manually. To install that build instead of the latest stable release:</p>
+<pre><code>curl -fsSL https://grit-scm.com/install-nightly | sh</code></pre>
+<p>On Windows:</p>
+<pre><code>irm https://grit-scm.com/install-nightly.ps1 | iex</code></pre>
+<p>Nightlies track recent <code>main</code>; use them when you want to test fixes before the next tagged release.</p>
+<h2 id="install-with-cargo">Install with Cargo</h2>
+<p>If you already have a Rust toolchain:</p>
+<pre><code>cargo install grit-cli</code></pre>
+<p>This builds and installs the <code>grit</code> executable into Cargo&#x27;s bin directory (usually <code>~/.cargo/bin</code>). Make sure that directory is on your <code>PATH</code>.</p>
+<h2 id="keep-grit-up-to-date">Keep grit up to date</h2>
+<p>After a script install, run <a href="../update/"><code>grit update</code></a> to re-run the same installer and replace the binary you&#x27;re running. If you installed with Cargo, update with:</p>
+<pre><code>cargo install grit-cli</code></pre>
+<h2 id="build-from-source">Build from source</h2>
+<p>Clone <a href="https://github.com/gitbutlerapp/grit">the repository</a> and build the CLI crate:</p>
+<pre><code>cargo build --release -p grit-cli</code></pre>
+<p>The binary is <code>target/release/grit</code>. You can copy it anywhere on your <code>PATH</code>, or run it from the build tree.</p>
+<h3 id="toolchain">Toolchain</h3>
+<p>The workspace pins a Rust version in <a href="https://github.com/gitbutlerapp/grit/blob/main/rust-toolchain.toml"><code>rust-toolchain.toml</code></a> (currently <strong>1.99.0</strong> with <code>rustfmt</code> and <code>clippy</code>). <code>rustup</code> picks this up automatically when you build in the repo.</p>
+<p>To use <code>grit-lib</code> in your own crate, add it from <a href="https://crates.io/crates/grit-lib">crates.io</a> — see the <a href="../library-quickstart/">library quick start</a>.</p><div class="pager"><a href="../">← Docs</a><a href="../tutorial/">Tutorial →</a></div></article>
+    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a class="current" href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#stable-release-recommended">Stable release (recommended)</a></li><li class="toc-level-2"><a href="#nightly-builds">Nightly builds</a></li><li class="toc-level-2"><a href="#install-with-cargo">Install with Cargo</a></li><li class="toc-level-2"><a href="#keep-grit-up-to-date">Keep grit up to date</a></li><li class="toc-level-2"><a href="#build-from-source">Build from source</a></li><li class="toc-level-3"><a href="#toolchain">Toolchain</a></li></ol></aside>
   </div>
 </section>
 </main>

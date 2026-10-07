@@ -11,6 +11,10 @@ publish = false
 name = "gritx-hash-object"
 path = "src/bin/gritx-hash-object.rs"
 
+[[bin]]
+name = "quickstart"
+path = "src/bin/quickstart.rs"
+
 [lints]
 workspace = true
 
