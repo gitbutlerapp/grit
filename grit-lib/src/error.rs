@@ -76,6 +76,23 @@ pub enum Error {
     #[error("index error: {0}")]
     IndexError(String),
 
+    /// Stage-1/2/3 entries are present; a stage-0 tree cannot be built.
+    #[error("index contains unmerged entries")]
+    IndexUnmerged,
+
+    /// A file path is a prefix of another index path at the same tree level.
+    #[error(
+        "index path prefix conflict between '{}' and '{}'",
+        directory.display(),
+        file.display()
+    )]
+    IndexPathPrefixConflict {
+        /// Shorter path (treated as the ambiguous directory prefix).
+        directory: std::path::PathBuf,
+        /// Longer path that extends the prefix with an additional component.
+        file: std::path::PathBuf,
+    },
+
     /// The `FSMN` index extension ends before its header, token, or EWAH payload.
     #[error("index fsmonitor extension payload is truncated")]
     IndexFsmonitorExtensionTruncated,

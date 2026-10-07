@@ -45,6 +45,13 @@ struct FileAlternatesCache {
     snapshot: Option<Arc<Vec<PathBuf>>>,
 }
 
+/// Options for [`Odb::write_with_options`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WriteOptions {
+    /// When set, do not touch mtimes on existing objects (Git `WRITE_OBJECT_SILENT`).
+    pub silent: bool,
+}
+
 /// Decompress a zlib-wrapped loose object payload from an open file.
 ///
 /// When the zlib wrapper advertises a preset dictionary (FDICT), `flate2` typically fails with a
@@ -871,6 +878,16 @@ impl Odb {
     /// - [`Error::Io`] — could not create the directory or write the file.
     /// - [`Error::Zlib`] — compression failed.
     pub fn write(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        self.write_with_options(kind, data, WriteOptions::default())
+    }
+
+    /// Like [`Self::write`], with control over freshen behaviour on existing objects.
+    pub fn write_with_options(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
@@ -878,7 +895,9 @@ impl Odb {
         // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
         let path = self.object_path(&oid);
         if path.is_file() {
-            let _ = touch_path_mtime(&path);
+            if !options.silent {
+                let _ = touch_path_mtime(&path);
+            }
             return Ok(oid);
         }
 
@@ -890,7 +909,10 @@ impl Odb {
             return Ok(oid);
         }
 
-        if already_exists && self.freshen_object(&oid) {
+        if already_exists {
+            if !options.silent {
+                let _ = self.freshen_object(&oid);
+            }
             return Ok(oid);
         }
 

@@ -9,7 +9,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::state::HeadState;
 use grit_lib::{
     refs,
-    write_tree::{build_cache_tree_from_tree, write_tree_from_index},
+    write_tree::{write_tree_update_index, WriteTreeFlags},
 };
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -72,12 +72,10 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
     };
 
     let mut index = model.index;
-    let tree = write_tree_from_index(&repo.odb, &index, "").context("could not write tree")?;
-    let cache_tree = build_cache_tree_from_tree(&repo.odb, &tree)
-        .context("could not build cache-tree from commit tree")?;
-    index.set_cache_tree(cache_tree);
+    let tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::default())
+        .context("could not write tree")?;
     repo.write_index(&mut index)
-        .context("could not update index cache-tree")?;
+        .context("could not refresh index cache-tree")?;
 
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
     let now = OffsetDateTime::now_utc();
