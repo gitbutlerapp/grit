@@ -2,9 +2,10 @@
 
 use std::borrow::Cow;
 use std::io::IsTerminal;
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::git_path::relative_path_for_display;
 use grit_lib::pathspec::pathdiff;
 
 use crate::context::{self, CommitSummary};
@@ -26,62 +27,14 @@ impl PathDisplayContext {
 
     /// Map a repository-relative path to a cwd-relative display string.
     pub fn format_repo_path<'a>(&self, repo_rel: &'a str) -> Cow<'a, str> {
-        let target = self.work_tree.join(repo_rel);
-        match pathdiff_relative_lexical(&self.cwd, &target) {
-            Ok(rel) if rel == "." => Cow::Borrowed(repo_rel),
-            Ok(rel) => Cow::Owned(rel),
-            Err(_) => Cow::Borrowed(repo_rel),
+        let target = self
+            .work_tree
+            .join(repo_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        match relative_path_for_display(&self.cwd, &target) {
+            Some(rel) if rel == "." => Cow::Borrowed(repo_rel),
+            Some(rel) => Cow::Owned(rel),
+            None => Cow::Borrowed(repo_rel),
         }
-    }
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-fn path_to_slash(path: &Path) -> String {
-    path.components()
-        .filter_map(|c| match c {
-            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
-            Component::ParentDir => Some("..".to_owned()),
-            Component::CurDir => None,
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn pathdiff_relative_lexical(from: &Path, to: &Path) -> Result<String, ()> {
-    let from_norm = normalize_path(from);
-    let to_norm = normalize_path(to);
-    let from_parts: Vec<_> = from_norm.components().collect();
-    let to_parts: Vec<_> = to_norm.components().collect();
-    let common = from_parts
-        .iter()
-        .zip(to_parts.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut result = PathBuf::new();
-    for _ in common..from_parts.len() {
-        result.push("..");
-    }
-    for part in &to_parts[common..] {
-        result.push(part);
-    }
-    if result.as_os_str().is_empty() {
-        Ok(".".to_string())
-    } else {
-        Ok(path_to_slash(&result))
     }
 }
 

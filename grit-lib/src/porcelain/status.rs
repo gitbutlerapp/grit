@@ -474,10 +474,8 @@ fn traditional_normal_directory_only(
                 continue;
             }
             let path = entry.path();
-            let rel_child = path
-                .strip_prefix(work_tree)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| name.clone());
+            let rel_child = crate::git_path::strip_worktree_prefix(&path, work_tree)
+                .unwrap_or_else(|| name.clone());
             if !pathspec_may_match_directory(&rel_child, pathspecs)
                 && !(entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
                     && status_path_matches_worktree(repo, index, work_tree, &rel_child, pathspecs))

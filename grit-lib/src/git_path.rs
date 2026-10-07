@@ -2,7 +2,8 @@
 //! Logic matches `git/path.c` (`normalize_path_copy`, `longest_ancestor_length`,
 //! `relative_path`, `strip_path_suffix`) and `git/remote.c` (`relative_url`).
 
-use std::path::{Path, PathBuf};
+use std::borrow::Cow;
+use std::path::{Component, Path, PathBuf};
 
 /// Errors returned by Git-compatible path helper routines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -703,10 +704,128 @@ pub fn abspath_part_inside_repo(path: &str, work_tree: &Path) -> Option<String> 
     None
 }
 
+/// Strip Windows extended-length `\\?\` / `\\?\UNC\` prefixes for comparison and display.
+#[must_use]
+pub fn strip_verbatim_path_prefix_str(path: &str) -> Cow<'_, str> {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        Cow::Owned(format!(r"\\{rest}"))
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        Cow::Borrowed(rest)
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+/// User-facing path: forward slashes, no verbatim prefix (Git-style init/status paths).
+#[must_use]
+pub fn user_display_path(path: &Path) -> String {
+    strip_verbatim_path_prefix_str(&path.display().to_string()).replace('\\', "/")
+}
+
+/// Lexical absolute path for comparison (does not follow symlinks).
+///
+/// Strips Windows verbatim prefixes when present. Used for repository entry paths so
+/// symlinks keep their repository spelling in status and pathspec resolution.
+#[must_use]
+pub fn path_lexical_for_disk_compare(path: &Path) -> PathBuf {
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let normalized = lexical_normalize_path_buf(abs);
+    #[cfg(windows)]
+    {
+        return PathBuf::from(
+            strip_verbatim_path_prefix_str(&normalized.display().to_string()).into_owned(),
+        );
+    }
+    normalized
+}
+
+fn lexical_normalize_path_buf(path: PathBuf) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(c),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(_) => out.push(c),
+        }
+    }
+    out
+}
+
+/// Repository-relative path with forward slashes when `path` lies under `work_tree`.
+#[must_use]
+pub fn strip_worktree_prefix(path: &Path, work_tree: &Path) -> Option<String> {
+    let path_key = path_lexical_for_disk_compare(path);
+    let wt_key = path_for_disk_compare(work_tree);
+    let rel = path_key.strip_prefix(&wt_key).ok()?;
+    Some(path_to_git_slash(rel))
+}
+
+/// Convert a filesystem path to Git's slash-separated repo-relative form.
+#[must_use]
+pub fn path_to_git_slash(path: &Path) -> String {
+    path.components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Path of `to` relative to `from`, for display (forward slashes).
+///
+/// Uses normalized paths (including Windows verbatim-prefix stripping) and walks up from
+/// the common ancestor with `..` when the target is not under `from`.
+#[must_use]
+pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
+    let from_cmp = path_for_disk_compare(from);
+    let to_cmp = path_lexical_for_disk_compare(to);
+    if from_cmp == to_cmp {
+        return Some(".".to_owned());
+    }
+
+    let from_parts: Vec<_> = from_cmp.components().collect();
+    let to_parts: Vec<_> = to_cmp.components().collect();
+    let common = from_parts
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let mut segments: Vec<String> = Vec::new();
+    for part in &from_parts[common..] {
+        if matches!(part, Component::Normal(_)) {
+            segments.push("..".to_owned());
+        }
+    }
+    for part in &to_parts[common..] {
+        match part {
+            Component::Normal(name) => segments.push(name.to_string_lossy().into_owned()),
+            Component::ParentDir => {
+                segments.pop();
+            }
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+
+    if segments.is_empty() {
+        Some(".".to_owned())
+    } else {
+        Some(segments.join("/"))
+    }
+}
+
 /// Canonicalize a path for on-disk comparison (macOS `/private` aliasing).
 ///
 /// On macOS, `/tmp` and `/private/tmp` refer to the same directory; Git stores and
 /// accepts both spellings when matching paths against `core.worktree`.
+///
+/// On Windows, `canonicalize` may return `\\?\`-prefixed paths; those are stripped so
+/// comparisons match non-verbatim spellings (`C:\…`).
 #[must_use]
 pub fn path_for_disk_compare(path: &Path) -> PathBuf {
     let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -718,6 +837,14 @@ pub fn path_for_disk_compare(path: &Path) -> PathBuf {
                 return without_private;
             }
         }
+    }
+    #[cfg(windows)]
+    {
+        return PathBuf::from(strip_verbatim_path_prefix_str(&canon.display().to_string()));
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = &canon;
     }
     canon
 }
@@ -803,6 +930,83 @@ mod git_path_component_tests {
         ] {
             assert!(!is_common_git_path(p), "{p} should be worktree-local");
         }
+    }
+
+    #[test]
+    fn strip_verbatim_extended_path_prefix() {
+        assert_eq!(strip_verbatim_path_prefix_str(r"\\?\C:\tmp\p"), r"C:\tmp\p");
+        assert_eq!(
+            strip_verbatim_path_prefix_str(r"\\?\UNC\server\share\dir"),
+            r"\\server\share\dir"
+        );
+        assert_eq!(strip_verbatim_path_prefix_str(r"C:\tmp\p"), r"C:\tmp\p");
+    }
+
+    #[test]
+    fn user_display_path_uses_forward_slashes() {
+        assert_eq!(
+            user_display_path(Path::new(r"\\?\C:\tmp\p\.git")),
+            "C:/tmp/p/.git"
+        );
+    }
+
+    #[test]
+    fn relative_path_for_display_above_and_below_cwd() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        let deep = repo.join("d");
+        std::fs::create_dir_all(&deep).expect("mkdir");
+        std::fs::write(repo.join("a.txt"), b"root").expect("write");
+        std::fs::write(deep.join("a.txt"), b"nested").expect("write");
+
+        let cwd = deep.canonicalize().expect("canonicalize cwd");
+        let above = repo
+            .join("a.txt")
+            .canonicalize()
+            .expect("canonicalize above");
+        let below = deep
+            .join("a.txt")
+            .canonicalize()
+            .expect("canonicalize below");
+
+        assert_eq!(
+            relative_path_for_display(&cwd, &above).as_deref(),
+            Some("../a.txt")
+        );
+        assert_eq!(
+            relative_path_for_display(&cwd, &below).as_deref(),
+            Some("a.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn strip_worktree_prefix_preserves_symlink_spelling() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join("d")).expect("mkdir");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        symlink(&outside, repo.join("d/link")).expect("symlink");
+        assert_eq!(
+            strip_worktree_prefix(&repo.join("d/link"), &repo).as_deref(),
+            Some("d/link")
+        );
+    }
+
+    #[test]
+    fn strip_worktree_prefix_for_nested_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join("d")).expect("mkdir");
+        let file = repo.join("d/a.txt");
+        std::fs::write(&file, b"x").expect("write");
+        assert_eq!(
+            strip_worktree_prefix(&file, &repo).as_deref(),
+            Some("d/a.txt")
+        );
     }
 
     #[test]

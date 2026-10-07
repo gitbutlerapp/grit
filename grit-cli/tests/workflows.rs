@@ -244,6 +244,92 @@ fn add_pathspec_from_subdirectory() -> TestResult {
         after_fail.dump()
     );
 
+    let sibling = repo.join("d");
+    fs::create_dir_all(&sibling)?;
+    write_file(&repo.join("a.txt"), "root\n")?;
+    write_file(&sibling.join("a.txt"), "nested\n")?;
+    gs_ok(&repo, ["add", "a.txt", "d/a.txt"])?;
+    let dual = gs_ok(&sibling, ["status"])?;
+    assert!(
+        dual.stdout.contains("new           ../a.txt"),
+        "expected parent-dir display for repo-root file:\n{}",
+        dual.dump()
+    );
+    assert!(
+        dual.stdout.contains("new           a.txt"),
+        "expected cwd-local display for nested file:\n{}",
+        dual.dump()
+    );
+
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn add_windows_backslash_and_absolute_pathspecs() -> TestResult {
+    let scratch = Scratch::new("add-win-pathspec")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    let d = repo.join("d");
+    fs::create_dir_all(&d)?;
+    write_file(&d.join("a.txt"), "1\n")?;
+    write_file(&d.join("b.txt"), "2\n")?;
+    write_file(&d.join("c.txt"), "3\n")?;
+
+    gs_ok(&repo, ["add", r"d\a.txt"])?;
+    gs_ok(&repo, ["add", &path_arg(&d.join("b.txt"))?])?;
+    let forward = d.join("b.txt").to_string_lossy().replace('\\', "/");
+    gs_ok(&repo, ["add", &forward])?;
+
+    let status = gs_ok(&d, ["status"])?;
+    assert!(
+        status.stdout.contains("new           a.txt"),
+        "staged file in cwd via backslash pathspec should display as a.txt:\n{}",
+        status.dump()
+    );
+    assert!(
+        !status.stdout.contains("new           ../a.txt"),
+        "must not show parent-relative path for file in cwd:\n{}",
+        status.dump()
+    );
+    assert!(
+        status.stdout.contains("new           b.txt"),
+        "staged nested path via absolute pathspec:\n{}",
+        status.dump()
+    );
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn status_from_subdirectory_shows_symlink_not_target() -> TestResult {
+    use std::os::unix::fs::symlink;
+
+    let scratch = Scratch::new("status-symlink")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+    let d = repo.join("d");
+    fs::create_dir_all(&d)?;
+    let outside = scratch.path().join("outside");
+    fs::create_dir_all(&outside)?;
+    write_file(&outside.join("secret.txt"), "secret\n")?;
+    symlink(&outside, d.join("link"))?;
+    gs_ok(&repo, ["add", "d/link"])?;
+    let status = gs_ok(&d, ["status"])?;
+    assert!(
+        status.stdout.contains("link"),
+        "expected symlink name in status output:\n{}",
+        status.dump()
+    );
+    assert!(
+        !status.stdout.contains("outside") && !status.stdout.contains("secret.txt"),
+        "must not display symlink target path:\n{}",
+        status.dump()
+    );
+
     Ok(())
 }
 

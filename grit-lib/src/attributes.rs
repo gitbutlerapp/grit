@@ -831,24 +831,16 @@ pub fn path_relative_to_worktree(
         cwd.join(p)
     };
 
-    let wt_canon = wt.canonicalize().map_err(|e| e.to_string())?;
-
     if let Ok(abs) = combined.canonicalize() {
-        let rel = abs
-            .strip_prefix(&wt_canon)
-            .map_err(|_| format!("path outside repository: {}", path_str))?;
-        return Ok(normalize_rel_path(
-            rel.to_str().ok_or_else(|| "invalid path".to_string())?,
-        ));
+        let rel = crate::git_path::strip_worktree_prefix(&abs, wt)
+            .ok_or_else(|| format!("path outside repository: {}", path_str))?;
+        return Ok(normalize_rel_path(&rel));
     }
 
     let abs_lex = lexical_normalize_path(combined);
-    let rel = abs_lex
-        .strip_prefix(&wt_canon)
-        .map_err(|_| format!("path outside repository: {}", path_str))?;
-    Ok(normalize_rel_path(
-        rel.to_str().ok_or_else(|| "invalid path".to_string())?,
-    ))
+    let rel = crate::git_path::strip_worktree_prefix(&abs_lex, wt)
+        .ok_or_else(|| format!("path outside repository: {}", path_str))?;
+    Ok(normalize_rel_path(&rel))
 }
 
 fn collect_nested_gitattributes_dirs(work_tree: &Path) -> Vec<PathBuf> {
