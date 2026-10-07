@@ -97,3 +97,27 @@ Each job uses **`ubuntu-latest`** and **`timeout-minutes: 15`**, and the jobs ru
 ## Benchmarks
 
 Performance work compares `grit-lib` operations and `grit` commands against system `git` on the same machine (see **ROADMAP.md** item 2). Use Criterion benchmarks in `grit-lib` for library operations and `grit-bench` (`grit-utils`) for command-level comparisons, and record results when changing hot paths.
+
+### Criterion (`grit-lib`)
+
+Object and pack micro-benchmarks live under `grit-lib/benches/` (harness disabled; entry point `objects`). A shared fixture module builds deterministic repos in a temp directory using `grit-lib`, calling the system `git` binary only for `index-pack` / `repack` when a real `.idx` is required.
+
+Run the full suite locally:
+
+```bash
+cargo bench -p grit-lib --bench objects
+```
+
+CI runs a one-iteration smoke pass (every benchmark once):
+
+```bash
+cargo bench -p grit-lib --bench objects -- --test
+```
+
+Before changing benchmarks, keep bench code warning-free:
+
+```bash
+cargo clippy -p grit-lib --benches -- -D warnings
+```
+
+Reported groups include SHA-1 throughput, Git object-id hashing, zlib inflate/deflate on typical blob and tree payloads, loose and packed object reads (whole objects and deep delta chains), pack `.idx` lookup (hit/miss on small and large indexes), and delta apply.
