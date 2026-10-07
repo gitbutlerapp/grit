@@ -404,7 +404,8 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 .content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
 .content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
 .content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
-.content td:first-child{white-space:nowrap}
+.content td{overflow-wrap:anywhere}.content td code{white-space:nowrap}
+.content td:first-child{overflow-wrap:normal}
 .toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
 .toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
 .toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
