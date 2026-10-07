@@ -1499,6 +1499,17 @@ fn normalize_repo_root_relative_pathspec(pathspec: &str) -> String {
     spec.to_owned()
 }
 
+/// Normalize user pathspec separators on Windows (`\` → `/`) before resolution.
+fn normalize_pathspec_separators(pathspec: &str) -> std::borrow::Cow<'_, str> {
+    #[cfg(windows)]
+    {
+        if !pathspec.starts_with(':') && pathspec.contains('\\') {
+            return std::borrow::Cow::Owned(pathspec.replace('\\', "/"));
+        }
+    }
+    std::borrow::Cow::Borrowed(pathspec)
+}
+
 fn normalize_relative_path_str(path: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     for component in std::path::Path::new(path).components() {
@@ -1519,17 +1530,22 @@ fn normalize_relative_path_str(path: &str) -> String {
 /// Current directory relative to `work_tree`, or `None` if cwd is the work tree root.
 #[must_use]
 pub fn pathdiff(cwd: &Path, work_tree: &Path) -> Option<String> {
-    let cwd_canon = cwd.canonicalize().ok()?;
-    let wt_canon = work_tree.canonicalize().ok()?;
+    use crate::git_path::{path_for_disk_compare, path_to_git_slash};
 
-    if cwd_canon == wt_canon {
+    let cwd_cmp = path_for_disk_compare(cwd);
+    let wt_cmp = path_for_disk_compare(work_tree);
+
+    if cwd_cmp == wt_cmp {
         return None;
     }
 
-    cwd_canon
-        .strip_prefix(&wt_canon)
-        .ok()
-        .map(|p| p.to_string_lossy().to_string())
+    let rel = cwd_cmp.strip_prefix(&wt_cmp).ok()?;
+    let git = path_to_git_slash(rel);
+    if git.is_empty() {
+        None
+    } else {
+        Some(git)
+    }
 }
 
 /// For exclude (and other cwd-relative) pathspec magic from a subdirectory, Git resolves the
@@ -1577,6 +1593,8 @@ fn prepend_cwd_to_short_exclude_pathspec(spec: &str, cwd: &str) -> Option<String
 /// or `None` when cwd is the work tree root.
 #[must_use]
 pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) -> String {
+    let pathspec = normalize_pathspec_separators(pathspec);
+    let pathspec = pathspec.as_ref();
     // Git: `.` at repo root means "match the whole tree" (not an empty pathspec).
     // An empty resolved pathspec would match nothing and breaks `grep -- . t` max-depth.
     if pathspec == "." {
@@ -1588,9 +1606,6 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
     if pathspec.contains("../") || pathspec.starts_with("../") {
         let cwd = std::env::current_dir().unwrap_or_default();
         let abs = cwd.join(pathspec);
-        let wt_canon = work_tree
-            .canonicalize()
-            .unwrap_or_else(|_| work_tree.to_path_buf());
         let mut parts: Vec<std::ffi::OsString> = Vec::new();
         for component in abs.components() {
             use std::path::Component;
@@ -1603,18 +1618,14 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
             }
         }
         let abs_norm: PathBuf = parts.iter().collect();
-        if let Ok(rel) = abs_norm.strip_prefix(&wt_canon) {
-            return rel.to_string_lossy().to_string();
+        if let Some(rel) = crate::git_path::strip_worktree_prefix(&abs_norm, work_tree) {
+            return rel;
         }
     }
     if Path::new(pathspec).is_absolute() {
         let abs = Path::new(pathspec);
-        let wt_canon = work_tree
-            .canonicalize()
-            .unwrap_or_else(|_| work_tree.to_path_buf());
-        let abs_canon = abs.canonicalize().unwrap_or_else(|_| abs.to_path_buf());
-        if let Ok(rel) = abs_canon.strip_prefix(&wt_canon) {
-            return rel.to_string_lossy().to_string();
+        if let Some(rel) = crate::git_path::strip_worktree_prefix(abs, work_tree) {
+            return rel;
         }
         return pathspec.to_owned();
     }

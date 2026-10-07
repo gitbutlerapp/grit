@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use grit_lib::git_path::user_display_path;
 use grit_lib::repo::init_repository;
 use serde::Serialize;
 
@@ -37,7 +38,7 @@ pub fn run(path: Option<String>, bare: bool) -> Result<InitOutcome> {
 
     Ok(InitOutcome {
         initialized: true,
-        path: repo.git_dir.display().to_string(),
+        path: user_display_path(&repo.git_dir),
         bare,
         branch: "main".to_owned(),
     })

@@ -1048,10 +1048,10 @@ pub fn normalize_repo_relative(repo: &Repository, cwd: &Path, path: &str) -> Res
         cwd.join(input)
     };
     let normalized = normalize_path(&combined);
-    let rel = normalized
-        .strip_prefix(work_tree)
-        .map_err(|_| Error::PathError(format!("path '{path}' is outside repository work tree")))?;
-    Ok(path_to_slash(rel))
+    let rel = crate::git_path::strip_worktree_prefix(&normalized, work_tree).ok_or_else(|| {
+        Error::PathError(format!("path '{path}' is outside repository work tree"))
+    })?;
+    Ok(rel)
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -1064,17 +1064,6 @@ fn normalize_path(path: &Path) -> PathBuf {
             }
             other => out.push(other.as_os_str()),
         }
-    }
-    out
-}
-
-fn path_to_slash(path: &Path) -> String {
-    let mut out = String::new();
-    for (idx, component) in path.components().enumerate() {
-        if idx > 0 {
-            out.push('/');
-        }
-        out.push_str(&component.as_os_str().to_string_lossy());
     }
     out
 }
