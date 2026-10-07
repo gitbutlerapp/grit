@@ -56,7 +56,18 @@ Prints hi on startup so we know the binary runs."
 
 ## JSON output
 
-```
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `oid` | string | Full commit object id (40 hex chars for SHA-1) |
+| `branch` | string | Short branch name (e.g. `main`) |
+| `subject` | string | First line of the commit message |
+| `changes` | number | Path changes vs the parent commit tree |
+
+Example:
+
+```json
 {
   "oid": "217c6f958c3162926c9c9379e6d21b38f110e1ad",
   "branch": "main",
@@ -65,7 +76,9 @@ Prints hi on startup so we know the binary runs."
 }
 ```
 
-`oid` is the new commit's id and `changes` is the number of paths it changed.
+## Markdown output
+
+Pass `--markdown` for the same fields as `--json`, rendered as a Markdown table for agents.
 
 ## See also
 

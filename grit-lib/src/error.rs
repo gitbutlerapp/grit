@@ -158,6 +158,14 @@ pub enum Error {
     /// Used for revision errors that must match Git's `fatal:` lines exactly.
     #[error("{0}")]
     Message(String),
+
+    /// The index tree matches the parent commit tree and [`allow_empty`](crate::porcelain::commit::CommitRequest::allow_empty) is false.
+    #[error("nothing to commit")]
+    NothingToCommit,
+
+    /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
+    #[error("HEAD is detached")]
+    DetachedHead,
 }
 
 /// Convenience alias for `Result<T, Error>`.

@@ -621,6 +621,7 @@ impl Repository {
         updated_workdir: bool,
         updated_skipworktree: bool,
     ) -> Result<()> {
+        test_inject_index_write_fail()?;
         // The on-disk index format (entry OID width and trailing checksum) is
         // fixed by the repository's hash algorithm. Stamp it here so every
         // index written through the repository is consistent, regardless of how
@@ -2807,5 +2808,37 @@ pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), String
     if version >= 2 {
         return Err(format!("unknown repository format version: {version}"));
     }
+    Ok(())
+}
+
+#[cfg(debug_assertions)]
+mod index_write_fail_inject {
+    use std::cell::RefCell;
+
+    thread_local! {
+        pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
+    }
+}
+
+/// Debug-only: fail the next [`Repository::write_index`] call.
+#[cfg(debug_assertions)]
+pub fn set_test_inject_index_write_fail(enabled: bool) {
+    index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
+}
+
+#[cfg(debug_assertions)]
+fn test_inject_index_write_fail() -> Result<()> {
+    index_write_fail_inject::INJECT.with(|c| {
+        if *c.borrow() {
+            return Err(Error::Io(std::io::Error::other(
+                "injected index write failure",
+            )));
+        }
+        Ok(())
+    })
+}
+
+#[cfg(not(debug_assertions))]
+fn test_inject_index_write_fail() -> Result<()> {
     Ok(())
 }
