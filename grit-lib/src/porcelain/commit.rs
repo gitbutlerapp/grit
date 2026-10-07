@@ -1,8 +1,8 @@
 //! Create a commit from the current index and move the checked-out branch.
 //!
 //! [`create_commit`] performs incremental cache-tree write-tree, writes the commit
-//! object, updates the branch and `HEAD` reflogs through [`refs::update_branch_for_commit`],
-//! and persists the index with a valid cache-tree.
+//! object, persists the index with a valid cache-tree, then updates the branch and `HEAD`
+//! reflogs through [`refs::update_branch_for_commit`].
 
 use crate::diff::{diff_trees, zero_oid};
 use crate::error::{Error, Result};
@@ -42,8 +42,8 @@ pub struct CommitOutcome {
 /// Write a commit from the current index and advance the checked-out branch.
 ///
 /// Loads the index from disk, builds the commit tree with an incremental cache-tree
-/// write-tree, writes the commit object, atomically updates the branch ref and reflogs
-/// (see [`update_branch_for_commit`]), then writes the index back with an updated cache-tree.
+/// write-tree, writes the commit object, writes the index back with an updated cache-tree,
+/// then atomically updates the branch ref and reflogs (see [`update_branch_for_commit`]).
 ///
 /// # Parameters
 ///
@@ -56,6 +56,7 @@ pub struct CommitOutcome {
 /// - [`Error::DetachedHead`] when `HEAD` is not on a branch.
 /// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false.
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
+/// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
 /// - Ref/reflog failures from [`update_branch_for_commit`]; the branch tip is not left advanced without reflogs when logging is enabled.
 pub fn create_commit(
     repo: &Repository,
@@ -131,6 +132,10 @@ pub fn create_commit(
         }
     });
 
+    repo.write_index(&mut index)?;
+
+    let changes = diff_trees(&repo.odb, parent_tree.as_ref(), Some(&tree), "")?.len();
+
     update_branch_for_commit(
         &repo.git_dir,
         &BranchCommitRefUpdate {
@@ -141,10 +146,6 @@ pub fn create_commit(
             reflog_message: &reflog_msg,
         },
     )?;
-
-    repo.write_index(&mut index)?;
-
-    let changes = diff_trees(&repo.odb, parent_tree.as_ref(), Some(&tree), "")?.len();
 
     progress.finish();
     Ok(CommitOutcome {
@@ -181,6 +182,7 @@ mod tests {
     use crate::progress::NullProgress;
     use crate::reflog::read_reflog;
     use crate::refs::{resolve_ref, set_test_inject_reflog_fail};
+    use crate::repo::set_test_inject_index_write_fail;
     use crate::write_tree::{cache_tree_fully_valid, verify_cache_tree};
     use std::fs;
     use std::path::Path;
@@ -317,6 +319,25 @@ mod tests {
         let head_log = read_reflog(&repo.git_dir, "HEAD").unwrap();
         assert_eq!(head_log.len(), 1);
         assert_eq!(head_log[0].new_oid, outcome.oid);
+    }
+
+    #[test]
+    fn create_commit_index_write_failure_does_not_advance_branch() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        set_test_inject_index_write_fail(true);
+        let err = create_commit(&repo, &commit_req("fail"), &mut NullProgress).unwrap_err();
+        set_test_inject_index_write_fail(false);
+        assert!(!matches!(err, Error::NothingToCommit));
+
+        assert!(
+            resolve_ref(&repo.git_dir, "refs/heads/main").is_err(),
+            "branch must not advance when index write fails"
+        );
     }
 
     #[test]
