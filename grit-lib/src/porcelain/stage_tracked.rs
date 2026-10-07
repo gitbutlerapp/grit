@@ -17,7 +17,9 @@ use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
 };
 use crate::objects::{ObjectId, ObjectKind};
+use crate::precompose_config::effective_core_precomposeunicode;
 use crate::repo::Repository;
+use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// Summary of paths updated while staging tracked modifications/deletions.
 ///
@@ -102,6 +104,7 @@ pub fn stage_tracked_modifications_in_index(
     index: &mut Index,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
+    let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
 
     let mut path_keys: HashSet<Vec<u8>> = HashSet::new();
     let mut unmerged_paths: HashSet<Vec<u8>> = HashSet::new();
@@ -119,7 +122,13 @@ pub fn stage_tracked_modifications_in_index(
     let mut summary = StageTrackedSummary::default();
 
     for raw_path in path_keys {
-        let abs_path = worktree_path_from_index_rel(work_tree, &raw_path);
+        let abs_path = std::str::from_utf8(&raw_path)
+            .ok()
+            .filter(|_| precompose_unicode)
+            .map_or_else(
+                || worktree_path_from_index_rel(work_tree, &raw_path),
+                |rel| resolve_worktree_path_for_staging(work_tree, rel, true).abs,
+            );
         if path_has_symlink_parent_cached(work_tree, &abs_path, &mut symlink_parent_cache) {
             if index.remove(&raw_path) {
                 summary.removed.push(raw_path.clone());
@@ -399,6 +408,7 @@ mod tests {
 
     use filetime::{set_file_mtime, FileTime};
     use std::fs;
+    use std::io::Write;
 
     use crate::diff::{entry_is_racy, stat_matches};
     use crate::index::{entry_from_metadata, index_file_mtime, MODE_EXECUTABLE, MODE_REGULAR};
@@ -713,6 +723,41 @@ mod tests {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
         let index = repo.load_index().unwrap();
         assert!(index.entries.iter().any(|e| e.path == b"locked/f"));
+    }
+
+    #[test]
+    fn precomposed_index_path_resolves_decomposed_worktree_file() {
+        let (_dir, repo) = init_repo();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(repo.git_dir.join("config"))
+            .unwrap()
+            .write_all(b"\n[core]\n\tprecomposeunicode = true\n")
+            .unwrap();
+
+        let wt = repo.work_tree.as_ref().unwrap();
+        let nfd = "cafe\u{0301}.txt";
+        let nfc = "caf\u{00e9}.txt";
+        let abs = wt.join(nfd);
+        fs::write(&abs, b"one").unwrap();
+        let oid = repo.odb.write(ObjectKind::Blob, b"one").unwrap();
+        let meta = fs::symlink_metadata(&abs).unwrap();
+        let mut index = repo.load_index().unwrap();
+        index.add_or_replace(
+            entry_from_stat(&abs, nfc.as_bytes(), oid, mode_from_metadata(&meta)).unwrap(),
+        );
+        repo.write_index(&mut index).unwrap();
+
+        let unchanged = stage_tracked_modifications(&repo, wt).unwrap();
+        assert!(unchanged.modified.is_empty());
+        assert!(unchanged.removed.is_empty());
+
+        fs::write(&abs, b"changed").unwrap();
+        let changed = stage_tracked_modifications(&repo, wt).unwrap();
+        assert_eq!(changed.modified, vec![nfc.as_bytes().to_vec()]);
+        assert!(changed.removed.is_empty());
+        let expected = repo.odb.write(ObjectKind::Blob, b"changed").unwrap();
+        assert_eq!(repo.load_index().unwrap().entries[0].oid, expected);
     }
 
     #[test]
