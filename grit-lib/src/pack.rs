@@ -5,8 +5,7 @@
 
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, verify_trailer};
-use crate::objects::HashAlgo;
-use crate::objects::{Object, ObjectId, ObjectKind};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 use crate::unpack_objects::apply_delta;
 use flate2::read::ZlibDecoder;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -2119,10 +2118,13 @@ fn validate_pack_index_object_count(pack_bytes: &[u8], idx: &PackIndex) -> Resul
 }
 
 fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8]) -> Result<()> {
-    if expected_oid.len() != 20 {
-        return Ok(());
-    }
-    let actual = hash_object(HashAlgo::Sha1, kind, data);
+    let algo = HashAlgo::from_len(expected_oid.len()).ok_or_else(|| {
+        Error::CorruptObject(format!(
+            "unsupported packed object id width: {}",
+            expected_oid.len()
+        ))
+    })?;
+    let actual = hash_object(algo, kind, data);
     if actual.as_bytes() != expected_oid {
         return Err(Error::CorruptObject(format!(
             "packed object {} hashes to {}",
@@ -2879,6 +2881,55 @@ mod tests {
         let git_dir = dir.join(".git");
         let odb = Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir);
         Some((tmp, tip, odb))
+    }
+
+    #[test]
+    fn verify_packed_object_hash_sha256_detects_corruption() {
+        use crate::hash::hash_object;
+        use std::fs;
+
+        let data = b"sha256 packed blob for hash verify\n";
+        let oid = hash_object(HashAlgo::Sha256, ObjectKind::Blob, data);
+        let wrong_oid = hash_object(HashAlgo::Sha256, ObjectKind::Blob, b"different payload\n");
+        let mut pack = Vec::new();
+        pack.extend_from_slice(b"PACK");
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        pack.extend_from_slice(&1u32.to_be_bytes());
+        let off = append_whole_blob(&mut pack, data);
+        pack.extend_from_slice(HashAlgo::Sha256.digest(&pack).as_bytes());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack_path = dir.path().join("sha256-corrupt.pack");
+        fs::write(&pack_path, &pack).expect("write pack");
+
+        let mut entries = vec![PackIndexEntry {
+            oid: wrong_oid.as_bytes().to_vec(),
+            offset: off,
+            crc32: None,
+        }];
+        entries.sort_by(|a, b| a.oid.cmp(&b.oid));
+        let idx = PackIndex {
+            idx_path: pack_path.with_extension("idx"),
+            pack_path,
+            hash_bytes: 32,
+            fanout: compute_fanout_from_entries(&entries),
+            entries,
+        };
+
+        let err = read_object_from_pack_bytes(&pack, &idx, wrong_oid.as_bytes()).unwrap_err();
+        match err {
+            Error::CorruptObject(msg) => {
+                assert!(
+                    msg.contains("hashes to"),
+                    "expected hash mismatch message, got: {msg}"
+                );
+                assert!(
+                    msg.contains(&oid.to_hex()),
+                    "expected recomputed oid in message, got: {msg}"
+                );
+            }
+            other => panic!("expected CorruptObject, got {other:?}"),
+        }
     }
 
     #[test]

@@ -7,10 +7,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use sha1::{Digest, Sha1};
-
 use crate::config::{ConfigFile, ConfigScope};
 use crate::error::{Error, Result};
+use crate::hash;
 use crate::index::Index;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -345,11 +344,7 @@ fn repo_git_path_append(git_dir: &Path, tail: &str) -> PathBuf {
 
 /// Returns the 40-character hex SHA-1 of a blob object for `data` (same as `git hash-object`).
 pub fn hash_blob_sha1_hex(data: &[u8]) -> String {
-    let header = format!("blob {}\0", data.len());
-    let mut hasher = Sha1::new();
-    hasher.update(header.as_bytes());
-    hasher.update(data);
-    hex::encode(hasher.finalize())
+    hash::hash_object(crate::objects::HashAlgo::Sha1, ObjectKind::Blob, data).to_hex()
 }
 
 /// Computes `submodule.<name>.gitdir` as a path relative to the work tree when not already set.

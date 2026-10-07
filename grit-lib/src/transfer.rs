@@ -19,12 +19,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::Path;
 
-use crate::hash::hash_object;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
 use crate::delta_encode::{encode_lcp_delta, encode_prefix_extension_delta};
 use crate::error::{Error, Result};
+use crate::hash;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::push_report::{PushRefResult, PushRefStatus};
@@ -597,7 +597,7 @@ fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
         if (1..=4).contains(&type_code) {
             if let Ok(data) = zlib_decompress_fixed(&pack[payload_start..], size) {
                 if let Ok(kind) = pack_type_code_to_kind(type_code) {
-                    let oid = hash_object_with_algo(algo, kind, &data);
+                    let oid = hash::hash_object(algo, kind, &data);
                     out.insert(oid);
                 }
             }
@@ -620,10 +620,6 @@ fn in_pack_whole_object_ids(pack: &[u8], algo: HashAlgo) -> HashSet<ObjectId> {
         pos += advance;
     }
     out
-}
-
-fn hash_object_with_algo(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
-    hash_object(algo, kind, data)
 }
 
 fn pack_type_code_to_kind(code: u8) -> Result<ObjectKind> {

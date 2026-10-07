@@ -11,7 +11,8 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
-use grit_lib::objects::ObjectKind;
+use grit_lib::hash::hash_object;
+use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::unpack_objects::apply_delta;
@@ -45,6 +46,21 @@ fn bench_object_id_hash(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(data.len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(label), &data, |b, input| {
             b.iter(|| black_box(Odb::hash_object_data(kind, input)));
+        });
+    }
+    group.finish();
+}
+
+fn bench_hash_object(c: &mut Criterion) {
+    let fx = ObjectBenchFixtures::global();
+    let mut group = c.benchmark_group("hash_object");
+    for (label, kind, data) in [
+        ("blob", ObjectKind::Blob, fx.delta_base.as_slice()),
+        ("tree", ObjectKind::Tree, fx.tree_body.as_slice()),
+    ] {
+        group.throughput(Throughput::Bytes(data.len() as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(label), &data, |b, input| {
+            b.iter(|| black_box(hash_object(HashAlgo::Sha1, kind, input)));
         });
     }
     group.finish();
@@ -176,6 +192,7 @@ criterion_group!(
     objects,
     bench_sha1_throughput,
     bench_object_id_hash,
+    bench_hash_object,
     bench_zlib,
     bench_loose_read,
     bench_packed_read,

@@ -25,17 +25,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use flate2::read::ZlibDecoder;
-use flate2::write::ZlibEncoder;
-use flate2::Compression;
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
-
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::hash;
 use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 use crate::pack;
+use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
 type MemOdbOverlay = Arc<Mutex<Option<std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>>>>;
 
@@ -1180,41 +1178,12 @@ fn touch_path_mtime(path: &Path) -> Option<std::time::SystemTime> {
 /// Hash the canonical store bytes of an object (`"<kind> <len>\0<data>"`) with
 /// the given hash algorithm.
 fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
-    let header = format!("{} {}\0", kind, data.len());
-    match algo {
-        HashAlgo::Sha1 => {
-            let mut hasher = Sha1::new();
-            hasher.update(header.as_bytes());
-            hasher.update(data);
-            ObjectId::from_bytes(hasher.finalize().as_slice())
-                .unwrap_or_else(|_| unreachable!("SHA-1 is 20 bytes"))
-        }
-        HashAlgo::Sha256 => {
-            let mut hasher = Sha256::new();
-            hasher.update(header.as_bytes());
-            hasher.update(data);
-            ObjectId::from_bytes(hasher.finalize().as_slice())
-                .unwrap_or_else(|_| unreachable!("SHA-256 is 32 bytes"))
-        }
-    }
+    hash::hash_object(algo, kind, data)
 }
 
 /// Compute the digest of pre-built store bytes with the given hash algorithm.
 fn hash_bytes_with(algo: HashAlgo, data: &[u8]) -> ObjectId {
-    match algo {
-        HashAlgo::Sha1 => {
-            let mut hasher = Sha1::new();
-            hasher.update(data);
-            ObjectId::from_bytes(hasher.finalize().as_slice())
-                .unwrap_or_else(|_| unreachable!("SHA-1 is 20 bytes"))
-        }
-        HashAlgo::Sha256 => {
-            let mut hasher = Sha256::new();
-            hasher.update(data);
-            ObjectId::from_bytes(hasher.finalize().as_slice())
-                .unwrap_or_else(|_| unreachable!("SHA-256 is 32 bytes"))
-        }
-    }
+    algo.digest(data)
 }
 
 /// Build the canonical store byte sequence: `"<kind> <len>\0<data>"`.
@@ -1836,10 +1805,10 @@ mod tests {
 
     #[test]
     fn freshen_pack_once_per_odb() {
+        use crate::objects::HashAlgo;
         use filetime::FileTime;
         use flate2::write::ZlibEncoder;
         use flate2::Compression;
-        use sha1::{Digest, Sha1};
         use std::fs;
         use std::io::Write;
         use std::thread;
@@ -1897,9 +1866,7 @@ mod tests {
             }
             let pack_bytes = fs::read(pack_path)?;
             buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
-            let mut hasher = Sha1::new();
-            Digest::update(&mut hasher, &buf);
-            buf.extend_from_slice(&hasher.finalize());
+            buf.extend_from_slice(HashAlgo::Sha1.digest(&buf).as_bytes());
             fs::write(idx_path, buf)?;
             Ok(())
         }
@@ -1921,9 +1888,7 @@ mod tests {
         append_pack_object(&mut pack, 3, b"alpha");
         let off_b = pack.len() as u64;
         append_pack_object(&mut pack, 3, b"beta");
-        let mut hasher = Sha1::new();
-        Digest::update(&mut hasher, &pack);
-        pack.extend_from_slice(hasher.finalize().as_slice());
+        pack.extend_from_slice(HashAlgo::Sha1.digest(&pack).as_bytes());
 
         let pack_dir = objects_dir.join("pack");
         fs::create_dir_all(&pack_dir).unwrap();
@@ -1951,10 +1916,10 @@ mod tests {
 
     #[test]
     fn write_existing_packed_object_freshens_pack() {
+        use crate::objects::HashAlgo;
         use filetime::FileTime;
         use flate2::write::ZlibEncoder;
         use flate2::Compression;
-        use sha1::{Digest, Sha1};
         use std::fs;
         use std::io::Write;
         use std::thread;
@@ -1976,9 +1941,7 @@ mod tests {
         let compressed = enc.finish().unwrap();
         pack.push(0x30 | 0x03); // blob len 11
         pack.extend_from_slice(&compressed);
-        let mut hasher = Sha1::new();
-        Digest::update(&mut hasher, &pack);
-        pack.extend_from_slice(hasher.finalize().as_slice());
+        pack.extend_from_slice(HashAlgo::Sha1.digest(&pack).as_bytes());
 
         let pack_dir = objects_dir.join("pack");
         fs::create_dir_all(&pack_dir).unwrap();
@@ -2006,9 +1969,7 @@ mod tests {
         buf.extend_from_slice(&0u32.to_be_bytes());
         buf.extend_from_slice(&(off as u32).to_be_bytes());
         buf.extend_from_slice(&pack[pack.len() - 20..]);
-        let mut hasher = Sha1::new();
-        Digest::update(&mut hasher, &buf);
-        buf.extend_from_slice(&hasher.finalize());
+        buf.extend_from_slice(HashAlgo::Sha1.digest(&buf).as_bytes());
         fs::write(&idx_path, buf).unwrap();
         pack::clear_pack_cache();
 

@@ -13,66 +13,14 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read};
 
-use flate2::read::ZlibDecoder;
-use flate2::{Decompress, FlushDecompress, Status};
-use sha1::{Digest, Sha1};
-use sha2::{Digest as Sha256Digest, Sha256};
-
 use crate::error::{Error, Result};
 use crate::gitmodules;
+use crate::hash::ObjectHasher;
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::Odb;
-
-/// Incremental pack checksum hasher matching the repository hash algorithm.
-#[derive(Clone)]
-enum PackHasher {
-    Sha1(Sha1),
-    Sha256(Sha256),
-}
-
-impl PackHasher {
-    fn new(algo: HashAlgo) -> Self {
-        match algo {
-            HashAlgo::Sha1 => Self::Sha1(Sha1::new()),
-            HashAlgo::Sha256 => Self::Sha256(Sha256::new()),
-        }
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        match self {
-            Self::Sha1(h) => Digest::update(h, data),
-            Self::Sha256(h) => Sha256Digest::update(h, data),
-        }
-    }
-
-    fn finalize(self) -> Vec<u8> {
-        match self {
-            Self::Sha1(h) => h.finalize().to_vec(),
-            Self::Sha256(h) => h.finalize().to_vec(),
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Sha1(_) => 20,
-            Self::Sha256(_) => 32,
-        }
-    }
-}
-
-/// Compute an object id for `data` of the given `kind` using `algo`, without an
-/// `Odb` in scope (Git store form: `"<kind> <len>\0<data>"`).
-fn hash_object_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
-    let header = format!("{kind} {}\0", data.len());
-    let mut h = PackHasher::new(algo);
-    h.update(header.as_bytes());
-    h.update(data);
-    // `finalize()` returns exactly `algo`'s digest width, which is always a
-    // valid OID length, so `from_bytes` cannot fail here.
-    #[allow(clippy::expect_used)]
-    ObjectId::from_bytes(&h.finalize()).expect("digest is a valid OID width")
-}
+use flate2::read::ZlibDecoder;
+use flate2::{Decompress, FlushDecompress, Status};
 
 /// Options controlling `unpack-objects` behaviour.
 #[derive(Debug, Default)]
@@ -537,7 +485,7 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let obj_data = rd.decompress(size)?;
-                in_pack.insert(hash_object_with(algo, kind, &obj_data));
+                in_pack.insert(crate::hash::hash_object(algo, kind, &obj_data));
             }
             6 => {
                 // ofs-delta: base is always in-pack (referenced by relative offset).
@@ -776,11 +724,11 @@ fn pack_index_records_inner(
 
     let consumed = rd.pos;
     {
-        let mut hasher = PackHasher::new(algo);
+        let mut hasher = ObjectHasher::new(algo);
         hasher.update(&pack[..consumed]);
         let digest = hasher.finalize();
         let trailing = rd.read_exact(hb)?;
-        if digest.as_slice() != trailing {
+        if digest.as_bytes() != trailing {
             return Err(Error::CorruptObject(
                 "pack trailing checksum mismatch".to_owned(),
             ));
@@ -945,11 +893,11 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 
     let consumed = rd.pos;
     {
-        let mut hasher = PackHasher::new(algo);
+        let mut hasher = ObjectHasher::new(algo);
         hasher.update(&rd.data[..consumed]);
         let digest = hasher.finalize();
         let trailing = rd.read_exact(algo.len())?;
-        if digest.as_slice() != trailing {
+        if digest.as_bytes() != trailing {
             return Err(Error::CorruptObject(
                 "pack trailing checksum mismatch".to_owned(),
             ));
@@ -1158,7 +1106,7 @@ fn io_to_corrupt_eof(e: io::Error, stream_pos: usize, context: &str) -> Error {
 /// object header or zlib stream starts at the correct offset.
 struct StreamingPackReader<'a> {
     inner: &'a mut dyn Read,
-    pack_hasher: PackHasher,
+    pack_hasher: ObjectHasher,
     stream_pos: usize,
     max_input_bytes: Option<u64>,
     /// Compressed (or other) bytes already read from `inner` and hashed but not yet consumed by
@@ -1170,7 +1118,7 @@ impl<'a> StreamingPackReader<'a> {
     fn new(inner: &'a mut dyn Read, max_input_bytes: Option<u64>, algo: HashAlgo) -> Self {
         Self {
             inner,
-            pack_hasher: PackHasher::new(algo),
+            pack_hasher: ObjectHasher::new(algo),
             stream_pos: 0,
             max_input_bytes,
             pending: Vec::new(),
@@ -1415,12 +1363,12 @@ impl<'a> StreamingPackReader<'a> {
 
     /// Hash over all pack bytes read so far (objects only; trailer not yet read).
     fn finalize_hasher(&self) -> Vec<u8> {
-        self.pack_hasher.clone().finalize()
+        self.pack_hasher.clone().finalize().as_bytes().to_vec()
     }
 
     /// Trailing pack checksum (hash-width bytes); not included in [`Self::finalize_hasher`].
     fn read_trailer(&mut self) -> Result<Vec<u8>> {
-        let hash_len = self.pack_hasher.len();
+        let hash_len = self.pack_hasher.algo().len();
         let mut b = vec![0u8; hash_len];
         if self.pending.len() >= hash_len {
             b.copy_from_slice(&self.pending[..hash_len]);
@@ -1609,10 +1557,7 @@ mod tests {
         for entry in &entries {
             pack.extend_from_slice(entry);
         }
-        let mut hasher = Sha1::new();
-        hasher.update(&pack);
-        let digest = hasher.finalize();
-        pack.extend_from_slice(digest.as_slice());
+        pack.extend_from_slice(HashAlgo::Sha1.digest(&pack).as_bytes());
         pack
     }
 
