@@ -40,16 +40,18 @@
 //! bodies, and the `GIT_ASKPASS` / `GIT_TRACE_CURL` plumbing. Embedders that need
 //! those should implement [`HttpClient`](super::HttpClient) over their own stack.
 
-use std::io::Read;
+use std::env;
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 
-use crate::config::{self, ConfigSet};
+use crate::config::{self, parse_i64, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
 use crate::error::{Error, Result};
+use crate::protocol::client_git_protocol_header_from_config;
 
 use super::{
     effective_info_refs_url_after_redirect, http_origin_key, http_origins_match, HttpClient,
@@ -91,6 +93,8 @@ pub struct UreqHttpClient {
     extra_headers: Vec<ExtraHeaderRule>,
     /// Merged Git config used for credential URL matching.
     credential_config: ConfigSet,
+    /// HTTP read timeouts and low-speed abort thresholds (`http.*` config).
+    transport_timeouts: HttpTransportTimeouts,
 }
 
 impl UreqHttpClient {
@@ -113,6 +117,7 @@ impl UreqHttpClient {
             save_cookies: false,
             extra_headers: Vec::new(),
             credential_config: ConfigSet::default(),
+            transport_timeouts: HttpTransportTimeouts::default(),
         }
     }
 
@@ -128,18 +133,25 @@ impl UreqHttpClient {
     /// Build a client from merged Git config, honoring the request-shaping HTTP
     /// settings: `http.proxy` (HTTP/HTTPS proxy), `http.cookieFile` +
     /// `http.saveCookies` (cookie jar), and `http.extraHeader` (custom request
-    /// headers). The protocol header (`protocol.version`) is *not* applied here;
-    /// set it explicitly with [`UreqHttpClient::with_git_protocol`] if desired.
+    /// headers), `protocol.version` (default `Git-Protocol` header), and
+    /// `http.timeout` / low-speed limits for response-body reads.
     ///
     /// # Errors
     ///
     /// Returns an error if `http.proxy` names a proxy scheme that this client
     /// cannot honor (e.g. a SOCKS proxy, which `ureq`'s built-in SOCKS support is
-    /// not compiled in for here), or the cookie file cannot be read.
+    /// not compiled in for here), `protocol.version` is invalid, or the cookie
+    /// file cannot be read.
     pub fn from_config(config: &ConfigSet) -> Result<Self> {
         let proxy = build_proxy(config)?;
-        let agent = default_agent(proxy);
+        let transport_timeouts = HttpTransportTimeouts::from_config(config);
+        let agent = agent_from_timeouts(proxy, &transport_timeouts);
         let mut client = Self::with_agent(agent);
+
+        if let Some(header) = client_git_protocol_header_from_config(config)? {
+            client.git_protocol = Some(header);
+        }
+        client.transport_timeouts = transport_timeouts;
 
         // Cookies: parse the cookie file (if any) and decide whether to persist.
         client.cookie_file_path = config
@@ -327,11 +339,169 @@ fn default_user_agent() -> String {
     format!("grit-lib/{}", env!("CARGO_PKG_VERSION"))
 }
 
+/// Git-shaped HTTP timeouts and optional low-speed abort thresholds (`http.*` config).
+#[derive(Clone, Debug)]
+struct HttpTransportTimeouts {
+    connect: Duration,
+    /// Whole-request ceiling (`http.timeout`, Git default 600s; `None` when disabled).
+    global: Option<Duration>,
+    low_speed: Option<LowSpeedSettings>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LowSpeedSettings {
+    bytes_per_second: u64,
+    window: Duration,
+}
+
+impl Default for HttpTransportTimeouts {
+    fn default() -> Self {
+        Self {
+            connect: Duration::from_secs(30),
+            global: Some(Duration::from_secs(600)),
+            low_speed: None,
+        }
+    }
+}
+
+impl HttpTransportTimeouts {
+    fn from_config(config: &ConfigSet) -> Self {
+        let global = config
+            .get("http.timeout")
+            .as_deref()
+            .and_then(|v| parse_i64(v).ok())
+            .map(|secs| {
+                if secs <= 0 {
+                    None
+                } else {
+                    Some(Duration::from_secs(secs as u64))
+                }
+            })
+            .unwrap_or(Some(Duration::from_secs(600)));
+
+        Self {
+            connect: Duration::from_secs(30),
+            global,
+            low_speed: parse_low_speed(config),
+        }
+    }
+}
+
+fn parse_low_speed(config: &ConfigSet) -> Option<LowSpeedSettings> {
+    let limit = env::var("GIT_HTTP_LOW_SPEED_LIMIT")
+        .ok()
+        .and_then(|v| parse_i64(v.trim()).ok())
+        .or_else(|| {
+            config
+                .get("http.lowSpeedLimit")
+                .and_then(|v| parse_i64(v.trim()).ok())
+        });
+    let time_secs = env::var("GIT_HTTP_LOW_SPEED_TIME")
+        .ok()
+        .and_then(|v| parse_i64(v.trim()).ok())
+        .or_else(|| {
+            config
+                .get("http.lowSpeedTime")
+                .and_then(|v| parse_i64(v.trim()).ok())
+        });
+
+    match (limit, time_secs) {
+        (Some(lim), Some(secs)) if lim > 0 && secs > 0 => Some(LowSpeedSettings {
+            bytes_per_second: lim as u64,
+            window: Duration::from_secs(secs as u64),
+        }),
+        _ => None,
+    }
+}
+
+/// Wraps a reader to abort when average throughput stays below the configured bytes/sec
+/// for the configured window, mirroring curl `LOW_SPEED_LIMIT` / `LOW_SPEED_TIME`.
+struct LowSpeedReader<R> {
+    inner: R,
+    settings: Option<LowSpeedSettings>,
+    window_start: Instant,
+    window_bytes: u64,
+    global_deadline: Option<Instant>,
+}
+
+impl<R: Read> LowSpeedReader<R> {
+    fn new(inner: R, timeouts: &HttpTransportTimeouts) -> Self {
+        let global_deadline = timeouts.global.and_then(|g| Instant::now().checked_add(g));
+        Self {
+            inner,
+            settings: timeouts.low_speed,
+            window_start: Instant::now(),
+            window_bytes: 0,
+            global_deadline,
+        }
+    }
+
+    fn check_global(&self) -> io::Result<()> {
+        if let Some(deadline) = self.global_deadline {
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "HTTP transfer exceeded http.timeout",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_window(&mut self) -> io::Result<()> {
+        let Some(settings) = self.settings else {
+            self.window_start = Instant::now();
+            self.window_bytes = 0;
+            return Ok(());
+        };
+        let elapsed = self.window_start.elapsed();
+        if elapsed < settings.window {
+            return Ok(());
+        }
+        let secs = elapsed.as_secs_f64();
+        if secs <= 0.0 {
+            self.window_start = Instant::now();
+            self.window_bytes = 0;
+            return Ok(());
+        }
+        let rate = self.window_bytes as f64 / secs;
+        if rate < settings.bytes_per_second as f64 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "HTTP transfer speed below http.lowSpeedLimit for http.lowSpeedTime",
+            ));
+        }
+        self.window_start = Instant::now();
+        self.window_bytes = 0;
+        Ok(())
+    }
+}
+
+impl<R: Read> Read for LowSpeedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.check_global()?;
+        self.finish_window()?;
+        let n = self.inner.read(buf)?;
+        if n > 0 {
+            self.window_bytes += n as u64;
+            self.finish_window()?;
+        }
+        Ok(n)
+    }
+}
+
 /// Build a [`ureq::Agent`] with default Git-shaped timeouts and an optional proxy.
 fn default_agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
+    agent_from_timeouts(proxy, &HttpTransportTimeouts::default())
+}
+
+fn agent_from_timeouts(
+    proxy: Option<ureq::Proxy>,
+    timeouts: &HttpTransportTimeouts,
+) -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_global(Some(Duration::from_secs(600)))
+        .timeout_connect(Some(timeouts.connect))
+        .timeout_global(timeouts.global)
         // Return >= 400 responses as `Ok` so the auth-retry logic can inspect the
         // status and `WWW-Authenticate` headers rather than treating them as hard
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
@@ -450,7 +620,7 @@ impl UreqHttpClient {
         for (name, value) in self.extra_headers_for_url(url) {
             req = req.header(&name, &value);
         }
-        finish(req.call())
+        finish(req.call(), &self.transport_timeouts)
     }
 
     fn do_post(
@@ -480,7 +650,7 @@ impl UreqHttpClient {
         for (name, value) in self.extra_headers_for_url(url) {
             req = req.header(&name, &value);
         }
-        finish(req.send(body))
+        finish(req.send(body), &self.transport_timeouts)
     }
 
     /// Run `attempt` (a GET or POST closure) with auth-retry on 401, returning
@@ -604,30 +774,33 @@ impl HttpClient for UreqHttpClient {
 /// than treating them as hard errors). Only genuine transport failures are `Err`.
 fn finish(
     result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    timeouts: &HttpTransportTimeouts,
 ) -> Result<RawResponse> {
     match result {
-        Ok(resp) => Ok(read_response(resp)),
+        Ok(resp) => read_response(resp, timeouts),
         Err(e) => Err(Error::Message(format!("http transport error: {e}"))),
     }
 }
 
-fn read_response(resp: ureq::http::Response<ureq::Body>) -> RawResponse {
+fn read_response(
+    resp: ureq::http::Response<ureq::Body>,
+    timeouts: &HttpTransportTimeouts,
+) -> Result<RawResponse> {
     use ureq::ResponseExt as _;
     let status = resp.status().as_u16();
     let final_url = resp.get_uri().to_string();
     let www_authenticate = header_values(resp.headers(), "WWW-Authenticate");
     let set_cookie = header_values(resp.headers(), "Set-Cookie");
     let mut body = Vec::new();
-    // Read the body (unbounded; git packs can be large). An error leaves `body`
-    // as whatever was read.
-    let _ = resp.into_body().into_reader().read_to_end(&mut body);
-    RawResponse {
+    let mut reader = LowSpeedReader::new(resp.into_body().into_reader(), timeouts);
+    reader.read_to_end(&mut body).map_err(Error::Io)?;
+    Ok(RawResponse {
         status,
         www_authenticate,
         set_cookie,
         body,
         final_url,
-    }
+    })
 }
 
 /// Collect all values for a header as owned UTF-8 strings (skipping any that
@@ -1091,5 +1264,77 @@ mod tests {
 
         assert_eq!(matching.path.as_deref(), Some("owner/repo.git/info/refs"));
         assert_eq!(other.path, None);
+    }
+
+    #[test]
+    fn from_config_rejects_invalid_protocol_version() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("protocol.version", "bogus")
+            .expect("override");
+        match UreqHttpClient::from_config(&cfg) {
+            Ok(_) => panic!("invalid protocol.version must be rejected"),
+            Err(err) => assert!(
+                matches!(err, Error::ConfigError(_)),
+                "expected ConfigError, got {err:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn from_config_applies_protocol_version_header() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("protocol.version", "2")
+            .expect("override");
+        let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+        assert_eq!(
+            client.git_protocol.as_deref(),
+            Some("version=2"),
+            "protocol.version=2 should set Git-Protocol header"
+        );
+    }
+
+    #[test]
+    fn low_speed_reader_propagates_body_read_io_errors() {
+        struct EofRead;
+        impl Read for EofRead {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                ))
+            }
+        }
+        let mut reader = LowSpeedReader::new(EofRead, &HttpTransportTimeouts::default());
+        let err = reader
+            .read_to_end(&mut Vec::new())
+            .expect_err("unexpected eof");
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn low_speed_reader_aborts_stalled_body_read() {
+        struct BytePerSecond(u8);
+        impl Read for BytePerSecond {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                std::thread::sleep(Duration::from_millis(50));
+                let n = buf.len().min(self.0 as usize);
+                buf[..n].fill(0);
+                Ok(n)
+            }
+        }
+        let timeouts = HttpTransportTimeouts {
+            connect: Duration::from_secs(30),
+            global: Some(Duration::from_secs(600)),
+            low_speed: Some(LowSpeedSettings {
+                bytes_per_second: 100,
+                window: Duration::from_millis(200),
+            }),
+        };
+        let mut reader = LowSpeedReader::new(BytePerSecond(1), &timeouts);
+        let mut sink = Vec::new();
+        let err = reader
+            .read_to_end(&mut sink)
+            .expect_err("slow read should abort");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
     }
 }

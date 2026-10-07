@@ -343,12 +343,12 @@ grit-lib = { version = <span class="tok-str">"0.4"</span>, features = [<span cla
 <span class="tok-kw">use</span> grit_lib::transport::http::ureq_client::UreqHttpClient;
 
 <span class="tok-cmt">// Load the repo's git config (system + global + local), build the helper-backed</span>
-<span class="tok-cmt">// provider, and also honor http.proxy / http.cookieFile / http.extraHeader.</span>
+<span class="tok-cmt">// provider, and honor http.proxy / http.cookieFile / http.extraHeader,</span>
+<span class="tok-cmt">// protocol.version (Git-Protocol header), and http.timeout / low-speed limits.</span>
 <span class="tok-kw">let</span> config = <span class="tok-ty">ConfigSet</span>::<span class="tok-fn">load</span>(<span class="tok-ty">Some</span>(git_dir), <span class="tok-kw">true</span>)?;
 <span class="tok-kw">let</span> provider = <span class="tok-ty">HelperCredentialProvider</span>::<span class="tok-fn">new</span>(config.<span class="tok-fn">clone</span>());
 <span class="tok-kw">let</span> client = <span class="tok-ty">UreqHttpClient</span>::<span class="tok-fn">from_config</span>(&config)?
-    .<span class="tok-fn">with_credential_provider</span>(<span class="tok-ty">Box</span>::<span class="tok-fn">new</span>(provider))
-    .<span class="tok-fn">with_git_protocol</span>(<span class="tok-str">"version=2"</span>);</code></pre>
+    .<span class="tok-fn">with_credential_provider</span>(<span class="tok-ty">Box</span>::<span class="tok-fn">new</span>(provider));</code></pre>
 <div class="note"><strong>Non-interactive by design.</strong> When no helper can supply a credential, the provider returns a typed <code>Error::Auth</code> — it never opens a TTY prompt or hangs. Interactive prompting, if you want it, is an embedder concern you layer on top.</div>
 
 <h2 id="reference">9. API reference</h2>
