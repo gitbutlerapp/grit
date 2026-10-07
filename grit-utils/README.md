@@ -19,7 +19,13 @@ cargo build --release -p grit-cli -p grit-utils
 # Add scenario
 ./target/release/grit-bench add --sizes 1000
 
-# All ported scenarios
+# Hot-path scenarios (switch / pick / merge / pick-series) at L and H
+./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output baselines/hot-paths-before.json
+
+# Optional FSMN index extension (core.fsmonitor hook v2)
+./target/release/grit-bench hot-paths --sizes 10000 --fsmonitor-fixture
+
+# All status/add scenarios
 ./target/release/grit-bench all --sizes 100,1000,10000
 
 # Compare two JSON reports (exit 1 if any scenario ratio drifts > tolerance)
@@ -92,6 +98,15 @@ Reports use `"schema_version": 1`. All times in scenario stats are **millisecond
 | `status-dirty-{N}` | status | Dirty tree (~10% modified, ~5% untracked): `git status -s` vs `grit status` |
 | `status-clean-{N}` | status | Clean tree: `git status -s` vs `grit status` |
 | `add-{N}` | add | `git add -A` vs `grit add` (stage all); **git** resets the index between timed runs |
+| `switch-{N}` | switch | Two branches differing in ~50 paths; `git switch -q X && switch -q Y` vs `grit switch X && switch Y` |
+| `switch-wide-{N}` | switch | ~10% path delta including directory deletions; same switch pattern |
+| `pick-{N}` | pick | One commit touching ~2000 paths (scaled down for small `N`); `git cherry-pick` vs `grit pick`; reset between runs |
+| `merge-{N}` | merge | Same topology as pick; `git merge -q --no-edit` vs `grit merge` |
+| `pick-series-{N}` | pick | 20 commits: `git cherry-pick base..topic` vs 20 sequential `grit pick` (upper bound — process startup) |
+
+Hot-path scenarios set `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` to an empty file. Append `-fsmn` to the scenario id when `--fsmonitor-fixture` is used (trivial hook v2 + FSMN index extension).
+
+**L / H fixtures:** `N=10000` with 100 directories and 1000 commits of history; `N=100000` with 1000 directories. Criterion micro-benchmarks for the same shapes live in `grit-lib/benches/hot_paths.rs`.
 
 Fixtures are synthetic repos with `N` tracked text files under `/tmp/grit-bench-scratch`.
 

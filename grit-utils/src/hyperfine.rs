@@ -38,6 +38,8 @@ pub struct HyperfineRun {
     pub warmup: u32,
     pub min_runs: u32,
     pub command_name: Option<String>,
+    /// Optional `env VAR=val …` prefix applied before `command` (inside the `cd` wrapper).
+    pub env_prefix: Option<String>,
 }
 
 /// Run hyperfine and return the single benchmark result.
@@ -45,11 +47,18 @@ pub fn run_hyperfine(hyperfine: &Path, run: &HyperfineRun) -> Result<HyperfineRe
     let export = NamedTempFile::new().context("create hyperfine export temp file")?;
     let export_path = export.path().to_path_buf();
 
-    let command = wrap_in_dir(&run.working_directory, &run.command);
-    let prepare = run
-        .prepare
-        .as_ref()
-        .map(|p| wrap_in_dir(&run.working_directory, p));
+    let inner = match &run.env_prefix {
+        Some(prefix) => format!("{prefix} {}", run.command),
+        None => run.command.clone(),
+    };
+    let command = wrap_in_dir(&run.working_directory, &inner);
+    let prepare = run.prepare.as_ref().map(|p| {
+        let prep_inner = match &run.env_prefix {
+            Some(prefix) => format!("{prefix} {p}"),
+            None => p.clone(),
+        };
+        wrap_in_dir(&run.working_directory, &prep_inner)
+    });
 
     let mut cmd = Command::new(hyperfine);
     cmd.arg("--export-json")

@@ -6,7 +6,10 @@ use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::render::{render_markdown, render_text};
-use grit_utils::scenarios::{run_add_suite, run_prepare_add, run_status_suite, RunConfig};
+use grit_utils::scenarios::{
+    run_add_suite, run_hot_path_suite, run_prepare_add, run_prepare_merge, run_prepare_pick,
+    run_prepare_pick_series, run_prepare_switch, run_status_suite, RunConfig,
+};
 use grit_utils::schema::BenchReport;
 use time::OffsetDateTime;
 
@@ -51,6 +54,14 @@ enum Cmd {
         #[arg(long, value_delimiter = ',', default_values_t = vec![100, 1_000, 10_000, 50_000])]
         sizes: Vec<usize>,
     },
+    /// Switch / pick / merge hot-path scenarios (L/H sizes by default)
+    HotPaths {
+        #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
+        sizes: Vec<usize>,
+        /// Enable `core.fsmonitor` with a trivial hook v2 script in the fixture.
+        #[arg(long)]
+        fsmonitor_fixture: bool,
+    },
     /// Run status (dirty + clean) and add benchmarks
     All {
         #[arg(long, value_delimiter = ',', default_values_t = vec![100, 1_000, 10_000, 50_000])]
@@ -66,7 +77,26 @@ enum Cmd {
     /// Internal: hyperfine `--prepare` hook for add benchmarks
     #[command(hide = true)]
     PrepareAdd {
-        /// System git used to reset the index between timed runs.
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareSwitch {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PreparePick {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareMerge {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PreparePickSeries {
         #[arg(long)]
         git: PathBuf,
     },
@@ -95,11 +125,12 @@ fn parse_timestamp(cli: &Cli) -> Result<OffsetDateTime> {
     Ok(OffsetDateTime::now_utc())
 }
 
-fn run_config(cli: &Cli) -> RunConfig {
+fn run_config(cli: &Cli, isolated_config: bool) -> RunConfig {
     RunConfig {
         warmup: cli.warmup,
         min_runs: cli.min_runs,
         prepare_bin: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("grit-bench")),
+        isolated_config,
     }
 }
 
@@ -124,11 +155,28 @@ fn render_report(format: &OutputFormat, report: &BenchReport) -> Result<String> 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if matches!(cli.command, Cmd::PrepareAdd { .. }) {
-        if let Cmd::PrepareAdd { git } = cli.command {
-            let git = resolve_binary("git", Some(&git))?;
+    match &cli.command {
+        Cmd::PrepareAdd { git } => {
+            let git = resolve_binary("git", Some(git))?;
             return run_prepare_add(&git);
         }
+        Cmd::PrepareSwitch { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_switch(&git);
+        }
+        Cmd::PreparePick { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_pick(&git);
+        }
+        Cmd::PrepareMerge { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_merge(&git);
+        }
+        Cmd::PreparePickSeries { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_pick_series(&git);
+        }
+        _ => {}
     }
 
     if let Cmd::Compare {
@@ -156,7 +204,6 @@ fn main() -> Result<()> {
     let grit = resolve_binary("grit", cli.grit.as_deref())?;
     let hyperfine = require_hyperfine()?;
     let timestamp = parse_timestamp(&cli)?;
-    let cfg = run_config(&cli);
 
     eprintln!(
         "git:  {} ({})",
@@ -174,20 +221,44 @@ fn main() -> Result<()> {
     let report = match &cli.command {
         Cmd::Status { sizes } => {
             eprintln!("Running status benchmarks...");
+            let cfg = run_config(&cli, false);
             run_status_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
         }
         Cmd::Add { sizes } => {
             eprintln!("Running add benchmarks...");
+            let cfg = run_config(&cli, false);
             run_add_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::HotPaths {
+            sizes,
+            fsmonitor_fixture,
+        } => {
+            eprintln!("Running hot-path benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_hot_path_suite(
+                &hyperfine,
+                &git,
+                &grit,
+                &cfg,
+                sizes,
+                *fsmonitor_fixture,
+                timestamp,
+            )?
         }
         Cmd::All { sizes } => {
             eprintln!("Running all benchmarks...");
+            let cfg = run_config(&cli, false);
             let mut status = run_status_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?;
             let add = run_add_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?;
             status.scenarios.extend(add.scenarios);
             status
         }
-        Cmd::Compare { .. } | Cmd::PrepareAdd { .. } => unreachable!(),
+        Cmd::Compare { .. }
+        | Cmd::PrepareAdd { .. }
+        | Cmd::PrepareSwitch { .. }
+        | Cmd::PreparePick { .. }
+        | Cmd::PrepareMerge { .. }
+        | Cmd::PreparePickSeries { .. } => unreachable!(),
     };
 
     let rendered = render_report(&cli.format, &report)?;
