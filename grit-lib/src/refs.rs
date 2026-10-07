@@ -1806,6 +1806,63 @@ fn normalize_list_refs_prefix(git_dir: &Path, prefix: &str) -> String {
     }
 }
 
+/// After the first clone fetch, batch remote-tracking refs into `packed-refs`
+/// (Git's post-clone layout). Leaves `refs/remotes/{remote}/HEAD` as a loose
+/// symbolic ref.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] on filesystem failures, or when a tag peel cannot be read.
+pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Result<()> {
+    if crate::reftable::is_reftable_repo(git_dir) {
+        return Ok(());
+    }
+    let prefix = format!("refs/remotes/{remote}/");
+    let head_sym = format!("refs/remotes/{remote}/HEAD");
+    let mut entries = list_refs(git_dir, &prefix)?;
+    entries.retain(|(name, _)| name != &head_sym);
+    if entries.is_empty() {
+        return Ok(());
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let odb = crate::odb::Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf());
+    let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
+    for (name, oid) in &entries {
+        body.push_str(&oid.to_hex());
+        body.push(' ');
+        body.push_str(name);
+        body.push('\n');
+        if let Ok(obj) = odb.read(oid) {
+            if obj.kind == crate::objects::ObjectKind::Tag {
+                if let Ok(tag) = crate::objects::parse_tag(&obj.data) {
+                    body.push('^');
+                    body.push_str(&tag.object.to_hex());
+                    body.push('\n');
+                }
+            }
+        }
+    }
+
+    let packed_path = git_dir.join("packed-refs");
+    let tmp = packed_path.with_extension("new");
+    fs::write(&tmp, body.as_bytes())?;
+    fs::rename(&tmp, &packed_path)?;
+
+    for (name, _) in &entries {
+        let storage_dir = ref_storage_dir(git_dir, name);
+        let stor = crate::ref_namespace::storage_ref_name(name);
+        let path = storage_dir.join(&stor);
+        if path.is_file() {
+            let _ = fs::remove_file(&path);
+        }
+        if let Some(parent) = path.parent() {
+            remove_empty_ref_directory(parent);
+        }
+    }
+    Ok(())
+}
+
 /// List all refs under a given prefix (e.g. `"refs/heads/"`).
 ///
 /// Dispatches to the reftable backend when `extensions.refStorage = reftable`.

@@ -564,11 +564,20 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
 ///
 /// Thin-pack bases may be resolved from `odb` when they are not present in the pack.
 pub fn pack_bytes_to_object_map(data: &[u8], odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
-    let rd = PackReader::new(data.to_vec());
-    build_pack_object_map(rd, odb)
+    build_pack_object_map(PackReader::new(data.to_vec()), odb).map(|(map, _)| map)
 }
 
-fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
+/// Resolved `(oid, pack_offset)` pairs for every object slot in a pack byte stream.
+///
+/// Offsets point at packed object headers (including delta slots). Thin-pack bases
+/// may be resolved from `odb` when they are not present in the pack.
+pub fn pack_index_entries_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<(ObjectId, u64)>> {
+    build_pack_object_map(PackReader::new(data.to_vec()), odb).map(|(_, idx)| idx)
+}
+
+type ResolvedPackContents = (HashMap<ObjectId, Object>, Vec<(ObjectId, u64)>);
+
+fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<ResolvedPackContents> {
     let algo = odb.hash_algo();
     let sig = rd.read_exact(4)?;
     if sig != b"PACK" {
@@ -587,6 +596,7 @@ fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<HashMap<Object
     let mut by_offset: HashMap<usize, (ObjectKind, Vec<u8>)> = HashMap::new();
     let mut by_oid: HashMap<ObjectId, (ObjectKind, Vec<u8>)> = HashMap::new();
     let mut pending: Vec<PendingDelta> = Vec::new();
+    let mut index_entries: Vec<(ObjectId, u64)> = Vec::new();
 
     fn base_from_pack_or_odb(
         by_oid: &HashMap<ObjectId, (ObjectKind, Vec<u8>)>,
@@ -610,6 +620,7 @@ fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<HashMap<Object
                 let oid = odb.hash(kind, &data);
                 by_offset.insert(obj_offset, (kind, data.clone()));
                 by_oid.insert(oid, (kind, data));
+                index_entries.push((oid, u64::try_from(obj_offset).unwrap_or(u64::MAX)));
             }
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
@@ -678,6 +689,7 @@ fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<HashMap<Object
                 let oid = odb.hash(base_kind, &result);
                 by_offset.insert(delta.offset, (base_kind, result.clone()));
                 by_oid.insert(oid, (base_kind, result));
+                index_entries.push((oid, u64::try_from(delta.offset).unwrap_or(u64::MAX)));
             } else {
                 still_pending.push(delta);
             }
@@ -692,10 +704,11 @@ fn build_pack_object_map(mut rd: PackReader, odb: &Odb) -> Result<HashMap<Object
         }
     }
 
-    Ok(by_oid
+    let map = by_oid
         .into_iter()
         .map(|(oid, (kind, data))| (oid, Object::new(kind, data)))
-        .collect())
+        .collect();
+    Ok((map, index_entries))
 }
 
 /// Either write `data` as a loose object (if `!dry_run`) or just compute its

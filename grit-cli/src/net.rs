@@ -88,12 +88,30 @@ pub fn fetch(
     remote: &str,
     refspecs: Vec<String>,
 ) -> Result<FetchOutcome> {
-    let url = remote_url(config, remote)?;
-    let opts = FetchOptions {
+    fetch_with_options(
+        repo,
+        config,
+        remote,
         refspecs,
-        tags: TagMode::Following,
-        ..Default::default()
-    };
+        FetchOptions {
+            tags: TagMode::Following,
+            ..Default::default()
+        },
+    )
+}
+
+/// Fetch with explicit [`FetchOptions`] (clone passes initial-remote layout flags).
+pub fn fetch_with_options(
+    repo: &Repository,
+    config: &ConfigSet,
+    remote: &str,
+    refspecs: Vec<String>,
+    mut opts: FetchOptions,
+) -> Result<FetchOutcome> {
+    if opts.refspecs.is_empty() {
+        opts.refspecs = refspecs;
+    }
+    let url = remote_url(config, remote)?;
 
     let outcome = if !is_url_scheme(&url) {
         let remote_git_dir =

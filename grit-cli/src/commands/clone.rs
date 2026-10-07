@@ -8,9 +8,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
+use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
+use grit_lib::transfer::{FetchOptions, TagMode};
 use grit_lib::transport_path::{
     absolute_local_clone_source_url, should_store_absolute_local_clone_url,
 };
@@ -81,8 +83,20 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
 
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
     let refspecs = net::fetch_refspecs(&config, net::DEFAULT_REMOTE);
-    let outcome = net::fetch(&repo, &config, net::DEFAULT_REMOTE, refspecs)
-        .context("could not fetch from the remote")?;
+    let outcome = net::fetch_with_options(
+        &repo,
+        &config,
+        net::DEFAULT_REMOTE,
+        refspecs,
+        FetchOptions {
+            tags: TagMode::Following,
+            initial_remote_fetch: true,
+            remote_name: Some(net::DEFAULT_REMOTE.to_owned()),
+            reflog_message: Some(format!("clone: from {url}")),
+            ..Default::default()
+        },
+    )
+    .context("could not fetch from the remote")?;
 
     let default = outcome
         .default_branch
@@ -97,6 +111,18 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
 
     let branch_ref = format!("refs/heads/{default}");
     refs::write_ref(&repo.git_dir, &branch_ref, &oid).context("could not create local branch")?;
+    if let Ok(identity) = grit_lib::fetch::fetch_operation_identity(&repo.git_dir) {
+        let zero = ObjectId::zero();
+        let _ = refs::append_reflog(
+            &repo.git_dir,
+            &branch_ref,
+            &zero,
+            &oid,
+            &identity,
+            &format!("clone: from {url}"),
+            false,
+        );
+    }
     refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref).context("could not set HEAD")?;
     set_config(
         &repo,

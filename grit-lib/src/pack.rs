@@ -927,6 +927,88 @@ fn compute_fanout_from_entries(entries: &[PackIndexEntry]) -> [u32; 256] {
     fanout
 }
 
+/// Write a version-2 `.idx` for `entries` describing objects in `pack_path`.
+///
+/// `entries` lists `(oid, byte_offset)` pairs; they are sorted by OID before
+/// writing. The pack file must already exist on disk with a valid trailing
+/// checksum at the repository hash width `hash_bytes` (`20` or `32`).
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] when the pack is too small or an entry
+/// offset cannot be walked, or [`Error::Io`] on filesystem failure.
+pub fn write_v2_pack_index(
+    idx_path: &Path,
+    pack_path: &Path,
+    entries: &[(ObjectId, u64)],
+    hash_bytes: usize,
+) -> Result<()> {
+    let mut sorted: Vec<(ObjectId, u64)> = entries.to_vec();
+    sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    let mut fanout = [0u32; 256];
+    for byte in 0u32..256 {
+        let count = sorted
+            .iter()
+            .filter(|(oid, _)| u32::from(oid.as_bytes()[0]) <= byte)
+            .count();
+        fanout[byte as usize] = u32::try_from(count).unwrap_or(u32::MAX);
+    }
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"\xfftOc");
+    buf.extend_from_slice(&2u32.to_be_bytes());
+    for f in fanout {
+        buf.extend_from_slice(&f.to_be_bytes());
+    }
+    for (oid, _) in &sorted {
+        if oid.as_bytes().len() != hash_bytes {
+            return Err(Error::CorruptObject(format!(
+                "OID width {} does not match index hash width {hash_bytes}",
+                oid.as_bytes().len()
+            )));
+        }
+        buf.extend_from_slice(oid.as_bytes());
+    }
+    let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
+    for (_, off) in &sorted {
+        let start = *off as usize;
+        let mut end = start;
+        skip_one_pack_object(&pack_bytes, &mut end, *off, hash_bytes)
+            .map_err(|e| Error::CorruptObject(format!("idx crc walk: {e}")))?;
+        let crc = crc32fast::hash(&pack_bytes[start..end]);
+        buf.extend_from_slice(&crc.to_be_bytes());
+    }
+    for (_, off) in &sorted {
+        let v = u32::try_from(*off).unwrap_or(0x8000_0000);
+        buf.extend_from_slice(&v.to_be_bytes());
+    }
+    if pack_bytes.len() < hash_bytes {
+        return Err(Error::CorruptObject(
+            "pack too small for idx trailer".into(),
+        ));
+    }
+    buf.extend_from_slice(&pack_bytes[pack_bytes.len() - hash_bytes..]);
+    let idx_trailer = match hash_bytes {
+        20 => {
+            let mut hasher = Sha1::new();
+            Digest::update(&mut hasher, &buf);
+            hasher.finalize().to_vec()
+        }
+        32 => {
+            let mut hasher = Sha256::new();
+            Sha256Digest::update(&mut hasher, &buf);
+            hasher.finalize().to_vec()
+        }
+        _ => {
+            return Err(Error::CorruptObject(format!(
+                "unsupported index hash width {hash_bytes}"
+            )));
+        }
+    };
+    buf.extend_from_slice(&idx_trailer);
+    fs::write(idx_path, buf).map_err(Error::Io)?;
+    Ok(())
+}
+
 fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<PackIndex> {
     if bytes.len() < 8 + 256 * 4 + 40 {
         return Err(Error::CorruptObject(format!(
