@@ -674,6 +674,7 @@ pub(crate) fn write_index_file_split(
         let shared_index = Index {
             version: index.version,
             entries: base_snapshot.clone(),
+            entries_sorted: true,
             sparse_directories: false,
             untracked_cache: None,
             fsmonitor_last_update: None,
@@ -809,6 +810,7 @@ pub(crate) fn write_index_file_split(
     let out_index = Index {
         version: index.version,
         entries: main_entries,
+        entries_sorted: true,
         sparse_directories: false,
         untracked_cache: index.untracked_cache.clone(),
         fsmonitor_last_update: index.fsmonitor_last_update.clone(),
