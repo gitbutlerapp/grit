@@ -54,7 +54,8 @@ This executes [`scripts/gate.sh`](scripts/gate.sh) in order, stopping at the fir
 
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace -- -D warnings`
-3. `cargo test --workspace`
+3. `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features`
+4. `cargo test --workspace`
 
 The script exports **`CARGO_BUILD_JOBS=$(nproc)`** for the run so builds use all cores despite the **`jobs = 2`** cap in [`.cargo/config.toml`](.cargo/config.toml). Each stage prints wall time on success or failure.
 
@@ -83,6 +84,7 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | **docs** | `make docs-check` and `python3 -m unittest discover scripts/tests` | `make docs-check && python3 -m unittest discover scripts/tests` |
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
+| **rustdoc** | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features` | `make doc` |
 | **test** | `cargo test -p grit-lib -p grit-cli`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
 
 Each job uses **`ubuntu-latest`** (the **docs** job uses **`timeout-minutes: 2`**; the others use **15**), and the jobs run in parallel.
