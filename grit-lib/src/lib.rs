@@ -58,7 +58,7 @@ pub mod prelude {
 /// Object storage: ids/kinds, the object database, packs, multi-pack index, deltas.
 pub mod object_store {
     pub use crate::{
-        delta_encode, delta_islands, index_pack, midx, objects, odb, pack, pack_geometry,
+        delta_encode, delta_islands, hash, index_pack, midx, objects, odb, pack, pack_geometry,
         pack_name_hash, pack_rev, promisor, promisor_remote, prune_packed, unpack_objects,
     };
 }
@@ -145,6 +145,7 @@ pub mod git_binary_base85;
 pub mod git_date;
 pub mod git_path;
 pub mod gitmodules;
+pub mod hash;
 pub mod hide_refs;
 pub mod hooks;
 pub mod ident;
