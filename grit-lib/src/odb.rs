@@ -20,7 +20,9 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -35,6 +37,12 @@ use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 use crate::pack;
 
 type MemOdbOverlay = Arc<Mutex<Option<std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>>>>;
+
+/// Cached `info/alternates` chain for one [`Odb`] (generation bumps on invalidation/reload).
+struct FileAlternatesCache {
+    generation: u64,
+    snapshot: Option<Arc<Vec<PathBuf>>>,
+}
 
 /// Decompress a zlib-wrapped loose object payload from an open file.
 ///
@@ -63,9 +71,7 @@ fn read_zlib_loose_payload(mut file: fs::File) -> Result<Vec<u8>> {
 
 /// True when `oid` is stored as a loose object or in a **non-promisor** local pack.
 fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
-    let loose = objects_dir
-        .join(oid.loose_prefix())
-        .join(oid.loose_suffix());
+    let loose = oid.loose_path_in(objects_dir);
     if loose.exists() {
         return true;
     }
@@ -109,6 +115,14 @@ pub struct Odb {
     /// every file; the value cannot change for a process that has opened a single repository, so
     /// caching it here avoids re-loading the cascade for every object read.
     core_multi_pack_index_cache: Arc<OnceLock<bool>>,
+    /// `info/alternates` chain resolved lazily; generation bumps on invalidation/reload.
+    file_alternate_dirs_cache: Arc<RwLock<FileAlternatesCache>>,
+    #[cfg(test)]
+    exists_probe: Arc<AtomicUsize>,
+    /// Explicit env alternates from [`Self::with_env_alternate_dirs`] (tests / callers); empty uses lazy env read.
+    env_alternate_dirs: Vec<PathBuf>,
+    /// Lazily parsed `GIT_ALTERNATE_OBJECT_DIRECTORIES` (first alternate lookup only).
+    env_alternate_lazy: Arc<OnceLock<Arc<Vec<PathBuf>>>>,
     /// When `Some`, object writes are redirected into this in-memory overlay instead of being
     /// persisted to the loose store (Git's tmp-objdir). Reads consult the overlay first. This
     /// mirrors `git merge-tree --quiet`, which performs a full merge but must leave the object
@@ -137,7 +151,9 @@ impl Odb {
     /// Create an [`Odb`] pointing at the given `objects/` directory.
     ///
     /// The directory does not need to exist yet; it will be created on the
-    /// first write operation.
+    /// first write operation. Does not read `GIT_ALTERNATE_OBJECT_DIRECTORIES`;
+    /// use [`Self::env_alternate_dirs_from_var`] and [`Self::with_env_alternate_dirs`]
+    /// (or open via [`crate::repo::Repository`], which resolves env alternates lazily on first use).
     #[must_use]
     pub fn new(objects_dir: &Path) -> Self {
         Self {
@@ -146,13 +162,24 @@ impl Odb {
             submodule_alternate_dirs: Arc::new(Mutex::new(Vec::new())),
             config_git_dir: None,
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
+            file_alternate_dirs_cache: Arc::new(RwLock::new(FileAlternatesCache {
+                generation: 0,
+                snapshot: None,
+            })),
+            env_alternate_dirs: Vec::new(),
+            env_alternate_lazy: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            #[cfg(test)]
+            exists_probe: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     /// Create an [`Odb`] with a work tree for resolving relative alternate paths.
+    ///
+    /// Does not read `GIT_ALTERNATE_OBJECT_DIRECTORIES`; pass env-derived paths with
+    /// [`Self::with_env_alternate_dirs`] (see [`Self::env_alternate_dirs_from_var`]).
     #[must_use]
     pub fn with_work_tree(objects_dir: &Path, work_tree: &Path) -> Self {
         Self {
@@ -161,10 +188,163 @@ impl Odb {
             submodule_alternate_dirs: Arc::new(Mutex::new(Vec::new())),
             config_git_dir: None,
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
+            file_alternate_dirs_cache: Arc::new(RwLock::new(FileAlternatesCache {
+                generation: 0,
+                snapshot: None,
+            })),
+            env_alternate_dirs: Vec::new(),
+            env_alternate_lazy: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            #[cfg(test)]
+            exists_probe: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    fn env_alternate_dirs_snapshot(&self) -> Arc<Vec<PathBuf>> {
+        if !self.env_alternate_dirs.is_empty() {
+            return Arc::new(self.env_alternate_dirs.clone());
+        }
+        Arc::clone(
+            self.env_alternate_lazy.get_or_init(|| {
+                Arc::new(Self::env_alternate_dirs_from_var(self.work_tree.as_deref()))
+            }),
+        )
+    }
+
+    /// Parse `GIT_ALTERNATE_OBJECT_DIRECTORIES` once for [`Self::with_env_alternate_dirs`].
+    ///
+    /// Relative entries are resolved against `resolve_base` (typically the work tree root).
+    #[must_use]
+    pub fn env_alternate_dirs_from_var(resolve_base: Option<&Path>) -> Vec<PathBuf> {
+        match std::env::var("GIT_ALTERNATE_OBJECT_DIRECTORIES") {
+            Ok(val) if !val.is_empty() => {
+                let mut dirs = parse_alternate_env(&val);
+                if let Some(base) = resolve_base {
+                    for dir in &mut dirs {
+                        if dir.is_relative() {
+                            *dir = base.join(&dir);
+                        }
+                    }
+                }
+                dirs
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Attach env-derived alternate object directories (see [`Self::env_alternate_dirs_from_var`]).
+    #[must_use]
+    pub fn with_env_alternate_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
+        self.env_alternate_dirs = dirs;
+        self
+    }
+
+    /// Drop the cached `info/alternates` chain so the next lookup re-reads the file.
+    pub fn invalidate_alternates_cache(&self) {
+        if let Ok(mut guard) = self.file_alternate_dirs_cache.write() {
+            guard.generation = guard.generation.wrapping_add(1);
+            guard.snapshot = None;
+        }
+    }
+
+    /// Reload `info/alternates` from disk into this [`Odb`]'s cache (used after external writes).
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures from reading the alternates chain (I/O or malformed `info/alternates`).
+    pub fn refresh_file_alternates_from_disk(&self) -> Result<()> {
+        let snapshot = Arc::new(pack::read_alternates_recursive(&self.objects_dir)?);
+        if let Ok(mut guard) = self.file_alternate_dirs_cache.write() {
+            guard.generation = guard.generation.wrapping_add(1);
+            guard.snapshot = Some(snapshot);
+        }
+        Ok(())
+    }
+
+    /// Append `alternate_objects_dir` to `objects/info/alternates` (deduped) and refresh the cache.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`] when the alternates file cannot be read or written.
+    pub fn append_file_alternate(&self, alternate_objects_dir: &Path) -> Result<()> {
+        Self::append_alternate_objects_line(&self.objects_dir, alternate_objects_dir)?;
+        self.refresh_file_alternates_from_disk()?;
+        Ok(())
+    }
+
+    /// Append one absolute `objects` directory line to `objects/info/alternates` (deduped).
+    ///
+    /// Does not update any in-memory cache; pair with [`Self::refresh_file_alternates_from_disk`]
+    /// on the relevant [`Odb`] when the same process keeps using it.
+    pub fn append_alternate_objects_line(
+        objects_dir: &Path,
+        alternate_objects_dir: &Path,
+    ) -> Result<()> {
+        let info = objects_dir.join("info");
+        fs::create_dir_all(&info)?;
+        let alt_path = info.join("alternates");
+        let alt_abs = alternate_objects_dir
+            .canonicalize()
+            .unwrap_or_else(|_| alternate_objects_dir.to_path_buf());
+        let line = format!("{}\n", alt_abs.display());
+        let existing = match fs::read_to_string(&alt_path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(Error::Io(e)),
+        };
+        if existing
+            .lines()
+            .any(|l| l.trim() == alt_abs.to_string_lossy())
+        {
+            return Ok(());
+        }
+        let mut out = existing;
+        out.push_str(&line);
+        fs::write(alt_path, out).map_err(Error::Io)
+    }
+
+    fn file_alternate_dirs_snapshot(&self) -> Arc<Vec<PathBuf>> {
+        loop {
+            let observed_gen = self
+                .file_alternate_dirs_cache
+                .read()
+                .map(|g| g.generation)
+                .unwrap_or(0);
+            if let Ok(guard) = self.file_alternate_dirs_cache.read() {
+                if guard.generation == observed_gen {
+                    if let Some(snapshot) = &guard.snapshot {
+                        return Arc::clone(snapshot);
+                    }
+                }
+            }
+            if let Ok(mut guard) = self.file_alternate_dirs_cache.write() {
+                if guard.generation != observed_gen {
+                    continue;
+                }
+                if let Some(snapshot) = &guard.snapshot {
+                    return Arc::clone(snapshot);
+                }
+                let snapshot = Arc::new(
+                    pack::read_alternates_recursive(&self.objects_dir).unwrap_or_default(),
+                );
+                guard.snapshot = Some(Arc::clone(&snapshot));
+                return snapshot;
+            }
+            break;
+        }
+        Arc::new(Vec::new())
+    }
+
+    #[cfg(test)]
+    fn exists_probe_count(&self) -> usize {
+        self.exists_probe.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    fn reset_exists_probe(&self) {
+        self.exists_probe.store(0, Ordering::Relaxed);
     }
 
     /// Enable the in-memory write overlay (Git's tmp-objdir): subsequent [`Self::write`]/
@@ -344,9 +524,7 @@ impl Odb {
     /// Return the filesystem path for a given object ID.
     #[must_use]
     pub fn object_path(&self, oid: &ObjectId) -> PathBuf {
-        self.objects_dir
-            .join(oid.loose_prefix())
-            .join(oid.loose_suffix())
+        oid.loose_path_in(&self.objects_dir)
     }
 
     /// Whether the object exists under this database directory only (loose or local packs).
@@ -363,8 +541,7 @@ impl Odb {
     /// The empty tree object is treated as present without a loose file (matches Git).
     #[must_use]
     pub fn exists_local(&self, oid: &ObjectId) -> bool {
-        const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-        if oid.to_hex() == EMPTY_TREE {
+        if oid.is_canonical_empty_tree() {
             return true;
         }
         exists_materialized_in_objects_dir(&self.objects_dir, oid)
@@ -373,29 +550,22 @@ impl Odb {
     /// Check whether an object exists in the loose store or any pack file.
     #[must_use]
     pub fn exists(&self, oid: &ObjectId) -> bool {
-        // The empty tree is a well-known object (no on-disk loose file). Git's
-        // canonical SHA-1 is `...8d69288fbee4904`; some harnesses still use the
-        // legacy typo hash `...899d69f7c6948d4` — treat both as present.
-        const EMPTY_TREE_CANON: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-        const EMPTY_TREE_LEGACY: &str = "4b825dc642cb6eb9a060e54bf899d69f7c6948d4";
-        let hex = oid.to_hex();
-        if hex == EMPTY_TREE_CANON || hex == EMPTY_TREE_LEGACY {
+        #[cfg(test)]
+        self.exists_probe.fetch_add(1, Ordering::Relaxed);
+        if oid.is_well_known_empty_tree() {
             return true;
         }
         if self.exists_in_dir(&self.objects_dir, oid) {
             return true;
         }
-        // Check alternates from info/alternates file.
-        if let Ok(alts) = pack::read_alternates_recursive(&self.objects_dir) {
-            for alt_dir in &alts {
-                if self.exists_in_dir(alt_dir, oid) {
-                    return true;
-                }
+        let file_alts = self.file_alternate_dirs_snapshot();
+        for alt_dir in file_alts.iter() {
+            if self.exists_in_dir(alt_dir, oid) {
+                return true;
             }
         }
-        // Check GIT_ALTERNATE_OBJECT_DIRECTORIES env var.
-        for alt_dir in env_alternate_dirs(self.work_tree.as_deref()) {
-            if self.exists_in_dir(&alt_dir, oid) {
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            if self.exists_in_dir(alt_dir, oid) {
                 return true;
             }
         }
@@ -411,9 +581,7 @@ impl Odb {
 
     /// Check whether an object exists in a specific objects directory.
     fn exists_in_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
-        let loose = objects_dir
-            .join(oid.loose_prefix())
-            .join(oid.loose_suffix());
+        let loose = oid.loose_path_in(objects_dir);
         if loose.exists() {
             return true;
         }
@@ -444,10 +612,7 @@ impl Odb {
     /// Returns `true` if an on-disk object was found and touched.
     #[must_use]
     pub fn freshen_object(&self, oid: &ObjectId) -> bool {
-        const EMPTY_TREE_CANON: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-        const EMPTY_TREE_LEGACY: &str = "4b825dc642cb6eb9a060e54bf899d69f7c6948d4";
-        let hex = oid.to_hex();
-        if hex == EMPTY_TREE_CANON || hex == EMPTY_TREE_LEGACY {
+        if oid.is_well_known_empty_tree() {
             return false;
         }
 
@@ -460,16 +625,15 @@ impl Odb {
             return true;
         }
 
-        if let Ok(alts) = pack::read_alternates_recursive(&self.objects_dir) {
-            for alt_dir in &alts {
-                if freshen_object_in_objects_dir(alt_dir, oid) {
-                    return true;
-                }
+        let file_alts = self.file_alternate_dirs_snapshot();
+        for alt_dir in file_alts.iter() {
+            if freshen_object_in_objects_dir(alt_dir, oid) {
+                return true;
             }
         }
 
-        for alt_dir in env_alternate_dirs(self.work_tree.as_deref()) {
-            if freshen_object_in_objects_dir(&alt_dir, oid) {
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            if freshen_object_in_objects_dir(alt_dir, oid) {
                 return true;
             }
         }
@@ -519,11 +683,7 @@ impl Odb {
     /// - [`Error::Zlib`] — decompression failed.
     /// - [`Error::CorruptObject`] — header is malformed.
     pub fn read(&self, oid: &ObjectId) -> Result<Object> {
-        // The empty tree is a well-known virtual object — no storage needed.
-        const EMPTY_TREE_CANON: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-        const EMPTY_TREE_LEGACY: &str = "4b825dc642cb6eb9a060e54bf899d69f7c6948d4";
-        let hex = oid.to_hex();
-        if hex == EMPTY_TREE_CANON || hex == EMPTY_TREE_LEGACY {
+        if oid.is_well_known_empty_tree() {
             return Ok(crate::objects::Object {
                 kind: crate::objects::ObjectKind::Tree,
                 data: Vec::new(),
@@ -572,18 +732,15 @@ impl Odb {
 
         let midx_alt = self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
 
-        // Check alternates from info/alternates file.
-        if let Ok(alts) = pack::read_alternates_recursive(&self.objects_dir) {
-            for alt_dir in &alts {
-                if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
-                    return Ok(obj);
-                }
+        let file_alts = self.file_alternate_dirs_snapshot();
+        for alt_dir in file_alts.iter() {
+            if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
+                return Ok(obj);
             }
         }
 
-        // Check GIT_ALTERNATE_OBJECT_DIRECTORIES env var.
-        for alt_dir in env_alternate_dirs(self.work_tree.as_deref()) {
-            if let Ok(obj) = Self::read_from_dir(&alt_dir, oid, midx_alt) {
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
                 return Ok(obj);
             }
         }
@@ -601,9 +758,7 @@ impl Odb {
 
     /// Try to read an object from a specific objects directory (loose or pack).
     fn read_from_dir(objects_dir: &Path, oid: &ObjectId, use_midx: bool) -> Result<Object> {
-        let loose = objects_dir
-            .join(oid.loose_prefix())
-            .join(oid.loose_suffix());
+        let loose = oid.loose_path_in(objects_dir);
         if let Ok(file) = fs::File::open(&loose) {
             let raw = read_zlib_loose_payload(file)?;
             return parse_object_bytes(&raw);
@@ -654,13 +809,15 @@ impl Odb {
             return Ok(oid);
         }
 
+        let already_exists = self.exists(&oid);
+
         // When the in-memory overlay is active, keep the object in memory only (unless it is
         // already present on disk, in which case nothing new needs to be written anyway).
-        if self.overlay_active() && !self.exists(&oid) && self.overlay_store(oid, kind, data) {
+        if self.overlay_active() && !already_exists && self.overlay_store(oid, kind, data) {
             return Ok(oid);
         }
 
-        if self.exists(&oid) {
+        if already_exists {
             let _ = self.freshen_object(&oid);
             return Ok(oid);
         }
@@ -671,8 +828,7 @@ impl Odb {
         fs::create_dir_all(prefix_dir)?;
 
         let compression = self.loose_compression()?;
-        // Write to a temp file in the same directory, then rename atomically.
-        let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
         {
             let tmp_file = fs::File::create(&tmp_path)?;
             let mut encoder = ZlibEncoder::new(tmp_file, compression);
@@ -726,7 +882,7 @@ impl Odb {
         fs::create_dir_all(prefix_dir)?;
 
         let compression = self.loose_compression()?;
-        let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
         {
             let tmp_file = fs::File::create(&tmp_path)?;
             let mut encoder = ZlibEncoder::new(tmp_file, compression);
@@ -766,7 +922,7 @@ impl Odb {
         fs::create_dir_all(prefix_dir)?;
 
         let compression = self.loose_compression()?;
-        let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
         {
             let tmp_file = fs::File::create(&tmp_path)?;
             let mut encoder = ZlibEncoder::new(tmp_file, compression);
@@ -815,7 +971,7 @@ impl Odb {
         fs::create_dir_all(prefix_dir)?;
 
         let compression = self.loose_compression()?;
-        let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
         {
             let tmp_file = fs::File::create(&tmp_path)?;
             let mut encoder = ZlibEncoder::new(tmp_file, compression);
@@ -861,7 +1017,7 @@ impl Odb {
         fs::create_dir_all(prefix_dir)?;
 
         let compression = self.loose_compression()?;
-        let tmp_path = prefix_dir.join(format!("tmp_{}", oid.loose_suffix()));
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
         {
             let tmp_file = fs::File::create(&tmp_path)?;
             let mut encoder = ZlibEncoder::new(tmp_file, compression);
@@ -1045,30 +1201,6 @@ fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<O
     }
 
     Ok(Object::new(kind, data))
-}
-
-/// Parse `GIT_ALTERNATE_OBJECT_DIRECTORIES` into a list of paths.
-///
-/// The env var contains colon-separated (`:`-separated on Unix) paths
-/// to additional object directories to search. Supports double-quoted
-/// entries with octal escapes (e.g. `\057` for `/`).
-///
-/// Relative paths are resolved against `resolve_base` (typically the work tree root).
-fn env_alternate_dirs(resolve_base: Option<&Path>) -> Vec<PathBuf> {
-    match std::env::var("GIT_ALTERNATE_OBJECT_DIRECTORIES") {
-        Ok(val) if !val.is_empty() => {
-            let mut dirs = parse_alternate_env(&val);
-            if let Some(base) = resolve_base {
-                for dir in &mut dirs {
-                    if dir.is_relative() {
-                        *dir = base.join(&dir);
-                    }
-                }
-            }
-            dirs
-        }
-        _ => Vec::new(),
-    }
 }
 
 /// Parse a colon-separated alternates string, handling double-quoted entries
@@ -1304,18 +1436,32 @@ mod tests {
         let oid = odb.write(ObjectKind::Blob, payload).unwrap();
         let path = odb.object_path(&oid);
         let before_bytes = fs::read(&path).unwrap();
-        let before_mtime =
-            filetime::FileTime::from_last_modification_time(&fs::metadata(&path).unwrap());
+        let meta_before = fs::metadata(&path).unwrap();
+        let before_mtime = filetime::FileTime::from_last_modification_time(&meta_before);
+        #[cfg(unix)]
+        let ino_before = {
+            use std::os::unix::fs::MetadataExt;
+            meta_before.ino()
+        };
         std::thread::sleep(std::time::Duration::from_millis(20));
         let oid2 = odb.write(ObjectKind::Blob, payload).unwrap();
         assert_eq!(oid, oid2);
         assert_eq!(fs::read(&path).unwrap(), before_bytes);
-        let after_mtime =
-            filetime::FileTime::from_last_modification_time(&fs::metadata(&path).unwrap());
+        let meta_after = fs::metadata(&path).unwrap();
+        let after_mtime = filetime::FileTime::from_last_modification_time(&meta_after);
         assert!(
             after_mtime >= before_mtime,
             "expected freshen to bump or preserve mtime"
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                meta_after.ino(),
+                ino_before,
+                "rewrite must not replace the loose object file"
+            );
+        }
     }
 
     /// Objects present only in a pack must not be duplicated as loose files on [`Self::write`].
@@ -1416,5 +1562,103 @@ mod tests {
                 "alternates through symlinked objects dir: {via_link:?}"
             );
         }
+    }
+
+    #[test]
+    fn empty_tree_exists_without_hex() {
+        let odb = Odb::new(std::path::Path::new("/nonexistent/objects"));
+        let canon = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
+        let legacy = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf899d69f7c6948d4").unwrap();
+        assert!(odb.exists(&canon));
+        assert!(odb.exists(&legacy));
+        assert!(odb.exists_local(&canon));
+        assert!(!odb.freshen_object(&canon));
+    }
+
+    #[test]
+    fn append_alternate_objects_line_errors_on_unreadable_existing_file() {
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(objects.join("info")).unwrap();
+        let alt_path = objects.join("info/alternates");
+        fs::write(&alt_path, b"not valid utf-8 \xff\n").unwrap();
+        let err = Odb::append_alternate_objects_line(&objects, Path::new("/tmp/other/objects"))
+            .unwrap_err();
+        assert!(matches!(err, Error::Io(_)));
+        assert_eq!(fs::read(&alt_path).unwrap(), b"not valid utf-8 \xff\n");
+    }
+
+    #[test]
+    fn append_file_alternate_refreshes_cached_snapshot() {
+        let primary = TempDir::new().unwrap();
+        let alternate = TempDir::new().unwrap();
+        let alt_objects = alternate.path().join("objects");
+        std::fs::create_dir_all(&alt_objects).unwrap();
+        let alt_odb = Odb::new(&alt_objects);
+        let oid = alt_odb.write(ObjectKind::Blob, b"via-alternate").unwrap();
+
+        let primary_objects = primary.path().join("objects");
+        std::fs::create_dir_all(primary_objects.join("info")).unwrap();
+        let primary_odb = Odb::new(&primary_objects);
+        assert!(!primary_odb.exists(&oid));
+        let _ = primary_odb.file_alternate_dirs_snapshot();
+        primary_odb.append_file_alternate(&alt_objects).unwrap();
+        assert!(primary_odb.exists(&oid));
+    }
+
+    #[test]
+    fn exists_via_env_alternate_dirs_at_construction() {
+        let primary = TempDir::new().unwrap();
+        let alternate = TempDir::new().unwrap();
+        let alt_objects = alternate.path().join("objects");
+        std::fs::create_dir_all(&alt_objects).unwrap();
+        let alt_odb = Odb::new(&alt_objects);
+        let oid = alt_odb.write(ObjectKind::Blob, b"env-alt").unwrap();
+
+        let primary_objects = primary.path().join("objects");
+        std::fs::create_dir_all(&primary_objects).unwrap();
+        let primary_odb = Odb::new(&primary_objects).with_env_alternate_dirs(vec![alt_objects]);
+        assert!(primary_odb.exists(&oid));
+    }
+
+    #[test]
+    fn write_existing_loose_uses_path_stat_not_exists() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let oid = odb.write(ObjectKind::Blob, b"once").unwrap();
+        let path = odb.object_path(&oid);
+        assert!(path.is_file());
+        odb.reset_exists_probe();
+        let oid2 = odb.write(ObjectKind::Blob, b"once").unwrap();
+        assert_eq!(oid, oid2);
+        assert_eq!(
+            odb.exists_probe_count(),
+            0,
+            "loose fast path must not call exists()"
+        );
+    }
+
+    #[test]
+    fn write_uses_single_exists_probe_when_not_loose() {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("f"), b"probe-once").unwrap();
+        git_in(dir.path(), &["add", "f"]);
+        git_in(dir.path(), &["commit", "-m", "c"]);
+        git_in(dir.path(), &["repack", "-ad"]);
+        let objects = dir.path().join(".git").join("objects");
+        let odb = Odb::new(&objects);
+        let oid = odb.write(ObjectKind::Blob, b"probe-once").unwrap();
+        assert!(!odb.object_path(&oid).exists());
+        odb.reset_exists_probe();
+        let oid2 = odb.write(ObjectKind::Blob, b"probe-once").unwrap();
+        assert_eq!(oid, oid2);
+        assert_eq!(
+            odb.exists_probe_count(),
+            1,
+            "pack/alternate write path must call exists() exactly once"
+        );
     }
 }

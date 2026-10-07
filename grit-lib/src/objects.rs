@@ -103,6 +103,17 @@ impl HashAlgo {
 /// Maximum raw digest length across supported hash algorithms (SHA-256).
 const MAX_OID_LEN: usize = 32;
 
+/// Canonical SHA-1 empty tree digest (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`).
+const WELL_KNOWN_EMPTY_TREE_CANON: [u8; 20] = [
+    0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, 0xa0, 0x60, 0xe5, 0x4b, 0xf8, 0xd6, 0x92, 0x88,
+    0xfb, 0xee, 0x49, 0x04,
+];
+/// Legacy typo empty tree digest still referenced by some tests (`…899d69f7c6948d4`).
+const WELL_KNOWN_EMPTY_TREE_LEGACY: [u8; 20] = [
+    0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, 0xa0, 0x60, 0xe5, 0x4b, 0xf8, 0x99, 0xd6, 0x9f,
+    0x7c, 0x69, 0x48, 0xd4,
+];
+
 /// A Git object identifier: a SHA-1 (20-byte) or SHA-256 (32-byte) digest.
 ///
 /// The digest is stored in a fixed 32-byte buffer with an explicit length;
@@ -171,6 +182,66 @@ impl ObjectId {
     #[must_use]
     pub fn is_zero(&self) -> bool {
         self.as_bytes().iter().all(|&b| b == 0)
+    }
+
+    /// Whether this OID is Git's well-known empty tree (canonical or legacy typo hash).
+    #[must_use]
+    pub(crate) fn is_well_known_empty_tree(&self) -> bool {
+        self.as_bytes().len() == HashAlgo::Sha1.len()
+            && (self.as_bytes() == WELL_KNOWN_EMPTY_TREE_CANON
+                || self.as_bytes() == WELL_KNOWN_EMPTY_TREE_LEGACY)
+    }
+
+    /// Whether this OID is the canonical SHA-1 empty tree (`4b825dc6…4904`).
+    #[must_use]
+    pub(crate) fn is_canonical_empty_tree(&self) -> bool {
+        self.as_bytes().len() == HashAlgo::Sha1.len()
+            && self.as_bytes() == WELL_KNOWN_EMPTY_TREE_CANON
+    }
+
+    /// Append `/<xx>/<rest-of-hex>` for this OID under `path` without heap hex strings.
+    pub(crate) fn push_loose_relative(&self, path: &mut std::path::PathBuf) {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let bytes = self.as_bytes();
+        let prefix = [
+            HEX[(bytes[0] >> 4) as usize],
+            HEX[(bytes[0] & 0xf) as usize],
+        ];
+        // SAFETY: `prefix` and `suffix` are ASCII hex digits only.
+        path.push(unsafe { std::str::from_utf8_unchecked(&prefix) });
+        let suffix_len = (bytes.len() - 1) * 2;
+        let mut suffix = [0u8; 62];
+        for (i, &b) in bytes[1..].iter().enumerate() {
+            suffix[i * 2] = HEX[(b >> 4) as usize];
+            suffix[i * 2 + 1] = HEX[(b & 0xf) as usize];
+        }
+        path.push(unsafe { std::str::from_utf8_unchecked(&suffix[..suffix_len]) });
+    }
+
+    /// Build `<objects-dir>/<xx>/<rest>` for this OID without intermediate hex [`String`]s.
+    #[must_use]
+    pub(crate) fn loose_path_in(&self, objects_dir: &std::path::Path) -> std::path::PathBuf {
+        let mut path = objects_dir.to_path_buf();
+        self.push_loose_relative(&mut path);
+        path
+    }
+
+    /// Temp loose-object filename (`tmp_<suffix>`) inside a prefix directory.
+    #[must_use]
+    pub(crate) fn loose_tmp_path_in_prefix(
+        &self,
+        prefix_dir: &std::path::Path,
+    ) -> std::path::PathBuf {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let bytes = self.as_bytes();
+        let suffix_len = (bytes.len() - 1) * 2;
+        let mut name = [0u8; 4 + 62];
+        name[..4].copy_from_slice(b"tmp_");
+        for (i, &b) in bytes[1..].iter().enumerate() {
+            name[4 + i * 2] = HEX[(b >> 4) as usize];
+            name[4 + i * 2 + 1] = HEX[(b & 0xf) as usize];
+        }
+        prefix_dir.join(unsafe { std::str::from_utf8_unchecked(&name[..4 + suffix_len]) })
     }
 
     /// Lowercase hex representation (40 or 64 characters).
