@@ -13,7 +13,7 @@ Commit-to-commit diffs resolve each commit’s tree with [`parse_commit`](rustdo
 
 ## Index-to-worktree
 
-[`diff_index_to_worktree`](rustdoc:grit_lib::diff::diff_index_to_worktree) compares the index to files on disk. [`diff_index_to_worktree_with_options`](rustdoc:grit_lib::diff::diff_index_to_worktree_with_options) adds index mtime, submodule, and rename-related flags. [`porcelain::add::stage`](rustdoc:grit_lib::porcelain::add::stage) uses [`diff_index_to_worktree_for_staging`](rustdoc:grit_lib::diff::diff_index_to_worktree_for_staging) internally so staging sees the same dirty paths as status.
+[`diff_index_to_worktree`](rustdoc:grit_lib::diff::diff_index_to_worktree) compares the index to files on disk. [`diff_index_to_worktree_with_options`](rustdoc:grit_lib::diff::diff_index_to_worktree_with_options) adds index mtime, submodule/gitlink handling, broken-gitlink detection, and an optional repository git-dir override. [`porcelain::add::stage`](rustdoc:grit_lib::porcelain::add::stage) uses [`diff_index_to_worktree_for_staging`](rustdoc:grit_lib::diff::diff_index_to_worktree_for_staging) internally so staging sees the same dirty paths as status.
 
 ## Blob diffs
 
