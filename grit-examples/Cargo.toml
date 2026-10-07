@@ -23,6 +23,22 @@ path = "src/bin/hash-info.rs"
 name = "quickstart"
 path = "src/bin/quickstart.rs"
 
+[[bin]]
+name = "guide_objects"
+path = "src/bin/guide_objects.rs"
+
+[[bin]]
+name = "guide_repository"
+path = "src/bin/guide_repository.rs"
+
+[[bin]]
+name = "guide_revwalk"
+path = "src/bin/guide_revwalk.rs"
+
+[[bin]]
+name = "guide_network"
+path = "src/bin/guide_network.rs"
+
 [lints]
 workspace = true
 
