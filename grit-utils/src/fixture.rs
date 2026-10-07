@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -88,8 +88,8 @@ pub fn dirty_repo(dir: &Path, count: usize) -> Result<()> {
     Ok(())
 }
 
-/// Modify ~20% of tracked files and reset the index to HEAD (for `add` benchmarks).
-pub fn prepare_add_iteration(dir: &Path, reset_with: &Path) -> Result<()> {
+/// Modify ~20% of tracked files and reset the index to HEAD with **git** (for `add` benchmarks).
+pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     let files = walkdir(dir)?;
     let modify_count = (files.len() / 5).max(1);
     for f in files.iter().take(modify_count) {
@@ -97,13 +97,19 @@ pub fn prepare_add_iteration(dir: &Path, reset_with: &Path) -> Result<()> {
             fs::write(f, "modified for add bench\n")?;
         }
     }
-    Command::new(reset_with)
+    let out = Command::new(git)
         .args(["reset", "-q", "HEAD"])
         .current_dir(dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .output()
-        .context("reset index")?;
+        .context("run git reset")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!(
+            "git reset -q HEAD failed in {}: {}",
+            dir.display(),
+            stderr.trim()
+        );
+    }
     Ok(())
 }
 
@@ -135,4 +141,48 @@ fn walkdir_inner(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    #[test]
+    fn prepare_add_iteration_requires_git_reset() {
+        let dir = TempDir::new().unwrap();
+        let git = which_git();
+        create_min_repo(&git, dir.path()).unwrap();
+        prepare_add_iteration(dir.path(), &git).unwrap();
+        let grit = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit");
+        if !grit.is_file() {
+            return;
+        }
+        let err = prepare_add_iteration(dir.path(), &grit).unwrap_err();
+        assert!(
+            err.to_string().contains("git reset"),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn which_git() -> PathBuf {
+        crate::binary::resolve_binary("git", None).expect("git")
+    }
+
+    fn create_min_repo(git: &Path, dir: &Path) -> Result<()> {
+        std::fs::create_dir_all(dir)?;
+        let out = Command::new(git)
+            .args(["init", "-q"])
+            .current_dir(dir)
+            .output()?;
+        if !out.status.success() {
+            bail!("git init failed");
+        }
+        std::fs::write(dir.join("f.txt"), "a\n")?;
+        run_git(git, dir, &["add", "f.txt"])?;
+        run_git(git, dir, &["commit", "-qm", "init"])?;
+        Ok(())
+    }
 }

@@ -91,7 +91,7 @@ Reports use `"schema_version": 1`. All times in scenario stats are **millisecond
 | --- | --- | --- |
 | `status-dirty-{N}` | status | Dirty tree (~10% modified, ~5% untracked): `git status -s` vs `grit status` |
 | `status-clean-{N}` | status | Clean tree: `git status -s` vs `grit status` |
-| `add-{N}` | add | `add -A` after modifying ~20% of files (index reset each hyperfine run) |
+| `add-{N}` | add | `git add -A` vs `grit add` (stage all); **git** resets the index between timed runs |
 
 Fixtures are synthetic repos with `N` tracked text files under `/tmp/grit-bench-scratch`.
 

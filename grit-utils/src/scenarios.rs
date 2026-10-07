@@ -2,13 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{create_repo, dirty_repo, prepare_add_iteration, scratch_dir};
 use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::schema::{BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION};
+use crate::shell::shell_command;
 use crate::stats::{median_ratio, timing_from_hyperfine};
 
 /// Driver selection for a scenario (CLI today; library hooks reserved).
@@ -54,12 +55,6 @@ pub struct RunConfig {
     pub prepare_bin: PathBuf,
 }
 
-fn build_command(program: &Path, args: &[String]) -> String {
-    let mut parts = vec![program.display().to_string()];
-    parts.extend(args.iter().cloned());
-    parts.join(" ")
-}
-
 fn bench_tool(
     hyperfine: &Path,
     program: &Path,
@@ -72,7 +67,7 @@ fn bench_tool(
     let entry = run_hyperfine(
         hyperfine,
         &HyperfineRun {
-            command: build_command(program, args),
+            command: shell_command(program, args),
             working_directory: cwd.to_path_buf(),
             prepare: prepare.map(str::to_string),
             warmup: cfg.warmup,
@@ -83,11 +78,14 @@ fn bench_tool(
     Ok(timing_from_hyperfine(&entry))
 }
 
-fn prepare_command(cfg: &RunConfig, _kind: PrepareKind, tool_flag: &str) -> String {
-    format!(
-        "{} prepare-add --tool {}",
-        cfg.prepare_bin.display(),
-        tool_flag
+fn prepare_command(cfg: &RunConfig, git: &Path) -> String {
+    shell_command(
+        &cfg.prepare_bin,
+        &[
+            "prepare-add".to_string(),
+            "--git".to_string(),
+            git.display().to_string(),
+        ],
     )
 }
 
@@ -100,12 +98,7 @@ pub fn run_scenario(
     scenario: &Scenario,
     repo: &Path,
 ) -> Result<ScenarioResult> {
-    let git_prepare = scenario
-        .prepare_kind
-        .map(|kind| prepare_command(cfg, kind, &format!("{}", git.display())));
-    let grit_prepare = scenario
-        .prepare_kind
-        .map(|kind| prepare_command(cfg, kind, &format!("{}", grit.display())));
+    let prepare = scenario.prepare_kind.map(|_| prepare_command(cfg, git));
 
     let git_stats = bench_tool(
         hyperfine,
@@ -113,7 +106,7 @@ pub fn run_scenario(
         &scenario.git_argv,
         repo,
         cfg,
-        git_prepare.as_deref(),
+        prepare.as_deref(),
         "git",
     )?;
     let grit_stats = bench_tool(
@@ -122,7 +115,7 @@ pub fn run_scenario(
         &scenario.grit_argv,
         repo,
         cfg,
-        grit_prepare.as_deref(),
+        prepare.as_deref(),
         "grit",
     )?;
 
@@ -197,7 +190,7 @@ pub fn run_status_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
-/// `add -A` benchmark for each file count.
+/// Stage-all benchmark for each file count (`git add -A` vs `grit add`).
 pub fn run_add_suite(
     hyperfine: &Path,
     git: &Path,
@@ -209,6 +202,8 @@ pub fn run_add_suite(
     let mut scenarios = Vec::new();
     for &size in sizes {
         let repo = create_repo(git, size)?;
+        prepare_add_iteration(&repo, git)
+            .with_context(|| format!("initial add-bench setup for {size} files"))?;
         scenarios.push(run_scenario(
             hyperfine,
             git,
@@ -218,8 +213,10 @@ pub fn run_add_suite(
                 id: format!("add-{size}"),
                 group: "add".into(),
                 fixture: format!("synthetic-{size}"),
-                description: "add -A after modifying ~20% of files (index reset each run)".into(),
-                grit_argv: vec!["add".into(), "-A".into()],
+                description:
+                    "stage all changes after modifying ~20% of files (git reset between runs)"
+                        .into(),
+                grit_argv: vec!["add".into()],
                 git_argv: vec!["add".into(), "-A".into()],
                 driver: Driver::Cli,
                 prepare_kind: Some(PrepareKind::AddIteration),
@@ -251,7 +248,7 @@ fn build_report(
                     kernel: "unknown".into(),
                     scratch_filesystem: "unknown".into(),
                     rustc_version: "unknown".into(),
-                    cargo_profile: "unknown".into(),
+                    cargo_profile: crate::machine::grit_bench_cargo_profile(),
                 }
             })
         }),
@@ -265,6 +262,6 @@ fn build_report(
 }
 
 /// Shared prepare hook for `add` scenarios (invoked by hyperfine `--prepare`).
-pub fn run_prepare_add(tool: &Path) -> Result<()> {
-    prepare_add_iteration(&scratch_dir(), tool)
+pub fn run_prepare_add(git: &Path) -> Result<()> {
+    prepare_add_iteration(&scratch_dir(), git)
 }

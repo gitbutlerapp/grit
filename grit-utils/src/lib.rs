@@ -8,6 +8,7 @@ pub mod machine;
 pub mod render;
 pub mod scenarios;
 pub mod schema;
+pub mod shell;
 pub mod stats;
 
 pub use compare::compare_reports;

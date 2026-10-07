@@ -8,6 +8,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use tempfile::NamedTempFile;
 
+use crate::shell::shell_quote;
+
 /// One entry from hyperfine JSON export (times in seconds).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct HyperfineResultEntry {
@@ -81,14 +83,6 @@ fn wrap_in_dir(dir: &Path, inner: &str) -> String {
     format!("cd {} && {}", shell_quote(&dir.to_string_lossy()), inner)
 }
 
-fn shell_quote(s: &str) -> String {
-    if s.contains('\'') {
-        format!("'{}'", s.replace('\'', "'\"'\"'"))
-    } else {
-        format!("'{s}'")
-    }
-}
-
 /// Parse hyperfine JSON export; expects exactly one result entry.
 pub fn parse_hyperfine_json(json: &str) -> Result<HyperfineResultEntry> {
     let export: HyperfineExport =
@@ -115,10 +109,5 @@ mod tests {
         assert_eq!(entry.command, "sleep 0.1");
         assert!((entry.median - 0.1020).abs() < 1e-6);
         assert_eq!(entry.times.as_ref().map(|t| t.len()), Some(5));
-    }
-
-    #[test]
-    fn shell_quote_escapes_single_quotes() {
-        assert_eq!(shell_quote("a'b"), "'a'\"'\"'b'");
     }
 }

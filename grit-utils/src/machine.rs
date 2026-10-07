@@ -1,5 +1,6 @@
 //! Collect machine and toolchain metadata for benchmark reports.
 
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -20,49 +21,115 @@ pub fn collect_machine_info(scratch_dir: &Path) -> Result<MachineInfo> {
         kernel: read_kernel(),
         scratch_filesystem: filesystem_type(scratch_dir),
         rustc_version: read_rustc_version(),
-        cargo_profile: env::var("CARGO_PROFILE").unwrap_or_else(|_| "release".into()),
+        cargo_profile: grit_bench_cargo_profile(),
     })
+}
+
+/// Profile this `grit-bench` binary was built with (`dev` or `release`).
+pub fn grit_bench_cargo_profile() -> String {
+    if cfg!(debug_assertions) {
+        "dev".into()
+    } else {
+        "release".into()
+    }
 }
 
 fn read_cpu_model() -> String {
     fs::read_to_string("/proc/cpuinfo")
         .ok()
-        .and_then(|content| {
-            content
-                .lines()
+        .and_then(|text| {
+            text.lines()
                 .find(|l| l.starts_with("model name"))
-                .map(|l| l.split_once(':').map(|(_, v)| v.trim()).unwrap_or(l))
-                .map(str::to_string)
+                .and_then(|l| l.split_once(':'))
+                .map(|(_, v)| v.trim().to_string())
         })
         .unwrap_or_else(|| "unknown".into())
 }
 
+fn read_logical_cores_from(content: &str) -> u32 {
+    let count = content
+        .lines()
+        .filter(|l| l.starts_with("processor"))
+        .count() as u32;
+    if count > 0 {
+        count
+    } else {
+        1
+    }
+}
+
 fn read_logical_cores() -> u32 {
     fs::read_to_string("/proc/cpuinfo")
-        .ok()
-        .map(|c| c.lines().filter(|l| l.starts_with("processor")).count() as u32)
-        .filter(|&n| n > 0)
+        .map(|c| read_logical_cores_from(&c))
         .unwrap_or(1)
+}
+
+/// Count unique `(physical id, core id)` tuples per `/proc/cpuinfo` block.
+pub fn physical_cores_from_cpuinfo(content: &str) -> Option<u32> {
+    let mut socket_cores: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut physical_id: Option<String> = None;
+    let mut core_id: Option<String> = None;
+
+    let flush = |socket_cores: &mut HashMap<String, HashSet<String>>,
+                 physical_id: &mut Option<String>,
+                 core_id: &mut Option<String>| {
+        if let (Some(p), Some(c)) = (physical_id.take(), core_id.take()) {
+            socket_cores.entry(p).or_default().insert(c);
+        } else {
+            physical_id.take();
+            core_id.take();
+        }
+    };
+
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            flush(&mut socket_cores, &mut physical_id, &mut core_id);
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        match key.trim() {
+            "physical id" => physical_id = Some(value.trim().to_string()),
+            "core id" => core_id = Some(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    flush(&mut socket_cores, &mut physical_id, &mut core_id);
+
+    let total: usize = socket_cores.values().map(HashSet::len).sum();
+    if total > 0 {
+        return Some(total as u32);
+    }
+
+    // Fallback: `cpu cores` per socket × socket count from unique physical ids.
+    let mut cores_per_socket: Option<u32> = None;
+    let mut physical_ids: HashSet<String> = HashSet::new();
+    for line in content.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        match key.trim() {
+            "cpu cores" if cores_per_socket.is_none() => {
+                cores_per_socket = value.trim().parse().ok();
+            }
+            "physical id" => {
+                physical_ids.insert(value.trim().to_string());
+            }
+            _ => {}
+        }
+    }
+    match (cores_per_socket, physical_ids.len()) {
+        (Some(cps), 0) => Some(cps),
+        (Some(cps), sockets) => Some(cps * sockets as u32),
+        _ => None,
+    }
 }
 
 fn read_physical_cores() -> u32 {
     fs::read_to_string("/proc/cpuinfo")
         .ok()
-        .and_then(|content| {
-            let cores: std::collections::HashSet<_> = content
-                .lines()
-                .filter_map(|l| {
-                    l.strip_prefix("core id")
-                        .or_else(|| l.strip_prefix("cpu cores"))
-                })
-                .filter_map(|l| l.split_once(':').map(|(_, v)| v.trim()))
-                .collect();
-            if cores.is_empty() {
-                None
-            } else {
-                Some(cores.len() as u32)
-            }
-        })
+        .and_then(|c| physical_cores_from_cpuinfo(&c))
         .unwrap_or_else(read_logical_cores)
 }
 
@@ -132,10 +199,28 @@ pub fn format_timestamp(now: time::OffsetDateTime) -> String {
 mod tests {
     use super::*;
 
+    const FOUR_CORE_CPUINFO: &str = include_str!("../tests/fixtures/cpuinfo_four_logical.txt");
+
     #[test]
     fn format_timestamp_rfc3339() {
         let ts = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
         let s = format_timestamp(ts);
         assert!(s.contains('T'));
+    }
+
+    #[test]
+    fn physical_cores_from_fixture_counts_core_tuples() {
+        assert_eq!(physical_cores_from_cpuinfo(FOUR_CORE_CPUINFO), Some(4));
+        assert_eq!(read_logical_cores_from(FOUR_CORE_CPUINFO), 4);
+    }
+
+    #[test]
+    fn cargo_profile_matches_build() {
+        let profile = grit_bench_cargo_profile();
+        if cfg!(debug_assertions) {
+            assert_eq!(profile, "dev");
+        } else {
+            assert_eq!(profile, "release");
+        }
     }
 }
