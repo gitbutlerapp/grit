@@ -722,10 +722,43 @@ pub fn user_display_path(path: &Path) -> String {
     strip_verbatim_path_prefix_str(&path.display().to_string()).replace('\\', "/")
 }
 
+/// Lexical absolute path for comparison (does not follow symlinks).
+///
+/// Strips Windows verbatim prefixes when present. Used for repository entry paths so
+/// symlinks keep their repository spelling in status and pathspec resolution.
+#[must_use]
+pub fn path_lexical_for_disk_compare(path: &Path) -> PathBuf {
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let normalized = lexical_normalize_path_buf(abs);
+    #[cfg(windows)]
+    {
+        return PathBuf::from(
+            strip_verbatim_path_prefix_str(&normalized.display().to_string()).into_owned(),
+        );
+    }
+    normalized
+}
+
+fn lexical_normalize_path_buf(path: PathBuf) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(c),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(_) => out.push(c),
+        }
+    }
+    out
+}
+
 /// Repository-relative path with forward slashes when `path` lies under `work_tree`.
 #[must_use]
 pub fn strip_worktree_prefix(path: &Path, work_tree: &Path) -> Option<String> {
-    let path_key = path_for_disk_compare(path);
+    let path_key = path_lexical_for_disk_compare(path);
     let wt_key = path_for_disk_compare(work_tree);
     let rel = path_key.strip_prefix(&wt_key).ok()?;
     Some(path_to_git_slash(rel))
@@ -750,7 +783,7 @@ pub fn path_to_git_slash(path: &Path) -> String {
 #[must_use]
 pub fn relative_path_for_display(from: &Path, to: &Path) -> Option<String> {
     let from_cmp = path_for_disk_compare(from);
-    let to_cmp = path_for_disk_compare(to);
+    let to_cmp = path_lexical_for_disk_compare(to);
     if from_cmp == to_cmp {
         return Some(".".to_owned());
     }
@@ -943,6 +976,23 @@ mod git_path_component_tests {
         assert_eq!(
             relative_path_for_display(&cwd, &below).as_deref(),
             Some("a.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn strip_worktree_prefix_preserves_symlink_spelling() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join("d")).expect("mkdir");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        symlink(&outside, repo.join("d/link")).expect("symlink");
+        assert_eq!(
+            strip_worktree_prefix(&repo.join("d/link"), &repo).as_deref(),
+            Some("d/link")
         );
     }
 
