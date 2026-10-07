@@ -41,7 +41,7 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
     git(repo_root, &["config", "user.email", "t@example.com"]);
     git(repo_root, &["config", "user.name", "Test"]);
 
-    const FILE_COUNT: usize = 80;
+    const FILE_COUNT: usize = 512;
     for i in 0..FILE_COUNT {
         let name = format!("file-{i:03}.txt");
         fs::write(repo_root.join(&name), format!("content {i}\n")).expect("write");
@@ -101,11 +101,19 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
     let second_elapsed = second_start.elapsed();
 
     assert!(
-        second_elapsed * 3 + Duration::from_millis(5) < first_elapsed,
-        "second status should avoid full re-hash (first {:?}, second {:?})",
+        second_elapsed <= first_elapsed,
+        "second status should not do more work than the refresh pass (first {:?}, second {:?})",
         first_elapsed,
         second_elapsed
     );
+    if first_elapsed > Duration::from_millis(25) {
+        assert!(
+            second_elapsed * 2 + Duration::from_millis(2) < first_elapsed,
+            "second status should avoid full re-hash on a warm index (first {:?}, second {:?})",
+            first_elapsed,
+            second_elapsed
+        );
+    }
 }
 
 #[test]

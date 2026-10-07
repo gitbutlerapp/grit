@@ -3369,7 +3369,8 @@ pub fn refresh_index_stat_content_verified(
     use crate::config::ConfigSet;
     use crate::crlf;
     use crate::worktree_batch::{
-        collect_refresh_hash_work, parallel_refresh_index_stat_hashes, RefreshHashOutcome,
+        collect_refresh_hash_work, collect_refresh_hash_work_parallel,
+        parallel_refresh_index_stat_hashes, RefreshHashOutcome,
     };
 
     let index_mtime = index_mtime_for_diff(index, index_mtime);
@@ -3377,7 +3378,15 @@ pub fn refresh_index_stat_content_verified(
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
 
-    let work = collect_refresh_hash_work(&index.entries, work_tree, index_mtime);
+    let work = match collect_refresh_hash_work_parallel(
+        &index.entries,
+        work_tree,
+        index_mtime,
+        parallelism,
+    ) {
+        Ok(work) => work,
+        Err(_) => collect_refresh_hash_work(&index.entries, work_tree, index_mtime),
+    };
     let outcomes = match parallel_refresh_index_stat_hashes(
         odb,
         &index.entries,

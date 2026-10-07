@@ -201,7 +201,9 @@ pub fn stage(
     )?;
 
     if outcome.total() > 0 {
-        index.sort();
+        if !bulk_empty_index_add {
+            index.sort();
+        }
         repo.write_index(&mut index)?;
     }
 
@@ -432,7 +434,9 @@ fn stage_untracked_paths_parallel(
         parallelism,
     )?;
 
-    repo.odb.ensure_all_loose_prefix_dirs()?;
+    if !prepared.is_empty() {
+        repo.odb.ensure_all_loose_prefix_dirs()?;
+    }
     let write_opts = WriteOptions {
         assume_loose_only_existence: true,
         trust_new_loose: true,

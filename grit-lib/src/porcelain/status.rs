@@ -306,6 +306,8 @@ fn collect_untracked_parallel_top_level(
             root_files.push(entry);
         }
     }
+    root_files.sort_by_key(|e| e.file_name());
+    root_dirs.sort_by_key(|e| e.file_name());
 
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();

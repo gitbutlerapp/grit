@@ -61,11 +61,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
         algo: odb.hash_algo(),
         compression: odb.loose_compression()?,
     };
-    let total_bytes: usize = items
-        .iter()
-        .filter_map(|item| fs::metadata(&item.abs).ok())
-        .map(|m| m.len() as usize)
-        .sum();
+    let total_bytes = items.len().saturating_mul(4096);
     let threads = parallelism.threads();
     let prepared = try_par_hash_with(items, threads, total_bytes, |item| {
         let meta = fs::symlink_metadata(&item.abs).map_err(Error::Io)?;
@@ -110,62 +106,103 @@ enum RefreshHashKind {
     StatAdopt,
 }
 
-pub(crate) struct RefreshHashWork<'a> {
-    entry_index: usize,
-    abs: PathBuf,
-    rel_path: &'a str,
-    meta: fs::Metadata,
-    expected_oid: ObjectId,
+pub(crate) struct RefreshHashWork {
+    pub(crate) entry_index: usize,
+    pub(crate) abs: PathBuf,
+    pub(crate) meta: fs::Metadata,
+    pub(crate) expected_oid: ObjectId,
     kind: RefreshHashKind,
 }
 
-/// Build parallel refresh work items from a snapshot of index entries (read-only).
-pub(crate) fn collect_refresh_hash_work<'a>(
-    entries: &'a [IndexEntry],
+fn refresh_work_item_for_entry(
+    entry_index: usize,
+    entries: &[IndexEntry],
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
-) -> Vec<RefreshHashWork<'a>> {
+) -> Option<RefreshHashWork> {
     use crate::diff::{entry_is_racy, stat_matches};
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 
+    let ie = &entries[entry_index];
+    if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+        return None;
+    }
+    if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+        return None;
+    }
+    let Ok(rel_path) = std::str::from_utf8(&ie.path) else {
+        return None;
+    };
+    let abs = work_tree.join(rel_path);
+    let Ok(meta) = fs::symlink_metadata(&abs) else {
+        return None;
+    };
+    if stat_matches(ie, &meta) {
+        if entry_is_racy(ie, index_mtime) {
+            return Some(RefreshHashWork {
+                entry_index,
+                abs,
+                meta,
+                expected_oid: ie.oid,
+                kind: RefreshHashKind::RacyVerify,
+            });
+        }
+        return None;
+    }
+    Some(RefreshHashWork {
+        entry_index,
+        abs,
+        meta,
+        expected_oid: ie.oid,
+        kind: RefreshHashKind::StatAdopt,
+    })
+}
+
+/// Build parallel refresh work items from a snapshot of index entries (read-only).
+pub(crate) fn collect_refresh_hash_work(
+    entries: &[IndexEntry],
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+) -> Vec<RefreshHashWork> {
     let mut work = Vec::new();
-    for (entry_index, ie) in entries.iter().enumerate() {
-        if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
-            continue;
+    for entry_index in 0..entries.len() {
+        if let Some(item) =
+            refresh_work_item_for_entry(entry_index, entries, work_tree, index_mtime)
+        {
+            work.push(item);
         }
-        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
-            continue;
-        }
-        let Ok(rel_path) = std::str::from_utf8(&ie.path) else {
-            continue;
-        };
-        let abs = work_tree.join(rel_path);
-        let Ok(meta) = fs::symlink_metadata(&abs) else {
-            continue;
-        };
-        if stat_matches(ie, &meta) {
-            if entry_is_racy(ie, index_mtime) {
-                work.push(RefreshHashWork {
-                    entry_index,
-                    abs,
-                    rel_path,
-                    meta,
-                    expected_oid: ie.oid,
-                    kind: RefreshHashKind::RacyVerify,
-                });
-            }
-            continue;
-        }
-        work.push(RefreshHashWork {
-            entry_index,
-            abs,
-            rel_path,
-            meta,
-            expected_oid: ie.oid,
-            kind: RefreshHashKind::StatAdopt,
-        });
     }
     work
+}
+
+/// Like [`collect_refresh_hash_work`], but stat-probes index entries in parallel when worthwhile.
+pub(crate) fn collect_refresh_hash_work_parallel(
+    entries: &[IndexEntry],
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+    parallelism: Parallelism,
+) -> Result<Vec<RefreshHashWork>> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let threads = parallelism.threads().get();
+    let est_bytes = entries.len().saturating_mul(512);
+    if !crate::hash::parallel_hash_worthwhile(entries.len(), est_bytes, threads) {
+        return Ok(collect_refresh_hash_work(entries, work_tree, index_mtime));
+    }
+    let indices: Vec<usize> = (0..entries.len()).collect();
+    let rows = try_par_hash_with(&indices, parallelism.threads(), est_bytes, |&i| {
+        Ok(refresh_work_item_for_entry(
+            i,
+            entries,
+            work_tree,
+            index_mtime,
+        ))
+    })
+    .map_err(|e: ParallelHashError<Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+    Ok(rows.into_iter().flatten().collect())
 }
 
 /// Hash refresh candidates in parallel; returns `(entry_index, action)` pairs in input order.
@@ -176,7 +213,7 @@ pub(crate) fn collect_refresh_hash_work<'a>(
 pub(crate) fn parallel_refresh_index_stat_hashes(
     odb: &Odb,
     entries: &[IndexEntry],
-    work: &[RefreshHashWork<'_>],
+    work: &[RefreshHashWork],
     conv: &ConversionConfig,
     attrs: &GitAttributes,
     config: &ConfigSet,
@@ -189,14 +226,16 @@ pub(crate) fn parallel_refresh_index_stat_hashes(
     let threads = parallelism.threads();
     try_par_hash_with(work, threads, total_bytes, |item| {
         let ie = &entries[item.entry_index];
-        let file_attrs = crlf::get_file_attrs(attrs, item.rel_path, false, config);
+        let rel_path = std::str::from_utf8(&ie.path)
+            .map_err(|_| Error::Message("index path is not valid UTF-8".into()))?;
+        let file_attrs = crlf::get_file_attrs(attrs, rel_path, false, config);
         let wt_oid = hash_worktree_file(
             odb,
             &item.abs,
             &item.meta,
             conv,
             &file_attrs,
-            item.rel_path,
+            rel_path,
             Some(ie),
         )?;
         let content_matches = wt_oid == item.expected_oid;

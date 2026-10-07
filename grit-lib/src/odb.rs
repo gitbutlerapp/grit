@@ -925,6 +925,42 @@ impl Odb {
         zlib_compress_store_bytes(store_bytes, compression)
     }
 
+    /// Publish precompressed bytes to a loose object path via a same-directory temp file.
+    ///
+    /// Readers never observe a partial object at the final name; failed writes remove the temp.
+    fn publish_zlib_loose_object(
+        path: &Path,
+        prefix_dir: &Path,
+        oid: &ObjectId,
+        zlib_store: &[u8],
+        prefix_dirs_precreated: bool,
+    ) -> Result<()> {
+        if !prefix_dirs_precreated {
+            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+        }
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
+        if let Err(e) = fs::write(&tmp_path, zlib_store) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(Error::Io(e));
+        }
+        match fs::rename(&tmp_path, path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&tmp_path);
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(Error::Io(e));
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o444));
+        }
+        Ok(())
+    }
+
     /// Write a loose object from precomputed id and zlib-compressed store bytes.
     ///
     /// The caller must supply bytes that [`read_zlib_loose_payload`] would expand to
@@ -980,34 +1016,13 @@ impl Odb {
             fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
         }
 
-        if options.trust_new_loose {
-            let mut file = match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(f) => f,
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(*oid),
-                Err(e) => return Err(Error::Io(e)),
-            };
-            file.write_all(zlib_store).map_err(Error::Io)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-            }
-            return Ok(*oid);
-        }
-
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        fs::write(&tmp_path, zlib_store).map_err(Error::Io)?;
-        fs::rename(&tmp_path, &path).map_err(Error::Io)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
+        Self::publish_zlib_loose_object(
+            &path,
+            prefix_dir,
+            oid,
+            zlib_store,
+            options.trust_new_loose,
+        )?;
         Ok(*oid)
     }
 
