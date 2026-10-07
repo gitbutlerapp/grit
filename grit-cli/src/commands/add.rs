@@ -15,11 +15,9 @@ use grit_lib::pathspec::{
 };
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::precompose_config::effective_core_precomposeunicode;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
-use grit_lib::unicode_normalization::resolve_worktree_path_for_staging;
 use serde::Serialize;
 
 use crate::context;
