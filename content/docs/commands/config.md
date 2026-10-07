@@ -32,7 +32,9 @@ Keys are written as `section.name`, for example `user.email`.
 | `branch.<name>.merge` | Which remote branch a branch pushes to and pulls from. Defaults to the same name. |
 | `credential.helper` | Where HTTPS credentials are stored and looked up. See [`grit auth`](../auth/). |
 | `grit.githubClientId` | The GitHub OAuth app [`grit auth`](../auth/) signs in with. |
-| `receive.denyNonFastForwards`, `receive.denyDeletes`, `receive.denyCurrentBranch` | Push rules enforced by [`grit receive-pack`](../receive-pack/). |
+| `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced by [`grit receive-pack`](../receive-pack/). |
+| `receive.denyDeletes` | Refuse pushes that delete branches or tags. |
+| `receive.denyCurrentBranch` | Refuse pushes to the branch checked out in a non-bare repository. On by default. |
 
 ## Options
 

@@ -59,7 +59,8 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 .content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
 .content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
 .content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
-.content td:first-child{white-space:nowrap}
+.content td{overflow-wrap:anywhere}.content td code{white-space:nowrap}
+.content td:first-child{overflow-wrap:normal}
 .toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
 .toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
 .toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
@@ -127,13 +128,17 @@ grit commit [-a] -m &lt;message&gt;</code></pre>
 
 Prints hi on startup so we know the binary runs.&quot;</code></pre>
 <h2 id="json-output">JSON output</h2>
+<p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>oid</code></td><td>string</td><td>Full commit object id (40 hex chars for SHA-1)</td></tr><tr><td><code>branch</code></td><td>string</td><td>Short branch name (e.g. <code>main</code>)</td></tr><tr><td><code>subject</code></td><td>string</td><td>First line of the commit message</td></tr><tr><td><code>changes</code></td><td>number</td><td>Path changes vs the parent commit tree</td></tr></tbody></table></div>
+<p>Example:</p>
 <pre><code>{
   &quot;oid&quot;: &quot;217c6f958c3162926c9c9379e6d21b38f110e1ad&quot;,
   &quot;branch&quot;: &quot;main&quot;,
   &quot;subject&quot;: &quot;Add the greeting&quot;,
   &quot;changes&quot;: 2
 }</code></pre>
-<p><code>oid</code> is the new commit&#x27;s id and <code>changes</code> is the number of paths it changed.</p>
+<h2 id="markdown-output">Markdown output</h2>
+<p>Pass <code>--markdown</code> for the same fields as <code>--json</code>, rendered as a Markdown table for agents.</p>
 <h2 id="see-also">See also</h2>
 <p><a href="../add/">grit add</a>, <a href="../status/">grit status</a>, <a href="../log/">grit log</a>, <a href="../config/">grit config</a></p><div class="pager"><a href="../add/">← grit add</a><a href="../diff/">grit diff →</a></div></article>
     <nav class="docnav" aria-label="Docs"><ol><li><a href="../">Overview</a></li><li><a href="../tutorial/">Tutorial</a></li></ol><h2>Getting started</h2><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h2>Making changes</h2><ol><li><a href="../add/">grit add</a></li><li><a class="current" href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h2>History</h2><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h2>Branches and tags</h2><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h2>Remotes</h2><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h2>Maintenance</h2><ol><li><a href="../update/">grit update</a></li></ol><h2>Plumbing</h2><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2>Library</h2><ol><li><a href="https://docs.rs/grit-lib">grit-lib API ↗</a></li></ol></nav>
