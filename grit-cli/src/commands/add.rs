@@ -4,11 +4,10 @@
 //! not a full `status` pass, so large trees with few edits stay fast.
 
 use std::collections::HashSet;
-use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::index::{Index, MODE_TREE};
-use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use grit_lib::index::MODE_TREE;
+use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
 use grit_lib::pathspec::{
     has_glob_chars, matches_pathspec_list, pathdiff, pathspec_is_exclude,
     resolve_pathspec_in_worktree,
@@ -88,7 +87,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
             .filter(|(s, _)| !pathspec_is_exclude(s))
             .collect::<Vec<_>>();
         if !positive.is_empty() {
-            let known = known_paths(repo, &work_tree)?;
+            let known = known_paths(repo)?;
             for (orig, resolved) in positive {
                 if !selector_matches_known(resolved, &known, &work_tree)? {
                     bail!("pathspec '{orig}' did not match any files");
@@ -102,7 +101,7 @@ pub fn stage(repo: &Repository, selectors: &[String]) -> Result<usize> {
 }
 
 /// Paths that may satisfy an explicit pathspec (index, HEAD tree, and a status snapshot).
-fn known_paths(repo: &Repository, work_tree: &Path) -> Result<Vec<String>> {
+fn known_paths(repo: &Repository) -> Result<Vec<String>> {
     let index = repo.load_index().context("could not load the index")?;
     let opts = StatusOptions {
         untracked: UntrackedMode::All,
