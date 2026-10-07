@@ -1339,7 +1339,10 @@ pub fn http_fetch(
             pack_oids = crate::index_pack::ingest_received_pack(
                 pack,
                 &local_odb,
-                &crate::index_pack::IngestPackOptions { fix_thin: true },
+                &crate::index_pack::IngestPackOptions {
+                    fix_thin: true,
+                    ..Default::default()
+                },
             )?;
         }
     }
@@ -1541,7 +1544,10 @@ fn http_fetch_v2(
             pack_oids = crate::index_pack::ingest_received_pack(
                 pack,
                 &local_odb,
-                &crate::index_pack::IngestPackOptions { fix_thin: true },
+                &crate::index_pack::IngestPackOptions {
+                    fix_thin: true,
+                    ..Default::default()
+                },
             )?;
         }
     }

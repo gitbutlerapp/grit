@@ -172,6 +172,7 @@ pub mod objects;
 pub mod odb;
 pub mod pack;
 pub mod pack_geometry;
+pub(crate) mod pack_index_build;
 pub mod pack_name_hash;
 pub mod pack_rev;
 pub mod patch_ids;

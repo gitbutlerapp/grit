@@ -1249,7 +1249,10 @@ pub fn fetch_local(
         crate::index_pack::ingest_received_pack(
             pack,
             &local_odb,
-            &crate::index_pack::IngestPackOptions { fix_thin: true },
+            &crate::index_pack::IngestPackOptions {
+                fix_thin: true,
+                ..Default::default()
+            },
         )?;
     }
 
