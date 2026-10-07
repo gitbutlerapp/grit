@@ -10,7 +10,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::odb::Odb;
-use crate::pack::{clear_pack_cache, write_v2_pack_index_with_trailer};
+use crate::pack::{clear_pack_cache, verify_pack_and_collect, write_v2_pack_index_with_trailer};
 use crate::transfer::fix_thin_pack;
 use crate::unpack_objects::{pack_index_records_from_bytes, PackIndexRecord};
 
@@ -64,13 +64,15 @@ pub fn install_pack_bytes(
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
     let pack_path = pack_dir.join(format!("{stem}.pack"));
     let idx_path = pack_dir.join(format!("{stem}.idx"));
-    let tmp_pack = pack_dir.join(format!("{stem}.pack.tmp"));
-    let tmp_idx = pack_dir.join(format!("{stem}.idx.tmp"));
+    let stage = pack_dir.join(format!(".{stem}-install"));
+    let stage_pack = stage.join(format!("{stem}.pack"));
+    let stage_idx = stage.join(format!("{stem}.idx"));
 
-    cleanup_stale_install_temps(&tmp_pack, &tmp_idx);
+    cleanup_stale_install_stage(&stage);
 
     let install_result = (|| -> Result<HashSet<ObjectId>> {
-        std::fs::write(&tmp_pack, &pack).map_err(Error::Io)?;
+        std::fs::create_dir_all(&stage).map_err(Error::Io)?;
+        std::fs::write(&stage_pack, &pack).map_err(Error::Io)?;
         let records = pack_index_records_from_bytes(&pack, odb)?;
         let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
         let entries: Vec<(ObjectId, u64, u32)> = records
@@ -78,18 +80,20 @@ pub fn install_pack_bytes(
             .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
             .collect();
         let trailer = &pack[pack.len() - hb..];
-        write_v2_pack_index_with_trailer(&tmp_idx, &entries, trailer, hb)?;
-        std::fs::rename(&tmp_pack, &pack_path).map_err(Error::Io)?;
-        std::fs::rename(&tmp_idx, &idx_path).map_err(|e| {
+        write_v2_pack_index_with_trailer(&stage_idx, &entries, trailer, hb)?;
+        // Same validation `git index-pack` performs before the pack is usable (CRCs, offsets, hashes).
+        verify_pack_and_collect(&stage_idx)?;
+        std::fs::rename(&stage_pack, &pack_path).map_err(Error::Io)?;
+        std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
             let _ = std::fs::remove_file(&pack_path);
             Error::Io(e)
         })?;
+        let _ = std::fs::remove_dir(&stage);
         Ok(oids)
     })();
 
     if install_result.is_err() {
-        let _ = std::fs::remove_file(&tmp_pack);
-        let _ = std::fs::remove_file(&tmp_idx);
+        cleanup_stale_install_stage(&stage);
         let _ = std::fs::remove_file(&pack_path);
         let _ = std::fs::remove_file(&idx_path);
     }
@@ -98,9 +102,16 @@ pub fn install_pack_bytes(
     Ok(oids)
 }
 
-fn cleanup_stale_install_temps(tmp_pack: &Path, tmp_idx: &Path) {
-    let _ = std::fs::remove_file(tmp_pack);
-    let _ = std::fs::remove_file(tmp_idx);
+fn cleanup_stale_install_stage(stage: &Path) {
+    if !stage.exists() {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(stage) {
+        for entry in entries.flatten() {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let _ = std::fs::remove_dir(stage);
 }
 
 #[cfg(test)]
@@ -249,12 +260,12 @@ mod tests {
         if pack_dir.exists() {
             let entries = pack_dir_entries(&pack_dir);
             assert!(
-                entries.iter().all(|p| {
-                    p.extension().is_some_and(|e| e == "tmp")
+                entries
+                    .iter()
+                    .all(|p| p.extension().is_some_and(|e| e == "pack" || e == "idx")
                         || p.file_name()
                             .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.ends_with(".pack.tmp") || n.ends_with(".idx.tmp"))
-                }),
+                            .is_some_and(|n| n.starts_with('.') && n.ends_with("-install"))),
                 "must not publish partial .pack/.idx, got {entries:?}"
             );
         }

@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use grit_lib::pack::verify_pack_and_collect;
 use grit_lib::repo::init_repository;
 use grit_lib::transfer::{fetch_local, CloneReflog, FetchOptions, TagMode};
 
@@ -224,6 +225,15 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
     for path in expected {
         assert!(reflogs.contains(&path), "missing reflog file logs/{path:?}");
     }
+
+    let pack_dir = clone_git.join("objects/pack");
+    let idx_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("pack index after clone fetch");
+    verify_pack_and_collect(&idx_path).expect("pack must pass grit verify-pack before fsck");
 
     let fsck = Command::new("git")
         .current_dir(&clone.path())
