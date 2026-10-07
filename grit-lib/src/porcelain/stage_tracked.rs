@@ -163,6 +163,7 @@ pub fn stage_tracked_modifications_in_index(
     };
     let file_abs =
         |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
+    let mut blob_scan: Vec<(String, BlobDiskLookup)> = Vec::new();
     for_each_blob_by_directory(
         &blob_dirs,
         dir_abs,
@@ -174,46 +175,50 @@ pub fn stage_tracked_modifications_in_index(
                     path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
                 }
         },
-        |entry_index, _rel_path, lookup| {
-            let idx_snapshot = index.entries[entry_index].clone();
-            let raw_path = idx_snapshot.path.clone();
-            let skip_worktree = idx_snapshot.skip_worktree();
-            let abs_path = abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode);
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    if skip_worktree {
-                        return Ok(());
-                    }
-                    if rel_path_has_symlink_parent(work_tree, _rel_path) {
-                        if index.remove(&raw_path) {
-                            summary.removed.push(raw_path);
-                        }
-                        return Ok(());
-                    }
-                    if symlink_metadata_for_staging(&abs_path)?.is_none() && index.remove(&raw_path)
-                    {
-                        summary.removed.push(raw_path);
-                    }
-                }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(meta) => {
-                    let ctx = PresentRefreshCtx {
-                        repo,
-                        index,
-                        raw_path: &raw_path,
-                        abs_path: &abs_path,
-                        idx_e: &idx_snapshot,
-                        index_mtime,
-                        trust_filemode,
-                    };
-                    if refresh_present_tracked_path(ctx, &meta)? {
-                        summary.modified.push(raw_path);
-                    }
-                }
-            }
+        |_entry_index, rel_path, lookup| {
+            blob_scan.push((rel_path.to_owned(), lookup));
             Ok(())
         },
     )?;
+
+    for (rel_path, lookup) in blob_scan {
+        let Some(idx_e) = index.get(rel_path.as_bytes(), 0).cloned() else {
+            continue;
+        };
+        let raw_path = idx_e.path.clone();
+        let abs_path = abs_path_for_stage_tracked(work_tree, &raw_path, precompose_unicode);
+        match lookup {
+            BlobDiskLookup::Missing => {
+                if idx_e.skip_worktree() {
+                    continue;
+                }
+                if rel_path_has_symlink_parent(work_tree, &rel_path) {
+                    if index.remove(&raw_path) {
+                        summary.removed.push(raw_path);
+                    }
+                    continue;
+                }
+                if symlink_metadata_for_staging(&abs_path)?.is_none() && index.remove(&raw_path) {
+                    summary.removed.push(raw_path);
+                }
+            }
+            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Present(meta) => {
+                let ctx = PresentRefreshCtx {
+                    repo,
+                    index,
+                    raw_path: &raw_path,
+                    abs_path: &abs_path,
+                    idx_e: &idx_e,
+                    index_mtime,
+                    trust_filemode,
+                };
+                if refresh_present_tracked_path(ctx, &meta)? {
+                    summary.modified.push(raw_path);
+                }
+            }
+        }
+    }
 
     summary.modified.sort();
     summary.removed.sort();
@@ -559,6 +564,28 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let repo = init_repository(dir.path(), false, "main", None, "files").unwrap();
         (dir, repo)
+    }
+
+    #[test]
+    fn stage_tracked_after_deleting_first_of_three_paths() {
+        let (_dir, repo) = init_repo();
+        write_and_index(&repo, b"a.txt", b"a\n");
+        write_and_index(&repo, b"b.txt", b"b\n");
+        write_and_index(&repo, b"c.txt", b"c\n");
+        finalize_index_for_stat_trust(&repo);
+
+        let wt = repo.work_tree.as_ref().unwrap();
+        fs::remove_file(worktree_path_from_index_rel(wt, b"a.txt")).unwrap();
+
+        let summary = stage_tracked_modifications(&repo, wt).unwrap();
+        assert_eq!(summary.removed, vec![b"a.txt".to_vec()]);
+        assert!(summary.modified.is_empty());
+        assert!(!repo
+            .load_index()
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.path == b"a.txt"));
     }
 
     #[test]
