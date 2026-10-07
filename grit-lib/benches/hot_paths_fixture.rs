@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use grit_lib::error::Result;
-use grit_lib::index::{entry_from_stat, Index, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::staging::stage_worktree_changes;
@@ -25,11 +25,18 @@ pub const L_DIRS: usize = 100;
 pub const H_FILES: usize = 100_000;
 pub const H_DIRS: usize = 1_000;
 
+struct IndexMutatePlan {
+    baseline: Index,
+    remove_paths: Vec<Vec<u8>>,
+    replacement_entries: Vec<IndexEntry>,
+}
+
 pub struct HotPathsFixture {
     pub _dir: TempDir,
     pub repo: Repository,
     pub head_tree: ObjectId,
     pub file_paths: Vec<String>,
+    index_mutate_plan: IndexMutatePlan,
 }
 
 impl HotPathsFixture {
@@ -40,11 +47,13 @@ impl HotPathsFixture {
         populate_worktree(dir.path(), file_count, dir_count);
         let file_paths = list_txt_paths(dir.path());
         let head_tree = commit_all(&repo, "initial").expect("initial commit");
+        let index_mutate_plan = build_index_mutate_plan(&repo);
         Self {
             _dir: dir,
             repo,
             head_tree,
             file_paths,
+            index_mutate_plan,
         }
     }
 
@@ -77,30 +86,14 @@ impl HotPathsFixture {
             .expect("tree")
     }
 
-    pub fn mutate_index_batch(&self, remove_fraction: f64) -> Index {
-        let mut index = self.repo.load_index().expect("load index");
-        let n = ((index.entries.len() as f64) * remove_fraction).round() as usize;
-        let n = n.max(1);
-        let to_touch: Vec<_> = index
-            .entries
-            .iter()
-            .take(n)
-            .map(|e| String::from_utf8_lossy(&e.path).into_owned())
-            .collect();
-        for path in &to_touch {
-            index.remove(path.as_bytes());
+    /// Apply a precomputed 10% remove/replace batch (index operations only).
+    pub fn apply_index_mutate_batch(&self) -> Index {
+        let mut index = self.index_mutate_plan.baseline.clone();
+        for path in &self.index_mutate_plan.remove_paths {
+            index.remove(path);
         }
-        let work_tree = self.repo.work_tree.as_ref().expect("work tree");
-        for path in to_touch {
-            let abs = work_tree.join(&path);
-            std::fs::write(&abs, b"replacement\n").expect("write");
-            let oid = self
-                .repo
-                .odb
-                .write(ObjectKind::Blob, b"replacement\n")
-                .expect("blob");
-            let entry = entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry");
-            index.add_or_replace(entry);
+        for entry in &self.index_mutate_plan.replacement_entries {
+            index.add_or_replace(entry.clone());
         }
         index.sort();
         index
@@ -115,6 +108,32 @@ impl HotPathsFixture {
 
     pub fn reset_worktree_to_head(&self) {
         checkout_between_trees(&self.repo, None, &self.head_tree).expect("reset to head");
+    }
+}
+
+fn build_index_mutate_plan(repo: &Repository) -> IndexMutatePlan {
+    const REPLACEMENT: &[u8] = b"bench-index-replacement\n";
+    let baseline = repo.load_index().expect("load index for mutate plan");
+    let n = ((baseline.entries.len() as f64) * 0.10).round() as usize;
+    let n = n.max(1);
+    let replace_oid = repo
+        .odb
+        .write(ObjectKind::Blob, REPLACEMENT)
+        .expect("replacement blob");
+    let touched: Vec<IndexEntry> = baseline.entries.iter().take(n).cloned().collect();
+    let remove_paths: Vec<Vec<u8>> = touched.iter().map(|e| e.path.clone()).collect();
+    let replacement_entries: Vec<IndexEntry> = touched
+        .into_iter()
+        .map(|mut entry| {
+            entry.oid = replace_oid;
+            entry.size = REPLACEMENT.len() as u32;
+            entry
+        })
+        .collect();
+    IndexMutatePlan {
+        baseline,
+        remove_paths,
+        replacement_entries,
     }
 }
 

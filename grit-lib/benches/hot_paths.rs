@@ -6,7 +6,7 @@ mod hot_paths_fixture;
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use hot_paths_fixture::{bench_checkout_between_trees, bench_stage_scan, HotPathsFixture};
 
 fn bench_index_mutate(c: &mut Criterion) {
@@ -16,11 +16,7 @@ fn bench_index_mutate(c: &mut Criterion) {
         ("H", HotPathsFixture::heavy()),
     ] {
         group.bench_with_input(BenchmarkId::from_parameter(label), fx, |b, fixture| {
-            b.iter(|| {
-                let mut index = fixture.mutate_index_batch(0.10);
-                black_box(index.entries.len());
-                index.sort();
-            });
+            b.iter(|| black_box(fixture.apply_index_mutate_batch().entries.len()));
         });
     }
     group.finish();
@@ -53,11 +49,14 @@ fn bench_staging_scan(c: &mut Criterion) {
         ("H", HotPathsFixture::heavy()),
     ] {
         group.bench_with_input(BenchmarkId::from_parameter(label), fx, |b, fixture| {
-            b.iter(|| {
-                fixture.reset_worktree_to_head();
-                fixture.modify_worktree_files(5);
-                bench_stage_scan(&fixture.repo);
-            });
+            b.iter_batched(
+                || {
+                    fixture.reset_worktree_to_head();
+                    fixture.modify_worktree_files(5);
+                },
+                |_| bench_stage_scan(&fixture.repo),
+                BatchSize::SmallInput,
+            );
         });
     }
     group.finish();

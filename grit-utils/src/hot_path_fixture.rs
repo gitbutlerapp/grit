@@ -63,6 +63,8 @@ pub struct HotPathMeta {
     pub main_branch: String,
     pub topic_branch: String,
     pub base_commit: String,
+    /// Tip of `main_branch` after a divergent commit (reset target for pick/merge).
+    pub main_tip: String,
     pub pick_commit: String,
     pub pick_series_commits: Vec<String>,
     pub wide: bool,
@@ -286,7 +288,8 @@ pub fn setup_switch_fixture_in(
         branch_b: branch_b.clone(),
         main_branch: branch_a,
         topic_branch: branch_b.clone(),
-        base_commit,
+        base_commit: base_commit.clone(),
+        main_tip: base_commit,
         pick_commit: String::new(),
         pick_series_commits: Vec::new(),
         wide,
@@ -295,7 +298,68 @@ pub fn setup_switch_fixture_in(
     Ok((dir.to_path_buf(), meta))
 }
 
-/// Pick / merge fixture: `main` at base, `topic` with one large commit.
+fn merge_base_oid(git: &Path, repo: &Path, left: &str, right: &str) -> Result<String> {
+    let mut cmd = Command::new(git);
+    cmd.args(["merge-base", left, right]).current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git merge-base")?;
+    if !out.status.success() {
+        bail!(
+            "git merge-base failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn is_ancestor(git: &Path, repo: &Path, maybe_ancestor: &str, rev: &str) -> Result<bool> {
+    let mut cmd = Command::new(git);
+    cmd.args(["merge-base", "--is-ancestor", maybe_ancestor, rev])
+        .current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git merge-base --is-ancestor")?;
+    match out.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => bail!(
+            "git merge-base --is-ancestor failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+    }
+}
+
+/// Verify pick/merge fixture graph: common base, sibling tips.
+pub fn assert_pick_merge_sibling_topology(
+    git: &Path,
+    repo: &Path,
+    meta: &HotPathMeta,
+) -> Result<()> {
+    let mb = merge_base_oid(git, repo, &meta.main_tip, &meta.pick_commit)?;
+    if mb != meta.base_commit {
+        bail!(
+            "merge-base(main, topic) = {mb}, expected base {}",
+            meta.base_commit
+        );
+    }
+    if is_ancestor(git, repo, &meta.main_tip, &meta.pick_commit)? {
+        bail!("main tip must not be an ancestor of topic tip");
+    }
+    if is_ancestor(git, repo, &meta.pick_commit, &meta.main_tip)? {
+        bail!("topic tip must not be an ancestor of main tip");
+    }
+    Ok(())
+}
+
+fn commit_main_diverge(git: &Path, dir: &Path, files: &[PathBuf]) -> Result<String> {
+    let rel = files.last().context("need at least one tracked file")?;
+    write_files(dir, std::slice::from_ref(rel), "main-diverge")?;
+    let rel_str = rel.to_string_lossy();
+    run_git(git, dir, &["add", rel_str.as_ref()])?;
+    run_git(git, dir, &["commit", "-q", "-m", "main diverge"])?;
+    rev_parse(git, dir, "HEAD")
+}
+
+/// Pick / merge fixture: sibling `main` and `topic` tips sharing [`HotPathMeta::base_commit`].
 pub fn setup_pick_merge_fixture(
     git: &Path,
     spec: HotPathRepoSpec,
@@ -303,35 +367,48 @@ pub fn setup_pick_merge_fixture(
 ) -> Result<(PathBuf, HotPathMeta)> {
     let dir = scratch_dir();
     remove_dir_robust(&dir);
-    fs::create_dir_all(&dir)?;
-    run_git(git, &dir, &["init", "-q"])?;
-    populate_tree(&dir, spec.file_count, spec.dir_count)?;
-    run_git(git, &dir, &["add", "-A"])?;
-    run_git(git, &dir, &["commit", "-q", "-m", "initial"])?;
+    setup_pick_merge_fixture_in(git, &dir, spec, touch_paths)
+}
+
+pub fn setup_pick_merge_fixture_in(
+    git: &Path,
+    dir: &Path,
+    spec: HotPathRepoSpec,
+    touch_paths: usize,
+) -> Result<(PathBuf, HotPathMeta)> {
+    if dir.exists() {
+        remove_dir_robust(dir);
+    }
+    fs::create_dir_all(dir)?;
+    run_git(git, dir, &["init", "-q"])?;
+    populate_tree(dir, spec.file_count, spec.dir_count)?;
+    run_git(git, dir, &["add", "-A"])?;
+    run_git(git, dir, &["commit", "-q", "-m", "initial"])?;
     if spec.history_commits > 1 {
-        extend_history(git, &dir, spec.history_commits.saturating_sub(1))?;
+        extend_history(git, dir, spec.history_commits.saturating_sub(1))?;
     }
 
     let main_branch = "main".to_string();
     let topic_branch = "topic".to_string();
-    run_git(git, &dir, &["branch", "-q", &main_branch])?;
-    let base_commit = rev_parse(git, &dir, "HEAD")?;
-    run_git(git, &dir, &["checkout", "-q", "-b", &topic_branch])?;
+    run_git(git, dir, &["branch", "-q", &main_branch])?;
+    let base_commit = rev_parse(git, dir, "HEAD")?;
+    run_git(git, dir, &["checkout", "-q", "-b", &topic_branch])?;
 
-    let files = list_tracked_files(&dir)?;
+    let files = list_tracked_files(dir)?;
     let n = touch_paths.min(files.len());
     let targets: Vec<PathBuf> = files.iter().take(n).cloned().collect();
-    write_files(&dir, &targets, "pick-touch")?;
-    run_git(git, &dir, &["add", "-A"])?;
-    run_git(git, &dir, &["commit", "-q", "-m", "topic tip"])?;
-    let pick_commit = rev_parse(git, &dir, "HEAD")?;
+    write_files(dir, &targets, "pick-touch")?;
+    run_git(git, dir, &["add", "-A"])?;
+    run_git(git, dir, &["commit", "-q", "-m", "topic tip"])?;
+    let pick_commit = rev_parse(git, dir, "HEAD")?;
 
-    run_git(git, &dir, &["checkout", "-q", &main_branch])?;
+    run_git(git, dir, &["checkout", "-q", &main_branch])?;
+    let main_tip = commit_main_diverge(git, dir, &files)?;
 
     if spec.fsmonitor {
-        let hook = write_fsmonitor_hook(&dir)?;
-        enable_fsmonitor(git, &dir, &hook)?;
-        assert_fsmonitor_index_ready(git, &dir)?;
+        let hook = write_fsmonitor_hook(dir)?;
+        enable_fsmonitor(git, dir, &hook)?;
+        assert_fsmonitor_index_ready(git, dir)?;
     }
 
     let meta = HotPathMeta {
@@ -340,12 +417,14 @@ pub fn setup_pick_merge_fixture(
         main_branch,
         topic_branch: topic_branch.clone(),
         base_commit,
+        main_tip,
         pick_commit,
         pick_series_commits: Vec::new(),
         wide: false,
     };
-    fs::write(meta_path(&dir), serde_json::to_string_pretty(&meta)?)?;
-    Ok((dir, meta))
+    assert_pick_merge_sibling_topology(git, dir, &meta)?;
+    fs::write(meta_path(dir), serde_json::to_string_pretty(&meta)?)?;
+    Ok((dir.to_path_buf(), meta))
 }
 
 /// Pick-series fixture: 20 commits on `topic`.
@@ -383,6 +462,7 @@ pub fn setup_pick_series_fixture(
     let pick_commit = series.last().cloned().unwrap_or_default();
 
     run_git(git, &dir, &["checkout", "-q", &main_branch])?;
+    let main_tip = commit_main_diverge(git, &dir, &files)?;
 
     if spec.fsmonitor {
         let hook = write_fsmonitor_hook(&dir)?;
@@ -396,10 +476,12 @@ pub fn setup_pick_series_fixture(
         main_branch,
         topic_branch,
         base_commit,
+        main_tip,
         pick_commit,
         pick_series_commits: series,
         wide: false,
     };
+    assert_pick_merge_sibling_topology(git, &dir, &meta)?;
     fs::write(meta_path(&dir), serde_json::to_string_pretty(&meta)?)?;
     Ok((dir, meta))
 }
@@ -413,7 +495,7 @@ pub fn prepare_switch(git: &Path, repo: &Path) -> Result<()> {
 pub fn prepare_pick(git: &Path, repo: &Path) -> Result<()> {
     let meta = load_meta(repo)?;
     run_git(git, repo, &["checkout", "-q", &meta.main_branch])?;
-    run_git(git, repo, &["reset", "-q", "--hard", &meta.base_commit])?;
+    run_git(git, repo, &["reset", "-q", "--hard", &meta.main_tip])?;
     Ok(())
 }
 
@@ -491,6 +573,24 @@ mod tests {
             n_wide >= 40,
             "expected ~10% path delta for wide switch, got {n_wide}"
         );
+    }
+
+    #[test]
+    fn pick_merge_fixture_has_sibling_branch_topology() {
+        let git = which_git();
+        let spec = HotPathRepoSpec {
+            file_count: 200,
+            dir_count: 5,
+            history_commits: 5,
+            fsmonitor: false,
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let touch = touch_paths_for_size(spec.file_count);
+        let (repo, meta) =
+            setup_pick_merge_fixture_in(&git, dir.path(), spec, touch).expect("pick/merge");
+        assert_pick_merge_sibling_topology(&git, &repo, &meta).expect("topology");
+        assert_ne!(meta.main_tip, meta.base_commit);
+        assert_ne!(meta.main_tip, meta.pick_commit);
     }
 
     #[test]
