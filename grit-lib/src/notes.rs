@@ -16,9 +16,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 
-use merge3::{Merge3, StandardMarkers};
-use time::OffsetDateTime;
-
+use crate::commit::{assemble_identity, now_for_identity};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
@@ -30,6 +28,7 @@ use crate::objects::{
 use crate::refs::{append_reflog, resolve_ref, should_autocreate_reflog, write_ref};
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
+use merge3::{Merge3, StandardMarkers};
 
 /// Per-worktree subdirectory holding the conflicted note blobs during a notes merge.
 pub const NOTES_MERGE_WORKTREE: &str = "NOTES_MERGE_WORKTREE";
@@ -240,9 +239,9 @@ pub fn write_notes_commit(
 
     // Build committer/author ident
     let config = ConfigSet::load(Some(&repo.git_dir), true)?;
-    let now = OffsetDateTime::now_utc();
-    let author = build_ident_role(&config, now, "AUTHOR");
-    let committer = build_ident_role(&config, now, "COMMITTER");
+    let now = now_for_identity();
+    let author = build_ident_role(&config, "AUTHOR", now);
+    let committer = build_ident_role(&config, "COMMITTER", now);
 
     let commit = CommitData {
         tree: tree_oid,
@@ -285,7 +284,7 @@ pub fn write_notes_commit(
 /// Build an identity line for the notes commit, honoring the
 /// `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL,DATE}` environment variables exactly like
 /// `git notes` (and `git commit-tree`). `prefix` is either "AUTHOR" or "COMMITTER".
-fn build_ident_role(config: &ConfigSet, now: OffsetDateTime, prefix: &str) -> String {
+fn build_ident_role(config: &ConfigSet, prefix: &str, now: time::OffsetDateTime) -> String {
     let name_key = format!("GIT_{prefix}_NAME");
     let email_key = format!("GIT_{prefix}_EMAIL");
     let date_key = format!("GIT_{prefix}_DATE");
@@ -320,19 +319,10 @@ fn build_ident_role(config: &ConfigSet, now: OffsetDateTime, prefix: &str) -> St
         .or_else(|| config.get("user.email"))
         .unwrap_or_default();
 
-    let date = std::env::var(&date_key)
+    let date_override = std::env::var(&date_key)
         .ok()
-        .filter(|d| !d.trim().is_empty())
-        .and_then(|d| crate::commit::parse_date_to_git_timestamp(&d).or(Some(d)))
-        .unwrap_or_else(|| {
-            let epoch = now.unix_timestamp();
-            let offset = now.offset();
-            let hours = offset.whole_hours();
-            let minutes = offset.minutes_past_hour().unsigned_abs();
-            format!("{epoch} {hours:+03}{minutes:02}")
-        });
-
-    format!("{name} <{email}> {date}")
+        .filter(|d| !d.trim().is_empty());
+    assemble_identity(&name, &email, date_override.as_deref(), now)
 }
 
 /// Per-worktree git directory for `NOTES_MERGE_*` (main: `.git/`, linked: `.git/worktrees/<id>/`).
@@ -876,9 +866,9 @@ pub fn write_notes_commit_with_parents(
         .collect();
     let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
     let config = ConfigSet::load(Some(&repo.git_dir), true)?;
-    let now = OffsetDateTime::now_utc();
-    let author = build_ident_role(&config, now, "AUTHOR");
-    let committer = build_ident_role(&config, now, "COMMITTER");
+    let now = now_for_identity();
+    let author = build_ident_role(&config, "AUTHOR", now);
+    let committer = build_ident_role(&config, "COMMITTER", now);
     let commit = CommitData {
         tree: tree_oid,
         parents: parents.to_vec(),

@@ -4,6 +4,8 @@
 //! records a merge commit. Conflicts are reported (without leaving a
 //! half-finished state) — resolving them is out of scope for `grit`.
 
+use crate::context;
+use crate::output::HumanRender;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::IdentRole;
@@ -21,10 +23,6 @@ use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use serde::Serialize;
-use time::OffsetDateTime;
-
-use crate::context;
-use crate::output::HumanRender;
 
 /// Result of `grit merge` (and the merge half of `grit pull`).
 #[derive(Serialize)]
@@ -192,7 +190,7 @@ pub fn integrate(
         .context("could not update the working tree")?;
 
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
-    let now = OffsetDateTime::now_utc();
+    let now = grit_lib::commit::now_for_identity();
     let author = context::identity(&config, IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
     let committer = context::identity(&config, IdentRole::Committer, "GIT_COMMITTER_DATE", now)?;
 
@@ -226,7 +224,7 @@ fn move_branch(
 ) -> Result<()> {
     refs::write_ref(&repo.git_dir, refname, &new).context("could not update branch")?;
     let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
-    let who = context::reflog_identity(&config, OffsetDateTime::now_utc());
+    let who = context::reflog_identity(&config, grit_lib::commit::now_for_identity());
     let _ = refs::append_reflog(&repo.git_dir, refname, &old, &new, &who, reason, false);
     let _ = refs::append_reflog(&repo.git_dir, "HEAD", &old, &new, &who, reason, false);
     Ok(())
