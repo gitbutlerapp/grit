@@ -940,16 +940,16 @@ fn compute_fanout_from_entries(entries: &[PackIndexEntry]) -> [u32; 256] {
 pub fn write_v2_pack_index(
     idx_path: &Path,
     pack_path: &Path,
-    entries: &[(ObjectId, u64)],
+    entries: &[(ObjectId, u64, u32)],
     hash_bytes: usize,
 ) -> Result<()> {
-    let mut sorted: Vec<(ObjectId, u64)> = entries.to_vec();
+    let mut sorted: Vec<(ObjectId, u64, u32)> = entries.to_vec();
     sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     let mut fanout = [0u32; 256];
     for byte in 0u32..256 {
         let count = sorted
             .iter()
-            .filter(|(oid, _)| u32::from(oid.as_bytes()[0]) <= byte)
+            .filter(|(oid, _, _)| u32::from(oid.as_bytes()[0]) <= byte)
             .count();
         fanout[byte as usize] = u32::try_from(count).unwrap_or(u32::MAX);
     }
@@ -959,7 +959,7 @@ pub fn write_v2_pack_index(
     for f in fanout {
         buf.extend_from_slice(&f.to_be_bytes());
     }
-    for (oid, _) in &sorted {
+    for (oid, _, _) in &sorted {
         if oid.as_bytes().len() != hash_bytes {
             return Err(Error::CorruptObject(format!(
                 "OID width {} does not match index hash width {hash_bytes}",
@@ -968,18 +968,24 @@ pub fn write_v2_pack_index(
         }
         buf.extend_from_slice(oid.as_bytes());
     }
-    let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
-    for (_, off) in &sorted {
-        let start = *off as usize;
-        let mut end = start;
-        skip_one_pack_object(&pack_bytes, &mut end, *off, hash_bytes)
-            .map_err(|e| Error::CorruptObject(format!("idx crc walk: {e}")))?;
-        let crc = crc32fast::hash(&pack_bytes[start..end]);
+    for (_, _, crc) in &sorted {
         buf.extend_from_slice(&crc.to_be_bytes());
     }
-    for (_, off) in &sorted {
-        let v = u32::try_from(*off).unwrap_or(0x8000_0000);
-        buf.extend_from_slice(&v.to_be_bytes());
+    let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
+    let mut large_offsets: Vec<u64> = Vec::new();
+    for (_, off, _) in &sorted {
+        if *off < (1u64 << 31) {
+            buf.extend_from_slice(&u32::try_from(*off).unwrap_or(0).to_be_bytes());
+        } else {
+            let idx = u32::try_from(large_offsets.len()).map_err(|_| {
+                Error::CorruptObject("pack index large-offset table overflow".to_owned())
+            })?;
+            large_offsets.push(*off);
+            buf.extend_from_slice(&(0x8000_0000u32 | idx).to_be_bytes());
+        }
+    }
+    for off in large_offsets {
+        buf.extend_from_slice(&off.to_be_bytes());
     }
     if pack_bytes.len() < hash_bytes {
         return Err(Error::CorruptObject(
@@ -2775,49 +2781,16 @@ mod tests {
         pack_path: &Path,
         entries: &[(ObjectId, u64)],
     ) -> Result<()> {
-        let mut sorted: Vec<(ObjectId, u64)> = entries.to_vec();
-        sorted.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-        let mut fanout = [0u32; 256];
-        for byte in 0u32..256 {
-            let count = sorted
-                .iter()
-                .filter(|(oid, _)| u32::from(oid.as_bytes()[0]) <= byte)
-                .count();
-            fanout[byte as usize] = u32::try_from(count).unwrap_or(u32::MAX);
-        }
-        let mut buf = Vec::new();
-        buf.extend_from_slice(b"\xfftOc");
-        buf.extend_from_slice(&2u32.to_be_bytes());
-        for f in fanout {
-            buf.extend_from_slice(&f.to_be_bytes());
-        }
-        for (oid, _) in &sorted {
-            buf.extend_from_slice(oid.as_bytes());
-        }
         let pack_bytes = std::fs::read(pack_path)?;
-        for (_, off) in &sorted {
+        let mut with_crc = Vec::with_capacity(entries.len());
+        for (oid, off) in entries {
             let start = *off as usize;
             let mut end = start;
             skip_one_pack_object(&pack_bytes, &mut end, *off, 20)
                 .map_err(|e| Error::CorruptObject(format!("idx crc walk: {e}")))?;
-            let crc = crc32fast::hash(&pack_bytes[start..end]);
-            buf.extend_from_slice(&crc.to_be_bytes());
+            with_crc.push((*oid, *off, crc32fast::hash(&pack_bytes[start..end])));
         }
-        for (_, off) in &sorted {
-            let v = u32::try_from(*off).unwrap_or(0x8000_0000);
-            buf.extend_from_slice(&v.to_be_bytes());
-        }
-        if pack_bytes.len() < 20 {
-            return Err(Error::CorruptObject(
-                "pack too small for idx trailer".into(),
-            ));
-        }
-        buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
-        let mut hasher = Sha1::new();
-        Digest::update(&mut hasher, &buf);
-        buf.extend_from_slice(&hasher.finalize());
-        std::fs::write(idx_path, buf)?;
-        Ok(())
+        write_v2_pack_index(idx_path, pack_path, &with_crc, 20)
     }
 
     fn single_blob_pack(data: &[u8]) -> (Vec<u8>, ObjectId, u64) {

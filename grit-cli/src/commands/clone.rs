@@ -12,7 +12,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
-use grit_lib::transfer::{FetchOptions, TagMode};
+use grit_lib::transfer::{CloneReflog, FetchOptions, TagMode};
 use grit_lib::transport_path::{
     absolute_local_clone_source_url, should_store_absolute_local_clone_url,
 };
@@ -83,6 +83,13 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
 
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
     let refspecs = net::fetch_refspecs(&config, net::DEFAULT_REMOTE);
+    let clone_message = format!("clone: from {url}");
+    let clone_reflog = grit_lib::fetch::fetch_operation_identity(&repo.git_dir)
+        .ok()
+        .map(|identity| CloneReflog {
+            identity,
+            message: clone_message.clone(),
+        });
     let outcome = net::fetch_with_options(
         &repo,
         &config,
@@ -92,7 +99,7 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
             tags: TagMode::Following,
             initial_remote_fetch: true,
             remote_name: Some(net::DEFAULT_REMOTE.to_owned()),
-            reflog_message: Some(format!("clone: from {url}")),
+            clone_reflog,
             ..Default::default()
         },
     )
@@ -119,11 +126,24 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
             &zero,
             &oid,
             &identity,
-            &format!("clone: from {url}"),
+            &clone_message,
             false,
         );
+        refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref)
+            .context("could not set HEAD")?;
+        let _ = refs::append_reflog(
+            &repo.git_dir,
+            "HEAD",
+            &zero,
+            &oid,
+            &identity,
+            &clone_message,
+            false,
+        );
+    } else {
+        refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref)
+            .context("could not set HEAD")?;
     }
-    refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref).context("could not set HEAD")?;
     set_config(
         &repo,
         &[

@@ -1826,28 +1826,79 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
     }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let odb = crate::odb::Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf());
-    let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
+    let odb =
+        crate::odb::Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf());
+    let mut merged: HashMap<String, (ObjectId, Option<ObjectId>)> = HashMap::new();
+    let packed_path = git_dir.join("packed-refs");
+    if let Ok(content) = fs::read_to_string(&packed_path) {
+        let mut last_name: Option<String> = None;
+        for line in content.lines() {
+            if line.starts_with('#') {
+                continue;
+            }
+            if let Some(hex) = line.strip_prefix('^') {
+                let Ok(peel_oid) = ObjectId::from_hex(hex.trim()) else {
+                    continue;
+                };
+                if let Some(name) = &last_name {
+                    if let Some(entry) = merged.get_mut(name) {
+                        entry.1 = Some(peel_oid);
+                    }
+                }
+                continue;
+            }
+            let mut parts = line.splitn(2, ' ');
+            let Some(hex) = parts.next() else {
+                continue;
+            };
+            let Some(name) = parts.next() else {
+                continue;
+            };
+            let name = name.trim();
+            let Ok(oid) = ObjectId::from_hex(hex) else {
+                continue;
+            };
+            if name.starts_with(&prefix) {
+                last_name = None;
+                continue;
+            }
+            merged.insert(name.to_owned(), (oid, None));
+            last_name = Some(name.to_owned());
+        }
+    }
+
     for (name, oid) in &entries {
+        let mut peel = None;
+        if let Ok(obj) = odb.read(oid) {
+            if obj.kind == crate::objects::ObjectKind::Tag {
+                if let Ok(tag) = crate::objects::parse_tag(&obj.data) {
+                    peel = Some(tag.object);
+                }
+            }
+        }
+        merged.insert(name.clone(), (*oid, peel));
+    }
+
+    let mut names: Vec<String> = merged.keys().cloned().collect();
+    names.sort();
+
+    let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
+    for name in &names {
+        let Some((oid, peel)) = merged.get(name) else {
+            continue;
+        };
         body.push_str(&oid.to_hex());
         body.push(' ');
         body.push_str(name);
         body.push('\n');
-        if let Ok(obj) = odb.read(oid) {
-            if obj.kind == crate::objects::ObjectKind::Tag {
-                if let Ok(tag) = crate::objects::parse_tag(&obj.data) {
-                    body.push('^');
-                    body.push_str(&tag.object.to_hex());
-                    body.push('\n');
-                }
-            }
+        if let Some(p) = peel {
+            body.push('^');
+            body.push_str(&p.to_hex());
+            body.push('\n');
         }
     }
 
-    let packed_path = git_dir.join("packed-refs");
-    let tmp = packed_path.with_extension("new");
-    fs::write(&tmp, body.as_bytes())?;
-    fs::rename(&tmp, &packed_path)?;
+    atomic_rewrite_packed_refs(git_dir, &body)?;
 
     for (name, _) in &entries {
         let storage_dir = ref_storage_dir(git_dir, name);
@@ -1861,6 +1912,58 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
         }
     }
     Ok(())
+}
+
+/// Rewrite `packed-refs` under the packed-refs lock (tempfile + rename).
+fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
+    let packed_path = git_dir.join("packed-refs");
+    let lock = lock_path_for_ref(&packed_path);
+    let timeout_ms = ConfigSet::load(Some(git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get("core.packedrefstimeout"))
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .unwrap_or(0);
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+        {
+            Ok(_) => break,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                if timeout_ms > 0 && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                return Err(Error::Io(e));
+            }
+            Err(e) => return Err(Error::Io(e)),
+        }
+    }
+
+    let tmp = packed_path.with_extension("new");
+    let mut created_tmp = false;
+    let write_result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(Error::Io)?;
+        created_tmp = true;
+        use std::io::Write as _;
+        file.write_all(body.as_bytes()).map_err(Error::Io)?;
+        drop(file);
+        fs::rename(&tmp, &packed_path).map_err(Error::Io)?;
+        created_tmp = false;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&lock);
+    if write_result.is_err() && created_tmp {
+        let _ = fs::remove_file(&tmp);
+    }
+    write_result
 }
 
 /// List all refs under a given prefix (e.g. `"refs/heads/"`).
