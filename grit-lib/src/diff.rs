@@ -3011,6 +3011,153 @@ pub fn worktree_differs_from_index_entry(
     Ok(eff_oid != ie.oid)
 }
 
+/// Inputs for [`classify_worktree_entry_for_add`].
+pub struct WorktreeAddRefreshParams<'a> {
+    /// Object database used to verify blob OIDs when stat data is inconclusive.
+    pub odb: &'a Odb,
+    /// Index entry being compared.
+    pub ie: &'a IndexEntry,
+    /// `lstat` metadata for the worktree path.
+    pub meta: &'a fs::Metadata,
+    /// Absolute worktree path to the file.
+    pub abs_path: &'a Path,
+    /// Repository-relative path string.
+    pub rel_path: &'a str,
+    /// CRLF / filter conversion settings.
+    pub conv: &'a crate::crlf::ConversionConfig,
+    /// Per-path attribute state.
+    pub file_attrs: &'a crate::crlf::FileAttrs,
+    /// On-disk index mtime when the index was loaded; `None` skips racy checks.
+    pub index_mtime: Option<(u32, u32)>,
+    /// Mode that would be written (after `core.filemode` / `--chmod`).
+    pub staged_mode: u32,
+}
+
+/// Outcome of comparing a tracked index entry to its worktree path for staging refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeAddRefresh {
+    /// Index already reflects the worktree; caller may skip staging.
+    UpToDate,
+    /// Executable bit differs while blob content is unchanged.
+    ModeOnly {
+        /// Mode to store in the index.
+        mode: u32,
+    },
+    /// Blob OID and mode are unchanged; only cached stat fields should be refreshed.
+    StatOnly,
+    /// Content, type, or mode/blob mismatch requires a full restage (read, convert, hash).
+    NeedsRestage,
+}
+
+/// Whether stat-only fast paths may skip re-hashing during staging.
+#[must_use]
+pub(crate) fn index_stat_cache_trustworthy(index_mtime: Option<(u32, u32)>) -> bool {
+    match index_mtime {
+        None => false,
+        Some((0, _)) => false,
+        Some(_) => true,
+    }
+}
+
+/// Decide whether staging must re-read and re-hash a tracked path.
+///
+/// Mirrors the fast paths in [`diff_index_to_worktree`] and Git's `refresh_index` /
+/// `add_file_to_index`: trust matching stat when the entry is not racy and
+/// [`index_stat_cache_trustworthy`] allows it; re-hash when stat matches but the entry is racy
+/// or when stat differs; apply CRLF-aware hashing like staging.
+///
+/// Returns [`WorktreeAddRefresh::UpToDate`] when the index entry already matches the worktree and
+/// no restaging is required; other variants describe mode/stat-only updates or a full restage.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the worktree file cannot be read for content verification.
+pub fn classify_worktree_entry_for_add(
+    params: &WorktreeAddRefreshParams<'_>,
+) -> Result<WorktreeAddRefresh> {
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+
+    let ie = params.ie;
+    let meta = params.meta;
+    let staged_mode = params.staged_mode;
+
+    if ie.intent_to_add() {
+        return Ok(WorktreeAddRefresh::NeedsRestage);
+    }
+
+    let racy = entry_is_racy(ie, params.index_mtime);
+    let stat_same = stat_matches(ie, meta);
+    let trust_stat = index_stat_cache_trustworthy(params.index_mtime);
+
+    if ie.mode == MODE_SYMLINK {
+        if !meta.file_type().is_symlink() {
+            return Ok(WorktreeAddRefresh::NeedsRestage);
+        }
+        if stat_same && !racy && trust_stat && staged_mode == ie.mode {
+            return Ok(WorktreeAddRefresh::UpToDate);
+        }
+        if stat_same && !racy && trust_stat && staged_mode != ie.mode {
+            return Ok(WorktreeAddRefresh::ModeOnly { mode: staged_mode });
+        }
+        return worktree_effective_oid_matches_index(params);
+    }
+
+    if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE {
+        return Ok(WorktreeAddRefresh::NeedsRestage);
+    }
+
+    if meta.file_type().is_symlink() || meta.is_dir() {
+        return Ok(WorktreeAddRefresh::NeedsRestage);
+    }
+
+    if stat_same && !racy && trust_stat {
+        if staged_mode == ie.mode {
+            return Ok(WorktreeAddRefresh::UpToDate);
+        }
+        return Ok(WorktreeAddRefresh::ModeOnly { mode: staged_mode });
+    }
+
+    worktree_effective_oid_matches_index(params)
+}
+
+fn worktree_effective_oid_matches_index(
+    params: &WorktreeAddRefreshParams<'_>,
+) -> Result<WorktreeAddRefresh> {
+    let WorktreeAddRefreshParams {
+        odb,
+        ie,
+        meta,
+        abs_path,
+        rel_path,
+        conv,
+        file_attrs,
+        staged_mode,
+        ..
+    } = params;
+    let worktree_oid =
+        hash_worktree_file(odb, abs_path, meta, conv, file_attrs, rel_path, Some(ie))?;
+    let mut eff_oid = worktree_oid;
+    if eff_oid != ie.oid {
+        if let Ok(raw) = fs::read(abs_path) {
+            let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+            if raw_oid == ie.oid {
+                eff_oid = ie.oid;
+            }
+        }
+    }
+    if eff_oid != ie.oid {
+        return Ok(WorktreeAddRefresh::NeedsRestage);
+    }
+    if *staged_mode != ie.mode {
+        return Ok(WorktreeAddRefresh::ModeOnly { mode: *staged_mode });
+    }
+    if stat_matches(ie, meta) {
+        Ok(WorktreeAddRefresh::UpToDate)
+    } else {
+        Ok(WorktreeAddRefresh::StatOnly)
+    }
+}
+
 pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
     // Compare size
     if meta.len() as u32 != ie.size {
@@ -7436,6 +7583,8 @@ mod racy_index_mtime_diff_tests {
 #[cfg(test)]
 mod smudge_racily_clean_tests {
     use super::*;
+    use crate::config::ConfigSet;
+    use crate::crlf::{self, FileAttrs};
     use crate::index::{entry_from_metadata, Index, MODE_REGULAR};
     use crate::objects::{HashAlgo, ObjectKind};
     use filetime::FileTime;
@@ -7512,6 +7661,90 @@ mod smudge_racily_clean_tests {
         pin_mtime_and_sample(&path, mtime.0, mtime.1);
         let meta = fs::symlink_metadata(&path).expect("stat file");
         entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR)
+    }
+
+    #[test]
+    fn index_stat_cache_trustworthy_rejects_unknown_mtime() {
+        assert!(!super::index_stat_cache_trustworthy(None));
+        assert!(!super::index_stat_cache_trustworthy(Some((0, 0))));
+        assert!(super::index_stat_cache_trustworthy(Some((1, 0))));
+    }
+
+    #[test]
+    fn classify_add_up_to_date_when_stat_matches() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (_git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let bytes = b"hello world\n";
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", bytes, (100, 0));
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let conv = crlf::ConversionConfig::from_config(&ConfigSet::new());
+        let attrs = FileAttrs::default();
+        let params = WorktreeAddRefreshParams {
+            odb: &odb,
+            ie: &entry,
+            meta: &meta,
+            abs_path: &wt.join("f.txt"),
+            rel_path: "f.txt",
+            conv: &conv,
+            file_attrs: &attrs,
+            index_mtime: Some((200, 0)),
+            staged_mode: MODE_REGULAR,
+        };
+        let refresh = classify_worktree_entry_for_add(&params).expect("classify");
+        assert_eq!(refresh, WorktreeAddRefresh::UpToDate);
+    }
+
+    #[test]
+    fn classify_add_rehashes_when_index_mtime_unknown_and_stat_matches() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (_git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", b"old content\n", (100, 0));
+        fs::write(wt.join("f.txt"), b"new content\n").expect("rewrite");
+        pin_mtime_and_sample(&wt.join("f.txt"), 100, 0);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let conv = crlf::ConversionConfig::from_config(&ConfigSet::new());
+        let attrs = FileAttrs::default();
+        let params = WorktreeAddRefreshParams {
+            odb: &odb,
+            ie: &entry,
+            meta: &meta,
+            abs_path: &wt.join("f.txt"),
+            rel_path: "f.txt",
+            conv: &conv,
+            file_attrs: &attrs,
+            index_mtime: None,
+            staged_mode: MODE_REGULAR,
+        };
+        let refresh = classify_worktree_entry_for_add(&params).expect("classify");
+        assert_eq!(refresh, WorktreeAddRefresh::NeedsRestage);
+    }
+
+    #[test]
+    fn classify_add_needs_restaging_when_content_differs() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (_git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", b"old content\n", (100, 0));
+        fs::write(wt.join("f.txt"), b"new content\n").expect("rewrite");
+        pin_mtime_and_sample(&wt.join("f.txt"), 101, 0);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let conv = crlf::ConversionConfig::from_config(&ConfigSet::new());
+        let attrs = FileAttrs::default();
+        let params = WorktreeAddRefreshParams {
+            odb: &odb,
+            ie: &entry,
+            meta: &meta,
+            abs_path: &wt.join("f.txt"),
+            rel_path: "f.txt",
+            conv: &conv,
+            file_attrs: &attrs,
+            index_mtime: Some((200, 0)),
+            staged_mode: MODE_REGULAR,
+        };
+        let refresh = classify_worktree_entry_for_add(&params).expect("classify");
+        assert_eq!(refresh, WorktreeAddRefresh::NeedsRestage);
     }
 
     #[test]
