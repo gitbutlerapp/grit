@@ -11,7 +11,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
-use grit_lib::hash::hash_object;
+use grit_lib::hash::{hash_object, hash_objects_parallel};
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
@@ -174,6 +174,35 @@ fn bench_idx_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_hash_batch_parallel(c: &mut Criterion) {
+    const COUNT: usize = 20_000;
+    const BLOB_LEN: usize = 16 * 1024;
+    let blob = vec![0x5a_u8; BLOB_LEN];
+    let items: Vec<(ObjectKind, &[u8])> = (0..COUNT)
+        .map(|_| (ObjectKind::Blob, blob.as_slice()))
+        .collect();
+
+    let mut group = c.benchmark_group("hash/batch_parallel");
+    group.throughput(Throughput::Bytes((COUNT * BLOB_LEN) as u64));
+    for threads in [1_usize, 8] {
+        let nz = std::num::NonZeroUsize::new(threads).expect("threads");
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("threads={threads}")),
+            &nz,
+            |b, &threads| {
+                b.iter(|| {
+                    black_box(hash_objects_parallel(
+                        HashAlgo::Sha1,
+                        black_box(&items),
+                        threads,
+                    ))
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_delta_apply(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("delta_apply");
@@ -191,6 +220,7 @@ fn bench_delta_apply(c: &mut Criterion) {
 criterion_group!(
     objects,
     bench_sha1_throughput,
+    bench_hash_batch_parallel,
     bench_object_id_hash,
     bench_hash_object,
     bench_zlib,

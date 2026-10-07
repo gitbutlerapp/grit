@@ -1,5 +1,7 @@
 //! Incremental hashing for Git object ids and file trailers.
 //!
+//! Parallel batch helpers: [`hash_objects_parallel`], [`par_hash_with`], and [`Parallelism`].
+//!
 //! This module is the single owner of the `sha1` and `sha2` crates in
 //! `grit-lib`. Callers hash canonical Git object bytes (`"<kind> <len>\\0<payload>"`)
 //! via [`HashAlgo::hash_object`] / [`ObjectHasher::for_object`], raw payloads via
@@ -13,6 +15,13 @@ use sha2::Sha256;
 
 use crate::error::{Error, Result};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+
+mod parallel;
+
+pub use parallel::{
+    hash_objects_parallel, par_hash_with, parallel_hash_worthwhile, try_par_hash_with,
+    ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS, PAR_HASH_MIN_TOTAL_BYTES,
+};
 
 /// RFC 2104 HMAC block size for SHA-1.
 const HMAC_BLOCK_SIZE: usize = 64;
