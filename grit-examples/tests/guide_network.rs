@@ -42,10 +42,8 @@ fn source_and_consumer(root: &Path) -> Result<(std::path::PathBuf, std::path::Pa
     let consumer = root.join("consumer");
     std::fs::create_dir_all(&consumer)?;
     git(&consumer, &["init", "-q", "-b", "main", "."])?;
-    git(
-        &consumer,
-        &["remote", "add", "origin", bare.to_str().unwrap()],
-    )?;
+    let file_url = format!("file://{}", bare.canonicalize()?.display());
+    git(&consumer, &["remote", "add", "origin", &file_url])?;
     Ok((consumer, bare))
 }
 

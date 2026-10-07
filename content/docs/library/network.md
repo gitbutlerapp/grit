@@ -34,11 +34,11 @@ HTTP smart transport accepts an [`HttpClient`](rustdoc:grit_lib::transport::http
 
 [`HelperCredentialProvider`](rustdoc:grit_lib::credentials::HelperCredentialProvider) runs configured `credential.helper` programs on `401` and retries with HTTP Basic. It **never** opens a TTY — missing credentials surface as [`Error::Auth`](rustdoc:grit_lib::error::Error).
 
-Pass [`NoProgress`](rustdoc:grit_lib::fetch::NoProgress) to ignore sideband progress, or implement [`Progress::sideband`](rustdoc:grit_lib::fetch::Progress) to stream messages to your UI.
+Pass [`NoProgress`](rustdoc:grit_lib::fetch::NoProgress) to ignore sideband progress, or implement [`Progress::message`](rustdoc:grit_lib::fetch::Progress) to receive raw progress bytes from side-band channel 2.
 
 ## Example
 
-This example resolves `origin`, lists refs on a **local** bare remote, fetches, creates an empty-tree commit on `main`, and pushes — all over `file://`:
+This example resolves `origin`, lists refs on a **local** bare remote, fetches, creates a commit reusing the fetched tip’s tree, and pushes — all over `file://`:
 
 <!-- include: grit-examples/src/bin/guide_network.rs -->
 
