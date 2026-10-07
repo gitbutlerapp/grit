@@ -3474,7 +3474,7 @@ fn worktree_blob_bytes(
         .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data));
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path)?;
-        return Ok(target.to_string_lossy().into_owned().into_bytes());
+        return Ok(symlink_target_bytes(&target));
     }
     if meta.is_dir() {
         return Ok(Vec::new());
