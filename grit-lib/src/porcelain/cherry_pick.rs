@@ -198,7 +198,7 @@ pub fn stage_entry_at(index: &mut Index, path: &[u8], src: &IndexEntry, stage: u
     let mut entry = src.clone();
     entry.path = path.to_vec();
     entry.flags = (path.len().min(0x0FFF) as u16) | ((stage as u16) << 12);
-    index.entries.push(entry);
+    index.push_entry_unsorted(entry);
 }
 
 /// Whether `index` already holds an unmerged (non-stage-0) entry at `path`.

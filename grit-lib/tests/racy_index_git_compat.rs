@@ -44,7 +44,7 @@ fn racy_same_size_change_matches_git_diff() {
     let index = grit_repo.load_index().expect("load index");
     let index_mtime = index.source_mtime.expect("index source mtime from disk");
     let entry = index
-        .entries
+        .entries()
         .iter()
         .find(|e| e.path == b"f.txt")
         .expect("index entry");
@@ -88,7 +88,7 @@ fn racy_unchanged_content_matches_git_clean_diff() {
     let grit_repo = Repository::open(&repo.join(".git"), Some(repo)).expect("open");
     let index = grit_repo.load_index().expect("load index");
     let entry = index
-        .entries
+        .entries()
         .iter()
         .find(|e| e.path == b"f.txt")
         .expect("index entry");

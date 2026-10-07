@@ -119,7 +119,7 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
         .to_string();
     let index = grit_repo.load_index().expect("index");
     let entry = index
-        .entries
+        .entries()
         .iter()
         .find(|e| e.path == b"tracked.txt" && e.stage() == 0)
         .expect("index entry");

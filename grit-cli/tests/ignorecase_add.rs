@@ -66,7 +66,7 @@ fn grit_add_replaces_case_variant_without_duplicate_index_entries() {
         .success());
 
     let index = Index::load(&git_dir.join("index")).expect("index");
-    let stage0: Vec<_> = index.entries.iter().filter(|e| e.stage() == 0).collect();
+    let stage0: Vec<_> = index.entries().iter().filter(|e| e.stage() == 0).collect();
     assert_eq!(stage0.len(), 1, "expected a single tracked file");
     assert_eq!(
         String::from_utf8_lossy(&stage0[0].path),

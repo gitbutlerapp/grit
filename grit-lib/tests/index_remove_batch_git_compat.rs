@@ -105,7 +105,7 @@ fn grit_index_batch_remove_replace_matches_git_ls_files_and_fsck() {
 
     let touch_count = TOTAL / 10;
     let mut remove_paths: Vec<Vec<u8>> = index
-        .entries
+        .entries()
         .iter()
         .filter(|e| e.stage() == 0)
         .take(touch_count)
@@ -133,7 +133,7 @@ fn grit_index_batch_remove_replace_matches_git_ls_files_and_fsck() {
     repo.write_index(&mut index).expect("write index");
 
     let git_lines = ls_files_stage_lines(tmp.path());
-    let expected = expected_ls_files_lines(&index.entries);
+    let expected = expected_ls_files_lines(index.entries());
     assert_eq!(git_lines, expected);
 
     git(tmp.path(), &["add", "-A"]);

@@ -53,7 +53,7 @@ fn filemode_false_suppresses_executable_mode_only_diff() {
     .expect("entry");
     entry.mode = MODE_EXECUTABLE;
     let mut index = Index::new();
-    index.entries.push(entry);
+    index.entries_mut().push(entry);
 
     let diff = diff_index_to_worktree(&odb, &index, root.path(), false, true).expect("diff");
     assert!(
@@ -135,7 +135,7 @@ fn separate_git_dir_honors_filemode_false_in_external_config() {
     .expect("entry");
     entry.mode = MODE_EXECUTABLE;
     let mut index = Index::new();
-    index.entries.push(entry);
+    index.entries_mut().push(entry);
 
     let diff = diff_index_to_worktree_with_options(
         &odb,

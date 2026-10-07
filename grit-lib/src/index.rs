@@ -225,13 +225,9 @@ impl IndexEntry {
 pub struct Index {
     /// Index format version (2 or 3).
     pub version: u32,
-    /// Index entries, sorted by (path, stage).
-    pub entries: Vec<IndexEntry>,
+    /// Index entries, sorted by (path, stage) when [`Self::entries_sorted`] is true.
+    pub(crate) entries: Vec<IndexEntry>,
     /// When `true`, `entries` are in Git `(path, stage)` order and O(log n) lookups apply.
-    ///
-    /// Direct `entries` mutation (for example `push` without [`Self::sort`]) must call
-    /// [`Self::mark_entries_unsorted`]; until then, lookups use a full linear scan so results
-    /// stay correct.
     pub(crate) entries_sorted: bool,
     /// When true, the on-disk index includes the `sdir` extension (sparse index).
     pub sparse_directories: bool,
@@ -1454,6 +1450,18 @@ impl Index {
         Ok(())
     }
 
+    /// Read-only view of index entries.
+    #[must_use]
+    pub fn entries(&self) -> &[IndexEntry] {
+        &self.entries
+    }
+
+    /// Mutable entry list; marks the index unsorted until [`Self::sort`].
+    pub fn entries_mut(&mut self) -> &mut Vec<IndexEntry> {
+        self.entries_sorted = false;
+        &mut self.entries
+    }
+
     /// Mark `entries` as not in canonical `(path, stage)` order after direct vector mutation.
     pub fn mark_entries_unsorted(&mut self) {
         self.entries_sorted = false;
@@ -1479,19 +1487,28 @@ impl Index {
         a.cmp(b)
     }
 
-    /// Index of `(path, stage)` when entries are sorted; linear scan if not.
+    fn entry_matches(entry: &IndexEntry, path: &[u8], stage: u8) -> bool {
+        entry.path == path && entry.stage() == stage
+    }
+
+    /// Index of `(path, stage)`; binary search when sorted, linear fallback if the flag is stale.
     fn find_entry_pos(&self, path: &[u8], stage: u8) -> Option<usize> {
         if self.entries_sorted {
-            self.entries
-                .binary_search_by(|e| {
-                    Self::cmp_paths(e.path.as_slice(), path).then_with(|| e.stage().cmp(&stage))
-                })
-                .ok()
-        } else {
-            self.entries
-                .iter()
-                .position(|e| e.path == path && e.stage() == stage)
+            if let Ok(pos) = self.entries.binary_search_by(|e| {
+                Self::cmp_paths(e.path.as_slice(), path).then_with(|| e.stage().cmp(&stage))
+            }) {
+                if self
+                    .entries
+                    .get(pos)
+                    .is_some_and(|e| Self::entry_matches(e, path, stage))
+                {
+                    return Some(pos);
+                }
+            }
         }
+        self.entries
+            .iter()
+            .position(|e| Self::entry_matches(e, path, stage))
     }
 
     /// Inclusive start and exclusive end of all entries sharing `path` (sorted indexes only).
@@ -1612,6 +1629,79 @@ impl Index {
             self.invalidate_after_path_removal(&path);
         }
         self.touch_fsmonitor_after_entry_change();
+    }
+
+    /// Remove every entry at `paths` (all stages), then merge `replacements` in sorted order.
+    ///
+    /// When the index is already sorted, this is one removal scan plus an `O(N + M)` merge,
+    /// avoiding per-path `Vec::drain` shifts and repeated `insert`/`sort` work.
+    pub fn remove_paths_and_insert<'a>(
+        &mut self,
+        paths: impl IntoIterator<Item = &'a [u8]>,
+        replacements: impl IntoIterator<Item = IndexEntry>,
+    ) {
+        let mut replacements: Vec<IndexEntry> = replacements.into_iter().collect();
+        if replacements.is_empty() {
+            self.remove_paths(paths);
+            return;
+        }
+        replacements.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+
+        let mut paths: Vec<&[u8]> = paths.into_iter().collect();
+        if paths.is_empty() {
+            for entry in replacements {
+                self.add_or_replace(entry);
+            }
+            return;
+        }
+        paths.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
+        paths.dedup_by(|a, b| a == b);
+
+        let mut invalidated_paths: Vec<Vec<u8>> = Vec::new();
+        let mut kept = Vec::with_capacity(self.entries.len());
+
+        if self.entries_sorted {
+            let mut path_idx = 0usize;
+            for entry in self.entries.drain(..) {
+                let ep = entry.path.as_slice();
+                while path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_lt() {
+                    path_idx += 1;
+                }
+                let remove = path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_eq();
+                if remove {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths.last().is_none_or(|p| p.as_slice() != ep) {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            let repl_for_inval = replacements
+                .iter()
+                .filter(|e| e.stage() == 0)
+                .map(|e| e.path.clone())
+                .collect::<Vec<_>>();
+            self.entries = merge_sorted_index_entries(kept, replacements);
+            self.entries_sorted = true;
+            for path in invalidated_paths {
+                self.invalidate_after_path_removal(&path);
+            }
+            for path in repl_for_inval {
+                if let Ok(p) = std::str::from_utf8(&path) {
+                    self.invalidate_untracked_cache_for_path(p);
+                }
+                self.invalidate_cache_tree_for_path(&path);
+            }
+            self.touch_fsmonitor_after_entry_change();
+            return;
+        }
+        self.remove_paths(paths);
+        for entry in replacements {
+            self.add_or_replace(entry);
+        }
     }
 
     /// Add or replace an entry (matched by path + stage).
@@ -1765,18 +1855,23 @@ impl Index {
     pub fn remove(&mut self, path: &[u8]) -> bool {
         if self.entries_sorted {
             let (start, end) = self.path_run_range_sorted(path);
-            if start >= end {
+            if start < end {
+                self.record_resolve_undo_for_run(start, end);
+                self.entries.drain(start..end);
+                self.invalidate_after_path_removal(path);
+                self.touch_fsmonitor_after_entry_change();
+                return true;
+            }
+            if !self.entries.iter().any(|e| e.path == path) {
                 return false;
             }
-            self.record_resolve_undo_for_run(start, end);
-            self.entries.drain(start..end);
-        } else {
-            self.record_resolve_undo_for_path(path);
-            let before = self.entries.len();
-            self.entries.retain(|e| e.path != path);
-            if self.entries.len() == before {
-                return false;
-            }
+            self.entries_sorted = false;
+        }
+        self.record_resolve_undo_for_path(path);
+        let before = self.entries.len();
+        self.entries.retain(|e| e.path != path);
+        if self.entries.len() == before {
+            return false;
         }
         self.invalidate_after_path_removal(path);
         self.touch_fsmonitor_after_entry_change();
@@ -1810,12 +1905,23 @@ impl Index {
         let plen = prefix.len();
         if self.entries_sorted {
             let (start, end) = self.descendant_run_range_sorted(path);
-            if start >= end {
+            if start < end {
+                self.record_resolve_undo_for_run(start, end);
+                self.entries.drain(start..end);
+                self.invalidate_untracked_cache_for_path(path);
+                self.invalidate_cache_tree_for_path(path.as_bytes());
                 return;
             }
-            self.record_resolve_undo_for_run(start, end);
-            self.entries.drain(start..end);
-        } else {
+            let any = self.entries.iter().any(|e| {
+                let ep = e.path.as_slice();
+                ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/'
+            });
+            if !any {
+                return;
+            }
+            self.entries_sorted = false;
+        }
+        {
             let had_descendant = self.entries.iter().any(|e| {
                 let ep = e.path.as_slice();
                 ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/'
@@ -2110,6 +2216,36 @@ fn read_tree_into_overlay(
         }
     }
     Ok(())
+}
+
+fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) -> Vec<IndexEntry> {
+    let mut kept = kept.into_iter().peekable();
+    let mut insert = insert.into_iter().peekable();
+    let mut out = Vec::with_capacity(kept.size_hint().0.saturating_add(insert.size_hint().0));
+    loop {
+        match (kept.peek(), insert.peek()) {
+            (None, None) => break,
+            (Some(_), None) => {
+                out.extend(kept);
+                break;
+            }
+            (None, Some(_)) => {
+                out.extend(insert);
+                break;
+            }
+            (Some(k), Some(i)) => {
+                let ord = (&k.path, k.stage()).cmp(&(&i.path, i.stage()));
+                if ord == std::cmp::Ordering::Less {
+                    if let Some(entry) = kept.next() {
+                        out.push(entry);
+                    }
+                } else if let Some(entry) = insert.next() {
+                    out.push(entry);
+                }
+            }
+        }
+    }
+    out
 }
 
 fn prefix_under_or_equal(prefix: &[u8], path: &[u8]) -> bool {
@@ -3273,6 +3409,19 @@ mod tests {
             }
             oracle.assert_matches(&idx);
         }
+    }
+
+    #[test]
+    fn stale_sorted_flag_still_finds_and_removes_entries() {
+        let mut idx = Index::new();
+        idx.entries.push(make_entry("z"));
+        idx.entries.push(make_entry("a"));
+        idx.entries.push(make_entry("b"));
+        idx.entries_sorted = true;
+        assert!(!idx.entries_are_sorted());
+        assert!(idx.get(b"z", 0).is_some());
+        assert!(idx.remove(b"z"));
+        assert!(idx.get(b"z", 0).is_none());
     }
 
     #[test]

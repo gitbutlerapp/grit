@@ -18,7 +18,7 @@ use grit_test_support::git;
 
 fn sparse_directory_placeholder_count(index: &Index) -> usize {
     index
-        .entries
+        .entries()
         .iter()
         .filter(|e| e.is_sparse_directory_placeholder())
         .count()
@@ -78,7 +78,7 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
     );
 
     let reloaded = grit_repo.load_index().expect("reload index");
-    for entry in &reloaded.entries {
+    for entry in reloaded.entries() {
         if entry.stage() != 0 {
             continue;
         }

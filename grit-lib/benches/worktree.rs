@@ -38,7 +38,7 @@ fn bench_index_write(c: &mut Criterion) {
         ("v4/10000", &fx.index_v4_10k),
         ("v4/100000", &fx.index_v4_100k),
     ] {
-        group.throughput(Throughput::Elements(index.entries.len() as u64));
+        group.throughput(Throughput::Elements(index.entries().len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(label), index, |b, idx| {
             b.iter(|| {
                 idx.write(&fx.index_write_scratch)

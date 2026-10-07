@@ -157,7 +157,7 @@ pub fn compose_octopus_final_index(pre_merge_index: &Index, final_index: &mut In
         if final_paths.contains(&e.path) {
             continue;
         }
-        final_index.entries.push(e.clone());
+        final_index.push_entry_unsorted(e.clone());
     }
     final_index.sort();
 }

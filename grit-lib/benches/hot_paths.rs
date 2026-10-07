@@ -16,7 +16,7 @@ fn bench_index_mutate(c: &mut Criterion) {
         ("H", HotPathsFixture::heavy()),
     ] {
         group.bench_with_input(BenchmarkId::from_parameter(label), fx, |b, fixture| {
-            b.iter(|| black_box(fixture.apply_index_mutate_batch().entries.len()));
+            b.iter(|| black_box(fixture.apply_index_mutate_batch().entries().len()));
         });
     }
     group.finish();
@@ -27,7 +27,7 @@ fn bench_index_mutate(c: &mut Criterion) {
         ("H", HotPathsFixture::heavy()),
     ] {
         fsmn_group.bench_with_input(BenchmarkId::from_parameter(label), fx, |b, fixture| {
-            b.iter(|| black_box(fixture.apply_index_mutate_batch_fsmn().entries.len()));
+            b.iter(|| black_box(fixture.apply_index_mutate_batch_fsmn().entries().len()));
         });
     }
     fsmn_group.finish();

@@ -114,7 +114,8 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
     )
     .context("could not replay the commit")?;
 
-    if !merged.conflict_content.is_empty() || merged.index.entries.iter().any(|e| e.stage() != 0) {
+    if !merged.conflict_content.is_empty() || merged.index.entries().iter().any(|e| e.stage() != 0)
+    {
         let mut paths: Vec<String> = merged
             .conflict_content
             .keys()
@@ -123,7 +124,7 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         if paths.is_empty() {
             paths = merged
                 .index
-                .entries
+                .entries()
                 .iter()
                 .filter(|e| e.stage() != 0)
                 .map(|e| String::from_utf8_lossy(&e.path).into_owned())
