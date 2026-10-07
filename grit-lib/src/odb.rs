@@ -76,12 +76,15 @@ fn read_zlib_loose_payload(mut file: fs::File) -> Result<Vec<u8>> {
 }
 
 /// True when `oid` is stored as a loose object or in a **non-promisor** local pack.
+///
+/// Non-promisor pack membership is checked before loose storage so packed objects
+/// avoid a per-probe loose `stat` on the hot path. A non-promisor pack hit already
+/// implies the object is materialized locally, including when a loose copy also exists.
 fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
-    let loose = oid.loose_path_in(objects_dir);
-    if loose.exists() {
+    if object_in_local_packs(objects_dir, oid) {
         return true;
     }
-    if object_in_local_packs(objects_dir, oid) {
+    if oid.loose_path_in(objects_dir).is_file() {
         return true;
     }
     if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true) {
@@ -614,11 +617,10 @@ impl Odb {
 
     /// Check whether an object exists in a specific objects directory.
     fn exists_in_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
-        let loose = oid.loose_path_in(objects_dir);
-        if loose.exists() {
+        if object_in_local_packs(objects_dir, oid) {
             return true;
         }
-        if object_in_local_packs(objects_dir, oid) {
+        if oid.loose_path_in(objects_dir).is_file() {
             return true;
         }
         if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
