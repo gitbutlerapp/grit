@@ -79,4 +79,3 @@ criterion_group!(
     targets = bench_index_mutate, bench_checkout, bench_staging_scan
 );
 criterion_main!(hot_paths);
-|||||||
