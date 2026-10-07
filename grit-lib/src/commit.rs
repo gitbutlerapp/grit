@@ -9,10 +9,9 @@
 //! sequencer commands (`rebase`, `cherry-pick`, `revert`, `stash`, `notes`,
 //! `tag`, `format-patch`, `checkout`).
 //!
-//! The larger commit-object assembly (tree-from-index, parent selection,
-//! message editing, hook dispatch, HEAD/reflog updates) still lives in the
-//! `grit` binary's `commands/commit.rs`; it is interleaved with editor launch,
-//! hook timing, and exit-code decisions and is extracted separately.
+//! Commit creation from the index (write-tree, object write, ref/reflog updates)
+//! lives in [`crate::porcelain::commit`]; the `grit commit` command stages paths
+//! then calls that API.
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;

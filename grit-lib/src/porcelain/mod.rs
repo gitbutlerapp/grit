@@ -26,6 +26,7 @@
 pub mod add;
 pub mod checkout;
 pub mod cherry_pick;
+pub mod commit;
 pub mod format_patch;
 pub mod log;
 pub mod merge;
