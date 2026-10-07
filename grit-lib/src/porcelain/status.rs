@@ -20,8 +20,9 @@
 //! in-progress operation [`state`](crate::state::WtStatusState), the loaded and
 //! sparse-expanded index, and the stash count.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
-use std::fs;
+use std::fs::{self, DirEntry, ReadDir};
 use std::path::Path;
 
 use crate::diff::DiffEntry;
@@ -189,6 +190,8 @@ pub fn collect_untracked_and_ignored(
         &mut matcher,
         ignored_mode,
         show_all,
+        false,
+        None::<&Cell<bool>>,
         precompose_unicode,
         &tracked_paths,
         "",
@@ -203,6 +206,177 @@ pub fn collect_untracked_and_ignored(
     Ok((untracked, ignored))
 }
 
+/// Test-only counter of directory entries consumed during check-only untracked probes.
+#[cfg(test)]
+pub(crate) mod untracked_walk_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ENTRIES: Cell<u32> = const { Cell::new(0) };
+    }
+
+    pub fn reset() {
+        ENTRIES.with(|c| c.set(0));
+    }
+
+    pub fn count() -> u32 {
+        ENTRIES.with(|c| c.get())
+    }
+
+    pub(super) fn record_entry() {
+        ENTRIES.with(|c| c.set(c.get().saturating_add(1)));
+    }
+}
+
+enum UntrackedWalkStep {
+    Continue,
+    Stop,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn visit_untracked_dir_entry(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    tracked: &BTreeSet<String>,
+    gitlinks: &BTreeSet<String>,
+    matcher: &mut IgnoreMatcher,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    check_only: bool,
+    visible_out: Option<&Cell<bool>>,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+    rel: &str,
+    entry: &DirEntry,
+    pathspecs: &[String],
+    untracked_out: &mut Vec<String>,
+    ignored_out: &mut Vec<String>,
+) -> Result<UntrackedWalkStep> {
+    let raw_name = entry.file_name().to_string_lossy().to_string();
+    if raw_name == ".git" {
+        return Ok(UntrackedWalkStep::Continue);
+    }
+    let name = if precompose_unicode {
+        precompose_utf8_segment(&raw_name).into_owned()
+    } else {
+        raw_name
+    };
+    let path = entry.path();
+    let child_rel = relative_path(rel, &name);
+    let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+
+    if is_dir && gitlinks.contains(&child_rel) {
+        return Ok(UntrackedWalkStep::Continue);
+    }
+
+    if tracked_paths.contains(&child_rel) {
+        return Ok(UntrackedWalkStep::Continue);
+    }
+
+    if is_dir {
+        if !pathspec_may_match_directory(&child_rel, pathspecs) {
+            return Ok(UntrackedWalkStep::Continue);
+        }
+        visit_untracked_directory(
+            repo,
+            index,
+            work_tree,
+            tracked,
+            gitlinks,
+            matcher,
+            ignored_mode,
+            show_all,
+            check_only,
+            visible_out,
+            precompose_unicode,
+            tracked_paths,
+            &child_rel,
+            &path,
+            pathspecs,
+            untracked_out,
+            ignored_out,
+        )?;
+        if check_only && visible_out.is_some_and(|out| out.get()) {
+            return Ok(UntrackedWalkStep::Stop);
+        }
+    } else {
+        if !status_path_matches_worktree(repo, index, work_tree, &child_rel, pathspecs) {
+            return Ok(UntrackedWalkStep::Continue);
+        }
+        let (is_ign, _) = matcher.check_path(repo, Some(index), &child_rel, false)?;
+        if is_ign {
+            if !check_only && ignored_mode != IgnoredMode::No {
+                ignored_out.push(child_rel);
+            }
+        } else if let Some(out) = visible_out {
+            out.set(true);
+            return Ok(UntrackedWalkStep::Stop);
+        } else {
+            untracked_out.push(child_rel);
+        }
+    }
+
+    Ok(UntrackedWalkStep::Continue)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn visit_untracked_read_dir_lazy(
+    entries: ReadDir,
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    tracked: &BTreeSet<String>,
+    gitlinks: &BTreeSet<String>,
+    matcher: &mut IgnoreMatcher,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    visible_out: Option<&Cell<bool>>,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+    rel: &str,
+    pathspecs: &[String],
+    untracked_out: &mut Vec<String>,
+    ignored_out: &mut Vec<String>,
+) -> Result<()> {
+    for entry in entries {
+        if visible_out.is_some_and(|out| out.get()) {
+            return Ok(());
+        }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        #[cfg(test)]
+        untracked_walk_probe::record_entry();
+        if matches!(
+            visit_untracked_dir_entry(
+                repo,
+                index,
+                work_tree,
+                tracked,
+                gitlinks,
+                matcher,
+                ignored_mode,
+                show_all,
+                true,
+                visible_out,
+                precompose_unicode,
+                tracked_paths,
+                rel,
+                &entry,
+                pathspecs,
+                untracked_out,
+                ignored_out,
+            )?,
+            UntrackedWalkStep::Stop
+        ) {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn visit_untracked_node(
     repo: &Repository,
@@ -213,6 +387,8 @@ fn visit_untracked_node(
     matcher: &mut IgnoreMatcher,
     ignored_mode: IgnoredMode,
     show_all: bool,
+    check_only: bool,
+    visible_out: Option<&Cell<bool>>,
     precompose_unicode: bool,
     tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
@@ -221,6 +397,10 @@ fn visit_untracked_node(
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
 ) -> Result<()> {
+    if check_only && visible_out.is_some_and(|out| out.get()) {
+        return Ok(());
+    }
+
     if !rel.is_empty()
         && abs.is_dir()
         && dir_is_nested_submodule_worktree(&repo.git_dir, abs)
@@ -233,36 +413,34 @@ fn visit_untracked_node(
         Ok(e) => e,
         Err(_) => return Ok(()),
     };
+
+    if check_only {
+        return visit_untracked_read_dir_lazy(
+            entries,
+            repo,
+            index,
+            work_tree,
+            tracked,
+            gitlinks,
+            matcher,
+            ignored_mode,
+            show_all,
+            visible_out,
+            precompose_unicode,
+            tracked_paths,
+            rel,
+            pathspecs,
+            untracked_out,
+            ignored_out,
+        );
+    }
+
     let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     sorted.sort_by_key(|e| e.file_name());
 
-    for entry in sorted {
-        let raw_name = entry.file_name().to_string_lossy().to_string();
-        if raw_name == ".git" {
-            continue;
-        }
-        let name = if precompose_unicode {
-            precompose_utf8_segment(&raw_name).into_owned()
-        } else {
-            raw_name
-        };
-        let path = entry.path();
-        let child_rel = relative_path(rel, &name);
-        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-
-        if is_dir && gitlinks.contains(&child_rel) {
-            continue;
-        }
-
-        if tracked_paths.contains(&child_rel) {
-            continue;
-        }
-
-        if is_dir {
-            if !pathspec_may_match_directory(&child_rel, pathspecs) {
-                continue;
-            }
-            visit_untracked_directory(
+    for entry in &sorted {
+        if matches!(
+            visit_untracked_dir_entry(
                 repo,
                 index,
                 work_tree,
@@ -271,26 +449,19 @@ fn visit_untracked_node(
                 matcher,
                 ignored_mode,
                 show_all,
+                false,
+                None,
                 precompose_unicode,
                 tracked_paths,
-                &child_rel,
-                &path,
+                rel,
+                entry,
                 pathspecs,
                 untracked_out,
                 ignored_out,
-            )?;
-        } else {
-            if !status_path_matches_worktree(repo, index, work_tree, &child_rel, pathspecs) {
-                continue;
-            }
-            let (is_ign, _) = matcher.check_path(repo, Some(index), &child_rel, false)?;
-            if is_ign {
-                if ignored_mode != IgnoredMode::No {
-                    ignored_out.push(child_rel);
-                }
-            } else {
-                untracked_out.push(child_rel);
-            }
+            )?,
+            UntrackedWalkStep::Stop
+        ) {
+            break;
         }
     }
 
@@ -307,6 +478,8 @@ fn visit_untracked_directory(
     matcher: &mut IgnoreMatcher,
     ignored_mode: IgnoredMode,
     show_all: bool,
+    check_only: bool,
+    visible_out: Option<&Cell<bool>>,
     precompose_unicode: bool,
     tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
@@ -325,6 +498,8 @@ fn visit_untracked_directory(
             matcher,
             ignored_mode,
             show_all,
+            check_only,
+            visible_out,
             precompose_unicode,
             tracked_paths,
             rel,
@@ -373,6 +548,67 @@ fn visit_untracked_directory(
         }
     }
 
+    if check_only {
+        visit_untracked_node(
+            repo,
+            index,
+            work_tree,
+            tracked,
+            gitlinks,
+            matcher,
+            ignored_mode,
+            show_all,
+            true,
+            visible_out,
+            precompose_unicode,
+            tracked_paths,
+            rel,
+            abs,
+            pathspecs,
+            untracked_out,
+            ignored_out,
+        )?;
+        return Ok(());
+    }
+
+    // Git `dir.c` with `DIR_HIDE_EMPTY_DIRECTORIES`: probe for a visible untracked
+    // entry without enumerating every child, then collapse to `dir/` in normal mode.
+    if !show_all
+        && ignored_mode == IgnoredMode::No
+        && (pathspecs.is_empty() || directory_pathspec_matches_self(rel, pathspecs))
+    {
+        let found = Cell::new(false);
+        visit_untracked_node(
+            repo,
+            index,
+            work_tree,
+            tracked,
+            gitlinks,
+            matcher,
+            ignored_mode,
+            false,
+            true,
+            Some(&found),
+            precompose_unicode,
+            tracked_paths,
+            rel,
+            abs,
+            pathspecs,
+            untracked_out,
+            ignored_out,
+        )?;
+        if found.get() {
+            if !rel.is_empty() {
+                untracked_out.push(format!("{rel}/"));
+            }
+            return Ok(());
+        }
+        if !rel.is_empty() && directory_contains_only_dot_git(abs) {
+            untracked_out.push(format!("{rel}/"));
+        }
+        return Ok(());
+    }
+
     let mut sub_untracked = Vec::new();
     let mut sub_ignored = Vec::new();
     visit_untracked_node(
@@ -384,6 +620,8 @@ fn visit_untracked_directory(
         matcher,
         ignored_mode,
         true,
+        false,
+        None,
         precompose_unicode,
         tracked_paths,
         rel,
@@ -908,6 +1146,34 @@ mod status_op_tests {
             model.untracked.iter().any(|p| p == "foo.txt"),
             "foo.txt should be untracked, got {:?}",
             model.untracked
+        );
+    }
+
+    #[test]
+    fn status_collapses_large_untracked_directory_without_full_walk() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        let scratch = root.join("scratch");
+        fs::create_dir_all(&scratch).unwrap();
+        for i in 0..3000 {
+            fs::write(scratch.join(format!("u{i}.rs")), format!("{i}\n")).unwrap();
+        }
+
+        let repo = Repository::open(&root.join(".git"), Some(root)).unwrap();
+        untracked_walk_probe::reset();
+        let model = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+
+        assert_eq!(
+            model.untracked,
+            vec!["scratch/".to_owned()],
+            "normal untracked mode should collapse wholly untracked directories"
+        );
+        let entries_read = untracked_walk_probe::count();
+        assert!(
+            entries_read <= 8,
+            "check-only probe must stop at the first visible entry, not scan all \
+             3000 files (read {entries_read} directory entries during probe)"
         );
     }
 
