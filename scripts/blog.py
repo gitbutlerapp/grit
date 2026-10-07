@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTENT_DIR = ROOT / "content" / "blog"
 OUT_DIR = ROOT / "docs" / "blog"
 SITE_URL = "https://grit-scm.com"
+# Fixed RSS timestamp when there are no posts (deterministic site generation).
+EMPTY_FEED_LAST_BUILD = datetime(1970, 1, 1, tzinfo=timezone.utc)
 SITE_TITLE = "the Grit project"
 BLOG_TITLE = "project notes from Grit"
 BLOG_DESCRIPTION = "Short deep dives into building a Git-compatible, library-oriented Rust implementation."
@@ -211,7 +213,10 @@ def load_posts() -> list[Post]:
             first_heading = next((HEADING_RE.match(line) for line in body.splitlines() if HEADING_RE.match(line)), None)
             title = first_heading.group(2) if first_heading else path.stem.replace("-", " ").title()
         slug = meta.get("slug") or path.stem
-        published = date.fromisoformat(meta.get("date", date.today().isoformat()))
+        raw_date = meta.get("date")
+        if not raw_date:
+            raise SystemExit(f"{path}: missing required front matter field 'date'")
+        published = date.fromisoformat(raw_date)
         summary = meta.get("summary", "")
         author = meta.get("author", AUTHOR)
         body_html, toc = markdown_to_html(body)
@@ -346,7 +351,7 @@ def render_feed(posts: list[Post]) -> str:
     <description>{xml_escape(post.summary)}</description>
     <content:encoded><![CDATA[{post.body_html}]]></content:encoded>
   </item>""" for post in posts)
-    latest = posts[0].rfc822_date if posts else email.utils.format_datetime(datetime.now(timezone.utc))
+    latest = posts[0].rfc822_date if posts else email.utils.format_datetime(EMPTY_FEED_LAST_BUILD)
     return f"""<?xml version=\"1.0\" encoding=\"utf-8\"?>
 <rss version=\"2.0\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\">
 <channel>

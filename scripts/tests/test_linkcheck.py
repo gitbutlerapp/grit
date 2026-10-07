@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -52,6 +53,29 @@ class LinkcheckFixture(unittest.TestCase):
     def test_external_link_skipped_by_default(self) -> None:
         issues = linkcheck.run(check_external=False)
         self.assertFalse(any(i.raw.startswith("https://") for i in issues))
+
+    def test_protocol_relative_external_normalizes_without_crash(self) -> None:
+        self.assertEqual(
+            linkcheck.normalize_external_url("//example.com/path"),
+            "https://example.com/path",
+        )
+        proto_site = Path(self._tmpdir.name) / "proto-only"
+        proto_site.mkdir()
+        (proto_site / "page.html").write_text('<a href="//example.com">x</a>', encoding="utf-8")
+        linkcheck.SITE_ROOT = proto_site
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.status = 200
+            issues = linkcheck.run(check_external=True)
+        self.assertEqual(issues, [])
+        urlopen.assert_called_once()
+        request = urlopen.call_args[0][0]
+        self.assertEqual(request.full_url, "https://example.com")
+
+
+class LinkcheckNormalizeTest(unittest.TestCase):
+    def test_unsupported_external_scheme_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            linkcheck.normalize_external_url("ftp://example.com")
 
 
 if __name__ == "__main__":
