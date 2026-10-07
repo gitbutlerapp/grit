@@ -2265,6 +2265,11 @@ fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) ->
                     if let Some(entry) = kept.next() {
                         out.push(entry);
                     }
+                } else if ord == std::cmp::Ordering::Equal {
+                    let _ = kept.next();
+                    if let Some(entry) = insert.next() {
+                        out.push(entry);
+                    }
                 } else if let Some(entry) = insert.next() {
                     out.push(entry);
                 }
