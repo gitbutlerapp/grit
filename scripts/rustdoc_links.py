@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 DOCS_RS_BASE = "https://docs.rs/grit-lib/latest"
@@ -76,22 +77,38 @@ def resolve_local_rustdoc_html(doc_root: Path, qualified: str) -> Path:
     raise FileNotFoundError(qualified)
 
 
-def expand_rustdoc_links(markdown: str, *, doc_root: Path | None) -> str:
+def ensure_local_rustdoc(doc_root: Path, *, repo_root: Path) -> None:
+    """Build ``grit-lib`` rustdoc under ``doc_root`` when it is missing."""
+    if (doc_root / "grit_lib").is_dir():
+        return
+    print("building grit-lib rustdoc for docs site (cargo doc -p grit-lib --no-deps)...", flush=True)
+    subprocess.run(
+        ["cargo", "doc", "-p", "grit-lib", "--no-deps"],
+        cwd=repo_root,
+        check=True,
+    )
+    if not (doc_root / "grit_lib").is_dir():
+        raise SystemExit(
+            f"grit-lib rustdoc not found at {doc_root / 'grit_lib'} after cargo doc"
+        )
+
+
+def expand_rustdoc_links(markdown: str, *, doc_root: Path) -> str:
     """Replace ``(rustdoc:grit_lib::...)`` link targets with docs.rs URLs."""
+
+    if not iter_rustdoc_paths(markdown):
+        return markdown
+
+    if not (doc_root / "grit_lib").is_dir():
+        raise SystemExit(
+            "grit-lib rustdoc is required to resolve rustdoc: links; "
+            "run: cargo doc -p grit-lib --no-deps"
+        )
 
     def replace(match: re.Match[str]) -> str:
         qualified = match.group(1).strip()
-        if doc_root is not None and (doc_root / "grit_lib").is_dir():
-            local = resolve_local_rustdoc_html(doc_root, qualified)
-            url = docs_rs_url(local_html_to_docs_rs_path(local, doc_root))
-        else:
-            # Best-effort URL without local validation (struct prefix guess).
-            tail = qualified.replace("::", "/")
-            if "::" in qualified:
-                name = qualified.rsplit("::", 1)[-1]
-                url = f"{DOCS_RS_BASE}/grit_lib/{tail.rsplit('/', 1)[0]}/struct.{name}.html"
-            else:
-                url = f"{DOCS_RS_BASE}/grit_lib/index.html"
+        local = resolve_local_rustdoc_html(doc_root, qualified)
+        url = docs_rs_url(local_html_to_docs_rs_path(local, doc_root))
         return f"]({url})"
 
     return RUSTDOC_LINK_IN_MARKDOWN.sub(replace, markdown)
@@ -101,10 +118,23 @@ def iter_rustdoc_paths(markdown: str) -> list[str]:
     return [m.group(1).strip() for m in RUSTDOC_LINK_IN_MARKDOWN.finditer(markdown)]
 
 
+def content_has_rustdoc_links(content_root: Path) -> bool:
+    for path in content_root.rglob("*.md"):
+        if iter_rustdoc_paths(path.read_text(encoding="utf-8")):
+            return True
+    return False
+
+
 def validate_rustdoc_links(content_root: Path, doc_root: Path) -> None:
     """Fail if any ``rustdoc:`` link under ``content_root`` does not resolve in ``doc_root``."""
-    if not (doc_root / "grit_lib").is_dir():
+    if not content_has_rustdoc_links(content_root):
         return
+
+    if not (doc_root / "grit_lib").is_dir():
+        raise SystemExit(
+            "content contains rustdoc: links but grit-lib rustdoc is missing; "
+            "run: cargo doc -p grit-lib --no-deps"
+        )
 
     missing: list[str] = []
     for path in sorted(content_root.rglob("*.md")):
