@@ -107,7 +107,6 @@ pub mod configuration {
     };
 }
 
-pub mod am;
 pub mod apply;
 pub mod attributes;
 pub mod blame;
@@ -166,7 +165,6 @@ pub mod instaweb;
 pub mod interpret_trailers;
 pub mod line_log;
 pub mod ls_remote;
-pub mod mailinfo;
 pub mod mailmap;
 pub mod merge_base;
 pub mod merge_diff;

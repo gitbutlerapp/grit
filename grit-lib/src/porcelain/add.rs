@@ -138,11 +138,8 @@ pub fn stage(
     let matches =
         |path: &str| opts.pathspecs.is_empty() || matches_pathspec_list(path, &opts.pathspecs);
 
-    let indexed_any_stage: HashSet<Vec<u8>> = index
-        .entries
-        .iter()
-        .map(|e| e.path.clone())
-        .collect();
+    let indexed_any_stage: HashSet<Vec<u8>> =
+        index.entries.iter().map(|e| e.path.clone()).collect();
 
     let mut outcome = StageOutcome::default();
 
