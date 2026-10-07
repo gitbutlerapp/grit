@@ -1986,27 +1986,6 @@ fn diff_index_to_tree_with_cache_tree(
     Ok(result)
 }
 
-fn collect_index_unmerged(
-    index: &Index,
-    unmerged_modes: &mut std::collections::BTreeMap<String, (u8, u32)>,
-) {
-    for ie in index.entries.iter().filter(|e| e.stage() != 0) {
-        let path = String::from_utf8_lossy(&ie.path).to_string();
-        let rank = match ie.stage() {
-            2 => 0u8,
-            3 => 1u8,
-            1 => 2u8,
-            _ => 3u8,
-        };
-        match unmerged_modes.get(&path) {
-            Some((existing_rank, _)) if *existing_rank <= rank => {}
-            _ => {
-                unmerged_modes.insert(path, (rank, ie.mode));
-            }
-        }
-    }
-}
-
 enum IndexLevelKind<'a> {
     Blob {
         entry: &'a IndexEntry,
