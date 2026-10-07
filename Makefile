@@ -16,13 +16,7 @@ CARGO ?= cargo
 CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
 export CARGO_BUILD_JOBS
 
-<<<<<<< New base: lib: rustfmt lib.rs re-exports after main rebase
-.PHONY: all build debug test clippy fmt gate clean docs docs-check
-||||||| Common ancestor
-.PHONY: all build debug test clippy fmt gate clean
-=======
-.PHONY: all build debug test clippy fmt doc gate clean
->>>>>>> Current commit: docs: fix grit-lib and grit-cli rustdoc warnings
+.PHONY: all build debug test clippy fmt doc gate clean docs docs-check
 
 all: build
 
