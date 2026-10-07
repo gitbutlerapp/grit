@@ -134,8 +134,6 @@ pub mod diffstat;
 pub mod dotfile;
 pub mod error;
 mod ewah_bitmap;
-pub mod fast_export;
-pub mod fast_import;
 pub mod fetch;
 pub mod fetch_head;
 pub mod fetch_negotiator;
