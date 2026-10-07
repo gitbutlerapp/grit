@@ -87,15 +87,14 @@ pub mod revision {
 pub mod diffing {
     pub use crate::{
         bloom, combined_diff_patch, combined_tree_diff, diff, diff_indent_heuristic, diff_moved,
-        diffstat, difftool, line_log, patch_ids, userdiff,
+        diffstat, line_log, patch_ids, userdiff,
     };
 }
 
 /// Merging: merge-base, tree/file merges, rerere, merge-message formatting.
 pub mod merging {
     pub use crate::{
-        fmt_merge_msg, merge_base, merge_diff, merge_file, merge_tree_trivial, merge_trees,
-        mergetool_vimdiff, rerere,
+        fmt_merge_msg, merge_base, merge_diff, merge_file, merge_tree_trivial, merge_trees, rerere,
     };
 }
 
@@ -133,7 +132,6 @@ pub mod diff;
 pub mod diff_indent_heuristic;
 pub mod diff_moved;
 pub mod diffstat;
-pub mod difftool;
 pub mod dotfile;
 pub mod error;
 mod ewah_bitmap;
@@ -172,7 +170,6 @@ pub mod merge_diff;
 pub mod merge_file;
 pub mod merge_tree_trivial;
 pub mod merge_trees;
-pub mod mergetool_vimdiff;
 pub mod midx;
 pub mod name_rev;
 pub mod net_trace;
