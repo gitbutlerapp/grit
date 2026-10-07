@@ -51,6 +51,12 @@ enum Cmd {
         #[arg(long, value_delimiter = ',', default_values_t = vec![100, 1_000, 10_000, 50_000])]
         sizes: Vec<usize>,
     },
+    /// Benchmark `commit` (stage + commit) at S/M/L repo sizes
+    Commit {
+        /// File counts to test (comma-separated; default S/M/L)
+        #[arg(long, value_delimiter = ',', default_values_t = vec![100, 5_000, 15_000])]
+        sizes: Vec<usize>,
+    },
     /// Run all benchmarks
     All {
         /// File counts to test (comma-separated)
@@ -102,13 +108,39 @@ struct Report {
 
 // ── Timing helpers ───────────────────────────────────────────────────
 
+fn shell_escape(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    if s.contains(' ') || s.contains('\'') {
+        format!("'{s}'")
+    } else {
+        s.into_owned()
+    }
+}
+
+fn isolated_git_env(cmd: &mut Command) {
+    cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Bench")
+        .env("GIT_AUTHOR_EMAIL", "b@example.com")
+        .env("GIT_COMMITTER_NAME", "Bench")
+        .env("GIT_COMMITTER_EMAIL", "b@example.com");
+}
+
+fn apply_bench_env(cmd_path: &Path, cmd: &mut Command) {
+    if cmd_path == Path::new("/bin/sh") || cmd_path.file_name().is_some_and(|n| n == "git") {
+        isolated_git_env(cmd);
+    }
+}
+
 fn measure(cmd_path: &Path, args: &[&str], cwd: &Path, iterations: usize) -> Result<Timing> {
     // Warmup run
-    let out = Command::new(cmd_path)
-        .args(args)
+    let mut cmd = Command::new(cmd_path);
+    cmd.args(args)
         .current_dir(cwd)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    apply_bench_env(cmd_path, &mut cmd);
+    let out = cmd
         .output()
         .with_context(|| format!("failed to run {:?}", cmd_path))?;
     if !out.status.success() {
@@ -124,12 +156,13 @@ fn measure(cmd_path: &Path, args: &[&str], cwd: &Path, iterations: usize) -> Res
     let mut runs = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = Instant::now();
-        let out = Command::new(cmd_path)
-            .args(args)
+        let mut cmd = Command::new(cmd_path);
+        cmd.args(args)
             .current_dir(cwd)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output()?;
+            .stderr(Stdio::null());
+        apply_bench_env(cmd_path, &mut cmd);
+        let out = cmd.output()?;
         let elapsed = start.elapsed();
         if !out.status.success() {
             anyhow::bail!("{} failed on iteration", cmd_path.display());
@@ -161,12 +194,14 @@ fn measure_with_setup(
 ) -> Result<Timing> {
     // Warmup
     setup()?;
-    let out = Command::new(cmd_path)
+    let mut warmup = Command::new(cmd_path);
+    warmup
         .args(args)
         .current_dir(cwd)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .output()?;
+        .stderr(Stdio::null());
+    apply_bench_env(cmd_path, &mut warmup);
+    let out = warmup.output()?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         anyhow::bail!(
@@ -181,15 +216,21 @@ fn measure_with_setup(
     for _ in 0..iterations {
         setup()?;
         let start = Instant::now();
-        let out = Command::new(cmd_path)
-            .args(args)
+        let mut cmd = Command::new(cmd_path);
+        cmd.args(args)
             .current_dir(cwd)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output()?;
+            .stderr(Stdio::null());
+        apply_bench_env(cmd_path, &mut cmd);
+        let out = cmd.output()?;
         let elapsed = start.elapsed();
         if !out.status.success() {
-            anyhow::bail!("{} failed on iteration", cmd_path.display());
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            anyhow::bail!(
+                "{} failed on iteration: {}",
+                cmd_path.display(),
+                stderr.trim()
+            );
         }
         runs.push(elapsed.as_secs_f64() * 1000.0);
     }
@@ -215,6 +256,10 @@ fn scratch_dir() -> PathBuf {
     PathBuf::from("/tmp/grit-bench-scratch")
 }
 
+fn scratch_dir_named(name: &str) -> PathBuf {
+    PathBuf::from(format!("/tmp/grit-bench-scratch-{name}"))
+}
+
 fn remove_dir_robust(dir: &Path) {
     // Try up to 3 times — macOS can return ENOTEMPTY transiently on large trees
     for _ in 0..3 {
@@ -233,15 +278,18 @@ fn remove_dir_robust(dir: &Path) {
 }
 
 fn create_repo(git: &Path, file_count: usize) -> Result<PathBuf> {
-    let dir = scratch_dir();
+    create_repo_at(git, file_count, scratch_dir())
+}
+
+fn create_repo_at(git: &Path, file_count: usize, dir: PathBuf) -> Result<PathBuf> {
     remove_dir_robust(&dir);
     std::fs::create_dir_all(&dir)?;
 
     // git init
-    let out = Command::new(git)
-        .args(["init", "-q"])
-        .current_dir(&dir)
-        .output()?;
+    let mut init = Command::new(git);
+    init.args(["init", "-q"]).current_dir(&dir);
+    apply_bench_env(git, &mut init);
+    let out = init.output()?;
     if !out.status.success() {
         anyhow::bail!("git init failed");
     }
@@ -265,17 +313,19 @@ fn create_repo(git: &Path, file_count: usize) -> Result<PathBuf> {
     }
 
     // git add + commit
-    let out = Command::new(git)
-        .args(["add", "-A"])
-        .current_dir(&dir)
-        .output()?;
+    let mut add = Command::new(git);
+    add.args(["add", "-A"]).current_dir(&dir);
+    apply_bench_env(git, &mut add);
+    let out = add.output()?;
     if !out.status.success() {
         anyhow::bail!("git add failed");
     }
-    let out = Command::new(git)
+    let mut commit = Command::new(git);
+    commit
         .args(["commit", "-q", "-m", "initial"])
-        .current_dir(&dir)
-        .output()?;
+        .current_dir(&dir);
+    apply_bench_env(git, &mut commit);
+    let out = commit.output()?;
     if !out.status.success() {
         anyhow::bail!("git commit failed");
     }
@@ -476,6 +526,90 @@ fn bench_add(git: &Path, grit: &Path, sizes: &[usize], iterations: usize) -> Res
     Ok(BenchResult {
         name: "add".into(),
         description: "git/grit add -A after modifying ~20% of files".into(),
+        points,
+    })
+}
+
+fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
+    let files = walkdir(dir)?;
+    let modify_count = (files.len() / 5).max(1);
+    for f in files.iter().take(modify_count) {
+        if f.extension().is_some_and(|e| e == "txt") {
+            use std::io::Write as _;
+            let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
+            writeln!(file, "commit bench change")?;
+        }
+    }
+    let mut reset_git = Command::new(git);
+    reset_git
+        .args(["reset", "-q", "HEAD"])
+        .current_dir(dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    isolated_git_env(&mut reset_git);
+    reset_git.output()?;
+    Ok(())
+}
+
+fn bench_commit(
+    git: &Path,
+    grit: &Path,
+    sizes: &[usize],
+    iterations: usize,
+) -> Result<BenchResult> {
+    let mut points = Vec::new();
+
+    for &size in sizes {
+        eprint!("  commit @ {size} files ... ");
+        let dir_git = create_repo_at(git, size, scratch_dir_named(&format!("git-{size}")))?;
+        let dir_grit = create_repo_at(git, size, scratch_dir_named(&format!("grit-{size}")))?;
+        let git_clone = git.to_path_buf();
+        let dir_git_setup = dir_git.clone();
+        let git_for_git = git_clone.clone();
+        let setup_git = move || prepare_commit_iteration(&dir_git_setup, &git_for_git);
+        let dir_grit_setup = dir_grit.clone();
+        let git_for_grit = git_clone;
+        let setup_grit = move || prepare_commit_iteration(&dir_grit_setup, &git_for_grit);
+
+        let git_cmd = format!(
+            "{} add -A && {} commit -q -m bench",
+            shell_escape(git),
+            shell_escape(git)
+        );
+        let git_t = measure_with_setup(
+            Path::new("/bin/sh"),
+            &["-c", &git_cmd],
+            &dir_git,
+            &setup_git,
+            iterations,
+        )?;
+        let grit_t = measure_with_setup(
+            grit,
+            &["commit", "bench"],
+            &dir_grit,
+            &setup_grit,
+            iterations,
+        )?;
+        let ratio = grit_t.mean_ms / git_t.mean_ms;
+        let speedup = git_t.mean_ms / grit_t.mean_ms;
+        eprintln!(
+            "git {:.1}ms  grit {:.1}ms  ({:.2}x grit/git)",
+            git_t.mean_ms, grit_t.mean_ms, ratio
+        );
+
+        points.push(ScalePoint {
+            file_count: size,
+            git: git_t,
+            grit: grit_t,
+            speedup,
+        });
+    }
+
+    Ok(BenchResult {
+        name: "commit".into(),
+        description:
+            "grit commit (stage all + commit) vs git add -A && git commit -q -m on a dirty tree"
+                .into(),
         points,
     })
 }
@@ -704,12 +838,17 @@ fn main() -> Result<()> {
             eprintln!("Running add benchmarks...");
             vec![bench_add(&git, &grit, sizes, iterations)?]
         }
+        Cmd::Commit { sizes } => {
+            eprintln!("Running commit benchmarks...");
+            vec![bench_commit(&git, &grit, sizes, iterations)?]
+        }
         Cmd::All { sizes } => {
             eprintln!("Running all benchmarks...");
             let dirty = bench_status(&git, &grit, sizes, iterations)?;
             let clean = bench_status_clean(&git, &grit, sizes, iterations)?;
             let add = bench_add(&git, &grit, sizes, iterations)?;
-            vec![dirty, clean, add]
+            let commit = bench_commit(&git, &grit, &[100, 5_000, 15_000], iterations)?;
+            vec![dirty, clean, add, commit]
         }
     };
 
