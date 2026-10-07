@@ -88,7 +88,22 @@ impl HotPathsFixture {
 
     /// Apply a precomputed 10% remove/replace batch (index operations only).
     pub fn apply_index_mutate_batch(&self) -> Index {
+        self.apply_index_mutate_batch_inner(false)
+    }
+
+    /// Same batch with an `FSMN` token present (lazy dirty-bitmap invalidation on each mutation).
+    pub fn apply_index_mutate_batch_fsmn(&self) -> Index {
+        self.apply_index_mutate_batch_inner(true)
+    }
+
+    fn apply_index_mutate_batch_inner(&self, with_fsmn: bool) -> Index {
         let mut index = self.index_mutate_plan.baseline.clone();
+        if with_fsmn {
+            index.set_fsmonitor_last_update(Some("bench-fsmn-token".into()));
+            for entry in &mut index.entries {
+                entry.set_fsmonitor_valid(true);
+            }
+        }
         for path in &self.index_mutate_plan.remove_paths {
             index.remove(path);
         }
