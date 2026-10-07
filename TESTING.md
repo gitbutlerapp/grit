@@ -120,6 +120,7 @@ CI runs a one-iteration smoke pass (every benchmark once):
 cargo bench -p grit-lib --bench objects -- --test
 cargo bench -p grit-lib --bench worktree -- --test
 GRIT_HISTORY_BENCH_COMMITS=2000 cargo bench -p grit-lib --bench history -- --test
+cargo bench -p grit-lib --bench hot_paths -- --test
 ```
 
 Before changing benchmarks, keep bench code warning-free:
