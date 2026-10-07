@@ -505,52 +505,10 @@ fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
         .count()
 }
 
-/// Break delta chains longer than `max_depth` edges, mirroring Git's
-/// `break_delta_chains` modulo rule so re-indexing stays within `--depth`.
-fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usize) {
-    let keys: Vec<ObjectId> = map.keys().copied().collect();
-    let value_set: HashSet<ObjectId> = map.values().copied().collect();
-    let tips: Vec<ObjectId> = keys
-        .into_iter()
-        .filter(|k| !value_set.contains(k))
-        .collect();
-
-    let modulus = max_depth.saturating_add(1);
-    let mut snip: HashSet<ObjectId> = HashSet::new();
-
-    for tip in tips {
-        let mut chain: Vec<ObjectId> = Vec::new();
-        let mut cur = tip;
-        let mut seen = HashSet::new();
-        while seen.insert(cur) {
-            chain.push(cur);
-            let Some(&b) = map.get(&cur) else {
-                break;
-            };
-            cur = b;
-        }
-        let n = chain.len();
-        if n < 2 {
-            continue;
-        }
-        let mut total_depth = (n - 1) as u32;
-        for &oid in &chain {
-            let assigned = (total_depth as usize) % modulus;
-            total_depth = total_depth.saturating_sub(1);
-            if assigned == 0 {
-                snip.insert(oid);
-            }
-        }
-    }
-    for oid in snip {
-        map.remove(&oid);
-    }
-}
-
 /// Select blob deltas for `send` and produce an ordered emit plan.
 ///
 /// A lift of the CLI's `optimize_blob_deltas`: a size-sorted prefix/LCP window
-/// heuristic over blobs, depth-limited via [`apply_delta_depth_limit`]. Trees and
+/// heuristic over blobs, depth-limited via [`crate::pack::apply_delta_depth_limit`]. Trees and
 /// commits are emitted whole (matching the CLI's blob-only delta selection).
 /// Correctness (re-indexability) is preserved because every chosen base is acyclic
 /// and either in-pack or, for thin packs, peer-held.
@@ -734,7 +692,7 @@ fn plan_deltas(
         }
 
         // Cap chain length. After snipping, any removed target reverts to whole.
-        apply_delta_depth_limit(&mut delta_to_base, opts.max_depth);
+        crate::pack::apply_delta_depth_limit(&mut delta_to_base, opts.max_depth);
 
         // A reused delta whose target was snipped (or whose base ceased to be the
         // chosen base) reverts to a freshly-computed full/delta object.
