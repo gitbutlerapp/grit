@@ -6,8 +6,7 @@
 //!
 //! `grit pick` is deliberately minimal: one commit at a time, no `--continue` /
 //! `--abort` machinery, no merge-commit picking. Conflicts and other tricky
-//! situations are reported up front and `grit cherry-pick` is the right escape
-//! hatch.
+//! situations are reported up front, and `git cherry-pick` is the escape hatch.
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
@@ -79,7 +78,7 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
     let source = context::read_commit(&repo, &source_oid)?;
     if source.parents.len() > 1 {
         bail!(
-            "{} is a merge commit — grit pick only handles regular commits; use `grit cherry-pick -m 1 {commit}`",
+            "{} is a merge commit — grit pick only handles regular commits; use `git cherry-pick -m 1 {commit}`",
             &source_oid.to_hex()[..7]
         );
     }
@@ -135,7 +134,7 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         paths.sort();
         paths.dedup();
         bail!(
-            "pick has conflicts in:\n  {}\n\ngs can't resolve conflicts yet — use `grit cherry-pick {}` to finish this pick.",
+            "pick has conflicts in:\n  {}\n\nNothing was changed. grit can't resolve conflicts yet — run `git cherry-pick {}` to resolve them.",
             paths.join("\n  "),
             &source_oid.to_hex()[..7]
         );

@@ -180,7 +180,7 @@ pub fn integrate(
             .collect();
         paths.sort();
         bail!(
-            "merge has conflicts in:\n  {}\n\ngi can't resolve conflicts yet — use `grit merge {label}` to finish this merge.",
+            "merge has conflicts in:\n  {}\n\nNothing was changed. grit can't resolve conflicts yet — run `git merge {label}` to resolve them.",
             paths.join("\n  ")
         );
     }
