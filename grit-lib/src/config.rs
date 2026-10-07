@@ -1927,9 +1927,7 @@ impl ConfigSet {
 
         // System config
         if opts.include_system && !git_config_nosystem_enabled() {
-            let system_path = std::env::var("GIT_CONFIG_SYSTEM")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("/etc/gitconfig"));
+            let system_path = system_config_path();
             match ConfigFile::from_path(&system_path, ConfigScope::System) {
                 Ok(Some(f)) => {
                     Self::merge_with_includes_collect(&mut set, &f, proc, 0, &ctx, included_files)?
@@ -2054,9 +2052,7 @@ impl ConfigSet {
 
         // System
         if !git_config_nosystem_enabled() {
-            let system_path = std::env::var("GIT_CONFIG_SYSTEM")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("/etc/gitconfig"));
+            let system_path = system_config_path();
             if let Ok(Some(f)) = ConfigFile::from_path(&system_path, ConfigScope::System) {
                 Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
             }
@@ -2149,9 +2145,7 @@ impl ConfigSet {
         };
 
         if include_system && !git_config_nosystem_enabled() {
-            let system_path = std::env::var("GIT_CONFIG_SYSTEM")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("/etc/gitconfig"));
+            let system_path = system_config_path();
             if let Ok(Some(f)) = ConfigFile::from_path(&system_path, ConfigScope::System) {
                 Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
             }
@@ -2410,11 +2404,7 @@ fn config_env_fingerprint() -> Option<Vec<(String, Option<String>)>> {
 fn config_cascade_file_paths(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if opts.include_system && !git_config_nosystem_enabled() {
-        paths.push(
-            std::env::var("GIT_CONFIG_SYSTEM")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("/etc/gitconfig")),
-        );
+        paths.push(system_config_path());
     }
     paths.extend(global_config_paths());
     if let Some(gd) = git_dir {
@@ -3440,6 +3430,39 @@ fn global_config_paths() -> Vec<PathBuf> {
     }
 
     paths
+}
+
+/// Path to the system-wide Git configuration file.
+///
+/// Honors `GIT_CONFIG_SYSTEM`. On Windows, falls back to Git for Windows'
+/// `etc/gitconfig` when `/etc/gitconfig` is absent (stock shells, not MSYS).
+#[must_use]
+pub(crate) fn system_config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("GIT_CONFIG_SYSTEM") {
+        return PathBuf::from(p);
+    }
+    let unix_default = PathBuf::from("/etc/gitconfig");
+    #[cfg(windows)]
+    {
+        if unix_default.is_file() {
+            return unix_default;
+        }
+        if let Some(root) = std::env::var_os("GIT_INSTALL_ROOT") {
+            let candidate = PathBuf::from(root).join("etc").join("gitconfig");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(pf) = std::env::var(var) {
+                let candidate = PathBuf::from(pf).join("Git").join("etc").join("gitconfig");
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+    }
+    unix_default
 }
 
 /// Return the user's home directory.

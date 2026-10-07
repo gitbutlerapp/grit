@@ -156,9 +156,15 @@ pub fn collect_untracked_and_ignored(
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
     // pathspec-based pruning entirely.
     let effective_pathspecs: &[String] = if pathspecs.is_empty() { &[] } else { pathspecs };
+    let ignorecase = crate::config::ConfigSet::load(Some(&repo.git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
+        .unwrap_or(false);
+    let tracked_paths = crate::path_icase::Stage0TrackedPaths::from_index(index, ignorecase);
     let tracked: BTreeSet<String> = index
         .entries
         .iter()
+        .filter(|ie| ie.stage() == 0)
         .map(|ie| String::from_utf8_lossy(&ie.path).to_string())
         .collect();
 
@@ -184,6 +190,7 @@ pub fn collect_untracked_and_ignored(
         ignored_mode,
         show_all,
         precompose_unicode,
+        &tracked_paths,
         "",
         work_tree,
         effective_pathspecs,
@@ -207,6 +214,7 @@ fn visit_untracked_node(
     ignored_mode: IgnoredMode,
     show_all: bool,
     precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
@@ -246,7 +254,7 @@ fn visit_untracked_node(
             continue;
         }
 
-        if tracked.contains(&child_rel) {
+        if tracked_paths.contains(&child_rel) {
             continue;
         }
 
@@ -264,6 +272,7 @@ fn visit_untracked_node(
                 ignored_mode,
                 show_all,
                 precompose_unicode,
+                tracked_paths,
                 &child_rel,
                 &path,
                 pathspecs,
@@ -299,6 +308,7 @@ fn visit_untracked_directory(
     ignored_mode: IgnoredMode,
     show_all: bool,
     precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
@@ -316,6 +326,7 @@ fn visit_untracked_directory(
             ignored_mode,
             show_all,
             precompose_unicode,
+            tracked_paths,
             rel,
             abs,
             pathspecs,
@@ -374,6 +385,7 @@ fn visit_untracked_directory(
         ignored_mode,
         true,
         precompose_unicode,
+        tracked_paths,
         rel,
         abs,
         pathspecs,
@@ -759,6 +771,7 @@ pub fn status(
         crate::diff::DiffIndexToWorktreeOptions {
             index_mtime,
             ignore_submodule_untracked: opts.untracked == UntrackedMode::No,
+            repository_git_dir: Some(repo.git_dir.clone()),
             ..Default::default()
         },
     )?

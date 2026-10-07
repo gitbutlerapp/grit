@@ -46,6 +46,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     let diff_opts = DiffIndexToWorktreeOptions {
         index_mtime,
         ignore_submodule_untracked: false,
+        repository_git_dir: Some(repo.git_dir.clone()),
         ..Default::default()
     };
     let unstaged =

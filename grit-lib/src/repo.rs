@@ -2464,11 +2464,12 @@ fn write_fresh_git_directory(
         }
     }
 
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
+
     fs::write(
         git_dir.join("description"),
         "Unnamed repository; edit this file 'description' to name the repository.\n",
     )?;
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
     Ok(())
 }
 
@@ -2585,12 +2586,12 @@ pub fn init_bare_clone_minimal(
         config_content.push_str("\trefStorage = reftable\n");
     }
     fs::write(git_dir.join("config"), config_content)?;
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
 
     fs::write(
         git_dir.join("packed-refs"),
         "# pack-refs with: peeled fully-peeled sorted\n",
     )?;
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
     Ok(())
 }
 
@@ -2710,6 +2711,7 @@ pub fn init_repository_separate(
         work_tree_abs.display()
     );
     fs::write(git_dir.join("config"), config_content)?;
+    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
     fs::write(
         git_dir.join("description"),
         "Unnamed repository; edit this file 'description' to name the repository.\n",
@@ -2717,8 +2719,6 @@ pub fn init_repository_separate(
 
     let gitfile = work_tree.join(".git");
     fs::write(&gitfile, format!("gitdir: {}\n", git_dir_abs.display()))?;
-
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
 
     Repository::open(git_dir, Some(work_tree))
 }

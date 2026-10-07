@@ -24,6 +24,8 @@ The crate name is `grit-lib`; sources live in this directory as `examples/<name>
 
 Creates a non-bare repo with `init_repository` (same idea as `git init`), then shows two ways to get a `Repository`: explicit `Repository::open` with a known git dir, and `Repository::discover` after changing into a subdirectory—matching how tools find `.git` when the current directory is not the repo root.
 
+`init_repository` probes the filesystem and writes `core.filemode`, `core.symlinks`, `core.ignorecase`, and (on macOS-style volumes) `core.precomposeunicode` into the new local config, matching Git’s `git init` behavior on each platform.
+
 **Interesting bits:** `explicit_git_dir`, work tree vs bare, discovery from a nested path.
 
 ---

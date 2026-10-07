@@ -17,6 +17,7 @@ use crate::diff::{
 use crate::error::{Error, Result};
 use crate::index::{entry_from_metadata, index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::{parse_commit, parse_tree, ObjectId};
+use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
 use crate::progress::ProgressSink;
@@ -97,6 +98,12 @@ pub fn stage(
     let mut index = repo.load_index()?;
 
     let convert = StagingConvertContext::load(repo, work_tree);
+    let ignorecase = convert
+        .config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
     let diff_opts = DiffIndexToWorktreeOptions {
         index_mtime,
@@ -131,6 +138,12 @@ pub fn stage(
     let matches =
         |path: &str| opts.pathspecs.is_empty() || matches_pathspec_list(path, &opts.pathspecs);
 
+    let indexed_any_stage: HashSet<Vec<u8>> = index
+        .entries
+        .iter()
+        .map(|e| e.path.clone())
+        .collect();
+
     let mut outcome = StageOutcome::default();
 
     let worktree_updates = collect_tracked_stage_plans(&unstaged, &matches);
@@ -141,14 +154,24 @@ pub fn stage(
             }
             continue;
         }
+        icase_map.remove_alias_of(&mut index, path.as_bytes());
         apply_tracked_stage_plan(repo, work_tree, &path, &plan, &mut index)?;
         outcome.modified += 1;
+    }
+
+    if ignorecase {
+        outcome.modified +=
+            stage_ignorecase_spelling_updates(work_tree, &icase_map, &matches, &mut index)?;
     }
 
     for path in &untracked {
         if !matches(path) {
             continue;
         }
+        if indexed_any_stage.contains(path.as_bytes()) {
+            continue;
+        }
+        icase_map.remove_alias_of(&mut index, path.as_bytes());
         stage_untracked_path(repo, work_tree, path, &convert, &mut index)?;
         outcome.added += 1;
     }
@@ -285,6 +308,58 @@ fn apply_tracked_stage_plan(
     index.stage_file(entry);
     mark_fsmonitor_staged(index, rel_path);
     Ok(())
+}
+
+/// Refresh index path spellings when the work tree uses a different ASCII case (ignorecase FS).
+fn stage_ignorecase_spelling_updates(
+    work_tree: &Path,
+    icase_map: &Stage0IcasePathMap,
+    matches: &impl Fn(&str) -> bool,
+    index: &mut Index,
+) -> Result<usize> {
+    let mut updated = 0usize;
+    let stage0: Vec<Vec<u8>> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode != MODE_GITLINK && e.mode != MODE_TREE)
+        .map(|e| e.path.clone())
+        .collect();
+
+    for raw_path in stage0 {
+        let index_rel = match std::str::from_utf8(&raw_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if !matches(index_rel) {
+            continue;
+        }
+        let abs = worktree_path_for_index_entry(work_tree, index_rel, true);
+        let Ok(rel) = abs.strip_prefix(work_tree) else {
+            continue;
+        };
+        let actual_rel = rel.to_string_lossy().replace('\\', "/");
+        if actual_rel == index_rel {
+            continue;
+        }
+        if !paths_equal(raw_path.as_slice(), actual_rel.as_bytes(), true) {
+            continue;
+        }
+        let Some(entry) = index
+            .entries
+            .iter()
+            .find(|e| e.path == raw_path && e.stage() == 0)
+            .cloned()
+        else {
+            continue;
+        };
+        icase_map.remove_alias_of(index, actual_rel.as_bytes());
+        let mut refreshed = entry;
+        refreshed.path = actual_rel.as_bytes().to_vec();
+        index.stage_file(refreshed);
+        mark_fsmonitor_staged(index, &actual_rel);
+        updated += 1;
+    }
+    Ok(updated)
 }
 
 fn stage_untracked_path(

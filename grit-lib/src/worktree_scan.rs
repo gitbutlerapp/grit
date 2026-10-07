@@ -322,6 +322,7 @@ mod tests {
                 ignore_submodule_untracked: false,
                 simplify_gitlinks: false,
                 error_on_broken_gitlinks: false,
+                ..DiffIndexToWorktreeOptions::default()
             },
         )
         .expect("status diff must not traverse unreadable symlink target");
