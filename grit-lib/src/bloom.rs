@@ -196,7 +196,7 @@ fn add_key_to_filter(key: &[u32], filter: &mut [u8], settings: &BloomFilterSetti
 pub struct BloomFilterInvalid;
 
 /// Returns `Ok(true)` if all bits for every key are set, `Ok(false)` if definitely not,
-/// [`Err(BloomFilterInvalid)`] if the filter has zero length (missing / invalid).
+/// `Err(BloomFilterInvalid)` if the filter has zero length (missing / invalid).
 pub fn bloom_filter_contains(
     key: &[u32],
     filter: &[u8],
