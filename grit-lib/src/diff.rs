@@ -2380,19 +2380,135 @@ pub struct DiffIndexToWorktreeOptions {
     pub stat_parallel_threads: Option<usize>,
 }
 
-/// Compare the index against the working tree with optional racy-timestamp context.
-///
-/// This variant enables a stat-trust fast path: if an entry's stat tuple matches and the mode is
-/// unchanged, the worktree blob hash is skipped unless the entry is racy relative to the supplied
-/// index mtime.
-///
-/// # Parameters
-///
-/// - `odb` — object database (for hashing worktree files).
-/// - `index` — the current index.
-/// - `work_tree` — path to the working tree root.
-/// - `options` — optional context for racy timestamp checks.
-///
+struct StagingHashJob {
+    entry_index: usize,
+    rel_path: String,
+    file_path: PathBuf,
+    entry: IndexEntry,
+    stat: crate::index::IndexStatFields,
+    worktree_mode: u32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parallel_process_blob_worktree_jobs(
+    odb: &Odb,
+    jobs: &[StagingHashJob],
+    threads: usize,
+    trust_filemode: bool,
+    materialize_dirty_blobs: bool,
+    config: &crate::config::ConfigSet,
+    attrs: &[crate::crlf::AttrRule],
+    conv: &crate::crlf::ConversionConfig,
+    result: &mut Vec<DiffEntry>,
+) -> Result<()> {
+    use std::sync::{Arc, Mutex};
+
+    if jobs.is_empty() {
+        return Ok(());
+    }
+    let threads = threads.max(1);
+    let out: Arc<Mutex<Vec<(usize, DiffEntry)>>> = Arc::new(Mutex::new(Vec::new()));
+    let chunk_size = jobs.len().div_ceil(threads);
+    let config = Arc::new(config.clone());
+    let conv = Arc::new(conv.clone());
+    let attrs: Arc<[crate::crlf::AttrRule]> = Arc::from(attrs.to_vec().into_boxed_slice());
+
+    std::thread::scope(|scope| -> Result<()> {
+        let mut handles = Vec::new();
+        for chunk in jobs.chunks(chunk_size) {
+            let chunk: Vec<StagingHashJob> = chunk
+                .iter()
+                .map(|job| StagingHashJob {
+                    entry_index: job.entry_index,
+                    rel_path: job.rel_path.clone(),
+                    file_path: job.file_path.clone(),
+                    entry: job.entry.clone(),
+                    stat: job.stat,
+                    worktree_mode: job.worktree_mode,
+                })
+                .collect();
+            let out = Arc::clone(&out);
+            let config = Arc::clone(&config);
+            let conv = Arc::clone(&conv);
+            let attrs = Arc::clone(&attrs);
+            handles.push(scope.spawn(move || -> std::result::Result<(), Error> {
+                for job in chunk {
+                    let file_attrs =
+                        crate::crlf::get_file_attrs(&attrs, &job.rel_path, false, &config);
+                    let data = read_regular_worktree_blob_bytes(
+                        odb,
+                        &job.file_path,
+                        &conv,
+                        &file_attrs,
+                        &job.rel_path,
+                        Some(&job.entry),
+                    )?;
+                    let worktree_oid = if materialize_dirty_blobs {
+                        odb.write_with_options(
+                            ObjectKind::Blob,
+                            &data,
+                            crate::odb::WriteOptions {
+                                assume_loose_only_existence: true,
+                                trust_new_loose: true,
+                                ..Default::default()
+                            },
+                        )?
+                    } else {
+                        odb.hash(ObjectKind::Blob, &data)
+                    };
+                    let mut eff_oid = worktree_oid;
+                    if eff_oid != job.entry.oid {
+                        let raw_oid = odb.hash(ObjectKind::Blob, &data);
+                        if raw_oid == job.entry.oid {
+                            eff_oid = job.entry.oid;
+                        }
+                    }
+                    let worktree_mode = job.worktree_mode;
+                    let mode_differs = trust_filemode && worktree_mode != job.entry.mode;
+                    if eff_oid != job.entry.oid || mode_differs {
+                        let path_owned = job.rel_path.clone();
+                        let diff = DiffEntry {
+                            status: DiffStatus::Modified,
+                            old_path: Some(path_owned.clone()),
+                            new_path: Some(path_owned),
+                            old_mode: format_mode(job.entry.mode),
+                            new_mode: format_mode(worktree_mode),
+                            old_oid: job.entry.oid,
+                            new_oid: eff_oid,
+                            score: None,
+                        };
+                        out.lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push((job.entry_index, diff));
+                    }
+                }
+                Ok(())
+            }));
+        }
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    return Err(Error::Message(
+                        "parallel blob worktree worker panicked".to_owned(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    })?;
+
+    let mut rows = out
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .drain(..)
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|(idx, _)| *idx);
+    result.extend(rows.into_iter().map(|(_, d)| d));
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn push_index_blob_worktree_diff(
     odb: &Odb,
@@ -2460,7 +2576,7 @@ fn push_index_blob_worktree_diff(
     }
 
     let file_attrs = crate::crlf::get_file_attrs(attrs, path_str_ref, false, config);
-    let worktree_oid = worktree_file_oid(
+    let data = worktree_blob_bytes(
         odb,
         file_path,
         &meta,
@@ -2468,16 +2584,25 @@ fn push_index_blob_worktree_diff(
         &file_attrs,
         path_str_ref,
         Some(ie),
-        materialize_dirty_blobs,
     )?;
-
+    let worktree_oid = if materialize_dirty_blobs {
+        odb.write_with_options(
+            ObjectKind::Blob,
+            &data,
+            crate::odb::WriteOptions {
+                assume_loose_only_existence: true,
+                trust_new_loose: true,
+                ..Default::default()
+            },
+        )?
+    } else {
+        odb.hash(ObjectKind::Blob, &data)
+    };
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
-        if let Ok(raw) = fs::read(file_path) {
-            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
-            if raw_oid == ie.oid {
-                eff_oid = ie.oid;
-            }
+        let raw_oid = odb.hash(ObjectKind::Blob, &data);
+        if raw_oid == ie.oid {
+            eff_oid = ie.oid;
         }
     }
 
@@ -2513,6 +2638,7 @@ pub fn diff_index_to_worktree_with_options(
         .clone()
         .unwrap_or(default_git_dir);
     diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false)
+        .map(|(entries, changed, _)| (entries, changed))
 }
 
 /// Like [`diff_index_to_worktree_with_options`], but loads config from `repository_git_dir`
@@ -2524,7 +2650,11 @@ pub fn diff_index_to_worktree_for_staging(
     index: &mut Index,
     work_tree: &Path,
     options: DiffIndexToWorktreeOptions,
-) -> Result<(Vec<DiffEntry>, bool)> {
+) -> Result<(
+    Vec<DiffEntry>,
+    bool,
+    std::collections::BTreeMap<String, crate::index::IndexStatFields>,
+)> {
     diff_index_to_worktree_inner(odb, index, work_tree, repository_git_dir, options, true)
 }
 
@@ -2535,10 +2665,16 @@ fn diff_index_to_worktree_inner(
     repository_git_dir: &Path,
     options: DiffIndexToWorktreeOptions,
     materialize_dirty_blobs: bool,
-) -> Result<(Vec<DiffEntry>, bool)> {
+) -> Result<(
+    Vec<DiffEntry>,
+    bool,
+    std::collections::BTreeMap<String, crate::index::IndexStatFields>,
+)> {
     use crate::config::ConfigSet;
     use crate::crlf;
+    use std::collections::BTreeMap;
 
+    let mut staging_stat_cache = BTreeMap::new();
     let index_mtime = index_mtime_for_diff(index, options.index_mtime);
 
     let ignore_submodule_untracked = options.ignore_submodule_untracked;
@@ -2787,8 +2923,8 @@ fn diff_index_to_worktree_inner(
     }
 
     use crate::worktree_scan::{
-        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
-        WorktreeBlobScanOptions,
+        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, stat_scan_thread_count,
+        BlobDiskLookup, WorktreeBlobScanOptions, PARALLEL_STAT_MIN_ENTRIES,
     };
     let preload_index = config
         .get_bool("core.preloadIndex")
@@ -2811,6 +2947,11 @@ fn diff_index_to_worktree_inner(
     let file_abs = move |rel: &str| {
         index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
     };
+    let blob_count: usize = blob_dirs.values().map(|v| v.len()).sum();
+    let hash_threads = stat_scan_thread_count(blob_scan, blob_count);
+    let parallel_blob_work =
+        materialize_dirty_blobs && blob_count >= PARALLEL_STAT_MIN_ENTRIES && hash_threads > 1;
+    let mut staging_hash_jobs: Vec<StagingHashJob> = Vec::new();
     for_each_blob_by_directory_parallel(
         &blob_dirs,
         blob_scan,
@@ -2838,6 +2979,12 @@ fn diff_index_to_worktree_inner(
                 }
                 BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
                 BlobDiskLookup::Present(meta) => {
+                    if materialize_dirty_blobs {
+                        staging_stat_cache.insert(
+                            path_str_ref.to_owned(),
+                            crate::index::IndexStatFields::from_metadata(&meta),
+                        );
+                    }
                     if refresh_index_stat_in_pass {
                         let ie = &mut index.entries[entry_index];
                         if refresh_index_blob_stat_from_metadata(
@@ -2855,25 +3002,67 @@ fn diff_index_to_worktree_inner(
                         }
                     }
                     let ie = &index.entries[entry_index];
-                    push_index_blob_worktree_diff(
-                        odb,
-                        ie,
-                        path_str_ref,
-                        &file_path,
-                        meta,
-                        index_mtime,
-                        trust_filemode,
-                        &config,
-                        &attrs,
-                        &conv,
-                        materialize_dirty_blobs,
-                        &mut result,
-                    )?;
+                    if parallel_blob_work {
+                        let worktree_mode = mode_from_metadata(&meta);
+                        if trust_filemode && stat_matches(ie, &meta) && worktree_mode != ie.mode {
+                            let path_owned = path_str_ref.to_owned();
+                            result.push(DiffEntry {
+                                status: DiffStatus::Modified,
+                                old_path: Some(path_owned.clone()),
+                                new_path: Some(path_owned),
+                                old_mode: format_mode(ie.mode),
+                                new_mode: format_mode(worktree_mode),
+                                old_oid: ie.oid,
+                                new_oid: ie.oid,
+                                score: None,
+                            });
+                        } else if !(stat_matches(ie, &meta)
+                            && (!trust_filemode || worktree_mode == ie.mode)
+                            && !entry_is_racy(ie, index_mtime))
+                        {
+                            staging_hash_jobs.push(StagingHashJob {
+                                entry_index,
+                                rel_path: path_str_ref.to_owned(),
+                                file_path,
+                                entry: ie.clone(),
+                                stat: crate::index::IndexStatFields::from_metadata(&meta),
+                                worktree_mode,
+                            });
+                        }
+                    } else {
+                        push_index_blob_worktree_diff(
+                            odb,
+                            ie,
+                            path_str_ref,
+                            &file_path,
+                            meta,
+                            index_mtime,
+                            trust_filemode,
+                            &config,
+                            &attrs,
+                            &conv,
+                            materialize_dirty_blobs,
+                            &mut result,
+                        )?;
+                    }
                 }
             }
             Ok(())
         },
     )?;
+    if parallel_blob_work && !staging_hash_jobs.is_empty() {
+        parallel_process_blob_worktree_jobs(
+            odb,
+            &staging_hash_jobs,
+            hash_threads,
+            trust_filemode,
+            materialize_dirty_blobs,
+            &config,
+            &attrs,
+            &conv,
+            &mut result,
+        )?;
+    }
 
     for (path, (_, base_entry)) in &unmerged_base {
         let file_path = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
@@ -2931,7 +3120,7 @@ fn diff_index_to_worktree_inner(
         }
     }
 
-    Ok((result, index_stat_refresh_changed))
+    Ok((result, index_stat_refresh_changed, staging_stat_cache))
 }
 
 /// Memoized cache of which ancestor directories are symlinks, so each directory
@@ -3519,28 +3708,43 @@ fn refresh_index_blob_stat_from_metadata(
     if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
         return false;
     }
-    if stat_matches(ie, meta) {
-        if entry_is_racy(ie, index_mtime) {
-            let file_attrs = crate::crlf::get_file_attrs(attrs, path, false, config);
-            let content_matches =
-                hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
-                    .map(|oid| oid == ie.oid)
-                    .unwrap_or(false);
-            if !content_matches {
-                invalidate_index_stat_cache(ie);
-                return true;
-            }
+    if !stat_matches(ie, meta) {
+        let file_attrs = crate::crlf::get_file_attrs(attrs, path, false, config);
+        let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
+            .map(|oid| oid == ie.oid)
+            .unwrap_or(false);
+        if !content_matches {
+            return false;
         }
-        return false;
+        let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
+        if index_entry_stat_matches(ie, &refreshed) {
+            return false;
+        }
+        ie.ctime_sec = refreshed.ctime_sec;
+        ie.ctime_nsec = refreshed.ctime_nsec;
+        ie.mtime_sec = refreshed.mtime_sec;
+        ie.mtime_nsec = refreshed.mtime_nsec;
+        ie.dev = refreshed.dev;
+        ie.ino = refreshed.ino;
+        ie.uid = refreshed.uid;
+        ie.gid = refreshed.gid;
+        ie.size = refreshed.size;
+        return true;
     }
-    let file_attrs = crate::crlf::get_file_attrs(attrs, path, false, config);
-    let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
-        .map(|oid| oid == ie.oid)
-        .unwrap_or(false);
-    if !content_matches {
-        return false;
+    if entry_is_racy(ie, index_mtime) {
+        let file_attrs = crate::crlf::get_file_attrs(attrs, path, false, config);
+        let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
+            .map(|oid| oid == ie.oid)
+            .unwrap_or(false);
+        if !content_matches {
+            invalidate_index_stat_cache(ie);
+            return true;
+        }
     }
     let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
+    if index_entry_stat_matches(ie, &refreshed) {
+        return false;
+    }
     ie.ctime_sec = refreshed.ctime_sec;
     ie.ctime_nsec = refreshed.ctime_nsec;
     ie.mtime_sec = refreshed.mtime_sec;
@@ -3551,6 +3755,18 @@ fn refresh_index_blob_stat_from_metadata(
     ie.gid = refreshed.gid;
     ie.size = refreshed.size;
     true
+}
+
+fn index_entry_stat_matches(a: &IndexEntry, b: &IndexEntry) -> bool {
+    a.ctime_sec == b.ctime_sec
+        && a.ctime_nsec == b.ctime_nsec
+        && a.mtime_sec == b.mtime_sec
+        && a.mtime_nsec == b.mtime_nsec
+        && a.dev == b.dev
+        && a.ino == b.ino
+        && a.uid == b.uid
+        && a.gid == b.gid
+        && a.size == b.size
 }
 
 /// Whether path-only checkout can skip writing a blob because the worktree is up to date.
@@ -3641,6 +3857,37 @@ pub(crate) fn symlink_target_bytes(target: &Path) -> Vec<u8> {
     }
 }
 
+fn read_regular_worktree_blob_bytes(
+    odb: &Odb,
+    path: &Path,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+) -> Result<Vec<u8>> {
+    let needs_index_blob =
+        index_entry.is_some_and(|_| crate::crlf::clean_uses_autocrlf_index_guard(file_attrs, conv));
+    let prior_blob: Option<Vec<u8>> = if needs_index_blob {
+        index_entry
+            .filter(|e| e.oid != zero_oid())
+            .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data))
+    } else {
+        None
+    };
+    let raw = fs::read(path)?;
+    #[cfg(test)]
+    odb.hot_path_test_metrics().record_blob_content_read();
+    let opts = crate::crlf::ConvertToGitOpts {
+        index_blob: prior_blob.as_deref(),
+        renormalize: false,
+        check_safecrlf: false,
+    };
+    Ok(
+        crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
+            .unwrap_or(raw),
+    )
+}
+
 pub(crate) fn worktree_blob_bytes(
     odb: &Odb,
     path: &Path,
@@ -3650,9 +3897,15 @@ pub(crate) fn worktree_blob_bytes(
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
 ) -> Result<Vec<u8>> {
-    let prior_blob: Option<Vec<u8>> = index_entry
-        .filter(|e| e.oid != zero_oid())
-        .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data));
+    let needs_index_blob =
+        index_entry.is_some_and(|_| crate::crlf::clean_uses_autocrlf_index_guard(file_attrs, conv));
+    let prior_blob: Option<Vec<u8>> = if needs_index_blob {
+        index_entry
+            .filter(|e| e.oid != zero_oid())
+            .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data))
+    } else {
+        None
+    };
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         return Ok(symlink_target_bytes(&target));
@@ -3687,7 +3940,15 @@ fn worktree_file_oid(
 ) -> Result<ObjectId> {
     let data = worktree_blob_bytes(odb, path, meta, conv, file_attrs, rel_path, index_entry)?;
     if materialize {
-        odb.write(ObjectKind::Blob, &data)
+        odb.write_with_options(
+            ObjectKind::Blob,
+            &data,
+            crate::odb::WriteOptions {
+                assume_loose_only_existence: true,
+                trust_new_loose: true,
+                ..Default::default()
+            },
+        )
     } else {
         Ok(odb.hash(ObjectKind::Blob, &data))
     }

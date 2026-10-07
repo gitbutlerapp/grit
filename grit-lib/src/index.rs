@@ -1770,6 +1770,12 @@ impl Index {
         self.touch_fsmonitor_after_entry_change();
     }
 
+    /// Returns whether the index contains any unmerged (stage 1/2/3) entries.
+    #[must_use]
+    pub fn has_unmerged_entries(&self) -> bool {
+        self.entries.iter().any(|e| e.stage() != 0)
+    }
+
     /// Stage a file at stage 0, removing any conflict stage entries (1, 2, 3)
     /// for the same path. This is the correct behavior for `git add` on a
     /// conflicted file during merge/cherry-pick resolution.
@@ -2958,6 +2964,90 @@ pub fn worktree_path_from_index_rel(work_tree: &Path, rel: &[u8]) -> PathBuf {
             .map(Cow::Borrowed)
             .unwrap_or_else(|_| Cow::Owned(String::from_utf8_lossy(rel).into_owned()));
         work_tree.join(rel.as_ref())
+    }
+}
+
+/// Stat fields copied from a worktree `Metadata` probe during index staging.
+#[derive(Debug, Clone, Copy)]
+pub struct IndexStatFields {
+    ctime_sec: u32,
+    ctime_nsec: u32,
+    mtime_sec: u32,
+    mtime_nsec: u32,
+    dev: u32,
+    ino: u32,
+    uid: u32,
+    gid: u32,
+    size: u32,
+}
+
+impl IndexStatFields {
+    /// Capture stat fields from filesystem metadata.
+    #[must_use]
+    pub fn from_metadata(meta: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Self {
+                ctime_sec: meta.ctime() as u32,
+                ctime_nsec: meta.ctime_nsec() as u32,
+                mtime_sec: meta.mtime() as u32,
+                mtime_nsec: meta.mtime_nsec() as u32,
+                dev: meta.dev() as u32,
+                ino: meta.ino() as u32,
+                uid: meta.uid(),
+                gid: meta.gid(),
+                size: meta.size() as u32,
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            use std::time::UNIX_EPOCH;
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .unwrap_or_default();
+            Self {
+                ctime_sec: mtime.as_secs() as u32,
+                ctime_nsec: mtime.subsec_nanos(),
+                mtime_sec: mtime.as_secs() as u32,
+                mtime_nsec: mtime.subsec_nanos(),
+                dev: 0,
+                ino: 0,
+                uid: 0,
+                gid: 0,
+                size: meta.len() as u32,
+            }
+        }
+    }
+
+    /// Build a stage-0 index entry using cached stat fields.
+    #[must_use]
+    pub fn index_entry(self, rel_path: &[u8], oid: ObjectId, mode: u32) -> IndexEntry {
+        IndexEntry {
+            ctime_sec: self.ctime_sec,
+            ctime_nsec: self.ctime_nsec,
+            mtime_sec: self.mtime_sec,
+            mtime_nsec: self.mtime_nsec,
+            dev: self.dev,
+            ino: self.ino,
+            mode,
+            uid: self.uid,
+            gid: self.gid,
+            size: self.size,
+            oid,
+            flags: rel_path.len().min(0xFFF) as u16,
+            flags_extended: None,
+            path: rel_path.to_vec(),
+            base_index_pos: 0,
+        }
+    }
+}
+
+impl From<&fs::Metadata> for IndexStatFields {
+    fn from(meta: &fs::Metadata) -> Self {
+        Self::from_metadata(meta)
     }
 }
 

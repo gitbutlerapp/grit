@@ -294,49 +294,6 @@ impl Odb {
         }
     }
 
-    /// Share the repository's lazy config snapshot (see [`crate::repo::Repository::config`]).
-    #[must_use]
-    pub(crate) fn with_shared_config_state(
-        mut self,
-        state: Arc<Mutex<Option<Arc<ConfigSet>>>>,
-    ) -> Self {
-        self.shared_config_state = Some(state);
-        self
-    }
-
-    fn load_config_cascade(&self) -> Result<ConfigSet> {
-        if let Some(state) = &self.shared_config_state {
-            let mut guard = state
-                .lock()
-                .map_err(|e| Error::Message(format!("config snapshot lock poisoned: {e}")))?;
-            if guard.is_none() {
-                let git_dir = self
-                    .config_git_dir
-                    .as_deref()
-                    .or_else(|| self.objects_dir.parent());
-                let loaded = if let Some(git_dir) = git_dir {
-                    ConfigSet::load(Some(git_dir), true)?
-                } else {
-                    ConfigSet::new()
-                };
-                *guard = Some(Arc::new(loaded));
-            }
-            let Some(cfg) = guard.as_ref() else {
-                return Err(Error::Message("config snapshot missing after init".into()));
-            };
-            return Ok(cfg.as_ref().clone());
-        }
-        let git_dir = self
-            .config_git_dir
-            .as_deref()
-            .or_else(|| self.objects_dir.parent());
-        if let Some(git_dir) = git_dir {
-            ConfigSet::load(Some(git_dir), true)
-        } else {
-            Ok(ConfigSet::new())
-        }
-    }
-
     fn env_alternate_dirs_snapshot(&self) -> Arc<Vec<PathBuf>> {
         if !self.env_alternate_dirs.is_empty() {
             return Arc::new(self.env_alternate_dirs.clone());
@@ -1141,7 +1098,9 @@ impl Odb {
             return Ok(oid);
         }
 
-        let already_exists = if options.assume_loose_only_existence {
+        let already_exists = if options.trust_new_loose {
+            false
+        } else if options.assume_loose_only_existence {
             self.exists_local(&oid)
         } else {
             self.exists(&oid)

@@ -5,15 +5,17 @@
 //! per index path.
 //!
 //! When [`WorktreeBlobScanOptions::preload_index`] is true and the tracked blob count is at
-//! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection runs in contiguous index-order chunks
-//! across a small number of threads (`std::thread::scope`). Visit order stays directory-sorted
-//! so diff output matches the serial path; only the metadata probes are parallelized. A later
-//! shared thread pool can replace the scoped helper without changing callers.
+//! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection preloads disk lookups in parallel by
+//! partitioning sorted parent-directory keys across a small thread pool (`std::thread::scope`).
+//! Visit order stays directory-sorted so diff output matches the serial path; only the metadata
+//! probes are parallelized. A later shared thread pool can replace the scoped helper without
+//! changing callers.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -47,21 +49,10 @@ pub(crate) struct WorktreeBlobScanOptions {
     pub stat_parallel_threads: Option<usize>,
 }
 
-/// Test hook: worker threads used by the most recent blob scan (`1` = serial).
-#[doc(hidden)]
-pub static LAST_BLOB_SCAN_THREADS: AtomicUsize = AtomicUsize::new(1);
-
-/// Returns [`LAST_BLOB_SCAN_THREADS`] for tests (embedders should not rely on this).
-#[doc(hidden)]
-#[must_use]
-pub fn last_blob_scan_threads_for_tests() -> usize {
-    LAST_BLOB_SCAN_THREADS.load(Ordering::Relaxed)
-}
-
 /// Returns how many threads a blob scan should use for `blob_count` entries.
 #[must_use]
 pub(crate) fn stat_scan_thread_count(options: WorktreeBlobScanOptions, blob_count: usize) -> usize {
-    let chosen = if !options.preload_index || blob_count < PARALLEL_STAT_MIN_ENTRIES {
+    if !options.preload_index || blob_count < PARALLEL_STAT_MIN_ENTRIES {
         1
     } else if let Some(requested) = options.stat_parallel_threads {
         if requested <= 1 {
@@ -74,9 +65,7 @@ pub(crate) fn stat_scan_thread_count(options: WorktreeBlobScanOptions, blob_coun
             .map(|n| n.get())
             .unwrap_or(1);
         cpus.clamp(1, STAT_PARALLEL_THREAD_CAP)
-    };
-    LAST_BLOB_SCAN_THREADS.store(chosen, Ordering::Relaxed);
-    chosen
+    }
 }
 
 fn probe_worktree_metadata_call() {
@@ -160,11 +149,15 @@ fn index_ordered_blobs(by_dir: &HashMap<String, Vec<BlobInDir>>) -> Vec<BlobInDi
     blobs
 }
 
-fn group_blobs_chunk(chunk: &[BlobInDir]) -> HashMap<String, Vec<BlobInDir>> {
-    let mut partial: HashMap<String, Vec<BlobInDir>> = HashMap::new();
-    for blob in chunk {
-        let (dir, _) = split_dir_file(&blob.rel_path);
-        partial.entry(dir).or_default().push(blob.clone());
+fn partial_dirs_for_keys(
+    by_dir: &HashMap<String, Vec<BlobInDir>>,
+    dir_keys: &[String],
+) -> HashMap<String, Vec<BlobInDir>> {
+    let mut partial = HashMap::with_capacity(dir_keys.len());
+    for key in dir_keys {
+        if let Some(blobs) = by_dir.get(key) {
+            partial.insert(key.clone(), blobs.clone());
+        }
     }
     partial
 }
@@ -176,48 +169,51 @@ fn preload_blob_lookups_parallel(
     dir_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
     file_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
 ) -> Result<HashMap<usize, BlobDiskLookup>> {
-    let ordered = index_ordered_blobs(by_dir);
-    if ordered.is_empty() {
+    let mut dirs: Vec<String> = by_dir.keys().cloned().collect();
+    dirs.sort();
+    if dirs.is_empty() {
         return Ok(HashMap::new());
     }
-    let chunk_size = ordered.len().div_ceil(threads);
+    let chunk_size = dirs.len().div_ceil(threads);
     let mut merged = HashMap::new();
-    let mut worker_panic = false;
     std::thread::scope(|scope| {
         let mut handles = Vec::new();
-        for chunk in ordered.chunks(chunk_size) {
-            let chunk = chunk.to_vec();
+        for dir_chunk in dirs.chunks(chunk_size) {
+            let dir_chunk: Vec<String> = dir_chunk.to_vec();
+            let partial_dirs = partial_dirs_for_keys(by_dir, &dir_chunk);
             let symlink_missing = symlink_missing.clone();
             let dir_abs = Arc::clone(&dir_abs);
             let file_abs = Arc::clone(&file_abs);
-            handles.push(scope.spawn(move || {
-                let partial_dirs = group_blobs_chunk(&chunk);
-                let mut local = HashMap::new();
-                let _ = for_each_blob_by_directory(
-                    &partial_dirs,
-                    |dir| dir_abs(dir),
-                    |rel| file_abs(rel),
-                    |rel| symlink_missing.contains(rel),
-                    |entry_index, _path, lookup| {
-                        local.insert(entry_index, lookup);
-                        Ok(())
-                    },
-                );
-                local
-            }));
+            handles.push(
+                scope.spawn(move || -> Result<HashMap<usize, BlobDiskLookup>> {
+                    let mut local = HashMap::new();
+                    for_each_blob_by_directory(
+                        &partial_dirs,
+                        |dir| dir_abs(dir),
+                        |rel| file_abs(rel),
+                        |rel| symlink_missing.contains(rel),
+                        |entry_index, _path, lookup| {
+                            local.insert(entry_index, lookup);
+                            Ok(())
+                        },
+                    )?;
+                    Ok(local)
+                }),
+            );
         }
         for handle in handles {
             match handle.join() {
-                Ok(local) => merged.extend(local),
-                Err(_) => worker_panic = true,
+                Ok(Ok(local)) => merged.extend(local),
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    return Err(Error::Message(
+                        "parallel blob stat worker thread panicked".to_owned(),
+                    ));
+                }
             }
         }
-    });
-    if worker_panic {
-        return Err(Error::Message(
-            "parallel blob stat worker thread panicked".to_owned(),
-        ));
-    }
+        Ok(())
+    })?;
     Ok(merged)
 }
 

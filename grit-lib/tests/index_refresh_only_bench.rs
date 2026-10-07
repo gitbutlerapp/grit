@@ -33,7 +33,6 @@ fn refresh_index_stat_only_timing() {
     let mut index = repo.load_index().expect("index");
     let index_mtime = index.source_mtime;
     let config = grit_lib::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
-    let parallelism = index_parallelism_from_config(&config);
 
     let start = Instant::now();
     let _ = refresh_index_stat_content_verified(
@@ -43,7 +42,7 @@ fn refresh_index_stat_only_timing() {
         root,
         index_mtime,
         Some(&config),
-        parallelism,
+        None,
     )
     .expect("refresh");
     let elapsed = start.elapsed();

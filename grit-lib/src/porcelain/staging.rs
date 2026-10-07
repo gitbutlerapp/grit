@@ -15,7 +15,9 @@ use crate::error::Result;
 use crate::index::{index_file_mtime, Index, MODE_TREE};
 use crate::objects::ObjectKind;
 use crate::pathspec::matches_pathspec_list;
-use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
+use crate::porcelain::status::{
+    collect_untracked_and_ignored_with_cache, expand_untracked_for_staging, IgnoredMode,
+};
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -87,8 +89,17 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         }
     }
 
-    let (untracked, _) =
-        collect_untracked_and_ignored(repo, &index, work_tree, IgnoredMode::No, true, pathspecs)?;
+    let (untracked, _) = collect_untracked_and_ignored_with_cache(
+        repo,
+        &mut index,
+        work_tree,
+        IgnoredMode::No,
+        false,
+        pathspecs,
+        false,
+    )?;
+    let untracked =
+        expand_untracked_for_staging(repo, &mut index, work_tree, untracked, pathspecs)?;
     for path in untracked {
         if !matches(&path) {
             continue;
@@ -98,7 +109,6 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     }
 
     if staged > 0 {
-        index.sort();
         repo.write_index(&mut index)?;
     }
     Ok(staged)

@@ -25,7 +25,9 @@ use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::odb::WriteOptions;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
-use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
+use crate::porcelain::status::{
+    collect_untracked_and_ignored_with_cache, expand_untracked_for_staging, IgnoredMode,
+};
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::state::resolve_head;
@@ -114,8 +116,8 @@ pub fn stage(
     let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
     let repo_config = repo.config().ok();
-    let unstaged = if index.entries.is_empty() {
-        Vec::new()
+    let (unstaged, staging_stats) = if index.entries.is_empty() {
+        (Vec::new(), std::collections::BTreeMap::new())
     } else {
         let diff_opts = DiffIndexToWorktreeOptions {
             index_mtime,
@@ -123,40 +125,43 @@ pub fn stage(
             config: repo_config.clone(),
             ..DiffIndexToWorktreeOptions::default()
         };
-        let (unstaged, _) = crate::diff::diff_index_to_worktree_for_staging(
+        let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
             &repo.odb,
             &repo.git_dir,
             &mut index,
             work_tree,
             diff_opts,
         )?;
-        unstaged
+        (unstaged, staging_stats)
     };
 
     let bulk_empty_index_add =
         opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
     let untracked = if opts.mode == StageMode::All {
-        let (untracked, _) = if bulk_empty_index_add {
-            crate::porcelain::status::collect_untracked_and_ignored_inner(
+        if bulk_empty_index_add {
+            let (untracked, _) = crate::porcelain::status::collect_untracked_and_ignored_inner(
                 repo,
-                &index,
+                &mut index,
                 work_tree,
                 IgnoredMode::No,
                 true,
                 &opts.pathspecs,
                 false,
-            )?
+                false,
+            )?;
+            untracked
         } else {
-            collect_untracked_and_ignored(
+            let (untracked, _) = collect_untracked_and_ignored_with_cache(
                 repo,
-                &index,
+                &mut index,
                 work_tree,
                 IgnoredMode::No,
-                true,
+                false,
                 &opts.pathspecs,
-            )?
-        };
-        untracked
+                false,
+            )?;
+            expand_untracked_for_staging(repo, &mut index, work_tree, untracked, &opts.pathspecs)?
+        }
     } else {
         Vec::new()
     };
@@ -172,6 +177,7 @@ pub fn stage(
         index.entries.iter().map(|e| e.path.clone()).collect();
 
     let mut outcome = StageOutcome::default();
+    let has_unmerged = index.has_unmerged_entries();
 
     let worktree_updates = collect_tracked_stage_plans(&unstaged, &matches);
     for (path, plan) in worktree_updates {
@@ -182,7 +188,15 @@ pub fn stage(
             continue;
         }
         icase_map.remove_alias_of(&mut index, path.as_bytes());
-        apply_tracked_stage_plan(repo, work_tree, &path, &plan, &mut index)?;
+        apply_tracked_stage_plan(
+            repo,
+            work_tree,
+            &path,
+            &plan,
+            staging_stats.get(&path),
+            &mut index,
+            has_unmerged,
+        )?;
         outcome.modified += 1;
     }
 
@@ -311,17 +325,19 @@ fn apply_tracked_stage_plan(
     work_tree: &Path,
     rel_path: &str,
     plan: &TrackedStagePlan,
+    cached_stat: Option<&crate::index::IndexStatFields>,
     index: &mut Index,
+    has_unmerged: bool,
 ) -> Result<()> {
     let abs = work_tree.join(rel_path);
-    let meta = fs::symlink_metadata(&abs).map_err(|e| {
-        Error::Io(std::io::Error::new(
-            e.kind(),
-            format!("could not read {rel_path}: {e}"),
-        ))
-    })?;
 
     if plan.gitlink {
+        let meta = fs::symlink_metadata(&abs).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("could not read {rel_path}: {e}"),
+            ))
+        })?;
         let oid = if plan.oid.is_zero() {
             read_submodule_head_oid(&abs).ok_or_else(|| {
                 Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
@@ -333,9 +349,23 @@ fn apply_tracked_stage_plan(
     }
 
     let oid = plan.oid;
-    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, plan.mode);
+    let mut entry = if let Some(stat) = cached_stat {
+        stat.index_entry(rel_path.as_bytes(), oid, plan.mode)
+    } else {
+        let meta = fs::symlink_metadata(&abs).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("could not read {rel_path}: {e}"),
+            ))
+        })?;
+        entry_from_metadata(&meta, rel_path.as_bytes(), oid, plan.mode)
+    };
     entry.mode = plan.mode;
-    index.stage_file(entry);
+    if has_unmerged {
+        index.stage_file(entry);
+    } else {
+        index.add_or_replace(entry);
+    }
     mark_fsmonitor_staged(index, rel_path);
     Ok(())
 }

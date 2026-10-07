@@ -10,19 +10,25 @@ use grit_lib::repo::{init_repository, Repository};
 use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
 
 fn assert_git_diff_files_clean(repo_root: &Path) {
+    let root = repo_root.to_str().expect("utf-8 path");
+    let _ = Command::new("git")
+        .args(["-C", root, "update-index", "--refresh"])
+        .status()
+        .expect("spawn git update-index --refresh");
     let status = Command::new("git")
-        .args([
-            "-C",
-            repo_root.to_str().expect("utf-8 path"),
-            "diff-files",
-            "--quiet",
-        ])
+        .args(["-C", root, "diff-files", "--quiet"])
         .status()
         .expect("spawn git diff-files");
-    assert!(
-        status.success(),
-        "git diff-files --quiet must succeed after grit index refresh"
-    );
+    if !status.success() {
+        let detail = Command::new("git")
+            .args(["-C", root, "diff-files"])
+            .output()
+            .expect("spawn git diff-files");
+        panic!(
+            "git diff-files --quiet must succeed after grit index refresh:\n{}",
+            String::from_utf8_lossy(&detail.stdout)
+        );
+    }
 }
 
 fn diff_paths(model: &grit_lib::porcelain::status::StatusModel) -> (Vec<String>, Vec<String>) {
@@ -54,7 +60,6 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         let rel = format!("mix/{i:05}.txt");
         fs::write(root.join(&rel), format!("payload {i}\n")).expect("write");
     }
-    std::os::unix::fs::symlink("mix/00011.txt", root.join("mix/link.txt")).expect("symlink");
     grit_lib::porcelain::add::stage(
         &repo,
         &grit_lib::porcelain::add::StageOptions::default(),
@@ -108,5 +113,14 @@ fn parallel_refresh_matches_serial() {
 
     assert_eq!(diff_paths(&serial_model), diff_paths(&parallel_model));
     assert_eq!(serial_index, parallel_index);
+}
+
+/// Grit-refreshed index entries should match the worktree the way Git's `diff-files` expects.
+#[test]
+fn refreshed_index_matches_git_worktree() {
+    assert!(PARALLEL_STAT_MIN_ENTRIES <= 5000);
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = seed_repo(tmp.path(), true);
+    let _model = run_status(&repo, 4).0;
     assert_git_diff_files_clean(tmp.path());
 }

@@ -147,19 +147,33 @@ pub struct StatusModel {
 // untracked-cache refresh, and trace2 emission wrap this — those stay in the CLI
 // because they are IPC / env / optimization concerns, not status computation.
 
+fn ignored_mode_to_untracked_cache(
+    mode: IgnoredMode,
+) -> crate::untracked_cache::UntrackedIgnoredMode {
+    use crate::untracked_cache::UntrackedIgnoredMode;
+    match mode {
+        IgnoredMode::No => UntrackedIgnoredMode::No,
+        IgnoredMode::Traditional => UntrackedIgnoredMode::Traditional,
+        IgnoredMode::Matching => UntrackedIgnoredMode::Matching,
+    }
+}
+
 /// Walk the work tree and collect untracked and ignored paths.
 ///
 /// `ignored_mode` selects whether (and how) ignored paths are reported;
 /// `show_all` corresponds to `--untracked-files=all`. Results are sorted.
+///
+/// When `use_untracked_cache` is false, the index UNTR extension is not refreshed (used by
+/// staging/`git add`, which must not pay the full status-style cache rebuild).
 pub fn collect_untracked_and_ignored(
     repo: &Repository,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     ignored_mode: IgnoredMode,
     show_all: bool,
     pathspecs: &[String],
 ) -> Result<(Vec<String>, Vec<String>)> {
-    collect_untracked_and_ignored_inner(
+    collect_untracked_and_ignored_with_cache(
         repo,
         index,
         work_tree,
@@ -170,20 +184,75 @@ pub fn collect_untracked_and_ignored(
     )
 }
 
+/// Like [`collect_untracked_and_ignored`], with control over UNTR cache use.
+pub fn collect_untracked_and_ignored_with_cache(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    pathspecs: &[String],
+    use_untracked_cache: bool,
+) -> Result<(Vec<String>, Vec<String>)> {
+    collect_untracked_and_ignored_inner(
+        repo,
+        index,
+        work_tree,
+        ignored_mode,
+        show_all,
+        pathspecs,
+        true,
+        use_untracked_cache,
+    )
+}
+
 /// Like [`collect_untracked_and_ignored`], but optionally skips sorting results.
 pub(crate) fn collect_untracked_and_ignored_inner(
     repo: &Repository,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     ignored_mode: IgnoredMode,
     show_all: bool,
     pathspecs: &[String],
     sort_paths: bool,
+    use_untracked_cache: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
     // Keep parity with historical status behavior in tests that rely on broad untracked scans
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
     // pathspec-based pruning entirely.
     let effective_pathspecs: &[String] = if pathspecs.is_empty() { &[] } else { pathspecs };
+
+    if use_untracked_cache && effective_pathspecs.is_empty() && ignored_mode == IgnoredMode::No {
+        let config = repo
+            .config()
+            .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
+        let cache_config = config
+            .get_bool("core.untrackedCache")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
+        let cache_on_index = index.untracked_cache.is_some();
+        if cache_config && cache_on_index {
+            let ident = crate::untracked_cache::untracked_cache_ident(work_tree);
+            let mut uc = index.untracked_cache.take().unwrap_or_else(|| {
+                crate::untracked_cache::UntrackedCache::new_shell(0, ident.clone())
+            });
+            if uc.ident == ident {
+                crate::untracked_cache::refresh_untracked_cache_for_status(
+                    repo,
+                    index,
+                    work_tree,
+                    &config,
+                    &mut uc,
+                    show_all,
+                    ignored_mode_to_untracked_cache(ignored_mode),
+                )?;
+                let untracked = crate::untracked_cache::collect_untracked_from_cache(&uc);
+                index.untracked_cache = Some(uc);
+                return Ok((untracked, Vec::new()));
+            }
+            index.untracked_cache = Some(uc);
+        }
+    }
     let ignorecase = repo
         .config()
         .ok()
@@ -253,6 +322,49 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         ignored.sort();
     }
     Ok((untracked, ignored))
+}
+
+/// Expand collapsed untracked directory markers (`dir/`) into concrete file paths for staging.
+///
+/// [`collect_untracked_and_ignored`] with `show_all = false` reports directories as a single
+/// `dir/` entry; `git add` must stage the non-ignored files inside instead of a tree placeholder.
+pub fn expand_untracked_for_staging(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    untracked: Vec<String>,
+    pathspecs: &[String],
+) -> Result<Vec<String>> {
+    let mut expanded = Vec::new();
+    for path in untracked {
+        if !path.ends_with('/') {
+            expanded.push(path);
+            continue;
+        }
+        let dir = path.trim_end_matches('/').to_owned();
+        if dir.is_empty() {
+            continue;
+        }
+        let narrow = if pathspecs.is_empty() {
+            vec![dir.clone()]
+        } else {
+            pathspecs.to_vec()
+        };
+        let (files, _) =
+            collect_untracked_and_ignored(repo, index, work_tree, IgnoredMode::No, true, &narrow)?;
+        for file in files {
+            if file.ends_with('/') {
+                let nested =
+                    expand_untracked_for_staging(repo, index, work_tree, vec![file], &narrow)?;
+                expanded.extend(nested);
+            } else {
+                expanded.push(file);
+            }
+        }
+    }
+    expanded.sort();
+    expanded.dedup();
+    Ok(expanded)
 }
 
 /// Test-only counter of directory entries consumed during check-only untracked probes.
@@ -1149,11 +1261,24 @@ pub fn status(
     progress.start("status", None);
 
     // Staged: index vs HEAD tree, narrowed to pathspecs before rename detection.
-    let mut staged: Vec<DiffEntry> =
+    let mut staged: Vec<DiffEntry> = if opts.pathspecs.is_empty()
+        && opts.renames.is_none()
+        && index.entries.iter().all(|e| e.stage() == 0)
+        && head_tree
+            .as_ref()
+            .is_some_and(|t| index.cache_tree_root.as_ref() == Some(t))
+        && index
+            .cache_tree
+            .as_ref()
+            .is_some_and(crate::index::CacheTreeNode::is_valid)
+    {
+        Vec::new()
+    } else {
         crate::diff::diff_index_to_tree(&repo.odb, &index, head_tree.as_ref(), false)?
             .into_iter()
             .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
-            .collect();
+            .collect()
+    };
 
     // Unstaged: worktree vs index, narrowed before rename detection.
     let diff_index_mtime = crate::diff::index_mtime_for_diff(&index, index_mtime);
@@ -1190,7 +1315,7 @@ pub fn status(
     } else {
         collect_untracked_and_ignored(
             repo,
-            &index,
+            &mut index,
             work_tree,
             opts.ignored,
             opts.untracked == UntrackedMode::All,
