@@ -124,8 +124,17 @@ pub struct FetchOptions {
     pub initial_remote_fetch: bool,
     /// Remote name paired with [`Self::initial_remote_fetch`] (e.g. `"origin"`).
     pub remote_name: Option<String>,
-    /// When set, append reflog entries for ref updates performed during this fetch.
-    pub reflog_message: Option<String>,
+    /// Clone-only reflog entries for `refs/remotes/{remote}/HEAD` (not remote branches).
+    pub clone_reflog: Option<CloneReflog>,
+}
+
+/// Identity and message for clone reflog entries written by the library.
+#[derive(Clone, Debug)]
+pub struct CloneReflog {
+    /// `"Name <email> <unix_time> <tz>"` formatted identity.
+    pub identity: String,
+    /// Reflog message (e.g. `clone: from <url>`).
+    pub message: String,
 }
 
 impl FetchOptions {
@@ -329,7 +338,7 @@ pub fn build_pack(
 
 /// Compute the full object closure reachable from `roots`, stopping descent into
 /// any object already present in `stop`.
-fn reachable_closure(
+pub(crate) fn reachable_closure(
     odb: &Odb,
     roots: &[ObjectId],
     stop: &HashSet<ObjectId>,
@@ -1228,6 +1237,7 @@ pub fn fetch_local(
                     oid: *oid,
                     force: refspecs_force(name, &positive),
                     is_tag: name.starts_with("refs/tags/"),
+                    advertised_peel: None,
                 });
             }
         }
@@ -1270,9 +1280,6 @@ pub fn fetch_local(
         crate::index_pack::ingest_received_pack(
             pack,
             &local_odb,
-            crate::config::ConfigSet::load(Some(local_git_dir), true)
-                .ok()
-                .as_ref(),
             &crate::index_pack::IngestPackOptions { fix_thin: true },
         )?;
     }
@@ -1335,20 +1342,6 @@ pub fn fetch_local(
                 continue;
             }
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
-            if let Some(message) = opts.reflog_message.as_deref() {
-                if let Ok(identity) = crate::fetch::fetch_operation_identity(local_git_dir) {
-                    let old_oid = old.unwrap_or_else(ObjectId::zero);
-                    let _ = crate::refs::append_reflog(
-                        local_git_dir,
-                        local_ref,
-                        &old_oid,
-                        &m.oid,
-                        &identity,
-                        message,
-                        false,
-                    );
-                }
-            }
         }
 
         updates.push(RefUpdate {
@@ -1744,6 +1737,8 @@ pub(crate) struct MatchedRef {
     pub(crate) oid: ObjectId,
     pub(crate) force: bool,
     pub(crate) is_tag: bool,
+    /// Peeled target from ls-refs `peeled:` (annotated tags), when known.
+    pub(crate) advertised_peel: Option<ObjectId>,
 }
 
 /// Open an [`Odb`] for a git directory, attaching the git dir so `hash_algo`
@@ -1892,6 +1887,7 @@ pub(crate) fn apply_tag_mode(
                 oid: *oid,
                 force: false,
                 is_tag: true,
+                advertised_peel: None,
             });
         }
     }

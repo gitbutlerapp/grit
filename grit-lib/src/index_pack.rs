@@ -1,20 +1,15 @@
 //! Install a received packfile into the object store (`index-pack` path).
 //!
-//! Fetch and clone normally keep the negotiated pack on disk (`.pack` + `.idx`)
-//! instead of exploding every object into loose storage. Small pushes may still
-//! use [`crate::unpack_objects`] when under the configured unpack limit.
+//! Fetch and clone keep the negotiated pack on disk (`.pack` + `.idx`) instead of
+//! exploding every object into loose storage. Small receive-pack pushes may still
+//! use [`crate::unpack_objects`] via [`crate::receive_pack::should_use_unpack_objects`].
 
-use std::io::Cursor;
-use std::path::PathBuf;
-
-use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::pack::{clear_pack_cache, write_v2_pack_index};
-use crate::receive_pack::should_use_unpack_objects;
 use crate::transfer::fix_thin_pack;
-use crate::unpack_objects::{pack_index_entries_from_bytes, unpack_objects, UnpackOptions};
+use crate::unpack_objects::{pack_index_records_from_bytes, PackIndexRecord};
 
 /// Options controlling how a received pack is ingested.
 #[derive(Debug, Clone, Default)]
@@ -24,19 +19,16 @@ pub struct IngestPackOptions {
     pub fix_thin: bool,
 }
 
-/// Ingest a pack received from fetch/clone: either install it under
-/// `objects/pack/` or unpack to loose objects when under the unpack limit.
+/// Ingest a pack received from fetch/clone by installing it under `objects/pack/`.
+///
+/// Fetch and clone always index the received pack (Git `fetch-pack` / `index-pack`).
+/// Call [`crate::receive_pack::should_use_unpack_objects`] only on the receive-pack path.
 ///
 /// # Errors
 ///
 /// Returns [`Error::CorruptObject`] when the pack cannot be validated or indexed,
-/// or I/O / zlib failures from the chosen ingest path.
-pub fn ingest_received_pack(
-    pack: Vec<u8>,
-    odb: &Odb,
-    cfg: Option<&ConfigSet>,
-    opts: &IngestPackOptions,
-) -> Result<()> {
+/// or I/O / zlib failures from indexing.
+pub fn ingest_received_pack(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) -> Result<()> {
     if pack.is_empty() {
         return Ok(());
     }
@@ -45,19 +37,6 @@ pub fn ingest_received_pack(
             "received data is not a pack stream".to_owned(),
         ));
     }
-    let use_unpack = cfg.is_some_and(|c| should_use_unpack_objects(&pack, c));
-    if use_unpack {
-        let mut cursor = Cursor::new(pack);
-        unpack_objects(
-            &mut cursor,
-            odb,
-            &UnpackOptions {
-                quiet: true,
-                ..Default::default()
-            },
-        )?;
-        return Ok(());
-    }
     install_pack_bytes(pack, odb, opts)
 }
 
@@ -65,7 +44,7 @@ pub fn ingest_received_pack(
 ///
 /// # Errors
 ///
-/// Same as [`ingest_received_pack`] for the install path.
+/// Same as [`ingest_received_pack`].
 pub fn install_pack_bytes(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) -> Result<()> {
     let pack = if opts.fix_thin {
         fix_thin_pack(pack, odb)?
@@ -84,47 +63,14 @@ pub fn install_pack_bytes(pack: Vec<u8>, odb: &Odb, opts: &IngestPackOptions) ->
     let idx_path = pack_dir.join(format!("{stem}.idx"));
     std::fs::write(&pack_path, &pack).map_err(Error::Io)?;
 
-    let entries = pack_index_entries_from_bytes(&pack, odb)?;
+    let records = pack_index_records_from_bytes(&pack, odb)?;
+    let entries: Vec<(ObjectId, u64, u32)> = records
+        .into_iter()
+        .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
+        .collect();
     write_v2_pack_index(&idx_path, &pack_path, &entries, hb)?;
     clear_pack_cache();
     Ok(())
-}
-
-/// Paths to a newly installed pack (for tests and diagnostics).
-#[derive(Debug, Clone)]
-pub struct InstalledPackPaths {
-    /// Absolute path to the `.pack` file.
-    pub pack_path: PathBuf,
-    /// Absolute path to the `.idx` file.
-    pub idx_path: PathBuf,
-}
-
-/// Like [`install_pack_bytes`], returning the written paths.
-pub fn install_pack_bytes_with_paths(
-    pack: Vec<u8>,
-    odb: &Odb,
-    opts: &IngestPackOptions,
-) -> Result<InstalledPackPaths> {
-    let hb = odb.hash_algo().len();
-    install_pack_bytes(pack, odb, opts)?;
-    let pack_dir = odb.objects_dir().join("pack");
-    let mut pack_path = None;
-    let mut idx_path = None;
-    for entry in std::fs::read_dir(&pack_dir).map_err(Error::Io)? {
-        let entry = entry.map_err(Error::Io)?;
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "pack") {
-            pack_path = Some(path.clone());
-            idx_path = Some(path.with_extension("idx"));
-        }
-    }
-    let pack_path = pack_path.ok_or_else(|| Error::Message("pack install missing .pack".into()))?;
-    let idx_path = idx_path.ok_or_else(|| Error::Message("pack install missing .idx".into()))?;
-    let _ = hb;
-    Ok(InstalledPackPaths {
-        pack_path,
-        idx_path,
-    })
 }
 
 #[cfg(test)]
@@ -132,6 +78,7 @@ mod tests {
     use super::*;
     use crate::objects::ObjectKind;
     use crate::odb::Odb;
+    use crate::pack::read_pack_index;
     use std::process::Command;
 
     fn git_index_pack(pack: &[u8]) -> (tempfile::TempDir, Vec<u8>) {
@@ -205,5 +152,46 @@ mod tests {
         let oid = odb.hash(ObjectKind::Blob, blob);
         let obj = odb.read(&oid).expect("read from pack");
         assert_eq!(obj.data.as_slice(), blob);
+    }
+
+    #[test]
+    fn fetch_ingest_keeps_pack_despite_receive_unpacklimit_zero() {
+        let blob = b"unpacklimit must not apply to fetch ingest\n";
+        let pack = single_blob_pack(blob);
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
+        std::fs::write(git_dir.join("config"), "[receive]\n\tunpackLimit = 0\n").expect("config");
+        let objects = git_dir.join("objects");
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+        install_pack_bytes(pack, &odb, &IngestPackOptions { fix_thin: false }).expect("install");
+        let pack_dir = git_dir.join("objects").join("pack");
+        let packs: Vec<_> = std::fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .collect();
+        assert_eq!(packs.len(), 1, "fetch ingest must index pack, not unpack");
+    }
+
+    #[test]
+    fn v2_index_large_offset_roundtrip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let pack_path = tmp.path().join("large.pack");
+        let pack = single_blob_pack(b"large offset idx fixture");
+        std::fs::write(&pack_path, &pack).expect("write pack");
+        let idx_path = pack_path.with_extension("idx");
+        let fake_oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let huge_off = 1u64 << 31;
+        write_v2_pack_index(
+            &idx_path,
+            &pack_path,
+            &[(fake_oid, huge_off, 0x1234_5678)],
+            20,
+        )
+        .expect("write idx");
+        let idx = read_pack_index(&idx_path).expect("read idx");
+        assert_eq!(idx.entries.len(), 1);
+        assert_eq!(idx.entries[0].offset, huge_off);
     }
 }

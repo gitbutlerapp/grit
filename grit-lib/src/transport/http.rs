@@ -1114,6 +1114,7 @@ struct MatchPlan {
 
 fn match_refspecs(
     remote_refs: &[(String, ObjectId)],
+    advertised_peel: &std::collections::HashMap<String, ObjectId>,
     positive: &[RefspecItem],
     negatives: &[RefspecItem],
 ) -> MatchPlan {
@@ -1133,6 +1134,7 @@ fn match_refspecs(
                     oid: *oid,
                     force: refspecs_force(name, positive),
                     is_tag: name.starts_with("refs/tags/"),
+                    advertised_peel: advertised_peel.get(name).copied(),
                 });
             }
         }
@@ -1142,6 +1144,16 @@ fn match_refspecs(
         wants,
         seen,
     }
+}
+
+fn advertised_peel_from_v0_refs(refs: &[AdvRef]) -> std::collections::HashMap<String, ObjectId> {
+    let mut peel = std::collections::HashMap::new();
+    for r in refs {
+        if let Some(base) = r.name.strip_suffix("^{}") {
+            peel.insert(base.to_owned(), r.oid);
+        }
+    }
+    peel
 }
 
 /// Fetch from a smart-HTTP remote, driving the stateless-RPC negotiation and
@@ -1227,6 +1239,7 @@ pub fn http_fetch(
         .filter(|r| r.name != "HEAD" && !r.name.ends_with("^{}"))
         .map(|r| (r.name.clone(), r.oid))
         .collect();
+    let advertised_peel = advertised_peel_from_v0_refs(&disc.refs);
 
     // 2. Parse refspecs.
     let mut positive: Vec<RefspecItem> = Vec::new();
@@ -1251,7 +1264,7 @@ pub fn http_fetch(
         mut matched,
         mut wants,
         mut seen,
-    } = match_refspecs(&remote_refs, &positive, &negatives);
+    } = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
 
     // 4. TagMode: add tags (the wire `include-tag` capability brings tag
     // objects with the pack; All adds every advertised tag, Following adds them
@@ -1272,6 +1285,7 @@ pub fn http_fetch(
                 oid: *oid,
                 force: false,
                 is_tag: true,
+                advertised_peel: advertised_peel.get(name).copied(),
             });
         }
     }
@@ -1315,9 +1329,6 @@ pub fn http_fetch(
             crate::index_pack::ingest_received_pack(
                 pack,
                 &local_odb,
-                crate::config::ConfigSet::load(Some(local_git_dir), true)
-                    .ok()
-                    .as_ref(),
                 &crate::index_pack::IngestPackOptions { fix_thin: true },
             )?;
         }
@@ -1334,7 +1345,7 @@ pub fn http_fetch(
 
     // 6. For TagMode::Following, drop tags whose target did not arrive.
     if opts.tags == TagMode::Following {
-        retain_following_tags(&local_odb, &mut matched, &wants);
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &wants);
     }
 
     // 7. Classify + apply ref updates.
@@ -1375,20 +1386,6 @@ pub fn http_fetch(
         );
         if write && !opts.dry_run {
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
-            if let Some(message) = opts.reflog_message.as_deref() {
-                if let Ok(identity) = crate::fetch::fetch_operation_identity(local_git_dir) {
-                    let old_oid = old.unwrap_or_else(crate::objects::ObjectId::zero);
-                    let _ = crate::refs::append_reflog(
-                        local_git_dir,
-                        local_ref,
-                        &old_oid,
-                        &m.oid,
-                        &identity,
-                        message,
-                        false,
-                    );
-                }
-            }
         }
         updates.push(RefUpdate {
             remote_ref: m.remote_ref.clone(),
@@ -1445,7 +1442,7 @@ fn http_fetch_v2(
     let git_protocol = "version=2";
 
     // 1. Recover the ref map via `command=ls-refs`.
-    let (remote_refs, head_symref) = {
+    let (remote_refs, head_symref, advertised_peel) = {
         let req = crate::fetch::build_v2_ls_refs_request(
             &server_caps,
             &local_odb,
@@ -1483,7 +1480,7 @@ fn http_fetch_v2(
         mut matched,
         mut wants,
         mut seen,
-    } = match_refspecs(&remote_refs, &positive, &negatives);
+    } = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
 
     // 4. TagMode: add tags (the wire `include-tag` capability brings tag objects
     // with the pack; All adds every advertised tag, Following adds them
@@ -1504,6 +1501,7 @@ fn http_fetch_v2(
                 oid: *oid,
                 force: false,
                 is_tag: true,
+                advertised_peel: advertised_peel.get(name).copied(),
             });
         }
     }
@@ -1550,9 +1548,6 @@ fn http_fetch_v2(
             crate::index_pack::ingest_received_pack(
                 pack,
                 &local_odb,
-                crate::config::ConfigSet::load(Some(local_git_dir), true)
-                    .ok()
-                    .as_ref(),
                 &crate::index_pack::IngestPackOptions { fix_thin: true },
             )?;
         }
@@ -1569,7 +1564,7 @@ fn http_fetch_v2(
 
     // 6. For TagMode::Following, drop tags whose target did not arrive.
     if opts.tags == TagMode::Following {
-        retain_following_tags(&local_odb, &mut matched, &wants);
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &wants);
     }
 
     // 7. Classify + apply ref updates (shared with the v0/v1 path).
@@ -1610,20 +1605,6 @@ fn http_fetch_v2(
         );
         if write && !opts.dry_run {
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
-            if let Some(message) = opts.reflog_message.as_deref() {
-                if let Ok(identity) = crate::fetch::fetch_operation_identity(local_git_dir) {
-                    let old_oid = old.unwrap_or_else(crate::objects::ObjectId::zero);
-                    let _ = crate::refs::append_reflog(
-                        local_git_dir,
-                        local_ref,
-                        &old_oid,
-                        &m.oid,
-                        &identity,
-                        message,
-                        false,
-                    );
-                }
-            }
         }
         updates.push(RefUpdate {
             remote_ref: m.remote_ref.clone(),
@@ -1794,52 +1775,6 @@ fn negotiate_pack_v2_http(
         )?;
         return Ok((pack, shallow_update));
     }
-}
-
-/// Drop provisional `Following` tags whose object did not arrive in the pack.
-fn retain_following_tags(
-    odb: &crate::odb::Odb,
-    matched: &mut Vec<crate::transfer::MatchedRef>,
-    wants: &HashSet<ObjectId>,
-) {
-    // No tag refs in the matched set → nothing to filter; skip the walk.
-    if !matched.iter().any(|m| m.is_tag) {
-        return;
-    }
-    let roots: Vec<ObjectId> = matched
-        .iter()
-        .filter(|m| !m.is_tag)
-        .map(|m| m.oid)
-        .collect();
-    // Commit-level reachability suffices (and avoids walking every head's full
-    // tree/blob closure — tens of seconds on a large repo). See the equivalent
-    // path in `crate::fetch::retain_following_tags`.
-    let closure = crate::fetch::reachable_commits(odb, &roots);
-    matched.retain(|m| {
-        if !m.is_tag {
-            return true;
-        }
-        let peeled = peel_tag_target(odb, m.oid);
-        let have = odb.exists(&m.oid);
-        have && (closure.contains(&m.oid) || closure.contains(&peeled) || wants.contains(&peeled))
-    });
-}
-
-fn peel_tag_target(odb: &crate::odb::Odb, oid: ObjectId) -> ObjectId {
-    let mut current = oid;
-    for _ in 0..16 {
-        let Ok(obj) = odb.read(&current) else {
-            return current;
-        };
-        if obj.kind != crate::objects::ObjectKind::Tag {
-            return current;
-        }
-        match crate::objects::parse_tag(&obj.data) {
-            Ok(t) => current = t.object,
-            Err(_) => return current,
-        }
-    }
-    current
 }
 
 /// Convenience: the unused-by-default [`Advertisement`] shape, exported so an
