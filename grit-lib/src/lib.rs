@@ -238,4 +238,6 @@ pub mod write_tree;
 pub mod ws;
 
 #[cfg(test)]
+mod hot_path_test_metrics;
+#[cfg(test)]
 mod object_write_regression;

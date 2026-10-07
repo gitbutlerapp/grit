@@ -125,6 +125,8 @@ pub struct Odb {
     file_alternate_dirs_cache: Arc<RwLock<FileAlternatesCache>>,
     #[cfg(test)]
     exists_probe: Arc<AtomicUsize>,
+    #[cfg(test)]
+    pub(crate) hot_path_test_metrics: Arc<crate::hot_path_test_metrics::HotPathTestMetrics>,
     /// Explicit env alternates from [`Self::with_env_alternate_dirs`] (tests / callers); empty uses lazy env read.
     env_alternate_dirs: Vec<PathBuf>,
     /// Lazily parsed `GIT_ALTERNATE_OBJECT_DIRECTORIES` (first alternate lookup only).
@@ -183,6 +185,8 @@ impl Odb {
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            hot_path_test_metrics: crate::hot_path_test_metrics::HotPathTestMetrics::new(),
         }
     }
 
@@ -210,7 +214,16 @@ impl Odb {
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
+            #[cfg(test)]
+            hot_path_test_metrics: crate::hot_path_test_metrics::HotPathTestMetrics::new(),
         }
+    }
+
+    /// Hot-path regression counters for this object database (unit tests only).
+    #[cfg(test)]
+    #[must_use]
+    pub fn hot_path_test_metrics(&self) -> &crate::hot_path_test_metrics::HotPathTestMetrics {
+        &self.hot_path_test_metrics
     }
 
     fn env_alternate_dirs_snapshot(&self) -> Arc<Vec<PathBuf>> {
@@ -638,7 +651,7 @@ impl Odb {
 
         let loose = self.object_path(oid);
         if loose.is_file() {
-            return touch_path_mtime(&loose).is_some();
+            return self.touch_object_mtime(&loose).is_some();
         }
 
         if self.freshen_object_in_objects_dir(&self.objects_dir, oid) {
@@ -674,7 +687,7 @@ impl Odb {
             .join(oid.loose_prefix())
             .join(oid.loose_suffix());
         if loose.is_file() {
-            return touch_path_mtime(&loose).is_some();
+            return self.touch_object_mtime(&loose).is_some();
         }
         let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
             return false;
@@ -701,7 +714,7 @@ impl Odb {
         if guard.contains(pack_path) {
             return true;
         }
-        let Some(touched_at) = touch_path_mtime(pack_path) else {
+        let Some(touched_at) = self.touch_object_mtime(pack_path) else {
             return false;
         };
         pack::refresh_pack_bytes_signature(pack_path, touched_at);
@@ -903,7 +916,7 @@ impl Odb {
         let path = self.object_path(&oid);
         if path.is_file() {
             if !options.silent {
-                let _ = touch_path_mtime(&path);
+                let _ = self.touch_object_mtime(&path);
             }
             return Ok(oid);
         }
@@ -1138,6 +1151,18 @@ impl Odb {
         };
         loose_store_bytes_header_valid(&raw)
     }
+
+    /// Update `path`'s mtime to "now" (Git `utime(path, NULL)`), returning whether it succeeded.
+    fn touch_object_mtime(&self, path: &Path) -> Option<std::time::SystemTime> {
+        #[cfg(test)]
+        self.hot_path_test_metrics.record_freshen();
+        // `utime(path, NULL)` sets both atime and mtime to the current time.
+        let touched_at = std::time::SystemTime::now();
+        let now = filetime::FileTime::from_system_time(touched_at);
+        filetime::set_file_times(path, now, now)
+            .ok()
+            .map(|()| touched_at)
+    }
 }
 
 fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
@@ -1165,66 +1190,8 @@ fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
     data.len() == size
 }
 
-/// Update `path`'s mtime to "now" (Git `utime(path, NULL)`), returning whether it succeeded.
-fn touch_path_mtime(path: &Path) -> Option<std::time::SystemTime> {
-    #[cfg(test)]
-    test_counters::record_freshen();
-    // `utime(path, NULL)` sets both atime and mtime to the current time.
-    let touched_at = std::time::SystemTime::now();
-    let now = filetime::FileTime::from_system_time(touched_at);
-    filetime::set_file_times(path, now, now)
-        .ok()
-        .map(|()| touched_at)
-}
-
 /// Hash the canonical store bytes of an object (`"<kind> <len>\0<data>"`) with
 /// the given hash algorithm.
-/// Process-wide counters for hot-path regression tests (see `object_write_regression` tests).
-#[cfg(test)]
-pub mod test_counters {
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    static FRESHEN_CALLS: AtomicUsize = AtomicUsize::new(0);
-    static FRESHEN_COUNTING: AtomicBool = AtomicBool::new(false);
-    static BLOB_CONTENT_READS: AtomicUsize = AtomicUsize::new(0);
-
-    /// Reset the freshen (`utimensat`) call counter.
-    pub fn reset_freshen_calls() {
-        FRESHEN_CALLS.store(0, Ordering::SeqCst);
-    }
-
-    pub fn set_freshen_counting(enabled: bool) {
-        FRESHEN_COUNTING.store(enabled, Ordering::SeqCst);
-    }
-
-    /// Number of object-store freshen touches since the last reset.
-    #[must_use]
-    pub fn freshen_calls() -> usize {
-        FRESHEN_CALLS.load(Ordering::SeqCst)
-    }
-
-    pub(crate) fn record_freshen() {
-        if FRESHEN_COUNTING.load(Ordering::Relaxed) {
-            FRESHEN_CALLS.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    /// Reset the worktree blob content read counter.
-    pub fn reset_blob_content_reads() {
-        BLOB_CONTENT_READS.store(0, Ordering::SeqCst);
-    }
-
-    /// Number of worktree file reads performed for blob hashing/staging since the last reset.
-    #[must_use]
-    pub fn blob_content_reads() -> usize {
-        BLOB_CONTENT_READS.load(Ordering::SeqCst)
-    }
-
-    pub(crate) fn record_blob_content_read() {
-        BLOB_CONTENT_READS.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
 fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
     hash::hash_object(algo, kind, data)
 }

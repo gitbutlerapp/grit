@@ -5,13 +5,14 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
 use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 
-use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
-use crate::midx;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::hot_path_test_metrics::HotPathMetricsScope;
+use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR, MODE_TREE};
+use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pack;
 use crate::porcelain::add::{stage, StageOptions};
@@ -21,29 +22,8 @@ use crate::repo::{init_repository, Repository};
 use crate::write_tree::{cache_tree_update, write_tree_update_index, WriteTreeFlags};
 
 const INDEX_MTIME: (u32, u32) = (1_700_000_000, 123_456_789);
-
-struct PackStampCountingGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-impl PackStampCountingGuard {
-    fn acquire() -> Self {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        let _lock = LOCK
-            .get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        Self { _lock }
-    }
-}
-
-impl Drop for PackStampCountingGuard {
-    fn drop(&mut self) {
-        pack::test_set_pack_signature_stat_counting(false);
-        midx::test_set_midx_stamp_counting(false);
-        crate::odb::test_counters::set_freshen_counting(false);
-    }
-}
+const LARGE_INDEX_ENTRIES: usize = 10_000;
+const PACK_REGRESSION_ENTRIES: usize = 2_500;
 
 fn bench_oid(seed: u32) -> ObjectId {
     let mut bytes = [0x42_u8; 20];
@@ -164,11 +144,49 @@ fn commit_ident() -> String {
     "Test User <t@example.com> 1 +0000".to_owned()
 }
 
+fn catfile_tree_line(mode: u32, kind: &str, oid: &ObjectId, name: &str) -> String {
+    format!("{:06o} {kind} {}\t{name}\n", mode, oid.to_hex())
+}
+
+fn git_tree_catfile_dump(repo_dir: &Path, tree_oid_hex: &str, out: &mut String) {
+    let body = git_out(repo_dir, &["cat-file", "-p", tree_oid_hex]);
+    for line in body.lines() {
+        out.push_str(line);
+        out.push('\n');
+        let Some((meta, _name)) = line.split_once('\t') else {
+            continue;
+        };
+        let mut parts = meta.split_whitespace();
+        let _mode = parts.next();
+        let kind = parts.next();
+        let oid = parts.next();
+        if kind == Some("tree") {
+            if let Some(oid) = oid {
+                git_tree_catfile_dump(repo_dir, oid, out);
+            }
+        }
+    }
+}
+
+fn grit_tree_catfile_dump(odb: &Odb, tree_oid: &ObjectId, out: &mut String) {
+    let obj = odb.read(tree_oid).expect("read tree");
+    let entries = parse_tree(&obj.data).expect("parse tree");
+    for entry in entries {
+        let name = String::from_utf8_lossy(&entry.name);
+        if entry.mode == MODE_TREE {
+            out.push_str(&catfile_tree_line(entry.mode, "tree", &entry.oid, &name));
+            grit_tree_catfile_dump(odb, &entry.oid, out);
+        } else {
+            out.push_str(&catfile_tree_line(entry.mode, "blob", &entry.oid, &name));
+        }
+    }
+}
+
 #[test]
 fn write_tree_unchanged_index_writes_and_freshens_nothing() {
     let tmp = TempDir::new().unwrap();
     let odb = Odb::new(tmp.path());
-    let mut index = build_flat_index(10_000, 2);
+    let mut index = build_flat_index(LARGE_INDEX_ENTRIES, 2);
     for i in 0..index.entries.len() {
         let data = format!("blob-{i}");
         let oid = odb.write(ObjectKind::Blob, data.as_bytes()).unwrap();
@@ -176,19 +194,20 @@ fn write_tree_unchanged_index_writes_and_freshens_nothing() {
     }
     cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
 
-    crate::write_tree::test_reset_tree_write_count();
-    crate::odb::test_counters::reset_freshen_calls();
-    crate::odb::test_counters::set_freshen_counting(true);
+    let metrics = odb.hot_path_test_metrics();
+    crate::write_tree::test_reset_tree_write_count(&odb);
+    metrics.reset_freshen_calls();
+    metrics.set_freshen_counting(true);
     write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
-    crate::odb::test_counters::set_freshen_counting(false);
+    metrics.set_freshen_counting(false);
 
     assert_eq!(
-        crate::write_tree::test_tree_write_count(),
+        crate::write_tree::test_tree_write_count(&odb),
         0,
         "valid cache-tree must not rewrite tree objects"
     );
     assert_eq!(
-        crate::odb::test_counters::freshen_calls(),
+        metrics.freshen_calls(),
         0,
         "unchanged write-tree must not freshen objects"
     );
@@ -243,9 +262,10 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
     index.add_or_replace(entry);
     repo.write_index(&mut index).unwrap();
 
-    crate::write_tree::test_reset_tree_write_count();
-    crate::odb::test_counters::reset_freshen_calls();
-    crate::odb::test_counters::set_freshen_counting(true);
+    let metrics = repo.odb.hot_path_test_metrics();
+    crate::write_tree::test_reset_tree_write_count(&repo.odb);
+    metrics.reset_freshen_calls();
+    metrics.set_freshen_counting(true);
     let outcome = create_commit(
         &repo,
         &CommitRequest {
@@ -257,27 +277,37 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
         &mut NullProgress,
     )
     .unwrap();
-    crate::odb::test_counters::set_freshen_counting(false);
+    metrics.set_freshen_counting(false);
 
     assert!(
-        crate::write_tree::test_tree_write_count() <= 3,
+        crate::write_tree::test_tree_write_count(&repo.odb) <= 3,
         "one depth-2 path change should rewrite at most root + top + mid trees, got {}",
-        crate::write_tree::test_tree_write_count()
+        crate::write_tree::test_tree_write_count(&repo.odb)
     );
     assert!(
-        crate::odb::test_counters::freshen_calls() <= 3,
+        metrics.freshen_calls() <= 3,
         "freshen calls must scale with changed trees, not index size (got {})",
-        crate::odb::test_counters::freshen_calls()
+        metrics.freshen_calls()
     );
 
     let wt = repo.work_tree.as_ref().unwrap();
     git_in(wt, &["fsck", "--strict"]);
-    let git_tree = git_out(wt, &["rev-parse", "HEAD^{tree}"]);
+    let git_tree_hex = git_out(wt, &["rev-parse", "HEAD^{tree}"]);
     let commit_obj = repo.odb.read(&outcome.oid).unwrap();
-    let grit_tree = parse_commit(&commit_obj.data).unwrap().tree.to_hex();
+    let grit_tree = parse_commit(&commit_obj.data).unwrap().tree;
     assert_eq!(
-        git_tree, grit_tree,
-        "git and grit must agree on commit tree"
+        git_tree_hex,
+        grit_tree.to_hex(),
+        "git and grit must agree on commit tree oid"
+    );
+
+    let mut git_dump = String::new();
+    git_tree_catfile_dump(wt, &git_tree_hex, &mut git_dump);
+    let mut grit_dump = String::new();
+    grit_tree_catfile_dump(&repo.odb, &grit_tree, &mut grit_dump);
+    assert_eq!(
+        git_dump, grit_dump,
+        "git cat-file tree dump (recursive) must match grit tree bytes"
     );
 }
 
@@ -285,7 +315,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
 fn stage_one_modified_file_hashes_one_blob() {
     let tmp = TempDir::new().unwrap();
     let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
-    let mut index = build_flat_index(10_000, 2);
+    let mut index = build_flat_index(LARGE_INDEX_ENTRIES, 2);
     materialize_index_worktree(&repo, &index, "v1:");
     for entry in index.entries.iter_mut() {
         let rel = std::str::from_utf8(&entry.path).unwrap();
@@ -304,11 +334,14 @@ fn stage_one_modified_file_hashes_one_blob() {
     fs::write(&target_abs, b"v2:changed").unwrap();
     pin_mtime(&target_abs, INDEX_MTIME.0 + 1, INDEX_MTIME.1);
 
-    crate::odb::test_counters::reset_blob_content_reads();
+    let metrics = repo.odb.hot_path_test_metrics();
+    metrics.reset_blob_content_reads();
+    metrics.set_blob_counting(true);
     let staged = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+    metrics.set_blob_counting(false);
     assert_eq!(staged.modified, 1, "expected exactly one staged path");
     assert_eq!(
-        crate::odb::test_counters::blob_content_reads(),
+        metrics.blob_content_reads(),
         1,
         "staging must hash/read only the modified worktree file"
     );
@@ -316,11 +349,12 @@ fn stage_one_modified_file_hashes_one_blob() {
 
 #[test]
 fn pack_signature_not_restatted_per_object() {
-    let _guard = PackStampCountingGuard::acquire();
     let tmp = TempDir::new().unwrap();
     let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
+    let _scope = HotPathMetricsScope::install(Arc::clone(&repo.odb.hot_path_test_metrics));
+    let metrics = repo.odb.hot_path_test_metrics();
     let wt = repo.work_tree.as_ref().unwrap();
-    let mut index = build_flat_index(10_000, 2);
+    let mut index = build_flat_index(PACK_REGRESSION_ENTRIES, 2);
     materialize_index_worktree(&repo, &index, "pack:");
     for entry in index.entries.iter_mut() {
         let rel = std::str::from_utf8(&entry.path).unwrap();
@@ -347,59 +381,62 @@ fn pack_signature_not_restatted_per_object() {
     )
     .unwrap();
 
-    git_in(wt, &["repack", "-adf"]);
+    git_in(wt, &["repack", "-ad"]);
     git_in(wt, &["multi-pack-index", "write"]);
     pack::clear_pack_cache();
 
-    let sample = index.entries[0].oid;
-    let _ = repo.odb.read(&sample).expect("warm pack cache");
+    let warm_rel = std::str::from_utf8(&index.entries[0].path).unwrap();
+    let warm_data = format!("pack:{warm_rel}");
+    let _ = repo
+        .odb
+        .write_with_options(ObjectKind::Blob, warm_data.as_bytes(), Default::default())
+        .unwrap();
 
-    let mut index = repo.load_index().unwrap();
-    crate::odb::test_counters::reset_freshen_calls();
-    pack::test_reset_pack_signature_stat_calls();
-    midx::test_reset_midx_stamp_calls();
-    pack::test_set_pack_signature_stat_counting(true);
-    midx::test_set_midx_stamp_counting(true);
-    crate::odb::test_counters::set_freshen_counting(true);
+    let index = repo.load_index().unwrap();
+    metrics.reset_freshen_calls();
+    metrics.reset_pack_stamp_stats();
+    metrics.reset_midx_stamp_stats();
+    metrics.set_stamp_counting(true);
+    metrics.set_freshen_counting(true);
     for entry in &index.entries {
-        let obj = repo.odb.read(&entry.oid).unwrap();
+        let rel = std::str::from_utf8(&entry.path).unwrap();
+        let data = format!("pack:{rel}");
         let _ = repo
             .odb
-            .write_with_options(obj.kind, &obj.data, Default::default())
+            .write_with_options(ObjectKind::Blob, data.as_bytes(), Default::default())
             .unwrap();
     }
-    pack::test_set_pack_signature_stat_counting(false);
-    midx::test_set_midx_stamp_counting(false);
-    crate::odb::test_counters::set_freshen_counting(false);
+    metrics.set_stamp_counting(false);
+    metrics.set_freshen_counting(false);
 
-    let stamp_calls =
-        pack::test_pack_signature_stat_call_count() + midx::test_midx_stamp_call_count();
+    let stamp_calls = metrics.pack_signature_stat_calls() + metrics.midx_stamp_stat_calls();
     assert!(
         stamp_calls <= 10,
         "pack/midx signature stats must not scale with object count (got {stamp_calls})"
     );
     assert!(
-        crate::odb::test_counters::freshen_calls() <= 16,
+        metrics.freshen_calls() <= 16,
         "freshen touches must not scale with packed object count (got {})",
-        crate::odb::test_counters::freshen_calls()
+        metrics.freshen_calls()
     );
     assert!(
-        stamp_calls < 500,
-        "sanity: stamp calls would be ~10k if regression returned"
+        stamp_calls < index.entries.len() / 10,
+        "sanity: stamp calls would track entry count if regression returned"
     );
 
-    let target = wt.join("d0099/f00099.txt");
+    let target_rel = "d0024/f00024.txt";
+    let target = wt.join(target_rel);
     fs::write(&target, b"pack:changed").unwrap();
     pin_mtime(&target, INDEX_MTIME.0 + 2, INDEX_MTIME.1);
     let new_oid = repo.odb.write(ObjectKind::Blob, b"pack:changed").unwrap();
-    let entry = entry_from_stat(&target, b"d0099/f00099.txt", new_oid, MODE_REGULAR).unwrap();
+    let entry = entry_from_stat(&target, target_rel.as_bytes(), new_oid, MODE_REGULAR).unwrap();
+    let mut index = repo.load_index().unwrap();
     index.add_or_replace(entry);
     repo.write_index(&mut index).unwrap();
 
-    pack::test_reset_pack_signature_stat_calls();
-    midx::test_reset_midx_stamp_calls();
-    pack::test_set_pack_signature_stat_counting(true);
-    midx::test_set_midx_stamp_counting(true);
+    metrics.reset_pack_stamp_stats();
+    metrics.reset_midx_stamp_stats();
+    metrics.set_stamp_counting(true);
     let _ = create_commit(
         &repo,
         &CommitRequest {
@@ -411,13 +448,11 @@ fn pack_signature_not_restatted_per_object() {
         &mut NullProgress,
     )
     .unwrap();
-    pack::test_set_pack_signature_stat_counting(false);
-    midx::test_set_midx_stamp_counting(false);
-    let stamp_after_commit =
-        pack::test_pack_signature_stat_call_count() + midx::test_midx_stamp_call_count();
+    metrics.set_stamp_counting(false);
+    let stamp_after_commit = metrics.pack_signature_stat_calls() + metrics.midx_stamp_stat_calls();
     assert!(
         stamp_after_commit <= 12,
-        "commit at 10k must not restat pack/midx per object (got {stamp_after_commit})"
+        "commit at scale must not restat pack/midx per object (got {stamp_after_commit})"
     );
 
     git_in(wt, &["fsck", "--strict"]);

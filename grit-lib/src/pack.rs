@@ -384,36 +384,10 @@ mod pack_cache {
 
     fn file_signature(path: &Path) -> Option<(SystemTime, u64)> {
         #[cfg(test)]
-        test_pack_signature_stat_calls::record_if_enabled();
+        crate::hot_path_test_metrics::record_pack_signature_stat_for_active_scope();
         let m = fs::metadata(path).ok()?;
         let mtime = m.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         Some((mtime, m.len()))
-    }
-
-    #[cfg(test)]
-    mod test_pack_signature_stat_calls {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-        static CALLS: AtomicUsize = AtomicUsize::new(0);
-        static ENABLED: AtomicBool = AtomicBool::new(false);
-
-        pub fn reset() {
-            CALLS.store(0, Ordering::SeqCst);
-        }
-
-        pub fn count() -> usize {
-            CALLS.load(Ordering::SeqCst)
-        }
-
-        pub fn set_enabled(enabled: bool) {
-            ENABLED.store(enabled, Ordering::SeqCst);
-        }
-
-        pub fn record_if_enabled() {
-            if ENABLED.load(Ordering::Relaxed) {
-                CALLS.fetch_add(1, Ordering::Relaxed);
-            }
-        }
     }
 
     /// Get a parsed pack index from cache, parsing from disk only on cache miss.
@@ -628,22 +602,6 @@ mod pack_cache {
     }
 
     #[cfg(test)]
-    pub fn test_reset_pack_signature_stat_calls() {
-        test_pack_signature_stat_calls::reset();
-    }
-
-    #[cfg(test)]
-    pub fn test_set_pack_signature_stat_counting(enabled: bool) {
-        test_pack_signature_stat_calls::set_enabled(enabled);
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub fn test_pack_signature_stat_calls() -> usize {
-        test_pack_signature_stat_calls::count()
-    }
-
-    #[cfg(test)]
     pub fn test_reset_dir_rescan_count(pack_dir: &Path) {
         lock()
             .test_dir_rescan_counts
@@ -817,22 +775,6 @@ pub fn clear_pack_cache() {
 /// (object freshening). See the internal `pack_cache::refresh_pack_signature` helper.
 pub fn refresh_pack_bytes_signature(pack_path: &Path, touched_at: SystemTime) {
     pack_cache::refresh_pack_signature(pack_path, touched_at);
-}
-
-#[cfg(test)]
-pub fn test_reset_pack_signature_stat_calls() {
-    pack_cache::test_reset_pack_signature_stat_calls();
-}
-
-#[cfg(test)]
-pub fn test_set_pack_signature_stat_counting(enabled: bool) {
-    pack_cache::test_set_pack_signature_stat_counting(enabled);
-}
-
-#[cfg(test)]
-#[must_use]
-pub fn test_pack_signature_stat_call_count() -> usize {
-    pack_cache::test_pack_signature_stat_calls()
 }
 
 /// Collect aggregate local pack metrics.

@@ -433,36 +433,17 @@ fn path_strip_prefix(path: &[u8], prefix_len: usize) -> &[u8] {
         .unwrap_or(&path[prefix_len..])
 }
 
-/// Reset the tree-object write counter (unit tests only).
+/// Reset the tree-object write counter on `odb` (unit tests only).
 #[cfg(test)]
-pub fn test_reset_tree_write_count() {
-    test_tree_write_counter::reset();
+pub fn test_reset_tree_write_count(odb: &Odb) {
+    odb.hot_path_test_metrics().reset_tree_writes();
 }
 
-/// Tree objects written via [`store_tree_payload`] since the last reset (unit tests only).
+/// Tree objects written via [`store_tree_payload`] on `odb` since the last reset (unit tests only).
 #[cfg(test)]
 #[must_use]
-pub fn test_tree_write_count() -> usize {
-    test_tree_write_counter::tree_writes()
-}
-
-#[cfg(test)]
-mod test_tree_write_counter {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    static TREE_WRITES: AtomicUsize = AtomicUsize::new(0);
-
-    pub fn reset() {
-        TREE_WRITES.store(0, Ordering::SeqCst);
-    }
-
-    pub fn tree_writes() -> usize {
-        TREE_WRITES.load(Ordering::SeqCst)
-    }
-
-    pub fn record_tree_write() {
-        TREE_WRITES.fetch_add(1, Ordering::SeqCst);
-    }
+pub fn test_tree_write_count(odb: &Odb) -> usize {
+    odb.hot_path_test_metrics().tree_writes()
 }
 
 fn store_tree_payload(
@@ -477,7 +458,7 @@ fn store_tree_payload(
         WriteTreePersistence::Repair => Ok((hashed, !odb.exists(&hashed))),
         WriteTreePersistence::Write => {
             #[cfg(test)]
-            test_tree_write_counter::record_tree_write();
+            odb.hot_path_test_metrics().record_tree_write();
             Ok((
                 odb.write_with_options(ObjectKind::Tree, payload, write_opts)?,
                 false,
@@ -1490,9 +1471,9 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"updated").unwrap();
         index.add_or_replace(entry("beta/four/deep", MODE_REGULAR, blob));
 
-        test_tree_write_counter::reset();
+        odb.hot_path_test_metrics().reset_tree_writes();
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
-        let tree_writes = test_tree_write_counter::tree_writes();
+        let tree_writes = odb.hot_path_test_metrics().tree_writes();
         assert!(
             (2..=3).contains(&tree_writes),
             "expected root + beta subtree tree writes, got {tree_writes}"
