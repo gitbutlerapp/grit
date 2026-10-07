@@ -12,20 +12,14 @@ repository = "https://github.com/gitbutlerapp/grit"
 unsafe_code = "allow"
 
 [lints.clippy]
-# `cargo clippy -p grit-lib --benches` always type-checks the lib unit-test harness
-# (dev-dependencies), so deny-by-default would fail the documented bench clippy command.
-# Production paths still avoid `unwrap`/`expect`; workspace `make gate` clippy checks
-# the rest of the workspace with `-D warnings`.
-unwrap_used = "allow"
-expect_used = "allow"
+unwrap_used = "deny"
+expect_used = "deny"
 
 [features]
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport
 # (`transport::http::ureq_client`). Off by default so embedders can bring their
 # own HTTP stack.
 http-ureq = ["dep:ureq", "dep:base64"]
-# Enables Criterion micro-benchmarks (`cargo bench -p grit-lib --features benchmark`).
-benchmark = ["dep:criterion"]
 
 [dependencies]
 thiserror.workspace = true
@@ -51,7 +45,6 @@ shell-words.workspace = true
 ureq = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 crc32fast.workspace = true
-criterion = { workspace = true, optional = true }
 
 # `nix` (signals, poll, uid, uname, Unix sockets) is only used behind
 # `#[cfg(unix)]`, so it is not pulled in on Windows.
@@ -67,8 +60,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [[bench]]
 name = "objects"
 harness = false
-required-features = ["benchmark"]
 
 [dev-dependencies]
+criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
 

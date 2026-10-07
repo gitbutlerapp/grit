@@ -1066,8 +1066,7 @@ mod tests {
 
     #[test]
     fn fast_import_delimited_data_m_inline_and_note() -> Result<()> {
-        let dir =
-            tempdir().map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let dir = tempdir().map_err(Error::Io)?;
         let repo = init_repository(dir.path(), false, "main", None, "files")?;
 
         let setup = r#"commit refs/heads/main

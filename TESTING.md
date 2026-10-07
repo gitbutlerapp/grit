@@ -105,13 +105,13 @@ Object and pack micro-benchmarks live under `grit-lib/benches/` (harness disable
 Run the full suite locally:
 
 ```bash
-cargo bench -p grit-lib --features benchmark --bench objects
+cargo bench -p grit-lib --bench objects
 ```
 
 CI runs a one-iteration smoke pass (every benchmark once):
 
 ```bash
-cargo bench -p grit-lib --features benchmark --bench objects -- --test
+cargo bench -p grit-lib --bench objects -- --test
 ```
 
 Before changing benchmarks, keep bench code warning-free:

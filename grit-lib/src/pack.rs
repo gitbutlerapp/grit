@@ -3424,12 +3424,14 @@ mod cached_lookup_tests {
         let mut hasher = Sha1::new();
         Digest::update(&mut hasher, &body);
         body.extend_from_slice(&hasher.finalize());
-        let mut perms = fs::metadata(&idx_path).unwrap().permissions();
-        perms.set_readonly(false);
-        fs::set_permissions(&idx_path, perms).unwrap();
-        fs::write(&idx_path, body).unwrap();
+        rewrite_test_file(&idx_path, &body);
         clear_pack_cache();
         idx_path
+    }
+
+    fn rewrite_test_file(path: &Path, body: &[u8]) {
+        let _ = fs::remove_file(path);
+        fs::write(path, body).unwrap();
     }
 
     fn synthetic_fanout_index(entries: &[(Vec<u8>, u64)]) -> PackIndex {
@@ -3880,10 +3882,7 @@ mod cached_lookup_tests {
         let flip = start + (end - start) / 2;
         let mut corrupt = fs::read(&redundant_pack).expect("read redundant");
         corrupt[flip] ^= 0x01;
-        let mut perms = fs::metadata(&redundant_pack).unwrap().permissions();
-        perms.set_readonly(false);
-        fs::set_permissions(&redundant_pack, perms).unwrap();
-        fs::write(&redundant_pack, &corrupt).expect("corrupt redundant pack");
+        rewrite_test_file(&redundant_pack, &corrupt);
         clear_pack_cache();
 
         let recorded_crc = read_pack_index(&redundant_idx)

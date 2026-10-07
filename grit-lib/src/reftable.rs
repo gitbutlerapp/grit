@@ -3553,8 +3553,10 @@ mod tests {
         let old_oid = ObjectId::from_bytes(&[0; 20]).unwrap();
         let new_oid = ObjectId::from_bytes(&[0xaa; 20]).unwrap();
 
-        let mut opts = WriteOptions::default();
-        opts.write_log = true;
+        let opts = WriteOptions {
+            write_log: true,
+            ..Default::default()
+        };
         let mut writer = ReftableWriter::new(opts, 1, 1);
         writer
             .add_log(LogRecord {

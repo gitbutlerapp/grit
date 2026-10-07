@@ -1466,7 +1466,7 @@ mod tests {
         assert!(attr_rule_matches(d_yes, "a/b/d/yes", false));
         let m = collect_attrs_for_path(&merged.rules, &merged.macros, "a/b/d/yes", false);
         assert!(
-            m.get("test").is_none(),
+            !m.contains_key("test"),
             "expected test cleared by notest macro, got {:?}",
             m.get("test")
         );

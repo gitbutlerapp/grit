@@ -200,17 +200,17 @@ mod tests {
     #[test]
     fn precompose_nfd_filename_to_nfc() {
         // Matches t3910: Adiarnfc = UTF-8 \303\204 (U+00C4), Adiarnfd = A + U+0308.
-        let nfd = format!("f.{}\u{0308}", 'A');
-        let nfc = format!("f.\u{00c4}");
-        assert_eq!(precompose_utf8_path(&nfd).as_ref(), nfc.as_str());
+        let nfd = "f.A\u{0308}";
+        let nfc = "f.\u{00c4}";
+        assert_eq!(precompose_utf8_path(nfd).as_ref(), nfc);
     }
 
     #[test]
     fn resolve_nfc_index_path_for_nfd_on_disk() {
         let td = tempfile::TempDir::new().expect("tempdir");
         let wt = td.path();
-        let nfd = format!("cafe\u{0301}.txt");
-        fs::write(wt.join(&nfd), b"x").expect("write");
+        let nfd = "cafe\u{0301}.txt";
+        fs::write(wt.join(nfd), b"x").expect("write");
         let nfc = "caf\u{00e9}.txt";
         let r = resolve_worktree_path_for_staging(wt, nfc, true);
         assert!(r.abs.is_file());

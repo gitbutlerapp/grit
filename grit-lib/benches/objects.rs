@@ -13,7 +13,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::objects::ObjectKind;
 use grit_lib::odb::Odb;
-use grit_lib::pack::{read_object_from_pack, PackIndex};
+use grit_lib::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::unpack_objects::apply_delta;
 use sha1::{Digest, Sha1};
 
@@ -116,6 +116,9 @@ fn bench_packed_read(c: &mut Criterion) {
             fx.packed_delta_chain_depth
         );
         b.iter(|| {
+            // Criterion warmup fills pack.rs delta-base cache; clear so each sample
+            // walks the full verified chain, not a one-hop cached read.
+            clear_pack_cache();
             black_box(
                 read_object_from_pack(&fx.packed_delta_idx, &fx.packed_delta_oid)
                     .expect("read delta chain"),

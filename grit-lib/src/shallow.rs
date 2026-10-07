@@ -340,9 +340,7 @@ mod tests {
     }
 
     fn oid(hex_byte: u8) -> ObjectId {
-        let s: String = std::iter::repeat(format!("{hex_byte:02x}"))
-            .take(20)
-            .collect();
+        let s = format!("{hex_byte:02x}").repeat(20);
         ObjectId::from_hex(&s).unwrap()
     }
 

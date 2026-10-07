@@ -1,4 +1,4 @@
-#![cfg_attr(test, allow(clippy::all))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 //! Gust library — core Git-compatible engine.
 //!

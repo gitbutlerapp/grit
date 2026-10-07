@@ -1560,6 +1560,7 @@ fn read_delta_varint(data: &[u8], pos: &mut usize) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::vec_init_then_push)]
     use super::*;
 
     // Helper: build a minimal pack from a list of (kind, data) pairs.

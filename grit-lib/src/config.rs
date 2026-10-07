@@ -4128,10 +4128,14 @@ mod config_cache_tests {
     use filetime::FileTime;
 
     fn local_opts(git_dir: &Path) -> LoadConfigOptions {
-        let mut opts = LoadConfigOptions::default();
-        opts.include_system = false;
-        opts.include_ctx.git_dir = Some(git_dir.to_path_buf());
-        opts
+        LoadConfigOptions {
+            include_system: false,
+            include_ctx: IncludeContext {
+                git_dir: Some(git_dir.to_path_buf()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 
     fn load_value(git_dir: &Path) -> Option<String> {

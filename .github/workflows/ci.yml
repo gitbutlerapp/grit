@@ -80,7 +80,7 @@ jobs:
       - run: cargo test -p grit-lib -p grit-cli
 
       - name: Criterion object micro-benchmarks (smoke)
-        run: cargo bench -p grit-lib --features benchmark --bench objects -- --test
+        run: cargo bench -p grit-lib --bench objects -- --test
 
       # The transport tests serve repositories with `grit upload-pack` /
       # `grit receive-pack` behind grit-http-server; they skip when either

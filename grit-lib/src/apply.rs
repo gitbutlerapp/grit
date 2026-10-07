@@ -1434,9 +1434,7 @@ mod tests {
                      +++ b/x\n\
                      @@ -1,3 +1,3 @@\n\
                       one\n";
-        let err = parse_patch(input, 1, "patch", false, None)
-            .err()
-            .expect("should fail");
+        let err = parse_patch(input, 1, "patch", false, None).unwrap_err();
         assert_eq!(err.to_string(), "error: corrupt patch at patch:4");
     }
 
@@ -1448,7 +1446,7 @@ mod tests {
 
     #[test]
     fn invalid_hunk_header_chains_inner_message() {
-        let err = parse_hunk_header("@@ -x +1 @@").err().expect("fail");
+        let err = parse_hunk_header("@@ -x +1 @@").unwrap_err();
         // The numeric parse failure must surface its own message.
         assert_eq!(err.to_string(), "invalid digit found in string");
     }
