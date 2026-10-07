@@ -64,8 +64,8 @@ pub mod object_store {
 /// References: the refs backends, reflog, refspecs, name validation, namespaces.
 pub mod references {
     pub use crate::{
-        branch_ref_format, branch_tracking, check_ref_format, hide_refs, ref_exclusions,
-        ref_namespace, reflog, refs, refspec, reftable,
+        branch_tracking, check_ref_format, hide_refs, ref_exclusions, ref_namespace, reflog, refs,
+        refspec, reftable,
     };
 }
 
@@ -94,7 +94,7 @@ pub mod diffing {
 /// Merging: merge-base, tree/file merges, rerere, merge-message formatting.
 pub mod merging {
     pub use crate::{
-        fmt_merge_msg, merge_base, merge_diff, merge_file, merge_tree_trivial, merge_trees, rerere,
+        fmt_merge_msg, merge_base, merge_diff, merge_file, merge_trees, rerere,
     };
 }
 
@@ -110,7 +110,6 @@ pub mod apply;
 pub mod attributes;
 pub mod blame;
 pub mod bloom;
-pub mod branch_ref_format;
 pub mod branch_tracking;
 pub mod check_ref_format;
 pub mod combined_diff_patch;
@@ -143,7 +142,6 @@ pub mod fmt_merge_msg;
 pub mod fsck_standalone;
 pub mod gc;
 pub mod git_binary_base85;
-pub mod git_column;
 pub mod git_date;
 pub mod git_path;
 pub mod gitmodules;
@@ -164,7 +162,6 @@ pub mod mailmap;
 pub mod merge_base;
 pub mod merge_diff;
 pub mod merge_file;
-pub mod merge_tree_trivial;
 pub mod merge_trees;
 pub mod midx;
 pub mod name_rev;
@@ -210,43 +207,24 @@ pub mod serve;
 pub mod shallow;
 pub mod shared_repo;
 pub mod signing;
-#[cfg(unix)]
-pub mod simple_ipc;
 pub mod sparse_checkout;
 pub mod split_index;
-pub mod unicode_normalization;
-pub mod untracked_cache;
-pub mod upload_filter;
-#[cfg(not(unix))]
-pub mod simple_ipc {
-    /// Whether simple IPC is supported on this platform.
-    #[must_use]
-    pub fn supports_simple_ipc() -> bool {
-        false
-    }
-
-    /// Stub for non-Unix targets.
-    pub fn run_simple_ipc_tool(_args: &[String]) -> i32 {
-        eprintln!("simple IPC not available on this platform");
-        1
-    }
-}
 pub mod state;
 pub mod stripspace;
 pub mod submodule_active;
 pub mod submodule_config;
 pub mod submodule_config_cache;
 pub mod submodule_gitdir;
-pub mod tab_expand;
 pub mod terminal;
 pub mod textconv_cache;
 pub mod transfer;
 pub mod transport;
 pub mod transport_path;
 pub mod tree_path_follow;
-#[cfg(unix)]
-pub mod unix_process;
+pub mod unicode_normalization;
 pub mod unpack_objects;
+pub mod untracked_cache;
+pub mod upload_filter;
 pub mod url_rewrite;
 pub mod userdiff;
 pub mod whitespace_rule;

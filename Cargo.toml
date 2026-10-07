@@ -37,7 +37,7 @@ icu_normalizer = "2.0.0"
 shell-words = "1.1"
 filetime = "0.2"
 criterion = { version = "0.8.2", features = ["html_reports"] }
-nix = { version = "0.31", default-features = false, features = ["fs", "signal", "user", "poll", "feature"] }
+nix = { version = "0.31", default-features = false, features = ["user", "feature"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
