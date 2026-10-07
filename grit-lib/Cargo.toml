@@ -73,6 +73,9 @@ harness = false
 name = "worktree"
 harness = false
 
+[[bench]]
+name = "history"
+harness = false
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }

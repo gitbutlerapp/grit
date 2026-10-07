@@ -1,18 +1,12 @@
-# CI: format, clippy, unit tests, and smart-HTTP transport tests.
-#
-# Toolchain bump: change every `uses: dtolnay/rust-toolchain@…` pin below to the
-# same new version and document it in TESTING.md "Continuous integration".
-
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,11 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Docs freshness and link check
-        run: make docs-check
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
 
-      - name: Site script unit tests
-        run: python3 -m unittest discover scripts/tests
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: docs
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: make docs-check
+
+      - run: python3 -m unittest discover scripts/tests
 
   fmt:
     name: fmt
@@ -41,7 +43,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -116,6 +118,11 @@ jobs:
 
       - name: Criterion worktree micro-benchmarks (smoke)
         run: cargo bench -p grit-lib --bench worktree -- --test
+
+      - name: Criterion history benchmarks (smoke)
+        env:
+          GRIT_HISTORY_BENCH_COMMITS: "2000"
+        run: cargo bench -p grit-lib --bench history -- --test
 
       # The transport tests serve repositories with `grit upload-pack` /
       # `grit receive-pack` behind grit-http-server; they skip when either

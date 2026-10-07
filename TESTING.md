@@ -111,6 +111,7 @@ Run the full suites locally:
 ```bash
 cargo bench -p grit-lib --bench objects
 cargo bench -p grit-lib --bench worktree
+cargo bench -p grit-lib --bench history
 ```
 
 CI runs a one-iteration smoke pass (every benchmark once):
@@ -118,6 +119,7 @@ CI runs a one-iteration smoke pass (every benchmark once):
 ```bash
 cargo bench -p grit-lib --bench objects -- --test
 cargo bench -p grit-lib --bench worktree -- --test
+GRIT_HISTORY_BENCH_COMMITS=2000 cargo bench -p grit-lib --bench history -- --test
 ```
 
 Before changing benchmarks, keep bench code warning-free:
@@ -129,3 +131,5 @@ cargo clippy -p grit-lib --benches -- -D warnings
 **`objects`** groups: SHA-1 throughput, Git object-id hashing, zlib inflate/deflate on typical blob and tree payloads, loose and packed object reads (whole objects and deep delta chains), pack `.idx` lookup (hit/miss on small and large indexes), and delta apply.
 
 **`worktree`** groups: index read and write at 10k and 100k entries (v2 and v4), config load with global/local layering (~500 keys plus `[include]` files), ignore matching (realistic `.gitignore` set against 100k paths), and `.gitattributes` lookup for 100k paths.
+
+**`history`** (fixture helper `benches/s7/mod.rs`) exercises revwalk (topological and date order, with and without an on-disk commit-graph), rev-parse of common spec shapes, tree-to-tree diff on wide (10k-entry) and deep trees with few and many changes, and blob diff (Myers and histogram) at small, 10k-line, and pathological sizes. The default fixture builds 10k commits; override with `GRIT_HISTORY_BENCH_COMMITS` (must exceed `100` for `HEAD~100` specs; CI smoke uses `2000`).
