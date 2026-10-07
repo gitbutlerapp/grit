@@ -6,11 +6,9 @@ use grit_lib::ident_resolve::IdentRole;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
+use grit_lib::refs;
 use grit_lib::state::HeadState;
-use grit_lib::{
-    refs,
-    write_tree::{write_tree_update_index, WriteTreeFlags},
-};
+use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -72,7 +70,7 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
     };
 
     let mut index = model.index;
-    let tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::default())
+    let tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())
         .context("could not write tree")?;
     repo.write_index(&mut index)
         .context("could not refresh index cache-tree")?;

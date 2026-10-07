@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compare git write-tree vs grit-lib incremental cache-tree on a large index.
-# Requires: git, hyperfine (optional), release build of grit-lib tests via cargo.
+# Compare system git write-tree vs grit-lib incremental cache-tree on a ~10k-file index.
+# Requires: git, release build of grit-lib example (built below), hyperfine optional.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,6 +10,7 @@ FILES="${FILES:-10000}"
 DIRS="${DIRS:-10}"
 
 GIT="git -c user.email=t@example.com -c user.name=Test -c commit.gpgsign=false"
+GRIT_BIN="$REPO_ROOT/target/release/examples/write_tree_update"
 
 cleanup() { rm -rf "$SCRATCH"; }
 trap cleanup EXIT
@@ -30,8 +31,6 @@ mkdir -p "$R"
   done
   $GIT add -A
   $GIT commit -qm "initial $FILES"
-  echo "touch" >> d5/f500.txt
-  $GIT add d5/f500.txt
 )
 
 prepare() {
@@ -41,14 +40,22 @@ prepare() {
   $GIT -C "$R" add d5/f500.txt
 }
 
+echo "Building grit write_tree_update example (release)…"
+cargo build -q --release -p grit-lib --example write_tree_update
+[[ -x "$GRIT_BIN" ]] || { echo "missing $GRIT_BIN" >&2; exit 1; }
+
 echo "Repo: $FILES files under $R"
+echo ""
 
 if command -v hyperfine >/dev/null 2>&1; then
   hyperfine --warmup 2 --min-runs 5 --prepare "$(declare -f prepare); prepare" \
     "$GIT -C $R write-tree" \
-    "cargo test -q -p grit-lib --test cache_tree_git_compat grit_cache_tree_matches_git_write_tree_after_single_path_change -- --exact --nocapture"
+    "$GRIT_BIN $R"
 else
   prepare
   echo "git write-tree:"
   ( time $GIT -C "$R" write-tree >/dev/null ) 2>&1
+  echo ""
+  echo "grit write_tree_update:"
+  ( time "$GRIT_BIN" "$R" >/dev/null ) 2>&1
 fi

@@ -141,7 +141,7 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
     }
 
     let mut index = merged.index;
-    let new_tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::default())
+    let new_tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())
         .context("could not write picked tree")?;
     if new_tree == head_tree {
         bail!(
