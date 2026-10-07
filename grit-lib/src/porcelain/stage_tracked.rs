@@ -946,6 +946,7 @@ mod tests {
             .unwrap()
             .write_all(b"\n[core]\n\tprecomposeunicode = true\n")
             .unwrap();
+        repo.reload_config().unwrap();
 
         let wt = repo.work_tree.as_ref().unwrap();
         let nfd = "cafe\u{0301}.txt";
@@ -981,6 +982,7 @@ mod tests {
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n",
         )
         .unwrap();
+        repo.reload_config().unwrap();
         fs::write(dir.path().join("run.sh"), b"x\n").unwrap();
         let git_dir = repo.git_dir.clone();
         let wt = repo.work_tree.as_ref().unwrap();

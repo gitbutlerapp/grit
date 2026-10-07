@@ -304,21 +304,32 @@ where
     } else {
         HashMap::new()
     };
-    let use_preloaded = threads > 1;
+    if threads > 1 {
+        let mut dirs: Vec<_> = by_dir.keys().cloned().collect();
+        dirs.sort();
+        for dir in dirs {
+            let Some(blobs) = by_dir.get(&dir) else {
+                continue;
+            };
+            for blob in blobs {
+                let lookup = preloaded.remove(&blob.entry_index).ok_or_else(|| {
+                    Error::Message(format!(
+                        "parallel blob stat preload missing index entry {}",
+                        blob.entry_index
+                    ))
+                })?;
+                visit(blob.entry_index, &blob.rel_path, lookup)?;
+            }
+        }
+        return Ok(());
+    }
 
     for_each_blob_by_directory(
         by_dir,
         |dir| dir_abs_arc(dir),
         |rel| file_abs_arc(rel),
         |rel| has_symlink_ancestor(rel),
-        |entry_index, path, lookup| {
-            let lookup = if use_preloaded {
-                preloaded.remove(&entry_index).unwrap_or(lookup)
-            } else {
-                lookup
-            };
-            visit(entry_index, path, lookup)
-        },
+        visit,
     )
 }
 

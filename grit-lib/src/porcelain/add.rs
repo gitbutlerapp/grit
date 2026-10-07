@@ -833,6 +833,7 @@ mod tests {
             "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tprecomposeunicode = true\n",
         )
         .unwrap();
+        repo.reload_config().unwrap();
         let nfd = "cafe\u{301}.txt";
         fs::write(root.join(nfd), b"content\n").unwrap();
 
@@ -1032,6 +1033,7 @@ mod tests {
             "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tautocrlf = true\n",
         )
         .unwrap();
+        repo.reload_config().unwrap();
         fs::write(root.join("f.txt"), b"changed\r\n").unwrap();
 
         stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
