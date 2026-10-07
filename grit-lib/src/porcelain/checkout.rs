@@ -40,19 +40,27 @@ pub fn checkout_between_trees(
     from: Option<&ObjectId>,
     to: &ObjectId,
 ) -> Result<()> {
+    let changes = diff_trees(&repo.odb, from, Some(to), "")?;
+    checkout_tree_changes(repo, &changes)
+}
+
+/// Apply a precomputed tree-to-tree diff to the working tree and index.
+///
+/// Callers such as `grit switch` can reuse one [`diff_trees`] result for both
+/// untracked guards and the mechanical apply.
+pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
     let work_tree = repo
         .work_tree
         .clone()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
-    let changes = diff_trees(&repo.odb, from, Some(to), "")?;
     let mut index = repo.load_index()?;
-    let mut paths_to_remove: Vec<Vec<u8>> = Vec::new();
-    let mut new_entries: Vec<IndexEntry> = Vec::new();
-    let mut deleted_abs_paths: Vec<PathBuf> = Vec::new();
+    let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
+    let mut new_entries: Vec<IndexEntry> = Vec::with_capacity(changes.len());
+    let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
     let mut dir_cache = LeadingDirCache::new();
 
-    for change in &changes {
+    for change in changes {
         if change.status == DiffStatus::Deleted {
             if let Some(path) = &change.old_path {
                 let abs = work_tree.join(path);
@@ -162,11 +170,13 @@ fn apply_in_place_git_mode_transition(
     }
     let mut perms = meta.permissions();
     let mut bits = perms.mode();
-    const EXEC_MASK: u32 = 0o111;
+    const ALL_EXEC: u32 = 0o111;
+    const USER_EXEC: u32 = 0o100;
     if new_exec {
-        bits |= EXEC_MASK;
+        // Match Git: executable blobs add owner execute only (0600 → 0700 under umask 077).
+        bits = (bits & !ALL_EXEC) | USER_EXEC;
     } else {
-        bits &= !EXEC_MASK;
+        bits &= !ALL_EXEC;
     }
     perms.set_mode(bits);
     file.set_permissions(perms).map_err(Error::Io)
@@ -252,13 +262,13 @@ pub fn apply_index_file_mode(abs_path: &Path, mode: u32) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        if mode != MODE_EXECUTABLE {
+            return Ok(());
+        }
         let mut perms = fs::metadata(abs_path)?.permissions();
-        let new_mode = if mode == MODE_EXECUTABLE {
-            0o755
-        } else {
-            0o644
-        };
-        perms.set_mode(new_mode);
+        let mut bits = perms.mode();
+        bits |= 0o100;
+        perms.set_mode(bits);
         fs::set_permissions(abs_path, perms)?;
     }
     // Windows has no POSIX mode bits; the executable bit is not represented in
