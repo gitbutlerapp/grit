@@ -88,6 +88,9 @@ pub struct StatusOptions {
     pub pathspecs: Vec<String>,
     /// Compute ahead/behind counts relative to the upstream branch.
     pub ahead_behind: bool,
+    /// Override parallel index stat workers (`Some(1)` forces serial). Used by tests and embedders.
+    #[doc(hidden)]
+    pub stat_parallel_threads: Option<usize>,
 }
 
 impl Default for StatusOptions {
@@ -98,6 +101,7 @@ impl Default for StatusOptions {
             renames: None,
             pathspecs: Vec::new(),
             ahead_behind: true,
+            stat_parallel_threads: None,
         }
     }
 }
@@ -1164,6 +1168,7 @@ pub fn status(
                 repository_git_dir: Some(repo.git_dir.clone()),
                 refresh_index_stat_in_pass: true,
                 config: repo_config.clone(),
+                stat_parallel_threads: opts.stat_parallel_threads,
                 ..Default::default()
             },
         )?;

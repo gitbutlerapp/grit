@@ -237,6 +237,7 @@ mod worktree_batch;
 pub mod worktree_cwd;
 pub mod worktree_ref;
 mod worktree_scan;
+pub use worktree_scan::{last_blob_scan_threads_for_tests, PARALLEL_STAT_MIN_ENTRIES};
 pub mod write_tree;
 pub mod ws;
 

@@ -2375,6 +2375,9 @@ pub struct DiffIndexToWorktreeOptions {
     pub refresh_index_stat_in_pass: bool,
     /// When set, used instead of loading config from [`Self::repository_git_dir`].
     pub config: Option<std::sync::Arc<crate::config::ConfigSet>>,
+    /// Override parallel stat workers (`Some(1)` forces serial). When `None`, honors
+    /// `core.preloadIndex` and [`crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES`].
+    pub stat_parallel_threads: Option<usize>,
 }
 
 /// Compare the index against the working tree with optional racy-timestamp context.
@@ -2784,20 +2787,33 @@ fn diff_index_to_worktree_inner(
     }
 
     use crate::worktree_scan::{
-        for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup,
+        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
+        WorktreeBlobScanOptions,
+    };
+    let preload_index = config
+        .get_bool("core.preloadIndex")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    let blob_scan = WorktreeBlobScanOptions {
+        preload_index,
+        stat_parallel_threads: options.stat_parallel_threads,
     };
     let blob_dirs = group_blob_entries_by_dir(index);
-    let dir_abs = |dir: &str| {
+    let work_tree_owned = work_tree.to_path_buf();
+    let dir_abs = move |dir: &str| {
         if dir.is_empty() {
-            work_tree.to_path_buf()
+            work_tree_owned.clone()
         } else {
-            index_entry_worktree_abs(work_tree, dir, precompose_unicode, ignorecase)
+            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
         }
     };
-    let file_abs =
-        |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
-    for_each_blob_by_directory(
+    let work_tree_for_files = work_tree.to_path_buf();
+    let file_abs = move |rel: &str| {
+        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+    };
+    for_each_blob_by_directory_parallel(
         &blob_dirs,
+        blob_scan,
         dir_abs,
         file_abs,
         |rel_path| {
@@ -3386,8 +3402,8 @@ pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
 /// `entry_is_racy` / Git `is_racy_timestamp`); pass `None` when unknown — racy detection is
 /// then skipped, which is conservative for tree-built indexes whose zeroed stat never matches.
 ///
-/// `parallelism` is the resolved worker count (from `core.preloadindex` / `index.threads`);
-/// callers pass [`crate::hash::index_parallelism_from_config`] output.
+/// `stat_parallel_threads` overrides parallel stat workers (`Some(1)` forces serial); when `None`,
+/// honors `core.preloadIndex` and [`crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES`].
 ///
 /// Returns `Ok(true)` when at least one entry was refreshed or invalidated, so callers can write
 /// the index opportunistically (Git only persists a refresh that changed something).
@@ -3402,18 +3418,27 @@ pub fn refresh_index_stat_content_verified(
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
     config: Option<&ConfigSet>,
-    _parallelism: crate::hash::Parallelism,
+    stat_parallel_threads: Option<usize>,
 ) -> Result<bool> {
     use crate::config::ConfigSet;
     use crate::crlf;
     use crate::worktree_scan::{
-        for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup,
+        for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
+        WorktreeBlobScanOptions,
     };
 
     let index_mtime = index_mtime_for_diff(index, index_mtime);
     let config = config
         .cloned()
         .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default());
+    let preload_index = config
+        .get_bool("core.preloadIndex")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    let blob_scan = WorktreeBlobScanOptions {
+        preload_index,
+        stat_parallel_threads,
+    };
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
     let precompose_unicode = config
@@ -3426,19 +3451,23 @@ pub fn refresh_index_stat_content_verified(
         .unwrap_or(false);
 
     let blob_dirs = group_blob_entries_by_dir(index);
-    let dir_abs = |dir: &str| {
+    let work_tree_owned = work_tree.to_path_buf();
+    let dir_abs = move |dir: &str| {
         if dir.is_empty() {
-            work_tree.to_path_buf()
+            work_tree_owned.clone()
         } else {
-            index_entry_worktree_abs(work_tree, dir, precompose_unicode, ignorecase)
+            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
         }
     };
-    let file_abs =
-        |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
+    let work_tree_for_files = work_tree.to_path_buf();
+    let file_abs = move |rel: &str| {
+        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
+    };
     let mut dir_symlinks = SymlinkDirCache::default();
     let mut changed = false;
-    for_each_blob_by_directory(
+    for_each_blob_by_directory_parallel(
         &blob_dirs,
+        blob_scan,
         dir_abs,
         file_abs,
         |rel_path| {

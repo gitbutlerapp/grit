@@ -3,14 +3,19 @@
 //! Groups indexed blob paths by parent directory and uses one `read_dir` per directory,
 //! reusing `DirEntry` metadata for tracked files instead of a separate `symlink_metadata`
 //! per index path.
+//!
+//! When [`WorktreeBlobScanOptions::preload_index`] is true and the tracked blob count is at
+//! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection runs in contiguous index-order chunks
+//! across a small number of threads (`std::thread::scope`). Visit order stays directory-sorted
+//! so diff output matches the serial path; only the metadata probes are parallelized. A later
+//! shared thread pool can replace the scoped helper without changing callers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-
-#[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Test hook: incremented once per worktree metadata syscall used by directory scans.
 #[cfg(test)]
@@ -24,6 +29,54 @@ pub(crate) fn reset_worktree_metadata_probe() {
 #[cfg(test)]
 pub(crate) fn worktree_metadata_probe_count() -> usize {
     WORKTREE_METADATA_PROBE.load(Ordering::Relaxed)
+}
+
+/// Minimum tracked blob entries before parallel stat preload is considered.
+pub const PARALLEL_STAT_MIN_ENTRIES: usize = 1000;
+
+/// Upper bound on worker threads for parallel stat preload (see Git's small preload pool).
+const STAT_PARALLEL_THREAD_CAP: usize = 4;
+
+/// Parallelism controls for directory-grouped blob scans (honors `core.preloadIndex`).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct WorktreeBlobScanOptions {
+    /// When false, stat preload never uses more than one thread.
+    pub preload_index: bool,
+    /// When `Some(1)`, forces a serial scan. When `Some(n > 1)`, caps workers at
+    /// [`STAT_PARALLEL_THREAD_CAP`]. When `None`, picks from [`std::thread::available_parallelism`].
+    pub stat_parallel_threads: Option<usize>,
+}
+
+/// Test hook: worker threads used by the most recent blob scan (`1` = serial).
+#[doc(hidden)]
+pub static LAST_BLOB_SCAN_THREADS: AtomicUsize = AtomicUsize::new(1);
+
+/// Returns [`LAST_BLOB_SCAN_THREADS`] for tests (embedders should not rely on this).
+#[doc(hidden)]
+#[must_use]
+pub fn last_blob_scan_threads_for_tests() -> usize {
+    LAST_BLOB_SCAN_THREADS.load(Ordering::Relaxed)
+}
+
+/// Returns how many threads a blob scan should use for `blob_count` entries.
+#[must_use]
+pub(crate) fn stat_scan_thread_count(options: WorktreeBlobScanOptions, blob_count: usize) -> usize {
+    let chosen = if !options.preload_index || blob_count < PARALLEL_STAT_MIN_ENTRIES {
+        1
+    } else if let Some(requested) = options.stat_parallel_threads {
+        if requested <= 1 {
+            1
+        } else {
+            requested.min(STAT_PARALLEL_THREAD_CAP)
+        }
+    } else {
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        cpus.clamp(1, STAT_PARALLEL_THREAD_CAP)
+    };
+    LAST_BLOB_SCAN_THREADS.store(chosen, Ordering::Relaxed);
+    chosen
 }
 
 fn probe_worktree_metadata_call() {
@@ -99,6 +152,75 @@ pub(crate) enum BlobDiskLookup {
     Io(io::Error),
 }
 
+/// Collect every scannable blob in ascending index order.
+#[must_use]
+fn index_ordered_blobs(by_dir: &HashMap<String, Vec<BlobInDir>>) -> Vec<BlobInDir> {
+    let mut blobs: Vec<BlobInDir> = by_dir.values().flatten().cloned().collect();
+    blobs.sort_by_key(|b| b.entry_index);
+    blobs
+}
+
+fn group_blobs_chunk(chunk: &[BlobInDir]) -> HashMap<String, Vec<BlobInDir>> {
+    let mut partial: HashMap<String, Vec<BlobInDir>> = HashMap::new();
+    for blob in chunk {
+        let (dir, _) = split_dir_file(&blob.rel_path);
+        partial.entry(dir).or_default().push(blob.clone());
+    }
+    partial
+}
+
+fn preload_blob_lookups_parallel(
+    by_dir: &HashMap<String, Vec<BlobInDir>>,
+    threads: usize,
+    symlink_missing: &HashSet<String>,
+    dir_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
+    file_abs: Arc<dyn Fn(&str) -> PathBuf + Send + Sync>,
+) -> Result<HashMap<usize, BlobDiskLookup>> {
+    let ordered = index_ordered_blobs(by_dir);
+    if ordered.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let chunk_size = ordered.len().div_ceil(threads);
+    let mut merged = HashMap::new();
+    let mut worker_panic = false;
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in ordered.chunks(chunk_size) {
+            let chunk = chunk.to_vec();
+            let symlink_missing = symlink_missing.clone();
+            let dir_abs = Arc::clone(&dir_abs);
+            let file_abs = Arc::clone(&file_abs);
+            handles.push(scope.spawn(move || {
+                let partial_dirs = group_blobs_chunk(&chunk);
+                let mut local = HashMap::new();
+                let _ = for_each_blob_by_directory(
+                    &partial_dirs,
+                    |dir| dir_abs(dir),
+                    |rel| file_abs(rel),
+                    |rel| symlink_missing.contains(rel),
+                    |entry_index, _path, lookup| {
+                        local.insert(entry_index, lookup);
+                        Ok(())
+                    },
+                );
+                local
+            }));
+        }
+        for handle in handles {
+            match handle.join() {
+                Ok(local) => merged.extend(local),
+                Err(_) => worker_panic = true,
+            }
+        }
+    });
+    if worker_panic {
+        return Err(Error::Message(
+            "parallel blob stat worker thread panicked".to_owned(),
+        ));
+    }
+    Ok(merged)
+}
+
 /// Visit grouped blob entries with one `read_dir` per distinct parent directory.
 ///
 /// When `has_symlink_ancestor(rel_path)` is true, the entry is reported as [`BlobDiskLookup::Missing`]
@@ -145,6 +267,59 @@ where
         }
     }
     Ok(())
+}
+
+/// Like [`for_each_blob_by_directory`], optionally preloading disk lookups in parallel.
+pub(crate) fn for_each_blob_by_directory_parallel<F>(
+    by_dir: &HashMap<String, Vec<BlobInDir>>,
+    scan_options: WorktreeBlobScanOptions,
+    dir_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
+    file_abs: impl Fn(&str) -> PathBuf + Send + Sync + 'static,
+    mut has_symlink_ancestor: impl FnMut(&str) -> bool,
+    mut visit: F,
+) -> Result<()>
+where
+    F: FnMut(usize, &str, BlobDiskLookup) -> Result<()>,
+{
+    let ordered = index_ordered_blobs(by_dir);
+    let mut symlink_missing = HashSet::new();
+    for blob in &ordered {
+        if has_symlink_ancestor(&blob.rel_path) {
+            symlink_missing.insert(blob.rel_path.clone());
+        }
+    }
+
+    let blob_count = ordered.len();
+    let threads = stat_scan_thread_count(scan_options, blob_count);
+    let dir_abs_arc: Arc<dyn Fn(&str) -> PathBuf + Send + Sync> = Arc::new(dir_abs);
+    let file_abs_arc: Arc<dyn Fn(&str) -> PathBuf + Send + Sync> = Arc::new(file_abs);
+    let mut preloaded = if threads > 1 {
+        preload_blob_lookups_parallel(
+            by_dir,
+            threads,
+            &symlink_missing,
+            Arc::clone(&dir_abs_arc),
+            Arc::clone(&file_abs_arc),
+        )?
+    } else {
+        HashMap::new()
+    };
+    let use_preloaded = threads > 1;
+
+    for_each_blob_by_directory(
+        by_dir,
+        |dir| dir_abs_arc(dir),
+        |rel| file_abs_arc(rel),
+        |rel| has_symlink_ancestor(rel),
+        |entry_index, path, lookup| {
+            let lookup = if use_preloaded {
+                preloaded.remove(&entry_index).unwrap_or(lookup)
+            } else {
+                lookup
+            };
+            visit(entry_index, path, lookup)
+        },
+    )
 }
 
 fn lookup_blob_in_directory(
@@ -303,6 +478,18 @@ mod tests {
         )
         .unwrap();
         assert!(missing);
+    }
+
+    #[test]
+    fn core_preload_index_false_uses_single_thread() {
+        let threads = stat_scan_thread_count(
+            WorktreeBlobScanOptions {
+                preload_index: false,
+                stat_parallel_threads: Some(4),
+            },
+            PARALLEL_STAT_MIN_ENTRIES,
+        );
+        assert_eq!(threads, 1);
     }
 
     #[cfg(unix)]
