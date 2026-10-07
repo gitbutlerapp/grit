@@ -209,7 +209,16 @@ fn chain_file_path(pack_dir: &Path) -> std::path::PathBuf {
     midx_d_dir(pack_dir).join("multi-pack-index-chain")
 }
 
+fn midx_chain_hash_hex_len(pack_dir: &Path) -> usize {
+    repo_hash_algo_for_pack_dir(pack_dir).hex_len()
+}
+
+fn is_valid_midx_chain_hash_line(t: &str, hex_len: usize) -> bool {
+    t.len() == hex_len && t.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
+    let hex_len = midx_chain_hash_hex_len(pack_dir);
     let path = chain_file_path(pack_dir);
     let f = fs::File::open(&path).map_err(Error::Io)?;
     let mut out = Vec::new();
@@ -219,7 +228,7 @@ fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
         if t.is_empty() {
             continue;
         }
-        if t.len() != 40 || !t.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !is_valid_midx_chain_hash_line(t, hex_len) {
             return Err(Error::CorruptObject(format!(
                 "invalid multi-pack-index chain line: {t}"
             )));
@@ -363,18 +372,12 @@ fn load_midx_file(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// OID width implied by a MIDX file's header hash-version byte (`data[5]`).
-fn midx_hash_len(data: &[u8]) -> usize {
-    if data.len() > 5 {
-        HashAlgo::try_from(data[5])
-            .map(|a| a.len())
-            .unwrap_or(HashAlgo::Sha1.len())
-    } else {
-        HashAlgo::Sha1.len()
-    }
+fn midx_hash_len(data: &[u8]) -> Result<usize> {
+    midx_trailing_hash_len(data)
 }
 
 fn oids_and_packs_from_midx_data(data: &[u8]) -> Result<(HashSet<ObjectId>, Vec<String>)> {
-    let hash_len = midx_hash_len(data);
+    let hash_len = midx_hash_len(data)?;
     let (_, hdr_end, _) = parse_midx_header(data)?;
     let (pn_off, pn_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
     let pack_names = parse_pack_names_blob(&data[pn_off..pn_off + pn_len])?;
@@ -423,14 +426,29 @@ fn collect_incremental_base(pack_dir: &Path) -> Result<(HashSet<ObjectId>, HashS
     Ok((oids, packs))
 }
 
+fn midx_trailing_hash_len(data: &[u8]) -> Result<usize> {
+    if data.len() < MIDX_HEADER_SIZE {
+        return Err(Error::CorruptObject(
+            "midx file too small for header".to_owned(),
+        ));
+    }
+    HashAlgo::try_from(data[5]).map(|a| a.len()).map_err(|e| {
+        Error::CorruptObject(format!(
+            "multi-pack-index hash version {} not recognized",
+            e.0
+        ))
+    })
+}
+
 fn midx_checksum_hex_from_path(path: &Path) -> Result<String> {
     let data = fs::read(path).map_err(Error::Io)?;
-    if data.len() < 20 {
+    let hash_len = midx_trailing_hash_len(&data)?;
+    if data.len() < hash_len {
         return Err(Error::CorruptObject(
             "midx too small for checksum".to_owned(),
         ));
     }
-    let hash = &data[data.len() - 20..];
+    let hash = &data[data.len() - hash_len..];
     Ok(hex::encode(hash))
 }
 
@@ -474,7 +492,8 @@ fn clear_stale_split_layers(pack_dir: &Path, keep: &[String]) -> Result<()> {
         let Some((hash_part, _ext)) = rest.split_once('.') else {
             continue;
         };
-        if hash_part.len() == 40 && !keep.contains(hash_part) {
+        let hex_len = midx_chain_hash_hex_len(pack_dir);
+        if hash_part.len() == hex_len && !keep.contains(hash_part) {
             let _ = fs::remove_file(ent.path());
         }
     }
@@ -1239,7 +1258,9 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
 /// Validate the trailing checksum of an in-memory MIDX image, using the
 /// algorithm implied by the header hash version (SHA-1 or SHA-256).
 fn midx_checksum_is_valid(data: &[u8]) -> bool {
-    let hash_len = midx_hash_len(data);
+    let Ok(hash_len) = midx_hash_len(data) else {
+        return false;
+    };
     if data.len() < hash_len {
         return false;
     }
@@ -1280,7 +1301,7 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
     let names = parse_pack_names_blob(&data[pn_off..pn_off + pn_len])?;
-    let hash_len = midx_hash_len(&data);
+    let hash_len = midx_hash_len(&data)?;
     let (oidl_off, oidl_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oidl_len % hash_len != 0 || ooff_len % 8 != 0 {
@@ -1309,7 +1330,7 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
     Ok((names, objects))
 }
 
-/// Trailing 40-character SHA-1 hex of the active MIDX (root or chain tip).
+/// Trailing checksum hex of the active MIDX (root or chain tip), width matches the file hash version.
 pub fn midx_checksum_hex(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir)
@@ -1348,7 +1369,7 @@ pub fn format_midx_show_objects_layer(
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
     let names = parse_pack_names_blob(&data[pn_off..pn_off + pn_len])?;
-    let hash_len = midx_hash_len(&data);
+    let hash_len = midx_hash_len(&data)?;
     let (oidl_off, oidl_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oidl_len % hash_len != 0 || ooff_len % 8 != 0 {
@@ -1494,7 +1515,7 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
         return Ok(None);
     };
     let data = fs::read(&path).map_err(Error::Io)?;
-    let hash_len = midx_hash_len(&data);
+    let hash_len = midx_hash_len(&data)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
@@ -1667,7 +1688,7 @@ pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result
     let path = resolve_tip_midx_path(&pack_dir)
         .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
     let data = fs::read(&path).map_err(Error::Io)?;
-    let hash_len = midx_hash_len(&data);
+    let hash_len = midx_hash_len(&data)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (fanout_off, fanout_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDFANOUT)?;
     let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
@@ -1734,7 +1755,7 @@ pub fn midx_oid_listed_in_tip(
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err),
     };
-    let hash_len = midx_hash_len(&data);
+    let hash_len = midx_hash_len(&data)?;
     let MidxReadView {
         oidf_off,
         oidl_off,
@@ -2072,7 +2093,7 @@ pub fn try_read_object_via_midx(
     };
     let hi = read_be_u32(&data, oidf_off + first * 4)?;
 
-    let hash_len = midx_hash_len(&data);
+    let hash_len = midx_hash_len(&data)?;
     let mut pos = None;
     let mut i = lo as usize;
     while i < hi as usize && i < num_objects {

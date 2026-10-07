@@ -283,3 +283,116 @@ fn sha256_objectformat_odd_casing_resolves_for_midx() {
     let obj = odb.read(&oid).expect("read HEAD through MIDX");
     assert_eq!(obj.kind, ObjectKind::Commit);
 }
+
+#[test]
+fn sha256_git_split_commit_graph_chain_loads() {
+    let Some((_tmp, git_dir)) = build_three_pack_sha256_repo() else {
+        eprintln!("SKIP: sha256 or git unavailable");
+        return;
+    };
+    let objects = git_dir.join("objects");
+
+    git(
+        _tmp.path(),
+        &["commit-graph", "write", "--reachable", "--split"],
+    );
+    std::fs::write(_tmp.path().join("split.txt"), b"split layer\n").unwrap();
+    git(_tmp.path(), &["add", "split.txt"]);
+    git(_tmp.path(), &["commit", "-q", "-m", "split tip"]);
+    git(
+        _tmp.path(),
+        &["commit-graph", "write", "--reachable", "--split"],
+    );
+    git(_tmp.path(), &["commit-graph", "verify"]);
+
+    let chain = CommitGraphChain::try_load(&objects)
+        .expect("load chain")
+        .expect("split commit-graph chain present");
+    assert!(
+        chain.num_layers() >= 2,
+        "expected at least two split layers, got {}",
+        chain.num_layers()
+    );
+    let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+    let commits = collect_reachable_commit_oids(&git_dir, &odb).expect("commits");
+    for oid in commits {
+        assert!(
+            chain.find_commit(&oid).is_some(),
+            "commit {oid} missing from git split chain"
+        );
+    }
+}
+
+#[test]
+fn sha256_incremental_midx_read_objects() {
+    let Some((_tmp, git_dir)) = build_three_pack_sha256_repo() else {
+        eprintln!("SKIP: sha256 or git unavailable");
+        return;
+    };
+    let objects = git_dir.join("objects");
+    let pack_dir = objects.join("pack");
+
+    grit_write_midx_with_rev(&pack_dir);
+    assert!(pack_dir.join("multi-pack-index").is_file());
+
+    std::fs::write(_tmp.path().join("incr.txt"), b"incremental pack\n").unwrap();
+    git(_tmp.path(), &["add", "incr.txt"]);
+    git(_tmp.path(), &["commit", "-q", "-m", "incr"]);
+    git(_tmp.path(), &["repack", "-d"]);
+
+    let opts = WriteMultiPackIndexOptions {
+        incremental: true,
+        version: Some(1),
+        ..WriteMultiPackIndexOptions::default()
+    };
+    write_multi_pack_index_with_options(&pack_dir, &opts).expect("incremental MIDX write");
+    assert!(
+        !pack_dir.join("multi-pack-index").exists(),
+        "incremental write removes root MIDX"
+    );
+    assert!(
+        pack_dir
+            .join("multi-pack-index.d/multi-pack-index-chain")
+            .is_file(),
+        "expected MIDX chain file"
+    );
+
+    let (_names, listed) = read_midx_objects(&objects).expect("read incremental MIDX");
+    assert!(
+        !listed.is_empty(),
+        "incremental tip MIDX should list objects from the new layer"
+    );
+
+    let chain_text =
+        std::fs::read_to_string(pack_dir.join("multi-pack-index.d/multi-pack-index-chain"))
+            .expect("chain file");
+    for line in chain_text.lines() {
+        let h = line.trim();
+        if h.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            h.len(),
+            HashAlgo::Sha256.hex_len(),
+            "SHA-256 MIDX chain entries must be 64 hex chars"
+        );
+    }
+
+    let packed = all_packed_oids(&objects);
+    for entry in &listed {
+        assert!(
+            packed.contains(&entry.oid),
+            "MIDX-listed oid {} not in any pack index",
+            entry.oid
+        );
+    }
+
+    let algo = hash_algo_for_objects_dir(&objects);
+    let sample = listed[0].oid;
+    assert!(
+        try_read_object_via_midx(&objects, &sample, algo)
+            .expect("midx read")
+            .is_some(),
+        "sample object from incremental tip should load via MIDX"
+    );
+}

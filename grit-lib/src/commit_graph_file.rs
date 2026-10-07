@@ -8,7 +8,7 @@ use crate::bloom::{
 };
 use crate::error::Error;
 use crate::objects::{HashAlgo, ObjectId};
-use crate::odb::Odb;
+use crate::odb::{hash_algo_for_objects_dir, Odb};
 
 /// Track which commit-graph layers have already emitted the "disabling Bloom
 /// filters ... due to incompatible settings" warning this process, so it is
@@ -95,6 +95,11 @@ pub struct CommitGraphLayer {
 /// OID width for a commit-graph header hash-version byte (`body[5]`).
 fn commit_graph_hash_len(hash_version: u8) -> Option<usize> {
     HashAlgo::try_from(hash_version).ok().map(|a| a.len())
+}
+
+/// True when `h` is a lowercase/uppercase hex chain entry for `algo` (40 or 64 chars).
+fn commit_graph_chain_hash_is_valid(h: &str, algo: HashAlgo) -> bool {
+    h.len() == algo.hex_len() && h.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 impl CommitGraphLayer {
@@ -670,11 +675,12 @@ impl CommitGraphChain {
         let info = objects_dir.join("info");
         let chain_path = info.join("commit-graphs").join("commit-graph-chain");
         if chain_path.is_file() {
+            let algo = hash_algo_for_objects_dir(objects_dir);
             let content = std::fs::read_to_string(&chain_path).map_err(Error::from)?;
             let mut layers = Vec::new();
             for line in content.lines() {
                 let h = line.trim();
-                if h.len() != 40 {
+                if !commit_graph_chain_hash_is_valid(h, algo) {
                     continue;
                 }
                 let graph_path = info.join("commit-graphs").join(format!("graph-{h}.graph"));
@@ -788,11 +794,12 @@ impl CommitGraphChain {
             }
         };
 
+        let algo = hash_algo_for_objects_dir(objects_dir);
         let content = std::fs::read_to_string(&chain_path).map_err(Error::from)?;
         let mut layers = Vec::new();
         for line in content.lines() {
             let h = line.trim();
-            if h.len() != 40 {
+            if !commit_graph_chain_hash_is_valid(h, algo) {
                 continue;
             }
             let graph_path = resolve_layer(h).ok_or_else(|| {

@@ -240,7 +240,7 @@ pub fn build_commit_graph_bytes(
     changed_paths: bool,
     bloom_settings: &BloomFilterSettings,
     base_chain: Option<&CommitGraphChain>,
-    base_graph_hashes: &[[u8; 20]],
+    base_graph_hashes: &[&[u8]],
     max_new_filters: Option<u32>,
     existing_filters: &HashMap<ObjectId, Vec<u8>>,
     upgraded_filters: &HashMap<ObjectId, Vec<u8>>,
