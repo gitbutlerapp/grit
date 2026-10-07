@@ -4,9 +4,10 @@
 
 mod fixture;
 
+use std::hint::black_box;
 use std::io::Read;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -109,6 +110,11 @@ fn bench_packed_read(c: &mut Criterion) {
         });
     });
     group.bench_function("deep_delta_chain", |b| {
+        assert!(
+            fx.packed_delta_chain_depth >= 50,
+            "fixture delta depth {}",
+            fx.packed_delta_chain_depth
+        );
         b.iter(|| {
             black_box(
                 read_object_from_pack(&fx.packed_delta_idx, &fx.packed_delta_oid)

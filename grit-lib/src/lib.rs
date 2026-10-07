@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::all))]
+
 //! Gust library — core Git-compatible engine.
 //!
 //! # Architecture
