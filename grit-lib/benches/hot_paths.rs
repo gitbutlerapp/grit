@@ -20,6 +20,17 @@ fn bench_index_mutate(c: &mut Criterion) {
         });
     }
     group.finish();
+
+    let mut fsmn_group = c.benchmark_group("index_mutate_batch_10pct_fsmn");
+    for (label, fx) in [
+        ("L", HotPathsFixture::large()),
+        ("H", HotPathsFixture::heavy()),
+    ] {
+        fsmn_group.bench_with_input(BenchmarkId::from_parameter(label), fx, |b, fixture| {
+            b.iter(|| black_box(fixture.apply_index_mutate_batch_fsmn().entries.len()));
+        });
+    }
+    fsmn_group.finish();
 }
 
 fn bench_checkout(c: &mut Criterion) {

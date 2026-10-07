@@ -1317,6 +1317,8 @@ impl Index {
         if self.fsmonitor_last_update.is_none() {
             return dirty;
         }
+        #[cfg(test)]
+        crate::index::tests::fsmonitor_rebuild_counter::note_build();
         for (i, entry) in self.entries.iter().enumerate() {
             if !entry.fsmonitor_valid() {
                 dirty.set_bit_extend(i);
@@ -1356,6 +1358,15 @@ impl Index {
         self.fsmonitor_dirty = Some(self.build_fsmonitor_dirty_from_entries());
     }
 
+    /// Drop cached and on-disk fsmonitor snapshots; rebuild on the next read or write.
+    fn invalidate_fsmonitor_bitmap(&mut self) {
+        if self.fsmonitor_last_update.is_none() {
+            return;
+        }
+        self.fsmonitor_raw_extension = None;
+        self.fsmonitor_dirty = None;
+    }
+
     /// Update the fsmonitor token; clears any stale on-disk snapshot when the token changes.
     pub fn set_fsmonitor_last_update(&mut self, token: Option<String>) {
         if self.fsmonitor_last_update.as_deref() != token.as_deref() {
@@ -1379,20 +1390,12 @@ impl Index {
 
     /// Call after mutating entry fsmonitor-valid bits without changing index membership.
     pub fn fsmonitor_validity_changed(&mut self) {
-        if self.fsmonitor_last_update.is_none() {
-            return;
-        }
-        self.fsmonitor_raw_extension = None;
-        self.rebuild_fsmonitor_dirty_from_entries();
+        self.invalidate_fsmonitor_bitmap();
     }
 
     /// Drop byte-for-byte `FSMN` preservation after index entries change.
     fn touch_fsmonitor_after_entry_change(&mut self) {
-        if self.fsmonitor_last_update.is_none() {
-            return;
-        }
-        self.fsmonitor_raw_extension = None;
-        self.rebuild_fsmonitor_dirty_from_entries();
+        self.invalidate_fsmonitor_bitmap();
     }
 
     /// Write the optional `FSMN` extension (`write_fsmonitor_extension`).
@@ -1409,7 +1412,11 @@ impl Index {
         let Some(token) = &self.fsmonitor_last_update else {
             return Ok(());
         };
-        let dirty = self.build_fsmonitor_dirty_from_entries();
+        let dirty = self
+            .fsmonitor_dirty
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.build_fsmonitor_dirty_from_entries());
         if dirty.bit_size > self.fsmonitor_active_entry_count() {
             return Ok(());
         }
@@ -2683,6 +2690,24 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    pub(super) mod fsmonitor_rebuild_counter {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        pub fn reset() {
+            COUNT.store(0, Ordering::SeqCst);
+        }
+
+        pub fn count() -> usize {
+            COUNT.load(Ordering::SeqCst)
+        }
+
+        pub fn note_build() {
+            COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     fn dummy_oid() -> ObjectId {
         ObjectId::from_bytes(&[0u8; 20]).unwrap()
     }
@@ -2860,6 +2885,45 @@ mod tests {
         assert_ne!(written, fsmn_payload);
         let (_, dirty) = parse_fsmonitor_extension(written).unwrap();
         assert!(dirty.bit_size >= 1);
+    }
+
+    #[test]
+    fn fsmonitor_rebuild_once_per_batch() {
+        let fsmn_payload: [u8; 41] = [
+            0, 0, 0, 2, b'b', b'u', b'i', b'l', b't', b'i', b'n', b':', b'f', b'a', b'k', b'e', 0,
+            0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let (token, dirty) = parse_fsmonitor_extension(&fsmn_payload).unwrap();
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("index");
+
+        let mut idx = Index::new();
+        for i in 0..1000 {
+            idx.add_or_replace(make_entry(&format!("path-{i:04}.txt")));
+        }
+        idx.sort();
+        for e in &mut idx.entries {
+            e.set_fsmonitor_valid(true);
+        }
+        idx.fsmonitor_last_update = Some(token);
+        idx.fsmonitor_dirty = Some(dirty);
+        idx.fsmonitor_raw_extension = Some(fsmn_payload.to_vec());
+
+        fsmonitor_rebuild_counter::reset();
+        for i in 0..1000 {
+            idx.add_or_replace(make_entry(&format!("mut-{i:04}.txt")));
+        }
+        assert_eq!(
+            fsmonitor_rebuild_counter::count(),
+            0,
+            "entry mutations must not scan entries for the EWAH"
+        );
+        idx.write(&path).unwrap();
+        assert_eq!(
+            fsmonitor_rebuild_counter::count(),
+            1,
+            "write must build the EWAH once for the batch"
+        );
     }
 
     #[test]
