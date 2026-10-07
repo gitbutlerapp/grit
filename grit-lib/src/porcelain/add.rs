@@ -22,6 +22,7 @@ use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::state::resolve_head;
+use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// What paths [`stage`] should update (`git add` vs `git add -u`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -293,7 +294,14 @@ fn stage_untracked_path(
     ctx: &StagingConvertContext,
     index: &mut Index,
 ) -> Result<()> {
-    let abs = work_tree.join(rel_path);
+    let precompose_unicode = ctx
+        .config
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
+    let abs = resolved.abs;
+    let index_relpath = resolved.index_relpath;
     let meta = fs::symlink_metadata(&abs).map_err(|e| {
         Error::Io(std::io::Error::new(
             e.kind(),
@@ -303,12 +311,14 @@ fn stage_untracked_path(
 
     if meta.is_dir() && !meta.file_type().is_symlink() && read_submodule_head_oid(&abs).is_some() {
         let head_oid = read_submodule_head_oid(&abs).ok_or_else(|| {
-            Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
+            Error::Message(format!(
+                "could not resolve submodule HEAD for '{index_relpath}'"
+            ))
         })?;
-        return stage_gitlink_at(rel_path, &meta, head_oid, index);
+        return stage_gitlink_at(&index_relpath, &meta, head_oid, index);
     }
 
-    let file_attrs = crlf::get_file_attrs(&ctx.attrs, rel_path, false, &ctx.config);
+    let file_attrs = crlf::get_file_attrs(&ctx.attrs, &index_relpath, false, &ctx.config);
     let mode = mode_from_metadata(&meta);
     let oid = materialize_worktree_blob(
         &repo.odb,
@@ -316,15 +326,15 @@ fn stage_untracked_path(
         &meta,
         &ctx.conv,
         &file_attrs,
-        rel_path,
+        &index_relpath,
         None,
     )
-    .map_err(|e| Error::Message(format!("could not store {rel_path}: {e}")))?;
+    .map_err(|e| Error::Message(format!("could not store {index_relpath}: {e}")))?;
 
-    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode);
+    let mut entry = entry_from_metadata(&meta, index_relpath.as_bytes(), oid, mode);
     entry.mode = mode;
     index.stage_file(entry);
-    mark_fsmonitor_staged(index, rel_path);
+    mark_fsmonitor_staged(index, &index_relpath);
     Ok(())
 }
 
@@ -593,6 +603,28 @@ mod tests {
         let index = repo.load_index().unwrap();
         assert!(index.get(b"tracked-new.txt", 0).is_some());
         assert!(index.get(b"ignored/x.txt", 0).is_none());
+    }
+
+    #[test]
+    fn stage_precomposes_untracked_index_path_while_reading_nfd_disk_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(
+            root.join(".git/config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tprecomposeunicode = true\n",
+        )
+        .unwrap();
+        let nfd = "cafe\u{301}.txt";
+        fs::write(root.join(nfd), b"content\n").unwrap();
+
+        let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        assert_eq!(outcome.added, 1);
+        let index = repo.load_index().unwrap();
+        let entry = index.get("caf\u{e9}.txt".as_bytes(), 0).unwrap();
+        assert!(index.get(nfd.as_bytes(), 0).is_none());
+        assert_eq!(repo.odb.read(&entry.oid).unwrap().data, b"content\n");
     }
 
     #[test]
