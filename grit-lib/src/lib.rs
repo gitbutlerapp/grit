@@ -6,6 +6,8 @@
 //!
 //! All Git-compatible logic lives here; the `grit` binary is a thin CLI shim
 //! that parses arguments and delegates to types exposed from this crate.
+//! Modules that only served out-of-scope Git commands or the removed `grit-git`
+//! CLI are not part of the crate; see `docs/v1-scope.md` (Removed from grit-lib).
 //!
 //! ## Where to start
 //!

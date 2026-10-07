@@ -12,7 +12,8 @@ to read, write, or inspect Git repositories from Rust without shelling out to
 
 ## Design philosophy
 
-- **Correctness first.** Behavior is validated against Git's own test suite.
+- **Correctness first.** Behavior is validated with Rust tests cross-checked
+  against the system `git` binary (on-disk formats and wire protocols).
   Edge cases (empty trees, encoding quirks, unusual ref names) are handled the
   way Git handles them.
 - **No unsafe code.** The workspace forbids `unsafe` — all I/O goes through

@@ -7,6 +7,7 @@ Grit is **`grit-lib`** (the library) and **`grit-cli`** (the `grit` client). Beh
 1. **Unit and integration tests in `grit-lib`** — core Git semantics (objects, packs, refs, index, diff, revwalk, config, transport, serving, and related areas). Prefer typed API tests over shelling out.
 2. **Coverage tests for every public library interface** — each public API surface gets explicit tests; line-coverage targets are in **ROADMAP.md**.
 3. **Workspace integration tests** — `grit-lib/tests/`, `grit-cli`, and `grit-examples` for end-to-end flows (temp repos, `file://`, local smart HTTP).
+4. **Scope guards** — `grit-lib/tests/pruned_modules.rs` fails if removed grit-git-only module files or `mod` declarations reappear under `grit-lib/src` (see `docs/v1-scope.md`).
 
 Compatibility with Git's **on-disk formats and wire protocols** is checked inside those tests against the system **`git`** binary: tests build repositories with `git`, read them with `grit-lib` (and the reverse), run `git fsck` on what `grit` writes, and push/fetch between the two. There is no ported upstream shell harness and no vendored Git source tree; Git's command-line text, flags and exit codes are not a compatibility target.
 

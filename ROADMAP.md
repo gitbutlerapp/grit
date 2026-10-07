@@ -71,7 +71,7 @@
 - The Rust tests show no regressions.
 - The benchmark page is updated.
 
-## 5. Prune unused commands from the library
+## 5. Prune unused commands from the library — **Done**
 *Workstream: Scope*
 
 **Goal.** Stop carrying the email workflow and archive code in grit-lib.
