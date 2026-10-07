@@ -43,6 +43,7 @@ if command -v hyperfine >/dev/null 2>&1; then
     "'$GRITX_HASH_FILE' '$BIG'"
 else
   echo "hyperfine not installed; timing with date"
+  # Pass label and timestamps as Python argv (not shell-interpolated f-strings).
   bench_timed() {
     local label=$1
     shift
