@@ -273,11 +273,16 @@ fn normalize_conflicts(content: &str, marker_size: usize) -> std::result::Result
     Ok(out)
 }
 
-fn handle_path(content: &str, marker_size: usize, hash_out: Option<&mut [u8; 20]>) -> i32 {
+fn handle_path(
+    content: &str,
+    marker_size: usize,
+    algo: HashAlgo,
+    hash_out: Option<&mut [u8]>,
+) -> i32 {
     let lines: Vec<String> = content.lines().map(String::from).collect();
     let mut i = 0usize;
     let mut ctx = if hash_out.is_some() {
-        Some(HashAlgo::Sha1.hasher())
+        Some(ObjectHasher::new(algo))
     } else {
         None
     };
@@ -303,8 +308,7 @@ fn handle_path(content: &str, marker_size: usize, hash_out: Option<&mut [u8; 20]
     }
 
     if let (Some(h), Some(buf)) = (ctx, hash_out) {
-        let digest = h.finalize();
-        buf.copy_from_slice(digest.as_bytes());
+        let _ = h.finalize_into(buf);
     }
     if found == 1 {
         1
@@ -315,6 +319,19 @@ fn handle_path(content: &str, marker_size: usize, hash_out: Option<&mut [u8; 20]
 
 fn conflict_marker_size(_path: &str) -> usize {
     7
+}
+
+/// Compute the rerere conflict identifier for `content` using `algo`.
+///
+/// Returns `None` when the text does not contain parseable conflict markers.
+#[must_use]
+pub fn rerere_conflict_id(algo: HashAlgo, content: &str, marker_size: usize) -> Option<ObjectId> {
+    let digest_len = algo.len();
+    let mut hash = [0u8; 32];
+    if handle_path(content, marker_size, algo, Some(&mut hash[..digest_len])) != 1 {
+        return None;
+    }
+    ObjectId::from_bytes(&hash[..digest_len]).ok()
 }
 
 fn check_one_conflict(index: &Index, start: usize) -> (usize, u8) {
@@ -733,8 +750,15 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
             String::new()
         };
         let marker_size = conflict_marker_size(path);
-        let mut hash = [0u8; 20];
-        let ret = handle_path(&work_content, marker_size, Some(&mut hash));
+        let algo = repo.odb.hash_algo();
+        let digest_len = algo.len();
+        let mut hash = [0u8; 32];
+        let ret = handle_path(
+            &work_content,
+            marker_size,
+            algo,
+            Some(&mut hash[..digest_len]),
+        );
         // Mirror `git rerere` `do_plain_rerere`: only evict MERGE_RR when the scan fails (`ret !=
         // 0`). `ret == 0` means the working tree no longer has markers (user resolved) — keep the
         // existing MERGE_RR row so the second phase can write `postimage`.
@@ -744,7 +768,7 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
         if ret < 1 {
             continue;
         }
-        let hex = hex::encode(hash);
+        let hex = hex::encode(&hash[..digest_len]);
         merge_rr.insert(
             path.clone(),
             MergeRrEntry {
@@ -813,7 +837,7 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
             continue;
         }
 
-        if handle_path(&work_content, marker_size, None) == 0 {
+        if handle_path(&work_content, marker_size, repo.odb.hash_algo(), None) == 0 {
             fs::copy(&file_path, postimage_path(&repo.git_dir, &id))?;
             eprintln!("Recorded resolution for '{path}'.");
             ent.id = None;
@@ -937,7 +961,7 @@ pub fn rerere_post_commit(repo: &Repository) -> Result<()> {
         }
         let content = fs::read_to_string(&fp)?;
         let marker_size = conflict_marker_size(&path);
-        if handle_path(&content, marker_size, None) != 0 {
+        if handle_path(&content, marker_size, repo.odb.hash_algo(), None) != 0 {
             continue;
         }
         fs::write(&post, content.as_bytes())?;
@@ -1248,13 +1272,15 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<()> {
         }
     };
     let marker_size = conflict_marker_size(path);
-    let mut hash = [0u8; 20];
-    if handle_path(&synth, marker_size, Some(&mut hash)) != 1 {
+    let algo = repo.odb.hash_algo();
+    let digest_len = algo.len();
+    let mut hash = [0u8; 32];
+    if handle_path(&synth, marker_size, algo, Some(&mut hash[..digest_len])) != 1 {
         return Err(crate::error::Error::PathError(format!(
             "could not parse conflict hunks in '{path}'"
         )));
     }
-    let hex = hex::encode(hash);
+    let hex = hex::encode(&hash[..digest_len]);
     let work = fs::read_to_string(&fp)?;
     let mut forgot_id: Option<RerereId> = None;
     for v in list_complete_variants(&repo.git_dir, &hex) {

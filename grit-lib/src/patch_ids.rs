@@ -1,6 +1,7 @@
 //! Patch-ID computation for commit equivalence detection.
 //!
-//! A patch-ID is a SHA-1 digest of the normalised diff a commit introduces.
+//! A patch-ID is a digest of the normalised diff a commit introduces, using the
+//! repository's object hash algorithm (SHA-1 or SHA-256).
 //! Whitespace is stripped from every changed line before hashing, so two
 //! commits whose diffs differ only in whitespace (spaces, tabs, newlines)
 //! produce identical patch-IDs.  This is the semantics required by
@@ -20,13 +21,10 @@ use crate::diff::{diff_trees, zero_oid, DiffEntry};
 use crate::error::Result;
 use crate::hash::ObjectHasher;
 use crate::merge_file;
-use crate::objects::HashAlgo;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 
-fn patch_id_hasher() -> ObjectHasher {
-    HashAlgo::Sha1.hasher()
-}
+const PATCH_ID_DIGEST_MAX: usize = 32;
 
 /// How to compute a patch-ID from unified diff text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +49,7 @@ pub enum PatchIdMode {
 ///
 /// # Parameters
 ///
+/// - `algo` — object hash algorithm (must match the repository that produced the diff).
 /// - `input` — raw bytes of the unified diff stream.
 /// - `mode`  — which patch-ID algorithm to use (see [`PatchIdMode`]).
 ///
@@ -58,15 +57,20 @@ pub enum PatchIdMode {
 ///
 /// A `Vec` of `(patch_id, commit_id)` pairs in the order they were encountered
 /// in the stream.
-pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(ObjectId, ObjectId)> {
+pub fn compute_patch_ids_from_text(
+    algo: HashAlgo,
+    input: &[u8],
+    mode: PatchIdMode,
+) -> Vec<(ObjectId, ObjectId)> {
     let stable = mode != PatchIdMode::Unstable;
     let verbatim = mode == PatchIdMode::Verbatim;
+    let digest_len = algo.len();
 
     let mut results: Vec<(ObjectId, ObjectId)> = Vec::new();
 
     // Current accumulated state for the patch being processed.
-    let mut ctx = patch_id_hasher();
-    let mut result = [0u8; 20];
+    let mut ctx = ObjectHasher::new(algo);
+    let mut result = [0u8; PATCH_ID_DIGEST_MAX];
     let mut patchlen: usize = 0;
     // before/after: -1 = parsing file header, 0 = awaiting @@ hunk, >0 = in hunk
     let mut before: i32 = -1;
@@ -101,19 +105,19 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
         };
 
         if let Some(candidate) = oid_candidate {
-            if let Some(oid) = try_parse_oid_prefix(candidate) {
+            if let Some(oid) = try_parse_oid_prefix(candidate, algo) {
                 // Finalise the patch we've been accumulating.
-                text_flush_one_hunk(&mut result, &mut ctx);
+                text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
                 if patchlen > 0 {
                     if let Some(coid) = current_commit.take() {
-                        if let Ok(pid) = ObjectId::from_bytes(&result) {
+                        if let Ok(pid) = ObjectId::from_bytes(&result[..digest_len]) {
                             results.push((pid, coid));
                         }
                     }
                 }
                 // Reset for the new patch.
-                result = [0u8; 20];
-                ctx = patch_id_hasher();
+                result = [0u8; PATCH_ID_DIGEST_MAX];
+                ctx = ObjectHasher::new(algo);
                 patchlen = 0;
                 before = -1;
                 after = -1;
@@ -159,7 +163,7 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
                 ctx.update(post.as_bytes());
                 patchlen += pre.len() + post.len();
                 if stable {
-                    text_flush_one_hunk(&mut result, &mut ctx);
+                    text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
                 }
                 continue;
             } else if let Some(rest) = line.strip_prefix("index ") {
@@ -182,16 +186,16 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
             } else if !line.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
                 // Non-alpha first char signals end of this patch's diffs.
                 // Re-use the `continue` path; treat as patch boundary.
-                text_flush_one_hunk(&mut result, &mut ctx);
+                text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
                 if patchlen > 0 {
                     if let Some(coid) = current_commit.take() {
-                        if let Ok(pid) = ObjectId::from_bytes(&result) {
+                        if let Ok(pid) = ObjectId::from_bytes(&result[..digest_len]) {
                             results.push((pid, coid));
                         }
                     }
                 }
-                result = [0u8; 20];
-                ctx = patch_id_hasher();
+                result = [0u8; PATCH_ID_DIGEST_MAX];
+                ctx = ObjectHasher::new(algo);
                 patchlen = 0;
                 before = -1;
                 after = -1;
@@ -226,7 +230,7 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
             }
             // Another file diff starts; flush per-file hash in stable mode.
             if stable {
-                text_flush_one_hunk(&mut result, &mut ctx);
+                text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
             }
             before = -1;
             after = -1;
@@ -255,10 +259,10 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
     }
 
     // Flush the final patch.
-    text_flush_one_hunk(&mut result, &mut ctx);
+    text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
     if patchlen > 0 {
         if let Some(coid) = current_commit {
-            if let Ok(pid) = ObjectId::from_bytes(&result) {
+            if let Ok(pid) = ObjectId::from_bytes(&result[..digest_len]) {
                 results.push((pid, coid));
             }
         }
@@ -269,13 +273,18 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
 
 /// Finalise `ctx`, accumulate its digest into `result` with byte-wise
 /// carry-addition (mirrors git's `flush_one_hunk`), and reset `ctx`.
-fn text_flush_one_hunk(result: &mut [u8; 20], ctx: &mut ObjectHasher) {
-    let old = std::mem::replace(ctx, patch_id_hasher());
-    let finished = old.finalize();
-    let hash = finished.as_bytes();
+fn text_flush_one_hunk(
+    result: &mut [u8],
+    digest_len: usize,
+    ctx: &mut ObjectHasher,
+    algo: HashAlgo,
+) {
+    let mut hash_buf = [0u8; PATCH_ID_DIGEST_MAX];
+    let old = std::mem::replace(ctx, ObjectHasher::new(algo));
+    let _ = old.finalize_into(&mut hash_buf);
     let mut carry: u16 = 0;
-    for i in 0..20 {
-        carry = carry + result[i] as u16 + hash[i] as u16;
+    for i in 0..digest_len {
+        carry = carry + result[i] as u16 + hash_buf[i] as u16;
         result[i] = carry as u8;
         carry >>= 8;
     }
@@ -295,30 +304,30 @@ fn hash_without_whitespace(ctx: &mut ObjectHasher, raw: &[u8]) -> usize {
     count
 }
 
-/// Parse a 40-hex OID at the start of `s`.
+/// Parse a full hex OID at the start of `s` for `algo`.
 ///
-/// Returns `None` if `s` does not start with exactly 40 lowercase hex digits
+/// Returns `None` when `s` does not start with a valid hex digest for `algo`
 /// optionally followed by ASCII whitespace.
-fn try_parse_oid_prefix(s: &str) -> Option<ObjectId> {
+fn try_parse_oid_prefix(s: &str, algo: HashAlgo) -> Option<ObjectId> {
     let s = s.trim_end_matches('\n').trim_end_matches('\r');
-    if s.len() < 40 {
+    let hex_len = algo.len() * 2;
+    if s.len() < hex_len {
         return None;
     }
-    let hex = &s[..40];
+    let hex = &s[..hex_len];
     if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    // The character after the OID (if any) must be whitespace or end of string.
-    if s.len() > 40 && !s.as_bytes()[40].is_ascii_whitespace() {
+    if s.len() > hex_len && !s.as_bytes()[hex_len].is_ascii_whitespace() {
         return None;
     }
-    let mut bytes = [0u8; 20];
+    let mut bytes = [0u8; PATCH_ID_DIGEST_MAX];
     for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
         let hi = hex_val(chunk[0])?;
         let lo = hex_val(chunk[1])?;
         bytes[i] = (hi << 4) | lo;
     }
-    ObjectId::from_bytes(&bytes).ok()
+    ObjectId::from_bytes(&bytes[..algo.len()]).ok()
 }
 
 /// Convert a single ASCII hex digit to its value.
@@ -396,14 +405,19 @@ fn split_lines_with_nl(input: &[u8]) -> Vec<&[u8]> {
 ///
 /// # Parameters
 ///
+/// - `algo` — object hash algorithm (must match `odb`'s configured format).
 /// - `odb` — object database used to read commit, tree, and blob objects.
 /// - `commit_oid` — OID of the commit to compute the patch-ID for.
 ///
 /// # Errors
 ///
 /// Returns errors from object-database reads or object-parse failures.
-pub fn compute_patch_id(odb: &Odb, commit_oid: &ObjectId) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(odb, commit_oid, &[])
+pub fn compute_patch_id(
+    algo: HashAlgo,
+    odb: &Odb,
+    commit_oid: &ObjectId,
+) -> Result<Option<ObjectId>> {
+    compute_patch_id_filtered(algo, odb, commit_oid, &[])
 }
 
 /// Compute the patch-ID for a single commit, limited to matching pathspecs.
@@ -413,6 +427,7 @@ pub fn compute_patch_id(odb: &Odb, commit_oid: &ObjectId) -> Result<Option<Objec
 ///
 /// # Parameters
 ///
+/// - `algo` — object hash algorithm (must match `odb`'s configured format).
 /// - `odb` — object database used to read commit, tree, and blob objects.
 /// - `commit_oid` — OID of the commit to compute the patch-ID for.
 /// - `paths` — pathspec strings used to limit the files included in the diff.
@@ -421,18 +436,21 @@ pub fn compute_patch_id(odb: &Odb, commit_oid: &ObjectId) -> Result<Option<Objec
 ///
 /// Returns errors from object-database reads or object-parse failures.
 pub fn compute_patch_id_for_paths(
+    algo: HashAlgo,
     odb: &Odb,
     commit_oid: &ObjectId,
     paths: &[String],
 ) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(odb, commit_oid, paths)
+    compute_patch_id_filtered(algo, odb, commit_oid, paths)
 }
 
 fn compute_patch_id_filtered(
+    algo: HashAlgo,
     odb: &Odb,
     commit_oid: &ObjectId,
     paths: &[String],
 ) -> Result<Option<ObjectId>> {
+    let digest_len = algo.len();
     let obj = odb.read(commit_oid)?;
     if obj.kind != ObjectKind::Commit {
         return Ok(None);
@@ -462,7 +480,7 @@ fn compute_patch_id_filtered(
     // Sort by primary path (lexicographic), matching diffcore_std ordering.
     diffs.sort_by(|a, b| a.path().cmp(b.path()));
 
-    let mut result = [0u8; 20];
+    let mut result = [0u8; PATCH_ID_DIGEST_MAX];
 
     for entry in &diffs {
         // Git's patch-id header (`diff --git a/<x> b/<y>`) uses the present path on both sides for
@@ -486,7 +504,7 @@ fn compute_patch_id_filtered(
         let old_mode = parse_mode_u32(&entry.old_mode);
         let new_mode = parse_mode_u32(&entry.new_mode);
 
-        let mut ctx = patch_id_hasher();
+        let mut ctx = ObjectHasher::new(algo);
         patch_id_add_string(&mut ctx, b"diff--git");
         patch_id_add_string(&mut ctx, b"a/");
         ctx.update(&old_path_buf[..len1]);
@@ -553,10 +571,10 @@ fn compute_patch_id_filtered(
             }
         }
 
-        text_flush_one_hunk(&mut result, &mut ctx);
+        text_flush_one_hunk(&mut result[..digest_len], digest_len, &mut ctx, algo);
     }
 
-    ObjectId::from_bytes(&result).map(Some)
+    ObjectId::from_bytes(&result[..digest_len]).map(Some)
 }
 
 fn diff_entry_matches_paths(entry: &DiffEntry, paths: &[String]) -> bool {
@@ -650,7 +668,8 @@ mod tests {
         git_in(dir.path(), &["commit", "-q", "-m", "third"]);
 
         let log_p = git_in(dir.path(), &["log", "-p", "--reverse"]);
-        let grit_ids = compute_patch_ids_from_text(log_p.as_bytes(), PatchIdMode::Stable);
+        let grit_ids =
+            compute_patch_ids_from_text(HashAlgo::Sha1, log_p.as_bytes(), PatchIdMode::Stable);
 
         use std::io::Write;
         let mut child = Command::new("git")

@@ -2465,7 +2465,7 @@ fn push_index_blob_worktree_diff(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(file_path) {
-            let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
             if raw_oid == ie.oid {
                 eff_oid = ie.oid;
             }
@@ -3270,7 +3270,7 @@ fn worktree_effective_oid_matches_index(
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(abs_path) {
-            let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
             if raw_oid == ie.oid {
                 eff_oid = ie.oid;
             }
@@ -3868,7 +3868,7 @@ pub fn diff_tree_to_worktree(
                     let mut eff_oid = wt_oid;
                     if eff_oid != te.oid {
                         if let Ok(raw) = fs::read(&file_path) {
-                            let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+                            let raw_oid = odb.hash(ObjectKind::Blob, &raw);
                             if raw_oid == te.oid {
                                 eff_oid = te.oid;
                             }
@@ -3906,7 +3906,7 @@ pub fn diff_tree_to_worktree(
                 let mut eff_oid = wt_oid;
                 if eff_oid != te.oid {
                     if let Ok(raw) = fs::read(&file_path) {
-                        let raw_oid = Odb::hash_object_data(ObjectKind::Blob, &raw);
+                        let raw_oid = odb.hash(ObjectKind::Blob, &raw);
                         if raw_oid == te.oid {
                             eff_oid = te.oid;
                         }
@@ -4007,7 +4007,7 @@ fn modified_as_copy_from_sources(
     let new_oid_eff = if e.new_oid != zero_oid() {
         e.new_oid
     } else {
-        Odb::hash_object_data(ObjectKind::Blob, &new_data)
+        odb.hash(ObjectKind::Blob, &new_data)
     };
 
     let mut best: Option<(usize, u32)> = None;
@@ -4323,7 +4323,7 @@ pub fn detect_copies(
                 let add_oid = if add.new_oid != zero_oid() {
                     add.new_oid
                 } else if let Some(ref data) = added_contents[ai] {
-                    Odb::hash_object_data(ObjectKind::Blob, data)
+                    odb.hash(ObjectKind::Blob, data)
                 } else {
                     zero_oid()
                 };

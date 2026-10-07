@@ -4732,10 +4732,11 @@ fn compute_cherry_patch_id(
     oid: &ObjectId,
     paths: &[String],
 ) -> Result<Option<ObjectId>> {
+    let algo = repo.odb.hash_algo();
     if paths.is_empty() {
-        compute_patch_id(&repo.odb, oid)
+        compute_patch_id(algo, &repo.odb, oid)
     } else {
-        compute_patch_id_for_paths(&repo.odb, oid, paths)
+        compute_patch_id_for_paths(algo, &repo.odb, oid, paths)
     }
 }
 

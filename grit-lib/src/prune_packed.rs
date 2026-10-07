@@ -4,7 +4,7 @@
 //! disk space without losing any object data.
 
 use crate::error::{Error, Result};
-use crate::objects::ObjectId;
+use crate::objects::{HashAlgo, ObjectId};
 use crate::pack::read_local_pack_indexes;
 use std::collections::HashSet;
 use std::fs;
@@ -37,6 +37,12 @@ pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Res
     if packed_ids.is_empty() {
         return Ok(Vec::new());
     }
+    let hash_bytes = packed_ids
+        .iter()
+        .next()
+        .map(|oid| oid.as_bytes().len())
+        .unwrap_or(HashAlgo::Sha1.len());
+    let loose_name_len = hash_bytes * 2 - 2;
 
     let mut removed = Vec::new();
     let rd = match fs::read_dir(objects_dir) {
@@ -66,8 +72,10 @@ pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Res
         for file in sub_rd {
             let file = file.map_err(Error::Io)?;
             let file_name = file.file_name().to_string_lossy().to_string();
-            // Loose object filenames are exactly 38 hex chars.
-            if file_name.len() != 38 || !file_name.chars().all(|c| c.is_ascii_hexdigit()) {
+            // Loose object filenames are (2 * hash_bytes - 2) hex chars after the prefix dir.
+            if file_name.len() != loose_name_len
+                || !file_name.chars().all(|c| c.is_ascii_hexdigit())
+            {
                 continue;
             }
 
@@ -109,10 +117,8 @@ fn collect_packed_ids(objects_dir: &Path) -> Result<HashSet<ObjectId>> {
     let mut ids = HashSet::new();
     for idx in indexes {
         for entry in idx.entries {
-            if entry.oid.len() == 20 {
-                if let Ok(oid) = crate::objects::ObjectId::from_bytes(&entry.oid) {
-                    ids.insert(oid);
-                }
+            if let Ok(oid) = ObjectId::from_bytes(&entry.oid) {
+                ids.insert(oid);
             }
         }
     }

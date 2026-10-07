@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
-use grit_lib::objects::ObjectKind;
-use grit_lib::odb::Odb;
+use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -116,7 +115,7 @@ fn init_repo_with_fsmn(tmp: &Path) -> PathBuf {
 }
 
 fn make_replacement_entry(path: &[u8], content: &[u8]) -> IndexEntry {
-    let oid = Odb::hash_object_data(ObjectKind::Blob, content);
+    let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, content);
     IndexEntry {
         ctime_sec: 1,
         ctime_nsec: 0,

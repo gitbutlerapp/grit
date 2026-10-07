@@ -1,8 +1,7 @@
 // API docs: https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html
-use grit_lib::objects::ObjectKind;
-use grit_lib::odb::Odb;
+use grit_lib::objects::{HashAlgo, ObjectKind};
 
 fn main() {
-    let oid = Odb::hash_object_data(ObjectKind::Blob, b"content to hash\n");
+    let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"content to hash\n");
     println!("{oid}");
 }

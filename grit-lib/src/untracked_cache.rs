@@ -14,8 +14,7 @@ use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK};
-use crate::objects::{ObjectId, ObjectKind};
-use crate::odb::Odb;
+use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
 
 pub const DIR_SHOW_OTHER_DIRECTORIES: u32 = 1 << 1;
@@ -541,7 +540,7 @@ fn global_excludes_path(repo: &Repository, config: &ConfigSet) -> Option<PathBuf
     }
 }
 
-fn file_stat_and_blob_oid(path: &Path) -> Result<(StatDataDisk, ObjectId)> {
+fn file_stat_and_blob_oid(path: &Path, algo: HashAlgo) -> Result<(StatDataDisk, ObjectId)> {
     match fs::metadata(path) {
         Ok(meta) => {
             let st = stat_data_from_meta(&meta);
@@ -549,13 +548,13 @@ fn file_stat_and_blob_oid(path: &Path) -> Result<(StatDataDisk, ObjectId)> {
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).map_err(Error::Io)?;
             let oid = if buf.is_empty() {
-                Odb::hash_object_data(ObjectKind::Blob, &buf)
+                algo.hash_object(ObjectKind::Blob, &buf)
             } else {
                 // Match Git's exclude-file oid normalization used by the untracked cache:
                 // parsed non-empty ignore files carry a trailing newline sentinel.
                 let mut normalized = buf;
                 normalized.push(b'\n');
-                Odb::hash_object_data(ObjectKind::Blob, &normalized)
+                algo.hash_object(ObjectKind::Blob, &normalized)
             };
             Ok((st, oid))
         }
@@ -779,7 +778,8 @@ fn fill_exclude_oids(
     uc: &mut UntrackedCache,
 ) -> Result<()> {
     let info_path = repo.git_dir.join("info/exclude");
-    let (st_i, oid_i) = file_stat_and_blob_oid(&info_path)?;
+    let algo = repo.odb.hash_algo();
+    let (st_i, oid_i) = file_stat_and_blob_oid(&info_path, algo)?;
     if uc.ss_info_exclude.valid
         && (uc.ss_info_exclude.stat != st_i || uc.ss_info_exclude.oid != oid_i)
     {
@@ -791,7 +791,7 @@ fn fill_exclude_oids(
     uc.ss_info_exclude.valid = true;
 
     let (st_e, oid_e) = if let Some(p) = global_excludes_path(repo, config) {
-        file_stat_and_blob_oid(&p)?
+        file_stat_and_blob_oid(&p, algo)?
     } else {
         (StatDataDisk::default(), ObjectId::zero())
     };
@@ -981,7 +981,7 @@ fn read_directory_recursive(
             if tracked_ignore_oid.is_some() {
                 ObjectId::zero()
             } else {
-                file_stat_and_blob_oid(&parent_exclude_path)
+                file_stat_and_blob_oid(&parent_exclude_path, repo.odb.hash_algo())
                     .map(|(_, oid)| oid)
                     .unwrap_or_else(|_| ObjectId::zero())
             }

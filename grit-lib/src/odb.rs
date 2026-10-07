@@ -871,16 +871,6 @@ impl Odb {
         pack::read_object_from_packs(objects_dir, oid)
     }
 
-    /// Hash raw content of a given kind with SHA-1 and return the [`ObjectId`].
-    ///
-    /// This does **not** write anything to disk. Prefer [`Self::hash`] when a
-    /// repository hash algorithm is available, so SHA-256 repositories are
-    /// handled correctly.
-    #[must_use]
-    pub fn hash_object_data(kind: ObjectKind, data: &[u8]) -> ObjectId {
-        hash_object_data_with(HashAlgo::Sha1, kind, data)
-    }
-
     /// Hash raw content of a given kind using this repository's hash algorithm.
     ///
     /// This does **not** write anything to disk.
@@ -1376,7 +1366,7 @@ mod tests {
     fn known_blob_hash() {
         // Verified: echo -n "hello" | git hash-object --stdin
         //        => b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0
-        let oid = Odb::hash_object_data(ObjectKind::Blob, b"hello");
+        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"hello");
         assert_eq!(oid.to_hex(), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
     }
 

@@ -1860,14 +1860,12 @@ fn collect_pack_oids_with_prefix(objects_dir: &Path, prefix: &str) -> Result<Vec
     let mut out = Vec::new();
     for idx in pack::read_local_pack_indexes_cached(objects_dir)? {
         for e in &idx.entries {
-            if e.oid.len() != 20 && e.oid.len() != 32 {
+            let Ok(oid) = crate::objects::ObjectId::from_bytes(&e.oid) else {
                 continue;
-            }
+            };
             let hex = pack::oid_bytes_to_hex(&e.oid);
             if hex.starts_with(prefix) {
-                if let Ok(oid) = crate::objects::ObjectId::from_bytes(&e.oid) {
-                    out.push(oid);
-                }
+                out.push(oid);
             }
         }
     }

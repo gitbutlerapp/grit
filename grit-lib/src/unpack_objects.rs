@@ -1652,8 +1652,8 @@ mod tests {
         assert_eq!(count, 2);
 
         // Verify both blobs can be read back.
-        let oid1 = Odb::hash_object_data(ObjectKind::Blob, b"hello\n");
-        let oid2 = Odb::hash_object_data(ObjectKind::Blob, b"world\n");
+        let oid1 = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"hello\n");
+        let oid2 = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"world\n");
         let obj1 = odb.read(&oid1).unwrap();
         let obj2 = odb.read(&oid2).unwrap();
         assert_eq!(obj1.data, b"hello\n");
@@ -1674,7 +1674,7 @@ mod tests {
             unpack_objects(&mut pack.as_slice(), &odb, &opts).unwrap(),
             1
         );
-        let oid = Odb::hash_object_data(ObjectKind::Tree, b"");
+        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, b"");
         assert!(odb.exists(&oid));
         let loose = objects_dir
             .join(oid.loose_prefix())
@@ -1700,7 +1700,7 @@ mod tests {
             name: b"sub".to_vec(),
             oid: submodule_oid,
         }]);
-        let tree_oid = Odb::hash_object_data(ObjectKind::Tree, &tree_data);
+        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &tree_data);
 
         // Strict connectivity must NOT flag the gitlink target as missing,
         // matching upstream git (git/fsck.c skips S_ISGITLINK entries).
@@ -1715,7 +1715,7 @@ mod tests {
             name: b"file".to_vec(),
             oid: ObjectId::from_hex(&"ab".repeat(20)).unwrap(),
         }]);
-        let bad_oid = Odb::hash_object_data(ObjectKind::Tree, &bad_tree);
+        let bad_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &bad_tree);
         let mut bad_pack = HashMap::new();
         bad_pack.insert(bad_oid, (ObjectKind::Tree, bad_tree));
         assert!(matches!(
@@ -1750,7 +1750,7 @@ mod tests {
         use tempfile::TempDir;
         let pack = make_pack(&[(ObjectKind::Blob, b"chunked-stream")]);
         let opts = UnpackOptions::default();
-        let oid = Odb::hash_object_data(ObjectKind::Blob, b"chunked-stream");
+        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"chunked-stream");
 
         let tmp = TempDir::new().unwrap();
         let objects_dir = tmp.path().join("objects");
@@ -1798,7 +1798,7 @@ mod tests {
         assert_eq!(count, 1);
 
         // Nothing should be written.
-        let oid = Odb::hash_object_data(ObjectKind::Blob, b"test content");
+        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"test content");
         assert!(!odb.exists(&oid));
     }
 

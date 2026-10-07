@@ -567,7 +567,7 @@ mod tests {
         pin_mtime(&file_path, INDEX_MTIME.0, INDEX_MTIME.1);
 
         let meta = fs::symlink_metadata(&file_path).unwrap();
-        let stale_oid = Odb::hash_object_data(ObjectKind::Blob, content_a);
+        let stale_oid = repo.odb.hash(ObjectKind::Blob, content_a);
         let mut index = repo.load_index().unwrap();
         let entry = entry_from_metadata(&meta, b"racy.txt", stale_oid, MODE_REGULAR);
         assert!(stat_matches(&entry, &meta));
@@ -603,7 +603,7 @@ mod tests {
         fs::write(&file_path, content_b).unwrap();
         pin_mtime(&file_path, INDEX_MTIME.0, INDEX_MTIME.1);
         let meta = fs::symlink_metadata(&file_path).unwrap();
-        let stale_oid = Odb::hash_object_data(ObjectKind::Blob, content_a);
+        let stale_oid = repo.odb.hash(ObjectKind::Blob, content_a);
 
         let mut index = Index::new();
         let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, MODE_REGULAR);

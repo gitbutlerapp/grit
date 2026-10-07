@@ -2437,7 +2437,11 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
             Some(crc) if crc32fast::hash(slice) != crc => continue,
             // v1 indexes carry no CRC; verify by inflating and re-hashing the content.
             None if read_object_from_pack(idx, oid)
-                .map(|obj| crate::odb::Odb::hash_object_data(obj.kind, &obj.data) != *oid)
+                .map(|obj| {
+                    HashAlgo::from_len(idx.hash_bytes)
+                        .map(|algo| hash_object(algo, obj.kind, &obj.data) != *oid)
+                        .unwrap_or(true)
+                })
                 .unwrap_or(true) =>
             {
                 continue;

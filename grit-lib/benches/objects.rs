@@ -43,7 +43,7 @@ fn bench_object_id_hash(c: &mut Criterion) {
     ] {
         group.throughput(Throughput::Bytes(data.len() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(label), &data, |b, input| {
-            b.iter(|| black_box(Odb::hash_object_data(kind, input)));
+            b.iter(|| black_box(HashAlgo::Sha1.hash_object(kind, input)));
         });
     }
     group.finish();
