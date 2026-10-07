@@ -11,8 +11,12 @@ readme = "README.md"
 name = "grit"
 path = "src/main.rs"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
 
 [dependencies]
 anyhow.workspace = true
@@ -27,6 +31,7 @@ jaq-std = "3.0"
 terminal_size.workspace = true
 # `inline` enables word-level intra-line highlighting for `grit diff`.
 similar = { workspace = true, features = ["inline"] }
+libc.workspace = true
 
 [dev-dependencies]
 grit-lib = { path = "../grit-lib" }

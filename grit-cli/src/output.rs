@@ -17,9 +17,11 @@
 use anyhow::{bail, Result};
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use serde::Serialize;
+use std::io::{ErrorKind, Write as _};
 
 use crate::context::CommitSummary;
 use crate::json_filter::apply_json_filter;
+use crate::stdio;
 use crate::ui::entry_path;
 
 /// How a command's outcome should be rendered.
@@ -73,21 +75,26 @@ pub fn emit<T: Serialize + HumanRender>(value: &T, opts: &OutputOptions) -> Resu
 
 /// Serialize `value` to stdout, optionally applying a jq-like `filter`.
 fn write_json<T: Serialize>(value: &T, filter: Option<&str>) -> Result<()> {
-    use std::io::Write as _;
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
     if let Some(expr) = filter {
         let full = serde_json::to_value(value)
             .map_err(|e| anyhow::anyhow!("serializing JSON output: {e}"))?;
         let filtered = apply_json_filter(&full, expr)?;
-        serde_json::to_writer_pretty(&mut lock, &filtered)
-            .map_err(|e| anyhow::anyhow!("serializing filtered JSON output: {e}"))?;
+        json_write(serde_json::to_writer_pretty(&mut lock, &filtered))?;
     } else {
-        serde_json::to_writer_pretty(&mut lock, value)
-            .map_err(|e| anyhow::anyhow!("serializing JSON output: {e}"))?;
+        json_write(serde_json::to_writer_pretty(&mut lock, value))?;
     }
-    let _ = writeln!(lock);
+    let _ = stdio::io_result(writeln!(lock));
     Ok(())
+}
+
+fn json_write(result: Result<(), serde_json::Error>) -> Result<()> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) if e.io_error_kind() == Some(ErrorKind::BrokenPipe) => Ok(()),
+        Err(e) => Err(anyhow::anyhow!("serializing JSON output: {e}")),
+    }
 }
 
 /// Report a command failure: `{"error": "…"}` on stdout in JSON mode, or the
@@ -111,7 +118,9 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
             } else {
                 serde_json::json!({ "error": format!("{err:#}") })
             };
-            println!("{payload}");
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            let _ = stdio::io_result(writeln!(lock, "{payload}"));
         }
     }
 }

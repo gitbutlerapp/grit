@@ -10,6 +10,7 @@ mod context;
 mod json_filter;
 mod net;
 mod output;
+mod stdio;
 mod ui;
 
 use anyhow::Result;
@@ -225,6 +226,7 @@ struct ServeArgs {
 }
 
 fn main() {
+    stdio::configure();
     let cli = Cli::parse();
     let opts = OutputOptions {
         mode: if cli.json {

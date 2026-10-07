@@ -459,6 +459,7 @@ dependencies = [
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "libc",
  "serde",
  "serde_json",
  "similar",

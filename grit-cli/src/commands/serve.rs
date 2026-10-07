@@ -9,6 +9,8 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+
+use crate::stdio;
 use grit_lib::config::ConfigSet;
 use grit_lib::repo::Repository;
 use grit_lib::serve::{self, ProtocolVersion, ReceivePolicy, ServeOptions};
@@ -68,7 +70,7 @@ pub fn run(
             serve::receive_pack(&repo, &mut input, &mut output, &opts, &policy)?;
         }
     }
-    output.flush().context("writing the response")?;
+    stdio::io_result(output.flush()).context("writing the response")?;
     Ok(())
 }
 
