@@ -91,6 +91,28 @@ impl Parallelism {
     }
 }
 
+/// Worker count for index preload / parallel worktree hashing.
+///
+/// Honors Git's `core.preloadindex` (when false, only one worker) and
+/// `index.threads` (when unset or zero, all logical CPUs).
+#[must_use]
+pub fn index_parallelism_from_config(config: &crate::config::ConfigSet) -> Parallelism {
+    use std::num::NonZeroUsize;
+
+    let preload = config
+        .get_bool("core.preloadindex")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    if !preload {
+        return Parallelism::new(NonZeroUsize::MIN);
+    }
+    let requested = config
+        .get_i64("index.threads")
+        .and_then(|r| r.ok())
+        .map(|n| n.max(0) as usize);
+    Parallelism::resolve(requested)
+}
+
 /// Returns true when parallel hashing is expected to beat a serial loop.
 #[must_use]
 pub fn parallel_hash_worthwhile(item_count: usize, total_bytes: usize, threads: usize) -> bool {

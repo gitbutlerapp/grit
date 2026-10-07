@@ -709,12 +709,15 @@ pub fn apply_stash(
     // the recorded OID, so a following `git diff-files` reflects only genuine differences (t3903
     // 'stash apply --index refreshes the index').
     if !has_conflicts {
+        let config = crate::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+        let parallelism = crate::hash::index_parallelism_from_config(&config);
         crate::diff::refresh_index_stat_content_verified(
             &repo.odb,
             &repo.git_dir,
             &mut new_index,
             work_tree,
             None,
+            parallelism,
         );
     }
     repo.write_index(&mut new_index)

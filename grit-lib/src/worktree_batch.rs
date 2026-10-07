@@ -1,0 +1,207 @@
+//! Parallel read, filter, and hash of worktree file blobs (add / index stat refresh).
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::config::ConfigSet;
+use crate::crlf::{self, ConversionConfig, GitAttributes};
+use crate::diff::{hash_worktree_file, mode_from_metadata, worktree_blob_bytes};
+use crate::error::{Error, Result};
+use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
+use crate::index::IndexEntry;
+use crate::objects::ObjectId;
+use crate::odb::Odb;
+
+/// One worktree path to read and normalize in parallel.
+pub struct WorktreeBlobReadInput {
+    /// Absolute path to read.
+    pub abs: PathBuf,
+    /// Index-relative path (for attributes / CRLF).
+    pub index_relpath: String,
+    /// Stage-0 index entry when conversion may use the recorded OID blob.
+    pub index_entry: Option<IndexEntry>,
+}
+
+/// Normalized blob bytes plus metadata needed to build an index entry.
+pub struct PreparedWorktreeBlob {
+    /// Index path spelling used for staging.
+    pub index_relpath: String,
+    /// Git-normalized blob payload (ready for [`Odb::write`]).
+    pub data: Vec<u8>,
+    /// Worktree metadata captured during the read pass.
+    pub meta: fs::Metadata,
+    /// Git mode derived from `meta`.
+    pub mode: u32,
+}
+
+/// Read and CRLF-filter many worktree blobs in parallel, preserving `items` order.
+///
+/// # Errors
+///
+/// Propagates I/O, conversion, or object-store read failures from any worker.
+pub fn prepare_worktree_blobs_parallel(
+    odb: &Odb,
+    items: &[WorktreeBlobReadInput],
+    conv: &ConversionConfig,
+    attrs: &GitAttributes,
+    config: &ConfigSet,
+    parallelism: Parallelism,
+) -> Result<Vec<PreparedWorktreeBlob>> {
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let total_bytes: usize = items
+        .iter()
+        .filter_map(|item| fs::metadata(&item.abs).ok())
+        .map(|m| m.len() as usize)
+        .sum();
+    let threads = parallelism.threads();
+    let prepared = try_par_hash_with(items, threads, total_bytes, |item| {
+        let meta = fs::symlink_metadata(&item.abs).map_err(Error::Io)?;
+        let file_attrs = crlf::get_file_attrs(attrs, &item.index_relpath, false, config);
+        let data = worktree_blob_bytes(
+            odb,
+            &item.abs,
+            &meta,
+            conv,
+            &file_attrs,
+            &item.index_relpath,
+            item.index_entry.as_ref(),
+        )?;
+        let mode = mode_from_metadata(&meta);
+        Ok(PreparedWorktreeBlob {
+            index_relpath: item.index_relpath.clone(),
+            data,
+            meta,
+            mode,
+        })
+    })
+    .map_err(|e: ParallelHashError<Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+    Ok(prepared)
+}
+
+/// Action to apply after parallel content verification during index stat refresh.
+pub(crate) enum RefreshHashOutcome {
+    /// Racy entry: content no longer matches the recorded OID.
+    InvalidateStat,
+    /// Stat was stale but content still matches: adopt worktree stat fields.
+    AdoptStat(fs::Metadata),
+}
+
+enum RefreshHashKind {
+    RacyVerify,
+    StatAdopt,
+}
+
+pub(crate) struct RefreshHashWork<'a> {
+    entry_index: usize,
+    abs: PathBuf,
+    rel_path: &'a str,
+    meta: fs::Metadata,
+    expected_oid: ObjectId,
+    kind: RefreshHashKind,
+}
+
+/// Build parallel refresh work items from a snapshot of index entries (read-only).
+pub(crate) fn collect_refresh_hash_work<'a>(
+    entries: &'a [IndexEntry],
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+) -> Vec<RefreshHashWork<'a>> {
+    use crate::diff::{entry_is_racy, stat_matches};
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+
+    let mut work = Vec::new();
+    for (entry_index, ie) in entries.iter().enumerate() {
+        if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
+            continue;
+        }
+        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+            continue;
+        }
+        let Ok(rel_path) = std::str::from_utf8(&ie.path) else {
+            continue;
+        };
+        let abs = work_tree.join(rel_path);
+        let Ok(meta) = fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        if stat_matches(ie, &meta) {
+            if entry_is_racy(ie, index_mtime) {
+                work.push(RefreshHashWork {
+                    entry_index,
+                    abs,
+                    rel_path,
+                    meta,
+                    expected_oid: ie.oid,
+                    kind: RefreshHashKind::RacyVerify,
+                });
+            }
+            continue;
+        }
+        work.push(RefreshHashWork {
+            entry_index,
+            abs,
+            rel_path,
+            meta,
+            expected_oid: ie.oid,
+            kind: RefreshHashKind::StatAdopt,
+        });
+    }
+    work
+}
+
+/// Hash refresh candidates in parallel; returns `(entry_index, action)` pairs in input order.
+///
+/// # Errors
+///
+/// Propagates I/O or hashing failures from any worker.
+pub(crate) fn parallel_refresh_index_stat_hashes(
+    odb: &Odb,
+    entries: &[IndexEntry],
+    work: &[RefreshHashWork<'_>],
+    conv: &ConversionConfig,
+    attrs: &GitAttributes,
+    config: &ConfigSet,
+    parallelism: Parallelism,
+) -> Result<Vec<(usize, RefreshHashOutcome)>> {
+    if work.is_empty() {
+        return Ok(Vec::new());
+    }
+    let total_bytes: usize = work.iter().map(|w| w.meta.len() as usize).sum();
+    let threads = parallelism.threads();
+    try_par_hash_with(work, threads, total_bytes, |item| {
+        let ie = &entries[item.entry_index];
+        let file_attrs = crlf::get_file_attrs(attrs, item.rel_path, false, config);
+        let wt_oid = hash_worktree_file(
+            odb,
+            &item.abs,
+            &item.meta,
+            conv,
+            &file_attrs,
+            item.rel_path,
+            Some(ie),
+        )?;
+        let content_matches = wt_oid == item.expected_oid;
+        let outcome = match item.kind {
+            RefreshHashKind::RacyVerify if !content_matches => {
+                Some(RefreshHashOutcome::InvalidateStat)
+            }
+            RefreshHashKind::StatAdopt if content_matches => {
+                Some(RefreshHashOutcome::AdoptStat(item.meta.clone()))
+            }
+            RefreshHashKind::RacyVerify | RefreshHashKind::StatAdopt => None,
+        };
+        Ok((item.entry_index, outcome))
+    })
+    .map_err(|e: ParallelHashError<Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })
+    .map(|rows| {
+        rows.into_iter()
+            .filter_map(|(idx, outcome)| outcome.map(|o| (idx, o)))
+            .collect()
+    })
+}

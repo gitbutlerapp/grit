@@ -15,8 +15,11 @@ use crate::diff::{
     DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::index::{entry_from_metadata, index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
-use crate::objects::{parse_commit, parse_tree, ObjectId};
+use crate::hash::{index_parallelism_from_config, Parallelism};
+use crate::index::{
+    entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
+};
+use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
@@ -24,6 +27,7 @@ use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
+use crate::worktree_batch::{prepare_worktree_blobs_parallel, WorktreeBlobReadInput};
 
 /// What paths [`stage`] should update (`git add` vs `git add -u`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,6 +52,8 @@ pub struct StageOptions {
     pub pathspec_sources: Vec<String>,
     /// Whether to include untracked paths ([`StageMode::All`]) or only tracked changes ([`StageMode::Update`]).
     pub mode: StageMode,
+    /// Override parallel worker count for batch blob hashing (`None` = resolve from config).
+    pub hash_threads: Option<usize>,
 }
 
 /// Counts returned by [`stage`].
@@ -98,24 +104,32 @@ pub fn stage(
     let mut index = repo.load_index()?;
 
     let convert = StagingConvertContext::load(repo, work_tree);
+    let parallelism = opts
+        .hash_threads
+        .map(|n| Parallelism::resolve(Some(n)))
+        .unwrap_or_else(|| index_parallelism_from_config(&convert.config));
     let ignorecase = convert
         .config
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
+    let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
-    let diff_opts = DiffIndexToWorktreeOptions {
-        index_mtime,
-        ..DiffIndexToWorktreeOptions::default()
+    let unstaged = if index.entries.is_empty() {
+        Vec::new()
+    } else {
+        let diff_opts = DiffIndexToWorktreeOptions {
+            index_mtime,
+            ..DiffIndexToWorktreeOptions::default()
+        };
+        crate::diff::diff_index_to_worktree_for_staging(
+            &repo.odb,
+            &repo.git_dir,
+            &index,
+            work_tree,
+            diff_opts,
+        )?
     };
-    let unstaged = crate::diff::diff_index_to_worktree_for_staging(
-        &repo.odb,
-        &repo.git_dir,
-        &index,
-        work_tree,
-        diff_opts,
-    )?;
 
     let untracked = if opts.mode == StageMode::All {
         let (untracked, _) = collect_untracked_and_ignored(
@@ -161,17 +175,18 @@ pub fn stage(
             stage_ignorecase_spelling_updates(work_tree, &icase_map, &matches, &mut index)?;
     }
 
-    for path in &untracked {
-        if !matches(path) {
-            continue;
-        }
-        if indexed_any_stage.contains(path.as_bytes()) {
-            continue;
-        }
-        icase_map.remove_alias_of(&mut index, path.as_bytes());
-        stage_untracked_path(repo, work_tree, path, &convert, &mut index)?;
-        outcome.added += 1;
-    }
+    stage_untracked_paths_parallel(
+        repo,
+        work_tree,
+        &untracked,
+        &matches,
+        &indexed_any_stage,
+        &convert,
+        &mut icase_map,
+        &mut index,
+        parallelism,
+        &mut outcome,
+    )?;
 
     if outcome.total() > 0 {
         index.sort();
@@ -357,6 +372,96 @@ fn stage_ignorecase_spelling_updates(
         updated += 1;
     }
     Ok(updated)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_untracked_paths_parallel(
+    repo: &Repository,
+    work_tree: &Path,
+    untracked: &[String],
+    matches: &impl Fn(&str) -> bool,
+    indexed_any_stage: &HashSet<Vec<u8>>,
+    ctx: &StagingConvertContext,
+    icase_map: &mut Stage0IcasePathMap,
+    index: &mut Index,
+    parallelism: Parallelism,
+    outcome: &mut StageOutcome,
+) -> Result<()> {
+    let precompose_unicode = ctx
+        .config
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+
+    let mut batch_inputs: Vec<WorktreeBlobReadInput> = Vec::new();
+    let mut deferred: Vec<String> = Vec::new();
+
+    for path in untracked {
+        if !matches(path) {
+            continue;
+        }
+        if indexed_any_stage.contains(path.as_bytes()) {
+            continue;
+        }
+        let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
+        batch_inputs.push(WorktreeBlobReadInput {
+            abs: resolved.abs,
+            index_relpath: resolved.index_relpath,
+            index_entry: None,
+        });
+    }
+
+    let prepared = prepare_worktree_blobs_parallel(
+        &repo.odb,
+        &batch_inputs,
+        &ctx.conv,
+        &ctx.attrs,
+        &ctx.config,
+        parallelism,
+    )?;
+
+    let mut batch_entries: Vec<IndexEntry> = Vec::with_capacity(prepared.len());
+    for prep in prepared {
+        let abs = work_tree.join(&prep.index_relpath);
+        if prep.meta.is_dir()
+            && !prep.meta.file_type().is_symlink()
+            && read_submodule_head_oid(&abs).is_some()
+        {
+            deferred.push(prep.index_relpath);
+            continue;
+        }
+        icase_map.remove_alias_of(index, prep.index_relpath.as_bytes());
+        let oid = repo
+            .odb
+            .write(ObjectKind::Blob, &prep.data)
+            .map_err(|e| Error::Message(format!("could not store {}: {e}", prep.index_relpath)))?;
+        let mut entry =
+            entry_from_metadata(&prep.meta, prep.index_relpath.as_bytes(), oid, prep.mode);
+        entry.mode = prep.mode;
+        index.invalidate_untracked_cache_for_path(&prep.index_relpath);
+        index.invalidate_cache_tree_for_path(&entry.path);
+        batch_entries.push(entry);
+        outcome.added += 1;
+    }
+    if !batch_entries.is_empty() {
+        for entry in &batch_entries {
+            if let Ok(rel) = std::str::from_utf8(&entry.path) {
+                mark_fsmonitor_staged(index, rel);
+            }
+        }
+        index.entries.extend(batch_entries);
+        if index.fsmonitor_last_update.is_some() {
+            index.fsmonitor_validity_changed();
+        }
+    }
+
+    for path in deferred {
+        icase_map.remove_alias_of(index, path.as_bytes());
+        stage_untracked_path(repo, work_tree, &path, ctx, index)?;
+        outcome.added += 1;
+    }
+
+    Ok(())
 }
 
 fn stage_untracked_path(

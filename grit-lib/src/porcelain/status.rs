@@ -974,12 +974,15 @@ pub fn status(
         Err(e) => return Err(e),
     };
     let index_mtime = index.source_mtime;
+    let config = crate::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let parallelism = crate::hash::index_parallelism_from_config(&config);
     if crate::diff::refresh_index_stat_content_verified(
         &repo.odb,
         &repo.git_dir,
         &mut index,
         work_tree,
         index_mtime,
+        parallelism,
     ) && repo.try_write_index(&mut index)?
     {
         index.source_mtime = crate::index::index_file_mtime(&index_path);
