@@ -625,12 +625,8 @@ pub fn verify_cache_tree(index: &Index) -> Result<()> {
     let Some(root) = index.cache_tree.as_ref() else {
         return Ok(());
     };
-    // Stage-0, non-tree entries in canonical (path) order — the layout the cache-tree indexes.
-    let mut cache: Vec<&IndexEntry> = index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0 && e.mode != MODE_TREE)
-        .collect();
+    // Same rows as write-tree / incremental cache-tree updates (includes sparse-directory placeholders).
+    let mut cache = cache_tree_index_rows(index);
     cache.sort_by(|a, b| a.path.cmp(&b.path));
     verify_cache_tree_one(root, &cache, &mut Vec::new())
 }

@@ -10,10 +10,19 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use grit_lib::diff::stat_matches;
+use grit_lib::index::Index;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
+
+fn sparse_directory_placeholder_count(index: &Index) -> usize {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.is_sparse_directory_placeholder())
+        .count()
+}
 
 fn touch_all_tracked(repo: &Path) {
     let out = git(repo, &["ls-files", "-z"]);
@@ -157,4 +166,76 @@ fn status_succeeds_when_index_lock_held_after_touch() {
     );
 
     let _ = fs::remove_file(&lock_path);
+}
+
+#[test]
+fn status_on_git_created_sparse_index_after_touch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path().join("gg");
+    let clone = Command::new("git")
+        .args(["clone", "--depth", "1", "https://github.com/git/git"])
+        .arg(&repo_root)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("spawn git clone");
+    assert!(
+        clone.success(),
+        "git clone git.git for sparse-index fixture"
+    );
+
+    git(&repo_root, &["config", "user.email", "t@example.com"]);
+    git(&repo_root, &["config", "user.name", "Test"]);
+    git(&repo_root, &["update-index", "--refresh"]);
+    git(
+        &repo_root,
+        &["sparse-checkout", "init", "--cone", "--sparse-index"],
+    );
+    git(&repo_root, &["sparse-checkout", "set", "Documentation"]);
+
+    for path in git(&repo_root, &["ls-files", "Documentation"])
+        .lines()
+        .filter(|l| !l.is_empty())
+        .take(64)
+    {
+        filetime::set_file_mtime(repo_root.join(path), filetime::FileTime::now())
+            .expect("touch materialized sparse file");
+    }
+
+    let git_dir = repo_root.join(".git");
+    let grit_repo = Repository::open(&git_dir, Some(&repo_root)).expect("open grit repo");
+    let index_before = Index::load(&grit_repo.index_path()).expect("load sparse index");
+    let placeholders_before = sparse_directory_placeholder_count(&index_before);
+    assert!(
+        placeholders_before > 0,
+        "Git cone sparse-index must leave sparse-directory placeholders in the index"
+    );
+
+    let had_cache_tree_test = std::env::var("GIT_TEST_CHECK_CACHE_TREE").is_ok();
+    std::env::set_var("GIT_TEST_CHECK_CACHE_TREE", "1");
+
+    let model = status(&grit_repo, &StatusOptions::default(), &mut NullProgress)
+        .expect("status must succeed on Git sparse index after mtime-only touches");
+
+    if !had_cache_tree_test {
+        std::env::remove_var("GIT_TEST_CHECK_CACHE_TREE");
+    }
+
+    assert!(
+        model.unstaged.is_empty(),
+        "mtime-only touches on materialized sparse paths must not appear unstaged"
+    );
+
+    let index_after = Index::load(&grit_repo.index_path()).expect("reload index after status");
+    assert_eq!(
+        sparse_directory_placeholder_count(&index_after),
+        placeholders_before,
+        "status stat refresh must not expand or drop sparse-directory placeholders"
+    );
+
+    let git_diff_files = git(&repo_root, &["diff-files"]);
+    assert!(
+        git_diff_files.trim().is_empty(),
+        "system git diff-files must be clean after grit refreshed stats"
+    );
 }
