@@ -9,12 +9,9 @@ use std::collections::HashSet;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::diff::{diff_trees, DiffStatus};
-use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::status::{status, StatusModel, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
-use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 use serde::Serialize;
 
@@ -73,9 +70,9 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
         None => None,
     };
 
-    guard_untracked(&repo, &model, head_tree.as_ref(), &target_tree)?;
-
-    checkout_between_trees(&repo, head_tree.as_ref(), &target_tree)
+    let changes = diff_trees(&repo.odb, head_tree.as_ref(), Some(&target_tree), "")?;
+    guard_untracked_changes(&model, &changes)?;
+    grit_lib::porcelain::checkout::checkout_tree_changes(&repo, &changes)
         .context("could not update the working tree")?;
     refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref).context("could not move HEAD")?;
 
@@ -87,19 +84,16 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
 
 /// Refuse the switch if it would overwrite an untracked working-tree file with a
 /// path the destination branch newly introduces.
-fn guard_untracked(
-    repo: &Repository,
+fn guard_untracked_changes(
     model: &StatusModel,
-    head_tree: Option<&ObjectId>,
-    target_tree: &ObjectId,
+    changes: &[grit_lib::diff::DiffEntry],
 ) -> Result<()> {
     if model.untracked.is_empty() {
         return Ok(());
     }
     let untracked: HashSet<&str> = model.untracked.iter().map(String::as_str).collect();
 
-    let changes = diff_trees(&repo.odb, head_tree, Some(target_tree), "")?;
-    for change in &changes {
+    for change in changes {
         if change.status != DiffStatus::Added {
             continue;
         }
