@@ -113,14 +113,14 @@ fn write_checkout_entry(
     if mode == MODE_SYMLINK {
         write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
         let abs = work_tree.join(rel_path);
-        let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-        record_written_file_metadata(&abs);
+        let meta = written_file_symlink_metadata(&abs)?;
         return Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode));
     }
 
     if can_overwrite_regular_in_place(change) {
         dir_cache.ensure_parents(work_tree, rel_path)?;
         let abs_path = work_tree.join(rel_path);
+        let old_mode = parse_git_mode(&change.old_mode);
         let mut file = match OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -129,43 +129,56 @@ fn write_checkout_entry(
             Ok(f) => f,
             Err(_) => {
                 write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
-                let meta = fs::symlink_metadata(&abs_path).map_err(Error::Io)?;
-                record_written_file_metadata(&abs_path);
+                let meta = written_file_symlink_metadata(&abs_path)?;
                 return Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode));
             }
         };
         file.write_all(data)
             .map_err(|e| Error::PathError(format!("writing '{rel_path}' during checkout: {e}")))?;
-        apply_index_file_mode_on_open(&file, mode)?;
-        let meta = file.metadata().map_err(Error::Io)?;
-        record_written_file_metadata(&abs_path);
+        let meta = written_file_metadata(&file, &abs_path)?;
+        apply_in_place_git_mode_transition(&file, &meta, old_mode, mode)?;
         return Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode));
     }
 
     write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
     let abs = work_tree.join(rel_path);
-    let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-    record_written_file_metadata(&abs);
+    let meta = written_file_symlink_metadata(&abs)?;
     Ok(entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode))
 }
 
+/// Adjust only the executable bit for an in-place overwrite, preserving umask-driven permissions.
 #[cfg(unix)]
-fn apply_index_file_mode_on_open(file: &std::fs::File, mode: u32) -> Result<()> {
+fn apply_in_place_git_mode_transition(
+    file: &std::fs::File,
+    meta: &fs::Metadata,
+    old_mode: u32,
+    new_mode: u32,
+) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    if mode == MODE_EXECUTABLE {
-        let mut perms = file.metadata().map_err(Error::Io)?.permissions();
-        perms.set_mode(0o755);
-        file.set_permissions(perms).map_err(Error::Io)?;
-    } else if mode == MODE_REGULAR {
-        let mut perms = file.metadata().map_err(Error::Io)?.permissions();
-        perms.set_mode(0o644);
-        file.set_permissions(perms).map_err(Error::Io)?;
+    let old_exec = old_mode == MODE_EXECUTABLE;
+    let new_exec = new_mode == MODE_EXECUTABLE;
+    if old_exec == new_exec {
+        return Ok(());
     }
-    Ok(())
+    let mut perms = meta.permissions();
+    let mut bits = perms.mode();
+    const EXEC_MASK: u32 = 0o111;
+    if new_exec {
+        bits |= EXEC_MASK;
+    } else {
+        bits &= !EXEC_MASK;
+    }
+    perms.set_mode(bits);
+    file.set_permissions(perms).map_err(Error::Io)
 }
 
 #[cfg(not(unix))]
-fn apply_index_file_mode_on_open(_file: &std::fs::File, _mode: u32) -> Result<()> {
+fn apply_in_place_git_mode_transition(
+    _file: &std::fs::File,
+    _meta: &fs::Metadata,
+    _old_mode: u32,
+    _new_mode: u32,
+) -> Result<()> {
     Ok(())
 }
 
@@ -213,26 +226,25 @@ impl LeadingDirCache {
 }
 
 fn leading_dir_metadata(path: &Path) -> Result<fs::Metadata> {
-    record_directory_metadata(path);
+    #[cfg(test)]
+    syscall_probe::note_metadata(path, syscall_probe::MetadataKind::Directory);
     fs::symlink_metadata(path).map_err(Error::Io)
 }
 
-fn record_directory_metadata(path: &Path) {
+fn written_file_symlink_metadata(path: &Path) -> Result<fs::Metadata> {
     #[cfg(test)]
-    {
-        syscall_probe::note_metadata(path, syscall_probe::MetadataKind::Directory);
-    }
-    #[cfg(not(test))]
-    let _ = path;
+    syscall_probe::note_metadata(path, syscall_probe::MetadataKind::WrittenFile);
+    fs::symlink_metadata(path).map_err(Error::Io)
 }
 
-fn record_written_file_metadata(path: &Path) {
+fn written_file_metadata(file: &std::fs::File, path: &Path) -> Result<fs::Metadata> {
     #[cfg(test)]
     {
         syscall_probe::note_metadata(path, syscall_probe::MetadataKind::WrittenFile);
     }
     #[cfg(not(test))]
     let _ = path;
+    file.metadata().map_err(Error::Io)
 }
 
 /// Set `abs_path` permissions to match Git index `mode` (regular vs executable blob).
