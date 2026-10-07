@@ -32,8 +32,8 @@ http-ureq = ["dep:ureq", "dep:base64"]
 
 [dependencies]
 thiserror.workspace = true
-sha1.workspace = true
-sha2.workspace = true
+sha1 = "0.11"
+sha2 = "0.11"
 flate2.workspace = true
 time.workspace = true
 hex.workspace = true

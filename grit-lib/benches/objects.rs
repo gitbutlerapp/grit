@@ -8,6 +8,7 @@ use std::hint::black_box;
 use std::io::Read;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use fixture::ObjectBenchFixtures;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -16,9 +17,6 @@ use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::unpack_objects::apply_delta;
-use sha1::{Digest, Sha1};
-
-use fixture::ObjectBenchFixtures;
 
 fn bench_sha1_throughput(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
@@ -27,7 +25,7 @@ fn bench_sha1_throughput(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(*size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), buf, |b, input| {
             b.iter(|| {
-                let mut hasher = Sha1::new();
+                let mut hasher = HashAlgo::Sha1.hasher();
                 hasher.update(black_box(input.as_slice()));
                 hasher.finalize()
             });

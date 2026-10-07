@@ -14,14 +14,19 @@
 //!   output of `git log -p` or `git diff-tree --patch --stdin`), matching the
 //!   behaviour of `git patch-id`.
 
-use sha1::{Digest, Sha1};
 use similar::{ChangeTag, TextDiff};
 
 use crate::diff::{diff_trees, zero_oid, DiffEntry};
 use crate::error::Result;
+use crate::hash::ObjectHasher;
 use crate::merge_file;
+use crate::objects::HashAlgo;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
+
+fn patch_id_hasher() -> ObjectHasher {
+    HashAlgo::Sha1.hasher()
+}
 
 /// How to compute a patch-ID from unified diff text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +65,7 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
     let mut results: Vec<(ObjectId, ObjectId)> = Vec::new();
 
     // Current accumulated state for the patch being processed.
-    let mut ctx = Sha1::new();
+    let mut ctx = patch_id_hasher();
     let mut result = [0u8; 20];
     let mut patchlen: usize = 0;
     // before/after: -1 = parsing file header, 0 = awaiting @@ hunk, >0 = in hunk
@@ -108,7 +113,7 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
                 }
                 // Reset for the new patch.
                 result = [0u8; 20];
-                ctx = Sha1::new();
+                ctx = patch_id_hasher();
                 patchlen = 0;
                 before = -1;
                 after = -1;
@@ -186,7 +191,7 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
                     }
                 }
                 result = [0u8; 20];
-                ctx = Sha1::new();
+                ctx = patch_id_hasher();
                 patchlen = 0;
                 before = -1;
                 after = -1;
@@ -264,9 +269,10 @@ pub fn compute_patch_ids_from_text(input: &[u8], mode: PatchIdMode) -> Vec<(Obje
 
 /// Finalise `ctx`, accumulate its digest into `result` with byte-wise
 /// carry-addition (mirrors git's `flush_one_hunk`), and reset `ctx`.
-fn text_flush_one_hunk(result: &mut [u8; 20], ctx: &mut Sha1) {
-    let old = std::mem::replace(ctx, Sha1::new());
-    let hash: [u8; 20] = old.finalize().into();
+fn text_flush_one_hunk(result: &mut [u8; 20], ctx: &mut ObjectHasher) {
+    let old = std::mem::replace(ctx, patch_id_hasher());
+    let finished = old.finalize();
+    let hash = finished.as_bytes();
     let mut carry: u16 = 0;
     for i in 0..20 {
         carry = carry + result[i] as u16 + hash[i] as u16;
@@ -278,11 +284,11 @@ fn text_flush_one_hunk(result: &mut [u8; 20], ctx: &mut Sha1) {
 /// Hash `raw` bytes into `ctx`, skipping ASCII whitespace.
 ///
 /// Returns the number of non-whitespace bytes fed to the hasher.
-fn hash_without_whitespace(ctx: &mut Sha1, raw: &[u8]) -> usize {
+fn hash_without_whitespace(ctx: &mut ObjectHasher, raw: &[u8]) -> usize {
     let mut count = 0;
     for &b in raw {
         if !b.is_ascii_whitespace() {
-            ctx.update([b]);
+            ctx.update(&[b]);
             count += 1;
         }
     }
@@ -480,7 +486,7 @@ fn compute_patch_id_filtered(
         let old_mode = parse_mode_u32(&entry.old_mode);
         let new_mode = parse_mode_u32(&entry.new_mode);
 
-        let mut ctx = Sha1::new();
+        let mut ctx = patch_id_hasher();
         patch_id_add_string(&mut ctx, b"diff--git");
         patch_id_add_string(&mut ctx, b"a/");
         ctx.update(&old_path_buf[..len1]);
@@ -566,11 +572,11 @@ fn parse_mode_u32(mode: &str) -> u32 {
     u32::from_str_radix(mode.trim(), 8).unwrap_or(0)
 }
 
-fn patch_id_add_string(ctx: &mut Sha1, s: &[u8]) {
+fn patch_id_add_string(ctx: &mut ObjectHasher, s: &[u8]) {
     ctx.update(s);
 }
 
-fn patch_id_add_mode(ctx: &mut Sha1, mode: u32) {
+fn patch_id_add_mode(ctx: &mut ObjectHasher, mode: u32) {
     let text = format!("{mode:06o}");
     ctx.update(text.as_bytes());
 }
@@ -599,4 +605,92 @@ fn read_blob(odb: &Odb, oid: &ObjectId) -> Result<Vec<u8>> {
     }
     let obj = odb.read(oid)?;
     Ok(obj.data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
+    fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn stable_patch_ids_match_git_patch_id_on_log_p() {
+        let dir = TempDir::new().expect("tempdir");
+        git_in(dir.path(), &["init", "-q", "--initial-branch=main", "."]);
+        std::fs::write(dir.path().join("f.txt"), b"one\n").unwrap();
+        git_in(dir.path(), &["add", "f.txt"]);
+        git_in(dir.path(), &["commit", "-q", "-m", "first"]);
+        std::fs::write(dir.path().join("f.txt"), b"one\ntwo\n").unwrap();
+        git_in(dir.path(), &["add", "f.txt"]);
+        git_in(dir.path(), &["commit", "-q", "-m", "second"]);
+        std::fs::write(dir.path().join("g.txt"), b"new\n").unwrap();
+        git_in(dir.path(), &["add", "g.txt"]);
+        git_in(dir.path(), &["commit", "-q", "-m", "third"]);
+
+        let log_p = git_in(dir.path(), &["log", "-p", "--reverse"]);
+        let grit_ids = compute_patch_ids_from_text(log_p.as_bytes(), PatchIdMode::Stable);
+
+        use std::io::Write;
+        let mut child = Command::new("git")
+            .current_dir(dir.path())
+            .args(["patch-id", "--stable"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn git patch-id");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(log_p.as_bytes())
+            .expect("write log");
+        let git_out = child.wait_with_output().expect("wait");
+        assert!(
+            git_out.status.success(),
+            "git patch-id --stable failed: {}",
+            String::from_utf8_lossy(&git_out.stderr)
+        );
+        let git_lines: Vec<(ObjectId, ObjectId)> = String::from_utf8_lossy(&git_out.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                let mut parts = line.split_whitespace();
+                let patch_hex = parts.next().expect("patch id");
+                let commit_hex = parts.next().expect("commit id");
+                let patch = ObjectId::from_hex(patch_hex).expect("patch hex");
+                let commit = ObjectId::from_hex(commit_hex).expect("commit hex");
+                (patch, commit)
+            })
+            .collect();
+
+        assert_eq!(grit_ids.len(), git_lines.len(), "patch-id count mismatch");
+        for ((g_patch, g_commit), (git_patch, git_commit)) in grit_ids.iter().zip(git_lines.iter())
+        {
+            assert_eq!(g_patch, git_patch, "patch-id mismatch");
+            assert_eq!(g_commit, git_commit, "commit-id mismatch");
+        }
+    }
 }

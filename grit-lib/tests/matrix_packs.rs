@@ -342,23 +342,16 @@ fn apply_delta(base: &[u8], delta: &[u8]) -> Vec<u8> {
 
 /// Git object id of `content` under `kind` ("blob"/"tree"/...) at the given hash.
 fn git_hash_object(kind: &str, content: &[u8], algo: HashAlgo) -> ObjectId {
-    use sha1::{Digest as _, Sha1};
-    use sha2::Sha256;
-    let header = format!("{kind} {}\0", content.len());
-    match algo {
-        HashAlgo::Sha1 => {
-            let mut h = Sha1::new();
-            h.update(header.as_bytes());
-            h.update(content);
-            ObjectId::from_bytes(&h.finalize()).unwrap()
-        }
-        HashAlgo::Sha256 => {
-            let mut h = Sha256::new();
-            h.update(header.as_bytes());
-            h.update(content);
-            ObjectId::from_bytes(&h.finalize()).unwrap()
-        }
-    }
+    use grit_lib::hash::hash_object;
+    use grit_lib::objects::ObjectKind;
+    let kind = match kind {
+        "blob" => ObjectKind::Blob,
+        "tree" => ObjectKind::Tree,
+        "commit" => ObjectKind::Commit,
+        "tag" => ObjectKind::Tag,
+        other => panic!("unknown object kind {other}"),
+    };
+    hash_object(algo, kind, content)
 }
 
 /// Resolve every delta edge in `pack` to `(target_oid, base_oid)` by fully

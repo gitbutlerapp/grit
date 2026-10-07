@@ -1,10 +1,10 @@
 //! `Odb::read` resolves REF_DELTA when the base object lives in another pack.
 
 use grit_lib::delta_encode::encode_lcp_delta;
+use grit_lib::objects::HashAlgo;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_object_from_packs};
-use sha1::{Digest, Sha1};
 use std::io::Write;
 use std::path::Path;
 
@@ -44,9 +44,8 @@ fn append_ref_delta(buf: &mut Vec<u8>, base_oid: &ObjectId, delta: &[u8]) {
 }
 
 fn append_sha1_pack_trailer(buf: &mut Vec<u8>) {
-    let mut hasher = Sha1::new();
-    Digest::update(&mut hasher, &*buf);
-    buf.extend_from_slice(&hasher.finalize());
+    let digest = HashAlgo::Sha1.digest(buf);
+    buf.extend_from_slice(digest.as_bytes());
 }
 
 fn write_v2_idx(idx_path: &Path, pack_path: &Path, entries: &[(ObjectId, u64)]) {
@@ -79,9 +78,8 @@ fn write_v2_idx(idx_path: &Path, pack_path: &Path, entries: &[(ObjectId, u64)]) 
     }
     let pack_bytes = std::fs::read(pack_path).expect("read pack");
     buf.extend_from_slice(&pack_bytes[pack_bytes.len() - 20..]);
-    let mut hasher = Sha1::new();
-    Digest::update(&mut hasher, &buf);
-    buf.extend_from_slice(&hasher.finalize());
+    let digest = HashAlgo::Sha1.digest(&buf);
+    buf.extend_from_slice(digest.as_bytes());
     std::fs::write(idx_path, buf).expect("write idx");
 }
 

@@ -7,13 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use sha1::{Digest, Sha1};
-
 use crate::config::ConfigSet;
 use crate::error::Result;
+use crate::hash::ObjectHasher;
 use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_REGULAR};
 use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
-use crate::objects::{ObjectId, ObjectKind};
+use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -183,7 +182,7 @@ fn handle_conflict(
     lines: &[String],
     i: &mut usize,
     marker_size: usize,
-    ctx: Option<&mut Sha1>,
+    ctx: Option<&mut ObjectHasher>,
 ) -> std::result::Result<String, ()> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Hunk {
@@ -234,9 +233,9 @@ fn handle_conflict(
             put_marker(&mut out, '>', marker_size);
             if let Some(h) = ctx {
                 h.update(one.as_bytes());
-                h.update([0]);
+                h.update(&[0]);
                 h.update(two.as_bytes());
-                h.update([0]);
+                h.update(&[0]);
             }
             return Ok(out);
         } else {
@@ -278,7 +277,7 @@ fn handle_path(content: &str, marker_size: usize, hash_out: Option<&mut [u8; 20]
     let lines: Vec<String> = content.lines().map(String::from).collect();
     let mut i = 0usize;
     let mut ctx = if hash_out.is_some() {
-        Some(Sha1::new())
+        Some(HashAlgo::Sha1.hasher())
     } else {
         None
     };
@@ -304,8 +303,8 @@ fn handle_path(content: &str, marker_size: usize, hash_out: Option<&mut [u8; 20]
     }
 
     if let (Some(h), Some(buf)) = (ctx, hash_out) {
-        let digest: [u8; 20] = h.finalize().into();
-        *buf = digest;
+        let digest = h.finalize();
+        buf.copy_from_slice(digest.as_bytes());
     }
     if found == 1 {
         1

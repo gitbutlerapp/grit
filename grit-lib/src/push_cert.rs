@@ -21,12 +21,8 @@
 //! the layout [`crate::signing::parse_signed_buffer`] / [`crate::signing::verify_tag`]
 //! already understand (signature appended, not header-embedded).
 
-use sha1::{Digest, Sha1};
-
+use crate::hash;
 use crate::signing::{GpgConfig, SignatureCheck};
-
-/// SHA-1 HMAC block size (RFC 2104). Git uses `the_hash_algo->blksz`.
-const HMAC_BLOCK_SIZE: usize = 64;
 
 /// `NONCE_OK` from receive-pack: the certificate nonce matched what we issued.
 pub const NONCE_OK: &str = "OK";
@@ -39,46 +35,12 @@ pub const NONCE_OK: &str = "OK";
 #[must_use]
 pub fn prepare_push_cert_nonce(path: &str, stamp: i64, seed: &str) -> String {
     let text = format!("{path}:{stamp}");
-    let mac = hmac_sha1(seed.as_bytes(), text.as_bytes());
+    let mac = hash::hmac_sha1(seed.as_bytes(), text.as_bytes());
     let mut hex = String::with_capacity(40);
     for b in mac {
         hex.push_str(&format!("{b:02x}"));
     }
     format!("{stamp}-{hex}")
-}
-
-/// RFC 2104 HMAC-SHA1, matching `receive-pack.c:hmac_hash`.
-fn hmac_sha1(key_in: &[u8], text: &[u8]) -> [u8; 20] {
-    let mut key = [0u8; HMAC_BLOCK_SIZE];
-    if key_in.len() > HMAC_BLOCK_SIZE {
-        let mut hasher = Sha1::new();
-        hasher.update(key_in);
-        let digest = hasher.finalize();
-        key[..20].copy_from_slice(&digest);
-    } else {
-        key[..key_in.len()].copy_from_slice(key_in);
-    }
-
-    let mut k_ipad = [0u8; HMAC_BLOCK_SIZE];
-    let mut k_opad = [0u8; HMAC_BLOCK_SIZE];
-    for i in 0..HMAC_BLOCK_SIZE {
-        k_ipad[i] = key[i] ^ 0x36;
-        k_opad[i] = key[i] ^ 0x5c;
-    }
-
-    let mut inner = Sha1::new();
-    inner.update(k_ipad);
-    inner.update(text);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha1::new();
-    outer.update(k_opad);
-    outer.update(inner_digest);
-    let outer_digest = outer.finalize();
-
-    let mut out = [0u8; 20];
-    out.copy_from_slice(&outer_digest);
-    out
 }
 
 /// A single ref update line in a push certificate.
