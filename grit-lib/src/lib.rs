@@ -236,3 +236,6 @@ pub mod worktree_ref;
 mod worktree_scan;
 pub mod write_tree;
 pub mod ws;
+
+#[cfg(test)]
+mod object_write_regression;

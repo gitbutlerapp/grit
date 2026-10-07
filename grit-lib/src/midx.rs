@@ -288,8 +288,52 @@ mod midx_cache {
     }
 
     fn stamp(path: &Path) -> Option<Stamp> {
+        #[cfg(test)]
+        test_midx_stamp_calls::record_if_enabled();
         let m = fs::metadata(path).ok()?;
         Some((m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+    }
+
+    #[cfg(test)]
+    mod test_midx_stamp_calls {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        static ENABLED: AtomicBool = AtomicBool::new(false);
+
+        pub fn reset() {
+            CALLS.store(0, Ordering::SeqCst);
+        }
+
+        pub fn count() -> usize {
+            CALLS.load(Ordering::SeqCst)
+        }
+
+        pub fn set_enabled(enabled: bool) {
+            ENABLED.store(enabled, Ordering::SeqCst);
+        }
+
+        pub fn record_if_enabled() {
+            if ENABLED.load(Ordering::Relaxed) {
+                CALLS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn test_reset_midx_stamp_calls() {
+        test_midx_stamp_calls::reset();
+    }
+
+    #[cfg(test)]
+    pub fn test_set_midx_stamp_counting(enabled: bool) {
+        test_midx_stamp_calls::set_enabled(enabled);
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_midx_stamp_calls() -> usize {
+        test_midx_stamp_calls::count()
     }
 
     /// MIDX file bytes, re-read from disk only when the file's stamp changes.
@@ -365,6 +409,22 @@ fn repo_midx_hash_version_for_objects_dir(objects_dir: &Path) -> u8 {
     midx_cache::hash_version(&config_path, || {
         sniff_objectformat_hash_version(&config_path)
     })
+}
+
+#[cfg(test)]
+pub fn test_reset_midx_stamp_calls() {
+    midx_cache::test_reset_midx_stamp_calls();
+}
+
+#[cfg(test)]
+pub fn test_set_midx_stamp_counting(enabled: bool) {
+    midx_cache::test_set_midx_stamp_counting(enabled);
+}
+
+#[cfg(test)]
+#[must_use]
+pub fn test_midx_stamp_call_count() -> usize {
+    midx_cache::test_midx_stamp_calls()
 }
 
 /// Uncached `[extensions] objectformat` scan of one config file.

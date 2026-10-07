@@ -433,6 +433,19 @@ fn path_strip_prefix(path: &[u8], prefix_len: usize) -> &[u8] {
         .unwrap_or(&path[prefix_len..])
 }
 
+/// Reset the tree-object write counter (unit tests only).
+#[cfg(test)]
+pub fn test_reset_tree_write_count() {
+    test_tree_write_counter::reset();
+}
+
+/// Tree objects written via [`store_tree_payload`] since the last reset (unit tests only).
+#[cfg(test)]
+#[must_use]
+pub fn test_tree_write_count() -> usize {
+    test_tree_write_counter::tree_writes()
+}
+
 #[cfg(test)]
 mod test_tree_write_counter {
     use std::sync::atomic::{AtomicUsize, Ordering};

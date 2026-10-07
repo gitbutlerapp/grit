@@ -374,6 +374,8 @@ fn read_worktree_blob_oid(
         let target = fs::read_link(abs_path)?;
         symlink_target_bytes(&target)
     } else {
+        #[cfg(test)]
+        crate::odb::test_counters::record_blob_content_read();
         fs::read(abs_path)?
     };
     repo.odb.write(ObjectKind::Blob, &data)

@@ -1167,6 +1167,8 @@ fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
 
 /// Update `path`'s mtime to "now" (Git `utime(path, NULL)`), returning whether it succeeded.
 fn touch_path_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    #[cfg(test)]
+    test_counters::record_freshen();
     // `utime(path, NULL)` sets both atime and mtime to the current time.
     let touched_at = std::time::SystemTime::now();
     let now = filetime::FileTime::from_system_time(touched_at);
@@ -1177,6 +1179,52 @@ fn touch_path_mtime(path: &Path) -> Option<std::time::SystemTime> {
 
 /// Hash the canonical store bytes of an object (`"<kind> <len>\0<data>"`) with
 /// the given hash algorithm.
+/// Process-wide counters for hot-path regression tests (see `object_write_regression` tests).
+#[cfg(test)]
+pub mod test_counters {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    static FRESHEN_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static FRESHEN_COUNTING: AtomicBool = AtomicBool::new(false);
+    static BLOB_CONTENT_READS: AtomicUsize = AtomicUsize::new(0);
+
+    /// Reset the freshen (`utimensat`) call counter.
+    pub fn reset_freshen_calls() {
+        FRESHEN_CALLS.store(0, Ordering::SeqCst);
+    }
+
+    pub fn set_freshen_counting(enabled: bool) {
+        FRESHEN_COUNTING.store(enabled, Ordering::SeqCst);
+    }
+
+    /// Number of object-store freshen touches since the last reset.
+    #[must_use]
+    pub fn freshen_calls() -> usize {
+        FRESHEN_CALLS.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_freshen() {
+        if FRESHEN_COUNTING.load(Ordering::Relaxed) {
+            FRESHEN_CALLS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Reset the worktree blob content read counter.
+    pub fn reset_blob_content_reads() {
+        BLOB_CONTENT_READS.store(0, Ordering::SeqCst);
+    }
+
+    /// Number of worktree file reads performed for blob hashing/staging since the last reset.
+    #[must_use]
+    pub fn blob_content_reads() -> usize {
+        BLOB_CONTENT_READS.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_blob_content_read() {
+        BLOB_CONTENT_READS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
     hash::hash_object(algo, kind, data)
 }

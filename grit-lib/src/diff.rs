@@ -3537,6 +3537,8 @@ fn worktree_blob_bytes(
         return Ok(Vec::new());
     }
     let raw = fs::read(path)?;
+    #[cfg(test)]
+    crate::odb::test_counters::record_blob_content_read();
     let opts = crate::crlf::ConvertToGitOpts {
         index_blob: prior_blob.as_deref(),
         renormalize: false,
