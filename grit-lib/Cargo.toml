@@ -6,6 +6,7 @@ license = "MIT"
 description = "Core library for the grit Git implementation"
 readme = "README.md"
 repository = "https://github.com/gitbutlerapp/grit"
+autobenches = false
 
 # Match workspace clippy/rustdoc denies; allow `unsafe` for `git_date` (`libc` FFI like Git `date.c`).
 # `lints.workspace = true` is incompatible with relaxing `unsafe_code` on this crate alone.
