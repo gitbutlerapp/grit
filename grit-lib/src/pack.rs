@@ -443,7 +443,7 @@ mod pack_cache {
                 return Ok(Arc::clone(&c.idx));
             }
         }
-        let parsed = refresh_pack_sidecar_flags(Arc::new(read_pack_index_no_verify(idx_path)?));
+        let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
         let mut g = lock();
         g.by_idx.insert(
             idx_path.to_path_buf(),
@@ -510,13 +510,10 @@ mod pack_cache {
     /// Get all `.idx` files for `objects_dir`, using the cached directory listing when present.
     pub fn get_dir_indexes(objects_dir: &Path) -> Result<Vec<Arc<PackIndex>>> {
         let pack_dir = objects_dir.join("pack");
-        let dir_mt = dir_mtime(&pack_dir);
         {
             let g = lock();
             if let Some(c) = g.by_dir.get(&pack_dir) {
-                if c.dir_mtime == dir_mt {
-                    return Ok(c.indexes.clone());
-                }
+                return Ok(c.indexes.clone());
             }
         }
         rescan_dir_indexes(objects_dir)
@@ -2723,7 +2720,7 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
 static PACK_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
-fn pack_cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn pack_cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
     PACK_CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner())

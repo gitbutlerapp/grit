@@ -2051,9 +2051,11 @@ mod tests {
     fn promisor_marker_checked_once_per_prepare() {
         use crate::objects::ObjectId;
         use crate::pack::{
-            clear_pack_cache, test_pack_marker_stat_count, test_reset_pack_marker_stat_count,
+            clear_pack_cache, pack_cache_test_guard, test_pack_marker_stat_count,
+            test_reset_pack_marker_stat_count,
         };
 
+        let _guard = pack_cache_test_guard();
         let dir = TempDir::new().unwrap();
         git_in(dir.path(), &["init", "-q", "-b", "main"]);
         git_in(dir.path(), &["config", "user.email", "t@example.com"]);
@@ -2079,9 +2081,15 @@ mod tests {
         test_reset_pack_marker_stat_count();
         let odb = Odb::new(&objects);
         assert!(odb.exists_local(&oid));
-        assert!(
-            test_pack_marker_stat_count() >= 2,
-            "prepare should stat promisor and mtimes sidecars once per pack"
+        let pack_count = fs::read_dir(objects.join("pack"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+            .count();
+        assert_eq!(
+            test_pack_marker_stat_count(),
+            u64::try_from(pack_count * 2).unwrap(),
+            "prepare should stat promisor and mtimes once per pack"
         );
 
         test_reset_pack_marker_stat_count();
@@ -2098,8 +2106,11 @@ mod tests {
     #[test]
     fn promisor_marker_added_after_prepare_is_seen_after_reprepare() {
         use crate::objects::ObjectId;
-        use crate::pack::clear_pack_cache;
+        use crate::pack::{
+            clear_pack_cache, pack_cache_test_guard, reprepare_pack_directory_on_miss,
+        };
 
+        let _guard = pack_cache_test_guard();
         let dir = TempDir::new().unwrap();
         git_in(dir.path(), &["init", "-q", "-b", "main"]);
         git_in(dir.path(), &["config", "user.email", "t@example.com"]);
@@ -2133,8 +2144,12 @@ mod tests {
         filetime::set_file_mtime(objects.join("pack"), filetime::FileTime::now()).unwrap();
 
         assert!(
+            reprepare_pack_directory_on_miss(&objects).unwrap(),
+            "pack directory change must require reprepare"
+        );
+        assert!(
             !odb.exists_local(&oid),
-            "promisor marker added after prepare must hide pack objects from exists_local"
+            "promisor marker must hide pack objects after reprepare refreshed sidecar flags"
         );
     }
 
