@@ -27,9 +27,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import blog  # noqa: E402
+import rustdoc_links  # noqa: E402
 import site_util  # noqa: E402
 
 ROOT = blog.ROOT
+DOC_ROOT = ROOT / "target" / "doc"
 CONTENT_DIR = ROOT / "content" / "docs"
 MANIFEST_PATH = CONTENT_DIR / "site.toml"
 OUT_DIR = ROOT / "docs" / "docs"
@@ -491,6 +493,7 @@ CSS = r'''
 
 
 def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
+    rustdoc_links.ensure_local_rustdoc(DOC_ROOT, repo_root=ROOT)
     site = load_site(content_dir=content_dir)
     if out_dir.exists():
         shutil.rmtree(out_dir)
@@ -504,6 +507,8 @@ def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
 
 
 def check_committed() -> int:
+    rustdoc_links.ensure_local_rustdoc(DOC_ROOT, repo_root=ROOT)
+    rustdoc_links.validate_rustdoc_links(CONTENT_DIR, DOC_ROOT)
     with tempfile.TemporaryDirectory(prefix="grit-docs-check-") as tmp:
         generated = Path(tmp) / "docs"
         generate(generated)

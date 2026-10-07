@@ -11,9 +11,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import docs  # noqa: E402
+import rustdoc_links  # noqa: E402
 
 
 class DocsManifestTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        rustdoc_links.ensure_local_rustdoc(docs.DOC_ROOT, repo_root=ROOT)
+
     def setUp(self) -> None:
         self.content = Path(tempfile.mkdtemp(prefix="grit-docs-test-"))
         self.addCleanup(lambda: shutil.rmtree(self.content, ignore_errors=True))
@@ -65,6 +70,38 @@ label = "Missing"
             for name in ("status", "commit", "fetch", "upload-pack"):
                 path = out / name / "index.html"
                 self.assertTrue(path.is_file(), f"missing command page {name}")
+
+    def test_rustdoc_links_resolve_function_and_enum_kinds(self) -> None:
+        fn_md = docs.prepare_markdown_body("[f](rustdoc:grit_lib::objects::parse_tree)")
+        self.assertIn("grit_lib/objects/fn.parse_tree.html", fn_md)
+        self.assertNotIn("struct.parse_tree", fn_md)
+        self.assertNotIn("grit_lib/grit_lib", fn_md)
+
+        enum_md = docs.prepare_markdown_body("[e](rustdoc:grit_lib::error::Error)")
+        self.assertIn("grit_lib/error/enum.Error.html", enum_md)
+
+    def test_generate_builds_rustdoc_when_grit_lib_docs_missing(self) -> None:
+        doc_root = docs.DOC_ROOT
+        grit_lib = doc_root / "grit_lib"
+        self.assertTrue(grit_lib.is_dir(), "setUpClass should have built rustdoc")
+
+        backup_parent = Path(tempfile.mkdtemp(prefix="grit-rustdoc-backup-"))
+        self.addCleanup(lambda: shutil.rmtree(backup_parent, ignore_errors=True))
+        shutil.move(str(grit_lib), str(backup_parent / "grit_lib"))
+
+        def restore() -> None:
+            if not grit_lib.is_dir() and (backup_parent / "grit_lib").is_dir():
+                shutil.move(str(backup_parent / "grit_lib"), str(grit_lib))
+
+        self.addCleanup(restore)
+
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            docs.generate(Path(tmp), content_dir=self.content)
+            html = (Path(tmp) / "library" / "objects" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("grit_lib/objects/fn.parse_tree.html", html)
+            self.assertNotIn("struct.parse_tree", html)
+
+        restore()
 
     def test_missing_include_file_fails(self) -> None:
         page = self.content / "library-quickstart.md"

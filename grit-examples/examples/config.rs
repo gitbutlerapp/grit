@@ -11,7 +11,10 @@ fn main() -> grit_lib::error::Result<()> {
     let mut config = ConfigSet::new();
     config.merge(&file);
 
-    println!("user.name = {}", config.get("user.name").unwrap_or_default());
+    println!(
+        "user.name = {}",
+        config.get("user.name").unwrap_or_default()
+    );
     println!("core.bare = {:?}", config.get_bool("core.bare"));
     Ok(())
 }

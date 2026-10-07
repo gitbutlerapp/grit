@@ -45,8 +45,10 @@ clean:
 	$(CARGO) clean
 
 docs:
+	RUSTDOCFLAGS="-D warnings" $(CARGO) doc -p grit-lib --no-deps
 	python3 scripts/site.py
 
 docs-check:
+	RUSTDOCFLAGS="-D warnings" $(CARGO) doc -p grit-lib --no-deps
 	python3 scripts/site.py --check
 	python3 scripts/linkcheck.py
