@@ -718,30 +718,6 @@ impl<'a> PackReader<'a> {
         Self { data, pos: 0 }
     }
 
-    /// Skip one packed object body (used for header-only pre-scans).
-    #[allow(dead_code)]
-    pub(crate) fn skip_object_payload(
-        &mut self,
-        type_code: u8,
-        size: usize,
-        hash_bytes: usize,
-    ) -> Result<()> {
-        match type_code {
-            1..=4 | 6 | 7 => {
-                if type_code == 6 {
-                    let _ = self.read_ofs_neg_offset()?;
-                } else if type_code == 7 {
-                    let _ = self.read_exact(hash_bytes)?;
-                }
-                let _ = self.decompress(size)?;
-                Ok(())
-            }
-            other => Err(Error::CorruptObject(format!(
-                "unknown packed-object type {other}"
-            ))),
-        }
-    }
-
     /// Read exactly `n` bytes and advance the cursor, returning a slice into
     /// the internal buffer.
     pub(crate) fn read_exact(&mut self, n: usize) -> Result<&[u8]> {
@@ -813,22 +789,37 @@ impl<'a> PackReader<'a> {
     /// Advances the cursor by exactly the number of compressed bytes consumed.
     /// Returns an error if the decompressed length differs from `expected_size`.
     pub(crate) fn decompress(&mut self, expected_size: usize) -> Result<Vec<u8>> {
-        let slice = &self.data[self.pos..];
-        let mut decoder = ZlibDecoder::new(slice);
-        let mut out = Vec::with_capacity(expected_size);
-        decoder
-            .read_to_end(&mut out)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
-        if out.len() != expected_size {
-            return Err(Error::CorruptObject(format!(
-                "decompressed {} bytes but expected {}",
-                out.len(),
-                expected_size
-            )));
-        }
-        self.pos += decoder.total_in() as usize;
+        let (out, consumed) = decompress_zlib_at(self.data, self.pos, expected_size)?;
+        self.pos += consumed;
         Ok(out)
     }
+}
+
+/// Decompress a zlib stream at `offset` in `pack` without advancing a [`PackReader`].
+pub(crate) fn decompress_zlib_at(
+    pack: &[u8],
+    offset: usize,
+    expected_size: usize,
+) -> Result<(Vec<u8>, usize)> {
+    let slice = pack.get(offset..).ok_or_else(|| {
+        Error::CorruptObject(format!(
+            "pack stream truncated: need zlib at offset {offset}"
+        ))
+    })?;
+    let mut decoder = ZlibDecoder::new(slice);
+    let mut out = Vec::with_capacity(expected_size);
+    decoder
+        .read_to_end(&mut out)
+        .map_err(|e| Error::Zlib(e.to_string()))?;
+    if out.len() != expected_size {
+        return Err(Error::CorruptObject(format!(
+            "decompressed {} bytes but expected {}",
+            out.len(),
+            expected_size
+        )));
+    }
+    let consumed = decoder.total_in() as usize;
+    Ok((out, consumed))
 }
 
 fn io_to_corrupt_eof(e: io::Error, stream_pos: usize, context: &str) -> Error {

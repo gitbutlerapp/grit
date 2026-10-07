@@ -20,7 +20,20 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 
 Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
 
-<<<<<<< New base: lib: parallel index-pack hashing with pack.threads
+## grit-lib: parallel index-pack (in-memory)
+
+Hyperfine on a **~90 000-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-07). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) via `cargo run --release -p grit-lib --example index_pack_bench` (see `GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`).
+
+| Command | Mean (8 runs) |
+| ------- | ------------- |
+| `git index-pack --threads=8` | 640 ms |
+| grit index-pack, 1 thread | 1.43 s |
+| grit index-pack, 8 threads | 781 ms |
+
+**Speedup (8 vs 1 thread): ~1.83×** on this fixture. Multi-threaded builds discover object boundaries with a discard decompress pass, then parallel workers inflate and hash whole objects; delta chains inflate, apply, and hash in parallel rounds. Grit does not yet beat `git index-pack --threads=8` on this pack (Git also writes the on-disk `.idx`).
+
+Integration coverage uses a **≥ 50 000** object fixture built with `git fast-import` and shared across tests via `OnceLock` (`grit-lib/tests/index_pack_parallel.rs`); the default release suite completes in about **41 s** on the factory VM.
+
 ## Hashing
 
 Raw digest throughput uses [`grit_lib::hash::ObjectHasher`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) (release build, Criterion). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
@@ -89,20 +102,3 @@ make docs
 The docs `--check` step fails if baseline numbers change without re-running `make docs`.
 
 For other library surfaces under test, see the [grit-lib API on docs.rs](https://docs.rs/grit-lib).
-||||||| Common ancestor
-For broader command comparisons and baselines, see the generated benchmarks page when present in the docs tree and the [grit-lib API on docs.rs](https://docs.rs/grit-lib) for the surfaces under test.
-=======
-## grit-lib: parallel index-pack (in-memory)
-
-Hyperfine on a **10 000-commit** pack (`git repack -adf --depth=50`, single-file commits, factory VM 2026-10-07). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) via `cargo run --release -p grit-lib --example index_pack_bench` (see `GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`).
-
-| Command | Mean |
-| ------- | ---- |
-| `git index-pack --threads=8` | 68 ms |
-| grit index-pack, 1 thread | 174 ms |
-| grit index-pack, 8 threads | 172 ms |
-
-On this mostly linear delta chain, wall time is dominated by the sequential pack scan and zlib inflate; parallel hashing and per-round delta resolution match Git’s output but do not yet beat `git index-pack` on this fixture. Integration coverage uses a **≥ 50 000** object wide-tree fixture (`grit-lib/tests/index_pack_parallel.rs`).
-
-For broader command comparisons and baselines, see the generated benchmarks page when present in the docs tree and the [grit-lib API on docs.rs](https://docs.rs/grit-lib) for the surfaces under test.
->>>>>>> Current commit: docs: index-pack parallel benchmark notes

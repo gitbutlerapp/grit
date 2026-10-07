@@ -194,6 +194,59 @@ where
             .map_err(ParallelHashError::Task);
     }
 
+    run_par_hash_pool(items, n_workers, f)
+}
+
+/// Like [`try_par_hash_with`], but uses the thread pool whenever `threads` > 1 and
+/// `items` is non-empty (ignores [`parallel_hash_worthwhile`]).
+///
+/// Used for pack index-pack where object counts are large and per-item work (inflate
+/// + hash) dominates thread startup cost.
+///
+/// # Errors
+///
+/// Returns [`ParallelHashError::Task`] with the first closure error observed.
+pub fn try_par_hash_with_force<T, R, E, F>(
+    items: &[T],
+    threads: NonZeroUsize,
+    f: F,
+) -> Result<Vec<R>, ParallelHashError<E>>
+where
+    T: Sync,
+    R: Send,
+    E: Send + 'static,
+    F: Fn(&T) -> Result<R, E> + Sync,
+{
+    let len = items.len();
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let n_workers = threads.get().min(len).max(1);
+    if n_workers <= 1 {
+        return items
+            .iter()
+            .map(&f)
+            .collect::<Result<Vec<R>, E>>()
+            .map_err(ParallelHashError::Task);
+    }
+
+    run_par_hash_pool(items, n_workers, f)
+}
+
+fn run_par_hash_pool<T, R, E, F>(
+    items: &[T],
+    n_workers: usize,
+    f: F,
+) -> Result<Vec<R>, ParallelHashError<E>>
+where
+    T: Sync,
+    R: Send,
+    E: Send + 'static,
+    F: Fn(&T) -> Result<R, E> + Sync,
+{
+    let len = items.len();
+
     let slots: Arc<Slots<R>> = Arc::new(Slots::new(len));
 
     let next = AtomicUsize::new(0);

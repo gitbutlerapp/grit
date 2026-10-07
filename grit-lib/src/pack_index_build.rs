@@ -1,13 +1,13 @@
 //! Build v2 pack index records from an in-memory pack (index-pack hashing path).
 //!
-//! Uses a sequential header scan, parallel inflate+hash for non-delta objects, then
-//! parallel delta resolution in rounds (each round resolves every object whose base
-//! is already known).
+//! One sequential pass inflates each slot once. Whole-object hashing and delta
+//! resolution (apply + hash) run in parallel worker pools with bounded base retention.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+
 use crate::error::{Error, Result};
-use crate::hash::{hash_object, try_par_hash_with, Parallelism};
+use crate::hash::{hash_object, try_par_hash_with_force, Parallelism};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::unpack_objects::{apply_delta, type_code_to_kind, PackIndexRecord, PackReader};
@@ -38,6 +38,14 @@ struct IndexBuildState<'a> {
 struct WholeInflated {
     offset: usize,
     pack_end: usize,
+    kind: ObjectKind,
+    data: Vec<u8>,
+}
+
+struct WholeResolved {
+    record: PackIndexRecord,
+    offset: usize,
+    oid: ObjectId,
     kind: ObjectKind,
     data: Vec<u8>,
 }
@@ -141,8 +149,8 @@ pub fn build_pack_index_records(
         oid_bases: &mut oid_bases,
         records: &mut records,
     };
-    hash_whole_objects_parallel(pack, &whole_objects, threads, &mut state)?;
-    resolve_pending_deltas_parallel(threads, &mut pending, &mut state)?;
+    hash_whole_objects_parallel(pack, whole_objects, threads, algo, &mut state)?;
+    resolve_pending_deltas_parallel(threads, algo, &mut pending, &mut state)?;
 
     Ok(records)
 }
@@ -164,31 +172,39 @@ fn verify_pack_trailer(pack: &[u8], consumed: usize, algo: HashAlgo) -> Result<(
 
 fn hash_whole_objects_parallel(
     pack: &[u8],
-    whole_objects: &[WholeInflated],
+    whole_objects: Vec<WholeInflated>,
     threads: std::num::NonZeroUsize,
+    algo: HashAlgo,
     state: &mut IndexBuildState<'_>,
 ) -> Result<()> {
     if whole_objects.is_empty() {
         return Ok(());
     }
-    let algo = state.odb.hash_algo();
-    let hash_inputs: Vec<(ObjectKind, &[u8])> = whole_objects
-        .iter()
-        .map(|w| (w.kind, w.data.as_slice()))
-        .collect();
-    let oids = crate::hash::hash_objects_parallel(algo, &hash_inputs, threads);
-    for (work, oid) in whole_objects.iter().zip(oids) {
-        let crc32 = crc32fast::hash(&pack[work.offset..work.pack_end]);
-        state.records.push(PackIndexRecord {
+    let resolved = try_par_hash_with_force(&whole_objects, threads, |work| {
+        let oid = hash_object(algo, work.kind, &work.data);
+        Ok(WholeResolved {
+            record: PackIndexRecord {
+                oid,
+                offset: u64::try_from(work.offset).unwrap_or(u64::MAX),
+                crc32: crc32fast::hash(&pack[work.offset..work.pack_end]),
+            },
+            offset: work.offset,
             oid,
-            offset: u64::try_from(work.offset).unwrap_or(u64::MAX),
-            crc32,
-        });
+            kind: work.kind,
+            data: work.data.clone(),
+        })
+    })
+    .map_err(|e: crate::hash::ParallelHashError<Error>| match e {
+        crate::hash::ParallelHashError::Task(err) => err,
+    })?;
+
+    for item in resolved {
+        state.records.push(item.record);
         retain_bases_for_whole(
-            work.offset,
-            oid,
-            work.kind,
-            work.data.clone(),
+            item.offset,
+            item.oid,
+            item.kind,
+            item.data,
             state.ofs_base_refs,
             state.oid_base_refs,
             state.ofs_bases,
@@ -244,10 +260,10 @@ struct DeltaResolved {
 
 fn resolve_pending_deltas_parallel(
     threads: std::num::NonZeroUsize,
+    algo: HashAlgo,
     pending: &mut Vec<PendingIndexDelta>,
     state: &mut IndexBuildState<'_>,
 ) -> Result<()> {
-    let algo = state.odb.hash_algo();
     let mut remaining = std::mem::take(pending);
     loop {
         if remaining.is_empty() {
@@ -270,11 +286,10 @@ fn resolve_pending_deltas_parallel(
             )));
         }
 
-        let total_bytes: usize = ready.iter().map(|d| d.delta_data.len()).sum();
-        let resolved = try_par_hash_with(&ready, threads, total_bytes, |delta| {
+        let resolved = try_par_hash_with_force(&ready, threads, |delta| {
             resolve_one_delta(delta, state.ofs_bases, state.oid_bases, state.odb, algo)
         })
-        .map_err(|e| match e {
+        .map_err(|e: crate::hash::ParallelHashError<Error>| match e {
             crate::hash::ParallelHashError::Task(err) => err,
         })?;
 

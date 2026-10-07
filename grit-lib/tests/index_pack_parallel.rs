@@ -1,7 +1,9 @@
 //! Parallel index-pack hashing: byte-identical `.idx` vs system `git index-pack`.
 
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use grit_lib::hash::Parallelism;
 use grit_lib::index_pack::{install_pack_bytes, IngestPackOptions};
@@ -20,17 +22,21 @@ const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_COMMITTER_EMAIL", "t@example.com"),
 ];
 
-fn target_object_count() -> usize {
-    std::env::var("GRIT_INDEX_PACK_PARALLEL_OBJECTS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|&n| n >= 100)
-        .unwrap_or(50_000)
-}
+const DEFAULT_MIN_PACK_OBJECTS: u32 = 50_000;
+const FILES_PER_COMMIT: usize = 8;
 
 struct DeltaPackFixture {
     pack: Vec<u8>,
     hash_algo: HashAlgo,
+    _keep: tempfile::TempDir,
+}
+
+fn target_min_pack_objects() -> u32 {
+    std::env::var("GRIT_INDEX_PACK_PARALLEL_OBJECTS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n >= 100)
+        .unwrap_or(DEFAULT_MIN_PACK_OBJECTS)
 }
 
 fn git_ok(dir: &Path, args: &[&str]) -> bool {
@@ -57,35 +63,74 @@ fn git_run(dir: &Path, args: &[&str]) {
     );
 }
 
+fn write_fast_import_script(out: &mut Vec<u8>, min_objects: u32) -> std::io::Result<()> {
+    let min_commits = (min_objects as usize).div_ceil(FILES_PER_COMMIT) + 2;
+    out.extend_from_slice(b"feature done\n");
+    out.extend_from_slice(b"commit refs/heads/main\nmark :1\n");
+    out.extend_from_slice(b"committer T <t@example.com> 1000000000 +0000\n");
+    out.extend_from_slice(b"data 4\ninit\n");
+    out.extend_from_slice(b"M 100644 inline seed.txt\n");
+    out.extend_from_slice(b"data 5\nseed\n\n");
+
+    for i in 1..min_commits {
+        let msg = format!("c{i}");
+        writeln!(out, "commit refs/heads/main")?;
+        writeln!(out, "mark :{}", i + 1)?;
+        writeln!(out, "committer T <t@example.com> 1000000000 +0000")?;
+        writeln!(out, "data {}", msg.len())?;
+        writeln!(out, "{msg}")?;
+        writeln!(out, "from :{i}")?;
+        for f in 0..FILES_PER_COMMIT {
+            let path = format!("d/{i:05}/{f:02}.txt");
+            let payload = format!("payload commit={i} file={f}\n");
+            writeln!(out, "M 100644 inline {path}")?;
+            writeln!(out, "data {}", payload.len())?;
+            write!(out, "{payload}")?;
+            out.push(b'\n');
+        }
+    }
+    out.extend_from_slice(b"done\n");
+    Ok(())
+}
+
 fn build_delta_pack_fixture(sha256: bool) -> DeltaPackFixture {
+    let min_objects = target_min_pack_objects();
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
     if sha256 {
-        if !git_ok(dir, &["init", "--object-format=sha256", "-b", "main"]) {
+        if !git_ok(&dir, &["init", "--object-format=sha256", "-b", "main"]) {
             panic!("system git lacks sha256 object format");
         }
     } else {
-        git_run(dir, &["init", "-b", "main"]);
+        git_run(&dir, &["init", "-b", "main"]);
     }
-    let n = target_object_count();
-    std::fs::write(dir.join("seed.txt"), b"seed\n").expect("seed");
-    git_run(dir, &["add", "seed.txt"]);
-    git_run(dir, &["commit", "-m", "seed"]);
-    const FILES_PER_COMMIT: usize = 8;
-    for i in 1..n {
-        for f in 0..FILES_PER_COMMIT {
-            let rel = format!("d/{i:05}/{f:02}.txt");
-            std::fs::create_dir_all(dir.join("d").join(format!("{i:05}"))).expect("dir");
-            std::fs::write(dir.join(&rel), format!("payload commit={i} file={f}\n"))
-                .expect("write");
-            git_run(dir, &["add", &rel]);
-        }
-        git_run(dir, &["commit", "-m", &format!("c{i}")]);
-        if i % 5000 == 0 {
-            eprintln!("index_pack_parallel fixture: {i}/{n} commits");
-        }
+
+    let mut script = Vec::new();
+    write_fast_import_script(&mut script, min_objects).expect("fast-import script");
+    let mut child = Command::new("git");
+    child
+        .current_dir(&dir)
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    for (k, v) in GIT_ENV {
+        child.env(k, v);
     }
-    git_run(dir, &["repack", "-adf", "--depth=50", "-q"]);
+    let mut child = child.spawn().expect("spawn fast-import");
+    {
+        let mut stdin = child.stdin.take().expect("stdin");
+        stdin.write_all(&script).expect("write fast-import");
+    }
+    let out = child.wait_with_output().expect("wait fast-import");
+    assert!(
+        out.status.success(),
+        "git fast-import (script {} bytes): {}",
+        script.len(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    git_run(&dir, &["repack", "-adf", "--depth=50", "-q"]);
     let pack_dir = dir.join(".git/objects/pack");
     let pack_path = std::fs::read_dir(&pack_dir)
         .expect("pack dir")
@@ -96,9 +141,10 @@ fn build_delta_pack_fixture(sha256: bool) -> DeltaPackFixture {
     let pack = std::fs::read(&pack_path).expect("read pack");
     let count = u32::from_be_bytes([pack[8], pack[9], pack[10], pack[11]]);
     assert!(
-        count as usize >= n,
-        "pack should contain at least {n} objects, header count {count}"
+        count >= min_objects,
+        "pack should contain at least {min_objects} objects, header count {count}"
     );
+
     let git_dir = dir.join(".git");
     let odb = Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir.clone());
     let hash_algo = if sha256 {
@@ -106,32 +152,38 @@ fn build_delta_pack_fixture(sha256: bool) -> DeltaPackFixture {
     } else {
         HashAlgo::Sha1
     };
-    assert_eq!(
-        odb.hash_algo(),
-        hash_algo,
-        "repository object format must match init"
-    );
+    assert_eq!(odb.hash_algo(), hash_algo);
     let hb = hash_algo.len();
     assert!(
         pack.len() > 12 + hb,
         "pack must include a {hb}-byte trailer"
     );
-    // Keep tempdir alive by leaking path into pack bytes consumer only — fixture built fresh per process.
-    std::mem::forget(tmp);
-    DeltaPackFixture { pack, hash_algo }
-}
 
-fn fixture_sha1() -> DeltaPackFixture {
-    build_delta_pack_fixture(false)
-}
-
-fn fixture_sha256() -> Option<DeltaPackFixture> {
-    let tmp = tempfile::tempdir().ok()?;
-    if !git_ok(tmp.path(), &["init", "--object-format=sha256"]) {
-        return None;
+    DeltaPackFixture {
+        pack,
+        hash_algo,
+        _keep: tmp,
     }
-    drop(tmp);
-    Some(build_delta_pack_fixture(true))
+}
+
+static FIXTURE_SHA1: OnceLock<DeltaPackFixture> = OnceLock::new();
+static FIXTURE_SHA256: OnceLock<Option<DeltaPackFixture>> = OnceLock::new();
+
+fn shared_fixture_sha1() -> &'static DeltaPackFixture {
+    FIXTURE_SHA1.get_or_init(|| build_delta_pack_fixture(false))
+}
+
+fn shared_fixture_sha256() -> Option<&'static DeltaPackFixture> {
+    FIXTURE_SHA256
+        .get_or_init(|| {
+            let tmp = tempfile::tempdir().ok()?;
+            if !git_ok(tmp.path(), &["init", "--object-format=sha256"]) {
+                return None;
+            }
+            drop(tmp);
+            Some(build_delta_pack_fixture(true))
+        })
+        .as_ref()
 }
 
 fn git_index_pack_idx(pack: &[u8], hash_algo: HashAlgo, threads: usize) -> (Vec<u8>, Vec<u8>) {
@@ -247,26 +299,24 @@ fn assert_idx_matches_git(pack: &[u8], hash_algo: HashAlgo, threads: usize) {
 
 #[test]
 fn parallel_index_pack_matches_git_sha1_threads_1_and_8() {
-    let fx = fixture_sha1();
+    let fx = shared_fixture_sha1();
     assert_idx_matches_git(&fx.pack, fx.hash_algo, 1);
     assert_idx_matches_git(&fx.pack, fx.hash_algo, 8);
-    drop(fx);
 }
 
 #[test]
 fn parallel_index_pack_matches_git_sha256_threads_1_and_8() {
-    let Some(fx) = fixture_sha256() else {
+    let Some(fx) = shared_fixture_sha256() else {
         eprintln!("skip: sha256 object format unavailable");
         return;
     };
     assert_idx_matches_git(&fx.pack, fx.hash_algo, 1);
     assert_idx_matches_git(&fx.pack, fx.hash_algo, 8);
-    drop(fx);
 }
 
 #[test]
 fn install_pack_path_matches_git_index() {
-    let fx = fixture_sha1();
+    let fx = shared_fixture_sha1();
     let pack = fx.pack.clone();
     let hash_algo = fx.hash_algo;
     let tmp = tempfile::tempdir().expect("install");
