@@ -2350,7 +2350,7 @@ pub fn diff_index_to_worktree(
 }
 
 /// Additional inputs for [`diff_index_to_worktree_with_options`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DiffIndexToWorktreeOptions {
     /// Optional index mtime pair `(sec, nsec)` sampled when the index was read.
     ///
@@ -2365,6 +2365,10 @@ pub struct DiffIndexToWorktreeOptions {
     /// When true, a populated gitlink checkout whose `.git` indirection cannot resolve to a HEAD
     /// is returned as an error instead of a normal modified gitlink.
     pub error_on_broken_gitlinks: bool,
+    /// Repository git directory used to load config (separate git dir / linked worktrees).
+    ///
+    /// When unset, defaults to `work_tree/.git`, which is wrong for gitfile layouts.
+    pub repository_git_dir: Option<std::path::PathBuf>,
 }
 
 /// Compare the index against the working tree with optional racy-timestamp context.
@@ -2388,6 +2392,7 @@ fn push_index_blob_worktree_diff(
     file_path: &Path,
     meta: fs::Metadata,
     index_mtime: Option<(u32, u32)>,
+    trust_filemode: bool,
     config: &ConfigSet,
     attrs: &[crate::crlf::AttrRule],
     conv: &crate::crlf::ConversionConfig,
@@ -2425,7 +2430,7 @@ fn push_index_blob_worktree_diff(
 
     let worktree_mode = mode_from_metadata(&meta);
     let stat_same = stat_matches(ie, &meta);
-    if stat_same && worktree_mode != ie.mode {
+    if trust_filemode && stat_same && worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
         result.push(DiffEntry {
             status: DiffStatus::Modified,
@@ -2440,7 +2445,10 @@ fn push_index_blob_worktree_diff(
         return Ok(());
     }
 
-    if stat_same && worktree_mode == ie.mode && !entry_is_racy(ie, index_mtime) {
+    if stat_same
+        && (!trust_filemode || worktree_mode == ie.mode)
+        && !entry_is_racy(ie, index_mtime)
+    {
         return Ok(());
     }
 
@@ -2466,7 +2474,8 @@ fn push_index_blob_worktree_diff(
         }
     }
 
-    if eff_oid != ie.oid || worktree_mode != ie.mode {
+    let mode_differs = trust_filemode && worktree_mode != ie.mode;
+    if eff_oid != ie.oid || mode_differs {
         let path_owned = path_str_ref.to_owned();
         result.push(DiffEntry {
             status: DiffStatus::Modified,
@@ -2491,14 +2500,12 @@ pub fn diff_index_to_worktree_with_options(
     work_tree: &Path,
     options: DiffIndexToWorktreeOptions,
 ) -> Result<Vec<DiffEntry>> {
-    diff_index_to_worktree_inner(
-        odb,
-        index,
-        work_tree,
-        &work_tree.join(".git"),
-        options,
-        false,
-    )
+    let default_git_dir = work_tree.join(".git");
+    let git_dir = options
+        .repository_git_dir
+        .clone()
+        .unwrap_or(default_git_dir);
+    diff_index_to_worktree_inner(odb, index, work_tree, &git_dir, options, false)
 }
 
 /// Like [`diff_index_to_worktree_with_options`], but loads config from `repository_git_dir`
@@ -2536,6 +2543,14 @@ fn diff_index_to_worktree_inner(
     let attrs = crlf::load_gitattributes(work_tree);
     let precompose_unicode = config
         .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let trust_filemode = config
+        .get_bool("core.filemode")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    let ignorecase = config
+        .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
 
@@ -2703,7 +2718,8 @@ fn diff_index_to_worktree_inner(
             continue;
         }
 
-        let file_path = index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode);
+        let file_path =
+            index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
 
         if is_intent_to_add {
             match fs::symlink_metadata(&file_path) {
@@ -2764,18 +2780,22 @@ fn diff_index_to_worktree_inner(
         if dir.is_empty() {
             work_tree.to_path_buf()
         } else {
-            index_entry_worktree_abs(work_tree, dir, precompose_unicode)
+            index_entry_worktree_abs(work_tree, dir, precompose_unicode, ignorecase)
         }
     };
-    let file_abs = |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode);
+    let file_abs =
+        |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
     for_each_blob_by_directory(
         index,
         &blob_dirs,
         dir_abs,
         file_abs,
-        |rel_path| dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode),
+        |rel_path| {
+            dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
+        },
         |_entry_index, ie, path_str_ref, lookup| {
-            let file_path = index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode);
+            let file_path =
+                index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
             match lookup {
                 BlobDiskLookup::Missing => {
                     result.push(DiffEntry {
@@ -2798,6 +2818,7 @@ fn diff_index_to_worktree_inner(
                         &file_path,
                         meta,
                         index_mtime,
+                        trust_filemode,
                         &config,
                         &attrs,
                         &conv,
@@ -2811,7 +2832,7 @@ fn diff_index_to_worktree_inner(
     )?;
 
     for (path, (_, base_entry)) in unmerged_base {
-        let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode);
+        let file_path = index_entry_worktree_abs(work_tree, &path, precompose_unicode, ignorecase);
         let wt_meta = match fs::symlink_metadata(&file_path) {
             Ok(meta) => Some(meta),
             Err(e)
@@ -2883,17 +2904,17 @@ fn index_entry_worktree_abs(
     work_tree: &Path,
     index_relpath: &str,
     precompose_unicode: bool,
+    ignorecase: bool,
 ) -> PathBuf {
     if precompose_unicode {
-        crate::unicode_normalization::resolve_worktree_path_for_staging(
+        return crate::unicode_normalization::resolve_worktree_path_for_staging(
             work_tree,
             index_relpath,
             true,
         )
-        .abs
-    } else {
-        work_tree.join(index_relpath)
+        .abs;
     }
+    crate::path_icase::worktree_path_for_index_entry(work_tree, index_relpath, ignorecase)
 }
 
 /// Effective index-file mtime for racy-git checks.
@@ -2912,6 +2933,7 @@ impl SymlinkDirCache {
         work_tree: &Path,
         rel_path: &str,
         precompose_unicode: bool,
+        ignorecase: bool,
     ) -> bool {
         let components: Vec<&str> = rel_path.split('/').collect();
         let mut prefix = String::new();
@@ -2927,7 +2949,7 @@ impl SymlinkDirCache {
             if self.plain.contains(&prefix) {
                 continue;
             }
-            let abs = index_entry_worktree_abs(work_tree, &prefix, precompose_unicode);
+            let abs = index_entry_worktree_abs(work_tree, &prefix, precompose_unicode, ignorecase);
             match fs::symlink_metadata(&abs) {
                 Ok(meta) if meta.file_type().is_symlink() => {
                     self.symlink.insert(prefix.clone());
@@ -3037,6 +3059,7 @@ pub fn smudge_racily_clean_entries(
 /// `ignore_submodule_untracked` mirrors [`diff_index_to_worktree`]'s same flag for gitlinks.
 pub fn worktree_differs_from_index_entry(
     odb: &Odb,
+    repository_git_dir: &Path,
     work_tree: &Path,
     ie: &IndexEntry,
     ignore_submodule_untracked: bool,
@@ -3045,7 +3068,22 @@ pub fn worktree_differs_from_index_entry(
     use crate::crlf;
 
     let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
-    let file_path = work_tree.join(path_str_ref);
+    let config =
+        ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let trust_filemode = config
+        .get_bool("core.filemode")
+        .and_then(|r| r.ok())
+        .unwrap_or(true);
+    let precompose_unicode = config
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let file_path =
+        index_entry_worktree_abs(work_tree, path_str_ref, precompose_unicode, ignorecase);
 
     if ie.mode == 0o160000 {
         let sub_head_oid = read_submodule_head(&file_path);
@@ -3076,12 +3114,10 @@ pub fn worktree_differs_from_index_entry(
     }
 
     let worktree_mode = mode_from_metadata(&meta);
-    if worktree_mode != ie.mode {
+    if trust_filemode && worktree_mode != ie.mode {
         return Ok(true);
     }
 
-    let git_dir = work_tree.join(".git");
-    let config = ConfigSet::load(Some(&git_dir), true).unwrap_or_else(|_| ConfigSet::new());
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
     let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref, false, &config);

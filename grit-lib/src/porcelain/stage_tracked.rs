@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::config::ConfigSet;
 use crate::diff::{
     entry_is_racy, mode_from_metadata, read_submodule_head_oid, stat_matches, symlink_target_bytes,
 };
@@ -105,6 +106,10 @@ pub fn stage_tracked_modifications_in_index(
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
     let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
+    let trust_filemode = ConfigSet::load(Some(&repo.git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get_bool("core.filemode").and_then(|r| r.ok()))
+        .unwrap_or(true);
 
     let mut path_keys: HashSet<Vec<u8>> = HashSet::new();
     let mut unmerged_paths: HashSet<Vec<u8>> = HashSet::new();
@@ -154,6 +159,7 @@ pub fn stage_tracked_modifications_in_index(
                     abs_path: &abs_path,
                     idx_e,
                     index_mtime,
+                    trust_filemode,
                 };
                 if refresh_present_tracked_path(ctx)? {
                     summary.modified.push(raw_path);
@@ -180,6 +186,7 @@ struct PresentRefreshCtx<'a> {
     abs_path: &'a Path,
     idx_e: &'a IndexEntry,
     index_mtime: Option<(u32, u32)>,
+    trust_filemode: bool,
 }
 
 fn refresh_unmerged_tracked_path(
@@ -244,6 +251,7 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
         abs_path,
         idx_e,
         index_mtime,
+        trust_filemode,
     } = ctx;
     let idx_mode = idx_e.mode;
     let idx_intent_to_add = idx_e.intent_to_add();
@@ -278,7 +286,7 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
     let stat_same = stat_matches(idx_e, &meta);
     let racy = entry_is_racy(idx_e, index_mtime);
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
-        if wt_mode == idx_mode {
+        if wt_mode == idx_mode || !trust_filemode {
             return Ok(false);
         }
         let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
@@ -287,10 +295,11 @@ fn refresh_present_tracked_path(ctx: PresentRefreshCtx<'_>) -> Result<bool> {
     }
 
     let oid = read_worktree_blob_oid(repo, abs_path, &meta)?;
-    if !idx_intent_to_add && idx_oid == oid && wt_mode == idx_mode {
+    let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
+    if !idx_intent_to_add && idx_oid == oid && (wt_mode == idx_mode || !trust_filemode) {
         return Ok(false);
     }
-    let entry = entry_from_stat(abs_path, raw_path, oid, wt_mode)?;
+    let entry = entry_from_stat(abs_path, raw_path, oid, mode_for_index)?;
     index.stage_file(entry);
     Ok(true)
 }
@@ -411,7 +420,9 @@ mod tests {
     use std::io::Write;
 
     use crate::diff::{entry_is_racy, stat_matches};
-    use crate::index::{entry_from_metadata, index_file_mtime, MODE_EXECUTABLE, MODE_REGULAR};
+    use crate::index::{
+        entry_from_metadata, index_file_mtime, Index, MODE_EXECUTABLE, MODE_REGULAR,
+    };
     use crate::objects::ObjectKind;
     use crate::odb::Odb;
     use crate::repo::{init_repository, Repository};
@@ -758,6 +769,39 @@ mod tests {
         assert!(changed.removed.is_empty());
         let expected = repo.odb.write(ObjectKind::Blob, b"changed").unwrap();
         assert_eq!(repo.load_index().unwrap().entries[0].oid, expected);
+    }
+
+    #[test]
+    fn filemode_false_skips_executable_bit_only_refresh() {
+        let dir = TempDir::new().unwrap();
+        let repo = init_repository(dir.path(), false, "main", None, "files").unwrap();
+        fs::write(
+            repo.git_dir.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("run.sh"), b"x\n").unwrap();
+        let git_dir = repo.git_dir.clone();
+        let wt = repo.work_tree.as_ref().unwrap();
+        let odb = Odb::new(&git_dir.join("objects"));
+        let oid = odb.write(ObjectKind::Blob, b"x\n").unwrap();
+        let abs = wt.join("run.sh");
+        let meta = fs::symlink_metadata(&abs).unwrap();
+        let mut entry = entry_from_stat(&abs, b"run.sh", oid, mode_from_metadata(&meta)).unwrap();
+        entry.mode = MODE_EXECUTABLE;
+        let mut index = Index::new();
+        index.add_or_replace(entry);
+        repo.write_index(&mut index).unwrap();
+        finalize_index_for_stat_trust(&repo);
+
+        let summary = stage_tracked_modifications(&repo, wt).unwrap();
+        assert!(
+            summary.modified.is_empty(),
+            "core.filemode=false must not stage mode-only executable mismatch: {summary:?}"
+        );
+        let loaded = repo.load_index().unwrap();
+        let e = loaded.entries.iter().find(|e| e.path == b"run.sh").unwrap();
+        assert_eq!(e.mode, MODE_EXECUTABLE);
     }
 
     #[test]

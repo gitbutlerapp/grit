@@ -183,6 +183,7 @@ pub mod pack_name_hash;
 pub mod pack_rev;
 pub mod patch_ids;
 pub mod path;
+pub mod path_icase;
 pub mod path_walk;
 pub mod pathspec;
 pub mod pkt_line;
