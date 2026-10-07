@@ -4,7 +4,42 @@
   <title>project notes from Grit</title>
   <link>https://grit-scm.com/blog/</link>
   <description>Short deep dives into building a Git-compatible, library-oriented Rust implementation.</description>
-  <lastBuildDate>Tue, 06 Oct 2026 00:00:00 +0000</lastBuildDate>
+  <lastBuildDate>Wed, 07 Oct 2026 00:00:00 +0000</lastBuildDate>
+  <item>
+    <title>Goodbye grit-git</title>
+    <link>https://grit-scm.com/blog/goodbye-grit-git/</link>
+    <guid isPermaLink="true">https://grit-scm.com/blog/goodbye-grit-git/</guid>
+    <pubDate>Wed, 07 Oct 2026 00:00:00 +0000</pubDate>
+    <description>We removed the Git-compatible grit-git CLI and the ported test harness. Grit is now two things: a complete Git library and a simpler CLI built on it.</description>
+    <content:encoded><![CDATA[<p>Yesterday we wrote about <a href="https://grit-scm.com/blog/a-new-site-and-a-new-focus/">a new focus</a> for Grit: speed, and a library worth linking, with <code>grit-git</code> kept around as a compatibility test bed. Today we went further. <code>grit-git</code> is gone.</p>
+<h2 id="what-we-removed">What we removed</h2>
+<p><code>grit-git</code> was the command-for-command reimplementation of <code>git</code>: every subcommand, every flag, every message, built to pass Git&#x27;s own test suite. It got remarkably far, passing more than 41,700 of the 42,001 upstream tests we ran. Along with it, we removed:</p>
+<ul>
+<li>the ported upstream shell test suite and the scripts and dashboards that drove it</li>
+<li>the vendored copy of Git&#x27;s source tree</li>
+<li>the benchmark scripts, which measured <code>grit-git</code> against <code>git</code></li>
+</ul>
+<p>Nothing was moved over. The code is still in the history if anyone wants it, but we&#x27;re not maintaining it.</p>
+<h2 id="why">Why</h2>
+<p>Passing Git&#x27;s test suite was a great way to start. It gave us a concrete target and showed that Grit reads and writes repositories correctly. But a test suite written for a command line pulls you toward reproducing that command line: its flags, its exact error text, its exit codes, and twenty years of subcommands that almost nobody uses. That is a lot of code to carry, and very little of it makes the library better.</p>
+<p>It also kept a GPL crate at the center of the project. <code>grit-git</code> was GPL because matching Git&#x27;s output meant reusing Git&#x27;s wording. With it gone, all of Grit is MIT licensed.</p>
+<h2 id="what-grit-is-now">What Grit is now</h2>
+<p>Grit is now exactly two things:</p>
+<ul>
+<li><strong><code>grit-lib</code></strong> is a Git library for Rust that covers most of what core Git does: the object database and packs, refs, the index, diffing, revision walking, merging, config, fetch and push. It never shells out to <code>git</code>, and we&#x27;re working toward a library that&#x27;s easy to embed: typed errors, no global state, nothing printed to the terminal. Almost all of our work goes here.</li>
+<li><strong><code>grit-cli</code></strong> is the <code>grit</code> command. It&#x27;s a simpler Git client that works on any repository and talks to any remote, but its interface is its own. Running <code>grit</code> with no arguments shows where you are and what to do next, and its commands can print <code>--json</code> for scripts.</li>
+</ul>
+<p>Compatibility still matters, but it now means what users actually depend on: repositories on disk and the wire protocol. A repository Grit writes has to be one Git is happy with, and Grit has to fetch from and push to any Git server. We check that with Rust tests that run against the real <code>git</code> binary, not by matching Git&#x27;s command-line output.</p>
+<h2 id="serving-repositories">Serving repositories</h2>
+<p>One thing <code>grit-git</code> did that we wanted to keep was the server side of fetch and push. So <code>grit</code> now has two plumbing commands, <code>grit upload-pack</code> and <code>grit receive-pack</code>, backed by a new server module in <code>grit-lib</code>. Any Git client can clone from, fetch from and push to a repository served this way, over ssh or through <code>grit-http-server</code> for smart HTTP:</p>
+<pre><code>git clone --upload-pack=&#x27;grit upload-pack&#x27; ssh://host/srv/project.git</code></pre>
+<p>They support protocol v0, v1 and v2 and the common <code>receive.*</code> safety settings. Shallow clones, partial-clone filters and server-side hooks are still to come.</p>
+<h2 id="what-s-next">What&#x27;s next</h2>
+<p>The <a href="https://github.com/gitbutlerapp/grit/blob/main/ROADMAP.md">roadmap</a> is the same, minus the work that only existed to support <code>grit-git</code>: a CI gate for every change, a benchmark baseline against Git, a real documentation site, and then making the library fast and clean. The first cleanup is pruning library code that only <code>grit-git</code> ever called.</p>
+<p>If you want to try it:</p>
+<pre><code>curl -fsSL https://grit-scm.com/install | sh
+cargo add grit-lib</code></pre>]]></content:encoded>
+  </item>
   <item>
     <title>A new site, and a new focus</title>
     <link>https://grit-scm.com/blog/a-new-site-and-a-new-focus/</link>
