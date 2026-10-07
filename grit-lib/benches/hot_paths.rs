@@ -36,8 +36,8 @@ fn bench_checkout(c: &mut Criterion) {
             let to_tree = fx.tree_with_fraction_changed(pct);
             let id = format!("{label}_{pct}");
             group.bench_with_input(BenchmarkId::from_parameter(id), fx, |b, fixture| {
+                fixture.reset_worktree_to_head();
                 b.iter(|| {
-                    fixture.reset_worktree_to_head();
                     bench_checkout_between_trees(&fixture.repo, &fixture.head_tree, &to_tree);
                 });
             });

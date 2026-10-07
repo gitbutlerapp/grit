@@ -7,7 +7,9 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::bench_env::{empty_global_config_path, enable_fsmonitor, write_fsmonitor_hook};
+use crate::bench_env::{
+    assert_fsmonitor_index_ready, empty_global_config_path, enable_fsmonitor, write_fsmonitor_hook,
+};
 use crate::fixture::{remove_dir_robust, scratch_dir};
 
 /// Parameters for a hot-path benchmark repository.
@@ -205,21 +207,35 @@ pub fn setup_switch_fixture(
 ) -> Result<(PathBuf, HotPathMeta)> {
     let dir = scratch_dir();
     remove_dir_robust(&dir);
-    fs::create_dir_all(&dir)?;
-    run_git(git, &dir, &["init", "-q"])?;
-    populate_tree(&dir, spec.file_count, spec.dir_count)?;
-    run_git(git, &dir, &["add", "-A"])?;
-    run_git(git, &dir, &["commit", "-q", "-m", "initial"])?;
+    setup_switch_fixture_in(git, &dir, spec, wide)
+}
+
+/// Like [`setup_switch_fixture`] but uses an explicit directory (for unit tests).
+pub fn setup_switch_fixture_in(
+    git: &Path,
+    dir: &Path,
+    spec: HotPathRepoSpec,
+    wide: bool,
+) -> Result<(PathBuf, HotPathMeta)> {
+    if dir.exists() {
+        remove_dir_robust(dir);
+    }
+    fs::create_dir_all(dir)?;
+    run_git(git, dir, &["init", "-q"])?;
+    populate_tree(dir, spec.file_count, spec.dir_count)?;
+    run_git(git, dir, &["add", "-A"])?;
+    run_git(git, dir, &["commit", "-q", "-m", "initial"])?;
     if spec.history_commits > 1 {
-        extend_history(git, &dir, spec.history_commits.saturating_sub(1))?;
+        extend_history(git, dir, spec.history_commits.saturating_sub(1))?;
     }
 
     let branch_a = "bench-a".to_string();
     let branch_b = "bench-b".to_string();
-    run_git(git, &dir, &["branch", "-q", &branch_a])?;
-    run_git(git, &dir, &["checkout", "-q", &branch_a])?;
+    let base_oid = rev_parse(git, dir, "HEAD")?;
+    run_git(git, dir, &["branch", "-q", &branch_a])?;
+    run_git(git, dir, &["checkout", "-q", "-b", &branch_b])?;
 
-    let files = list_tracked_files(&dir)?;
+    let files = list_tracked_files(dir)?;
     let change_count = if wide {
         (files.len() / 10).max(1)
     } else {
@@ -241,22 +257,30 @@ pub fn setup_switch_fixture(
             }
         }
         targets.retain(|p| !dirs.iter().any(|d| p.starts_with(d)));
-        write_files(&dir, &targets, "wide-b")?;
+        write_files(dir, &targets, "wide-b")?;
     } else {
-        write_files(&dir, &targets, "branch-b")?;
+        write_files(dir, &targets, "branch-b")?;
     }
-    run_git(git, &dir, &["add", "-A"])?;
-    run_git(git, &dir, &["commit", "-q", "-m", "branch b tip"])?;
-    run_git(git, &dir, &["branch", "-q", &branch_b])?;
-    run_git(git, &dir, &["checkout", "-q", &branch_a])?;
+    run_git(git, dir, &["add", "-A"])?;
+    run_git(git, dir, &["commit", "-q", "-m", "branch b tip"])?;
+    run_git(git, dir, &["checkout", "-q", &branch_a])?;
+
+    let tip_a = rev_parse(git, dir, &branch_a)?;
+    let tip_b = rev_parse(git, dir, &branch_b)?;
+    if tip_a != base_oid {
+        bail!("bench-a must stay at the pre-switch base commit");
+    }
+    if tip_a == tip_b {
+        bail!("bench-b must differ from bench-a");
+    }
 
     if spec.fsmonitor {
-        let hook = write_fsmonitor_hook(&dir)?;
-        enable_fsmonitor(git, &dir, &hook)?;
-        run_git(git, &dir, &["status", "-s"])?;
+        let hook = write_fsmonitor_hook(dir)?;
+        enable_fsmonitor(git, dir, &hook)?;
+        assert_fsmonitor_index_ready(git, dir)?;
     }
 
-    let base_commit = rev_parse(git, &dir, "HEAD")?;
+    let base_commit = tip_a;
     let meta = HotPathMeta {
         branch_a: branch_a.clone(),
         branch_b: branch_b.clone(),
@@ -267,8 +291,8 @@ pub fn setup_switch_fixture(
         pick_series_commits: Vec::new(),
         wide,
     };
-    fs::write(meta_path(&dir), serde_json::to_string_pretty(&meta)?)?;
-    Ok((dir, meta))
+    fs::write(meta_path(dir), serde_json::to_string_pretty(&meta)?)?;
+    Ok((dir.to_path_buf(), meta))
 }
 
 /// Pick / merge fixture: `main` at base, `topic` with one large commit.
@@ -307,7 +331,7 @@ pub fn setup_pick_merge_fixture(
     if spec.fsmonitor {
         let hook = write_fsmonitor_hook(&dir)?;
         enable_fsmonitor(git, &dir, &hook)?;
-        run_git(git, &dir, &["status", "-s"])?;
+        assert_fsmonitor_index_ready(git, &dir)?;
     }
 
     let meta = HotPathMeta {
@@ -363,7 +387,7 @@ pub fn setup_pick_series_fixture(
     if spec.fsmonitor {
         let hook = write_fsmonitor_hook(&dir)?;
         enable_fsmonitor(git, &dir, &hook)?;
-        run_git(git, &dir, &["status", "-s"])?;
+        assert_fsmonitor_index_ready(git, &dir)?;
     }
 
     let meta = HotPathMeta {
@@ -406,5 +430,85 @@ pub fn touch_paths_for_size(file_count: usize) -> usize {
         2000
     } else {
         (file_count / 2).max(10)
+    }
+}
+
+/// Count paths that differ between two refs (for fixture validation).
+pub fn diff_name_only_count(git: &Path, repo: &Path, left: &str, right: &str) -> Result<usize> {
+    let mut cmd = Command::new(git);
+    cmd.args(["diff", "--name-only", left, right])
+        .current_dir(repo);
+    git_env(&mut cmd);
+    let out = cmd.output().context("git diff --name-only")?;
+    if !out.status.success() {
+        bail!(
+            "git diff --name-only {left} {right} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text.lines().filter(|l| !l.is_empty()).count())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn which_git() -> PathBuf {
+        crate::binary::resolve_binary("git", None).expect("git")
+    }
+
+    #[test]
+    fn switch_fixture_branches_differ_by_expected_path_count() {
+        let git = which_git();
+        let spec = HotPathRepoSpec {
+            file_count: 500,
+            dir_count: 10,
+            history_commits: 5,
+            fsmonitor: false,
+        };
+        let narrow = tempfile::tempdir().expect("tempdir");
+        let (repo, _meta) =
+            setup_switch_fixture_in(&git, narrow.path(), spec, false).expect("narrow switch");
+        let n = diff_name_only_count(&git, &repo, "bench-a", "bench-b").expect("diff count");
+        assert!(
+            (45..=55).contains(&n),
+            "expected ~50 differing paths, got {n}"
+        );
+
+        let spec_wide = HotPathRepoSpec {
+            file_count: 500,
+            dir_count: 10,
+            history_commits: 5,
+            fsmonitor: false,
+        };
+        let wide = tempfile::tempdir().expect("tempdir wide");
+        let (repo_w, _) =
+            setup_switch_fixture_in(&git, wide.path(), spec_wide, true).expect("wide switch");
+        let n_wide =
+            diff_name_only_count(&git, &repo_w, "bench-a", "bench-b").expect("wide diff count");
+        assert!(
+            n_wide >= 40,
+            "expected ~10% path delta for wide switch, got {n_wide}"
+        );
+    }
+
+    #[test]
+    fn fsmonitor_fixture_writes_fsmn_token() {
+        let git = which_git();
+        let spec = HotPathRepoSpec {
+            file_count: 50,
+            dir_count: 5,
+            history_commits: 2,
+            fsmonitor: true,
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (repo, _) =
+            setup_switch_fixture_in(&git, dir.path(), spec, false).expect("fsmonitor switch");
+        let index = fs::read(repo.join(".git/index")).expect("read index");
+        assert!(
+            index.windows(4).any(|w| w == b"FSMN"),
+            "index should contain FSMN extension after fsmonitor status"
+        );
     }
 }
