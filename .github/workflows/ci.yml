@@ -71,6 +71,25 @@ jobs:
 
       - run: cargo clippy --workspace -- -D warnings
 
+  rustdoc:
+    name: rustdoc
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rustdoc
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+
   test:
     name: test
     runs-on: ubuntu-latest

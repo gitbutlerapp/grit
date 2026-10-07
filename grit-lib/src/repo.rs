@@ -213,7 +213,7 @@ impl Repository {
         Self::from_canonical_git_dir(git_dir, work_tree)
     }
 
-    /// Like [`Self::open`] but skips [`validate_repository_format`].
+    /// Like [`Self::open`] but skips repository format validation (`validate_repository_format`).
     ///
     /// Used after repository discovery when the format is unsupported so callers still learn
     /// the git directory (Git `GIT_DIR_INVALID_FORMAT` still records gitdir for `read_early_config`).

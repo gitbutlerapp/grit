@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-//! Gust library — core Git-compatible engine.
+//! grit-lib — fast, linkable Git engine for Rust.
 //!
 //! # Architecture
 //!

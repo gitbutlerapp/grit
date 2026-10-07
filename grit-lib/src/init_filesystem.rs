@@ -156,7 +156,7 @@ pub fn probe_symlinks_supported(git_dir: &Path) -> std::io::Result<bool> {
 ///
 /// # Errors
 ///
-/// Returns [`crate::Error::Io`] or config parse/write failures.
+/// Returns [`Error::Io`](crate::error::Error::Io) or config parse/write failures.
 pub fn apply_init_filesystem_config(
     git_dir: &Path,
     opts: InitFilesystemConfigOptions,

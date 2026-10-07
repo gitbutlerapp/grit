@@ -825,7 +825,7 @@ impl PackedRefs {
 
     /// Whether any packed ref name conflicts with `refname` as a path prefix
     /// (e.g. an existing `refs/heads/x` blocks creating `refs/heads/x/y`).
-    /// Mirrors [`packed_ref_namespace_conflict`] against the snapshot.
+    /// Mirrors the internal `packed_ref_namespace_conflict` helper against the snapshot.
     #[must_use]
     pub fn has_namespace_conflict(&self, refname: &str) -> bool {
         self.map

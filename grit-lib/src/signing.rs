@@ -1393,9 +1393,9 @@ fn next_temp_counter() -> u64 {
 }
 
 /// Build the committer-info default signing key (Git's
-/// `git_committer_info(IDENT_STRICT | IDENT_NO_DATE)` — "Name <email>").
+/// `git_committer_info(IDENT_STRICT | IDENT_NO_DATE)` — `"Name <email>"`).
 ///
-/// `committer_ident` is a full ident line ("Name <email> <ts> <tz>"); this
+/// `committer_ident` is a full ident line (`"Name <email> <ts> <tz>"`); this
 /// trims the trailing timestamp/timezone.
 pub fn committer_signing_default(committer_ident: &str) -> String {
     if let Some(angle_end) = committer_ident.find('>') {
@@ -1437,7 +1437,7 @@ pub fn parse_signed_buffer(buf: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
 ///
 /// Mirrors [`verify_commit`] but uses [`parse_signed_buffer`] (tag signatures are
 /// appended, not stored in a `gpgsig` header).  The verifier is chosen from the
-/// signature armor (`get_format_by_sig`), reusing [`verify_ssh_signed_buffer`]
+/// signature armor (`get_format_by_sig`), reusing the internal `verify_ssh_signed_buffer` helper
 /// for ssh and the gpg/gpgsm path otherwise.  Returns the "no signature" result
 /// when the tag carries no signature.
 pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> Result<SignatureCheck> {

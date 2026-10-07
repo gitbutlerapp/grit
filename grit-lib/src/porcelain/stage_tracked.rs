@@ -48,7 +48,7 @@ impl StageTrackedSummary {
 /// and skip content re-hashing when stat data proves the blob is unchanged (unless the entry is
 /// racy relative to the on-disk index mtime).
 ///
-/// Untracked files are not added. [`skip_worktree`] entries are left unchanged; missing paths
+/// Untracked files are not added. [`IndexEntry::skip_worktree`] entries are left unchanged; missing paths
 /// are not treated as deletions for those entries.
 ///
 /// # Parameters

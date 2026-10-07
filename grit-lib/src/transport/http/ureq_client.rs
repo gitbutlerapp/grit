@@ -1,4 +1,4 @@
-//! Default [`HttpClient`](super::HttpClient) backed by [`ureq`] (feature `http-ureq`).
+//! Default [`HttpClient`] backed by `ureq` (feature `http-ureq`).
 //!
 //! This is the batteries-included client for embedders who do not want to wire
 //! their own HTTP stack. It lifts the core request path from the CLI's
@@ -38,7 +38,7 @@
 //! compiled in here, so a SOCKS proxy URL is rejected with a clear error rather
 //! than silently mishandled. Also omitted: custom CA bundles, gzip request
 //! bodies, and the `GIT_ASKPASS` / `GIT_TRACE_CURL` plumbing. Embedders that need
-//! those should implement [`HttpClient`](super::HttpClient) over their own stack.
+//! those should implement [`HttpClient`] over their own stack.
 
 use std::env;
 use std::io::{self, Read};

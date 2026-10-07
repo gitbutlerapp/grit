@@ -71,7 +71,7 @@ pub struct DiffHunk {
     pub target: Range,
 }
 
-/// Sequence of hunks from `collect_diff_ranges` (parent[i] aligns with target[i]).
+/// Sequence of hunks from `collect_diff_ranges` (`parent[i]` aligns with `target[i]`).
 #[derive(Clone, Debug, Default)]
 pub struct DiffRanges {
     pub hunks: Vec<DiffHunk>,

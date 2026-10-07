@@ -2,7 +2,7 @@
 //!
 //! [`create_commit`] performs incremental cache-tree write-tree, writes the commit
 //! object, persists the index with a valid cache-tree, then updates the branch and `HEAD`
-//! reflogs through [`refs::update_branch_for_commit`].
+//! reflogs through [`crate::refs::update_branch_for_commit`].
 
 use crate::diff::{diff_trees, zero_oid};
 use crate::error::{Error, Result};

@@ -2108,7 +2108,7 @@ pub fn validate_midx_referenced_packs(objects_dir: &Path) {
 
 /// When `core.multiPackIndex` is enabled, try to read `oid` from the active MIDX in `objects_dir`.
 ///
-/// Returns [`None`] when no MIDX exists or `oid` is not listed. Returns [`Some(Err(..))`] when the
+/// Returns [`None`] when no MIDX exists or `oid` is not listed. Returns `Some(Err(..))` when the
 /// MIDX is present but malformed (callers surface Git-style `error:` / `fatal:` messages).
 pub fn try_read_object_via_midx(
     objects_dir: &Path,
@@ -2635,7 +2635,7 @@ pub enum CompactError {
     MissingEndpoint(String),
     /// Both endpoints resolve to the same layer.
     IdenticalEndpoints,
-    /// `from` (argv[0]) is newer than `to` (argv[1]); git requires `from` to be an
+    /// `from` (`argv[0]`) is newer than `to` (`argv[1]`); git requires `from` to be an
     /// ancestor of `to`. Carries `(from, to)` arg text for the diagnostic.
     NotAncestor(String, String),
     /// Compaction was requested with the v1 on-disk MIDX format.
@@ -2690,7 +2690,7 @@ fn layer_pack_names(pack_dir: &Path, hash: &str) -> Result<Vec<String>> {
 }
 
 /// `git multi-pack-index compact <from> <to>`: merge the inclusive chain range
-/// `[from..to]` (oldest→newest, matching git's `from`=argv[0] / `to`=argv[1]) into a
+/// `[from..to]` (oldest→newest, matching git's `from`=`argv[0]` / `to`=`argv[1]`) into a
 /// single new incremental layer, preserving pack order, and rewrite the chain as
 /// `[layers before from] + [compacted layer] + [layers after to]`.
 ///

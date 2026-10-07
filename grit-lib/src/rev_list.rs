@@ -4656,7 +4656,7 @@ fn dense_path_limited_action(
 
 /// Whether `oid` would be included in a dense path-limited history walk for `paths`.
 ///
-/// Matches the non-Bloom parts of [`commit_touches_paths`] with `full_history = false` and
+/// Matches the non-Bloom parts of the internal `commit_touches_paths` helper with `full_history = false` and
 /// `sparse = false`: single-parent commits require a tree change on `paths` vs their parent;
 /// merge commits are omitted when exactly one parent is tree-same on `paths` (Git `TREESAME`
 /// simplification). Used by `log -g -- <path>` to align with Git's reflog path filtering.

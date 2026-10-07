@@ -5,7 +5,7 @@
 //! the console only renders `\x1b[..m` sequences when *virtual terminal
 //! processing* is enabled for the stream. Modern consoles (Windows Terminal,
 //! recent `conhost`, VS Code) support it but require a one-time
-//! [`SetConsoleMode`] opt-in; legacy consoles do not support it at all and would
+//! `SetConsoleMode` opt-in; legacy consoles do not support it at all and would
 //! otherwise print the raw escape bytes as visible garbage.
 //!
 //! [`ansi_supported`] enables the mode once (caching the result) and reports

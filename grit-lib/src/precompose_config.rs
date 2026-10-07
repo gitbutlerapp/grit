@@ -1,4 +1,4 @@
-//! Read `core.precomposeunicode` without opening a full [`Repository`].
+//! Read `core.precomposeunicode` without opening a full [`Repository`](crate::repo::Repository).
 //!
 //! Used for pathspec matching when argv may use NFD spellings while the index stores NFC.
 

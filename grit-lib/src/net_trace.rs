@@ -22,7 +22,7 @@ pub fn enabled() -> bool {
 
 /// Emit one `[grit-net] …` trace line to stderr (only when [`enabled`]).
 ///
-/// Prefer the [`net_trace!`] macro at call sites so the format arguments are
+/// Prefer the `net_trace!` macro at call sites so the format arguments are
 /// skipped entirely when tracing is off.
 pub fn line(msg: &str) {
     eprintln!("[grit-net] {msg}");

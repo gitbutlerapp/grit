@@ -17,9 +17,9 @@
 //!   — reusing the same refspec/tag/prune/classification helpers as the
 //!   in-process and `git://` fetch paths.
 //!
-//! A default [`ureq`]-backed [`HttpClient`] lives in [`crate::transport::http::ureq_client`]
-//! behind the `http-ureq` cargo feature; it wires a [`CredentialProvider`] for
-//! HTTP basic auth on `401`.
+//! A default `ureq`-backed [`HttpClient`] lives in the `transport::http::ureq_client`
+//! module behind the `http-ureq` cargo feature; it wires a
+//! [`CredentialProvider`](crate::credentials::CredentialProvider) for HTTP basic auth on `401`.
 //!
 //! Both protocol v0/v1 (the classic stateless RPC) and protocol v2 (the
 //! stateless multi-POST flow) are implemented here. A v2 server is detected from

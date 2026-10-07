@@ -1,12 +1,12 @@
-//! Shared error types for the Gust library.
+//! Shared error types for grit-lib.
 //!
-//! Library code uses [`Error`] (a `thiserror` enum) so callers can match on
+//! Library code uses [`enum@Error`] (a `thiserror` enum) so callers can match on
 //! specific failure modes. The binary wraps these with `anyhow` for human-
 //! readable top-level reporting.
 
 use thiserror::Error;
 
-/// The top-level error type for all Gust library operations.
+/// The top-level error type for all grit-lib operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {

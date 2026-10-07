@@ -7,13 +7,21 @@ description = "Core library for the grit Git implementation"
 readme = "README.md"
 repository = "https://github.com/gitbutlerapp/grit"
 
-# Inherit workspace deny rules but allow `unsafe` for `git_date` (`libc` FFI like Git `date.c`).
+# Match workspace clippy/rustdoc denies; allow `unsafe` for `git_date` (`libc` FFI like Git `date.c`).
+# `lints.workspace = true` is incompatible with relaxing `unsafe_code` on this crate alone.
 [lints.rust]
 unsafe_code = "allow"
 
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+invalid_html_tags = "deny"
+invalid_codeblock_attributes = "deny"
+bare_urls = "deny"
 
 [features]
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport

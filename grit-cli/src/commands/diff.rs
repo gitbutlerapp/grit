@@ -388,7 +388,7 @@ impl HumanRender for DiffOutcome {
     }
 }
 
-/// Color only on a TTY with `NO_COLOR` unset (https://no-color.org), and only
+/// Color only on a TTY with `NO_COLOR` unset (<https://no-color.org>), and only
 /// when the console can render ANSI (always on Unix; VT-capable on Windows).
 fn use_color() -> bool {
     std::io::stdout().is_terminal()

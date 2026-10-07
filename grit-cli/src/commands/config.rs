@@ -189,7 +189,7 @@ fn target_file(global: bool) -> Result<(ConfigScope, PathBuf)> {
 /// The global config file to write to.
 ///
 /// We derive this from grit-lib's own global-config search list
-/// ([`global_config_paths_pub`]) so a write always lands in a file the loader
+/// ([`grit_lib::config::global_config_paths_pub`]) so a write always lands in a file the loader
 /// will read back — crucial on Windows, where the home directory may resolve via
 /// `%USERPROFILE%` rather than `$HOME`. Following Git's writer preference, we use
 /// an existing `~/.gitconfig`, then an existing XDG `git/config`, otherwise the

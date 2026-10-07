@@ -50,7 +50,7 @@ const FG_DIM: &str = "38;5;244";
 const FG_AUTHOR: &str = "38;5;110";
 
 /// Whether to emit ANSI color: only when stdout is a TTY and `NO_COLOR` is unset
-/// (the de-facto standard for opting out — https://no-color.org).
+/// (the de-facto standard for opting out — <https://no-color.org>).
 fn use_color() -> bool {
     std::io::stdout().is_terminal()
         && grit_lib::terminal::ansi_supported()

@@ -94,7 +94,7 @@ pub struct CertRefUpdate {
 /// Build the unsigned push-certificate payload (`send-pack.c:generate_push_cert`).
 ///
 /// `pusher` is the signing key id (Git uses `get_signing_key_id()`, falling back
-/// to the committer ident "Name <email>"). `date` is `"<epoch> <tz>"`. `url` and
+/// to the committer ident `"Name <email>"`). `date` is `"<epoch> <tz>"`. `url` and
 /// `nonce` are omitted when empty. Returns `None` when there are no updates to send.
 #[must_use]
 pub fn build_push_cert_payload(

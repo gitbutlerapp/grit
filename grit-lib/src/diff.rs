@@ -512,7 +512,7 @@ pub fn unified_diff_histogram_with_prefix_and_funcname(
 
 /// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm,
 /// applying `--ignore-blank-lines` / `-I` change-record suppression
-/// ([`histogram_unified_body_ignore`]) and then attaching function-name hunk
+/// (`histogram_unified_body_ignore_fc`) and then attaching function-name hunk
 /// headers exactly like [`unified_diff_histogram_with_prefix_and_funcname`].
 ///
 /// `is_ignorable_change` is given the removed/added line slices (without
@@ -3194,7 +3194,7 @@ pub(crate) fn index_stat_cache_trustworthy(index_mtime: Option<(u32, u32)>) -> b
 ///
 /// Mirrors the fast paths in [`diff_index_to_worktree`] and Git's `refresh_index` /
 /// `add_file_to_index`: trust matching stat when the entry is not racy and
-/// [`index_stat_cache_trustworthy`] allows it; re-hash when stat matches but the entry is racy
+/// `index_stat_cache_trustworthy` allows it; re-hash when stat matches but the entry is racy
 /// or when stat differs; apply CRLF-aware hashing like staging.
 ///
 /// Returns [`WorktreeAddRefresh::UpToDate`] when the index entry already matches the worktree and
@@ -6497,7 +6497,7 @@ pub fn should_break_rewrite_for_stat(old: &[u8], new: &[u8]) -> bool {
 
 /// Whether an in-place blob edit should be split into delete+create for rename/copy (`should_break`
 /// in `diffcore-break.c`). `break_score` is on the internal 0–[`GIT_DIFF_MAX_SCORE`] scale (default
-/// [`DIFF_DEFAULT_BREAK_SCORE`]).
+/// `DIFF_DEFAULT_BREAK_SCORE`).
 #[must_use]
 pub fn should_break_rewrite_pair(old: &[u8], new: &[u8], break_score: u64) -> bool {
     should_break_rewrite_inner(old, new, break_score)
@@ -6541,7 +6541,7 @@ pub fn parse_diff_rename_score_token(arg: &str) -> Option<u64> {
 }
 
 /// Git `merge_score` from `diffcore-break.c` when a pair is considered broken: how much of the
-/// source blob was removed (0–[`DIFF_MAX_SCORE`] scale). Used for `dissimilarity index` metadata.
+/// source blob was removed (0–`DIFF_MAX_SCORE` scale). Used for `dissimilarity index` metadata.
 #[must_use]
 pub fn rewrite_merge_score(old: &[u8], new: &[u8]) -> Option<u64> {
     if old.is_empty() {
@@ -6812,7 +6812,7 @@ pub fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
 /// True when a populated submodule checkout is *broken*: its `HEAD` resolves to a commit OID, but
 /// that commit object cannot be read from the submodule's own object database.
 ///
-/// This mirrors Git's [`is_submodule_modified`], which shells out to `git status --porcelain=2`
+/// This mirrors Git's `is_submodule_modified`, which shells out to `git status --porcelain=2`
 /// inside the submodule; when the submodule's object store is corrupt (e.g. `rm -r .git/objects`),
 /// that inner status fails and Git aborts the surrounding `status`/`diff`/`fetch`. We detect the
 /// same condition in-process so the superproject operation can return a fatal error rather than

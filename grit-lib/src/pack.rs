@@ -771,7 +771,7 @@ pub fn clear_pack_cache() {
 }
 
 /// Re-stamp the cached pack-bytes signature after deliberately touching `pack_path`'s mtime
-/// (object freshening). See [`pack_cache::refresh_pack_signature`].
+/// (object freshening). See the internal `pack_cache::refresh_pack_signature` helper.
 pub fn refresh_pack_bytes_signature(pack_path: &Path, touched_at: SystemTime) {
     pack_cache::refresh_pack_signature(pack_path, touched_at);
 }
@@ -2250,7 +2250,7 @@ pub fn pack_index_is_v1(idx_path: &Path) -> bool {
 /// Resolve `oid` from local packs via the process-wide pack cache (cached `.idx`
 /// parses, cached pack bytes, fanout binary search, delta-base cache).
 ///
-/// Returns [`Ok(None)`] when no local pack index names the object. When a pack
+/// Returns `Ok(None)` when no local pack index names the object. When a pack
 /// copy fails to decode from a v1 (legacy) index, returns an empty blob placeholder
 /// (historical pack-objects behavior). Any other decode failure invokes
 /// `alternate_read` once before trying the next pack.

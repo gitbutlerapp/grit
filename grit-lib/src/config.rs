@@ -229,7 +229,7 @@ pub fn canonical_key(raw: &str) -> Result<String> {
 
 // ── Parser ──────────────────────────────────────────────────────────
 
-/// Display path for config diagnostics (matches [`config_error_path_display`] for public callers).
+/// Display path for config diagnostics (matches the internal `config_error_path_display` helper for public callers).
 #[must_use]
 pub fn config_file_display_for_error(path: &Path) -> String {
     config_error_path_display(path)
@@ -1885,8 +1885,8 @@ impl ConfigSet {
     /// See [`LoadConfigOptions`] for `GIT_CONFIG_PARAMETERS` / `-c` include behaviour.
     ///
     /// Results are memoized for the process lifetime and revalidated against
-    /// the cascade files' stat stamps on every call (see the cache notes near
-    /// [`ConfigCacheKey`]).
+    /// the cascade files' stat stamps on every call (see the cache notes near the internal
+    /// `ConfigCacheKey` type).
     pub fn load_with_options(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Result<Self> {
         let Some(env_fp) = config_env_fingerprint() else {
             return Self::load_with_options_uncached(git_dir, opts, &mut Vec::new());
