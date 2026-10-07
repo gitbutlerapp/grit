@@ -641,6 +641,7 @@ dependencies = [
  "anyhow",
  "clap",
  "grit-lib",
+ "serde_json",
  "tempfile",
 ]
 

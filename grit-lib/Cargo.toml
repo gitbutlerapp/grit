@@ -75,6 +75,10 @@ name = "worktree"
 harness = false
 
 [[bench]]
+name = "hash"
+harness = false
+
+[[bench]]
 name = "history"
 harness = false
 

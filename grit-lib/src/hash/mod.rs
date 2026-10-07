@@ -23,6 +23,69 @@ pub use parallel::{
     ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS, PAR_HASH_MIN_TOTAL_BYTES,
 };
 
+/// Which implementation the `sha1` / `sha2` dependency selects for `algo` on this CPU.
+///
+/// Values mirror the `cpufeatures` dispatch inside those crates for the digests
+/// Grit uses (SHA-1 and SHA-256). On x86_64, SHA-256 in `sha2` 0.11 only selects
+/// SHA-NI or portable code (AVX2 is used for SHA-512, not SHA-256, so there is no
+/// separate AVX2 backend variant here).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Backend {
+    /// x86_64 SHA-NI (`sha` target feature) — used for SHA-1 and SHA-256 when available.
+    X86ShaNi,
+    /// AArch64 SHA2 crypto extensions.
+    Aarch64Sha,
+    /// Portable software implementation.
+    Portable,
+}
+
+impl Backend {
+    /// Stable lowercase name for scripts and JSON (`x86_sha_ni`, `portable`, …).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::X86ShaNi => "x86_sha_ni",
+            Self::Aarch64Sha => "aarch64_sha",
+            Self::Portable => "portable",
+        }
+    }
+}
+
+impl std::fmt::Display for Backend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Report the hashing backend the linked `sha1` / `sha2` crates would use for `algo`.
+///
+/// Detection uses the same target features as those crates (`sha` on x86_64, `sha2` on
+/// AArch64). `algo` is accepted for a stable signature; both supported algorithms share
+/// the same backend on a given CPU.
+#[must_use]
+pub fn backend(algo: HashAlgo) -> Backend {
+    let _ = algo;
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("sha") {
+            Backend::X86ShaNi
+        } else {
+            Backend::Portable
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("sha2") {
+            Backend::Aarch64Sha
+        } else {
+            Backend::Portable
+        }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        Backend::Portable
+    }
+}
 /// RFC 2104 HMAC block size for SHA-1.
 const HMAC_BLOCK_SIZE: usize = 64;
 
@@ -612,5 +675,45 @@ mod tests {
             HashAlgo::Sha256.digest(b"via write trait"),
             ObjectId::from_bytes(&out).unwrap()
         );
+    }
+
+    #[test]
+    fn backend_matches_cpu() {
+        let expected = {
+            #[cfg(target_arch = "x86_64")]
+            {
+                if std::arch::is_x86_feature_detected!("sha") {
+                    Backend::X86ShaNi
+                } else {
+                    Backend::Portable
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                if std::arch::is_aarch64_feature_detected!("sha2") {
+                    Backend::Aarch64Sha
+                } else {
+                    Backend::Portable
+                }
+            }
+            #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+            {
+                Backend::Portable
+            }
+        };
+        assert_eq!(super::backend(HashAlgo::Sha1), expected);
+    }
+
+    #[test]
+    fn sha256_backend_matches_sha2_dispatcher() {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let got = super::backend(HashAlgo::Sha256);
+            if std::arch::is_x86_feature_detected!("sha") {
+                assert_eq!(got, Backend::X86ShaNi);
+            } else {
+                assert_eq!(got, Backend::Portable);
+            }
+        }
     }
 }
