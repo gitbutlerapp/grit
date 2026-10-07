@@ -1,6 +1,8 @@
 //! Integration coverage for [`grit_lib::hash`] parallel batch helpers.
 
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use grit_lib::hash::hash_object;
 use grit_lib::hash::{
@@ -53,6 +55,43 @@ fn parallelism_and_threshold_constants_are_documented() {
         PAR_HASH_MIN_TOTAL_BYTES,
         8
     ));
+}
+
+#[test]
+fn try_par_hash_with_drops_completed_values_on_error() {
+    struct TrackDrop(Arc<AtomicUsize>);
+
+    impl Drop for TrackDrop {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let items: Vec<i32> = (0..128).collect();
+    let made = Arc::new(AtomicUsize::new(0));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let result = try_par_hash_with(
+        &items,
+        NonZeroUsize::new(8).expect("threads"),
+        items.len(),
+        {
+            let made = Arc::clone(&made);
+            let dropped = Arc::clone(&dropped);
+            move |&x| {
+                if x == 127 {
+                    while made.load(Ordering::Acquire) < 127 {
+                        std::hint::spin_loop();
+                    }
+                    return Err("stop");
+                }
+                made.fetch_add(1, Ordering::SeqCst);
+                Ok(TrackDrop(Arc::clone(&dropped)))
+            }
+        },
+    );
+    assert!(matches!(result, Err(ParallelHashError::Task("stop"))));
+    assert_eq!(made.load(Ordering::SeqCst), 127);
+    assert_eq!(dropped.load(Ordering::SeqCst), 127);
 }
 
 #[test]

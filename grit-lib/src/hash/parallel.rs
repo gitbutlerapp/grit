@@ -31,20 +31,21 @@ pub const PAR_HASH_MIN_TOTAL_BYTES: usize = 256 * 1024;
 /// Items claimed per atomic work-stealing step (contiguous index range).
 const PAR_HASH_CHUNK: usize = 16;
 
-/// Failure from [`try_par_hash_with`] when a worker panics or returns an error.
+/// Failure from [`try_par_hash_with`] when a closure returns an error.
+///
+/// If a worker panics, initialized partial results are dropped and the panic is
+/// **resumed on the caller thread** after workers join; this enum is not used
+/// for that case.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParallelHashError<E> {
-    /// The first error returned by the closure.
+    /// The first error returned by the closure (additional concurrent errors are discarded).
     Task(E),
-    /// A worker thread panicked (payload is dropped).
-    Panic,
 }
 
 impl<E: std::fmt::Display> std::fmt::Display for ParallelHashError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Task(e) => write!(f, "{e}"),
-            Self::Panic => f.write_str("parallel hash worker panicked"),
         }
     }
 }
@@ -115,7 +116,8 @@ pub fn hash_objects_parallel(
 /// Run `f` over `items` with up to `threads` workers, preserving order.
 ///
 /// When [`parallel_hash_worthwhile`] is false, runs serially on the caller thread.
-/// If `f` panics, the panic is rethrown after worker threads finish (no deadlock).
+/// If `f` panics, partial results are dropped and the panic is rethrown after
+/// workers join.
 #[must_use]
 pub fn par_hash_with<T, R, F>(
     items: &[T],
@@ -131,16 +133,19 @@ where
     try_par_hash_with::<T, R, Infallible, _>(items, threads, total_bytes, |item| Ok(f(item)))
         .unwrap_or_else(|e| match e {
             ParallelHashError::Task(infallible) => match infallible {},
-            ParallelHashError::Panic => unreachable!("worker panic is resumed before return"),
         })
 }
 
-/// Fallible variant of [`par_hash_with`]: first error or panic stops the pool.
+/// Fallible variant of [`par_hash_with`]: first closure error stops the pool.
+///
+/// When a worker returns `Err`, every value already stored for earlier indices is
+/// dropped before this function returns. If a worker panics, the same cleanup runs
+/// and the panic payload is **resumed on the caller thread** (this function does
+/// not return).
 ///
 /// # Errors
 ///
-/// Returns [`ParallelHashError::Task`] on the first closure error, or
-/// [`ParallelHashError::Panic`] when a worker panics.
+/// Returns [`ParallelHashError::Task`] with the first closure error observed.
 pub fn try_par_hash_with<T, R, E, F>(
     items: &[T],
     threads: NonZeroUsize,
@@ -167,21 +172,26 @@ where
             .map_err(ParallelHashError::Task);
     }
 
-    let slots: Arc<Slots<R>> = Arc::new(Slots(
-        (0..len)
-            .map(|_| UnsafeCell::new(MaybeUninit::uninit()))
-            .collect(),
-    ));
+    let slots: Arc<Slots<R>> = Arc::new(Slots::new(len));
 
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
-    let err_slot: Arc<ErrorSlot<E>> = Arc::new(ErrorSlot(UnsafeCell::new(None)));
+    let first_error: Arc<Mutex<Option<E>>> = Arc::new(Mutex::new(None));
     let panic_payload: Arc<Mutex<Option<Box<dyn std::any::Any + Send>>>> =
         Arc::new(Mutex::new(None));
 
+    let record_task_error = |err: E, first_error: &Mutex<Option<E>>| {
+        if let Ok(mut guard) = first_error.lock() {
+            if guard.is_none() {
+                *guard = Some(err);
+            }
+        }
+        failed.store(true, Ordering::Release);
+    };
+
     let run_worker =
         |slots: Arc<Slots<R>>,
-         err_slot: Arc<ErrorSlot<E>>,
+         first_error: Arc<Mutex<Option<E>>>,
          panic_payload: Arc<Mutex<Option<Box<dyn std::any::Any + Send>>>>| {
             loop {
                 if failed.load(Ordering::Acquire) {
@@ -198,19 +208,13 @@ where
                     }
                     let i = start + offset;
                     match catch_unwind(AssertUnwindSafe(|| f(item))) {
-                        Ok(Ok(value)) => {
-                            // SAFETY: each index is written exactly once.
-                            unsafe {
-                                (*slots.0[i].get()).write(value);
-                            }
-                        }
-                        Ok(Err(e)) => {
-                            err_slot.store(e);
-                            failed.store(true, Ordering::Release);
-                        }
+                        Ok(Ok(value)) => slots.store(i, value),
+                        Ok(Err(e)) => record_task_error(e, &first_error),
                         Err(payload) => {
                             if let Ok(mut guard) = panic_payload.lock() {
-                                *guard = Some(payload);
+                                if guard.is_none() {
+                                    *guard = Some(payload);
+                                }
                             }
                             failed.store(true, Ordering::Release);
                         }
@@ -222,47 +226,89 @@ where
     std::thread::scope(|scope| {
         for _ in 1..n_workers {
             let slots = Arc::clone(&slots);
-            let err_slot = Arc::clone(&err_slot);
+            let first_error = Arc::clone(&first_error);
             let panic_payload = Arc::clone(&panic_payload);
-            scope.spawn(move || run_worker(slots, err_slot, panic_payload));
+            scope.spawn(move || run_worker(slots, first_error, panic_payload));
         }
         run_worker(
             Arc::clone(&slots),
-            Arc::clone(&err_slot),
+            Arc::clone(&first_error),
             Arc::clone(&panic_payload),
         );
     });
 
     if let Ok(mut guard) = panic_payload.lock() {
         if let Some(payload) = guard.take() {
+            slots.drop_initialized();
             resume_unwind(payload);
         }
     }
 
-    if let Ok(err_slot) = Arc::try_unwrap(err_slot) {
-        if let Some(e) = err_slot.take() {
+    if let Ok(mut guard) = first_error.lock() {
+        if let Some(e) = guard.take() {
+            drop(guard);
+            slots.drop_initialized();
             return Err(ParallelHashError::Task(e));
         }
     }
 
     let slots = match Arc::try_unwrap(slots) {
         Ok(s) => s,
-        Err(_) => {
-            return Err(ParallelHashError::Panic);
+        Err(arc) => {
+            arc.drop_initialized();
+            panic!("parallel hash slot buffer still shared after scope join");
         }
     };
     Ok(slots.into_vec())
 }
 
-struct Slots<R>(Vec<UnsafeCell<MaybeUninit<R>>>);
+struct Slots<R> {
+    cells: Vec<UnsafeCell<MaybeUninit<R>>>,
+    initialized: Vec<AtomicBool>,
+}
 
 impl<R> Slots<R> {
-    fn into_vec(self) -> Vec<R> {
-        let Self(mut slots) = self;
-        let mut out = Vec::with_capacity(slots.len());
-        // SAFETY: every index was initialized exactly once on success paths.
+    fn new(len: usize) -> Self {
+        Self {
+            cells: (0..len)
+                .map(|_| UnsafeCell::new(MaybeUninit::uninit()))
+                .collect(),
+            initialized: (0..len).map(|_| AtomicBool::new(false)).collect(),
+        }
+    }
+
+    fn store(&self, index: usize, value: R) {
+        // SAFETY: each index is written at most once while `initialized` is false.
         unsafe {
-            for cell in slots.drain(..) {
+            (*self.cells[index].get()).write(value);
+        }
+        self.initialized[index].store(true, Ordering::Release);
+    }
+
+    fn drop_initialized(&self) {
+        for i in 0..self.cells.len() {
+            if self.initialized[i].swap(false, Ordering::AcqRel) {
+                // SAFETY: `initialized` was true, so the slot holds a valid `R`.
+                unsafe {
+                    (*self.cells[i].get()).assume_init_drop();
+                }
+            }
+        }
+    }
+
+    fn into_vec(self) -> Vec<R> {
+        let Self {
+            mut cells,
+            initialized,
+        } = self;
+        let mut out = Vec::with_capacity(cells.len());
+        for (cell, was_init) in cells.drain(..).zip(initialized) {
+            assert!(
+                was_init.into_inner(),
+                "parallel hash success path left an uninitialized slot"
+            );
+            // SAFETY: success path initializes every index exactly once.
+            unsafe {
                 out.push(cell.into_inner().assume_init());
             }
         }
@@ -270,28 +316,8 @@ impl<R> Slots<R> {
     }
 }
 
-// Each cell is written once at a distinct index.
+// Each cell is written once at a distinct index; `initialized` guards drops.
 unsafe impl<R: Send> Sync for Slots<R> {}
-
-struct ErrorSlot<E>(UnsafeCell<Option<E>>);
-
-impl<E> ErrorSlot<E> {
-    fn store(&self, err: E) {
-        // SAFETY: only the first error is kept; writers set `failed` afterward.
-        unsafe {
-            let slot = &mut *self.0.get();
-            if slot.is_none() {
-                *slot = Some(err);
-            }
-        }
-    }
-
-    fn take(self) -> Option<E> {
-        unsafe { (*self.0.get()).take() }
-    }
-}
-
-unsafe impl<E: Send> Sync for ErrorSlot<E> {}
 
 #[cfg(test)]
 mod tests {
@@ -308,6 +334,16 @@ mod tests {
             .iter()
             .map(|(kind, data)| hash_object(algo, *kind, data))
             .collect()
+    }
+
+    struct DropCounter {
+        dropped: Arc<AtomicUsize>,
+    }
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.dropped.fetch_add(1, AtomicOrdering::SeqCst);
+        }
     }
 
     #[test]
@@ -362,17 +398,70 @@ mod tests {
     }
 
     #[test]
-    fn par_hash_panic_propagates() {
+    fn try_par_hash_drops_partial_results_on_task_error() {
         let items: Vec<i32> = (0..128).collect();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            par_hash_with(&items, threads(4), items.len(), |&x| {
-                if x == 64 {
-                    panic!("fail");
+        let made = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let err = try_par_hash_with::<_, _, (), _>(&items, threads(8), items.len(), |&x| {
+            if x == 127 {
+                while made.load(AtomicOrdering::Acquire) < 127 {
+                    std::hint::spin_loop();
                 }
-                x
+                return Err(());
+            }
+            made.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(DropCounter {
+                dropped: Arc::clone(&dropped),
             })
+        });
+        assert!(matches!(err, Err(ParallelHashError::Task(()))));
+        assert_eq!(made.load(AtomicOrdering::SeqCst), 127);
+        assert_eq!(dropped.load(AtomicOrdering::SeqCst), 127);
+    }
+
+    #[test]
+    fn try_par_hash_concurrent_errors_are_raced_without_ub() {
+        let items: Vec<i32> = (0..512).collect();
+        let err = try_par_hash_with(&items, threads(8), items.len(), |&x| {
+            if x % 7 == 0 {
+                Err(x)
+            } else {
+                Ok(x)
+            }
+        })
+        .unwrap_err();
+        match err {
+            ParallelHashError::Task(code) => assert_eq!(code % 7, 0),
+        }
+    }
+
+    #[test]
+    fn par_hash_panic_propagates_and_drops_partials() {
+        let items: Vec<i32> = (0..128).collect();
+        let made = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _ = try_par_hash_with::<_, _, std::convert::Infallible, _>(
+                &items,
+                threads(8),
+                items.len(),
+                |&x| {
+                    if x == 127 {
+                        while made.load(AtomicOrdering::Acquire) < 127 {
+                            std::hint::spin_loop();
+                        }
+                        panic!("fail");
+                    }
+                    made.fetch_add(1, AtomicOrdering::SeqCst);
+                    Ok(DropCounter {
+                        dropped: Arc::clone(&dropped),
+                    })
+                },
+            );
         }));
         assert!(result.is_err());
+        assert_eq!(made.load(AtomicOrdering::SeqCst), 127);
+        assert_eq!(dropped.load(AtomicOrdering::SeqCst), 127);
     }
 
     #[test]
