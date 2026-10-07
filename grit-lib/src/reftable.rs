@@ -209,8 +209,8 @@ impl Default for WriteOptions {
 pub struct ReftableTransactionUpdate {
     /// Full storage refname to update.
     pub refname: String,
-    /// New ref value, or a deletion tombstone.
-    pub value: RefValue,
+    /// New ref value when this item updates a ref; `None` writes only a reflog line.
+    pub value: Option<RefValue>,
     /// Optional reflog entry to record in the same table and update index.
     pub log: Option<LogRecord>,
 }
@@ -2167,6 +2167,8 @@ impl ReftableStack {
             return Ok(());
         }
 
+        test_inject_reftable_transaction_fail()?;
+
         {
             let guard = self.acquire_tables_list_lock()?;
             self.reload_table_names();
@@ -2176,11 +2178,13 @@ impl ReftableStack {
             let mut updates = updates;
             updates.sort_by(|a, b| a.refname.cmp(&b.refname));
             for update in &updates {
-                writer.add_ref(RefRecord {
-                    name: update.refname.clone(),
-                    update_index,
-                    value: update.value.clone(),
-                })?;
+                if let Some(value) = &update.value {
+                    writer.add_ref(RefRecord {
+                        name: update.refname.clone(),
+                        update_index,
+                        value: value.clone(),
+                    })?;
+                }
             }
             for update in updates {
                 if let Some(mut log) = update.log {
@@ -2599,6 +2603,35 @@ pub fn reftable_write_ref(
     stack.write_ref(&storage_refname, RefValue::Val1(*oid), log, &opts)
 }
 
+/// Build a reflog record for a reftable transaction (update index filled by the writer).
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the repository hash width cannot be determined.
+pub fn reftable_log_record_for_commit(
+    git_dir: &Path,
+    refname: &str,
+    old_oid: &ObjectId,
+    new_oid: &ObjectId,
+    identity: &str,
+    message: &str,
+) -> Result<LogRecord> {
+    let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
+    let opts = read_write_options(&store_git_dir);
+    let (name, email, time_secs, tz) = parse_identity_string(identity);
+    Ok(LogRecord {
+        refname: storage_refname,
+        update_index: 0,
+        old_id: widen_oid_to(*old_oid, opts.hash_size),
+        new_id: widen_oid_to(*new_oid, opts.hash_size),
+        name,
+        email,
+        time_seconds: time_secs,
+        tz_offset: tz,
+        message: message.to_owned(),
+    })
+}
+
 /// Write a symbolic ref to a reftable repo.
 pub fn reftable_write_symref(
     git_dir: &Path,
@@ -2662,6 +2695,38 @@ pub fn reftable_write_transaction(
         let opts = read_write_options(&store_git_dir);
         stack.write_transaction(updates, &opts)?;
     }
+    Ok(())
+}
+
+#[cfg(debug_assertions)]
+mod reftable_tx_fail_inject {
+    use std::cell::RefCell;
+
+    thread_local! {
+        pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
+    }
+}
+
+/// When enabled (debug builds only), the next [`ReftableStack::write_transaction`] fails before writing.
+#[cfg(debug_assertions)]
+pub fn set_test_inject_reftable_transaction_fail(enabled: bool) {
+    reftable_tx_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
+}
+
+#[cfg(debug_assertions)]
+fn test_inject_reftable_transaction_fail() -> Result<()> {
+    reftable_tx_fail_inject::INJECT.with(|c| {
+        if *c.borrow() {
+            return Err(Error::Io(std::io::Error::other(
+                "injected reftable transaction failure",
+            )));
+        }
+        Ok(())
+    })
+}
+
+#[cfg(not(debug_assertions))]
+fn test_inject_reftable_transaction_fail() -> Result<()> {
     Ok(())
 }
 

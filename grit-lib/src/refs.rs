@@ -1495,10 +1495,10 @@ fn test_inject_reflog_fail(_refname: &str) -> Result<()> {
 
 /// Move a checked-out branch to `new_oid` and append matching branch and `HEAD` reflogs.
 ///
-/// Verifies `HEAD` is a symbolic ref to `branch_ref`, applies the compare-and-swap
-/// expectation on the branch tip, then writes the branch ref and reflogs. If a reflog
-/// append fails after the branch ref moved, the branch tip is rolled back (and a
-/// partial branch reflog line is removed when possible).
+/// Verifies `HEAD` is a symbolic ref to `branch_ref`, then runs a storage transaction:
+/// on the files backend the branch ref lock is held from CAS through reflog writes and
+/// ref commit; on reftable, branch and `HEAD` logs are written in one transaction.
+/// Reflog failures before the ref commit do not advance the branch tip.
 ///
 /// # Errors
 ///
@@ -1515,11 +1515,6 @@ pub struct BranchCommitRefUpdate<'a> {
     pub identity: &'a str,
     /// Reflog message (without trailing newline).
     pub reflog_message: &'a str,
-}
-
-enum BranchRollback {
-    Absent,
-    Oid(ObjectId),
 }
 
 fn verify_branch_cas(
@@ -1546,11 +1541,212 @@ fn verify_branch_cas(
     }
 }
 
-fn rollback_branch_ref(git_dir: &Path, branch_ref: &str, plan: &BranchRollback) -> Result<()> {
-    match plan {
-        BranchRollback::Absent => delete_ref(git_dir, branch_ref),
-        BranchRollback::Oid(oid) => write_ref(git_dir, branch_ref, oid),
+fn read_loose_or_packed_oid(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
+    let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
+    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
+    let try_names: Vec<&str> = if storage_owned != stor_name {
+        vec![storage_owned.as_str(), stor_name.as_str()]
+    } else {
+        vec![stor_name.as_str()]
+    };
+    for name in try_names {
+        let path = store.join(name);
+        if let Ok(Ref::Direct(oid)) = read_ref_file(&path) {
+            return Ok(Some(oid));
+        }
+        if let Some(oid) = lookup_packed_ref(&store, name)? {
+            return Ok(Some(oid));
+        }
     }
+    Ok(None)
+}
+
+fn abort_loose_ref_lock(lock: &Path) {
+    let _ = fs::remove_file(lock);
+}
+
+#[cfg(debug_assertions)]
+mod branch_ref_pause_inject {
+    use std::sync::{Condvar, Mutex, OnceLock};
+
+    pub struct PauseGate {
+        pub wait: Mutex<bool>,
+        pub cv: Condvar,
+    }
+
+    static PAUSE_BEFORE_COMMIT: OnceLock<Mutex<Option<std::sync::Arc<PauseGate>>>> =
+        OnceLock::new();
+
+    pub fn pause_slot() -> &'static Mutex<Option<std::sync::Arc<PauseGate>>> {
+        PAUSE_BEFORE_COMMIT.get_or_init(|| Mutex::new(None))
+    }
+}
+
+/// Synchronization gate used with [`set_test_inject_branch_ref_pause_before_commit`].
+#[cfg(debug_assertions)]
+pub type BranchRefPauseGate = std::sync::Arc<branch_ref_pause_inject::PauseGate>;
+
+/// Debug-only: pause [`update_branch_for_commit`] on the files backend after reflogs, before committing the ref.
+#[cfg(debug_assertions)]
+pub fn set_test_inject_branch_ref_pause_before_commit(gate: Option<BranchRefPauseGate>) {
+    *branch_ref_pause_inject::pause_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = gate;
+}
+
+#[cfg(debug_assertions)]
+fn test_branch_ref_pause_before_commit() {
+    let gate = branch_ref_pause_inject::pause_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some(gate) = gate {
+        let mut wait = gate.wait.lock().unwrap_or_else(|e| e.into_inner());
+        *wait = true;
+        gate.cv.notify_all();
+        while *wait {
+            wait = gate.cv.wait(wait).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn test_branch_ref_pause_before_commit() {}
+
+fn update_branch_for_commit_files(
+    git_dir: &Path,
+    update: &BranchCommitRefUpdate<'_>,
+    reflog_old: &ObjectId,
+) -> Result<()> {
+    ensure_refname_safe_for_storage(update.branch_ref)?;
+    let storage_dir = ref_storage_dir(git_dir, update.branch_ref);
+    if packed_ref_namespace_conflict(&storage_dir, update.branch_ref)? {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{}': reference namespace conflict",
+            update.branch_ref
+        )));
+    }
+    let stor = crate::ref_namespace::storage_ref_name(update.branch_ref);
+    let path = storage_dir.join(&stor);
+    remove_empty_ref_directory(&path);
+    if fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+    {
+        let display = ref_path_for_display(&path);
+        return Err(Error::Message(format!(
+            "fatal: cannot lock ref '{}': there is a non-empty directory '{display}' blocking reference '{}'",
+            update.branch_ref, update.branch_ref
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let lock = lock_path_for_ref(&path);
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock)?;
+
+    let current = read_loose_or_packed_oid(git_dir, update.branch_ref)?;
+    if let Err(err) = verify_branch_cas(update.expected_old, current, update.branch_ref) {
+        abort_loose_ref_lock(&lock);
+        return Err(err);
+    }
+
+    let mut branch_reflog_written = false;
+    if should_autocreate_reflog(git_dir, update.branch_ref) {
+        match append_reflog(
+            git_dir,
+            update.branch_ref,
+            reflog_old,
+            &update.new_oid,
+            update.identity,
+            update.reflog_message,
+            false,
+        ) {
+            Ok(()) => branch_reflog_written = true,
+            Err(err) => {
+                abort_loose_ref_lock(&lock);
+                return Err(err);
+            }
+        }
+    }
+
+    if should_autocreate_reflog(git_dir, "HEAD") {
+        if let Err(err) = append_reflog(
+            git_dir,
+            "HEAD",
+            reflog_old,
+            &update.new_oid,
+            update.identity,
+            update.reflog_message,
+            false,
+        ) {
+            if branch_reflog_written {
+                let _ = crate::reflog::truncate_last_reflog_line(git_dir, update.branch_ref);
+            }
+            abort_loose_ref_lock(&lock);
+            return Err(err);
+        }
+    }
+
+    test_branch_ref_pause_before_commit();
+
+    let content = format!("{}\n", update.new_oid);
+    {
+        use std::io::Write as _;
+        let mut file = fs::OpenOptions::new().write(true).open(&lock)?;
+        file.write_all(content.as_bytes())?;
+    }
+    fs::rename(&lock, &path)?;
+    Ok(())
+}
+
+fn update_branch_for_commit_reftable(
+    git_dir: &Path,
+    update: &BranchCommitRefUpdate<'_>,
+    reflog_old: &ObjectId,
+) -> Result<()> {
+    let current = resolve_ref(git_dir, update.branch_ref).ok();
+    verify_branch_cas(update.expected_old, current, update.branch_ref)?;
+
+    let mut updates = Vec::new();
+    let branch_log = if should_autocreate_reflog(git_dir, update.branch_ref) {
+        Some(crate::reftable::reftable_log_record_for_commit(
+            git_dir,
+            update.branch_ref,
+            reflog_old,
+            &update.new_oid,
+            update.identity,
+            update.reflog_message,
+        )?)
+    } else {
+        None
+    };
+    updates.push(crate::reftable::ReftableTransactionUpdate {
+        refname: update.branch_ref.to_owned(),
+        value: Some(crate::reftable::RefValue::Val1(update.new_oid)),
+        log: branch_log,
+    });
+
+    if should_autocreate_reflog(git_dir, "HEAD") {
+        updates.push(crate::reftable::ReftableTransactionUpdate {
+            refname: "HEAD".to_owned(),
+            value: None,
+            log: Some(crate::reftable::reftable_log_record_for_commit(
+                git_dir,
+                "HEAD",
+                reflog_old,
+                &update.new_oid,
+                update.identity,
+                update.reflog_message,
+            )?),
+        });
+    }
+
+    crate::reftable::reftable_write_transaction(git_dir, updates)
 }
 
 /// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
@@ -1563,79 +1759,13 @@ pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'
         )));
     }
 
-    let current = resolve_ref(git_dir, update.branch_ref).ok();
-    verify_branch_cas(update.expected_old, current, update.branch_ref)?;
-    let rollback = match current {
-        None => BranchRollback::Absent,
-        Some(oid) => BranchRollback::Oid(oid),
-    };
     let reflog_old = update.expected_old.unwrap_or_else(crate::diff::zero_oid);
 
     if crate::reftable::is_reftable_repo(git_dir) {
-        crate::reftable::reftable_write_ref(
-            git_dir,
-            update.branch_ref,
-            &update.new_oid,
-            Some(update.identity),
-            Some(update.reflog_message),
-        )?;
-        if should_autocreate_reflog(git_dir, "HEAD") {
-            if let Err(err) = append_reflog(
-                git_dir,
-                "HEAD",
-                &reflog_old,
-                &update.new_oid,
-                update.identity,
-                update.reflog_message,
-                false,
-            ) {
-                let _ = rollback_branch_ref(git_dir, update.branch_ref, &rollback);
-                return Err(err);
-            }
-        }
-        return Ok(());
+        return update_branch_for_commit_reftable(git_dir, update, &reflog_old);
     }
 
-    write_ref(git_dir, update.branch_ref, &update.new_oid)?;
-
-    let mut branch_reflog_written = false;
-    if should_autocreate_reflog(git_dir, update.branch_ref) {
-        match append_reflog(
-            git_dir,
-            update.branch_ref,
-            &reflog_old,
-            &update.new_oid,
-            update.identity,
-            update.reflog_message,
-            false,
-        ) {
-            Ok(()) => branch_reflog_written = true,
-            Err(err) => {
-                rollback_branch_ref(git_dir, update.branch_ref, &rollback)?;
-                return Err(err);
-            }
-        }
-    }
-
-    if should_autocreate_reflog(git_dir, "HEAD") {
-        if let Err(err) = append_reflog(
-            git_dir,
-            "HEAD",
-            &reflog_old,
-            &update.new_oid,
-            update.identity,
-            update.reflog_message,
-            false,
-        ) {
-            if branch_reflog_written {
-                let _ = crate::reflog::truncate_last_reflog_line(git_dir, update.branch_ref);
-            }
-            rollback_branch_ref(git_dir, update.branch_ref, &rollback)?;
-            return Err(err);
-        }
-    }
-
-    Ok(())
+    update_branch_for_commit_files(git_dir, update, &reflog_old)
 }
 
 /// Filesystem path to the reflog file for `refname` (same layout as [`append_reflog`]).
@@ -2028,6 +2158,96 @@ fn collect_packed_refs_into_map(
         out.insert(key, oid);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod update_branch_for_commit_tests {
+    use super::*;
+    use crate::reflog::read_reflog;
+    use crate::repo::init_repository;
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::thread;
+    use tempfile::TempDir;
+
+    fn sample_oid(hex: &str) -> ObjectId {
+        hex.parse().unwrap()
+    }
+
+    #[test]
+    fn update_branch_for_commit_holds_lock_until_ref_commit() {
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
+        let git_dir = repo.git_dir.clone();
+        let oid1 = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
+        let oid2 = sample_oid("1111111111111111111111111111111111111111");
+        let oid3 = sample_oid("2222222222222222222222222222222222222222");
+        write_ref(&git_dir, "refs/heads/main", &oid1).unwrap();
+
+        let gate = Arc::new(branch_ref_pause_inject::PauseGate {
+            wait: Mutex::new(false),
+            cv: Condvar::new(),
+        });
+        set_test_inject_branch_ref_pause_before_commit(Some(gate.clone()));
+
+        let git_dir_thread = git_dir.clone();
+        let handle = thread::spawn(move || {
+            update_branch_for_commit(
+                &git_dir_thread,
+                &BranchCommitRefUpdate {
+                    branch_ref: "refs/heads/main",
+                    expected_old: Some(oid1),
+                    new_oid: oid2,
+                    identity: "T <t@e.com> 1 +0000",
+                    reflog_message: "commit: test",
+                },
+            )
+        });
+
+        let mut wait = gate.wait.lock().unwrap();
+        while !*wait {
+            wait = gate.cv.wait(wait).unwrap();
+        }
+
+        assert!(
+            write_ref(&git_dir, "refs/heads/main", &oid3).is_err(),
+            "concurrent branch update must block on the held ref lock"
+        );
+
+        *wait = false;
+        gate.cv.notify_all();
+        drop(wait);
+        handle.join().unwrap().unwrap();
+        set_test_inject_branch_ref_pause_before_commit(None);
+
+        assert_eq!(resolve_ref(&git_dir, "refs/heads/main").unwrap(), oid2);
+    }
+
+    #[test]
+    fn update_branch_for_commit_reftable_transaction_is_all_or_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repository(tmp.path(), false, "main", None, "reftable").unwrap();
+        let git_dir = repo.git_dir.clone();
+        let new_oid = sample_oid("3333333333333333333333333333333333333333");
+
+        crate::reftable::set_test_inject_reftable_transaction_fail(true);
+        let err = update_branch_for_commit(
+            &git_dir,
+            &BranchCommitRefUpdate {
+                branch_ref: "refs/heads/main",
+                expected_old: None,
+                new_oid,
+                identity: "T <t@e.com> 1 +0000",
+                reflog_message: "commit (initial): test",
+            },
+        )
+        .unwrap_err();
+        crate::reftable::set_test_inject_reftable_transaction_fail(false);
+        assert!(!matches!(err, Error::Message(_)));
+
+        assert!(resolve_ref(&git_dir, "refs/heads/main").is_err());
+        assert!(read_reflog(&git_dir, "refs/heads/main").unwrap().is_empty());
+        assert!(read_reflog(&git_dir, "HEAD").unwrap().is_empty());
+    }
 }
 
 #[cfg(test)]
