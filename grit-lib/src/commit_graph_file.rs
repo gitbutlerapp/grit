@@ -7,7 +7,7 @@ use crate::bloom::{
     bloom_filter_contains, bloom_keyvec_for_path, BloomBuildOutcome, BloomFilterSettings,
 };
 use crate::error::Error;
-use crate::objects::ObjectId;
+use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::Odb;
 
 /// Track which commit-graph layers have already emitted the "disabling Bloom
@@ -93,12 +93,8 @@ pub struct CommitGraphLayer {
 }
 
 /// OID width for a commit-graph header hash-version byte (`body[5]`).
-const fn commit_graph_hash_len(hash_version: u8) -> Option<usize> {
-    match hash_version {
-        1 => Some(20),
-        2 => Some(32),
-        _ => None,
-    }
+fn commit_graph_hash_len(hash_version: u8) -> Option<usize> {
+    HashAlgo::try_from(hash_version).ok().map(|a| a.len())
 }
 
 impl CommitGraphLayer {

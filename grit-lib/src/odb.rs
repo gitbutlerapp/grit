@@ -158,6 +158,28 @@ impl std::fmt::Debug for Odb {
     }
 }
 
+/// Resolve the repository hash algorithm from `extensions.objectformat` in `git_dir`'s config.
+///
+/// Uses the same config parser as [`Odb::hash_algo`], including case-insensitive section and
+/// key names. Defaults to [`HashAlgo::Sha1`] when the extension is absent or unreadable.
+#[must_use]
+pub fn hash_algo_for_git_dir(git_dir: &Path) -> HashAlgo {
+    ConfigSet::load(Some(git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get("extensions.objectformat"))
+        .and_then(|v| HashAlgo::from_name(&v))
+        .unwrap_or(HashAlgo::Sha1)
+}
+
+/// Like [`hash_algo_for_git_dir`] but takes an `objects/` directory path.
+#[must_use]
+pub fn hash_algo_for_objects_dir(objects_dir: &Path) -> HashAlgo {
+    objects_dir
+        .parent()
+        .map(hash_algo_for_git_dir)
+        .unwrap_or(HashAlgo::Sha1)
+}
+
 impl Odb {
     /// Create an [`Odb`] pointing at the given `objects/` directory.
     ///
@@ -479,17 +501,10 @@ impl Odb {
     #[must_use]
     pub fn hash_algo(&self) -> HashAlgo {
         *self.hash_algo_cache.get_or_init(|| {
-            let git_dir = self
-                .config_git_dir
-                .clone()
-                .or_else(|| self.objects_dir.parent().map(Path::to_path_buf));
-            let Some(git_dir) = git_dir else {
-                return HashAlgo::Sha1;
-            };
-            let cfg = ConfigSet::load(Some(&git_dir), true).unwrap_or_default();
-            cfg.get("extensions.objectformat")
-                .and_then(|v| HashAlgo::from_name(&v))
-                .unwrap_or(HashAlgo::Sha1)
+            if let Some(git_dir) = self.config_git_dir.as_deref() {
+                return hash_algo_for_git_dir(git_dir);
+            }
+            hash_algo_for_objects_dir(&self.objects_dir)
         })
     }
 
@@ -630,7 +645,7 @@ impl Odb {
             && self.config_git_dir.is_some()
             && self.core_multi_pack_index_enabled()
         {
-            match midx_oid_listed_in_tip(objects_dir, oid) {
+            match midx_oid_listed_in_tip(objects_dir, oid, self.hash_algo()) {
                 Ok(Some(true)) => return true,
                 Ok(Some(false)) | Ok(None) => {}
                 Err(_) => return false,
@@ -818,7 +833,7 @@ impl Odb {
         }
 
         if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            if let Some(obj) = try_read_object_via_midx(&self.objects_dir, oid)? {
+            if let Some(obj) = try_read_object_via_midx(&self.objects_dir, oid, self.hash_algo())? {
                 return Ok(obj);
             }
         }
@@ -864,7 +879,9 @@ impl Odb {
             return parse_object_bytes(&raw);
         }
         if use_midx {
-            if let Some(obj) = try_read_object_via_midx(objects_dir, oid)? {
+            if let Some(obj) =
+                try_read_object_via_midx(objects_dir, oid, hash_algo_for_objects_dir(objects_dir))?
+            {
                 return Ok(obj);
             }
         }

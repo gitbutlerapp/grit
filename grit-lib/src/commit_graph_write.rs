@@ -10,8 +10,6 @@ use crate::odb::Odb;
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
 const VERSION: u8 = 1;
-const HASH_LEN: usize = 20;
-
 const CHUNK_OID_FANOUT: u32 = 0x4f49_4446;
 const CHUNK_OID_LOOKUP: u32 = 0x4f49_444c;
 const CHUNK_COMMIT_DATA: u32 = 0x4344_4154;
@@ -249,6 +247,8 @@ pub fn build_commit_graph_bytes(
     write_generation_data: bool,
 ) -> crate::error::Result<(Vec<u8>, BloomWriteStats)> {
     let base_count: u32 = base_chain.map(CommitGraphChain::total_commits).unwrap_or(0);
+    let algo = odb.hash_algo();
+    let hash_len = algo.len();
 
     let oid_to_idx: HashMap<ObjectId, u32> = sorted_oids
         .iter()
@@ -278,7 +278,7 @@ pub fn build_commit_graph_bytes(
 
     let mut extra_edges: Vec<u8> = Vec::new();
 
-    let mut cdat: Vec<u8> = Vec::with_capacity(sorted_oids.len() * (HASH_LEN + 16));
+    let mut cdat: Vec<u8> = Vec::with_capacity(sorted_oids.len() * (hash_len + 16));
     for (i, oid) in sorted_oids.iter().enumerate() {
         let info = &infos[oid];
         cdat.extend_from_slice(info.tree.as_bytes());
@@ -325,7 +325,7 @@ pub fn build_commit_graph_bytes(
         fanout[i * 4..i * 4 + 4].copy_from_slice(&cum.to_be_bytes());
     }
 
-    let mut oid_lookup = Vec::with_capacity(sorted_oids.len() * HASH_LEN);
+    let mut oid_lookup = Vec::with_capacity(sorted_oids.len() * hash_len);
     for oid in sorted_oids {
         oid_lookup.extend_from_slice(oid.as_bytes());
     }
@@ -436,7 +436,6 @@ pub fn build_commit_graph_bytes(
 
     // The commit-graph hash version and trailing checksum follow the repository
     // hash algorithm (SHA-1 → version 1, SHA-256 → version 2).
-    let algo = odb.hash_algo();
     let mut out = Vec::with_capacity(end_offset as usize + algo.len());
     out.write_all(SIGNATURE)?;
     let base_layers = base_graph_hashes.len() as u8;

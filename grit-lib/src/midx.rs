@@ -18,13 +18,12 @@ use crate::hash::verify_trailer;
 
 use crate::error::{Error, Result};
 use crate::objects::{HashAlgo, ObjectId};
+use crate::odb::hash_algo_for_objects_dir;
 use crate::pack::{read_pack_index_no_verify, PackIndex};
 
 const MIDX_SIGNATURE: u32 = 0x4d49_4458;
 const MIDX_VERSION_V1: u8 = 1;
 const MIDX_VERSION_V2: u8 = 2;
-const HASH_VERSION_SHA1: u8 = 1;
-const HASH_VERSION_SHA256: u8 = 2;
 const MIDX_HEADER_SIZE: usize = 12;
 const CHUNK_TOC_ENTRY_SIZE: usize = 12;
 const MIDX_CHUNKID_PACKNAMES: u32 = 0x504e_414d;
@@ -230,33 +229,17 @@ fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// Resolve the path to the newest MIDX layer (root `multi-pack-index` or last chain entry).
-/// Return the MIDX hash-version byte expected for the repository owning `pack_dir`,
-/// mirroring git's `oid_version(r->hash_algo)` (SHA-1 → 1, SHA-256 → 2).
-///
-/// `pack_dir` is `<gitdir>/objects/pack`; the object format lives in the gitdir's
-/// `config` under `extensions.objectformat`. When the config cannot be read or the
-/// extension is absent, the default SHA-1 version (1) is returned.
-fn repo_midx_hash_version(pack_dir: &Path) -> u8 {
-    // pack_dir = <gitdir>/objects/pack -> gitdir = pack_dir/../..
-    let Some(objects_dir) = pack_dir.parent() else {
-        return HASH_VERSION_SHA1;
-    };
-    repo_midx_hash_version_for_objects_dir(objects_dir)
-}
-
 // ── Process-lifetime MIDX read cache ─────────────────────────────────
 //
 // `try_read_object_via_midx` / `midx_oid_listed_in_tip` run once per object
-// lookup, and each used to re-read the entire multi-pack-index file, re-parse
-// the referenced pack `.idx`, and re-scan `[extensions] objectformat` from the
-// repo config. History walks paid for it per object (`log --stat` issued ~90
-// full MIDX reads per commit). Cache the MIDX bytes keyed by path and the
-// sniffed hash version keyed by config path, both revalidated with stat
-// stamps (mtime + size, recorded before the read) on every access. In-process
-// MIDX writers evict their pack dir, closing the same-mtime-tick rewrite
-// window; C git opens the MIDX once per process with no revalidation at all,
-// so serving a stamped copy is strictly more conservative than upstream.
+// lookup, and each used to re-read the entire multi-pack-index file and
+// re-parse the referenced pack `.idx`. History walks paid for it per object
+// (`log --stat` issued ~90 full MIDX reads per commit). Cache the MIDX bytes
+// keyed by path with stat stamps (mtime + size, recorded before the read) on
+// every access. In-process MIDX writers evict their pack dir, closing the
+// same-mtime-tick rewrite window; C git opens the MIDX once per process with
+// no revalidation at all, so serving a stamped copy is strictly more
+// conservative than upstream.
 mod midx_cache {
     use crate::error::{Error, Result};
     use std::collections::HashMap;
@@ -270,7 +253,6 @@ mod midx_cache {
     #[derive(Default)]
     struct State {
         bytes: HashMap<PathBuf, (Stamp, Arc<Vec<u8>>)>,
-        hash_version: HashMap<PathBuf, (Option<Stamp>, u8)>,
         /// Tip-MIDX resolution per pack dir, held for the process lifetime and
         /// evicted by in-process MIDX writers. Only the object-read hot path may
         /// use this: a stale entry there degrades to the regular pack lookup,
@@ -314,26 +296,6 @@ mod midx_cache {
         Ok(data)
     }
 
-    /// Cached `[extensions] objectformat` sniff keyed by the config path,
-    /// re-computed only when the config file's stamp changes (an absent
-    /// config is cached too, stamped as `None`).
-    pub fn hash_version(config_path: &Path, compute: impl FnOnce() -> u8) -> u8 {
-        let sig = stamp(config_path);
-        {
-            let g = lock();
-            if let Some((s, v)) = g.hash_version.get(config_path) {
-                if *s == sig {
-                    return *v;
-                }
-            }
-        }
-        let v = compute();
-        lock()
-            .hash_version
-            .insert(config_path.to_path_buf(), (sig, v));
-        v
-    }
-
     /// Cached tip-MIDX resolution for `pack_dir`, computing it with `resolve` on
     /// first use. Object-read hot path only (see [`State::tip_path`]): resolving
     /// the tip costs two filesystem probes per call (root file + chain), which
@@ -356,48 +318,11 @@ mod midx_cache {
     }
 }
 
-/// Like [`repo_midx_hash_version`] but starting from the `objects` directory.
-/// The config sniff is cached per config path with stat-stamp revalidation
-/// (see [`midx_cache`]).
-fn repo_midx_hash_version_for_objects_dir(objects_dir: &Path) -> u8 {
-    let Some(gitdir) = objects_dir.parent() else {
-        return HASH_VERSION_SHA1;
-    };
-    let config_path = gitdir.join("config");
-    midx_cache::hash_version(&config_path, || {
-        sniff_objectformat_hash_version(&config_path)
-    })
-}
-
-/// Uncached `[extensions] objectformat` scan of one config file.
-fn sniff_objectformat_hash_version(config_path: &Path) -> u8 {
-    let Ok(text) = fs::read_to_string(config_path) else {
-        return HASH_VERSION_SHA1;
-    };
-    // Minimal scan for `[extensions]` ... `objectformat = sha256`. Section and key
-    // names are case-insensitive in git config; values are case-sensitive but git
-    // only accepts the literals "sha1"/"sha256".
-    let mut in_extensions = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            let section = line.trim_start_matches('[').trim_end_matches(']');
-            let name = section.split_whitespace().next().unwrap_or("");
-            in_extensions = name.eq_ignore_ascii_case("extensions");
-            continue;
-        }
-        if !in_extensions {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            if key.trim().eq_ignore_ascii_case("objectformat")
-                && value.trim().eq_ignore_ascii_case("sha256")
-            {
-                return HASH_VERSION_SHA256;
-            }
-        }
-    }
-    HASH_VERSION_SHA1
+fn repo_hash_algo_for_pack_dir(pack_dir: &Path) -> HashAlgo {
+    pack_dir
+        .parent()
+        .map(hash_algo_for_objects_dir)
+        .unwrap_or(HashAlgo::Sha1)
 }
 
 pub fn resolve_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
@@ -437,13 +362,14 @@ fn load_midx_file(path: &Path) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// OID width implied by a MIDX file's header hash-version byte (`data[5]`):
-/// 2 → SHA-256 (32 bytes), anything else → SHA-1 (20 bytes).
+/// OID width implied by a MIDX file's header hash-version byte (`data[5]`).
 fn midx_hash_len(data: &[u8]) -> usize {
-    if data.len() > 5 && data[5] == 2 {
-        32
+    if data.len() > 5 {
+        HashAlgo::try_from(data[5])
+            .map(|a| a.len())
+            .unwrap_or(HashAlgo::Sha1.len())
     } else {
-        20
+        HashAlgo::Sha1.len()
     }
 }
 
@@ -629,11 +555,11 @@ fn build_midx_bytes_filtered(
     write_bitmap_placeholders: bool,
     omit_embedded_ridx_chunk: bool,
     version: u8,
-    hash_version: u8,
+    algo: HashAlgo,
     exclude_oids: Option<&HashSet<ObjectId>>,
 ) -> Result<(Vec<u8>, Option<Vec<u32>>)> {
-    // OID width implied by the MIDX hash version (1 → SHA-1/20, 2 → SHA-256/32).
-    let hash_len = if hash_version == 2 { 32 } else { 20 };
+    let hash_version = u8::from(algo);
+    let hash_len = algo.len();
     let preferred_pack_idx = preferred_idx.map(|p| p as u32);
     let pack_mtimes: Vec<std::time::SystemTime> = indexes.iter().map(pack_mtime_for_midx).collect();
 
@@ -854,11 +780,6 @@ fn build_midx_bytes_filtered(
     out.extend_from_slice(&body);
 
     // Trailing checksum matches the MIDX hash version (SHA-1 for 1, SHA-256 for 2).
-    let algo = if hash_version == 2 {
-        HashAlgo::Sha256
-    } else {
-        HashAlgo::Sha1
-    };
     out.extend_from_slice(algo.digest(&out).as_bytes());
 
     Ok((out, rev_sidecar_order))
@@ -868,8 +789,13 @@ fn build_midx_bytes_filtered(
 ///
 /// `midx_file_hash` is the MIDX's own trailing checksum (20 bytes for SHA-1, 32
 /// for SHA-256); its width selects the RIDX hash-id (1 or 2).
-fn write_midx_rev_sidecar(path: &Path, pack_order: &[u32], midx_file_hash: &[u8]) -> Result<()> {
-    let hash_id: u32 = if midx_file_hash.len() == 32 { 2 } else { 1 };
+fn write_midx_rev_sidecar(
+    path: &Path,
+    pack_order: &[u32],
+    midx_file_hash: &[u8],
+    algo: HashAlgo,
+) -> Result<()> {
+    let hash_id = u32::from(u8::from(algo));
     let mut body =
         Vec::with_capacity(RIDX_HEADER_SIZE + pack_order.len() * 4 + midx_file_hash.len());
     body.extend_from_slice(&RIDX_SIGNATURE.to_be_bytes());
@@ -1083,13 +1009,15 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
         )]);
     }
     let hash_version = data[5];
-    let expected_hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
+    let expected_hash_version = u8::from(hash_algo_for_objects_dir(objects_dir));
     if hash_version != expected_hash_version {
         return Err(vec![format!(
             "multi-pack-index hash version {hash_version} does not match version {expected_hash_version}"
         )]);
     }
-    let hash_len = if hash_version == 2 { 32usize } else { 20usize };
+    let hash_len = HashAlgo::try_from(hash_version)
+        .map(|a| a.len())
+        .unwrap_or(HashAlgo::Sha1.len());
     let num_packs = u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize;
 
     // --- table of contents ---
@@ -1789,7 +1717,11 @@ pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result
 /// Returns whether `oid` appears in the active MIDX OID table for `objects_dir`.
 ///
 /// [`None`] means there is no MIDX at the pack tip. [`Some`] is the lookup result when a MIDX exists.
-pub fn midx_oid_listed_in_tip(objects_dir: &Path, oid: &ObjectId) -> Result<Option<bool>> {
+pub fn midx_oid_listed_in_tip(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    repo_algo: HashAlgo,
+) -> Result<Option<bool>> {
     let pack_dir = objects_dir.join("pack");
     let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
     else {
@@ -1808,7 +1740,7 @@ pub fn midx_oid_listed_in_tip(objects_dir: &Path, oid: &ObjectId) -> Result<Opti
         oidl_off,
         num_objects,
         ..
-    } = match midx_load_for_read(&data, repo_midx_hash_version_for_objects_dir(objects_dir)) {
+    } = match midx_load_for_read(&data, repo_algo) {
         MidxLoadResult::Ok(v) => v,
         MidxLoadResult::Skip => return Ok(None),
     };
@@ -1890,7 +1822,7 @@ fn midx_die(lines: &[&str]) -> ! {
 /// Validate and load a MIDX image for object reads, mirroring `load_multi_pack_index`
 /// in git/midx.c. Fatal corruptions print `error:`/`fatal:` and exit (Git `die()`);
 /// recoverable corruptions print an `error:`/`warning:` and return [`MidxLoadResult::Skip`].
-fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult {
+fn midx_load_for_read(data: &[u8], expected: HashAlgo) -> MidxLoadResult {
     if data.len() < MIDX_HEADER_SIZE + 20 {
         return MidxLoadResult::Skip;
     }
@@ -1907,6 +1839,7 @@ fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult 
         )]);
     }
     let hash_version = data[5];
+    let expected_hash_version = u8::from(expected);
     if hash_version != expected_hash_version {
         // `load_multi_pack_index` error()s then `goto cleanup_fail` (returns NULL),
         // so this is recoverable, not fatal. The expected version is the repository's
@@ -1916,7 +1849,7 @@ fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult 
         ));
         return MidxLoadResult::Skip;
     }
-    let hash_len = if hash_version == 2 { 32usize } else { 20usize };
+    let hash_len = expected.len();
     let num_packs = u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize;
 
     // Table of contents (chunk-format.c read_table_of_contents). Recoverable failures
@@ -2066,7 +1999,7 @@ pub fn validate_midx_referenced_packs(objects_dir: &Path) {
         return;
     };
     let MidxReadView { pack_names, .. } =
-        match midx_load_for_read(&data, repo_midx_hash_version_for_objects_dir(objects_dir)) {
+        match midx_load_for_read(&data, hash_algo_for_objects_dir(objects_dir)) {
             MidxLoadResult::Ok(v) => v,
             MidxLoadResult::Skip => return,
         };
@@ -2101,6 +2034,7 @@ pub fn validate_midx_referenced_packs(objects_dir: &Path) {
 pub fn try_read_object_via_midx(
     objects_dir: &Path,
     oid: &ObjectId,
+    repo_algo: HashAlgo,
 ) -> Result<Option<crate::objects::Object>> {
     let pack_dir = objects_dir.join("pack");
     let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
@@ -2125,7 +2059,7 @@ pub fn try_read_object_via_midx(
         loff,
         num_objects,
         pack_names,
-    } = match midx_load_for_read(&data, repo_midx_hash_version_for_objects_dir(objects_dir)) {
+    } = match midx_load_for_read(&data, repo_algo) {
         MidxLoadResult::Ok(v) => v,
         MidxLoadResult::Skip => return Ok(None),
     };
@@ -2436,11 +2370,8 @@ pub fn write_multi_pack_index_with_options(
     let pack_mtimes_layer: Vec<std::time::SystemTime> =
         indexes.iter().map(pack_mtime_for_midx).collect();
     let preferred_u32 = preferred_idx.map(|p| p as u32);
-    let select_hash_len = if repo_midx_hash_version(pack_dir) == 2 {
-        32
-    } else {
-        20
-    };
+    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
+    let select_hash_len = repo_algo.len();
 
     let mut best: HashMap<ObjectId, MidxEntry> = HashMap::new();
     for (pack_id, idx) in indexes.iter().enumerate() {
@@ -2496,15 +2427,11 @@ pub fn write_multi_pack_index_with_options(
         bitmap_placeholders,
         omit_embedded_ridx,
         opts.version.unwrap_or(MIDX_VERSION_V2),
-        repo_midx_hash_version(pack_dir),
+        repo_algo,
         exclude,
     )?;
 
-    let hash_len = if repo_midx_hash_version(pack_dir) == 2 {
-        32
-    } else {
-        20
-    };
+    let hash_len = repo_algo.len();
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
     let hash_arr: Vec<u8> = hash.to_vec();
@@ -2545,13 +2472,13 @@ pub fn write_multi_pack_index_with_options(
             let full = hex::encode(hash);
             fs::write(midx_d.join(format!("multi-pack-index-{full}.bitmap")), [])
                 .map_err(Error::Io)?;
-            if opts.write_rev_placeholder {
-                let rev_path = midx_d.join(format!("multi-pack-index-{full}.rev"));
-                if let Some(order) = rev_sidecar_order.as_ref() {
-                    write_midx_rev_sidecar(&rev_path, order, &hash_arr)?;
-                } else {
-                    fs::write(rev_path, []).map_err(Error::Io)?;
-                }
+        }
+        if opts.write_rev_placeholder {
+            let rev_path = midx_d.join(format!("multi-pack-index-{hash_hex}.rev"));
+            if let Some(order) = rev_sidecar_order.as_ref() {
+                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
+            } else {
+                fs::write(rev_path, []).map_err(Error::Io)?;
             }
         }
     } else {
@@ -2590,13 +2517,13 @@ pub fn write_multi_pack_index_with_options(
                 [],
             )
             .map_err(Error::Io)?;
-            if opts.write_rev_placeholder {
-                let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
-                if let Some(order) = rev_sidecar_order.as_ref() {
-                    write_midx_rev_sidecar(&rev_path, order, &hash_arr)?;
-                } else {
-                    fs::write(rev_path, []).map_err(Error::Io)?;
-                }
+        }
+        if opts.write_rev_placeholder {
+            let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
+            if let Some(order) = rev_sidecar_order.as_ref() {
+                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
+            } else {
+                fs::write(rev_path, []).map_err(Error::Io)?;
             }
         }
     }
@@ -2771,6 +2698,7 @@ pub fn compact_multi_pack_index(
         Some(&base_oids)
     };
 
+    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
     let (out, rev_sidecar_order) = build_midx_bytes_filtered(
         &ordered_idx_names,
         &indexes,
@@ -2778,15 +2706,11 @@ pub fn compact_multi_pack_index(
         write_bitmaps,
         write_rev,
         version.unwrap_or(MIDX_VERSION_V2),
-        repo_midx_hash_version(pack_dir),
+        repo_algo,
         exclude,
     )?;
 
-    let hash_len = if repo_midx_hash_version(pack_dir) == 2 {
-        32
-    } else {
-        20
-    };
+    let hash_len = repo_algo.len();
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
     let hash_arr: Vec<u8> = hash.to_vec();
@@ -2819,7 +2743,7 @@ pub fn compact_multi_pack_index(
         let rev_path = midx_d.join(format!("multi-pack-index-{hash_hex}.rev"));
         if write_rev {
             if let Some(order) = rev_sidecar_order.as_ref() {
-                write_midx_rev_sidecar(&rev_path, order, &hash_arr)?;
+                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
             } else {
                 fs::write(rev_path, []).map_err(Error::Io)?;
             }
@@ -2871,7 +2795,7 @@ mod tests {
         clear_pack_midx_state, resolve_tip_midx_path, try_read_object_via_midx,
         write_multi_pack_index,
     };
-    use crate::objects::ObjectId;
+    use crate::objects::{HashAlgo, ObjectId};
     use crate::odb::Odb;
     use crate::pack::{clear_pack_cache, read_object_from_packs};
     use std::path::Path;
@@ -2948,7 +2872,7 @@ mod tests {
         assert!(midx_path.is_file(), "expected root MIDX");
 
         assert!(
-            try_read_object_via_midx(&objects, &oid)
+            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
                 .expect("prime midx read")
                 .is_some(),
             "object should be reachable via MIDX"
@@ -2957,7 +2881,7 @@ mod tests {
         std::fs::remove_file(&midx_path).expect("simulate external MIDX removal");
 
         assert!(
-            try_read_object_via_midx(&objects, &oid)
+            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
                 .expect("vanished tip must not fail reads")
                 .is_none(),
             "cached tip path to a removed MIDX should degrade to absent"
@@ -2977,7 +2901,7 @@ mod tests {
         let objects = tmp.path().join(".git/objects");
         let pack_dir = objects.join("pack");
 
-        assert!(try_read_object_via_midx(&objects, &oid)
+        assert!(try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
             .expect("prime caches")
             .is_some());
         assert!(resolve_tip_midx_path(&pack_dir).is_some());
@@ -2986,13 +2910,13 @@ mod tests {
         assert!(resolve_tip_midx_path(&pack_dir).is_none());
 
         // Tip-path cache was evicted: listing must not resurrect the removed MIDX.
-        assert!(try_read_object_via_midx(&objects, &oid)
+        assert!(try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
             .expect("read after clear")
             .is_none());
 
         write_multi_pack_index(&pack_dir).expect("rewrite midx");
         assert!(
-            try_read_object_via_midx(&objects, &oid)
+            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
                 .expect("read after rewrite")
                 .is_some(),
             "fresh MIDX must be visible after in-process rewrite"

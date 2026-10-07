@@ -83,8 +83,8 @@ impl HashAlgo {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name.trim() {
-            "sha1" => Some(Self::Sha1),
-            "sha256" => Some(Self::Sha256),
+            v if v.eq_ignore_ascii_case("sha1") => Some(Self::Sha1),
+            v if v.eq_ignore_ascii_case("sha256") => Some(Self::Sha256),
             _ => None,
         }
     }
@@ -96,6 +96,29 @@ impl HashAlgo {
             20 => Some(Self::Sha1),
             32 => Some(Self::Sha256),
             _ => None,
+        }
+    }
+}
+
+/// Error when converting an on-disk hash-version byte to [`HashAlgo`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("unknown Git hash version byte {0} (expected 1 for SHA-1 or 2 for SHA-256)")]
+pub struct HashVersionError(pub u8);
+
+impl From<HashAlgo> for u8 {
+    fn from(algo: HashAlgo) -> Self {
+        algo.oid_version()
+    }
+}
+
+impl TryFrom<u8> for HashAlgo {
+    type Error = HashVersionError;
+
+    fn try_from(version: u8) -> std::result::Result<Self, Self::Error> {
+        match version {
+            1 => Ok(Self::Sha1),
+            2 => Ok(Self::Sha256),
+            other => Err(HashVersionError(other)),
         }
     }
 }

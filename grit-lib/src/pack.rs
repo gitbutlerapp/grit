@@ -791,8 +791,9 @@ pub fn collect_local_pack_info(objects_dir: &Path) -> Result<LocalPackInfo> {
         info.pack_count += 1;
         info.object_count += idx.entries.len();
         info.size_bytes += pack_meta.len() + idx_meta.len();
+        let hash_bytes = idx.hash_bytes;
         for entry in idx.entries {
-            if entry.oid.len() == 20 {
+            if entry.oid.len() == hash_bytes {
                 if let Ok(oid) = ObjectId::from_bytes(&entry.oid) {
                     info.object_ids.insert(oid);
                 }
@@ -1178,7 +1179,7 @@ pub fn oid_bytes_to_hex(oid: &[u8]) -> String {
 /// True when `entry` stores a SHA-1 OID matching `oid` (SHA-256 pack entries are ignored).
 #[must_use]
 pub fn pack_index_entry_matches_sha1_oid(entry: &PackIndexEntry, oid: &ObjectId) -> bool {
-    entry.oid.len() == 20 && entry.oid.as_slice() == oid.as_bytes()
+    entry.oid.len() == oid.as_bytes().len() && entry.oid.as_slice() == oid.as_bytes()
 }
 
 /// Hash canonical loose object bytes (`kind SP size NUL data`) with the repo hash width.
@@ -1767,7 +1768,7 @@ fn rescue_in_pack_base(
     let Some(entry) = idx.entries.iter().find(|e| e.offset == base_offset) else {
         return Ok(None);
     };
-    if entry.oid.len() != 20 {
+    if entry.oid.len() != idx.hash_bytes {
         return Ok(None);
     }
     let base_oid = ObjectId::from_bytes(entry.oid.as_slice())?;
@@ -1955,46 +1956,42 @@ fn resolve_pack_object_at_body(
                     continue;
                 }
 
-                if hb == 20 {
-                    if let (Some(dir), Ok(base_oid)) =
-                        (objects_dir, ObjectId::from_bytes(base_raw.as_slice()))
-                    {
-                        let loose = dir
-                            .join(base_oid.loose_prefix())
-                            .join(base_oid.loose_suffix());
-                        if loose.is_file() {
-                            if let Ok(obj) =
-                                crate::odb::Odb::read_loose_verify_oid(&loose, &base_oid)
-                            {
-                                let result = finish_with_whole_base_fixed(
-                                    obj.kind,
-                                    &obj.data,
-                                    &pending,
-                                    &idx_ref.pack_path,
-                                    object_start,
-                                )?;
-                                return Ok((obj.kind, result));
-                            }
-                        }
-                        if let Some(other_idx) = find_other_pack_index(dir, idx_ref, &base_oid)? {
-                            let Some(off) = other_idx.find_offset(&base_oid) else {
-                                return Err(Error::ObjectNotFound(base_oid.to_hex()));
-                            };
-                            let (base_kind, base_data) = resolve_pack_object_at(
-                                PackIndexHandle::Shared(other_idx),
-                                off,
-                                objects_dir,
-                                state,
-                            )?;
+                if let (Some(dir), Ok(base_oid)) =
+                    (objects_dir, ObjectId::from_bytes(base_raw.as_slice()))
+                {
+                    let loose = dir
+                        .join(base_oid.loose_prefix())
+                        .join(base_oid.loose_suffix());
+                    if loose.is_file() {
+                        if let Ok(obj) = crate::odb::Odb::read_loose_verify_oid(&loose, &base_oid) {
                             let result = finish_with_whole_base_fixed(
-                                base_kind,
-                                &base_data,
+                                obj.kind,
+                                &obj.data,
                                 &pending,
                                 &idx_ref.pack_path,
                                 object_start,
                             )?;
-                            return Ok((base_kind, result));
+                            return Ok((obj.kind, result));
                         }
+                    }
+                    if let Some(other_idx) = find_other_pack_index(dir, idx_ref, &base_oid)? {
+                        let Some(off) = other_idx.find_offset(&base_oid) else {
+                            return Err(Error::ObjectNotFound(base_oid.to_hex()));
+                        };
+                        let (base_kind, base_data) = resolve_pack_object_at(
+                            PackIndexHandle::Shared(other_idx),
+                            off,
+                            objects_dir,
+                            state,
+                        )?;
+                        let result = finish_with_whole_base_fixed(
+                            base_kind,
+                            &base_data,
+                            &pending,
+                            &idx_ref.pack_path,
+                            object_start,
+                        )?;
+                        return Ok((base_kind, result));
                     }
                 }
                 if idx_ref.entries.len() > 100 {
@@ -2270,7 +2267,7 @@ pub fn packed_ref_delta_reuse_slice(
                 let Some(base_entry) = idx.entries.iter().find(|e| e.offset == base_off) else {
                     continue;
                 };
-                if base_entry.oid.len() != 20 {
+                if base_entry.oid.len() != idx.hash_bytes {
                     continue;
                 }
                 ObjectId::from_bytes(base_entry.oid.as_slice())?
@@ -2635,8 +2632,9 @@ fn read_u64_be(bytes: &[u8], pos: &mut usize) -> Result<u64> {
 pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
     let index = read_pack_index(idx_path)?;
     let mut out = Vec::new();
+    let hash_bytes = index.hash_bytes;
     for e in index.entries {
-        if e.oid.len() == 20 {
+        if e.oid.len() == hash_bytes {
             out.push(ObjectId::from_bytes(&e.oid)?);
         }
     }
