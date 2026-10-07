@@ -69,6 +69,10 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 name = "objects"
 harness = false
 
+[[bench]]
+name = "worktree"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }

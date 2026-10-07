@@ -103,18 +103,20 @@ Performance work compares `grit-lib` operations and `grit` commands against syst
 
 ### Criterion (`grit-lib`)
 
-Object and pack micro-benchmarks live under `grit-lib/benches/` (harness disabled; entry point `objects`). A shared fixture module builds deterministic repos in a temp directory using `grit-lib`, calling the system `git` binary only for `index-pack` / `repack` when a real `.idx` is required.
+Criterion micro-benchmarks live under `grit-lib/benches/` (harness disabled). Shared fixture modules build deterministic repos in a temp directory using `grit-lib`; the object suite calls the system `git` binary only for `index-pack` / `repack` when a real `.idx` is required.
 
-Run the full suite locally:
+Run the full suites locally:
 
 ```bash
 cargo bench -p grit-lib --bench objects
+cargo bench -p grit-lib --bench worktree
 ```
 
 CI runs a one-iteration smoke pass (every benchmark once):
 
 ```bash
 cargo bench -p grit-lib --bench objects -- --test
+cargo bench -p grit-lib --bench worktree -- --test
 ```
 
 Before changing benchmarks, keep bench code warning-free:
@@ -123,4 +125,6 @@ Before changing benchmarks, keep bench code warning-free:
 cargo clippy -p grit-lib --benches -- -D warnings
 ```
 
-Reported groups include SHA-1 throughput, Git object-id hashing, zlib inflate/deflate on typical blob and tree payloads, loose and packed object reads (whole objects and deep delta chains), pack `.idx` lookup (hit/miss on small and large indexes), and delta apply.
+**`objects`** groups: SHA-1 throughput, Git object-id hashing, zlib inflate/deflate on typical blob and tree payloads, loose and packed object reads (whole objects and deep delta chains), pack `.idx` lookup (hit/miss on small and large indexes), and delta apply.
+
+**`worktree`** groups: index read and write at 10k and 100k entries (v2 and v4), config load with global/local layering (~500 keys plus `[include]` files), ignore matching (realistic `.gitignore` set against 100k paths), and `.gitattributes` lookup for 100k paths.
