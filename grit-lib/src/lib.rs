@@ -93,9 +93,7 @@ pub mod diffing {
 
 /// Merging: merge-base, tree/file merges, rerere, merge-message formatting.
 pub mod merging {
-    pub use crate::{
-        fmt_merge_msg, merge_base, merge_diff, merge_file, merge_trees, rerere,
-    };
+    pub use crate::{fmt_merge_msg, merge_base, merge_diff, merge_file, merge_trees, rerere};
 }
 
 /// Configuration and identity: config cascade, .gitmodules, author/committer idents.
