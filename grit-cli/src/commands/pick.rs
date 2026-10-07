@@ -8,6 +8,8 @@
 //! `--abort` machinery, no merge-commit picking. Conflicts and other tricky
 //! situations are reported up front, and `git cherry-pick` is the escape hatch.
 
+use crate::context;
+use crate::output::HumanRender;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::IdentRole;
@@ -25,10 +27,6 @@ use grit_lib::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use serde::Serialize;
-use time::OffsetDateTime;
-
-use crate::context;
-use crate::output::HumanRender;
 
 /// Result of `grit pick`.
 #[derive(Serialize)]
@@ -154,7 +152,7 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         .context("could not update the working tree")?;
 
     let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
-    let now = OffsetDateTime::now_utc();
+    let now = grit_lib::commit::now_for_identity();
     // Preserve the original author (cherry-pick semantics); committer is the
     // current user. `author_raw` is empty so `serialize_commit` re-encodes from
     // the textual `author` field — matching `grit commit`.
@@ -205,7 +203,7 @@ fn move_branch(
 ) -> Result<()> {
     refs::write_ref(&repo.git_dir, refname, &new).context("could not update branch")?;
     let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
-    let who = context::reflog_identity(&config, OffsetDateTime::now_utc());
+    let who = context::reflog_identity(&config, grit_lib::commit::now_for_identity());
     let _ = refs::append_reflog(&repo.git_dir, refname, &old, &new, &who, reason, false);
     let _ = refs::append_reflog(&repo.git_dir, "HEAD", &old, &new, &who, reason, false);
     Ok(())
