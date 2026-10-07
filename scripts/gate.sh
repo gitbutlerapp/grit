@@ -31,6 +31,7 @@ echo "Pre-integration gate (CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS})"
 
 run_stage "fmt" cargo fmt --all --check
 run_stage "clippy" cargo clippy --workspace -- -D warnings
+run_stage "rustdoc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 run_stage "test" cargo test --workspace
 
 echo ""
