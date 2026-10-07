@@ -19,7 +19,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
-use grit_lib::write_tree::write_tree_from_index;
+use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -185,7 +185,8 @@ pub fn integrate(
         );
     }
 
-    let merged_tree = write_tree_from_index(&repo.odb, &merged.index, "")
+    let mut index = merged.index;
+    let merged_tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::default())
         .context("could not write merged tree")?;
     checkout_between_trees(repo, Some(&into_tree), &merged_tree)
         .context("could not update the working tree")?;

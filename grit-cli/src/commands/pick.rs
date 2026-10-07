@@ -23,7 +23,7 @@ use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
-use grit_lib::write_tree::write_tree_from_index;
+use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -140,7 +140,8 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         );
     }
 
-    let new_tree = write_tree_from_index(&repo.odb, &merged.index, "")
+    let mut index = merged.index;
+    let new_tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::default())
         .context("could not write picked tree")?;
     if new_tree == head_tree {
         bail!(

@@ -101,7 +101,6 @@ pub fn cache_tree_fully_valid(odb: &Odb, node: Option<&CacheTreeNode>) -> bool {
 /// Update the index cache-tree extension and write any missing tree objects.
 ///
 /// On success the index's [`Index::cache_tree`] reflects the current stage-0 entries.
-/// Returns the number of index entries consumed at the root (for internal bookkeeping).
 ///
 /// # Errors
 ///
@@ -389,7 +388,7 @@ fn rebuild_directory_node(
 
         let gitlink = mode == MODE_GITLINK;
         let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
-        if (!gitlink && oid.is_zero()) || (!allow_missing && !odb.exists(&oid)) {
+        if oid.is_zero() || (!allow_missing && !odb.exists(&oid)) {
             return Err(Error::ObjectNotFound(format!(
                 "{mode:o} {} at {}",
                 oid.to_hex(),
@@ -1137,13 +1136,34 @@ mod tests {
     }
 
     #[test]
-    fn cache_tree_update_missing_ok_allows_zero_oid_gitlink_paths() {
+    fn cache_tree_update_rejects_null_oid_even_with_missing_ok() {
         let dir = TempDir::new().unwrap();
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"ok").unwrap();
-        let zero = ObjectId::from_hex("0000000000000000000000000000000000000000").unwrap();
+        let zero = ObjectId::zero();
         let mut index = Index::new();
         index.add_or_replace(entry("sub", MODE_GITLINK, zero));
+        index.add_or_replace(entry("ok", MODE_REGULAR, blob));
+        let err = cache_tree_update(
+            &odb,
+            &mut index,
+            WriteTreeFlags {
+                missing_ok: true,
+                ..WriteTreeFlags::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::ObjectNotFound(_)));
+    }
+
+    #[test]
+    fn cache_tree_update_missing_ok_skips_existence_for_non_null_gitlink() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"ok").unwrap();
+        let missing = ObjectId::from_hex("00000000000000000000000000000000000000ab").unwrap();
+        let mut index = Index::new();
+        index.add_or_replace(entry("sub", MODE_GITLINK, missing));
         index.add_or_replace(entry("ok", MODE_REGULAR, blob));
         cache_tree_update(
             &odb,
