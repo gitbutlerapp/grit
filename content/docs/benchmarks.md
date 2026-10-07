@@ -3,11 +3,6 @@ title: Benchmarks
 summary: Grit vs Git on realistic workloads, from the committed grit-bench baseline.
 ---
 
----
-title: Benchmarks
-summary: Grit vs Git on realistic workloads, from the committed grit-bench baseline.
----
-
 Performance work is measured on the factory VM and in CI against the **system** `git` binary. Micro-benchmarks live in `grit-lib` (Criterion) and command-level scenarios in `grit-bench` (`grit-utils`).
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
@@ -24,6 +19,33 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 **Speedup (8 vs 1 thread): ~3.9×** on the factory VM (2026-10-07).
 
 Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
+
+## Hashing
+
+Raw digest throughput uses [`grit_lib::hash::ObjectHasher`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) (release build, Criterion). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
+
+**Environment (2026-10-07):** Intel Xeon (SHA-NI present), Linux, `git` 2.43.0, OpenSSL 3.0.13, Rust stable. `hash-info --json` reports `{"sha1":"x86_sha_ni","sha256":"x86_sha_ni"}`.
+
+| Workload | grit-lib | Reference | grit / reference |
+| -------- | -------- | --------- | ---------------- |
+| SHA-1, 1 MiB buffer | 1.98 GiB/s | OpenSSL SHA-1 @ 16 KiB: 1.98 GiB/s | **100%** |
+| SHA-256, 1 MiB buffer | 1.80 GiB/s | OpenSSL SHA-256 @ 16 KiB: 1.78 GiB/s | **101%** |
+| SHA-1 blob, 256 MiB file | 0.31 s | `git hash-object`: 0.48 s | **1.55× faster** |
+
+SHA-1 at 1 MiB and above meets the project bar (≥ 95% of OpenSSL on the same CPU). SHA-256 meets ≥ 90% of OpenSSL. End-to-end blob id for a large file beats stock Git 2.43, which still uses sha1dc for object hashing.
+
+### Commands
+
+```bash
+# Backends selected on this CPU
+cargo run -p grit-examples --bin hash-info -- --json
+
+# Criterion throughput (64 B … 64 MiB)
+cargo bench -p grit-lib --bench hash
+
+# OpenSSL + hyperfine vs git (creates a 256 MiB temp file)
+./scripts/bench-hash.sh
+```
 
 ## grit-bench vs Git
 

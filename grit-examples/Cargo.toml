@@ -12,6 +12,14 @@ name = "gritx-hash-object"
 path = "src/bin/gritx-hash-object.rs"
 
 [[bin]]
+name = "gritx-hash-file"
+path = "src/bin/gritx-hash-file.rs"
+
+[[bin]]
+name = "hash-info"
+path = "src/bin/hash-info.rs"
+
+[[bin]]
 name = "quickstart"
 path = "src/bin/quickstart.rs"
 
@@ -28,3 +36,4 @@ tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+serde_json.workspace = true
