@@ -1007,9 +1007,7 @@ impl Odb {
             return parse_object_bytes(&raw);
         }
         if use_midx {
-            if let Some(obj) =
-                try_read_object_via_midx(objects_dir, oid)?
-            {
+            if let Some(obj) = try_read_object_via_midx(objects_dir, oid)? {
                 return Ok(obj);
             }
         }
