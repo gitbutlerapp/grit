@@ -61,6 +61,36 @@ fn fsck(dir: &Path) {
 }
 
 #[test]
+fn grit_first_commit_subdirs_index_sorted_for_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+
+    std::fs::write(root.join("a.txt"), b"1\n").unwrap();
+    std::fs::create_dir_all(root.join("d")).unwrap();
+    std::fs::write(root.join("d/x.txt"), b"2\n").unwrap();
+    std::fs::write(root.join("z.txt"), b"3\n").unwrap();
+
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &commit_req("base"), &mut NullProgress).expect("commit");
+
+    let staged = git_out(root, &["ls-files", "--stage"]);
+    let paths: Vec<&str> = staged
+        .lines()
+        .map(|line| line.split_whitespace().nth(3).expect("path"))
+        .collect();
+    assert_eq!(paths, ["a.txt", "d/x.txt", "z.txt"]);
+
+    assert!(
+        git_out(root, &["status", "--short"]).is_empty(),
+        "git status should be clean"
+    );
+    fsck(root);
+}
+
+#[test]
 fn grit_create_commit_initial_validated_by_git() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

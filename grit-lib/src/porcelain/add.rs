@@ -240,9 +240,7 @@ pub fn stage(
     )?;
 
     if outcome.total() > 0 {
-        if !bulk_empty_index_add {
-            index.sort();
-        }
+        index.sort();
         repo.write_index(&mut index)?;
     }
 
@@ -782,6 +780,28 @@ mod tests {
             }
         }
         Some(current.is_valid())
+    }
+
+    #[test]
+    fn bulk_empty_index_stage_writes_sorted_index() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        fs::create_dir_all(root.join("d")).unwrap();
+        fs::write(root.join("d/x.txt"), b"2\n").unwrap();
+        fs::write(root.join("z.txt"), b"3\n").unwrap();
+
+        let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        assert_eq!(outcome.added, 3);
+
+        let index = repo.load_index().unwrap();
+        let paths: Vec<String> = index
+            .entries
+            .iter()
+            .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+            .collect();
+        assert_eq!(paths, ["a.txt", "d/x.txt", "z.txt"]);
     }
 
     #[test]
