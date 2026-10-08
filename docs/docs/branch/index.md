@@ -17,6 +17,8 @@ With no arguments, lists your local branches and marks the current one with `*`.
 
 With a name, creates a branch at the current commit. It doesn't switch to the new branch; use [`grit switch -c`](https://grit-scm.com/docs/switch/index.md) to create a branch and switch to it in one step.
 
+Branch names follow the same rules as `git check-ref-format --branch` (no spaces, `..`, `~`, `.lock`, reserved names like `HEAD`, and other characters Git rejects). Invalid names fail before anything is written under `.git/refs`.
+
 With `-d`, deletes a branch. `grit` refuses if the branch has commits that aren't in the current branch, so you can't lose work by accident; `-D` deletes it anyway. You can't delete the branch you're on.
 
 ## Options

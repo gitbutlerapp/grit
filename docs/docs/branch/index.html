@@ -127,6 +127,7 @@ grit branch -D &lt;name&gt;</code></pre>
 <h2 id="description">Description</h2>
 <p>With no arguments, lists your local branches and marks the current one with <code>*</code>.</p>
 <p>With a name, creates a branch at the current commit. It doesn&#x27;t switch to the new branch; use <a href="../switch/"><code>grit switch -c</code></a> to create a branch and switch to it in one step.</p>
+<p>Branch names follow the same rules as <code>git check-ref-format --branch</code> (no spaces, <code>..</code>, <code>~</code>, <code>.lock</code>, reserved names like <code>HEAD</code>, and other characters Git rejects). Invalid names fail before anything is written under <code>.git/refs</code>.</p>
 <p>With <code>-d</code>, deletes a branch. <code>grit</code> refuses if the branch has commits that aren&#x27;t in the current branch, so you can&#x27;t lose work by accident; <code>-D</code> deletes it anyway. You can&#x27;t delete the branch you&#x27;re on.</p>
 <h2 id="options">Options</h2>
 <div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;name&gt;</code></td><td>The branch to create or delete. Omit to list branches.</td></tr><tr><td><code>-d</code>, <code>--delete</code></td><td>Delete the branch. It must be fully merged into the current branch.</td></tr><tr><td><code>-D</code>, <code>--force</code></td><td>Delete the branch even if it isn&#x27;t merged.</td></tr></tbody></table></div>

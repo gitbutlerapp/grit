@@ -675,6 +675,19 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
 }
 
 fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
+    if let Some(rest) = refname.strip_prefix("refs/") {
+        if rest.is_empty() || !crate::check_ref_format::is_valid_fetch_advertised_ref(refname) {
+            return Err(Error::InvalidRef(format!(
+                "refusing to update ref with bad name '{refname}'"
+            )));
+        }
+        if refname == "refs/heads/HEAD" {
+            return Err(Error::InvalidRef(
+                "'HEAD' is not a valid branch name".to_owned(),
+            ));
+        }
+        return Ok(());
+    }
     if crate::check_ref_format::refname_is_safe(refname) {
         Ok(())
     } else {
@@ -2636,6 +2649,27 @@ mod ref_storage_traversal_guard_tests {
         let (_dir, git_dir) = bare_repo_with_config();
         let result = delete_ref(&git_dir, TRAVERSAL_REF);
         assert_invalid_ref_preserves_config(&git_dir, result);
+    }
+
+    #[test]
+    fn write_ref_rejects_illegal_branch_refname() {
+        let (_dir, git_dir) = bare_repo_with_config();
+        for refname in [
+            "refs/heads/bad name",
+            "refs/heads/x..y",
+            "refs/heads/a~b",
+            "refs/heads/a.lock",
+            "refs/heads/HEAD",
+        ] {
+            let result = write_ref(&git_dir, refname, &sample_oid());
+            assert_invalid_ref_preserves_config(&git_dir, result);
+            assert!(
+                !git_dir
+                    .join(refname.strip_prefix("refs/").unwrap())
+                    .exists(),
+                "must not write loose ref for {refname}"
+            );
+        }
     }
 }
 

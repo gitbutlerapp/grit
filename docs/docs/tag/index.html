@@ -125,6 +125,7 @@ grit tag &lt;name&gt;
 grit tag -d &lt;name&gt;</code></pre>
 <h2 id="description">Description</h2>
 <p>With no arguments, lists your tags. With a name, creates a tag pointing at the current commit; tags created by <code>grit</code> are lightweight tags, with no message of their own. With <code>-d</code>, deletes a tag.</p>
+<p>Tag names must be valid as <code>refs/tags/&lt;name&gt;</code> under Git&#x27;s ref-name rules (same checks as <code>git check-ref-format refs/tags/&lt;name&gt;</code>). Invalid names are rejected before writing under <code>.git/refs</code>.</p>
 <p>Tags are local until you publish them with <a href="../push/"><code>grit push --tags</code></a>.</p>
 <h2 id="options">Options</h2>
 <div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;name&gt;</code></td><td>The tag to create or delete. Omit to list tags.</td></tr><tr><td><code>-d</code>, <code>--delete</code></td><td>Delete the tag.</td></tr></tbody></table></div>

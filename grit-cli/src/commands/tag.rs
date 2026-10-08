@@ -5,6 +5,7 @@
 //! annotated-tag ceremony; reach for `grit tag -a` when you need that.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::check_ref_format::{tag_short_name_error_message, validate_tag_short_name};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
@@ -89,6 +90,9 @@ fn list(repo: &Repository) -> Result<TagOutcome> {
 }
 
 fn create(repo: &Repository, name: &str) -> Result<TagOutcome> {
+    if let Err(err) = validate_tag_short_name(name) {
+        bail!(tag_short_name_error_message(name, &err));
+    }
     let tag_ref = format!("refs/tags/{name}");
     if refs::resolve_ref(&repo.git_dir, &tag_ref).is_ok() {
         bail!("tag '{name}' already exists");

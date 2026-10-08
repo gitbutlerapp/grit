@@ -6,6 +6,8 @@
 //! collide come along for the ride.
 
 use anyhow::{bail, Context, Result};
+use grit_lib::check_ref_format::{branch_short_name_error_message, validate_branch_short_name};
+use grit_lib::diff::DiffStatus;
 use grit_lib::porcelain::checkout::checkout_tree_changes;
 use grit_lib::porcelain::worktree_guard::{ensure_no_untracked_overwrite, prepare_tree_switch};
 use grit_lib::refs;
@@ -43,6 +45,9 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
     let branch_ref = format!("refs/heads/{name}");
 
     if create {
+        if let Err(err) = validate_branch_short_name(name) {
+            bail!(branch_short_name_error_message(name, &err));
+        }
         if refs::resolve_ref(&repo.git_dir, &branch_ref).is_ok() {
             bail!("branch '{name}' already exists");
         }

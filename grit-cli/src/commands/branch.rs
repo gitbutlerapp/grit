@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::branch_tracking::upstream_tracking_full_ref;
+use grit_lib::check_ref_format::{branch_short_name_error_message, validate_branch_short_name};
 use grit_lib::merge_base::is_ancestor;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -104,6 +105,9 @@ fn list(repo: &Repository) -> Result<BranchOutcome> {
 }
 
 fn create(repo: &Repository, name: &str) -> Result<BranchOutcome> {
+    if let Err(err) = validate_branch_short_name(name) {
+        bail!(branch_short_name_error_message(name, &err));
+    }
     let branch_ref = format!("refs/heads/{name}");
     if refs::resolve_ref(&repo.git_dir, &branch_ref).is_ok() {
         bail!("branch '{name}' already exists");

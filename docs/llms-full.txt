@@ -1582,6 +1582,8 @@ With no arguments, lists your local branches and marks the current one with `*`.
 
 With a name, creates a branch at the current commit. It doesn't switch to the new branch; use [`grit switch -c`](https://grit-scm.com/docs/switch/index.md) to create a branch and switch to it in one step.
 
+Branch names follow the same rules as `git check-ref-format --branch` (no spaces, `..`, `~`, `.lock`, reserved names like `HEAD`, and other characters Git rejects). Invalid names fail before anything is written under `.git/refs`.
+
 With `-d`, deletes a branch. `grit` refuses if the branch has commits that aren't in the current branch, so you can't lose work by accident; `-D` deletes it anyway. You can't delete the branch you're on.
 
 ## Options
@@ -1903,6 +1905,8 @@ grit tag -d <name>
 ## Description
 
 With no arguments, lists your tags. With a name, creates a tag pointing at the current commit; tags created by `grit` are lightweight tags, with no message of their own. With `-d`, deletes a tag.
+
+Tag names must be valid as `refs/tags/<name>` under Git's ref-name rules (same checks as `git check-ref-format refs/tags/<name>`). Invalid names are rejected before writing under `.git/refs`.
 
 Tags are local until you publish them with [`grit push --tags`](https://grit-scm.com/docs/push/index.md).
 

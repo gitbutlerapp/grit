@@ -14,6 +14,8 @@ grit tag -d <name>
 
 With no arguments, lists your tags. With a name, creates a tag pointing at the current commit; tags created by `grit` are lightweight tags, with no message of their own. With `-d`, deletes a tag.
 
+Tag names must be valid as `refs/tags/<name>` under Git's ref-name rules (same checks as `git check-ref-format refs/tags/<name>`). Invalid names are rejected before writing under `.git/refs`.
+
 Tags are local until you publish them with [`grit push --tags`](https://grit-scm.com/docs/push/index.md).
 
 ## Options
