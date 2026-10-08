@@ -128,9 +128,7 @@ pub fn index_entries_stat_equivalent(
             return false;
         }
     }
-    if policy.check_stat
-        && (a.dev != b.dev || a.ino != b.ino || a.uid != b.uid || a.gid != b.gid)
-    {
+    if policy.check_stat && (a.dev != b.dev || a.ino != b.ino || a.uid != b.uid || a.gid != b.gid) {
         return false;
     }
     true
