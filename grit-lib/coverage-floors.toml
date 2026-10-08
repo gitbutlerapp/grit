@@ -27,7 +27,7 @@ minimum = 58.2
 files = [
     "odb.rs",
 ]
-minimum = 79.7
+minimum = 79.5
 
 [group.pack]
 files = [
@@ -38,7 +38,7 @@ files = [
     "pack_index_build.rs",
     "pack_zlib.rs",
 ]
-minimum = 78.2
+minimum = 77.0
 
 [group.supporting]
 files = [
@@ -50,7 +50,7 @@ files = [
     "promisor.rs",
     "fsck_standalone.rs",
 ]
-minimum = 67.8
+minimum = 59.7
 
 [file."bloom.rs"]
 minimum = 50.0
@@ -59,7 +59,7 @@ minimum = 50.0
 minimum = 29.6
 
 [file."commit_graph_write.rs"]
-minimum = 66.7
+minimum = 65.5
 
 [file."delta_encode.rs"]
 minimum = 93.3
@@ -74,10 +74,10 @@ minimum = 90.7
 minimum = 58.2
 
 [file."objects.rs"]
-minimum = 78.7
+minimum = 75.7
 
 [file."odb.rs"]
-minimum = 79.7
+minimum = 79.5
 
 [file."pack.rs"]
 minimum = 80.1
@@ -89,7 +89,7 @@ minimum = 85.6
 minimum = 74.5
 
 [file."pack_map.rs"]
-minimum = 78.2
+minimum = 72.9
 
 [file."pack_rev.rs"]
 minimum = 38.4

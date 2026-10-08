@@ -284,7 +284,7 @@ fn cross_pack_ref_delta_cycle_errors_without_hanging() {
 // --- cross-pack base and duplicate entry in same pack ---
 
 #[test]
-fn ref_delta_base_in_other_pack_and_duplicate_in_same_pack() {
+fn ref_delta_base_in_other_pack() {
     run_algo(HashAlgo::Sha1, |algo| {
         clear_pack_cache();
         let base = b"cross-pack-base";
@@ -305,19 +305,79 @@ fn ref_delta_base_in_other_pack_and_duplicate_in_same_pack() {
 
         let got = read_object_from_packs(&objects, &oid_tip).expect("cross-pack read");
         assert_eq!(got.data, tip);
-
-        let mut dup_b = PackBuilder::new(algo);
-        dup_b.add_ref_delta(oid_base.as_bytes(), &delta, delta.len());
-        let built_dup = dup_b.build();
-        finish_synthetic_pack(&objects, "dup-pack", algo, &built_dup, &[(oid_tip, 0)]);
-        let got2 = read_object_from_packs(&objects, &oid_tip).expect("duplicate pack read");
-        assert_eq!(got2.data, tip);
         assert_eq!(
             packed_delta_base_oid(&objects, &oid_tip)
                 .expect("base oid lookup")
                 .expect("some base"),
             oid_base
         );
+    });
+}
+
+/// Same pack holds a full base object and a ref-delta tip; the index maps the base OID to the
+/// full copy so resolution stays in-pack (t5309/t5314 fallback) rather than needing another pack.
+#[test]
+fn ref_delta_full_base_duplicate_in_same_pack_enables_read() {
+    run_algo(HashAlgo::Sha1, |algo| {
+        clear_pack_cache();
+        let a = b"aaa";
+        let b = b"bbb";
+        let oid_a = ObjectId::from_hex(&hash_loose_object(algo, "blob", a)).unwrap();
+        let oid_b = ObjectId::from_hex(&hash_loose_object(algo, "blob", b)).unwrap();
+        let delta_a = encode_lcp_delta(b, a).unwrap();
+        let delta_b = encode_lcp_delta(a, b).unwrap();
+
+        let repo = RepoFixture::init(algo).expect("init");
+        let objects = repo.objects_dir();
+
+        let mut with_full_base = PackBuilder::new(algo);
+        let full_b = with_full_base.add_full(PackObjectKind::Blob, b);
+        with_full_base.add_ref_delta(oid_b.as_bytes(), &delta_a, delta_a.len());
+        let built = with_full_base.build();
+        finish_synthetic_pack(
+            &objects,
+            "full-plus-delta",
+            algo,
+            &built,
+            &[(oid_a, 1), (oid_b, full_b)],
+        );
+
+        let got_a = read_object_from_packs(&objects, &oid_a).expect("read A via in-pack full B");
+        assert_eq!(got_a.data, a);
+        let got_b = read_object_from_packs(&objects, &oid_b).expect("read in-pack full B");
+        assert_eq!(got_b.data, b);
+
+        // Thin pack alone (separate repo): only the ref-delta slot — must fail without a base pack.
+        clear_pack_cache();
+        let thin_repo = RepoFixture::init(algo).expect("thin repo");
+        let thin_objects = thin_repo.objects_dir();
+        let mut thin = PackBuilder::new(algo);
+        thin.add_ref_delta(oid_b.as_bytes(), &delta_a, delta_a.len());
+        let thin_built = thin.build();
+        finish_synthetic_pack(&thin_objects, "thin-only", algo, &thin_built, &[(oid_a, 0)]);
+        assert!(
+            read_object_from_packs(&thin_objects, &oid_a).is_err(),
+            "ref-delta without in-pack or cross-pack base must fail"
+        );
+
+        // Indexed two-object ref-delta cycle (no full duplicate): must hit depth limit.
+        clear_pack_cache();
+        let cycle_repo = RepoFixture::init(algo).expect("cycle repo");
+        let cycle_objects = cycle_repo.objects_dir();
+        let mut cyclic = PackBuilder::new(algo);
+        cyclic.add_ref_delta(oid_b.as_bytes(), &delta_a, delta_a.len());
+        cyclic.add_ref_delta(oid_a.as_bytes(), &delta_b, delta_b.len());
+        let cyclic_built = cyclic.build();
+        finish_synthetic_pack(
+            &cycle_objects,
+            "pure-cycle",
+            algo,
+            &cyclic_built,
+            &[(oid_a, 0), (oid_b, 1)],
+        );
+        let idx = read_pack_index(&cycle_objects.join("pack").join("pure-cycle.idx")).expect("idx");
+        let err = read_object_from_pack(&idx, &oid_a).expect_err("pure cycle must not resolve");
+        expect_delta_chain_limit(err);
     });
 }
 
@@ -416,11 +476,36 @@ fn t5316_deep_ofs_chain_depth_55_matches_verify_pack_and_read() {
             }
         }
         apply_delta_depth_limit(&mut map, 50);
+        let max_edges = max_delta_dependency_chain_edges(&map);
         assert!(
-            map.len() <= records.len(),
-            "depth limit should not expand map"
+            max_edges <= 50,
+            "after depth limit, longest dependency chain must be <= 50 edges (got {max_edges})"
         );
     });
+}
+
+fn max_delta_dependency_chain_edges(map: &HashMap<ObjectId, ObjectId>) -> usize {
+    let value_set: std::collections::HashSet<ObjectId> = map.values().copied().collect();
+    let tips: Vec<ObjectId> = map
+        .keys()
+        .copied()
+        .filter(|k| !value_set.contains(k))
+        .collect();
+    let mut max_edges = 0usize;
+    for tip in tips {
+        let mut edges = 0usize;
+        let mut cur = tip;
+        let mut seen = std::collections::HashSet::new();
+        while seen.insert(cur) {
+            let Some(&base) = map.get(&cur) else {
+                break;
+            };
+            edges += 1;
+            cur = base;
+        }
+        max_edges = max_edges.max(edges);
+    }
+    max_edges
 }
 
 #[test]
