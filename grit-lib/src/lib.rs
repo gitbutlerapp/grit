@@ -45,7 +45,7 @@ pub mod prelude {
     pub use crate::config::ConfigSet;
     pub use crate::error::{Error, Result};
     pub use crate::index::Index;
-    pub use crate::objects::{Object, ObjectId, ObjectKind};
+    pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
     pub use crate::odb::Odb;
     pub use crate::repo::Repository;
 }

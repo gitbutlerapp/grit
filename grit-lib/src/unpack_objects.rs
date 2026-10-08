@@ -1219,6 +1219,41 @@ pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>> {
     Ok(result)
 }
 
+/// Uncompressed size of the object produced when `delta` is applied to its base.
+///
+/// Reads only the second varint in the Git binary delta stream (after `src_size`).
+/// Returns [`None`] when `data` ends before both varints are complete (incremental zlib prefix
+/// decoding); callers with a full delta buffer should treat [`None`] as a truncated stream.
+pub(crate) fn delta_uncompressed_result_size_if_complete(data: &[u8]) -> Result<Option<usize>> {
+    let mut pos = 0;
+    let Some(_src_size) = read_delta_varint_if_complete(data, &mut pos)? else {
+        return Ok(None);
+    };
+    read_delta_varint_if_complete(data, &mut pos)
+}
+
+fn read_delta_varint_if_complete(data: &[u8], pos: &mut usize) -> Result<Option<usize>> {
+    let start = *pos;
+    let mut value = 0usize;
+    let mut shift = 0u32;
+    while *pos < data.len() {
+        let b = data[*pos];
+        *pos += 1;
+        value |= ((b & 0x7f) as usize) << shift;
+        shift += 7;
+        if b & 0x80 == 0 {
+            return Ok(Some(value));
+        }
+        if shift > 35 {
+            return Err(Error::CorruptObject(
+                "delta varint exceeds supported width".to_owned(),
+            ));
+        }
+    }
+    *pos = start;
+    Ok(None)
+}
+
 /// Read a variable-length little-endian integer from `data` starting at `*pos`.
 ///
 /// Advances `*pos` past the consumed bytes.

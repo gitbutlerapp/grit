@@ -3118,8 +3118,8 @@ fn resolve_specs_for_objects_with_options(
                     }
                     Err(err) => return Err(err),
                 };
-                let expected_kind = match repo.odb.read(&object_oid) {
-                    Ok(object) => ExpectedObjectKind::from_object_kind(object.kind),
+                let expected_kind = match repo.odb.read_info(&object_oid) {
+                    Ok(info) => ExpectedObjectKind::from_object_kind(info.kind),
                     Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => None,
                     Err(Error::ObjectNotFound(_)) if ignore_missing => continue,
                     Err(err) => return Err(err),
@@ -6636,8 +6636,8 @@ fn collect_tree_objects_filtered(
             }
         }
     }
-    let object = match repo.odb.read(&tree_oid) {
-        Ok(object) => object,
+    let tree_info = match repo.odb.read_info(&tree_oid) {
+        Ok(info) => info,
         Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
             if missing_action.reports_missing() && missing_seen.insert(tree_oid) {
                 missing.push(tree_oid);
@@ -6646,11 +6646,12 @@ fn collect_tree_objects_filtered(
         }
         Err(err) => return Err(err),
     };
-    if object.kind != ObjectKind::Tree {
+    if tree_info.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
             "object {tree_oid} is not a tree"
         )));
     }
+    let object = repo.odb.read(&tree_oid)?;
 
     let bits = match filter {
         None => ListFilterBits {
@@ -6735,8 +6736,8 @@ fn collect_tree_objects_filtered(
         } else {
             format!("{prefix}/{name}")
         };
-        let child_obj = match repo.odb.read(&entry.oid) {
-            Ok(object) => object,
+        let child_info = match repo.odb.read_info(&entry.oid) {
+            Ok(info) => info,
             Err(Error::ObjectNotFound(_)) if missing_action != MissingAction::Error => {
                 if missing_action.reports_missing() && missing_seen.insert(entry.oid) {
                     missing.push(entry.oid);
@@ -6746,7 +6747,7 @@ fn collect_tree_objects_filtered(
             Err(err) => return Err(err),
         };
         if entry.mode == 0o040000 {
-            if child_obj.kind != ObjectKind::Tree {
+            if child_info.kind != ObjectKind::Tree {
                 return Err(Error::CorruptObject(format!(
                     "object {} is not a tree",
                     entry.oid
@@ -6788,7 +6789,7 @@ fn collect_tree_objects_filtered(
                     continue;
                 }
             }
-            if child_obj.kind == ObjectKind::Blob {
+            if child_info.kind == ObjectKind::Blob {
                 let sparse_blob = sparse_filter_includes_path(repo, &path, sparse_lines);
                 let blob_bits = match filter {
                     None => ListFilterBits {
@@ -6808,7 +6809,7 @@ fn collect_tree_objects_filtered(
                                 ObjectFilter::Combine(_) => filter_object_bits_blob(
                                     f,
                                     entry.oid,
-                                    child_obj.data.len() as u64,
+                                    child_info.size,
                                     depth,
                                     tree_omit_set,
                                     collect_tree_omits,
@@ -6817,7 +6818,7 @@ fn collect_tree_objects_filtered(
                                 _ => filter_object_bits_blob(
                                     f,
                                     entry.oid,
-                                    child_obj.data.len() as u64,
+                                    child_info.size,
                                     depth,
                                     tree_omit_set,
                                     collect_tree_omits,
@@ -7255,12 +7256,12 @@ fn flatten_tree_with_mode(
         } else {
             format!("{prefix}/{name}")
         };
-        let child = match repo.odb.read(&entry.oid) {
-            Ok(o) => o,
+        let child_info = match repo.odb.read_info(&entry.oid) {
+            Ok(info) => info,
             Err(Error::ObjectNotFound(_)) => continue,
             Err(err) => return Err(err),
         };
-        if child.kind == ObjectKind::Tree {
+        if child_info.kind == ObjectKind::Tree {
             result.extend(flatten_tree_with_mode(repo, entry.oid, &path)?);
         } else {
             result.push((path, (entry.oid, canon_tree_mode(entry.mode))));

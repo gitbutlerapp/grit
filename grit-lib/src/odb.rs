@@ -29,7 +29,7 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::pack;
 use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
@@ -907,6 +907,79 @@ impl Odb {
         Err(Error::ObjectNotFound(oid.to_hex()))
     }
 
+    /// Return the kind and uncompressed size of `oid` without loading the full object body.
+    ///
+    /// Resolution order matches [`Self::read`]: in-memory overlay, loose objects, multi-pack-index,
+    /// local packs, then alternates.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ObjectNotFound`] — no object with this id in any consulted store.
+    /// - [`Error::Zlib`] — decompression failed while reading a loose or pack header.
+    /// - [`Error::CorruptObject`] — malformed object or pack headers.
+    pub fn read_info(&self, oid: &ObjectId) -> Result<ObjectInfo> {
+        if oid.is_well_known_empty_tree() {
+            return Ok(ObjectInfo {
+                kind: ObjectKind::Tree,
+                size: 0,
+            });
+        }
+
+        if let Some(obj) = self.overlay_read(oid) {
+            return Ok(ObjectInfo {
+                kind: obj.kind,
+                size: u64::try_from(obj.data.len())
+                    .map_err(|_| Error::CorruptObject("object size overflow".to_owned()))?,
+            });
+        }
+
+        if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
+            crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+        }
+
+        let path = self.object_path(oid);
+        if path.is_file() {
+            return read_loose_object_info(&path);
+        }
+
+        if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
+            if let Some(info) = crate::midx::try_read_info_via_midx(&self.objects_dir, oid)? {
+                return Ok(info);
+            }
+        }
+
+        match pack::read_object_info_from_packs(&self.objects_dir, oid) {
+            Ok(info) => return Ok(info),
+            Err(Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+
+        let midx_alt = self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
+
+        let file_alts = self.file_alternate_dirs_snapshot();
+        for alt_dir in file_alts.iter() {
+            if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, midx_alt) {
+                return Ok(info);
+            }
+        }
+
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, midx_alt) {
+                return Ok(info);
+            }
+        }
+
+        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
+            for alt_dir in guard.iter() {
+                if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, false) {
+                    return Ok(info);
+                }
+            }
+        }
+
+        Err(Error::ObjectNotFound(oid.to_hex()))
+    }
+
     /// Try to read an object from a specific objects directory (loose or pack).
     fn read_from_dir(objects_dir: &Path, oid: &ObjectId, use_midx: bool) -> Result<Object> {
         let loose = oid.loose_path_in(objects_dir);
@@ -922,6 +995,23 @@ impl Odb {
             }
         }
         pack::read_object_from_packs(objects_dir, oid)
+    }
+
+    fn read_info_from_dir(
+        objects_dir: &Path,
+        oid: &ObjectId,
+        use_midx: bool,
+    ) -> Result<ObjectInfo> {
+        let loose = oid.loose_path_in(objects_dir);
+        if loose.is_file() {
+            return read_loose_object_info(&loose);
+        }
+        if use_midx {
+            if let Some(info) = crate::midx::try_read_info_via_midx(objects_dir, oid)? {
+                return Ok(info);
+            }
+        }
+        pack::read_object_info_from_packs(objects_dir, oid)
     }
 
     /// Hash raw content of a given kind using this repository's hash algorithm.
@@ -1426,6 +1516,56 @@ pub(crate) fn parse_object_bytes(raw: &[u8]) -> Result<Object> {
 
 pub(crate) fn parse_object_bytes_with_oid(raw: &[u8], oid: &ObjectId) -> Result<Object> {
     parse_object_bytes_inner(raw, Some(oid))
+}
+
+/// Parse `"<type> <size>\0"` from decompressed bytes that include at least the header prefix.
+pub(crate) fn parse_object_header_prefix(raw: &[u8]) -> Result<(ObjectKind, u64)> {
+    let nul = raw
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
+
+    let header = &raw[..nul];
+    let sp = header
+        .iter()
+        .position(|&b| b == b' ')
+        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
+
+    if sp > 32 {
+        return Err(Error::ObjectHeaderTooLong {
+            oid: hash_bytes_with(HashAlgo::Sha1, raw).to_hex(),
+        });
+    }
+
+    let kind = ObjectKind::from_bytes(&header[..sp])?;
+    let size_str = std::str::from_utf8(&header[sp + 1..])
+        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
+    let size: u64 = size_str
+        .parse()
+        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
+    Ok((kind, size))
+}
+
+/// Read kind and size from a loose object file without loading the full payload.
+pub(crate) fn read_loose_object_info(path: &Path) -> Result<ObjectInfo> {
+    let file = fs::File::open(path).map_err(Error::Io)?;
+    let mut decoder = ZlibDecoder::new(file);
+    let mut prefix = Vec::with_capacity(64);
+    let mut buf = [0u8; 256];
+    loop {
+        let n = decoder
+            .read(&mut buf)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        prefix.extend_from_slice(&buf[..n]);
+        if prefix.contains(&0) || prefix.len() >= 128 {
+            break;
+        }
+    }
+    let (kind, size) = parse_object_header_prefix(&prefix)?;
+    Ok(ObjectInfo { kind, size })
 }
 
 fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<Object> {
