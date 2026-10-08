@@ -99,8 +99,11 @@ fn bench_open_pack_read_one(c: &mut Criterion) {
 }
 
 fn bench_repack_deep_chain(c: &mut Criterion) {
-    static DEEP: OnceLock<(tempfile::TempDir, grit_lib::pack::PackIndex, grit_lib::objects::ObjectId)> =
-        OnceLock::new();
+    static DEEP: OnceLock<(
+        tempfile::TempDir,
+        grit_lib::pack::PackIndex,
+        grit_lib::objects::ObjectId,
+    )> = OnceLock::new();
     let (_keep, idx, sample_oid) = DEEP.get_or_init(build_deep_repack_read_sample);
     c.bench_function("odb_read/deep_repack_read_one", |b| {
         b.iter(|| {

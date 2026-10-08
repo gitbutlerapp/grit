@@ -83,7 +83,8 @@ pub fn git_repack_with_window(
     depth: Option<u32>,
 ) -> Result<()> {
     let mut cmd = Command::new("git");
-    cmd.current_dir(repo_root).args(["repack", "-a", "-d", "-f"]);
+    cmd.current_dir(repo_root)
+        .args(["repack", "-a", "-d", "-f"]);
     if let Some(w) = window {
         cmd.arg(format!("--window={w}"));
     }
