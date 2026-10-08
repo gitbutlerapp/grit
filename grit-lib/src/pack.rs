@@ -300,8 +300,12 @@ mod pack_cache {
     use std::fs;
     use std::io;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
     use std::time::SystemTime;
+
+    static DELTA_CACHE_ENABLED: AtomicBool = AtomicBool::new(true);
+    static DELTA_LRU_POPULATED: AtomicBool = AtomicBool::new(false);
 
     struct CachedDir {
         dir_mtime: SystemTime,
@@ -354,7 +358,14 @@ mod pack_cache {
 
     impl DeltaBaseLru {
         fn set_byte_limit(&mut self, limit: usize) {
-            self.byte_limit = limit.max(1);
+            if limit == 0 {
+                self.clear();
+                self.byte_limit = 0;
+                DELTA_CACHE_ENABLED.store(false, Ordering::Release);
+                return;
+            }
+            DELTA_CACHE_ENABLED.store(true, Ordering::Release);
+            self.byte_limit = limit;
             while self.bytes_used > self.byte_limit {
                 let Some(key) = self.head else {
                     break;
@@ -417,6 +428,9 @@ mod pack_cache {
         }
 
         fn put(&mut self, key: DeltaCacheKey, kind: ObjectKind, data: Arc<[u8]>) {
+            if self.byte_limit == 0 {
+                return;
+            }
             let sz = data.len();
             if sz > self.byte_limit {
                 return;
@@ -441,6 +455,7 @@ mod pack_cache {
                 };
                 self.evict_key(evict);
             }
+            DELTA_LRU_POPULATED.store(!self.entries.is_empty(), Ordering::Release);
         }
 
         fn drop_pack(&mut self, pack_id: u32) {
@@ -453,6 +468,7 @@ mod pack_cache {
             for key in keys {
                 self.evict_key(key);
             }
+            DELTA_LRU_POPULATED.store(!self.entries.is_empty(), Ordering::Release);
         }
 
         fn clear(&mut self) {
@@ -461,6 +477,7 @@ mod pack_cache {
             self.head = None;
             self.tail = None;
             self.bytes_used = 0;
+            DELTA_LRU_POPULATED.store(false, Ordering::Release);
         }
     }
 
@@ -904,6 +921,7 @@ mod pack_cache {
         g.by_pack.clear();
         g.pack_ids.clear();
         g.delta_lru.clear();
+        DELTA_LRU_POPULATED.store(false, Ordering::Release);
     }
 
     /// Process-wide delta-base byte cap from config (default [`DELTA_BASE_CACHE_DEFAULT`]).
@@ -950,8 +968,18 @@ mod pack_cache {
 
     /// Cached resolved object at `(pack_id, offset)`, if still resident.
     pub fn get_delta_base(pack_id: u32, offset: u64) -> Option<(ObjectKind, Arc<[u8]>)> {
+        if !DELTA_CACHE_ENABLED.load(Ordering::Acquire)
+            || !DELTA_LRU_POPULATED.load(Ordering::Acquire)
+        {
+            return None;
+        }
         let key = DeltaCacheKey { pack_id, offset };
         lock().delta_lru.get(key)
+    }
+
+    #[must_use]
+    pub fn delta_base_caching_enabled() -> bool {
+        DELTA_CACHE_ENABLED.load(Ordering::Acquire)
     }
 
     /// Insert many intermediate bases under one lock (hot path for delta-chain resolution).
@@ -960,6 +988,9 @@ mod pack_cache {
             return;
         }
         let mut g = lock();
+        if g.delta_lru.byte_limit == 0 {
+            return;
+        }
         for &(pack_id, offset, ref data) in items {
             g.delta_lru
                 .put(DeltaCacheKey { pack_id, offset }, kind, Arc::clone(data));
@@ -1694,7 +1725,7 @@ struct PendingDeltaFrame {
 #[derive(Clone, Debug, Default)]
 struct DeltaChainState {
     depth: usize,
-    visited: Vec<(u32, u64)>,
+    visited: HashSet<(u32, u64)>,
 }
 
 thread_local! {
@@ -1721,16 +1752,11 @@ impl DeltaChainState {
                 limit: MAX_DELTA_CHAIN_READ_DEPTH,
             });
         }
-        if self
-            .visited
-            .iter()
-            .any(|&(p, o)| p == pack_id && o == offset)
-        {
+        if !self.visited.insert((pack_id, offset)) {
             return Err(Error::DeltaChainTooDeep {
                 limit: MAX_DELTA_CHAIN_READ_DEPTH,
             });
         }
-        self.visited.push((pack_id, offset));
         Ok(())
     }
 
@@ -1758,13 +1784,40 @@ fn apply_delta_chain_forward(
         return Ok(base_data.to_vec());
     }
 
-    let mut cache_inserts: Vec<(u32, u64, Arc<[u8]>)> = Vec::with_capacity(pending.len() + 1);
-    if let Some((pid, off)) = whole_base {
-        cache_inserts.push((pid, off, Arc::from(base_data)));
+    let caching = pack_cache::delta_base_caching_enabled();
+    let mut cache_inserts: Vec<(u32, u64, Arc<[u8]>)> =
+        Vec::with_capacity(if caching { pending.len() + 1 } else { 0 });
+    if caching {
+        if let Some((pid, off)) = whole_base {
+            cache_inserts.push((pid, off, Arc::from(base_data)));
+        }
     }
 
     let mut owned = Vec::new();
     let mut scratch = Vec::new();
+    if caching {
+        let mut rolling: Option<Arc<[u8]>> = None;
+        for frame in pending.iter().rev() {
+            let base: &[u8] = match &rolling {
+                Some(arc) => arc.as_ref(),
+                None => base_data,
+            };
+            apply_delta_into(&mut scratch, base, &frame.delta)?;
+            mem::swap(&mut owned, &mut scratch);
+            let arc: Arc<[u8]> = Arc::from(owned.into_boxed_slice());
+            if frame.pack_id != result_pack_id || frame.offset != result_offset {
+                cache_inserts.push((frame.pack_id, frame.offset, Arc::clone(&arc)));
+            }
+            rolling = Some(arc);
+            owned = Vec::new();
+        }
+        pack_cache::put_delta_bases(kind, &cache_inserts);
+        return Ok(match rolling {
+            Some(arc) => arc.to_vec(),
+            None => owned,
+        });
+    }
+
     let mut use_initial_base = true;
     for frame in pending.iter().rev() {
         let base: &[u8] = if use_initial_base {
@@ -1775,11 +1828,7 @@ fn apply_delta_chain_forward(
         };
         apply_delta_into(&mut scratch, base, &frame.delta)?;
         mem::swap(&mut owned, &mut scratch);
-        if frame.pack_id != result_pack_id || frame.offset != result_offset {
-            cache_inserts.push((frame.pack_id, frame.offset, Arc::from(owned.as_slice())));
-        }
     }
-    pack_cache::put_delta_bases(kind, &cache_inserts);
     Ok(owned)
 }
 
@@ -1880,6 +1929,16 @@ fn resolve_pack_object_at(
     objects_dir: Option<&Path>,
     state: &mut DeltaChainState,
 ) -> Result<(ObjectKind, Vec<u8>)> {
+    resolve_pack_object_at_with_bytes(start_idx, start_offset, objects_dir, state, None)
+}
+
+fn resolve_pack_object_at_with_bytes(
+    start_idx: PackIndexHandle<'_>,
+    start_offset: u64,
+    objects_dir: Option<&Path>,
+    state: &mut DeltaChainState,
+    pack_bytes_override: Option<&[u8]>,
+) -> Result<(ObjectKind, Vec<u8>)> {
     let pack_path = start_idx.get().pack_path.clone();
     let start_pack_id = pack_cache::pack_id_for(&pack_path);
     for attempt in 0..2 {
@@ -1889,6 +1948,7 @@ fn resolve_pack_object_at(
             start_pack_id,
             objects_dir,
             state,
+            pack_bytes_override,
         ) {
             Ok(v) => return Ok(v),
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
@@ -1910,34 +1970,51 @@ fn resolve_pack_object_at_body(
     result_pack_id: u32,
     objects_dir: Option<&Path>,
     state: &mut DeltaChainState,
+    pack_bytes_override: Option<&[u8]>,
 ) -> Result<(ObjectKind, Vec<u8>)> {
     let result_offset = start_offset;
     let mut cur_offset = start_offset;
-    let mut pending: Vec<PendingDeltaFrame> = Vec::new();
+    let mut pending: Vec<PendingDeltaFrame> = Vec::with_capacity(64);
     let mut inflate = ZlibInflateScratch::default();
+
+    let mut cur_pack_path = cur_idx.get().pack_path.clone();
+    let mut cur_pack_id = pack_cache::pack_id_for(&cur_pack_path);
+    let mut validated_pack_count = false;
+
+    enum PackBytesSource<'a> {
+        Borrowed(&'a [u8]),
+        Cached(Arc<PackData>),
+    }
+
+    let mut pack_bytes = match pack_bytes_override {
+        Some(b) => PackBytesSource::Borrowed(b),
+        None => PackBytesSource::Cached(read_pack_bytes_cached(&cur_pack_path)?),
+    };
 
     loop {
         let idx_ref = cur_idx.get();
-        let pack_path = &idx_ref.pack_path;
-        let pack_id = pack_cache::pack_id_for(pack_path);
+        if idx_ref.pack_path != cur_pack_path {
+            cur_pack_path = idx_ref.pack_path.clone();
+            pack_bytes = PackBytesSource::Cached(read_pack_bytes_cached(&cur_pack_path)?);
+            cur_pack_id = pack_cache::pack_id_for(&cur_pack_path);
+            validated_pack_count = false;
+        }
+        let pack_id = cur_pack_id;
         state.visit(pack_id, cur_offset)?;
 
-        if let Some((cached_kind, cached_data)) = pack_cache::get_delta_base(pack_id, cur_offset) {
-            let data = apply_delta_chain_forward(
-                cached_kind,
-                cached_data.as_ref(),
-                None,
-                &pending,
-                result_pack_id,
-                result_offset,
-            )?;
-            return Ok((cached_kind, data));
+        let bytes: &[u8] = match &pack_bytes {
+            PackBytesSource::Borrowed(b) => b,
+            PackBytesSource::Cached(c) => c.as_ref(),
+        };
+
+        if !validated_pack_count {
+            validate_pack_index_object_count(bytes, idx_ref)?;
+            validated_pack_count = true;
         }
 
-        let cur_bytes = read_pack_bytes_cached(pack_path)?;
         let object_start = cur_offset;
         let mut pos = cur_offset as usize;
-        let (packed_type, size) = match parse_pack_object_header(&cur_bytes, &mut pos) {
+        let (packed_type, size) = match parse_pack_object_header(bytes, &mut pos) {
             Ok(v) => v,
             Err(err) => {
                 if let Some((kind, data)) =
@@ -1959,7 +2036,7 @@ fn resolve_pack_object_at_body(
 
         match packed_type {
             PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
-                let data = match decompress_pack_data(&cur_bytes, &mut pos, size, &mut inflate) {
+                let data = match decompress_pack_data(bytes, &mut pos, size, &mut inflate) {
                     Ok(d) => d,
                     Err(err) => {
                         if let Some((kind, rescued)) =
@@ -1991,8 +2068,8 @@ fn resolve_pack_object_at_body(
             }
             PackedType::OfsDelta => {
                 state.next_hop()?;
-                let base_offset = parse_ofs_delta_base(&cur_bytes, &mut pos, object_start)?;
-                let delta_data = decompress_pack_data(&cur_bytes, &mut pos, size, &mut inflate)?;
+                let base_offset = parse_ofs_delta_base(bytes, &mut pos, object_start)?;
+                let delta_data = decompress_pack_data(bytes, &mut pos, size, &mut inflate)?;
                 pending.push(PendingDeltaFrame {
                     pack_id,
                     offset: object_start,
@@ -2016,14 +2093,14 @@ fn resolve_pack_object_at_body(
             PackedType::RefDelta => {
                 state.next_hop()?;
                 let hb = idx_ref.hash_bytes();
-                if pos + hb > cur_bytes.len() {
+                if pos + hb > bytes.len() {
                     return Err(Error::CorruptObject(
                         "truncated ref-delta base OID".to_owned(),
                     ));
                 }
-                let base_raw = cur_bytes[pos..pos + hb].to_vec();
+                let base_raw = bytes[pos..pos + hb].to_vec();
                 pos += hb;
-                let delta_data = decompress_pack_data(&cur_bytes, &mut pos, size, &mut inflate)?;
+                let delta_data = decompress_pack_data(bytes, &mut pos, size, &mut inflate)?;
                 pending.push(PendingDeltaFrame {
                     pack_id,
                     offset: object_start,
@@ -2217,16 +2294,16 @@ fn read_pack_object_at(
     objects_dir: Option<&Path>,
     start_depth: usize,
 ) -> Result<(ObjectKind, Vec<u8>)> {
-    let _ = pack_bytes;
     let mut state = DeltaChainState {
         depth: start_depth,
-        visited: Vec::new(),
+        visited: HashSet::new(),
     };
-    resolve_pack_object_at(
+    resolve_pack_object_at_with_bytes(
         PackIndexHandle::Borrowed(idx),
         start_offset,
         objects_dir,
         &mut state,
+        Some(pack_bytes),
     )
 }
 
@@ -2268,7 +2345,7 @@ pub fn read_object_info_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Obj
         }
         let mut state = DeltaChainState {
             depth: 0,
-            visited: Vec::new(),
+            visited: HashSet::new(),
         };
         match resolve_pack_object_info_at(
             PackIndexHandle::Borrowed(idx),
@@ -2313,8 +2390,9 @@ fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize)
 
 fn read_object_at_depth(idx: &PackIndex, offset: u64, depth: usize) -> Result<Object> {
     if depth == 0 {
-        if let Some((kind, data)) = pack_cache::get_delta_base(&idx.pack_path, offset) {
-            return Ok(Object::new(kind, data.as_ref().clone()));
+        let pack_id = pack_cache::pack_id_for(&idx.pack_path);
+        if let Some((kind, data)) = pack_cache::get_delta_base(pack_id, offset) {
+            return Ok(Object::new(kind, data.to_vec()));
         }
     }
     let pack_path = &idx.pack_path;
@@ -3644,6 +3722,24 @@ mod tests {
             matches!(err, Error::DeltaChainTooDeep { limit: 4096 }),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn delta_base_cache_limit_zero_disables_caching() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        pack_cache::test_set_delta_base_cache_byte_limit(0);
+        let Some((_tmp, idx, tip, _odb)) = build_ofs_delta_chain_pack(12) else {
+            pack_cache::test_set_delta_base_cache_byte_limit(pack_cache::DELTA_BASE_CACHE_DEFAULT);
+            return;
+        };
+        let _ = read_object_from_pack(&idx, &tip).expect("read chain");
+        assert_eq!(
+            pack_cache::test_delta_base_cache_bytes_used(),
+            0,
+            "limit 0 must not retain delta bases"
+        );
+        pack_cache::test_set_delta_base_cache_byte_limit(pack_cache::DELTA_BASE_CACHE_DEFAULT);
     }
 
     #[test]
