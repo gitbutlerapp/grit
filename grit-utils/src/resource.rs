@@ -1,5 +1,6 @@
 //! Peak resident set size for benchmark child processes (Unix).
 
+use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
@@ -9,9 +10,43 @@ use crate::hyperfine::{run_hyperfine, HyperfineResultEntry, HyperfineRun};
 use crate::schema::TimingStats;
 use crate::stats::timing_from_hyperfine;
 
-/// Peak RSS of child processes after running `command`, in bytes.
+/// Environment variable carrying the shell command for [`run_measure_rss_cli`].
+pub const MEASURE_CMD_ENV: &str = "GRIT_BENCH_MEASURE_CMD";
+
+/// Hidden CLI entry: run one shell command and print peak RSS (bytes) on stdout.
+///
+/// Invoked in a fresh process so `getrusage(RUSAGE_CHILDREN)` reflects only this run.
+pub fn run_measure_rss_cli(cwd: &Path) -> Result<()> {
+    let command = std::env::var(MEASURE_CMD_ENV).context("GRIT_BENCH_MEASURE_CMD not set")?;
+    let peak = peak_rss_single_child(&command, cwd)?;
+    println!("{peak}");
+    Ok(())
+}
+
+/// Peak RSS for `command`, measured in a fresh `grit-bench measure-rss` process.
+pub fn peak_rss_for_command(command: &str, cwd: &Path) -> Result<u64> {
+    let exe = std::env::current_exe().context("current exe for measure-rss")?;
+    let out = Command::new(exe)
+        .arg("measure-rss")
+        .arg("--cwd")
+        .arg(cwd)
+        .env(MEASURE_CMD_ENV, command)
+        .output()
+        .context("spawn measure-rss helper")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "measure-rss failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.trim()
+        .parse::<u64>()
+        .context("parse measure-rss stdout as u64")
+}
+
 #[cfg(unix)]
-pub fn peak_rss_for_command(command: &str, cwd: &std::path::Path) -> Result<u64> {
+fn peak_rss_single_child(command: &str, cwd: &Path) -> Result<u64> {
     use nix::sys::resource::{getrusage, UsageWho};
     use std::process::Stdio;
 
@@ -31,13 +66,12 @@ pub fn peak_rss_for_command(command: &str, cwd: &std::path::Path) -> Result<u64>
 }
 
 #[cfg(not(unix))]
-pub fn peak_rss_for_command(_command: &str, _cwd: &std::path::Path) -> Result<u64> {
+fn peak_rss_single_child(_command: &str, _cwd: &Path) -> Result<u64> {
     Ok(0)
 }
 
 #[cfg(unix)]
 fn rss_bytes_from_nix(kib: i64) -> u64 {
-    // Linux reports KiB; macOS reports bytes in some versions — treat large values as bytes.
     if kib > 1_000_000 {
         kib as u64
     } else {

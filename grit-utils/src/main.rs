@@ -83,6 +83,12 @@ enum Cmd {
         #[command(subcommand)]
         workload: DriveCmd,
     },
+    /// Internal: measure peak RSS for one shell command (fresh process)
+    #[command(hide = true)]
+    MeasureRss {
+        #[arg(long)]
+        cwd: PathBuf,
+    },
     /// Compare two JSON reports; exit non-zero when ratios differ beyond tolerance
     Compare {
         baseline: PathBuf,
@@ -217,6 +223,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
+        Cmd::MeasureRss { cwd } => {
+            return grit_utils::resource::run_measure_rss_cli(cwd);
+        }
         Cmd::Drive { workload } => {
             return run_drive(workload);
         }
@@ -338,6 +347,7 @@ fn main() -> Result<()> {
             status
         }
         Cmd::Compare { .. }
+        | Cmd::MeasureRss { .. }
         | Cmd::Drive { .. }
         | Cmd::PrepareAdd { .. }
         | Cmd::PrepareSwitch { .. }
