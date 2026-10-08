@@ -157,11 +157,18 @@ fn two_repos_on_two_threads() {
     ha.join().expect("join a");
     hb.join().expect("join b");
 
-    for (repo, author) in [(&a.root, "Alice"), (&b.root, "Bob")] {
+    for (repo, author, expect_text_attr) in
+        [(&a.root, "Alice", "auto"), (&b.root, "Bob", "unset")]
+    {
         git_in(repo, &["fsck"]);
         let log_authors = git_in(repo, &["log", "--format=%an"]);
         for line in log_authors.lines() {
             assert_eq!(line, author, "git log author in {}", repo.display());
         }
+        let attr = git_in(repo, &["check-attr", "text", "--", "file-0.txt"]);
+        assert!(
+            attr.contains(expect_text_attr),
+            "expected text={expect_text_attr} for {author}, got: {attr}"
+        );
     }
 }

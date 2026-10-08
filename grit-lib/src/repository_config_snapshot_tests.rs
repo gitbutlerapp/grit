@@ -15,6 +15,7 @@ mod tests {
     use crate::config::cascade_load_counters;
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::diff::diff_tree_to_worktree_with_git_dir;
+    use crate::environment::{Environment, RepositoryOptions};
     use crate::index::{entry_from_stat, Index, MODE_REGULAR};
     use crate::objects::ObjectKind;
     use crate::porcelain::add::{stage, StageOptions};
@@ -111,6 +112,45 @@ mod tests {
             .unwrap();
         });
         assert_at_most_config_loads("rev_list", 2);
+    }
+
+    #[test]
+    fn repository_config_revalidates_global_cascade_stamps() {
+        let tmp = TempDir::new().unwrap();
+        let global = tmp.path().join("global.cfg");
+        fs::write(&global, "[user]\n\tname = Alice\n").unwrap();
+
+        let root = tmp.path().join("repo");
+        fs::create_dir_all(&root).unwrap();
+        init_repository(&root, false, "main", None, "files").expect("init");
+
+        let mut env = Environment::empty();
+        env.cwd = root.clone();
+        env.git_config_global = Some(global.to_string_lossy().into_owned());
+        env.git_config_nosystem = Some("true".into());
+        env.git_config_system = Some("/dev/null".into());
+
+        let git_dir = root.join(".git");
+        let repo = Repository::open_with(
+            &RepositoryOptions::with_environment(env),
+            &git_dir,
+            Some(&root),
+        )
+        .expect("open");
+        assert_eq!(
+            repo.config().expect("config").get("user.name").as_deref(),
+            Some("Alice")
+        );
+
+        fs::write(
+            &global,
+            "[user]\n\tname = Alice With A Much Longer Name For Stamp Change\n",
+        )
+        .unwrap();
+        assert_eq!(
+            repo.config().expect("config").get("user.name").as_deref(),
+            Some("Alice With A Much Longer Name For Stamp Change")
+        );
     }
 
     #[test]

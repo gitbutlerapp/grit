@@ -619,12 +619,12 @@ fn multiple_helpers_chain_until_complete() {
     let first = dir.join("user_only.sh");
     write_script(
         &first,
-        "#!/bin/sh\nif [ \"$1\" = get ]; then echo username=chain-user; fi\n",
+        "#!/bin/sh\nif [ \"$1\" = get ]; then cat >/dev/null 2>&1 || true; echo username=chain-user; fi\n",
     );
     let second = dir.join("pass_only.sh");
     write_script(
         &second,
-        "#!/bin/sh\nif [ \"$1\" = get ]; then echo password=chain-pass; fi\n",
+        "#!/bin/sh\nif [ \"$1\" = get ]; then cat >/dev/null 2>&1 || true; echo password=chain-pass; fi\n",
     );
 
     let first_value = format!("!{}", first.display());

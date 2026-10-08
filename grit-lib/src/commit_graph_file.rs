@@ -10,31 +10,24 @@ use crate::error::Error;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::{hash_algo_for_objects_dir, Odb};
 
-/// Track which commit-graph layers have already emitted the "disabling Bloom
-/// filters ... due to incompatible settings" warning this process, so it is
-/// printed at most once per layer (matching Git, which loads the chain once).
-fn warn_once_for_disabled_bloom_layer(id: &str) -> bool {
-    use std::collections::HashSet;
-    use std::sync::OnceLock;
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let set = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    match set.lock() {
-        Ok(mut guard) => guard.insert(id.to_string()),
-        Err(_) => true,
-    }
+fn warn_once_for_disabled_bloom_layer(
+    caches: Option<&crate::repo_caches::RepoCaches>,
+    id: &str,
+) -> bool {
+    let key = format!("bloom-disabled:{id}");
+    caches
+        .map(|c| c.should_warn_commit_graph_once(&key))
+        .unwrap_or(true)
 }
 
-/// Emit the "base graphs chunk is too small" warning at most once per layer id
-/// (grit re-reads the chain several times within one command; Git loads it once).
-fn warn_once_for_base_chunk_too_small(id: &str) -> bool {
-    use std::collections::HashSet;
-    use std::sync::OnceLock;
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let set = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    match set.lock() {
-        Ok(mut guard) => guard.insert(id.to_string()),
-        Err(_) => true,
-    }
+fn warn_once_for_base_chunk_too_small(
+    caches: Option<&crate::repo_caches::RepoCaches>,
+    id: &str,
+) -> bool {
+    let key = format!("base-chunk:{id}");
+    caches
+        .map(|c| c.should_warn_commit_graph_once(&key))
+        .unwrap_or(true)
 }
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
@@ -689,6 +682,14 @@ impl CommitGraphChain {
     /// Returns `Ok(None)` when no commit-graph exists. Corrupt graphs (including invalid GDO2)
     /// return [`Err`].
     pub fn try_load(objects_dir: &Path) -> Result<Option<Self>, Error> {
+        Self::try_load_with_caches(objects_dir, None)
+    }
+
+    /// Load a commit-graph chain, deduplicating warnings through `caches` when provided.
+    pub fn try_load_with_caches(
+        objects_dir: &Path,
+        caches: Option<&crate::repo_caches::RepoCaches>,
+    ) -> Result<Option<Self>, Error> {
         let info = objects_dir.join("info");
         let chain_path = info.join("commit-graphs").join("commit-graph-chain");
         if chain_path.is_file() {
@@ -711,7 +712,7 @@ impl CommitGraphChain {
                 // already loaded below this one.
                 let n = layers.len();
                 if n > 0 && layer.base_chunk_size / layer.hash_len < n {
-                    if warn_once_for_base_chunk_too_small(&layer.layer_display_id()) {
+                    if warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id()) {
                         eprintln!(
                             "{}",
                             crate::diagnostics::warning_line(
@@ -731,7 +732,7 @@ impl CommitGraphChain {
             // representation is tip-first, so reverse after reading.
             layers.reverse();
             let mut chain = Self { layers };
-            chain.validate_bloom_compatibility();
+            chain.validate_bloom_compatibility(caches);
             return Ok(Some(chain));
         }
         let single = info.join("commit-graph");
@@ -741,7 +742,7 @@ impl CommitGraphChain {
             let mut chain = Self {
                 layers: vec![layer],
             };
-            chain.validate_bloom_compatibility();
+            chain.validate_bloom_compatibility(caches);
             return Ok(Some(chain));
         }
         Ok(None)
@@ -779,6 +780,14 @@ impl CommitGraphChain {
         objects_dir: &Path,
         alt_dirs: &[PathBuf],
     ) -> Result<Option<Self>, Error> {
+        Self::try_load_across_with_caches(objects_dir, alt_dirs, None)
+    }
+
+    pub fn try_load_across_with_caches(
+        objects_dir: &Path,
+        alt_dirs: &[PathBuf],
+        caches: Option<&crate::repo_caches::RepoCaches>,
+    ) -> Result<Option<Self>, Error> {
         let layer_dir = |dir: &Path| dir.join("info").join("commit-graphs");
         let resolve_layer = |hash: &str| -> Option<PathBuf> {
             let name = format!("graph-{hash}.graph");
@@ -804,7 +813,7 @@ impl CommitGraphChain {
         let chain_path = if local_chain.is_file() {
             local_chain
         } else if local_single.is_file() {
-            return Self::try_load(objects_dir);
+            return Self::try_load_with_caches(objects_dir, caches);
         } else {
             match alt_dirs
                 .iter()
@@ -834,7 +843,7 @@ impl CommitGraphChain {
             let layer = CommitGraphLayer::try_parse(graph_path, raw)?;
             let n = layers.len();
             if n > 0 && layer.base_chunk_size / layer.hash_len < n {
-                if warn_once_for_base_chunk_too_small(&layer.layer_display_id()) {
+                if warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id()) {
                     eprintln!(
                         "{}",
                         crate::diagnostics::warning_line(
@@ -851,11 +860,11 @@ impl CommitGraphChain {
         }
         layers.reverse();
         let mut chain = Self { layers };
-        chain.validate_bloom_compatibility();
+        chain.validate_bloom_compatibility(caches);
         Ok(Some(chain))
     }
 
-    fn validate_bloom_compatibility(&mut self) {
+    fn validate_bloom_compatibility(&mut self, caches: Option<&crate::repo_caches::RepoCaches>) {
         // Git walks the chain from the tip down to the base (`for (; g; g =
         // g->base_graph)` in validate_mixed_bloom_settings), so the *topmost*
         // (tip) layer's Bloom settings become the reference and any
@@ -879,7 +888,7 @@ impl CommitGraphChain {
                         // most once per layer. Grit re-reads the chain from disk several
                         // times within a single command (settings probe, commit set,
                         // filter reuse), so dedupe the warning per layer id to match.
-                        if warn_once_for_disabled_bloom_layer(&id) {
+                        if warn_once_for_disabled_bloom_layer(caches, &id) {
                             eprintln!(
                                 "{}",
                                 crate::diagnostics::warning_line(&format!(

@@ -65,24 +65,12 @@ pub fn should_drop_tail_match_for_myers(
     parent_lines.iter().filter(|line| **line == tail).count() >= 2
 }
 
-/// Whether the indent heuristic is enabled for this blame run
-/// (`--indent-heuristic` / `--no-indent-heuristic` / `diff.indentHeuristic`).
-static BLAME_INDENT_HEURISTIC: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-fn blame_indent_heuristic_enabled() -> bool {
-    BLAME_INDENT_HEURISTIC.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-pub fn set_blame_indent_heuristic(enabled: bool) {
-    BLAME_INDENT_HEURISTIC.store(enabled, std::sync::atomic::Ordering::Relaxed);
-}
-
 /// Map each line in `new` to its origin in `old` (if any).
 pub fn build_line_map(
     old: &[&str],
     new: &[&str],
     diff_algorithm: BlameDiffAlgorithm,
+    indent_heuristic: bool,
 ) -> Vec<Option<usize>> {
     // Ensure trailing newlines so `from_lines` splits consistently
     let mut old_joined = old.join("\n");
@@ -96,7 +84,7 @@ pub fn build_line_map(
         &old_joined,
         &new_joined,
         diff_algorithm.to_similar(),
-        blame_indent_heuristic_enabled(),
+        indent_heuristic,
     );
 
     let mut result = vec![None; new.len()];
@@ -823,6 +811,7 @@ pub fn compute_blame(
     copy_depth: usize,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
 ) -> Result<Vec<BlameLine>> {
     let start_commit = {
         let obj = read_object_for_blame(odb, &start_oid, None)?;
@@ -930,6 +919,7 @@ pub fn compute_blame(
                         copy_depth,
                         first_parent_only,
                         grafts,
+                        indent_heuristic,
                     )?;
                     parent_lines.push(Some(p_lines));
                     parent_blames.push(Some(p_blame));
@@ -1078,7 +1068,7 @@ pub fn compute_blame(
                 } else {
                     diff_algorithm
                 };
-                let map = build_line_map(&pl_refs, &cur_lines, map_algo);
+                let map = build_line_map(&pl_refs, &cur_lines, map_algo, indent_heuristic);
                 parent_blobs.push((p, blob, mode));
                 par_lines_vec.push(pl);
                 maps.push(map);
@@ -1242,6 +1232,7 @@ pub fn compute_blame(
                             copy_depth.saturating_sub(1),
                             first_parent_only,
                             grafts,
+                            indent_heuristic,
                         )?;
                         for line in source_blame {
                             by_content
@@ -1361,7 +1352,8 @@ pub fn compute_blame(
                 let par_lines = content_lines(&par_content);
 
                 // Build mapping: cur_line_idx → Option<parent_line_idx>
-                let mut line_map = build_line_map(&par_lines, &cur_lines, diff_algorithm);
+                let mut line_map =
+                    build_line_map(&par_lines, &cur_lines, diff_algorithm, indent_heuristic);
                 if is_ignored {
                     line_map = build_fuzzy_line_map(&par_lines, &cur_lines, &line_map);
                 }
@@ -1381,6 +1373,7 @@ pub fn compute_blame(
                         false,
                         first_parent_only,
                         grafts,
+                        indent_heuristic,
                     )? {
                         let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
                         for line in source_blame {
@@ -1585,6 +1578,7 @@ fn find_copy_source_blame(
     include_current_path: bool,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
 ) -> Result<Option<(String, Vec<BlameLine>)>> {
     let mut entries = Vec::new();
     collect_tree_file_entries(odb, parent_tree_oid, "", &mut entries)?;
@@ -1626,6 +1620,7 @@ fn find_copy_source_blame(
         copy_depth,
         first_parent_only,
         grafts,
+        indent_heuristic,
     )?;
     Ok(Some((source_path, source_blame)))
 }
@@ -1800,6 +1795,7 @@ pub fn build_uncommitted_blame(
     copy_depth: usize,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
 ) -> Result<Vec<BlameLine>> {
     let zero = crate::diff::zero_oid();
     let final_lines = content_lines(content);
@@ -1822,6 +1818,7 @@ pub fn build_uncommitted_blame(
             true,
             first_parent_only,
             grafts,
+            indent_heuristic,
         )? {
             let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
             for line in source_blame {
@@ -1947,7 +1944,7 @@ pub fn compute_reverse_blame(
 
         let old_refs: Vec<&str> = prev_lines.iter().map(|s| s.as_str()).collect();
         let new_refs: Vec<&str> = cur_lines.iter().map(|s| s.as_str()).collect();
-        let new_to_old = build_line_map(&old_refs, &new_refs, diff_algorithm);
+        let new_to_old = build_line_map(&old_refs, &new_refs, diff_algorithm, false);
         let mut old_to_new = vec![None; prev_lines.len()];
         for (new_idx, old_idx_opt) in new_to_old.iter().enumerate() {
             if let Some(old_idx) = *old_idx_opt {
@@ -2033,7 +2030,7 @@ pub fn apply_final_content_overlay(
         return Ok(None);
     }
 
-    let map = build_line_map(&head_lines, &final_lines, BlameDiffAlgorithm::Myers);
+    let map = build_line_map(&head_lines, &final_lines, BlameDiffAlgorithm::Myers, false);
     let zero = crate::diff::zero_oid();
 
     let mut by_head_line: HashMap<usize, &BlameLine> = HashMap::new();
@@ -2128,7 +2125,7 @@ pub fn apply_worktree_overlay(
 
     let head_lines = content_lines(&head_content);
     let wt_lines = content_lines(&worktree_content);
-    let map = build_line_map(&head_lines, &wt_lines, BlameDiffAlgorithm::Myers);
+    let map = build_line_map(&head_lines, &wt_lines, BlameDiffAlgorithm::Myers, false);
     let zero = crate::diff::zero_oid();
 
     let mut by_head_line: HashMap<usize, &BlameLine> = HashMap::new();
@@ -2209,7 +2206,7 @@ mod tests {
     fn build_line_map_maps_unchanged_lines_and_drops_replaced() {
         let old = ["alpha", "beta", "gamma"];
         let new = ["alpha", "BETA", "gamma"];
-        let map = build_line_map(&old, &new, BlameDiffAlgorithm::Myers);
+        let map = build_line_map(&old, &new, BlameDiffAlgorithm::Myers, false);
         // unchanged lines map back to their old index; the replaced line is None.
         assert_eq!(map, vec![Some(0), None, Some(2)]);
     }
@@ -2217,7 +2214,7 @@ mod tests {
     #[test]
     fn build_line_map_identity_for_equal_files() {
         let lines = ["one", "two", "three"];
-        let map = build_line_map(&lines, &lines, BlameDiffAlgorithm::Histogram);
+        let map = build_line_map(&lines, &lines, BlameDiffAlgorithm::Histogram, false);
         assert_eq!(map, vec![Some(0), Some(1), Some(2)]);
     }
 

@@ -627,10 +627,18 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
         // Git terminates the credential record with a blank line. A helper may answer (e.g.
         // `quit=1`) and exit without reading its input; like Git, ignore the resulting broken
         // pipe and still read whatever it printed.
-        let request = format!("{}\n", creds.serialize());
-        if let Err(e) = stdin.write_all(request.as_bytes()) {
+        let payload = creds.serialize();
+        if let Err(e) = stdin.write_all(payload.as_bytes()) {
             if e.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(e.into());
+                return Err(Error::Message(format!(
+                    "failed to write credential request to helper '{helper}': {e}"
+                )));
+            }
+        } else if let Err(e) = stdin.write_all(b"\n") {
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(Error::Message(format!(
+                    "failed to write credential request to helper '{helper}': {e}"
+                )));
             }
         }
     }

@@ -15,13 +15,12 @@
 //! - `work_tree` — `Some(path)` for non-bare repos, `None` for bare.
 //! - [`Odb`] — the loose object database.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::sync::Arc;
 
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::environment::{Environment, RepositoryOptions};
@@ -95,8 +94,6 @@ pub struct Repository {
     /// without reopening the repository.
     /// Repository-scoped caches (config, attributes, filters, precompose, …).
     caches: Arc<RepoCaches>,
-    /// Primary config snapshot for this handle (revalidated via local `config` mtime/size).
-    config_memo: Mutex<Option<ConfigSnapshotEntry>>,
     /// Discovery and configuration environment used to open this repository.
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
@@ -105,13 +102,6 @@ pub struct Repository {
 
 /// Legacy alias kept for [`Odb`] wiring during the repository-cache migration.
 pub(crate) type RepositoryConfigSnapshot = Arc<RepoCaches>;
-
-type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
-
-fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
-    let meta = fs::metadata(git_dir.join("config")).ok()?;
-    Some((meta.modified().ok()?, meta.len()))
-}
 
 /// Repository-level settings derived from config that are read on hot paths.
 #[derive(Debug, Clone)]
@@ -190,7 +180,6 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             caches,
-            config_memo: Mutex::new(None),
             environment,
             git_prefix,
         })
@@ -250,35 +239,16 @@ impl Repository {
     }
 
     fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
-        let disk_identity = local_repo_config_identity(&self.git_dir);
-        {
-            let guard = self
-                .config_memo
-                .lock()
-                .map_err(|e| Error::Message(format!("config memo lock poisoned: {e}")))?;
-            if let Some((cfg, cached_identity)) = guard.as_ref() {
-                if *cached_identity == disk_identity {
-                    return Ok(Arc::clone(cfg));
-                }
-            }
-        }
-        let cfg = self
-            .caches
-            .load_config(self.environment.as_ref(), Some(&self.git_dir), true)?;
-        let mut guard = self
-            .config_memo
-            .lock()
-            .map_err(|e| Error::Message(format!("config memo lock poisoned: {e}")))?;
-        *guard = Some((Arc::clone(&cfg), disk_identity));
-        Ok(cfg)
+        self.caches
+            .load_config(self.environment.as_ref(), Some(&self.git_dir), true)
     }
 
     /// Return the merged configuration cascade for this repository.
     ///
-    /// The snapshot is loaded lazily on first use and reused while the repository `config`
-    /// file's modification time and size are unchanged. If that file is rewritten on disk,
-    /// the next call reloads the cascade automatically. Prefer [`Self::reload_config`] after
-    /// in-process config writes so related caches update immediately.
+    /// Loads through [`RepoCaches`] on every call so global, system, include, and local
+    /// config stamps stay validated (not only `.git/config` mtime). Prefer
+    /// [`Self::reload_config`] after in-process config writes so related caches update
+    /// immediately.
     ///
     /// # Errors
     ///
@@ -297,9 +267,6 @@ impl Repository {
     /// Propagates errors from [`ConfigSet::load`].
     pub fn reload_config(&self) -> Result<()> {
         self.caches.invalidate_config_cache();
-        if let Ok(mut guard) = self.config_memo.lock() {
-            *guard = None;
-        }
         let _ = self.config()?;
         Ok(())
     }
@@ -419,9 +386,7 @@ impl Repository {
             }
             // `GIT_DIR` without `GIT_WORK_TREE`: honour `core.bare` / `core.worktree` like Git.
             let (is_bare, core_wt) = read_core_bare_and_worktree(&git_dir)?;
-            if is_bare && core_wt.is_some() {
-                warn_core_bare_worktree_conflict(&git_dir, env);
-            }
+            let bare_worktree_conflict = is_bare && core_wt.is_some();
             let resolved_wt = if is_bare {
                 None
             } else if let Some(raw) = core_wt {
@@ -439,6 +404,9 @@ impl Repository {
             repo.discovery_root = None;
             repo.work_tree_from_env = false;
             repo.discovery_via_gitfile = false;
+            if bare_worktree_conflict {
+                warn_core_bare_worktree_conflict(&repo);
+            }
             return Ok(repo);
         }
 
@@ -1934,7 +1902,7 @@ fn try_open_at(env: &Environment, dir: &Path) -> Result<Option<DiscoveredAt>> {
         };
         repo.discovery_root = Some(root.canonicalize().unwrap_or(root));
         repo.discovery_via_gitfile = true;
-        warn_core_bare_worktree_conflict(&git_dir, env);
+        warn_core_bare_worktree_conflict(&repo);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: Some(dot_git.clone()),
@@ -1988,7 +1956,7 @@ fn try_open_at(env: &Environment, dir: &Path) -> Result<Option<DiscoveredAt>> {
     if dir.join("HEAD").is_file() && dir.join("commondir").is_file() {
         maybe_trace_implicit_bare_repository(dir, env);
         let repo = Repository::open(dir, None)?;
-        warn_core_bare_worktree_conflict(dir, env);
+        warn_core_bare_worktree_conflict(&repo);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -2011,7 +1979,7 @@ fn try_open_at(env: &Environment, dir: &Path) -> Result<Option<DiscoveredAt>> {
             }
         }
         let repo = Repository::open(dir, None)?;
-        warn_core_bare_worktree_conflict(dir, env);
+        warn_core_bare_worktree_conflict(&repo);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -2342,32 +2310,18 @@ fn safe_directory_matches(config_value: &str, checked: &str, cwd: &Path) -> bool
     config_norm == checked_norm
 }
 
-fn warn_core_bare_worktree_conflict(git_dir: &Path, environment: &Environment) {
-    if environment
+fn warn_core_bare_worktree_conflict(repo: &Repository) {
+    if repo
+        .environment
         .git_work_tree
         .as_deref()
         .is_some_and(|s| !s.trim().is_empty())
     {
         return;
     }
-    static WARNED_DIRS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-    if let Ok((bare, wt)) = read_core_bare_and_worktree(git_dir) {
+    if let Ok((bare, wt)) = read_core_bare_and_worktree(&repo.git_dir) {
         if bare && wt.is_some() {
-            let key = git_dir
-                .canonicalize()
-                .unwrap_or_else(|_| git_dir.to_path_buf())
-                .to_string_lossy()
-                .to_string();
-            let mut guard = WARNED_DIRS.lock().unwrap_or_else(|e| e.into_inner());
-            let set = guard.get_or_insert_with(HashSet::new);
-            if set.insert(key) {
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::warning_line(
-                        "core.bare and core.worktree do not make sense"
-                    )
-                );
-            }
+            repo.caches.warn_bare_worktree_conflict_once(&repo.git_dir);
         }
     }
 }

@@ -22,7 +22,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
 system_time_now = 0
 
 [file.attributes.rs]
@@ -127,7 +127,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 0
 system_time_now = 0
 
 [file.config.rs]
@@ -210,7 +210,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 0
+command_new = 1
 static_global = 0
 system_time_now = 0
 
@@ -254,27 +254,6 @@ literal_hint = 0
 literal_warning = 0
 command_new = 1
 static_global = 0
-system_time_now = 0
-
-[file.git_binary_base85.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
 system_time_now = 0
 
 [file.git_date/mod.rs]
@@ -568,7 +547,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
 system_time_now = 0
 
 [file.notes.rs]
@@ -889,7 +868,7 @@ system_time_now = 0
 [file.repo.rs]
 println = 0
 print = 0
-eprintln = 4
+eprintln = 3
 eprint = 0
 dbg = 0
 process_exit = 0
@@ -904,7 +883,28 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
+system_time_now = 0
+
+[file.repo_caches.rs]
+println = 0
+print = 0
+eprintln = 1
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 0
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 1
+command_new = 0
+static_global = 0
 system_time_now = 0
 
 [file.rerere.rs]
@@ -1096,27 +1096,6 @@ command_new = 1
 static_global = 0
 system_time_now = 0
 
-[file.terminal.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
-system_time_now = 0
-
 [file.textconv_cache.rs]
 println = 0
 print = 0
@@ -1218,8 +1197,8 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 0
-static_global = 1
+command_new = 2
+static_global = 0
 system_time_now = 0
 
 [file.worktree_rules.rs]
@@ -1240,6 +1219,6 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
 system_time_now = 0
 

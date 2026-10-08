@@ -4,7 +4,7 @@
 //! reftable-backend detection live here instead of process-global statics so concurrent
 //! repositories on different threads do not cross-contaminate.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -36,6 +36,8 @@ pub struct RepoCaches {
     reftable_backend: Mutex<HashMap<PathBuf, bool>>,
     filters: FilterProcessState,
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
+    bare_worktree_warn_seen: Mutex<HashSet<String>>,
+    commit_graph_warn_seen: Mutex<HashSet<String>>,
 }
 
 impl std::fmt::Debug for RepoCaches {
@@ -57,7 +59,32 @@ impl RepoCaches {
             reftable_backend: Mutex::new(HashMap::new()),
             filters: FilterProcessState::new(),
             promisor_hydrate: Mutex::new(None),
+            bare_worktree_warn_seen: Mutex::new(HashSet::new()),
+            commit_graph_warn_seen: Mutex::new(HashSet::new()),
         })
+    }
+
+    /// Emit `core.bare` / `core.worktree` conflict warning at most once per git dir on this repo.
+    pub fn warn_bare_worktree_conflict_once(&self, git_dir: &Path) {
+        let key = git_dir
+            .canonicalize()
+            .unwrap_or_else(|_| git_dir.to_path_buf())
+            .to_string_lossy()
+            .to_string();
+        let Ok(mut guard) = self.bare_worktree_warn_seen.lock() else {
+            return;
+        };
+        if guard.insert(key) {
+            eprintln!("warning: core.bare and core.worktree do not make sense");
+        }
+    }
+
+    /// Return `true` when this warning id has not been emitted yet for this repository handle.
+    pub fn should_warn_commit_graph_once(&self, id: &str) -> bool {
+        let Ok(mut guard) = self.commit_graph_warn_seen.lock() else {
+            return true;
+        };
+        guard.insert(id.to_string())
     }
 
     /// Load the standard configuration cascade with repository-scoped memoization.

@@ -61,6 +61,7 @@ pub fn encode(mut data: &[u8]) -> String {
 ///
 /// `out_len` is the number of raw (compressed) bytes this line contributes.
 pub fn decode_body(buffer: &[u8], mut out_len: usize) -> Result<Vec<u8>, DecodeError> {
+    // hygiene: immutable base-85 decode table, initialized once
     static DE85: std::sync::OnceLock<[u8; 256]> = std::sync::OnceLock::new();
     let de85 = DE85.get_or_init(prep_decode_table);
 

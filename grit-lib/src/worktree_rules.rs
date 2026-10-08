@@ -27,6 +27,7 @@ use crate::repo::Repository;
 /// Counts are per thread so tests running concurrently in one process do not see each other's
 /// reads. Attribute files are always read on the calling thread ([`WorktreeRules`] is not
 /// `Sync`), so an operation's reads land in its caller's counts.
+#[cfg(test)]
 pub mod file_load_counters {
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -68,11 +69,15 @@ pub mod file_load_counters {
 }
 
 fn record_attr_read(path: &Path) {
+    #[cfg(test)]
     file_load_counters::record(path);
+    let _ = path;
 }
 
 fn record_ignore_read(path: &Path) {
+    #[cfg(test)]
     file_load_counters::record(path);
+    let _ = path;
 }
 
 /// Attribute/ignore/conversion state shared across one porcelain operation.
