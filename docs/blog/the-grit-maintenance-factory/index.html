@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Grit is now maintained by a factory of agents - the Grit project</title>
+<meta name="description" content="Grit now has an almost fully autonomous maintainer. Cloud agents plan the roadmap, fix issues, review each other&#x27;s work, land changes, cut a release every day and test it on Linux, macOS and Windows. Here&#x27;s how it works and where to watch it." />
+<link rel="alternate" type="application/rss+xml" title="Grit blog feed" href="../feed.xml" />
+<script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="canonical" href="./" />
+<link rel="alternate" type="text/markdown" href="index.md" />
+<meta property="og:title" content="Grit is now maintained by a factory of agents" />
+<style>
+:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--code-fg:#e9e4d8;--chip:#e9e4d8;--rail:clamp(48px,8vw,120px);--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+a{color:inherit}a:hover{opacity:.7}
+.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(20px,4vw,56px)}
+.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:24px 0}
+.brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;text-decoration:none}
+.brand::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent)}
+.nav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:15px}.nav a{text-decoration:none}
+.nav .pill{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px}
+.commit{display:grid;grid-template-columns:var(--rail) minmax(0,1fr)}
+.commit+.commit{border-top:1px solid var(--line)}
+.rail{position:relative}.rail>span{position:absolute;display:block}
+.line{left:20px;top:0;bottom:0;width:3px;background:var(--ink)}
+.line.from-head{top:110px}.line.stub{bottom:auto;height:46px}
+.dot{left:15px;top:44px;width:13px;height:13px;border-radius:50%;background:var(--ink)}
+.head-dot{left:8px;top:96px;width:27px;height:27px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--ink)}
+.head-dot.small{left:13px;top:41px;width:17px;height:17px;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--ink)}
+.root-dot{left:14px;top:44px;width:15px;height:15px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px var(--ink)}
+.hero{padding:56px 0 72px}
+.refs{display:flex;flex-wrap:wrap;gap:14px;font:14px var(--mono);color:var(--muted)}
+.refs a{text-decoration:none}.refs .ref{color:var(--accent)}
+h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spacing:-.06em;font-weight:700}
+.post-hero h1{font-size:clamp(44px,7vw,88px);line-height:.95;letter-spacing:-.045em;max-width:16ch;text-wrap:balance}
+.tagline{margin:24px 0 0;font-size:clamp(26px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:500}
+.lede{max-width:640px;margin:20px 0 0;font-size:clamp(17px,1.6vw,20px);line-height:1.5;color:var(--soft);text-wrap:pretty}
+.entry{padding:36px 0 40px}
+.sha{font:13px var(--mono);color:var(--muted)}.sha.hot{color:var(--accent)}.sha a{color:inherit}
+.entry h2{margin:12px 0 0;font-size:clamp(28px,3.4vw,40px);line-height:1.05;letter-spacing:-.03em}
+.entry h2 a{text-decoration:none}
+.entry p{max-width:680px;margin:14px 0 0;font-size:18px;line-height:1.55;color:var(--soft);text-wrap:pretty}
+.post-body{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:56px;padding:48px 0 64px}
+.content{font-size:19px;line-height:1.65;color:var(--soft)}
+.content>:first-child{margin-top:0}
+.content h2{margin:2.2em 0 .5em;font-size:clamp(26px,3vw,34px);line-height:1.1;letter-spacing:-.025em;color:var(--ink)}
+.content h3{margin:1.8em 0 .4em;font-size:22px;letter-spacing:-.015em;color:var(--ink)}
+.content p{margin:0 0 1.1em;text-wrap:pretty}
+.content ul,.content ol{margin:0 0 1.1em;padding-left:1.2em}.content li{margin:.3em 0}
+.content li::marker{color:var(--accent)}
+.content a{color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.content strong{color:var(--ink)}
+.content code{font:.86em var(--mono);background:var(--chip);border-radius:6px;padding:.1em .35em}
+.content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
+.content pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
+.content .table{margin:1.4em 0;overflow-x:auto}
+.content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
+.content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
+.content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.content td{overflow-wrap:anywhere}.content td code{white-space:nowrap}
+.content td:first-child{overflow-wrap:normal}
+.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
+.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
+.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
+.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
+.foot{padding:40px 0 64px}
+.foot .links{display:flex;flex-wrap:wrap;gap:28px;margin-top:14px;font-size:17px}
+@media(max-width:900px){.post-body{display:block}.toc{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="topbar">
+  <a class="brand" href="../../" aria-label="grit homepage">grit</a>
+  <nav class="nav" aria-label="Primary">
+    <a href="../../docs/">Docs</a>
+    <a href="https://crates.io/crates/grit-lib">Library</a>
+    <a href="../">Blog</a>
+    <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
+  </nav>
+</header>
+<main>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
+  <div class="hero post-hero">
+    <div class="refs"><a class="ref" href="../">← blog</a><span>52ebb16</span><time datetime="2026-10-07">October 7, 2026</time><span>schacon</span></div>
+    <h1>Grit is now maintained by a factory of agents</h1>
+    <p class="lede">Grit now has an almost fully autonomous maintainer. Cloud agents plan the roadmap, fix issues, review each other&#x27;s work, land changes, cut a release every day and test it on Linux, macOS and Windows. Here&#x27;s how it works and where to watch it.</p>
+  </div>
+</section>
+<section class="commit">
+  <div class="rail" aria-hidden="true"><span class="line"></span></div>
+  <div class="post-body">
+    <article class="content"><p>Grit now has a maintainer that is mostly software. A small web service we call the factory runs a crew of cloud agents that plan work from the roadmap, triage and fix issues, write code and tests, benchmark against Git, review each other, land the result on <code>main</code>, and cut a release every day. The human maintainer sets direction, approves plans and answers the questions the agents ask.</p>
+<p>This is an experiment, and it&#x27;s running in the open. You can watch it live at <a href="https://maint.grit-scm.com">maint.grit-scm.com</a>.</p>
+<h2 id="where-to-watch">Where to watch</h2>
+<ul>
+<li><strong><a href="https://maint.grit-scm.com">What&#x27;s cooking</a></strong> is the public dashboard: the roadmap item in focus, every task that&#x27;s queued, being cooked or being tasted (reviewed), the latest commits on <code>main</code>, benchmarks against Git, and how much agent time and how many tokens it all takes.</li>
+<li><strong>The changelog</strong> on that page has one post per release, summarizing what landed that day with the reviewers&#x27; before-and-after measurements and a link to the exact commit range on GitHub.</li>
+<li><strong><a href="https://maint.grit-scm.com/cooking.json">cooking.json</a></strong> has the same data for scripts.</li>
+<li><strong><a href="https://github.com/gitbutlerapp/grit">GitHub</a></strong> is where it all ends up: issues the factory triaged or filed, commits on <code>main</code>, and the daily releases.</li>
+</ul>
+<h2 id="the-crew">The crew</h2>
+<p>Each kind of work gets its own agent, running on <a href="https://cursor.com/blog/typescript-sdk">Cursor&#x27;s cloud agents</a> through the Cursor SDK, with a model chosen for the job:</p>
+<div class="table"><table><thead><tr><th>Agent</th><th>What it does</th><th>Model</th></tr></thead><tbody><tr><td>Planner</td><td>Breaks a roadmap item into small steps that can each land on their own</td><td>Claude Opus 5.5</td></tr><tr><td>Implementer</td><td>Writes one step or one issue fix, with tests and benchmark numbers</td><td>Composer 2.5</td></tr><tr><td>Reviewer</td><td>Reads the diff, runs the Rust tests, measures, and writes a brief</td><td>GPT-5.6 Sol</td></tr><tr><td>Integrator</td><td>Rebases approved work onto <code>main</code>, resolves conflicts and lands it</td><td>GPT-5.6 Sol</td></tr><tr><td>Triager</td><td>Labels new GitHub issues and decides whether a fix is worth trying</td><td>Composer 2.5</td></tr><tr><td>Scout</td><td>Reads the Git mailing list and upstream commits for ideas</td><td>Claude Sonnet 5.5</td></tr><tr><td>Dogfooder</td><td>Uses grit like a person would and files bugs</td><td>Claude Sonnet 5.5</td></tr></tbody></table></div>
+<p>The reviewer deliberately comes from a different model family than the implementer, so the two don&#x27;t share blind spots.</p>
+<h2 id="how-work-flows">How work flows</h2>
+<p>It starts from two documents: a short direction statement (what Grit is, and what it isn&#x27;t) and a roadmap of about twenty items. The factory keeps several roadmap items in flight at once. For each one, a planner writes a step-by-step plan with a dependency graph, outcomes it can measure, risks, and the open questions it wants the maintainer to weigh in on. The maintainer approves the plan, steers it, or sends it back.</p>
+<p>Approved steps become tasks. Each runs on its own cloud machine and does its work in a <a href="https://gitbutler.com">GitButler</a> workspace. Nothing goes to GitHub at this stage. Every branch lives in GitButler Mesh, where other agents can fetch it, stack work on top of it, or review it.</p>
+<p>When an implementer finishes, a reviewer pulls the branch from the Mesh, runs <code>cargo test</code>, checks compatibility against the system <code>git</code>, re-measures the author&#x27;s performance claims, and writes an integration brief. The brief covers what changed and why, before-and-after numbers, risks, the strongest argument against merging, and follow-up tasks it noticed. If the reviewer finds a real problem, the author gets the feedback and tries again.</p>
+<p>Work that is approved and passes its Rust tests lands on its own. Security fixes always wait for the maintainer, and anything the reviewer won&#x27;t approve goes to the maintainer with the brief attached. If landing fails because <code>main</code> moved underneath it, an integrator agent rebases the branch, resolves the conflicts and lands it. Integrated branches are archived from the Mesh automatically.</p>
+<h2 id="issues-ideas-and-dogfooding">Issues, ideas and dogfooding</h2>
+<p>Every new GitHub issue is triaged within minutes: labeled by type, area and priority, and either queued for a fix or marked as not worth one, with a written assessment.</p>
+<p>Once a day, a scout reads recent traffic on the Git mailing list and new commits to upstream Git, and proposes work for Grit: performance ideas, compatibility changes, edge cases worth testing.</p>
+<p>Dogfooding agents install Grit and use it the way a person would: cloning real projects, branching, committing, pushing, timing it all against <code>git</code>. They run on Cursor&#x27;s Linux cloud and on two machines we run ourselves, a MacBook and a Windows PC, connected as self-hosted Cursor workers. Several of the bugs fixed this week were filed this way, including Windows path handling, macOS Unicode normalization and a clone that unpacked a 194,000-object pack into loose files.</p>
+<h2 id="a-release-every-day">A release every day</h2>
+<p>On any day where new work has landed, the factory bumps the version (0.5.1, 0.5.2, …), tags it, and Grit&#x27;s release workflow builds and publishes binaries for Linux, macOS and Windows. The factory then writes the changelog post for the dashboard.</p>
+<p>Then the release gets checked. Each platform installs the published binary the way a user would and confirms the version. Each one draws its own random mix from a catalog of everyday scenarios:</p>
+<ul>
+<li>init, commit and push</li>
+<li>clones over HTTPS, local paths and <code>file://</code></li>
+<li>switching branches and rewriting history</li>
+<li>undoing commits</li>
+<li>two people pushing to the same branch</li>
+<li>merge conflicts</li>
+<li>Grit serving Git, and Git serving Grit</li>
+<li>large trees and long histories</li>
+</ul>
+<p>Each night&#x27;s mix also adds a couple of twists, like Unicode file names, CRLF line endings or case-only renames. For every scenario the agent writes down the steps and the expected outcomes before running anything, then grades what actually happened. The maintainer gets one report in the morning: a scenario-by-platform grid, every failed step with what was expected and what happened, and links to any bugs it filed.</p>
+<h2 id="the-human-part">The human part</h2>
+<p>The maintainer&#x27;s job is the part that needs taste: writing the direction and the roadmap, approving plans, answering questions, and making the calls the agents flag. Decisions arrive in an inbox on a private dashboard and on a small iOS app with push notifications. Each one comes with a brief, laid out so it can be read on a phone. The maintainer can approve, steer the agent with a sentence, or queue one of the suggested follow-ups with a tap. Everything can be paused with one button.</p>
+<h2 id="so-far">So far</h2>
+<p>In its first day and a half, the factory has:</p>
+<ul>
+<li>launched 404 agents across 646 runs, using about 150 hours of agent time and 2.5 billion tokens</li>
+<li>completed 220 reviews</li>
+<li>triaged all 33 open issues</li>
+<li>landed 92 changes on <code>main</code></li>
+</ul>
+<p>That&#x27;s not all good code on the first try. Most changes go through two or three review rounds, and a few have been sent back or discarded. But it is a lot of carefully checked work, and you can see every step of it.</p>
+<p>We&#x27;ll keep writing about what works and what doesn&#x27;t. In the meantime, <a href="https://maint.grit-scm.com">come watch it cook</a>.</p></article>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#where-to-watch">Where to watch</a></li>
+<li class="toc-level-2"><a href="#the-crew">The crew</a></li>
+<li class="toc-level-2"><a href="#how-work-flows">How work flows</a></li>
+<li class="toc-level-2"><a href="#issues-ideas-and-dogfooding">Issues, ideas and dogfooding</a></li>
+<li class="toc-level-2"><a href="#a-release-every-day">A release every day</a></li>
+<li class="toc-level-2"><a href="#the-human-part">The human part</a></li>
+<li class="toc-level-2"><a href="#so-far">So far</a></li></ol></aside>
+  </div>
+</section>
+</main>
+<footer class="commit">
+  <div class="rail" aria-hidden="true"><span class="line stub"></span><span class="root-dot"></span></div>
+  <div class="foot">
+    <div class="sha">0000001 · initial commit · by <a href="https://gitbutler.com">GitButler</a></div>
+    <div class="links"><a href="../">All posts</a><a href="../../">Home</a><a href="../feed.xml">RSS feed</a></div>
+  </div>
+</footer>
+</div>
+</body>
+</html>
