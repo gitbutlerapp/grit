@@ -170,7 +170,7 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
     let _keep = temp_guard;
 
     let index = repo.load_index()?;
-    println!(&quot;index_entries={}&quot;, index.entries.len());
+    println!(&quot;index_entries={}&quot;, index.entries().len());
 
     let outcome = stage(&amp;repo, &amp;StageOptions::default(), &amp;mut NullProgress)?;
     println!(
