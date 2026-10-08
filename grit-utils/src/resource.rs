@@ -70,12 +70,33 @@ fn peak_rss_single_child(_command: &str, _cwd: &Path) -> Result<u64> {
     Ok(0)
 }
 
+/// Convert `ru_maxrss` from `getrusage` into bytes (OS-specific units).
 #[cfg(unix)]
-fn rss_bytes_from_nix(kib: i64) -> u64 {
-    if kib > 1_000_000 {
-        kib as u64
-    } else {
-        (kib as u64).saturating_mul(1024)
+pub(crate) fn rss_bytes_from_nix(raw: i64) -> u64 {
+    let raw = raw.max(0) as u64;
+    #[cfg(target_os = "macos")]
+    {
+        raw
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Linux and BSD report KiB.
+        raw.saturating_mul(1024)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rss_bytes_linux_kib_to_bytes() {
+        if cfg!(target_os = "macos") {
+            assert_eq!(rss_bytes_from_nix(4096), 4096);
+        } else {
+            assert_eq!(rss_bytes_from_nix(1024), 1024 * 1024);
+            assert_eq!(rss_bytes_from_nix(1_126_400), 1_153_433_600);
+        }
     }
 }
 
