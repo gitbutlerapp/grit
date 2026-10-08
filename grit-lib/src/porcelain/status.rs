@@ -26,8 +26,10 @@ use std::fs::{self, DirEntry, ReadDir};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::config::ConfigSet;
 use crate::diff::DiffEntry;
 use crate::error::Result;
+use crate::hash::{index_parallelism_from_config, try_par_hash_with, ParallelHashError};
 use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
@@ -146,48 +148,162 @@ pub struct StatusModel {
 // untracked-cache refresh, and trace2 emission wrap this — those stay in the CLI
 // because they are IPC / env / optimization concerns, not status computation.
 
+fn ignored_mode_to_untracked_cache(
+    mode: IgnoredMode,
+) -> crate::untracked_cache::UntrackedIgnoredMode {
+    use crate::untracked_cache::UntrackedIgnoredMode;
+    match mode {
+        IgnoredMode::No => UntrackedIgnoredMode::No,
+        IgnoredMode::Traditional => UntrackedIgnoredMode::Traditional,
+        IgnoredMode::Matching => UntrackedIgnoredMode::Matching,
+    }
+}
+
 /// Walk the work tree and collect untracked and ignored paths.
 ///
 /// `ignored_mode` selects whether (and how) ignored paths are reported;
 /// `show_all` corresponds to `--untracked-files=all`. Results are sorted.
 pub fn collect_untracked_and_ignored(
     repo: &Repository,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     ignored_mode: IgnoredMode,
     show_all: bool,
     pathspecs: &[String],
 ) -> Result<(Vec<String>, Vec<String>)> {
-    let mut rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
-    collect_untracked_and_ignored_with_rules(
+    collect_untracked_and_ignored_with_cache(
         repo,
         index,
         work_tree,
         ignored_mode,
         show_all,
         pathspecs,
-        &mut rules,
+        true,
     )
 }
 
-/// Like [`collect_untracked_and_ignored`], reusing an existing [`crate::worktree_rules::WorktreeRules`] context.
-pub fn collect_untracked_and_ignored_with_rules(
+/// Like [`collect_untracked_and_ignored`], with control over UNTR cache use.
+///
+/// When `use_untracked_cache` is false, the index UNTR extension is not refreshed (used by
+/// staging/`git add`, which must not pay the full status-style cache rebuild).
+pub fn collect_untracked_and_ignored_with_cache(
     repo: &Repository,
-    index: &Index,
+    index: &mut Index,
     work_tree: &Path,
     ignored_mode: IgnoredMode,
     show_all: bool,
     pathspecs: &[String],
-    rules: &mut crate::worktree_rules::WorktreeRules,
+    use_untracked_cache: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
+    let rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
+    collect_untracked_and_ignored_inner(
+        repo,
+        index,
+        work_tree,
+        pathspecs,
+        UntrackedScan {
+            ignored_mode,
+            show_all,
+            sort_paths: true,
+            use_untracked_cache,
+        },
+        &rules,
+    )
+}
+
+/// Like [`collect_untracked_and_ignored`], reusing an existing
+/// [`crate::worktree_rules::WorktreeRules`] so ignore and attribute files already loaded by the
+/// same operation are not read again.
+pub fn collect_untracked_and_ignored_with_rules(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    pathspecs: &[String],
+    rules: &crate::worktree_rules::WorktreeRules,
+) -> Result<(Vec<String>, Vec<String>)> {
+    collect_untracked_and_ignored_inner(
+        repo,
+        index,
+        work_tree,
+        pathspecs,
+        UntrackedScan {
+            ignored_mode,
+            show_all,
+            sort_paths: true,
+            use_untracked_cache: true,
+        },
+        rules,
+    )
+}
+
+/// How [`collect_untracked_and_ignored_inner`] walks and reports the work tree.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UntrackedScan {
+    /// Whether (and how) ignored paths are reported.
+    pub ignored_mode: IgnoredMode,
+    /// `--untracked-files=all`: list files inside untracked directories.
+    pub show_all: bool,
+    /// Sort the returned paths; unsorted results allow the parallel top-level walk.
+    pub sort_paths: bool,
+    /// Refresh and answer from the index UNTR extension when configured.
+    pub use_untracked_cache: bool,
+}
+
+/// Shared implementation of the untracked/ignored walk.
+pub(crate) fn collect_untracked_and_ignored_inner(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    pathspecs: &[String],
+    scan: UntrackedScan,
+    rules: &crate::worktree_rules::WorktreeRules,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let UntrackedScan {
+        ignored_mode,
+        show_all,
+        sort_paths,
+        use_untracked_cache,
+    } = scan;
     // Keep parity with historical status behavior in tests that rely on broad untracked scans
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
     // pathspec-based pruning entirely.
     let effective_pathspecs: &[String] = if pathspecs.is_empty() { &[] } else { pathspecs };
-    let ignorecase = repo
+
+    if use_untracked_cache && effective_pathspecs.is_empty() && ignored_mode == IgnoredMode::No {
+        let config = rules.config_arc();
+        let cache_config = config
+            .get_bool("core.untrackedCache")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
+        let cache_on_index = index.untracked_cache.is_some();
+        if cache_config && cache_on_index {
+            let ident = crate::untracked_cache::untracked_cache_ident(work_tree);
+            let mut uc = index.untracked_cache.take().unwrap_or_else(|| {
+                crate::untracked_cache::UntrackedCache::new_shell(0, ident.clone())
+            });
+            if uc.ident == ident {
+                crate::untracked_cache::refresh_untracked_cache_for_status(
+                    repo,
+                    index,
+                    work_tree,
+                    &config,
+                    &mut uc,
+                    show_all,
+                    ignored_mode_to_untracked_cache(ignored_mode),
+                )?;
+                let untracked = crate::untracked_cache::collect_untracked_from_cache(&uc);
+                index.untracked_cache = Some(uc);
+                return Ok((untracked, Vec::new()));
+            }
+            index.untracked_cache = Some(uc);
+        }
+    }
+    let ignorecase = rules
         .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
         .unwrap_or(false);
     let tracked_paths = crate::path_icase::Stage0TrackedPaths::from_index(index, ignorecase);
     let tracked: BTreeSet<String> = index
@@ -208,6 +324,21 @@ pub fn collect_untracked_and_ignored_with_rules(
     let mut ignored = Vec::new();
     let precompose_unicode =
         effective_core_precomposeunicode_with_config(Some(&repo.git_dir), Some(rules.config()));
+
+    if !sort_paths && effective_pathspecs.is_empty() && tracked.is_empty() && gitlinks.is_empty() {
+        untracked = collect_untracked_parallel_top_level(
+            repo,
+            index,
+            work_tree,
+            ignored_mode,
+            show_all,
+            precompose_unicode,
+            &tracked_paths,
+            &rules.ignore(),
+            effective_pathspecs,
+        )?;
+        return Ok((untracked, ignored));
+    }
 
     visit_untracked_node(
         repo,
@@ -230,9 +361,87 @@ pub fn collect_untracked_and_ignored_with_rules(
         &mut ignored,
     )?;
 
-    untracked.sort();
-    ignored.sort();
+    if sort_paths {
+        untracked.sort();
+        ignored.sort();
+    }
     Ok((untracked, ignored))
+}
+
+/// Expand collapsed untracked directory markers (`dir/`) into concrete file paths for staging.
+///
+/// [`collect_untracked_and_ignored`] with `show_all = false` reports directories as a single
+/// `dir/` entry; `git add` must stage the non-ignored files inside instead of a tree placeholder.
+pub fn expand_untracked_for_staging(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    untracked: Vec<String>,
+    pathspecs: &[String],
+) -> Result<Vec<String>> {
+    if !untracked.iter().any(|p| p.ends_with('/')) {
+        let mut files = untracked;
+        files.sort();
+        files.dedup();
+        return Ok(files);
+    }
+    let rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
+    expand_untracked_for_staging_with_rules(repo, index, work_tree, untracked, pathspecs, &rules)
+}
+
+/// Like [`expand_untracked_for_staging`], reusing an existing
+/// [`crate::worktree_rules::WorktreeRules`] for every nested directory walk.
+pub fn expand_untracked_for_staging_with_rules(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    untracked: Vec<String>,
+    pathspecs: &[String],
+    rules: &crate::worktree_rules::WorktreeRules,
+) -> Result<Vec<String>> {
+    let mut expanded = Vec::new();
+    for path in untracked {
+        if !path.ends_with('/') {
+            expanded.push(path);
+            continue;
+        }
+        let dir = path.trim_end_matches('/').to_owned();
+        if dir.is_empty() {
+            continue;
+        }
+        let narrow = if pathspecs.is_empty() {
+            vec![dir.clone()]
+        } else {
+            pathspecs.to_vec()
+        };
+        let (files, _) = collect_untracked_and_ignored_with_rules(
+            repo,
+            index,
+            work_tree,
+            IgnoredMode::No,
+            true,
+            &narrow,
+            rules,
+        )?;
+        for file in files {
+            if file.ends_with('/') {
+                let nested = expand_untracked_for_staging_with_rules(
+                    repo,
+                    index,
+                    work_tree,
+                    vec![file],
+                    &narrow,
+                    rules,
+                )?;
+                expanded.extend(nested);
+            } else {
+                expanded.push(file);
+            }
+        }
+    }
+    expanded.sort();
+    expanded.dedup();
+    Ok(expanded)
 }
 
 /// Test-only counter of directory entries consumed during check-only untracked probes.
@@ -260,6 +469,115 @@ pub(crate) mod untracked_walk_probe {
 enum UntrackedWalkStep {
     Continue,
     Stop,
+}
+
+/// Parallel untracked scan for an empty index (bulk `git add .`), preserving path order loosely.
+///
+/// Only used without pathspecs, so the walk never needs attribute rules (`rules = None`); the
+/// per-operation [`crate::worktree_rules::WorktreeRules`] is not shareable across workers.
+#[allow(clippy::too_many_arguments)]
+fn collect_untracked_parallel_top_level(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+    matcher_template: &IgnoreMatcher,
+    pathspecs: &[String],
+) -> Result<Vec<String>> {
+    let empty_tracked = BTreeSet::<String>::new();
+    let empty_gitlinks = BTreeSet::<String>::new();
+    let entries: Vec<DirEntry> = fs::read_dir(work_tree)
+        .map_err(crate::error::Error::Io)?
+        .filter_map(|e| e.ok())
+        .collect();
+
+    let mut root_files = Vec::new();
+    let mut root_dirs = Vec::new();
+    for entry in entries {
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        if entry.path().is_dir() {
+            root_dirs.push(entry);
+        } else {
+            root_files.push(entry);
+        }
+    }
+    root_files.sort_by_key(|e| e.file_name());
+    root_dirs.sort_by_key(|e| e.file_name());
+
+    let mut untracked = Vec::new();
+    let mut ignored = Vec::new();
+    let mut matcher = matcher_template.clone();
+    for entry in root_files {
+        let _ = visit_untracked_dir_entry(
+            repo,
+            index,
+            work_tree,
+            &empty_tracked,
+            &empty_gitlinks,
+            &mut matcher,
+            ignored_mode,
+            show_all,
+            false,
+            None::<&Cell<bool>>,
+            precompose_unicode,
+            tracked_paths,
+            "",
+            &entry,
+            pathspecs,
+            None,
+            &mut untracked,
+            &mut ignored,
+        )?;
+    }
+
+    if root_dirs.is_empty() {
+        return Ok(untracked);
+    }
+
+    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let parallelism = index_parallelism_from_config(&config);
+    let threads = parallelism.threads();
+    let dir_count = root_dirs.len();
+    let est_bytes = dir_count.saturating_mul(4096);
+    let per_dir = try_par_hash_with(&root_dirs, threads, est_bytes, |entry| {
+        let mut matcher = matcher_template.clone();
+        let mut local_untracked = Vec::new();
+        let mut local_ignored = Vec::new();
+        let _ = visit_untracked_dir_entry(
+            repo,
+            index,
+            work_tree,
+            &empty_tracked,
+            &empty_gitlinks,
+            &mut matcher,
+            ignored_mode,
+            show_all,
+            false,
+            None::<&Cell<bool>>,
+            precompose_unicode,
+            tracked_paths,
+            "",
+            entry,
+            pathspecs,
+            None,
+            &mut local_untracked,
+            &mut local_ignored,
+        )?;
+        Ok(local_untracked)
+    })
+    .map_err(|e: ParallelHashError<crate::error::Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+
+    for mut local in per_dir {
+        untracked.append(&mut local);
+    }
+    Ok(untracked)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1046,18 +1364,6 @@ pub fn status(
     let worktree_rules = Arc::new(Mutex::new(
         crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?,
     ));
-    if crate::diff::refresh_index_stat_content_verified_with_rules(
-        &repo.odb,
-        &repo.git_dir,
-        &mut index,
-        work_tree,
-        index_mtime,
-        repo_config.as_deref(),
-        Some(&worktree_rules),
-    )? && repo.try_write_index(&mut index)?
-    {
-        index.source_mtime = crate::index::index_file_mtime(&index_path);
-    }
     let sparse_directory_prefixes: Vec<Vec<u8>> = index
         .entries
         .iter()
@@ -1079,15 +1385,28 @@ pub fn status(
     progress.start("status", None);
 
     // Staged: index vs HEAD tree, narrowed to pathspecs before rename detection.
-    let mut staged: Vec<DiffEntry> =
+    let mut staged: Vec<DiffEntry> = if opts.pathspecs.is_empty()
+        && opts.renames.is_none()
+        && index.entries.iter().all(|e| e.stage() == 0)
+        && head_tree
+            .as_ref()
+            .is_some_and(|t| index.cache_tree_root.as_ref() == Some(t))
+        && index
+            .cache_tree
+            .as_ref()
+            .is_some_and(crate::index::CacheTreeNode::is_valid)
+    {
+        Vec::new()
+    } else {
         crate::diff::diff_index_to_tree(&repo.odb, &index, head_tree.as_ref(), false)?
             .into_iter()
             .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
-            .collect();
+            .collect()
+    };
 
     // Unstaged: worktree vs index, narrowed before rename detection.
     let diff_index_mtime = crate::diff::index_mtime_for_diff(&index, index_mtime);
-    let (unstaged_entries, index_refreshed_in_diff) =
+    let (unstaged_raw, index_stat_refresh_changed) =
         crate::diff::diff_index_to_worktree_with_options(
             &repo.odb,
             &mut index,
@@ -1103,10 +1422,10 @@ pub fn status(
                 ..Default::default()
             },
         )?;
-    if index_refreshed_in_diff && repo.try_write_index(&mut index)? {
+    if index_stat_refresh_changed && repo.try_write_index(&mut index)? {
         index.source_mtime = crate::index::index_file_mtime(&index_path);
     }
-    let mut unstaged: Vec<DiffEntry> = unstaged_entries
+    let mut unstaged: Vec<DiffEntry> = unstaged_raw
         .into_iter()
         .filter(|e| status_path_matches(e.path(), &opts.pathspecs))
         .collect();
@@ -1119,17 +1438,17 @@ pub fn status(
     let (untracked, ignored) = if opts.untracked == UntrackedMode::No {
         (Vec::new(), Vec::new())
     } else {
-        let mut rules_guard = worktree_rules.lock().map_err(|e| {
+        let rules_guard = worktree_rules.lock().map_err(|e| {
             crate::error::Error::Message(format!("worktree rules lock poisoned: {e}"))
         })?;
         collect_untracked_and_ignored_with_rules(
             repo,
-            &index,
+            &mut index,
             work_tree,
             opts.ignored,
             opts.untracked == UntrackedMode::All,
             &opts.pathspecs,
-            &mut rules_guard,
+            &rules_guard,
         )?
     };
 
@@ -1272,6 +1591,39 @@ mod status_op_tests {
             entries_read <= 8,
             "check-only probe must stop at the first visible entry, not scan all \
              3000 files (read {entries_read} directory entries during probe)"
+        );
+    }
+
+    #[test]
+    fn status_scan_stats_each_tracked_path_once() {
+        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        const FILE_COUNT: usize = 2000;
+        for i in 0..FILE_COUNT {
+            let dir = format!("d{:04}", i / 100);
+            fs::create_dir_all(root.join(&dir)).unwrap();
+            fs::write(
+                root.join(&dir).join(format!("f{i:05}.txt")),
+                format!("body {i}\n"),
+            )
+            .unwrap();
+        }
+        grit_test_support::git(root, &["add", "."]);
+        grit_test_support::git(root, &["commit", "-qm", "seed"]);
+
+        let repo = Repository::open(&root.join(".git"), Some(root)).unwrap();
+        reset_worktree_metadata_probe();
+        let _ = status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+        let tracked = repo.load_index().unwrap().entries.len();
+        let dir_count = (FILE_COUNT + 99) / 100;
+        let calls = worktree_metadata_probe_count();
+        assert!(
+            calls <= tracked + dir_count + 5,
+            "status scan metadata calls {calls} exceeded budget {} (tracked {tracked}, dirs {dir_count})",
+            tracked + dir_count + 5
         );
     }
 

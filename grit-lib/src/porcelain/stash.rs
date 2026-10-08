@@ -70,7 +70,7 @@ pub fn flatten_tree_full(
 pub fn add_stage_entry(index: &mut Index, path: &[u8], oid: &ObjectId, mode: u32, stage: u16) {
     let name_len = path.len().min(0xFFF) as u16;
     let flags = (stage << 12) | name_len;
-    index.entries.push(IndexEntry {
+    index.push_entry_unsorted(IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
         mtime_sec: 0,
@@ -571,7 +571,7 @@ pub fn apply_stash(
                     } else {
                         path.len() as u16
                     };
-                    new_index.entries.push(IndexEntry {
+                    new_index.push_entry_unsorted(IndexEntry {
                         ctime_sec: 0,
                         ctime_nsec: 0,
                         mtime_sec: 0,
@@ -718,6 +718,7 @@ pub fn apply_stash(
             work_tree,
             None,
             repo.config().ok().as_deref(),
+            None,
             rules_arc.as_ref(),
         )?;
     }

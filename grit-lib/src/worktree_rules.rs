@@ -23,54 +23,47 @@ use crate::odb::Odb;
 use crate::repo::Repository;
 
 /// Counts disk reads of attribute/ignore pattern files (tests only).
+///
+/// Counts are per thread so tests running concurrently in one process do not see each other's
+/// reads. Attribute files are always read on the calling thread ([`WorktreeRules`] is not
+/// `Sync`), so an operation's reads land in its caller's counts.
 pub mod file_load_counters {
+    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
-    use std::sync::{Mutex, OnceLock};
 
-    fn map() -> &'static Mutex<HashMap<PathBuf, u32>> {
-        static MAP: OnceLock<Mutex<HashMap<PathBuf, u32>>> = OnceLock::new();
-        MAP.get_or_init(|| Mutex::new(HashMap::new()))
+    thread_local! {
+        static MAP: RefCell<HashMap<PathBuf, u32>> = RefCell::new(HashMap::new());
     }
 
-    /// Reset counters before an operation under test.
+    /// Reset this thread's counters before an operation under test.
     pub fn reset() {
-        if let Ok(mut m) = map().lock() {
-            m.clear();
-        }
+        MAP.with(|m| m.borrow_mut().clear());
     }
 
     /// Record one read of `path` (canonicalized when possible).
     pub fn record(path: &Path) {
         let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        if let Ok(mut m) = map().lock() {
-            *m.entry(key).or_insert(0) += 1;
-        }
+        MAP.with(|m| *m.borrow_mut().entry(key).or_insert(0) += 1);
     }
 
     /// Maximum read count for any single file since the last [`reset`].
     #[must_use]
     pub fn max_reads_per_file() -> u32 {
-        map()
-            .lock()
-            .map(|m| m.values().copied().max().unwrap_or(0))
-            .unwrap_or(0)
+        MAP.with(|m| m.borrow().values().copied().max().unwrap_or(0))
     }
 
     /// Total distinct files read since the last [`reset`].
     #[must_use]
     pub fn distinct_files_read() -> usize {
-        map().lock().map(|m| m.len()).unwrap_or(0)
+        MAP.with(|m| m.borrow().len())
     }
 
     /// Read count for `path` since the last [`reset`] (canonicalized when possible).
     #[must_use]
     pub fn reads_for(path: &Path) -> u32 {
         let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        map()
-            .lock()
-            .map(|m| m.get(&key).copied().unwrap_or(0))
-            .unwrap_or(0)
+        MAP.with(|m| m.borrow().get(&key).copied().unwrap_or(0))
     }
 }
 

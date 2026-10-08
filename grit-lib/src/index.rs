@@ -3230,21 +3230,25 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Per-thread count of fsmonitor EWAH rebuilds. Thread-local so concurrently running tests
+    /// that also write fsmonitor indexes do not disturb each other's counts.
     pub(super) mod fsmonitor_rebuild_counter {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::cell::Cell;
 
-        static COUNT: AtomicUsize = AtomicUsize::new(0);
+        thread_local! {
+            static COUNT: Cell<usize> = const { Cell::new(0) };
+        }
 
         pub fn reset() {
-            COUNT.store(0, Ordering::SeqCst);
+            COUNT.with(|c| c.set(0));
         }
 
         pub fn count() -> usize {
-            COUNT.load(Ordering::SeqCst)
+            COUNT.with(Cell::get)
         }
 
         pub fn note_build() {
-            COUNT.fetch_add(1, Ordering::SeqCst);
+            COUNT.with(|c| c.set(c.get() + 1));
         }
     }
 

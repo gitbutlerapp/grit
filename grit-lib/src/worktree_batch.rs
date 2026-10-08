@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
-use crate::crlf::{self, ConversionConfig, GitAttributes};
+use crate::crlf::{self, ConversionConfig, FileAttrs, GitAttributes};
 use crate::diff::{hash_worktree_file, mode_from_metadata, worktree_blob_bytes};
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, try_par_hash_with, ParallelHashError, Parallelism};
@@ -20,6 +20,9 @@ pub(crate) struct WorktreeBlobReadInput {
     pub index_relpath: String,
     /// Stage-0 index entry when conversion may use the recorded OID blob.
     pub index_entry: Option<IndexEntry>,
+    /// Attributes for `index_relpath`, resolved by the caller (attribute lookup is not
+    /// thread-safe, so it happens before the parallel phase).
+    pub file_attrs: FileAttrs,
 }
 
 /// Worktree blob after parallel read, hash, and zlib compression.
@@ -50,8 +53,6 @@ pub(crate) fn prepare_worktree_blobs_parallel(
     odb: &Odb,
     items: &[WorktreeBlobReadInput],
     conv: &ConversionConfig,
-    attrs: &GitAttributes,
-    config: &ConfigSet,
     parallelism: Parallelism,
 ) -> Result<Vec<PreparedWorktreeBlob>> {
     if items.is_empty() {
@@ -65,13 +66,12 @@ pub(crate) fn prepare_worktree_blobs_parallel(
     let threads = parallelism.threads();
     let prepared = try_par_hash_with(items, threads, total_bytes, |item| {
         let meta = fs::symlink_metadata(&item.abs).map_err(Error::Io)?;
-        let file_attrs = crlf::get_file_attrs(attrs, &item.index_relpath, false, config);
         let data = worktree_blob_bytes(
             odb,
             &item.abs,
             &meta,
             conv,
-            &file_attrs,
+            &item.file_attrs,
             &item.index_relpath,
             item.index_entry.as_ref(),
         )?;

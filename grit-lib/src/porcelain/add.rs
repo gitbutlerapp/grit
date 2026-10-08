@@ -13,15 +13,26 @@ use crate::diff::{
     DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::index::{entry_from_metadata, index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
+use crate::hash::{
+    index_parallelism_from_config, try_par_hash_with, ParallelHashError, Parallelism,
+};
+use crate::index::{
+    entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
+};
 use crate::objects::{parse_commit, parse_tree, ObjectId};
+use crate::odb::WriteOptions;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
-use crate::porcelain::status::IgnoredMode;
+use crate::porcelain::status::{
+    collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
+    UntrackedScan,
+};
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
+use crate::worktree_batch::{prepare_worktree_blobs_parallel, WorktreeBlobReadInput};
+use crate::worktree_rules::WorktreeRules;
 
 /// What paths [`stage`] should update (`git add` vs `git add -u`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -95,52 +106,83 @@ pub fn stage(
     let index_mtime = index_file_mtime(&index_path);
     let mut index = repo.load_index()?;
 
-    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(
-        crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?,
-    ));
-    let ignorecase = rules_arc
-        .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?
-        .config()
+    // One attribute/ignore/conversion context for the whole add: the worktree diff, the
+    // untracked walk and blob conversion all reuse the files it has already loaded.
+    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(WorktreeRules::from_repository(
+        repo, &index,
+    )?));
+    let rules_config = lock_rules(&rules_arc)?.config_arc();
+    let parallelism = index_parallelism_from_config(&rules_config);
+    let ignorecase = rules_config
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
+    let mut icase_map = Stage0IcasePathMap::from_index(&index, ignorecase);
 
-    let diff_opts = DiffIndexToWorktreeOptions {
-        index_mtime,
-        repository_git_dir: Some(repo.git_dir.clone()),
-        config: Some(
-            rules_arc
-                .lock()
-                .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?
-                .config_arc(),
-        ),
-        worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
-        ..DiffIndexToWorktreeOptions::default()
-    };
-    let (unstaged, _) = crate::diff::diff_index_to_worktree_for_staging(
-        &repo.odb,
-        &repo.git_dir,
-        &mut index,
-        work_tree,
-        diff_opts,
-    )?;
-
-    let untracked = if opts.mode == StageMode::All {
-        let mut guard = rules_arc
-            .lock()
-            .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
-        let (untracked, _) = super::status::collect_untracked_and_ignored_with_rules(
-            repo,
-            &index,
+    let (unstaged, staging_stats) = if index.entries.is_empty() {
+        (Vec::new(), std::collections::BTreeMap::new())
+    } else {
+        let diff_opts = DiffIndexToWorktreeOptions {
+            index_mtime,
+            repository_git_dir: Some(repo.git_dir.clone()),
+            config: Some(std::sync::Arc::clone(&rules_config)),
+            worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
+            ..DiffIndexToWorktreeOptions::default()
+        };
+        let (unstaged, _, staging_stats) = crate::diff::diff_index_to_worktree_for_staging(
+            &repo.odb,
+            &repo.git_dir,
+            &mut index,
             work_tree,
-            IgnoredMode::No,
-            true,
-            &opts.pathspecs,
-            &mut guard,
+            diff_opts,
         )?;
-        untracked
+        (unstaged, staging_stats)
+    };
+
+    let rules = lock_rules(&rules_arc)?;
+    let bulk_empty_index_add =
+        opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
+    let untracked = if opts.mode == StageMode::All {
+        if bulk_empty_index_add {
+            let scan = UntrackedScan {
+                ignored_mode: IgnoredMode::No,
+                show_all: true,
+                sort_paths: false,
+                use_untracked_cache: false,
+            };
+            let (untracked, _) = collect_untracked_and_ignored_inner(
+                repo,
+                &mut index,
+                work_tree,
+                &opts.pathspecs,
+                scan,
+                &rules,
+            )?;
+            untracked
+        } else {
+            let scan = UntrackedScan {
+                ignored_mode: IgnoredMode::No,
+                show_all: false,
+                sort_paths: true,
+                use_untracked_cache: false,
+            };
+            let (untracked, _) = collect_untracked_and_ignored_inner(
+                repo,
+                &mut index,
+                work_tree,
+                &opts.pathspecs,
+                scan,
+                &rules,
+            )?;
+            expand_untracked_for_staging_with_rules(
+                repo,
+                &mut index,
+                work_tree,
+                untracked,
+                &opts.pathspecs,
+                &rules,
+            )?
+        }
     } else {
         Vec::new()
     };
@@ -156,6 +198,7 @@ pub fn stage(
         index.entries.iter().map(|e| e.path.clone()).collect();
 
     let mut outcome = StageOutcome::default();
+    let has_unmerged = index.has_unmerged_entries();
 
     let worktree_updates = collect_tracked_stage_plans(&unstaged, &matches);
     for (path, plan) in worktree_updates {
@@ -166,7 +209,15 @@ pub fn stage(
             continue;
         }
         icase_map.remove_alias_of(&mut index, path.as_bytes());
-        apply_tracked_stage_plan(repo, work_tree, &path, &plan, &mut index)?;
+        apply_tracked_stage_plan(
+            repo,
+            work_tree,
+            &path,
+            &plan,
+            staging_stats.get(&path),
+            &mut index,
+            has_unmerged,
+        )?;
         outcome.modified += 1;
     }
 
@@ -175,20 +226,23 @@ pub fn stage(
             stage_ignorecase_spelling_updates(work_tree, &icase_map, &matches, &mut index)?;
     }
 
-    for path in &untracked {
-        if !matches(path) {
-            continue;
-        }
-        if indexed_any_stage.contains(path.as_bytes()) {
-            continue;
-        }
-        icase_map.remove_alias_of(&mut index, path.as_bytes());
-        stage_untracked_path(repo, work_tree, path, &rules_arc, &mut index)?;
-        outcome.added += 1;
-    }
+    stage_untracked_paths_parallel(
+        repo,
+        work_tree,
+        &untracked,
+        &matches,
+        &indexed_any_stage,
+        &rules,
+        &mut icase_map,
+        &mut index,
+        parallelism,
+        &mut outcome,
+    )?;
 
     if outcome.total() > 0 {
-        index.sort();
+        if !bulk_empty_index_add {
+            index.sort();
+        }
         repo.write_index(&mut index)?;
     }
 
@@ -201,6 +255,14 @@ struct TrackedStagePlan {
     oid: ObjectId,
     mode: u32,
     gitlink: bool,
+}
+
+fn lock_rules(
+    rules: &std::sync::Mutex<WorktreeRules>,
+) -> Result<std::sync::MutexGuard<'_, WorktreeRules>> {
+    rules
+        .lock()
+        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))
 }
 
 /// Merge unstaged diff rows into one staging action per path (unmerged paths may appear twice).
@@ -273,17 +335,19 @@ fn apply_tracked_stage_plan(
     work_tree: &Path,
     rel_path: &str,
     plan: &TrackedStagePlan,
+    cached_stat: Option<&crate::index::IndexStatFields>,
     index: &mut Index,
+    has_unmerged: bool,
 ) -> Result<()> {
     let abs = work_tree.join(rel_path);
-    let meta = fs::symlink_metadata(&abs).map_err(|e| {
-        Error::Io(std::io::Error::new(
-            e.kind(),
-            format!("could not read {rel_path}: {e}"),
-        ))
-    })?;
 
     if plan.gitlink {
+        let meta = fs::symlink_metadata(&abs).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("could not read {rel_path}: {e}"),
+            ))
+        })?;
         let oid = if plan.oid.is_zero() {
             read_submodule_head_oid(&abs).ok_or_else(|| {
                 Error::Message(format!("could not resolve submodule HEAD for '{rel_path}'"))
@@ -295,9 +359,23 @@ fn apply_tracked_stage_plan(
     }
 
     let oid = plan.oid;
-    let mut entry = entry_from_metadata(&meta, rel_path.as_bytes(), oid, plan.mode);
+    let mut entry = if let Some(stat) = cached_stat {
+        stat.index_entry(rel_path.as_bytes(), oid, plan.mode)
+    } else {
+        let meta = fs::symlink_metadata(&abs).map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("could not read {rel_path}: {e}"),
+            ))
+        })?;
+        entry_from_metadata(&meta, rel_path.as_bytes(), oid, plan.mode)
+    };
     entry.mode = plan.mode;
-    index.stage_file(entry);
+    if has_unmerged {
+        index.stage_file(entry);
+    } else {
+        index.add_or_replace(entry);
+    }
     mark_fsmonitor_staged(index, rel_path);
     Ok(())
 }
@@ -354,16 +432,122 @@ fn stage_ignorecase_spelling_updates(
     Ok(updated)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn stage_untracked_paths_parallel(
+    repo: &Repository,
+    work_tree: &Path,
+    untracked: &[String],
+    matches: &impl Fn(&str) -> bool,
+    indexed_any_stage: &HashSet<Vec<u8>>,
+    rules: &WorktreeRules,
+    icase_map: &mut Stage0IcasePathMap,
+    index: &mut Index,
+    parallelism: Parallelism,
+    outcome: &mut StageOutcome,
+) -> Result<()> {
+    let precompose_unicode = rules
+        .config()
+        .get_bool("core.precomposeunicode")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+
+    let mut batch_inputs: Vec<WorktreeBlobReadInput> = Vec::new();
+    let mut deferred: Vec<String> = Vec::new();
+
+    for path in untracked {
+        if !matches(path) {
+            continue;
+        }
+        if indexed_any_stage.contains(path.as_bytes()) {
+            continue;
+        }
+        let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
+        let file_attrs = rules.file_attrs(&resolved.index_relpath, false);
+        batch_inputs.push(WorktreeBlobReadInput {
+            abs: resolved.abs,
+            index_relpath: resolved.index_relpath,
+            index_entry: None,
+            file_attrs,
+        });
+    }
+
+    let prepared =
+        prepare_worktree_blobs_parallel(&repo.odb, &batch_inputs, rules.conversion(), parallelism)?;
+
+    if !prepared.is_empty() {
+        repo.odb.ensure_all_loose_prefix_dirs()?;
+    }
+    let write_opts = WriteOptions {
+        assume_loose_only_existence: true,
+        trust_new_loose: true,
+        ..WriteOptions::default()
+    };
+    let write_bytes: usize = prepared.iter().map(|p| p.zlib_store.len()).sum();
+    let threads = parallelism.threads();
+    let _written: Vec<ObjectId> = try_par_hash_with(&prepared, threads, write_bytes, |prep| {
+        repo.odb
+            .write_loose_zlib_prehashed(&prep.oid, &prep.zlib_store, write_opts)
+            .map_err(|e| Error::Message(format!("could not store {}: {e}", prep.index_relpath)))
+    })
+    .map_err(|e: ParallelHashError<Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+
+    let skip_per_path_cache_invalidate =
+        index.cache_tree.is_none() && index.untracked_cache.is_none();
+    let mut batch_entries: Vec<IndexEntry> = Vec::with_capacity(prepared.len());
+    for prep in prepared {
+        let abs = work_tree.join(&prep.index_relpath);
+        if prep.meta.is_dir()
+            && !prep.meta.file_type().is_symlink()
+            && read_submodule_head_oid(&abs).is_some()
+        {
+            deferred.push(prep.index_relpath);
+            continue;
+        }
+        icase_map.remove_alias_of(index, prep.index_relpath.as_bytes());
+        let mut entry = entry_from_metadata(
+            &prep.meta,
+            prep.index_relpath.as_bytes(),
+            prep.oid,
+            prep.mode,
+        );
+        entry.mode = prep.mode;
+        if !skip_per_path_cache_invalidate {
+            index.invalidate_untracked_cache_for_path(&prep.index_relpath);
+            index.invalidate_cache_tree_for_path(&entry.path);
+        }
+        batch_entries.push(entry);
+        outcome.added += 1;
+    }
+    if !batch_entries.is_empty() {
+        for entry in &batch_entries {
+            if let Ok(rel) = std::str::from_utf8(&entry.path) {
+                mark_fsmonitor_staged(index, rel);
+            }
+        }
+        index.entries.extend(batch_entries);
+        if index.fsmonitor_last_update.is_some() {
+            index.fsmonitor_validity_changed();
+        }
+    }
+
+    for path in deferred {
+        icase_map.remove_alias_of(index, path.as_bytes());
+        stage_untracked_path(repo, work_tree, &path, rules, index)?;
+        outcome.added += 1;
+    }
+
+    Ok(())
+}
+
 fn stage_untracked_path(
     repo: &Repository,
     work_tree: &Path,
     rel_path: &str,
-    rules: &std::sync::Arc<std::sync::Mutex<crate::worktree_rules::WorktreeRules>>,
+    rules: &WorktreeRules,
     index: &mut Index,
 ) -> Result<()> {
-    let rules = rules
-        .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
     let precompose_unicode = rules
         .config()
         .get_bool("core.precomposeunicode")
@@ -864,7 +1048,6 @@ mod tests {
             .success());
 
         let repo = Repository::discover(Some(&linked)).unwrap();
-        repo.reload_config().unwrap();
         std::fs::write(linked.join("grit.txt"), b"grit\r\n").unwrap();
         stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
         let index = repo.load_index().unwrap();
@@ -947,7 +1130,7 @@ mod tests {
         let mut index = Index::new();
         let mut gitlink = conflict_index_entry("sub", 0, old_head, MODE_GITLINK);
         gitlink.size = 0;
-        index.entries.push(gitlink);
+        index.push_entry_unsorted(gitlink);
         write_index(&repo, &mut index);
 
         let new_head = commit_in_repo(&sub_repo, "inside.txt", b"new\n", "new");
