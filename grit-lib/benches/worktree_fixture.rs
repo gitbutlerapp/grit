@@ -93,6 +93,36 @@ __pycache__/
     std::fs::write(path, content).expect("write gitignore");
 }
 
+fn build_status_nested_l_fixtures(base: &Path) -> (Repository, Repository) {
+    fn populate(wt: &Path, with_nested_attrs: bool) {
+        std::fs::write(wt.join(".gitattributes"), "* text=auto\n").ok();
+        for d in 0..50 {
+            let dir = wt.join(format!("dir{d:02}"));
+            std::fs::create_dir_all(&dir).expect("status L dir");
+            if with_nested_attrs {
+                std::fs::write(dir.join(".gitattributes"), "* eol=lf\n").expect("nested ga");
+            }
+            for f in 0..40 {
+                std::fs::write(
+                    dir.join(format!("f{f:04}.txt")),
+                    format!("content-{d}-{f}\n"),
+                )
+                .expect("status L file");
+            }
+        }
+    }
+
+    let nested_root = base.join("status-nested-L");
+    let plain_root = base.join("status-plain-L");
+    let nested_repo =
+        init_repository(&nested_root, false, "main", None, "files").expect("nested status repo");
+    let plain_repo =
+        init_repository(&plain_root, false, "main", None, "files").expect("plain status repo");
+    populate(nested_repo.work_tree.as_ref().expect("wt"), true);
+    populate(plain_repo.work_tree.as_ref().expect("wt"), false);
+    (nested_repo, plain_repo)
+}
+
 fn write_realistic_gitattributes(path: &Path) {
     let content = r"* text=auto
 *.rs linguist-language=Rust diff=rust
@@ -149,6 +179,10 @@ pub struct WorktreeBenchFixtures {
     pub index_write_scratch: PathBuf,
     /// Repository with 10k tracked files on disk for status/staging scan benchmarks.
     pub scan_repo_10k: Repository,
+    /// Repository with one `.gitattributes` per directory (L-sized status fixture).
+    pub status_nested_attr_repo: Repository,
+    /// Same tree layout without per-directory `.gitattributes` (baseline).
+    pub status_plain_l_repo: Repository,
 }
 
 impl WorktreeBenchFixtures {
@@ -273,6 +307,8 @@ impl WorktreeBenchFixtures {
             .write(&scan_repo.index_path())
             .expect("write scan index");
 
+        let (status_nested_attr_repo, status_plain_l_repo) = build_status_nested_l_fixtures(base);
+
         Self {
             _root: root,
             index_v2_10k_path,
@@ -292,6 +328,8 @@ impl WorktreeBenchFixtures {
             attr_paths,
             index_write_scratch,
             scan_repo_10k: scan_repo,
+            status_nested_attr_repo,
+            status_plain_l_repo,
         }
     }
 

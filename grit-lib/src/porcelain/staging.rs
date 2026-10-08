@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use crate::config::ConfigSet;
 use crate::crlf;
 use crate::diff::{
     classify_worktree_entry_for_add, mode_from_metadata, DiffIndexToWorktreeOptions, DiffStatus,
@@ -15,9 +14,7 @@ use crate::error::Result;
 use crate::index::{index_file_mtime, Index, MODE_TREE};
 use crate::objects::ObjectKind;
 use crate::pathspec::matches_pathspec_list;
-use crate::porcelain::status::{
-    collect_untracked_and_ignored_with_cache, expand_untracked_for_staging, IgnoredMode,
-};
+use crate::porcelain::status::IgnoredMode;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -38,29 +35,32 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
     let mut index = repo.load_index()?;
-    let config_arc = repo.config().ok();
-    let config = config_arc
-        .as_ref()
-        .map(|c| c.as_ref())
-        .cloned()
-        .unwrap_or_default();
-    let conv = crlf::ConversionConfig::from_config(&config);
-    let attr_rules = crlf::load_gitattributes(work_tree);
+    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
+    let config_arc = worktree_rules.config_arc();
     let precompose_unicode =
-        effective_core_precomposeunicode_with_config(Some(&repo.git_dir), config_arc.as_deref());
+        effective_core_precomposeunicode_with_config(Some(&repo.git_dir), Some(&config_arc));
 
     let matches = |path: &str| pathspecs.is_empty() || matches_pathspec_list(path, pathspecs);
 
+    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
     let diff_opts = DiffIndexToWorktreeOptions {
         index_mtime,
         ignore_submodule_untracked: false,
         repository_git_dir: Some(repo.git_dir.clone()),
-        config: config_arc,
+        config: Some(config_arc.clone()),
+        worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
         ..Default::default()
     };
     let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
-        &repo.odb, &mut index, work_tree, diff_opts,
+        &repo.odb,
+        &mut index,
+        work_tree,
+        diff_opts,
     )?;
+    let mut worktree_rules = rules_arc
+        .lock()
+        .map_err(|e| crate::error::Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+    let conv = worktree_rules.conversion().clone();
 
     let mut staged = 0usize;
     for entry in unstaged {
@@ -81,25 +81,22 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
             &mut index,
             index_mtime,
             &conv,
-            &attr_rules,
-            &config,
+            &mut worktree_rules,
             precompose_unicode,
         )? {
             staged += 1;
         }
     }
 
-    let (untracked, _) = collect_untracked_and_ignored_with_cache(
+    let (untracked, _) = super::status::collect_untracked_and_ignored_with_rules(
         repo,
-        &mut index,
+        &index,
         work_tree,
         IgnoredMode::No,
-        false,
+        true,
         pathspecs,
-        false,
+        &mut worktree_rules,
     )?;
-    let untracked =
-        expand_untracked_for_staging(repo, &mut index, work_tree, untracked, pathspecs)?;
     for path in untracked {
         if !matches(&path) {
             continue;
@@ -109,6 +106,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     }
 
     if staged > 0 {
+        index.sort();
         repo.write_index(&mut index)?;
     }
     Ok(staged)
@@ -122,8 +120,7 @@ fn stage_tracked_worktree_path(
     index: &mut Index,
     index_mtime: Option<(u32, u32)>,
     conv: &crlf::ConversionConfig,
-    attr_rules: &crlf::GitAttributes,
-    config: &ConfigSet,
+    rules: &mut crate::worktree_rules::WorktreeRules,
     precompose_unicode: bool,
 ) -> Result<bool> {
     let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
@@ -138,7 +135,7 @@ fn stage_tracked_worktree_path(
             .map(|_| true);
     };
 
-    let file_attrs = crlf::get_file_attrs(attr_rules, rel_path, false, config);
+    let file_attrs = rules.file_attrs(rel_path, false);
     let refresh = classify_worktree_entry_for_add(&WorktreeAddRefreshParams {
         odb: &repo.odb,
         ie: &ie,

@@ -498,6 +498,9 @@ fn load_rules_from_file(
             }
         }
     }
+    if path.exists() {
+        crate::worktree_rules::record_ignore_pattern_file_read(path);
+    }
     let Some(content) = read_optional_text(path)? else {
         return Ok(Vec::new());
     };

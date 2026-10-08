@@ -5,7 +5,6 @@
 use std::time::Instant;
 
 use grit_lib::diff::refresh_index_stat_content_verified;
-use grit_lib::hash::index_parallelism_from_config;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -33,7 +32,6 @@ fn refresh_index_stat_only_timing() {
     let mut index = repo.load_index().expect("index");
     let index_mtime = index.source_mtime;
     let config = grit_lib::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
-
     let start = Instant::now();
     let _ = refresh_index_stat_content_verified(
         &repo.odb,

@@ -10,6 +10,8 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use grit_lib::attributes::collect_attrs_for_path;
 use grit_lib::ignore::IgnoreMatcher;
 use grit_lib::index::Index;
+use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NullProgress;
 
 use worktree_fixture::WorktreeBenchFixtures;
 
@@ -90,12 +92,35 @@ fn bench_attributes_match(c: &mut Criterion) {
     });
 }
 
+fn bench_status_with_nested_gitattributes_l(c: &mut Criterion) {
+    let fx = WorktreeBenchFixtures::global();
+    let opts = StatusOptions::default();
+    let mut group = c.benchmark_group("status_with_nested_gitattributes_L");
+    group.bench_function("plain_no_nested_attrs", |b| {
+        b.iter(|| {
+            black_box(
+                status(&fx.status_plain_l_repo, &opts, &mut NullProgress).expect("status plain L"),
+            );
+        });
+    });
+    group.bench_function("nested_gitattributes", |b| {
+        b.iter(|| {
+            black_box(
+                status(&fx.status_nested_attr_repo, &opts, &mut NullProgress)
+                    .expect("status nested attrs L"),
+            );
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     worktree,
     bench_index_read,
     bench_index_write,
     bench_config_load,
     bench_ignore_match,
-    bench_attributes_match
+    bench_attributes_match,
+    bench_status_with_nested_gitattributes_l
 );
 criterion_main!(worktree);

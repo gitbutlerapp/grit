@@ -21,10 +21,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
-use crate::worktree_scan::{
-    for_each_blob_by_directory_parallel, group_blob_entries_by_dir, BlobDiskLookup,
-    WorktreeBlobScanOptions,
-};
+use crate::worktree_scan::{for_each_blob_by_directory, group_blob_entries_by_dir, BlobDiskLookup};
 
 /// Summary of paths updated while staging tracked modifications/deletions.
 ///
@@ -161,43 +158,24 @@ pub fn stage_tracked_modifications_in_index(
     }
 
     let blob_dirs = group_blob_entries_by_dir(index);
-    let work_tree_owned = work_tree.to_path_buf();
-    let dir_abs = move |dir: &str| {
+    let dir_abs = |dir: &str| {
         if dir.is_empty() {
-            work_tree_owned.clone()
+            work_tree.to_path_buf()
         } else {
-            index_entry_worktree_abs(&work_tree_owned, dir, precompose_unicode, ignorecase)
+            index_entry_worktree_abs(work_tree, dir, precompose_unicode, ignorecase)
         }
     };
-    let work_tree_for_files = work_tree.to_path_buf();
-    let work_tree_for_symlink = work_tree.to_path_buf();
-    let file_abs = move |rel: &str| {
-        index_entry_worktree_abs(&work_tree_for_files, rel, precompose_unicode, ignorecase)
-    };
-    let preload_index = repo
-        .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.preloadIndex").and_then(|r| r.ok()))
-        .unwrap_or(true);
-    let blob_scan_opts = WorktreeBlobScanOptions {
-        preload_index,
-        stat_parallel_threads: None,
-    };
+    let file_abs =
+        |rel: &str| index_entry_worktree_abs(work_tree, rel, precompose_unicode, ignorecase);
     let mut blob_scan: Vec<(String, BlobDiskLookup)> = Vec::new();
-    for_each_blob_by_directory_parallel(
+    for_each_blob_by_directory(
         &blob_dirs,
-        blob_scan_opts,
         dir_abs,
         file_abs,
         |rel_path| {
             dir_symlinks.has_symlink_in_path(work_tree, rel_path, precompose_unicode, ignorecase)
                 || {
-                    let abs = index_entry_worktree_abs(
-                        &work_tree_for_symlink,
-                        rel_path,
-                        precompose_unicode,
-                        ignorecase,
-                    );
+                    let abs = file_abs(rel_path);
                     path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
                 }
         },
