@@ -5,9 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::ConfigSet;
-use grit_lib::crlf::{
-    convert_to_worktree_eager, ConversionConfig, ConversionError, FileAttrs, WorkTreeEncodingError,
-};
+use grit_lib::crlf::{convert_to_worktree_eager, ConversionConfig, FileAttrs};
+use grit_lib::error::FilterError;
 
 fn default_conv() -> ConversionConfig {
     ConversionConfig::from_config(&ConfigSet::new())
@@ -58,12 +57,11 @@ fn unknown_working_tree_encoding_is_typed_unsupported_on_clean() {
     let mut attrs = FileAttrs::default();
     attrs.working_tree_encoding = Some("not-a-real-encoding".to_owned());
     let err = grit_lib::crlf::convert_to_git(b"\xff\xfe", "f.txt", &conv, &attrs).unwrap_err();
-    assert_eq!(
+    assert!(matches!(
         err,
-        ConversionError::Encoding(WorkTreeEncodingError::UnsupportedEncoding {
-            label: "not-a-real-encoding".to_owned(),
-        })
-    );
+        FilterError::NotFilteredProperly { detail, .. }
+            if detail.contains("not-a-real-encoding")
+    ));
 }
 
 #[test]
@@ -72,12 +70,11 @@ fn unknown_working_tree_encoding_is_typed_unsupported_on_smudge() {
     let mut attrs = FileAttrs::default();
     attrs.working_tree_encoding = Some("not-a-real-encoding".to_owned());
     let err = convert_to_worktree_eager(b"hi\n", "f.txt", &conv, &attrs, None, None).unwrap_err();
-    assert_eq!(
+    assert!(matches!(
         err,
-        ConversionError::Encoding(WorkTreeEncodingError::UnsupportedEncoding {
-            label: "not-a-real-encoding".to_owned(),
-        })
-    );
+        FilterError::NotFilteredProperly { detail, .. }
+            if detail.contains("not-a-real-encoding")
+    ));
 }
 
 fn git_env() -> [(&'static str, &'static str); 2] {

@@ -27,7 +27,6 @@ use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclus
 use crate::reflog::{list_reflog_refs, read_reflog};
 use crate::refs;
 use crate::repo::Repository;
-use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
 
 /// User-facing output mode for `rev-list`.
