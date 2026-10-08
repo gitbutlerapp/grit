@@ -176,3 +176,35 @@ fn corrupt_zlib_loose_object_returns_typed_error() {
         "expected Zlib error, got {err:?}"
     );
 }
+
+#[test]
+fn read_info_on_git_loose_objects_uses_header_only_inflate() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let git_dir = init_git_repo();
+    for size in [0usize, 1, 4096, 256 * 1024] {
+        let data = vec![0xABu8; size];
+        let mut child = Command::new("git")
+            .current_dir(git_dir.path())
+            .args(["hash-object", "-w", "-t", "blob", "--stdin"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("hash-object");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(&data)
+            .expect("write");
+        let out = child.wait_with_output().expect("wait");
+        assert!(out.status.success());
+        let oid_hex = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let oid = ObjectId::from_hex(&oid_hex).expect("oid");
+        let odb = Odb::new(&git_dir.path().join(".git/objects"));
+        let info = odb.read_info(&oid).expect("read_info");
+        assert_eq!(info.kind, ObjectKind::Blob);
+        assert_eq!(info.size, u64::try_from(data.len()).unwrap());
+    }
+}
