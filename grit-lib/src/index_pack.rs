@@ -356,6 +356,84 @@ mod tests {
         assert_eq!(idx.offset_at(0), huge_off);
     }
 
+    fn pack_with_junk_before_trailer(valid: &[u8], junk: &[u8]) -> Vec<u8> {
+        use crate::objects::HashAlgo;
+
+        let algo = HashAlgo::Sha1;
+        let hb = algo.len();
+        let body = &valid[..valid.len().checked_sub(hb).expect("pack trailer")];
+        let mut body_with_junk = body.to_vec();
+        body_with_junk.extend_from_slice(junk);
+        let trailer = algo.digest(&body_with_junk);
+        body_with_junk.extend_from_slice(trailer.as_bytes());
+        body_with_junk
+    }
+
+    fn git_index_pack_strict_rejects(pack: &[u8]) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pack_path = dir.path().join("in.pack");
+        std::fs::write(&pack_path, pack).expect("write pack");
+        let out = Command::new("/usr/bin/git")
+            .current_dir(dir.path())
+            .args([
+                "index-pack",
+                "--strict",
+                pack_path.to_string_lossy().as_ref(),
+            ])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git index-pack --strict");
+        assert!(
+            !out.status.success(),
+            "git index-pack --strict must reject junk before trailer: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn rejects_extra_bytes_before_pack_trailer() {
+        use crate::hash::Parallelism;
+        use crate::unpack_objects::pack_index_records_with_threads;
+
+        let valid = single_blob_pack(b"one blob\n");
+        let corrupted = pack_with_junk_before_trailer(&valid, b"JUNK");
+        git_index_pack_strict_rejects(&corrupted);
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+
+        for threads in [1_usize, 4] {
+            let err = pack_index_records_with_threads(
+                &corrupted,
+                &odb,
+                Parallelism::resolve(Some(threads)),
+            )
+            .expect_err("index-pack hashing");
+            assert!(
+                matches!(err, Error::CorruptObject(_)),
+                "threads={threads}: {err:?}"
+            );
+        }
+
+        for threads in [1_usize, 4] {
+            let err = install_pack_bytes(
+                corrupted.clone(),
+                &odb,
+                &IngestPackOptions {
+                    fix_thin: false,
+                    threads: Some(threads),
+                    ..Default::default()
+                },
+            )
+            .expect_err("install pack");
+            assert!(
+                matches!(err, Error::CorruptObject(_)),
+                "install threads={threads}: {err:?}"
+            );
+        }
+    }
+
     #[test]
     fn install_failure_leaves_no_published_pack_or_index() {
         let tmp = tempfile::tempdir().expect("tempdir");

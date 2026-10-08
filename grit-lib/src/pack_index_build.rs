@@ -357,13 +357,13 @@ fn verify_pack_trailer(pack: &[u8], consumed: usize, algo: HashAlgo) -> Result<(
     let Some(body_end) = pack.len().checked_sub(hb) else {
         return Err(Error::CorruptObject("pack stream truncated".to_owned()));
     };
-    if consumed > body_end {
+    if consumed != body_end {
         return Err(Error::CorruptObject(format!(
-            "pack scanner consumed {consumed} bytes past body end {body_end}"
+            "pack object stream ends at {consumed} but pack trailer starts at {body_end}"
         )));
     }
-    let expected = algo.digest(&pack[..body_end]);
-    let trailing = &pack[body_end..];
+    let expected = algo.digest(&pack[..consumed]);
+    let trailing = &pack[consumed..body_end + hb];
     if expected.as_bytes() != trailing {
         return Err(Error::CorruptObject(
             "pack trailing checksum mismatch".to_owned(),

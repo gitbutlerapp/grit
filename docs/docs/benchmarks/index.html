@@ -150,7 +150,7 @@ cargo bench -p grit-lib --bench hash
 <ul>
 <li><strong>Fixtures</strong> use synthetic repos at large file counts and deep history, built deterministically in a scratch directory.</li>
 <li><strong>Drivers</strong> are CLI invocations of <code>grit</code> and <code>git</code> with equivalent semantics (not argv-for-argv compatibility).</li>
-<li><strong>Ratios</strong> are <strong>Grit mean ÷ Git mean</strong>. Values below <code>1.00×</code> mean Grit is faster; values above <code>2.00×</code> are highlighted as regressions worth investigating.</li>
+<li><strong>Ratios</strong> are <strong>Grit median ÷ Git median</strong> (stored in each scenario’s <code>ratio</code> field; hyperfine also records mean and spread). Values below <code>1.00×</code> mean Grit is faster; values above <code>2.00×</code> are highlighted as regressions worth investigating.</li>
 <li><strong>Spread</strong> shows Grit’s standard deviation across timed runs (hyperfine <code>--min-runs</code> / warmup settings from the baseline capture).</li>
 </ul>
 <h3 id="reproduce-locally">Reproduce locally</h3>
