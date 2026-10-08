@@ -1138,6 +1138,15 @@ impl<'a> StreamingPackReader<'a> {
 /// field does not match `base.len()`, or the result length does not match the
 /// declared destination size.
 pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>> {
+    let mut result = Vec::new();
+    apply_delta_into(&mut result, base, delta)?;
+    Ok(result)
+}
+
+/// Apply `delta` onto `base`, reusing `out` storage (cleared first, capacity grown as needed).
+///
+/// Same semantics as [`apply_delta`]; prefer this when resolving multi-hop chains.
+pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<()> {
     let mut pos = 0usize;
 
     let src_size = read_delta_varint(delta, &mut pos)?;
@@ -1148,7 +1157,10 @@ pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>> {
         )));
     }
     let dest_size = read_delta_varint(delta, &mut pos)?;
-    let mut result = Vec::with_capacity(dest_size);
+    out.clear();
+    if out.capacity() < dest_size {
+        out.reserve(dest_size - out.capacity());
+    }
 
     while pos < delta.len() {
         let cmd = delta[pos];
@@ -1197,26 +1209,26 @@ pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>> {
                     base.len()
                 ))
             })?;
-            result.extend_from_slice(chunk);
+            out.extend_from_slice(chunk);
         } else {
             // INSERT instruction: copy the next `cmd` literal bytes verbatim.
             let n = cmd as usize;
             let chunk = delta
                 .get(pos..pos + n)
                 .ok_or_else(|| Error::CorruptObject("truncated delta INSERT data".to_owned()))?;
-            result.extend_from_slice(chunk);
+            out.extend_from_slice(chunk);
             pos += n;
         }
     }
 
-    if result.len() != dest_size {
+    if out.len() != dest_size {
         return Err(Error::CorruptObject(format!(
             "delta produced {} bytes but expected {dest_size}",
-            result.len()
+            out.len()
         )));
     }
 
-    Ok(result)
+    Ok(())
 }
 
 /// Uncompressed size of the object produced when `delta` is applied to its base.

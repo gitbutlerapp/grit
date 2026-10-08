@@ -12,13 +12,14 @@ use crate::error::{Error, Result};
 use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 pub use crate::pack_map::PackData;
-use crate::unpack_objects::{apply_delta, delta_uncompressed_result_size_if_complete};
+use crate::unpack_objects::{apply_delta_into, delta_uncompressed_result_size_if_complete};
 use crate::zlib_inflate::{inflate_prefix, ZlibInflateScratch};
 use flate2::read::ZlibDecoder;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::io::Read;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -295,7 +296,7 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 mod pack_cache {
     use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
-    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::collections::{HashMap, HashSet};
     use std::fs;
     use std::io;
     use std::path::{Path, PathBuf};
@@ -333,7 +334,9 @@ mod pack_cache {
         byte_limit: usize,
         bytes_used: usize,
         entries: HashMap<DeltaCacheKey, (ObjectKind, Arc<[u8]>)>,
-        order: VecDeque<DeltaCacheKey>,
+        head: Option<DeltaCacheKey>,
+        tail: Option<DeltaCacheKey>,
+        links: HashMap<DeltaCacheKey, (Option<DeltaCacheKey>, Option<DeltaCacheKey>)>,
     }
 
     impl Default for DeltaBaseLru {
@@ -342,7 +345,9 @@ mod pack_cache {
                 byte_limit: DELTA_BASE_CACHE_DEFAULT,
                 bytes_used: 0,
                 entries: HashMap::new(),
-                order: VecDeque::new(),
+                head: None,
+                tail: None,
+                links: HashMap::new(),
             }
         }
     }
@@ -351,21 +356,63 @@ mod pack_cache {
         fn set_byte_limit(&mut self, limit: usize) {
             self.byte_limit = limit.max(1);
             while self.bytes_used > self.byte_limit {
-                let Some(key) = self.order.pop_front() else {
+                let Some(key) = self.head else {
                     break;
                 };
-                if let Some((_, data)) = self.entries.remove(&key) {
-                    self.bytes_used = self.bytes_used.saturating_sub(data.len());
+                self.evict_key(key);
+            }
+        }
+
+        fn unlink(&mut self, key: DeltaCacheKey) {
+            let Some((prev, next)) = self.links.remove(&key) else {
+                return;
+            };
+            match prev {
+                Some(p) => {
+                    if let Some(link) = self.links.get_mut(&p) {
+                        link.1 = next;
+                    }
                 }
+                None => self.head = next,
+            }
+            match next {
+                Some(n) => {
+                    if let Some(link) = self.links.get_mut(&n) {
+                        link.0 = prev;
+                    }
+                }
+                None => self.tail = prev,
+            }
+        }
+
+        fn append_tail(&mut self, key: DeltaCacheKey) {
+            let prev = self.tail;
+            self.links.insert(key, (prev, None));
+            if let Some(p) = prev {
+                if let Some(link) = self.links.get_mut(&p) {
+                    link.1 = Some(key);
+                }
+            } else {
+                self.head = Some(key);
+            }
+            self.tail = Some(key);
+        }
+
+        fn touch(&mut self, key: DeltaCacheKey) {
+            self.unlink(key);
+            self.append_tail(key);
+        }
+
+        fn evict_key(&mut self, key: DeltaCacheKey) {
+            self.unlink(key);
+            if let Some((_, data)) = self.entries.remove(&key) {
+                self.bytes_used = self.bytes_used.saturating_sub(data.len());
             }
         }
 
         fn get(&mut self, key: DeltaCacheKey) -> Option<(ObjectKind, Arc<[u8]>)> {
             let (kind, data) = self.entries.get(&key).map(|(k, d)| (*k, Arc::clone(d)))?;
-            if let Some(pos) = self.order.iter().position(|k| *k == key) {
-                self.order.remove(pos);
-                self.order.push_back(key);
-            }
+            self.touch(key);
             Some((kind, data))
         }
 
@@ -374,40 +421,45 @@ mod pack_cache {
             if sz > self.byte_limit {
                 return;
             }
-            if let Some((_, old)) = self.entries.insert(key, (kind, Arc::clone(&data))) {
-                self.bytes_used = self.bytes_used.saturating_sub(old.len()).saturating_add(sz);
-                if let Some(pos) = self.order.iter().position(|k| *k == key) {
-                    self.order.remove(pos);
+            use std::collections::hash_map::Entry;
+            match self.entries.entry(key) {
+                Entry::Occupied(mut slot) => {
+                    let old_len = slot.get().1.len();
+                    slot.insert((kind, Arc::clone(&data)));
+                    self.bytes_used = self.bytes_used.saturating_sub(old_len).saturating_add(sz);
+                    self.touch(key);
                 }
-            } else {
-                self.bytes_used = self.bytes_used.saturating_add(sz);
+                Entry::Vacant(slot) => {
+                    slot.insert((kind, Arc::clone(&data)));
+                    self.bytes_used = self.bytes_used.saturating_add(sz);
+                    self.append_tail(key);
+                }
             }
-            self.order.push_back(key);
             while self.bytes_used > self.byte_limit {
-                let Some(evict) = self.order.pop_front() else {
+                let Some(evict) = self.head else {
                     break;
                 };
-                if let Some((_, old)) = self.entries.remove(&evict) {
-                    self.bytes_used = self.bytes_used.saturating_sub(old.len());
-                }
+                self.evict_key(evict);
             }
         }
 
         fn drop_pack(&mut self, pack_id: u32) {
-            self.entries.retain(|k, (_, data)| {
-                if k.pack_id == pack_id {
-                    self.bytes_used = self.bytes_used.saturating_sub(data.len());
-                    false
-                } else {
-                    true
-                }
-            });
-            self.order.retain(|k| k.pack_id != pack_id);
+            let keys: Vec<DeltaCacheKey> = self
+                .entries
+                .keys()
+                .copied()
+                .filter(|k| k.pack_id == pack_id)
+                .collect();
+            for key in keys {
+                self.evict_key(key);
+            }
         }
 
         fn clear(&mut self) {
             self.entries.clear();
-            self.order.clear();
+            self.links.clear();
+            self.head = None;
+            self.tail = None;
             self.bytes_used = 0;
         }
     }
@@ -902,12 +954,21 @@ mod pack_cache {
         lock().delta_lru.get(key)
     }
 
-    /// Insert a resolved **intermediate** delta base, evicting LRU entries past the byte cap.
-    pub fn put_delta_base(pack_id: u32, offset: u64, kind: ObjectKind, data: &[u8]) {
-        let arc: Arc<[u8]> = Arc::from(data);
-        lock()
-            .delta_lru
-            .put(DeltaCacheKey { pack_id, offset }, kind, arc);
+    /// Insert many intermediate bases under one lock (hot path for delta-chain resolution).
+    pub fn put_delta_bases(kind: ObjectKind, items: &[(u32, u64, Arc<[u8]>)]) {
+        if items.is_empty() {
+            return;
+        }
+        let mut g = lock();
+        for &(pack_id, offset, ref data) in items {
+            g.delta_lru
+                .put(DeltaCacheKey { pack_id, offset }, kind, Arc::clone(data));
+        }
+    }
+
+    /// Drop only cached delta bases (pack indexes and bytes stay cached).
+    pub fn clear_delta_bases() {
+        lock().delta_lru.clear();
     }
 
     /// Re-stamp the cached signature for `pack_path` after the caller deliberately touched the
@@ -991,6 +1052,11 @@ pub fn test_reset_pack_marker_stat_count() {
 #[must_use]
 pub fn test_pack_marker_stat_count() -> u64 {
     pack_cache::test_marker_stat_count()
+}
+
+/// Drop only the process-wide delta-base LRU (indexes and pack bytes stay cached).
+pub fn clear_pack_delta_base_cache() {
+    pack_cache::clear_delta_bases();
 }
 
 /// Apply `core.deltaBaseCacheLimit` from repository config to the process-wide delta-base LRU.
@@ -1688,19 +1754,33 @@ fn apply_delta_chain_forward(
     result_pack_id: u32,
     result_offset: u64,
 ) -> Result<Vec<u8>> {
-    let mut buf = base_data.to_vec();
+    if pending.is_empty() {
+        return Ok(base_data.to_vec());
+    }
+
+    let mut cache_inserts: Vec<(u32, u64, Arc<[u8]>)> = Vec::with_capacity(pending.len() + 1);
     if let Some((pid, off)) = whole_base {
-        if !pending.is_empty() {
-            pack_cache::put_delta_base(pid, off, kind, &buf);
-        }
+        cache_inserts.push((pid, off, Arc::from(base_data)));
     }
+
+    let mut owned = Vec::new();
+    let mut scratch = Vec::new();
+    let mut use_initial_base = true;
     for frame in pending.iter().rev() {
-        buf = apply_delta(&buf, &frame.delta)?;
+        let base: &[u8] = if use_initial_base {
+            use_initial_base = false;
+            base_data
+        } else {
+            owned.as_slice()
+        };
+        apply_delta_into(&mut scratch, base, &frame.delta)?;
+        mem::swap(&mut owned, &mut scratch);
         if frame.pack_id != result_pack_id || frame.offset != result_offset {
-            pack_cache::put_delta_base(frame.pack_id, frame.offset, kind, &buf);
+            cache_inserts.push((frame.pack_id, frame.offset, Arc::from(owned.as_slice())));
         }
     }
-    Ok(buf)
+    pack_cache::put_delta_bases(kind, &cache_inserts);
+    Ok(owned)
 }
 
 /// Starting index for a pack read: borrow the caller's [`PackIndex`], or hold a cached
