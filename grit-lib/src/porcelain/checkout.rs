@@ -171,10 +171,10 @@ fn apply_in_place_git_mode_transition(
     let mut perms = meta.permissions();
     let mut bits = perms.mode();
     const ALL_EXEC: u32 = 0o111;
-    const USER_EXEC: u32 = 0o100;
     if new_exec {
-        // Match Git: executable blobs add owner execute only (0600 → 0700 under umask 077).
-        bits = (bits & !ALL_EXEC) | USER_EXEC;
+        // Match Git: grant execute wherever read is already present (0644→0755 under umask 022,
+        // 0600→0700 under umask 077).
+        bits |= (bits & 0o444) >> 2;
     } else {
         bits &= !ALL_EXEC;
     }

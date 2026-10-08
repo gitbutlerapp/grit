@@ -3,6 +3,7 @@
 #[cfg(unix)]
 mod unix {
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
 
     use grit_lib::objects::ObjectId;
     use grit_lib::porcelain::checkout::checkout_between_trees;
@@ -18,12 +19,26 @@ mod unix {
         std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
     }
 
+    static UMASK_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Process umask is global; serialize these oracles so parallel tests do not race.
+    fn with_umask<R>(mask: libc::mode_t, f: impl FnOnce() -> R) -> R {
+        let _guard = UMASK_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let old = unsafe { libc::umask(mask) };
+        let out = f();
+        unsafe {
+            libc::umask(old);
+        }
+        out
+    }
+
     #[test]
     fn in_place_content_only_checkout_preserves_umask_077_file_mode_like_git() {
+        with_umask(0o077, || {
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = tmp.path();
-
-        let old_umask = unsafe { libc::umask(0o077) };
 
         git(root, &["init", "-q", "-b", "main", "."]);
         git(root, &["config", "user.email", "t@example.com"]);
@@ -73,20 +88,17 @@ mod unix {
             grit_mode, git_mode,
             "grit in-place checkout must match git file mode (expected 0600, got {grit_mode:#o})"
         );
-
-        unsafe {
-            libc::umask(old_umask);
-        }
+        });
     }
 
     fn checkout_mode_oracle(
         root: &std::path::Path,
+        umask: libc::mode_t,
         prepare_main: Option<&dyn Fn(&std::path::Path)>,
         prepare_target: &dyn Fn(&std::path::Path),
         label: &str,
     ) {
-        let old_umask = unsafe { libc::umask(0o077) };
-
+        with_umask(umask, || {
         git(root, &["init", "-q", "-b", "main", "."]);
         git(root, &["config", "user.email", "t@example.com"]);
         git(root, &["config", "user.name", "Test"]);
@@ -126,10 +138,7 @@ mod unix {
             grit_mode, git_mode,
             "{label}: grit mode {grit_mode:#o} must match git {git_mode:#o}"
         );
-
-        unsafe {
-            libc::umask(old_umask);
-        }
+        });
     }
 
     #[test]
@@ -137,6 +146,7 @@ mod unix {
         let tmp = tempfile::tempdir().expect("tempdir");
         checkout_mode_oracle(
             tmp.path(),
+            0o077,
             None,
             &|root| {
                 std::fs::write(root.join("secret.txt"), b"target\n").expect("write");
@@ -150,7 +160,30 @@ mod unix {
                     std::fs::set_permissions(root.join("secret.txt"), perms).expect("chmod");
                 }
             },
-            "100644→100755 content+mode",
+            "100644→100755 content+mode (umask 077)",
+        );
+    }
+
+    #[test]
+    fn in_place_mode_to_executable_matches_git_under_umask_022() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        checkout_mode_oracle(
+            tmp.path(),
+            0o022,
+            None,
+            &|root| {
+                std::fs::write(root.join("secret.txt"), b"target\n").expect("write");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = std::fs::metadata(root.join("secret.txt"))
+                        .expect("meta")
+                        .permissions();
+                    perms.set_mode(0o755);
+                    std::fs::set_permissions(root.join("secret.txt"), perms).expect("chmod");
+                }
+            },
+            "100644→100755 content+mode (umask 022)",
         );
     }
 
@@ -159,6 +192,7 @@ mod unix {
         let tmp = tempfile::tempdir().expect("tempdir");
         checkout_mode_oracle(
             tmp.path(),
+            0o077,
             Some(&|root| {
                 #[cfg(unix)]
                 {
@@ -173,7 +207,7 @@ mod unix {
             &|root| {
                 std::fs::write(root.join("secret.txt"), b"plain\n").expect("write");
             },
-            "100755→100644 content+mode",
+            "100755→100644 content+mode (umask 077)",
         );
     }
 }
