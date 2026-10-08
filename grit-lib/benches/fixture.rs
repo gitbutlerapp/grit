@@ -73,8 +73,23 @@ fn git_index_pack(dir: &Path, pack_path: &Path) -> Result<()> {
 }
 
 fn git_repack(repo_root: &Path) -> Result<()> {
+    git_repack_with_window(repo_root, None, None)
+}
+
+/// `git repack -adf` with optional delta window/depth (for deep-chain read benchmarks).
+pub fn git_repack_with_window(
+    repo_root: &Path,
+    window: Option<u32>,
+    depth: Option<u32>,
+) -> Result<()> {
     let mut cmd = Command::new("git");
-    cmd.current_dir(repo_root).args(["repack", "-a", "-d"]);
+    cmd.current_dir(repo_root).args(["repack", "-a", "-d", "-f"]);
+    if let Some(w) = window {
+        cmd.arg(format!("--window={w}"));
+    }
+    if let Some(d) = depth {
+        cmd.arg(format!("--depth={d}"));
+    }
     for (k, v) in GIT_ENV {
         cmd.env(k, v);
     }
@@ -86,6 +101,42 @@ fn git_repack(repo_root: &Path) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Repository with `git repack --depth=250 --window=250` for packed read micro-benchmarks.
+pub fn build_deep_repack_read_sample() -> (TempDir, PackIndex, ObjectId) {
+    let tmp = tempfile::tempdir().expect("deep repack tempdir");
+    let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init repo");
+    let mut parent = None;
+    let mut body = String::new();
+    for i in 0..128 {
+        body.push_str(&format!("seed {i:04}\n"));
+    }
+    for rev in 0..80 {
+        body.push_str(&format!("layer-{rev}\n"));
+        parent = Some(
+            grit_commit_file(
+                &repo,
+                parent,
+                "chain.txt",
+                body.as_bytes(),
+                &format!("deep-repack-{rev}"),
+            )
+            .expect("grit commit"),
+        );
+    }
+    git_repack_with_window(tmp.path(), Some(250), Some(250)).expect("deep repack");
+    let pack_dir = repo.git_dir.join("objects/pack");
+    let idx_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("idx after deep repack");
+    let idx = read_pack_index(&idx_path).expect("read idx");
+    let mid = idx.entries.len() / 2;
+    let sample_oid = ObjectId::from_bytes(&idx.entries[mid].oid).expect("oid");
+    (tmp, idx, sample_oid)
 }
 
 fn index_pack_in_dir(dir: &Path, pack_bytes: &[u8], stem: &str) -> PackIndex {
