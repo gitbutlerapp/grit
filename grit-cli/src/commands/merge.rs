@@ -16,8 +16,7 @@ use grit_lib::merge_trees::{
 };
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_merge;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
@@ -102,11 +101,9 @@ fn short_hex(oid: &str) -> &str {
 pub fn run(branch: &str) -> Result<MergeOutcome> {
     let repo = context::discover()?;
 
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress)
-        .context("could not compute status")?;
-    if !model.staged.is_empty() || !model.unstaged.is_empty() {
-        bail!("you have uncommitted changes — commit them before merging");
-    }
+    ensure_worktree_clean_for_merge(&repo)
+        .map_err(anyhow::Error::new)
+        .context("could not verify worktree is clean")?;
 
     let (refname, head_oid) = match resolve_head(&repo.git_dir)? {
         HeadState::Branch {
