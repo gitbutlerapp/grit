@@ -25,7 +25,7 @@ This example initializes a repository, writes a blob, tree, and commit, verifies
 
 Objects land on disk in standard loose format. System Git can read them:
 
-```
+```bash
 cargo run --bin guide_objects /path/to/repo
 git -C /path/to/repo fsck --strict
 ```

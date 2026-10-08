@@ -7,7 +7,7 @@ order: 2
 
 ## Synopsis
 
-```
+```text
 grit clone <url> [<dir>]
 ```
 
@@ -32,7 +32,7 @@ For private GitHub repositories over HTTPS, sign in first with [`grit auth`](../
 
 Clone a repository from GitHub:
 
-```
+```console
 $ grit clone https://github.com/gitbutlerapp/grit.git
 Cloning into 'grit' ...
 Cloned into 'grit' on branch main.
@@ -40,13 +40,13 @@ Cloned into 'grit' on branch main.
 
 Clone into a directory with a different name:
 
-```
+```console
 $ grit clone git@github.com:gitbutlerapp/grit.git grit-src
 ```
 
 Clone a local repository:
 
-```
+```console
 $ grit clone /srv/git/project.git
 ```
 

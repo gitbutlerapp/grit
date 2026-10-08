@@ -7,7 +7,7 @@ order: 1
 
 ## Synopsis
 
-```
+```text
 grit remote
 grit remote add <name> <url>
 ```
@@ -28,7 +28,7 @@ The URL can be anything [`grit clone`](../clone/) accepts: an HTTPS, SSH, `git:/
 
 ## Examples
 
-```
+```console
 $ grit remote add origin https://github.com/ada/project.git
 Added remote origin → https://github.com/ada/project.git
 

@@ -7,7 +7,7 @@ order: 2
 
 ## Synopsis
 
-```
+```text
 grit commit [-a] <message>
 grit commit [-a] -m <message>
 ```
@@ -34,7 +34,7 @@ The author and committer come from the `user.name` and `user.email` settings (se
 
 Commit everything:
 
-```
+```console
 $ grit commit "Add the greeting"
 [main 217c6f9] Add the greeting
 2 changes committed
@@ -42,13 +42,13 @@ $ grit commit "Add the greeting"
 
 The same, written the way you'd write it for `git`:
 
-```
+```console
 $ grit commit -am "Add the greeting"
 ```
 
 A longer message with a body:
 
-```
+```console
 $ grit commit -m "Add the greeting
 
 Prints hi on startup so we know the binary runs."

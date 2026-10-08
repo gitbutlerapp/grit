@@ -39,7 +39,7 @@ The program below opens a repository (created by system Git in tests), walks `ma
 
 Run against a repo with diverged `main` and `feature` branches:
 
-```
+```bash
 cargo run --bin guide_revwalk /path/to/repo main..feature
 ```
 

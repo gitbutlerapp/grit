@@ -7,7 +7,7 @@ order: 3
 
 ## Synopsis
 
-```
+```text
 grit manager (get | store | erase)
 ```
 
@@ -17,7 +17,7 @@ A Git credential helper backed by the Windows Credential Manager. You don't run 
 
 [`grit auth`](../auth/) sets `credential.helper` to `grit manager` on Windows when no other helper is configured. To set it up yourself:
 
-```
+```text
 > grit config --global credential.helper "grit manager"
 ```
 
@@ -33,7 +33,7 @@ It works only on Windows. On other systems it exits with an error.
 
 ## Examples
 
-```
+```text
 > echo "protocol=https`nhost=github.com`n" | grit manager get
 protocol=https
 host=github.com

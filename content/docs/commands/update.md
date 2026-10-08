@@ -7,7 +7,7 @@ order: 1
 
 ## Synopsis
 
-```
+```text
 grit update
 ```
 
@@ -23,7 +23,7 @@ The installer prints its own progress. If you installed `grit` with `cargo insta
 
 ## Examples
 
-```
+```console
 $ grit update
 Updating grit (current: 0.5.0)
 Install directory: /home/ada/.local/bin

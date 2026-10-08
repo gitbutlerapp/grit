@@ -9,7 +9,7 @@ This page walks through a minimal program that discovers a Git repository in the
 
 In your crate:
 
-```
+```bash
 cargo add grit-lib
 ```
 
@@ -32,13 +32,13 @@ Save as `src/main.rs` (or copy from `grit-examples` in the Grit repo):
 
 From the root of any Git repository with at least one commit:
 
-```
+```bash
 cargo run
 ```
 
 Example output (your commit id will differ):
 
-```
+```text
 217c6f9a1b2c3d4e5f6789012345678901234567
 Start the project
 ```

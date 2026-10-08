@@ -7,7 +7,7 @@ order: 1
 
 ## Synopsis
 
-```
+```text
 grit log [--before <commit>]
 ```
 
@@ -27,7 +27,7 @@ When there's more history, the last line shows the command for the next page.
 
 Show recent history:
 
-```
+```console
 $ grit log
   b52cca6  ada  2 minutes ago  Handle empty input
   5fbefea  ada  1 hour ago     Add a greeting test
@@ -39,13 +39,13 @@ $ grit log
 
 Show the next page:
 
-```
+```console
 $ grit log --before=a7e3a5e
 ```
 
 Get the subjects of the last ten commits:
 
-```
+```console
 $ grit log --json --filter '.commits[].subject'
 ```
 

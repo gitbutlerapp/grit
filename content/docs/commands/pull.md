@@ -7,7 +7,7 @@ order: 3
 
 ## Synopsis
 
-```
+```text
 grit pull
 ```
 
@@ -25,7 +25,7 @@ Like `grit merge`, `grit pull` won't run with uncommitted changes or a detached 
 
 ## Examples
 
-```
+```console
 $ grit pull
 Fast-forwarded origin/main → b52cca6
 

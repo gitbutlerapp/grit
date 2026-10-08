@@ -27,6 +27,6 @@ The program below discovers a repository (or opens `.git` in the current directo
 
 Run from any Git checkout:
 
-```
+```bash
 cargo run --bin guide_repository
 ```

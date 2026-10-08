@@ -7,7 +7,7 @@ order: 4
 
 ## Synopsis
 
-```
+```text
 grit config [--global] <key>
 grit config [--global] <key> <value>
 grit config [--global] --unset <key>
@@ -52,27 +52,27 @@ Reading or removing a key that isn't set is an error.
 
 Set your identity for every repository:
 
-```
+```console
 $ grit config --global user.name "Ada Lovelace"
 $ grit config --global user.email ada@example.com
 ```
 
 Read a value:
 
-```
+```console
 $ grit config user.email
 ada@example.com
 ```
 
 Use a different email address in one repository:
 
-```
+```console
 $ grit config user.email ada@work.example
 ```
 
 List everything:
 
-```
+```console
 $ grit config --list
 user.name=Ada Lovelace
 user.email=ada@example.com
@@ -84,7 +84,7 @@ remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*
 
 Remove a setting:
 
-```
+```console
 $ grit config --unset target.branch
 ```
 

@@ -50,6 +50,32 @@ HTML_CHROME_MARKERS = (
     "<aside",
     "<table class=\"cmds\"",
 )
+FENCE_LINE = re.compile(r"^(?P<ticks>`{3,})(?P<info>\S*)?\s*$")
+
+
+def validate_fence_languages(*, content_dir: Path | None = None) -> None:
+    """Fail if any Markdown code fence opens without a language tag."""
+    root = content_dir or CONTENT_DIR
+    for path in sorted(root.rglob("*.md")):
+        in_code = False
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped.startswith("`"):
+                continue
+            match = FENCE_LINE.match(stripped)
+            if not match:
+                continue
+            info = match.group("info") or ""
+            if not in_code:
+                if not info:
+                    raise SystemExit(
+                        f"{rel}:{line_no}: code fence missing language tag "
+                        "(use console, text, json, rust, toml, bash, or another info string)"
+                    )
+                in_code = True
+            else:
+                in_code = False
 
 
 def expand_includes(body: str) -> str:
@@ -321,6 +347,7 @@ def load_site(*, content_dir: Path | None = None) -> Site:
     manifest_path = root / "site.toml"
     sections = load_manifest_from(manifest_path, root)
     validate_manifest(sections, content_dir=root)
+    validate_fence_languages(content_dir=root)
     listed = collect_listed_sources_for_dir(sections, root)
     command_groups: tuple[str, ...] = ()
     for section in sections:

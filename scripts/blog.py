@@ -112,6 +112,9 @@ def inline_md(value: str) -> str:
     return escaped
 
 
+FENCE_LINE = re.compile(r"^(?P<ticks>`{3,})(?P<info>\S*)?\s*$")
+
+
 def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
     lines = markdown.splitlines()
     output: list[str] = []
@@ -160,13 +163,18 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
             table_rows.append([cell.strip().replace("\\|", "|") for cell in re.split(r"(?<!\\)\|", row)])
             continue
         flush_table()
-        if line.strip().startswith("```"):
+        fence = FENCE_LINE.match(line.strip())
+        if fence and line.strip().startswith("`"):
             if in_code:
                 output.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
                 code_lines = []
                 in_code = False
             else:
-                flush_paragraph(); close_list(); in_code = True; code_lines = []
+                # Opening info string (e.g. ```console) is not copied into HTML.
+                flush_paragraph()
+                close_list()
+                in_code = True
+                code_lines = []
             continue
         if in_code:
             code_lines.append(line)

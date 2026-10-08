@@ -7,7 +7,7 @@ order: 2
 
 ## Synopsis
 
-```
+```text
 grit fetch [<remote>]
 ```
 
@@ -25,7 +25,7 @@ Each updated ref is listed with its old and new commit.
 
 ## Examples
 
-```
+```console
 $ grit fetch
   refs/remotes/origin/main  a8e620a → b52cca6
 Fetched 1 update from origin.
@@ -36,7 +36,7 @@ Already up to date with origin.
 
 Fetch from another remote:
 
-```
+```console
 $ grit fetch upstream
 ```
 

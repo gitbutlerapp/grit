@@ -7,7 +7,7 @@ order: 1
 
 ## Synopsis
 
-```
+```text
 grit init [--bare] [<path>]
 ```
 
@@ -28,20 +28,20 @@ The first branch is `main`. It has no commits until you make one.
 
 Start a new project in a new directory:
 
-```
+```console
 $ grit init project
 Initialized empty repository in /home/ada/project/.git
 ```
 
 Turn the current directory into a repository:
 
-```
+```console
 $ grit init
 ```
 
 Create a bare repository to use as a shared remote:
 
-```
+```console
 $ grit init --bare /srv/git/project.git
 Initialized empty bare repository in /srv/git/project.git
 ```

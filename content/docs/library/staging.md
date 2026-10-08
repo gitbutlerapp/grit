@@ -29,7 +29,7 @@ This program loads the index, stages new or changed paths, and prints the tree o
 
 With a repository path, compare the printed tree to Git:
 
-```
+```bash
 cargo run --bin guide_index /path/to/repo
 git -C /path/to/repo write-tree
 git -C /path/to/repo fsck --strict

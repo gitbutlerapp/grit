@@ -7,7 +7,7 @@ order: 1
 
 ## Synopsis
 
-```
+```text
 grit branch
 grit branch <name>
 grit branch -d <name>
@@ -32,7 +32,7 @@ With `-d`, deletes a branch. `grit` refuses if the branch has commits that aren'
 
 ## Examples
 
-```
+```console
 $ grit branch
   feature
 * main
@@ -46,7 +46,7 @@ Deleted branch experiment (was cf18394).
 
 Deleting a branch with unmerged work:
 
-```
+```console
 $ grit branch -d spike
 error: the branch 'spike' is not fully merged.
 If you are sure you want to delete it, run 'grit branch -D spike'

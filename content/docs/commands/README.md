@@ -4,7 +4,19 @@ Every file in this directory (except this README) is one `grit` subcommand. The 
 
 Use this section order:
 
-1. **Synopsis** — fenced usage lines.
+Every fenced code block must tag the opening fence with a language or format hint (bare ` ``` ` lines fail `load_site` validation):
+
+| Tag | Use for |
+| --- | --- |
+| `text` | Synopsis usage lines and other plain prose or output without a shell prompt |
+| `console` | Terminal sessions: a `$ grit …` line plus command output |
+| `json` | Real `grit <cmd> --json` examples in the JSON output section |
+| `bash` | Shell install/build commands without a `$` prompt |
+| `rust`, `toml` | Library snippets and manifest fragments |
+
+Closing fences stay untagged: ` ``` ` on its own line.
+
+1. **Synopsis** — fenced usage lines (`text`).
 2. **Description** — what the command does; `###` subsections are fine.
 3. **Options** — table of flags and arguments (or a note pointing at global options).
 4. **Examples** — human-readable terminal output from a real `grit` run.

@@ -7,7 +7,7 @@ order: 1
 
 ## Synopsis
 
-```
+```text
 grit upload-pack [--stateless-rpc] [--advertise-refs] <directory>
 ```
 
@@ -31,13 +31,13 @@ It supports Git protocol versions 0, 1 and 2, chosen by the client through the `
 
 Clone over SSH from a server that has `grit` but not `git` installed:
 
-```
+```console
 $ git clone --upload-pack='grit upload-pack' ssh://example.com/srv/git/project.git
 ```
 
 Set it for a remote you already have:
 
-```
+```console
 $ git config remote.origin.uploadpack 'grit upload-pack'
 ```
 

@@ -7,7 +7,7 @@ order: 5
 
 ## Synopsis
 
-```
+```text
 grit tag
 grit tag <name>
 grit tag -d <name>
@@ -28,7 +28,7 @@ Tags are local until you publish them with [`grit push --tags`](../push/).
 
 ## Examples
 
-```
+```console
 $ grit tag v0.1
 Created tag v0.1
 

@@ -11,7 +11,7 @@ Regenerated on 2026-10-07 by running the listed commands with `grit` built from 
 
 Every commit records an author. Set your name and email once, in your global config:
 
-```
+```console
 $ grit config --global user.name "Ada Lovelace"
 $ grit config --global user.email ada@example.com
 ```
@@ -20,7 +20,7 @@ $ grit config --global user.email ada@example.com
 
 ## Create a repository
 
-```
+```console
 $ grit init project
 Initialized empty repository in /workspace/project/.git
 $ cd project
@@ -28,7 +28,7 @@ $ cd project
 
 To work on an existing project instead, copy it with [`grit clone`](../clone/) and skip ahead to the next section:
 
-```
+```console
 $ grit clone https://github.com/gitbutlerapp/grit.git
 ```
 
@@ -36,7 +36,7 @@ $ grit clone https://github.com/gitbutlerapp/grit.git
 
 Running `grit` with no arguments shows where you are and what's changed. Add a couple of files and look:
 
-```
+```console
 $ echo "# Notes" > README.md
 $ echo "fn main() {}" > main.rs
 $ grit
@@ -55,7 +55,7 @@ The last line always suggests the next step. You'll come back to this screen a l
 
 [`grit commit`](../commit/) stages every change in the working tree and records it in one step:
 
-```
+```console
 $ grit commit "Start the project"
 [main 310fdb0] Start the project
 2 changes committed
@@ -65,7 +65,7 @@ There is no separate staging step to remember. [`grit add`](../add/) exists for 
 
 Look at the history with [`grit log`](../log/):
 
-```
+```console
 $ grit log
   310fdb0  ada  just now  Start the project
 ```
@@ -74,14 +74,14 @@ $ grit log
 
 Create a branch and switch to it with [`grit switch -c`](../switch/):
 
-```
+```console
 $ grit switch -c feature
 Created and switched to branch feature
 ```
 
 Make a change and look at it with [`grit diff`](../diff/) before committing:
 
-```
+```console
 $ printf 'fn main() {\n    println!("hi");\n}\n' > main.rs
 $ grit diff
 
@@ -95,7 +95,7 @@ main.rs
 
 The two number columns are the old and new line numbers. Commit the change:
 
-```
+```console
 $ grit commit "Say hi"
 [feature 2e409e2] Say hi
 1 change committed
@@ -103,7 +103,7 @@ $ grit commit "Say hi"
 
 [`grit show`](../show/) displays a commit, its message and the files it changed. With no argument, it shows the latest commit:
 
-```
+```console
 $ grit show
 branch feature
 commit 2e409e26f8b370ea1928a8fb93dcf2e025418e1f
@@ -120,7 +120,7 @@ Date:   2026-10-07 14:55:47 +0000
 
 Switch back to `main` and [merge](../merge/) the branch in. Nothing else has happened on `main`, so `grit` just moves `main` forward:
 
-```
+```console
 $ grit switch main
 Switched to branch main
 $ grit merge feature
@@ -129,7 +129,7 @@ Fast-forwarded feature → 2e409e2
 
 The branch is done, so [delete it](../branch/):
 
-```
+```console
 $ grit branch -d feature
 Deleted branch feature (was 2e409e2).
 ```
@@ -140,7 +140,7 @@ Deleted branch feature (was 2e409e2).
 
 A remote is another copy of the repository, usually on a server. Add one called `origin` with [`grit remote add`](../remote/), then [push](../push/):
 
-```
+```console
 $ grit remote add origin https://github.com/ada/project.git
 Added remote origin → https://github.com/ada/project.git
 $ grit push
@@ -151,14 +151,14 @@ $ grit push
 
 To get other people's work, run [`grit pull`](../pull/). It fetches from the remote and brings your branch up to date, fast-forwarding when it can and recording a merge commit when both sides have new commits:
 
-```
+```console
 $ grit pull
 Merged origin/main into the current branch (91275a2)
 ```
 
 If someone pushed before you, `grit push` is rejected and tells you what to do:
 
-```
+```console
 $ grit push
   rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
 ```
@@ -167,7 +167,7 @@ $ grit push
 
 [`grit tag`](../tag/) marks the current commit, and `grit push --tags` publishes your tags:
 
-```
+```console
 $ grit tag v0.1
 Created tag v0.1
 $ grit push --tags
@@ -184,7 +184,7 @@ $ grit push --tags
 
 Every command takes `--json` and prints a single JSON object, which is handy for scripts and agents. `--filter` picks out the part you need:
 
-```
+```console
 $ grit status --json --filter '{branch, clean}'
 {
   "branch": "main",

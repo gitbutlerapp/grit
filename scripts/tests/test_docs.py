@@ -104,6 +104,21 @@ label = "Missing"
 
         restore()
 
+    def test_every_fence_has_language(self) -> None:
+        cases = (
+            ("tutorial.md", lambda text: text.replace("```console\n", "```\n", 1)),
+            ("commands/README.md", lambda text: text + "\n\n```\nignored\n```\n"),
+        )
+        for rel, mutate in cases:
+            with self.subTest(page=rel):
+                shutil.copytree(ROOT / "content" / "docs", self.content, dirs_exist_ok=True)
+                page = self.content / rel
+                page.write_text(mutate(page.read_text(encoding="utf-8")), encoding="utf-8")
+                with self.assertRaises(SystemExit) as ctx:
+                    docs.load_site(content_dir=self.content)
+                self.assertIn("missing language tag", str(ctx.exception))
+                self.assertIn(rel, str(ctx.exception))
+
     def test_every_page_has_markdown_twin(self) -> None:
         with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
             out = Path(tmp)

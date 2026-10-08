@@ -2,6 +2,7 @@ target/*
 .claude/
 scripts/__pycache__
 scripts/subscripts/__pycache__
+scripts/tests/__pycache__
 .env
 logs/agent_*
 reports/*
