@@ -28,44 +28,6 @@ pub fn display_width_minus_ansi(s: &str) -> usize {
     w
 }
 
-/// `term_columns()` approximation: `COLUMNS` env, then `stty size`, then 80.
-#[must_use]
-pub fn terminal_columns() -> usize {
-    if let Ok(cols) = std::env::var("COLUMNS") {
-        if let Ok(w) = cols.parse::<usize>() {
-            if w > 0 {
-                return w;
-            }
-        }
-    }
-    // The terminal size is constant for the life of the process (matching
-    // C git, which caches `term_columns()` after the first call); spawning
-    // `stty` once per --stat commit dominated history walks. The `COLUMNS`
-    // check above stays uncached so per-call env overrides keep working.
-    static STTY_COLS: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
-    if let Some(w) = *STTY_COLS.get_or_init(|| {
-        let output = std::process::Command::new("stty")
-            .arg("size")
-            .stdin(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()?;
-        let s = String::from_utf8_lossy(&output.stdout);
-        let parts: Vec<&str> = s.split_whitespace().collect();
-        if parts.len() == 2 {
-            if let Ok(w) = parts[1].parse::<usize>() {
-                if w > 0 {
-                    return Some(w);
-                }
-            }
-        }
-        None
-    }) {
-        return w;
-    }
-    80
-}
-
 /// Default total width for `format-patch` diffstat (`MAIL_DEFAULT_WRAP` in Git).
 pub const FORMAT_PATCH_STAT_WIDTH: usize = 72;
 
@@ -94,8 +56,12 @@ pub struct DiffstatOptions<'a> {
     /// Git's `width = term_columns() - utf8_strnwidth(line_prefix)` where the graph's vertical
     /// rail is the `output_prefix`.
     pub width_prefix: &'a str,
-    /// When true, width budget is `terminal_columns() - display_width_minus_ansi(<prefix>)`.
+    /// When true, width budget is [`Self::terminal_width`] minus
+    /// `display_width_minus_ansi(<prefix>)` (callers set [`Self::terminal_width`] from the
+    /// terminal size or `COLUMNS`, typically in `grit-cli`).
     pub subtract_prefix_from_terminal: bool,
+    /// Terminal width in columns when [`Self::subtract_prefix_from_terminal`] is true.
+    pub terminal_width: usize,
     /// Cap filename area (`diff.statNameWidth` / `--stat-name-width`).
     pub stat_name_width: Option<usize>,
     /// Cap graph (+/-) area (`diff.statGraphWidth` / `--stat-graph-width`).
@@ -230,7 +196,7 @@ pub fn write_diffstat_block(
         opts.width_prefix
     };
     let mut width = if opts.subtract_prefix_from_terminal {
-        terminal_columns()
+        opts.terminal_width
             .saturating_sub(display_width_minus_ansi(width_prefix))
             .saturating_add(opts.graph_prefix_budget_slack)
     } else {
@@ -511,6 +477,7 @@ mod tests {
             line_prefix: "",
             width_prefix: "",
             subtract_prefix_from_terminal: false,
+            terminal_width: 80,
             stat_name_width: Some(10),
             stat_graph_width: None,
             stat_count: None,

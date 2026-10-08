@@ -60,12 +60,13 @@ memmap2.workspace = true
 # pulled in on Windows.
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
+rustix = { version = "1.1", default-features = false, features = ["process"] }
 
 # `windows-sys` backs the Windows Credential Manager store (`credentials::windows_store`),
 # used by the built-in `gs manager` credential helper, and enabling ANSI virtual
 # terminal processing for colored output (`terminal`). Windows-only.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Console", "Win32_System_Threading"] }
 
 [[bench]]
 name = "objects"
@@ -89,6 +90,10 @@ harness = false
 
 [[bench]]
 name = "midx"
+harness = false
+
+[[bench]]
+name = "userdiff_hunk_header"
 harness = false
 
 [dev-dependencies]

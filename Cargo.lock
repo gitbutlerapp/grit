@@ -677,6 +677,7 @@ dependencies = [
  "merge3",
  "nix",
  "regex",
+ "rustix",
  "sha1",
  "sha2",
  "shell-words",
