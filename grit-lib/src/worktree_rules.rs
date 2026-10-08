@@ -148,6 +148,7 @@ impl WorktreeRules {
             conversion,
             ignore,
             attrs,
+            caches: Arc::clone(repo.caches()),
         })
     }
 
