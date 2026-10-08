@@ -45,7 +45,9 @@ pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
         &mut index,
         work_tree,
         index_mtime,
-    ) && repo.try_write_index(&mut index)?
+        None,
+        None,
+    )? && repo.try_write_index(&mut index)?
     {
         index.source_mtime = crate::index::index_file_mtime(&index_path);
     }
@@ -66,7 +68,8 @@ pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
 /// Staged and unstaged diffs for the current worktree (no rename detection).
 fn local_change_diffs(
     repo: &Repository,
-    snapshot: &WorktreeSnapshot,
+    index: &mut Index,
+    head_tree: Option<ObjectId>,
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>)> {
     let work_tree = repo
         .work_tree
@@ -77,16 +80,16 @@ fn local_change_diffs(
 
     let staged = diff_index_to_tree(
         &repo.odb,
-        &snapshot.index,
-        snapshot.head_tree.as_ref(),
+        index,
+        head_tree.as_ref(),
         false,
     )?;
-    let unstaged = diff_index_to_worktree_with_options(
+    let (unstaged, _index_changed) = diff_index_to_worktree_with_options(
         &repo.odb,
-        &snapshot.index,
+        index,
         work_tree,
         crate::diff::DiffIndexToWorktreeOptions {
-            index_mtime: crate::diff::index_mtime_for_diff(&snapshot.index, index_mtime),
+            index_mtime: crate::diff::index_mtime_for_diff(index, index_mtime),
             ignore_submodule_untracked: true,
             repository_git_dir: Some(repo.git_dir.clone()),
             ..Default::default()
@@ -96,8 +99,9 @@ fn local_change_diffs(
 }
 
 fn ensure_worktree_clean_with_message(repo: &Repository, message: &str) -> Result<()> {
-    let snapshot = load_worktree_snapshot(repo)?;
-    let (staged, unstaged) = local_change_diffs(repo, &snapshot)?;
+    let mut snapshot = load_worktree_snapshot(repo)?;
+    let (staged, unstaged) =
+        local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
     if !staged.is_empty() || !unstaged.is_empty() {
         return Err(Error::Message(message.into()));
     }
@@ -146,8 +150,9 @@ pub fn prepare_tree_switch(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<TreeSwitchPlan> {
-    let snapshot = load_worktree_snapshot(repo)?;
-    let (staged, unstaged) = local_change_diffs(repo, &snapshot)?;
+    let mut snapshot = load_worktree_snapshot(repo)?;
+    let (staged, unstaged) =
+        local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
     if !staged.is_empty() || !unstaged.is_empty() {
         return Err(Error::Message(
             "you have uncommitted changes — commit them before switching".into(),
@@ -160,7 +165,7 @@ pub fn prepare_tree_switch(
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let (untracked, _) = collect_untracked_and_ignored(
         repo,
-        &snapshot.index,
+        &mut snapshot.index,
         work_tree,
         IgnoredMode::No,
         false,
