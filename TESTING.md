@@ -124,8 +124,11 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 | t1060 | loose object corruption and missing objects | `grit-lib/tests/odb_loose_objects.rs` (`t1060_*`) | covered |
 | t1006/t1007 | commit/tree/tag parse and serialize vs git bytes | `grit-lib/tests/objects_parse_roundtrip.rs` | covered |
 | t5300-pack-objects.sh | v2 pack index + reverse index byte-identical to `git index-pack --rev-index`; ingest passes `verify-pack` / `fsck --strict` | `grit-lib/tests/pack_ingest_roundtrip.rs` (`idx_and_rev_match_git_*`, `ingest_every_option_passes_git_verify_and_fsck_sha1`) | ported (core write/read) |
+| t5302 | pack index v1/v2, forced 64-bit offset table, fanout edge cases, empty pack | `grit-lib/tests/pack_index_formats.rs` (`git_indexed_v1_v2_and_large_offset_table_oracle`, `fanout_*`, `empty_pack_index_from_git`) | covered |
 | t5303-pack-corruption-resilience.sh | apply_delta accept/reject vs git index-pack; pack corruption recovery | `grit-lib/tests/pack_deltas.rs` (`t5303_apply_delta_*`), `grit-lib/tests/pack_corruption.rs` | covered |
+| t5308 | duplicate pack entries remain readable | `grit-lib/tests/pack_index_formats.rs` (`duplicate_index_entries_remain_readable`) | covered |
 | t5309-pack-delta-cycles.sh | ref-delta cycles and cross-pack cycles (timeout guard) | `grit-lib/tests/pack_deltas.rs` (`ref_delta_*cycle*`) | covered |
+| t5313 | idx parse/read bounds: truncated idx, bad magic/version, trailer checksum, pack/index count skew, bogus offsets, ofs-delta | `grit-lib/tests/pack_index_formats.rs` (`truncated_idx_*`, `pack_index_object_count_mismatch_errors`, `bogus_offsets_and_ofs_delta_rejected_without_panic`) | covered |
 | t5314-pack-cycle-detection.sh | self-referencing and two-object ref-delta cycles | `grit-lib/tests/pack_deltas.rs` (`ref_delta_self_reference*`, `ref_delta_two_object_cycle*`) | covered |
 | t5316-pack-delta-depth.sh | deep OFS chains (50+) vs verify-pack depth | `grit-lib/tests/pack_deltas.rs` (`t5316_deep_ofs_chain*`) | covered |
 | t5318-commit-graph.sh | write/verify, Bloom/changed-paths, merge/octopus EDGE, corruption | `grit-lib/tests/commit_graph_roundtrip.rs`, `grit-lib/tests/commit_graph_corruption.rs` | ported (skip progress/option UX) |

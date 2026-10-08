@@ -428,7 +428,7 @@ fn read_pack_index_v1(
         let oid_start = off_start + 4;
         if i > 0 {
             let prev_start = oid_base + (i - 1) * record_size + 4;
-            if bytes[prev_start..prev_start + 20] >= bytes[oid_start..oid_start + 20] {
+            if bytes[prev_start..prev_start + 20] > bytes[oid_start..oid_start + 20] {
                 return Err(Error::CorruptObject(format!(
                     "oid lookup out of order in {}",
                     idx_path.display()
@@ -528,7 +528,7 @@ fn read_pack_index_v2(
         let start = oid_base + i * hash_bytes;
         if i > 0 {
             let prev = oid_base + (i - 1) * hash_bytes;
-            if bytes[prev..prev + hash_bytes] >= bytes[start..start + hash_bytes] {
+            if bytes[prev..prev + hash_bytes] > bytes[start..start + hash_bytes] {
                 return Err(Error::CorruptObject(format!(
                     "oid lookup out of order in {}",
                     idx_path.display()
@@ -769,6 +769,72 @@ mod tests {
             32
         );
         assert!(detect_idx_hash_bytes_v2(1073, fanout_end, 0, Path::new("t.idx")).is_err());
+    }
+
+    #[test]
+    fn duplicate_oid_rows_parse_and_resolve_first_offset() {
+        use crate::pack::write_v2_pack_index_with_trailer;
+        use std::fs;
+
+        let oid = ObjectId::from_bytes(&[0x05; 20]).unwrap();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let idx_path = dir.path().join("dup-oid.idx");
+        let pack_path = dir.path().join("dup-oid.pack");
+        fs::write(&pack_path, b"PACK\x00\x00\x00\x02\x00\x00\x00\x00").expect("pack stub");
+        write_v2_pack_index_with_trailer(
+            &idx_path,
+            &[(oid, 100, 0), (oid, 200, 0)],
+            &[0u8; 20],
+            20,
+        )
+        .expect("write dup rows");
+        let mut idx =
+            parse_pack_index_bytes(&idx_path, fs::read(&idx_path).unwrap(), false).expect("parse");
+        idx.pack_path = pack_path;
+        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.offset_at(0), 100);
+        assert_eq!(idx.offset_at(1), 200);
+        assert_eq!(idx.find_offset(&oid), Some(200));
+    }
+
+    #[test]
+    fn find_position_rejects_mismatched_hash_width() {
+        let body = build_v1_idx_bytes(&[(vec![0x01; 20], 12)]);
+        let idx = parse_pack_index_bytes(Path::new("w.idx"), body, false).expect("idx");
+        let wide = ObjectId::from_bytes(&[0x01; 32]).expect("wide");
+        assert!(idx.find_position(&wide).is_none());
+    }
+
+    #[test]
+    fn pack_index_entry_matches_sha1_oid_rejects_wide_rows() {
+        let body = build_v1_idx_bytes(&[(vec![0x01; 20], 12)]);
+        let idx = parse_pack_index_bytes(Path::new("w.idx"), body, false).expect("idx");
+        let entry = idx.iter().next().expect("row");
+        let sha1 = ObjectId::from_bytes(&[0x01; 20]).expect("sha1");
+        assert!(pack_index_entry_matches_sha1_oid(&entry, &sha1));
+        let wide = ObjectId::from_bytes(&[0x01; 32]).expect("wide");
+        assert!(!pack_index_entry_matches_sha1_oid(&entry, &wide));
+    }
+
+    #[test]
+    fn v2_parse_rejects_inconsistent_large_offset_slot() {
+        let oid = ObjectId::from_bytes(&[0x01; 20]).unwrap();
+        let pack_trailer = [0u8; 20];
+        let mut body = Vec::new();
+        body.extend_from_slice(b"\xfftOc");
+        body.extend_from_slice(&2u32.to_be_bytes());
+        let fanout = compute_fanout_from_oid_slices(&[oid.as_bytes()]);
+        for f in fanout {
+            body.extend_from_slice(&f.to_be_bytes());
+        }
+        body.extend_from_slice(oid.as_bytes());
+        body.extend_from_slice(&0u32.to_be_bytes());
+        body.extend_from_slice(&0x8000_0001u32.to_be_bytes());
+        body.extend_from_slice(&1000u64.to_be_bytes());
+        body.extend_from_slice(&pack_trailer);
+        body.extend_from_slice(&pack_trailer);
+        let err = parse_pack_index_bytes(Path::new("bad-large.idx"), body, false).unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)));
     }
 
     #[test]
