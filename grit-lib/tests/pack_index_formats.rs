@@ -8,10 +8,10 @@ use grit_lib::error::Error;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pack::{
-    clear_pack_cache, collect_local_pack_info, pack_index_entry_matches_sha1_oid,
-    parse_pack_index_bytes, read_idx_object_ids, read_local_pack_indexes,
-    read_local_pack_indexes_cached, read_object_from_pack, read_object_from_packs,
-    read_pack_bytes_cached, read_pack_index, read_pack_index_no_verify,
+    clear_pack_cache, collect_local_pack_info, compute_fanout_from_oid_slices,
+    pack_index_entry_matches_sha1_oid, parse_pack_index_bytes, read_idx_object_ids,
+    read_local_pack_indexes, read_local_pack_indexes_cached, read_object_from_pack,
+    read_object_from_packs, read_pack_bytes_cached, read_pack_index, read_pack_index_no_verify,
     reprepare_pack_directory_on_miss, revalidate_stale_pack_bytes, skip_one_pack_object,
     test_pack_cache_guard, verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
 };
@@ -314,16 +314,7 @@ fn fanout_all_objects_share_first_byte() {
     let mut body = Vec::new();
     let mut sorted_oids: Vec<&[u8]> = rows.iter().map(|(o, _)| o.as_slice()).collect();
     sorted_oids.sort();
-    let mut fanout = [0u32; 256];
-    let mut idx = 0usize;
-    for byte in 0..256usize {
-        while idx < sorted_oids.len()
-            && sorted_oids[idx].first().copied().unwrap_or(0) <= byte as u8
-        {
-            idx += 1;
-        }
-        fanout[byte] = idx as u32;
-    }
+    let fanout = compute_fanout_from_oid_slices(&sorted_oids);
     for slot in fanout {
         body.extend_from_slice(&slot.to_be_bytes());
     }
@@ -332,7 +323,7 @@ fn fanout_all_objects_share_first_byte() {
         body.extend_from_slice(&(*off as u32).to_be_bytes());
         body.extend_from_slice(oid);
     }
-    body.extend_from_slice(&HashAlgo::Sha1.digest(&body).as_bytes().to_vec());
+    body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
     let idx = parse_pack_index_bytes(Path::new("one-bucket.idx"), body, false).expect("v1 idx");
     assert_eq!(idx.fanout[0xab], 32);
     assert_eq!(idx.fanout[0xac], 32);
@@ -344,24 +335,24 @@ fn fanout_all_objects_share_first_byte() {
 
 #[test]
 fn fanout_first_and_last_bucket_hits() {
-    let (repo, _pack, oids) = rich_pack_fixture(HashAlgo::Sha1);
-    let idx_path = std::fs::read_dir(repo.objects_dir().join("pack"))
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|x| x == "idx"))
-        .expect("idx");
-    let idx = read_pack_index(&idx_path).expect("idx");
-    let mut sorted = oids;
-    sorted.sort_by_key(|o| o.to_hex());
-    let first = sorted.first().expect("first");
-    let last = sorted.last().expect("last");
-    let fb = first.as_bytes()[0] as usize;
-    let lb = last.as_bytes()[0] as usize;
-    assert!(idx.find_position(first).is_some());
-    assert!(idx.find_position(last).is_some());
-    assert!(idx.fanout[fb] >= 1);
-    assert_eq!(idx.fanout[lb], idx.len() as u32);
+    let rows = [(vec![0x00_u8; 20], 120_u64), (vec![0xff_u8; 20], 240_u64)];
+    let mut body = Vec::new();
+    let slices: Vec<&[u8]> = rows.iter().map(|(o, _)| o.as_slice()).collect();
+    for slot in compute_fanout_from_oid_slices(&slices) {
+        body.extend_from_slice(&slot.to_be_bytes());
+    }
+    for (oid, off) in &rows {
+        body.extend_from_slice(&(*off as u32).to_be_bytes());
+        body.extend_from_slice(oid);
+    }
+    body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+    let idx = parse_pack_index_bytes(Path::new("fanout-edges.idx"), body, false).expect("v1 idx");
+    let oid_lo = ObjectId::from_bytes(&rows[0].0).expect("oid 0x00");
+    let oid_hi = ObjectId::from_bytes(&rows[1].0).expect("oid 0xff");
+    assert!(idx.find_position(&oid_lo).is_some());
+    assert!(idx.find_position(&oid_hi).is_some());
+    assert_eq!(idx.fanout[0], 1);
+    assert_eq!(idx.fanout[0xff], 2);
 }
 
 #[test]
@@ -541,6 +532,42 @@ fn pack_index_object_count_mismatch_errors() {
         verify_pack_and_collect(&idx_path).map(|_| ()),
         "object count mismatch",
     );
+
+    // Header and idx both claim 99 objects; pack stream only contains two.
+    let mut builder3 = PackBuilder::new(FixtureAlgo::Sha1);
+    builder3.add_full(FixtureKind::Blob, b"a");
+    builder3.add_full(FixtureKind::Blob, b"b");
+    builder3.set_header_object_count(99);
+    let inflated = builder3.build();
+    assert_eq!(inflated.entry_offsets.len(), 2);
+    let odb3 = Odb::new(repo.path());
+    let oid_a3 = odb3.hash(ObjectKind::Blob, b"a");
+    let oid_b3 = odb3.hash(ObjectKind::Blob, b"b");
+    let off_a3 = inflated.entry_offsets[0] as u64;
+    let off_b3 = inflated.entry_offsets[1] as u64;
+    let crc_a = pack_entry_crc(&inflated.bytes, off_a3, 20);
+    let crc_b = pack_entry_crc(&inflated.bytes, off_b3, 20);
+    let mut rows = Vec::with_capacity(99);
+    for i in 0..99usize {
+        if i == 0 {
+            rows.push((oid_a3, off_a3, crc_a));
+        } else if i == 1 {
+            rows.push((oid_b3, off_b3, crc_b));
+        } else {
+            rows.push((oid_a3, off_a3 + u64::try_from(i).unwrap() * 4096, 0));
+        }
+    }
+    std::fs::create_dir_all(repo.objects_dir().join("pack")).expect("pack dir");
+    let pack_path = repo.objects_dir().join("pack/inflated-count.pack");
+    std::fs::write(&pack_path, &inflated.bytes).expect("write inflated pack");
+    let idx_inflated = pack_path.with_extension("idx");
+    write_v2_pack_index(&idx_inflated, &pack_path, &rows, 20).expect("write inflated idx");
+    let idx99 = read_pack_index(&idx_inflated).expect("parse inflated idx");
+    assert_eq!(idx99.len(), 99);
+    assert_corrupt_contains(
+        verify_pack_and_collect(&idx_inflated).map(|_| ()),
+        "invalid object boundaries",
+    );
 }
 
 #[test]
@@ -559,8 +586,8 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     let bogus: u32 = (pack_len + 4096) as u32;
     let mut body = Vec::new();
     let mut fanout = [0u32; 256];
-    for slot in 0..256usize {
-        fanout[slot] = if slot >= oid_bytes[0] as usize { 1 } else { 0 };
+    for slot in fanout.iter_mut().skip(oid_bytes[0] as usize) {
+        *slot = 1;
     }
     for slot in fanout {
         body.extend_from_slice(&slot.to_be_bytes());
@@ -587,7 +614,6 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
         IndexVersion::V2LargeOffsetAt(0x40),
     );
     let idx = read_pack_index(&idx_path).expect("v2 idx");
-    let oid0 = ObjectId::from_bytes(idx.oid_at(0)).expect("oid0");
     let oid1 = ObjectId::from_bytes(idx.oid_at(1)).expect("oid1");
 
     let mut raw = std::fs::read(&idx_path).expect("raw idx");
@@ -741,6 +767,7 @@ fn duplicate_index_entries_remain_readable() {
 
 #[test]
 fn large_pack_uses_mmap_backing_for_reads() {
+    let _guard = test_pack_cache_guard();
     clear_pack_cache();
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     std::fs::create_dir_all(repo.objects_dir().join("pack")).expect("pack dir");
