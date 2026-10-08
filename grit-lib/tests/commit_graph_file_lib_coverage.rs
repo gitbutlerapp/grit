@@ -51,6 +51,7 @@ fn one_commit_repo() -> (tempfile::TempDir, Repository, ObjectId) {
         encoding: None,
         message: "m\n".into(),
         raw_message: None,
+        extra_headers: Vec::new(),
     });
     let commit = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
     grit_lib::refs::write_ref(&repo.git_dir, "refs/heads/main", &commit).expect("ref");
@@ -101,6 +102,7 @@ fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<Object
             encoding: None,
             message: "m\n".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         });
         repo.odb.write(ObjectKind::Commit, &raw).expect("commit")
     };
@@ -229,6 +231,7 @@ fn commit_tree_high_bit_and_parse_graph_dump() {
         encoding: None,
         message: "m\n".into(),
         raw_message: None,
+        extra_headers: Vec::new(),
     });
     let commit = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
     assert!(commit_tree_has_high_bit_paths(&repo.odb, commit));
@@ -281,7 +284,7 @@ fn try_load_with_caches_and_sub_chain() {
     .expect("write");
     std::fs::write(repo.odb.objects_dir().join("info/commit-graph"), bytes).expect("write");
     let objects = repo.odb.objects_dir();
-    let caches = RepoCaches::new();
+    let caches = RepoCaches::new(grit_lib::command_runner::system_command_runner());
     let first = CommitGraphChain::try_load_with_caches(objects, Some(&caches))
         .expect("load")
         .expect("graph");
@@ -357,6 +360,7 @@ fn two_parent_graph_commit_matches_object() {
             encoding: None,
             message: "p\n".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         });
         repo.odb.write(ObjectKind::Commit, &raw).expect("p")
     };
@@ -371,6 +375,7 @@ fn two_parent_graph_commit_matches_object() {
             encoding: None,
             message: "m\n".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         });
         repo.odb.write(ObjectKind::Commit, &raw).expect("m")
     };
@@ -425,6 +430,7 @@ fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
             encoding: None,
             message: "m\n".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         });
         sorted.push(repo.odb.write(ObjectKind::Commit, &raw).expect("c"));
     }
@@ -501,7 +507,7 @@ fn split_chain_stops_when_base_chunk_missing_for_stacked_layer() {
         format!("{base_name}\n{tip_name}\n"),
     )
     .expect("chain");
-    let caches = RepoCaches::new();
+    let caches = RepoCaches::new(grit_lib::command_runner::system_command_runner());
     let chain = CommitGraphChain::try_load_with_caches(repo.odb.objects_dir(), Some(&caches))
         .expect("load")
         .expect("partial chain");
@@ -663,7 +669,7 @@ fn split_chain_with_different_bloom_versions_disables_base() {
         format!("{base_name}\n{tip_name}\n"),
     )
     .expect("chain");
-    let caches = RepoCaches::new();
+    let caches = RepoCaches::new(grit_lib::command_runner::system_command_runner());
     let chain = CommitGraphChain::try_load_with_caches(repo.odb.objects_dir(), Some(&caches))
         .expect("load split")
         .expect("chain");
@@ -756,7 +762,7 @@ fn try_load_across_resolves_layers_from_alternate() {
                 .collect()
         })
         .unwrap_or_default();
-    let caches = RepoCaches::new();
+    let caches = RepoCaches::new(grit_lib::command_runner::system_command_runner());
     let chain = CommitGraphChain::try_load_across_with_caches(&objects, &alt_dirs, Some(&caches))
         .expect("across")
         .expect("chain");

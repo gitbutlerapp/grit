@@ -39,6 +39,7 @@ const CHUNK_OID_LOOKUP: u32 = 0x4f49_444c; // OIDL
 const CHUNK_COMMIT_DATA: u32 = 0x4344_4154; // CDAT
 const CHUNK_GENERATION_DATA: u32 = 0x4744_4132; // GDA2
 const CHUNK_GENERATION_DATA_OVERFLOW: u32 = 0x4744_4f32; // GDO2
+const CHUNK_EXTRA_EDGES: u32 = 0x4544_4745; // EDGE
 
 /// CDAT parent word meaning "no parent in this slot" (Git `GRAPH_PARENT_NONE`).
 const GRAPH_PARENT_NONE: u32 = 0x7000_0000;
@@ -74,6 +75,7 @@ pub struct CommitGraphLayer {
     chunk_commit_data_off: usize,
     #[allow(dead_code)]
     chunk_generation_data: Option<usize>,
+    read_generation_data: bool,
     chunk_bloom_indexes: Option<usize>,
     chunk_bloom_data: Option<(usize, usize)>,
     bloom_settings: Option<BloomFilterSettings>,
@@ -616,6 +618,7 @@ impl CommitGraphLayer {
             oid_lookup_off,
             chunk_commit_data_off: commit_data_off,
             chunk_generation_data: generation_off,
+            read_generation_data,
             chunk_bloom_indexes,
             chunk_bloom_data,
             bloom_settings,
@@ -623,6 +626,10 @@ impl CommitGraphLayer {
             base_chunk_size,
             hash_len,
         })
+    }
+
+    fn parse(path: PathBuf, raw: Vec<u8>) -> Option<Self> {
+        Self::try_parse(path, raw).ok()
     }
 
     fn oid_at_lex(&self, lex_index: u32) -> Option<ObjectId> {
@@ -1564,6 +1571,7 @@ mod tests {
             encoding: None,
             message: "m\n".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         });
         let commit = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
         crate::refs::write_ref(&repo.git_dir, "refs/heads/main", &commit).expect("ref");

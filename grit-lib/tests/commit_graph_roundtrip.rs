@@ -541,6 +541,7 @@ fn root_commit_and_grit_only_write_without_generation_chunk() {
         encoding: None,
         message: "root\n".into(),
         raw_message: None,
+        extra_headers: Vec::new(),
     });
     let commit = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
     grit_lib::refs::write_ref(&repo.git_dir, "refs/heads/main", &commit).expect("ref");

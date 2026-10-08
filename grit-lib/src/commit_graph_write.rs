@@ -658,6 +658,7 @@ mod tests {
             encoding: None,
             message: "m\n".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         });
         repo.odb.write(ObjectKind::Commit, &raw).expect("commit")
     }
@@ -746,6 +747,7 @@ mod tests {
                 encoding: None,
                 message: "m\n".into(),
                 raw_message: None,
+                extra_headers: Vec::new(),
             });
             let c = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
             infos.insert(
