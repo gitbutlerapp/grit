@@ -271,10 +271,10 @@ pub fn build_packed_exists_local_fixture(object_count: usize) -> (TempDir, Odb, 
     let objects = root.path().join("objects");
     let (idx, _tip) = build_large_pack_index(&objects, object_count);
     let odb = Odb::new(&objects);
-    let mut oids = Vec::with_capacity(object_count.min(idx.entries.len()));
-    for e in &idx.entries {
-        if e.oid.len() == 20 {
-            if let Ok(oid) = ObjectId::from_bytes(&e.oid) {
+    let mut oids = Vec::with_capacity(object_count.min(idx.len()));
+    for e in idx.iter() {
+        if e.oid().len() == 20 {
+            if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
                 oids.push(oid);
                 if oids.len() >= object_count {
                     break;
