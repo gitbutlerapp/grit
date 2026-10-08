@@ -23,9 +23,7 @@ mod unix {
 
     /// Process umask is global; serialize these oracles so parallel tests do not race.
     fn with_umask<R>(mask: libc::mode_t, f: impl FnOnce() -> R) -> R {
-        let _guard = UMASK_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = UMASK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let old = unsafe { libc::umask(mask) };
         let out = f();
         unsafe {
@@ -37,54 +35,54 @@ mod unix {
     #[test]
     fn in_place_content_only_checkout_preserves_umask_077_file_mode_like_git() {
         with_umask(0o077, || {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let root = tmp.path();
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let root = tmp.path();
 
-        git(root, &["init", "-q", "-b", "main", "."]);
-        git(root, &["config", "user.email", "t@example.com"]);
-        git(root, &["config", "user.name", "Test"]);
+            git(root, &["init", "-q", "-b", "main", "."]);
+            git(root, &["config", "user.email", "t@example.com"]);
+            git(root, &["config", "user.name", "Test"]);
 
-        std::fs::write(root.join("secret.txt"), b"main\n").expect("write main");
-        git(root, &["add", "secret.txt"]);
-        git(root, &["commit", "-qm", "main"]);
-        let main_tree = tree_of_head(root);
-        let main_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
+            std::fs::write(root.join("secret.txt"), b"main\n").expect("write main");
+            git(root, &["add", "secret.txt"]);
+            git(root, &["commit", "-qm", "main"]);
+            let main_tree = tree_of_head(root);
+            let main_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
 
-        std::fs::write(root.join("secret.txt"), b"target\n").expect("write target");
-        git(root, &["add", "secret.txt"]);
-        git(root, &["commit", "-qm", "target"]);
-        let target_tree = tree_of_head(root);
-        let target_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
-        git(root, &["branch", "target"]);
+            std::fs::write(root.join("secret.txt"), b"target\n").expect("write target");
+            git(root, &["add", "secret.txt"]);
+            git(root, &["commit", "-qm", "target"]);
+            let target_tree = tree_of_head(root);
+            let target_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
+            git(root, &["branch", "target"]);
 
-        git(root, &["reset", "--hard", &main_commit]);
-        assert_eq!(
-            mode_bits(&root.join("secret.txt")),
-            0o600,
-            "main checkout should leave 0600 under umask 077"
-        );
+            git(root, &["reset", "--hard", &main_commit]);
+            assert_eq!(
+                mode_bits(&root.join("secret.txt")),
+                0o600,
+                "main checkout should leave 0600 under umask 077"
+            );
 
-        git(root, &["checkout", "-q", "target"]);
-        let git_mode = mode_bits(&root.join("secret.txt"));
-        assert_eq!(
-            git_mode, 0o600,
-            "git switch must preserve 0600 for content-only regular-file update"
-        );
+            git(root, &["checkout", "-q", "target"]);
+            let git_mode = mode_bits(&root.join("secret.txt"));
+            assert_eq!(
+                git_mode, 0o600,
+                "git switch must preserve 0600 for content-only regular-file update"
+            );
 
-        git(root, &["reset", "--hard", &main_commit]);
-        assert_eq!(mode_bits(&root.join("secret.txt")), 0o600);
+            git(root, &["reset", "--hard", &main_commit]);
+            assert_eq!(mode_bits(&root.join("secret.txt")), 0o600);
 
-        let grit_repo = Repository::open(&root.join(".git"), Some(root)).expect("open");
-        checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
-        grit_lib::refs::write_ref(
-            &grit_repo.git_dir,
-            "HEAD",
-            &ObjectId::from_hex(&target_commit).expect("commit"),
-        )
-        .expect("head");
+            let grit_repo = Repository::open(&root.join(".git"), Some(root)).expect("open");
+            checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
+            grit_lib::refs::write_ref(
+                &grit_repo.git_dir,
+                "HEAD",
+                &ObjectId::from_hex(&target_commit).expect("commit"),
+            )
+            .expect("head");
 
-        let grit_mode = mode_bits(&root.join("secret.txt"));
-        assert_eq!(
+            let grit_mode = mode_bits(&root.join("secret.txt"));
+            assert_eq!(
             grit_mode, git_mode,
             "grit in-place checkout must match git file mode (expected 0600, got {grit_mode:#o})"
         );
@@ -99,45 +97,45 @@ mod unix {
         label: &str,
     ) {
         with_umask(umask, || {
-        git(root, &["init", "-q", "-b", "main", "."]);
-        git(root, &["config", "user.email", "t@example.com"]);
-        git(root, &["config", "user.name", "Test"]);
+            git(root, &["init", "-q", "-b", "main", "."]);
+            git(root, &["config", "user.email", "t@example.com"]);
+            git(root, &["config", "user.name", "Test"]);
 
-        std::fs::write(root.join("secret.txt"), b"main\n").expect("write main");
-        if let Some(prepare_main) = prepare_main {
-            prepare_main(root);
-        }
-        git(root, &["add", "secret.txt"]);
-        git(root, &["commit", "-qm", "main"]);
-        let main_tree = tree_of_head(root);
-        let main_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
+            std::fs::write(root.join("secret.txt"), b"main\n").expect("write main");
+            if let Some(prepare_main) = prepare_main {
+                prepare_main(root);
+            }
+            git(root, &["add", "secret.txt"]);
+            git(root, &["commit", "-qm", "main"]);
+            let main_tree = tree_of_head(root);
+            let main_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
 
-        prepare_target(root);
-        git(root, &["add", "secret.txt"]);
-        git(root, &["commit", "-qm", "target"]);
-        let target_tree = tree_of_head(root);
-        let target_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
-        git(root, &["branch", "target"]);
+            prepare_target(root);
+            git(root, &["add", "secret.txt"]);
+            git(root, &["commit", "-qm", "target"]);
+            let target_tree = tree_of_head(root);
+            let target_commit = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
+            git(root, &["branch", "target"]);
 
-        git(root, &["reset", "--hard", &main_commit]);
-        git(root, &["checkout", "-q", "target"]);
-        let git_mode = mode_bits(&root.join("secret.txt"));
+            git(root, &["reset", "--hard", &main_commit]);
+            git(root, &["checkout", "-q", "target"]);
+            let git_mode = mode_bits(&root.join("secret.txt"));
 
-        git(root, &["reset", "--hard", &main_commit]);
-        let grit_repo = Repository::open(&root.join(".git"), Some(root)).expect("open");
-        checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
-        grit_lib::refs::write_ref(
-            &grit_repo.git_dir,
-            "HEAD",
-            &ObjectId::from_hex(&target_commit).expect("commit"),
-        )
-        .expect("head");
-        let grit_mode = mode_bits(&root.join("secret.txt"));
+            git(root, &["reset", "--hard", &main_commit]);
+            let grit_repo = Repository::open(&root.join(".git"), Some(root)).expect("open");
+            checkout_between_trees(&grit_repo, Some(&main_tree), &target_tree).expect("checkout");
+            grit_lib::refs::write_ref(
+                &grit_repo.git_dir,
+                "HEAD",
+                &ObjectId::from_hex(&target_commit).expect("commit"),
+            )
+            .expect("head");
+            let grit_mode = mode_bits(&root.join("secret.txt"));
 
-        assert_eq!(
-            grit_mode, git_mode,
-            "{label}: grit mode {grit_mode:#o} must match git {git_mode:#o}"
-        );
+            assert_eq!(
+                grit_mode, git_mode,
+                "{label}: grit mode {grit_mode:#o} must match git {git_mode:#o}"
+            );
         });
     }
 

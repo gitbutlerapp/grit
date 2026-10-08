@@ -78,12 +78,7 @@ fn local_change_diffs(
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
 
-    let staged = diff_index_to_tree(
-        &repo.odb,
-        index,
-        head_tree.as_ref(),
-        false,
-    )?;
+    let staged = diff_index_to_tree(&repo.odb, index, head_tree.as_ref(), false)?;
     let (unstaged, _index_changed) = diff_index_to_worktree_with_options(
         &repo.odb,
         index,
@@ -100,8 +95,7 @@ fn local_change_diffs(
 
 fn ensure_worktree_clean_with_message(repo: &Repository, message: &str) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let (staged, unstaged) =
-        local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
+    let (staged, unstaged) = local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
     if !staged.is_empty() || !unstaged.is_empty() {
         return Err(Error::Message(message.into()));
     }
@@ -151,8 +145,7 @@ pub fn prepare_tree_switch(
     to_tree: &ObjectId,
 ) -> Result<TreeSwitchPlan> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let (staged, unstaged) =
-        local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
+    let (staged, unstaged) = local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
     if !staged.is_empty() || !unstaged.is_empty() {
         return Err(Error::Message(
             "you have uncommitted changes — commit them before switching".into(),
