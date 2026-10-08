@@ -525,15 +525,13 @@ pub(crate) mod pack_cache {
     }
 
     #[cfg(test)]
-    static TEST_MARKER_STAT_COUNT: std::sync::atomic::AtomicU64 =
-        std::sync::atomic::AtomicU64::new(0);
+    thread_local! {
+        static TEST_MARKER_STAT_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
 
     fn marker_sidecar_is_file(path: &Path) -> bool {
         #[cfg(test)]
-        {
-            use std::sync::atomic::Ordering;
-            TEST_MARKER_STAT_COUNT.fetch_add(1, Ordering::Relaxed);
-        }
+        TEST_MARKER_STAT_COUNT.with(|count| count.set(count.get().saturating_add(1)));
         path.is_file()
     }
 
@@ -897,15 +895,13 @@ pub(crate) mod pack_cache {
 
     #[cfg(test)]
     pub fn test_reset_marker_stat_count() {
-        use std::sync::atomic::Ordering;
-        TEST_MARKER_STAT_COUNT.store(0, Ordering::Relaxed);
+        TEST_MARKER_STAT_COUNT.with(|count| count.set(0));
     }
 
     #[cfg(test)]
     #[must_use]
     pub fn test_marker_stat_count() -> u64 {
-        use std::sync::atomic::Ordering;
-        TEST_MARKER_STAT_COUNT.load(Ordering::Relaxed)
+        TEST_MARKER_STAT_COUNT.with(std::cell::Cell::get)
     }
 
     #[cfg(test)]
