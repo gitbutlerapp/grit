@@ -237,7 +237,7 @@ pub(crate) fn worktree_bytes_from_index_blob(
         Some(&smudge_meta),
         delayed_checkout,
     )
-    .map_err(Error::PathError)
+    .map_err(Error::from)
 }
 
 fn finish_delayed_checkouts(
@@ -306,6 +306,7 @@ fn smudge_retry_after_delay(
         Some(blob_hex),
         Some(meta),
     )
+    .map_err(|e| e.to_string())
 }
 
 fn parse_git_mode(mode: &str) -> u32 {
