@@ -103,7 +103,7 @@ fn grit_write_trailer_artifacts(repo: &Repository) {
     let pack_bytes = std::fs::read(&pack_path).expect("read pack");
     let hb = repo.odb.hash_algo().len();
     let pack_checksum = &pack_bytes[pack_bytes.len() - hb..];
-    let offsets: Vec<u64> = index.entries.iter().map(|e| e.offset).collect();
+    let offsets: Vec<u64> = index.iter().map(|e| e.offset()).collect();
     let rev_bytes =
         build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, pack_checksum);
     std::fs::write(rev_path_for_index(&idx_path), rev_bytes).expect("write rev");

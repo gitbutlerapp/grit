@@ -85,8 +85,8 @@ pub fn promisor_pack_object_ids(objects_dir: &Path) -> HashSet<ObjectId> {
         if !idx.is_promisor {
             continue;
         }
-        for e in &idx.entries {
-            if let Ok(oid) = crate::objects::ObjectId::from_bytes(&e.oid) {
+        for e in idx.iter() {
+            if let Ok(oid) = crate::objects::ObjectId::from_bytes(e.oid()) {
                 ids.insert(oid);
             }
         }

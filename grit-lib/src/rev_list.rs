@@ -2946,8 +2946,8 @@ fn packed_object_set(repo: &Repository) -> HashSet<ObjectId> {
     let objects_dir = repo.odb.objects_dir();
     if let Ok(indexes) = pack::read_local_pack_indexes(objects_dir) {
         for idx in indexes {
-            for e in idx.entries {
-                if let Ok(oid) = ObjectId::from_bytes(&e.oid) {
+            for e in idx.iter() {
+                if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
                     out.insert(oid);
                 }
             }

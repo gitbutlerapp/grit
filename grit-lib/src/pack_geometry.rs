@@ -127,7 +127,7 @@ pub fn collect_geometry_packs(
 
         out.push(GeometricPack {
             stem,
-            object_count: idx.entries.len(),
+            object_count: idx.len(),
             mtime_secs,
             is_local: true,
         });
@@ -193,7 +193,7 @@ pub fn collect_promisor_geometry_packs(
 
         out.push(GeometricPack {
             stem,
-            object_count: idx.entries.len(),
+            object_count: idx.len(),
             mtime_secs,
             is_local: true,
         });

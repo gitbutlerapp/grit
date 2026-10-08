@@ -21,12 +21,12 @@ fn main() -> grit_lib::error::Result<()> {
 
     for idx in &indexes {
         println!("pack: {}", idx.pack_path.display());
-        println!("  index entries: {}", idx.entries.len());
-        if let Some(e) = idx.entries.first() {
+        println!("  index entries: {}", idx.len());
+        if let Some(e) = idx.iter().next() {
             println!(
                 "  first oid: {} @ offset {}",
-                pack::oid_bytes_to_hex(&e.oid),
-                e.offset
+                pack::oid_bytes_to_hex(e.oid()),
+                e.offset()
             );
         }
     }
@@ -39,7 +39,7 @@ fn main() -> grit_lib::error::Result<()> {
             let p = e.path();
             if p.extension().is_some_and(|x| x == "idx") {
                 let parsed = pack::read_pack_index(&p)?;
-                println!("parsed {}: {} objects", p.display(), parsed.entries.len());
+                println!("parsed {}: {} objects", p.display(), parsed.len());
                 break;
             }
         }

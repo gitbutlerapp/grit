@@ -3,6 +3,11 @@
 //! This module implements a focused subset of pack functionality required by
 //! `count-objects`, `verify-pack`, and `show-index`.
 
+pub use crate::pack_index::{
+    compute_fanout_from_entries, compute_fanout_from_oid_slices, pack_index_entry_matches_sha1_oid,
+    parse_pack_index_bytes, PackIndex, PackIndexEntry, PackIndexEntryRef,
+};
+
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
@@ -17,73 +22,35 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-/// A parsed entry from an index file.
-#[derive(Debug, Clone)]
-pub struct PackIndexEntry {
-    /// Raw object identifier (`20` bytes for SHA-1, `32` for SHA-256).
-    pub oid: Vec<u8>,
-    /// Byte offset of the object in the corresponding `.pack`.
-    pub offset: u64,
-    /// CRC32 of the raw packed entry bytes (header + payload), from the v2 index CRC table.
-    /// `None` for version-1 indexes, which do not record CRCs.
-    pub crc32: Option<u32>,
+/// Resolve a pack index row position from a pack byte offset (`.rev` first, then sorted table).
+#[must_use]
+pub fn find_position_by_pack_offset(idx: &PackIndex, offset: u64) -> Option<usize> {
+    if let Some(pos) = find_position_by_pack_offset_rev(idx, offset) {
+        return Some(pos);
+    }
+    idx.find_position_by_offset_sorted(offset)
 }
 
-/// Parsed data from a `.idx` file (version 2).
-#[derive(Debug, Clone)]
-pub struct PackIndex {
-    /// Absolute path to the `.idx` file.
-    pub idx_path: PathBuf,
-    /// Absolute path to the `.pack` file.
-    pub pack_path: PathBuf,
-    /// OID width in bytes (`20` for SHA-1, `32` for SHA-256).
-    pub hash_bytes: usize,
-    /// Parsed entries in index order (sorted by OID).
-    pub entries: Vec<PackIndexEntry>,
-    /// 256-entry first-byte fanout table: `fanout[b]` is the count of entries whose
-    /// first OID byte is `<= b`. Enables O(log n) lookup via the OID's first byte
-    /// (matches Git's `find_pack_entry_one` in `packfile.c`).
-    pub fanout: [u32; 256],
-    /// Sibling `pack-*.promisor` marker was present when this index was prepared.
-    pub is_promisor: bool,
-    /// Sibling `pack-*.mtimes` marker was present when this index was prepared (cruft pack).
-    pub is_cruft: bool,
-}
-
-impl PackIndex {
-    /// Find the offset in the `.pack` file for the given OID via the fanout
-    /// table and binary search; returns `None` when the OID is not present.
-    ///
-    /// The lookup only applies when the OID's width matches this index's hash
-    /// width (20 bytes for SHA-1, 32 for SHA-256); a width mismatch yields `None`.
-    #[must_use]
-    pub fn find_offset(&self, oid: &ObjectId) -> Option<u64> {
-        let needle = oid.as_bytes();
-        if self.hash_bytes != needle.len() {
-            return None;
+fn find_position_by_pack_offset_rev(idx: &PackIndex, offset: u64) -> Option<usize> {
+    use crate::pack_rev::{rev_path_for_index, try_rev_positions_in_pack_order};
+    use std::cmp::Ordering;
+    use std::fs;
+    let rev_path = rev_path_for_index(&idx.idx_path);
+    let data = fs::read(rev_path).ok()?;
+    let positions = try_rev_positions_in_pack_order(&data, idx.len())?;
+    let mut lo = 0usize;
+    let mut hi = positions.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let idx_pos = positions[mid] as usize;
+        let off = idx.offset_at(idx_pos);
+        match off.cmp(&offset) {
+            Ordering::Less => lo = mid + 1,
+            Ordering::Greater => hi = mid,
+            Ordering::Equal => return Some(idx_pos),
         }
-        let first_byte = needle[0] as usize;
-        let lo = if first_byte == 0 {
-            0
-        } else {
-            self.fanout[first_byte - 1] as usize
-        };
-        let hi = self.fanout[first_byte] as usize;
-        if lo >= hi || hi > self.entries.len() {
-            return None;
-        }
-        let slice = &self.entries[lo..hi];
-        slice
-            .binary_search_by(|e| e.oid.as_slice().cmp(needle))
-            .ok()
-            .map(|idx| slice[idx].offset)
     }
-
-    /// Whether this pack index contains the given SHA-1 OID.
-    #[must_use]
-    pub fn contains(&self, oid: &ObjectId) -> bool {
-        self.find_offset(oid).is_some()
-    }
+    None
 }
 
 /// A single entry produced by `show-index`, with an optional CRC32.
@@ -401,11 +368,7 @@ mod pack_cache {
         if idx.is_promisor == is_promisor && idx.is_cruft == is_cruft {
             return idx;
         }
-        let updated = Arc::new(PackIndex {
-            is_promisor,
-            is_cruft,
-            ..(*idx).clone()
-        });
+        let updated = Arc::new(idx.with_sidecar_flags(is_promisor, is_cruft));
         let mut g = lock();
         g.by_idx.insert(
             idx.idx_path.clone(),
@@ -655,10 +618,10 @@ mod pack_cache {
         {
             let g = lock();
             if let Some(c) = g.by_idx.get(&idx_path) {
-                return Ok(c.idx.hash_bytes);
+                return Ok(c.idx.hash_bytes());
             }
         }
-        Ok(read_pack_index_no_verify(&idx_path)?.hash_bytes)
+        Ok(read_pack_index_no_verify(&idx_path)?.hash_bytes())
     }
 
     fn pack_fingerprint_mismatch(
@@ -883,134 +846,18 @@ pub fn collect_local_pack_info(objects_dir: &Path) -> Result<LocalPackInfo> {
         let pack_meta = fs::metadata(&idx.pack_path).map_err(Error::Io)?;
         let idx_meta = fs::metadata(&idx.idx_path).map_err(Error::Io)?;
         info.pack_count += 1;
-        info.object_count += idx.entries.len();
+        info.object_count += idx.len();
         info.size_bytes += pack_meta.len() + idx_meta.len();
-        let hash_bytes = idx.hash_bytes;
-        for entry in idx.entries {
-            if entry.oid.len() == hash_bytes {
-                if let Ok(oid) = ObjectId::from_bytes(&entry.oid) {
+        let hash_bytes = idx.hash_bytes();
+        for entry in idx.iter() {
+            if entry.oid().len() == hash_bytes {
+                if let Ok(oid) = ObjectId::from_bytes(entry.oid()) {
                     info.object_ids.insert(oid);
                 }
             }
         }
     }
     Ok(info)
-}
-
-fn verify_idx_trailing_checksum(idx_path: &Path, bytes: &[u8], hash_bytes: usize) -> Result<()> {
-    let Some(algo) = HashAlgo::from_len(hash_bytes) else {
-        return Err(Error::CorruptObject(format!(
-            "unsupported index hash width {hash_bytes}"
-        )));
-    };
-    verify_trailer(algo, bytes).map_err(|e| {
-        Error::CorruptObject(format!(
-            "index checksum mismatch for {}: {e}",
-            idx_path.display()
-        ))
-    })
-}
-
-/// Validate that the 256-entry pack-index fanout table is non-decreasing.
-///
-/// The fanout table maps each first OID byte to a cumulative object count, so its
-/// entries must be monotonically non-decreasing. Git's `load_idx` (`packfile.c`)
-/// rejects any index whose fanout decreases ("non-monotonic index"); without this
-/// check a corrupted fanout (e.g. an inflated interior entry) could still pass the
-/// final `fanout[255]` object-count read and let bogus indexes be enumerated.
-///
-/// # Errors
-///
-/// Returns [`Error::CorruptObject`] when any entry is smaller than its predecessor.
-fn check_fanout_monotonic(fanout: &[u32; 256], idx_path: &Path) -> Result<()> {
-    let mut prev = 0u32;
-    for &n in fanout {
-        if n < prev {
-            return Err(Error::CorruptObject(format!(
-                "non-monotonic index {}",
-                idx_path.display()
-            )));
-        }
-        prev = n;
-    }
-    Ok(())
-}
-
-fn read_pack_index_v1(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<PackIndex> {
-    let mut pos = 0usize;
-    if bytes.len() < 256 * 4 + 20 {
-        return Err(Error::CorruptObject(format!(
-            "index file {} is too small",
-            idx_path.display()
-        )));
-    }
-    let mut fanout = [0u32; 256];
-    for slot in &mut fanout {
-        *slot = read_u32_be(bytes, &mut pos)?;
-    }
-    check_fanout_monotonic(&fanout, idx_path)?;
-    let object_count = fanout[255] as usize;
-    let need = pos
-        .saturating_add(object_count.saturating_mul(24))
-        .saturating_add(20);
-    if bytes.len() < need {
-        return Err(Error::CorruptObject(format!(
-            "truncated idx file {}",
-            idx_path.display()
-        )));
-    }
-
-    let mut entries: Vec<PackIndexEntry> = Vec::with_capacity(object_count);
-    for i in 0..object_count {
-        let offset = read_u32_be(bytes, &mut pos)? as u64;
-        let oid = bytes[pos..pos + 20].to_vec();
-        pos += 20;
-        if i > 0 && entries[i - 1].oid.cmp(&oid) != std::cmp::Ordering::Less {
-            return Err(Error::CorruptObject(format!(
-                "oid lookup out of order in {}",
-                idx_path.display()
-            )));
-        }
-        entries.push(PackIndexEntry {
-            oid,
-            offset,
-            crc32: None,
-        });
-    }
-
-    if verify {
-        // Version-1 indexes are SHA-1 only (20-byte trailing checksum).
-        verify_idx_trailing_checksum(idx_path, bytes, 20)?;
-    }
-
-    let mut pack_path = idx_path.to_path_buf();
-    pack_path.set_extension("pack");
-
-    let fanout = compute_fanout_from_entries(&entries);
-    Ok(PackIndex {
-        idx_path: idx_path.to_path_buf(),
-        pack_path,
-        hash_bytes: 20,
-        entries,
-        fanout,
-        is_promisor: false,
-        is_cruft: false,
-    })
-}
-
-/// Compute the 256-entry fanout from a sorted entry list (used for v1 indexes
-/// where the fanout is not stored explicitly in a usable form for lookups).
-fn compute_fanout_from_entries(entries: &[PackIndexEntry]) -> [u32; 256] {
-    let mut fanout = [0u32; 256];
-    let mut idx = 0usize;
-    for byte in 0u32..256 {
-        let needle = byte as u8;
-        while idx < entries.len() && entries[idx].oid.first().copied().unwrap_or(0) <= needle {
-            idx += 1;
-        }
-        fanout[byte as usize] = u32::try_from(idx).unwrap_or(u32::MAX);
-    }
-    fanout
 }
 
 /// Write a version-2 `.idx` for `entries` describing objects in `pack_path`.
@@ -1114,170 +961,9 @@ fn write_v2_pack_index_body(
     Ok(())
 }
 
-fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<PackIndex> {
-    if bytes.len() < 8 + 256 * 4 + 40 {
-        return Err(Error::CorruptObject(format!(
-            "index file {} is too small",
-            idx_path.display()
-        )));
-    }
-
-    let mut pos = 0usize;
-    pos += 4;
-    let version = read_u32_be(bytes, &mut pos)?;
-    if version != 2 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported idx version {} in {}",
-            version,
-            idx_path.display()
-        )));
-    }
-
-    let mut fanout = [0u32; 256];
-    for slot in &mut fanout {
-        *slot = read_u32_be(bytes, &mut pos)?;
-    }
-    check_fanout_monotonic(&fanout, idx_path)?;
-    let object_count = fanout[255] as usize;
-
-    let idx_file_len = bytes.len();
-    let hash_bytes = detect_idx_hash_bytes_v2(idx_file_len, pos, object_count, idx_path)?;
-
-    let need = pos
-        .saturating_add(object_count * hash_bytes)
-        .saturating_add(object_count * 4)
-        .saturating_add(object_count * 4)
-        .saturating_add(40);
-    if bytes.len() < need {
-        return Err(Error::CorruptObject(format!(
-            "truncated idx file {}",
-            idx_path.display()
-        )));
-    }
-
-    let mut oids: Vec<Vec<u8>> = Vec::with_capacity(object_count);
-    for _ in 0..object_count {
-        let slice = &bytes[pos..pos + hash_bytes];
-        pos += hash_bytes;
-        oids.push(slice.to_vec());
-    }
-
-    let mut crcs = Vec::with_capacity(object_count);
-    for _ in 0..object_count {
-        crcs.push(read_u32_be(bytes, &mut pos)?);
-    }
-
-    let mut offsets32 = Vec::with_capacity(object_count);
-    let mut large_count = 0usize;
-    for _ in 0..object_count {
-        let v = read_u32_be(bytes, &mut pos)?;
-        if (v & 0x8000_0000) != 0 {
-            large_count += 1;
-        }
-        offsets32.push(v);
-    }
-
-    if bytes.len() < pos + large_count * 8 + 40 {
-        return Err(Error::CorruptObject(format!(
-            "truncated large offset table in {}",
-            idx_path.display()
-        )));
-    }
-    let mut large_offsets = Vec::with_capacity(large_count);
-    for _ in 0..large_count {
-        large_offsets.push(read_u64_be(bytes, &mut pos)?);
-    }
-
-    let mut next_large = 0usize;
-    let mut entries = Vec::with_capacity(object_count);
-    for (i, oid) in oids.into_iter().enumerate() {
-        let raw = offsets32[i];
-        let offset = if (raw & 0x8000_0000) == 0 {
-            raw as u64
-        } else {
-            let off = large_offsets.get(next_large).copied().ok_or_else(|| {
-                Error::CorruptObject(format!("bad large offset index in {}", idx_path.display()))
-            })?;
-            next_large += 1;
-            off
-        };
-        entries.push(PackIndexEntry {
-            oid,
-            offset,
-            crc32: Some(crcs[i]),
-        });
-    }
-
-    let mut pack_path = idx_path.to_path_buf();
-    pack_path.set_extension("pack");
-
-    if verify {
-        verify_idx_trailing_checksum(idx_path, bytes, hash_bytes)?;
-    }
-
-    Ok(PackIndex {
-        idx_path: idx_path.to_path_buf(),
-        pack_path,
-        hash_bytes,
-        entries,
-        fanout,
-        is_promisor: false,
-        is_cruft: false,
-    })
-}
-
-/// Infer OID width for a version-2 index using Git's file-size bounds (`packfile.c` `load_idx`).
-///
-/// The first OID byte cannot disambiguate SHA-1 vs SHA-256 (both use the same fanout slot for
-/// small repos), so we require the total `.idx` size to match exactly one `(hashsz, large_offset_count)` pair.
-fn detect_idx_hash_bytes_v2(
-    idx_file_len: usize,
-    fanout_end: usize,
-    object_count: usize,
-    idx_path: &Path,
-) -> Result<usize> {
-    if object_count == 0 {
-        return Ok(20);
-    }
-
-    // For a width `hb` (20 for SHA-1, 32 for SHA-256) the v2 index is:
-    //   fanout_end + n*hb (OIDs) + n*4 (CRC) + n*4 (offsets)
-    //   + large*8 (64-bit offset extension) + hb (pack checksum) + hb (index checksum)
-    // The OID width and both trailing checksums all use the repository hash, so the
-    // index checksum is `hb`-wide too (Git `packfile.c` `load_idx`). Require the size
-    // to match exactly one `(hb, large)` pair with `0 <= large <= n`.
-    for &hb in &[20usize, 32] {
-        let fixed = fanout_end
-            .saturating_add(object_count.saturating_mul(hb + 4 + 4))
-            .saturating_add(2 * hb);
-        if idx_file_len < fixed {
-            continue;
-        }
-        let extra = idx_file_len - fixed;
-        if !extra.is_multiple_of(8) {
-            continue;
-        }
-        if extra / 8 > object_count {
-            continue;
-        }
-        return Ok(hb);
-    }
-
-    Err(Error::CorruptObject(format!(
-        "wrong index v2 file size in {}",
-        idx_path.display()
-    )))
-}
-
 #[must_use]
 pub fn oid_bytes_to_hex(oid: &[u8]) -> String {
     hex::encode(oid)
-}
-
-/// True when `entry` stores a SHA-1 OID matching `oid` (SHA-256 pack entries are ignored).
-#[must_use]
-pub fn pack_index_entry_matches_sha1_oid(entry: &PackIndexEntry, oid: &ObjectId) -> bool {
-    entry.oid.len() == oid.as_bytes().len() && entry.oid.as_slice() == oid.as_bytes()
 }
 
 /// Hash canonical loose object bytes (`kind SP size NUL data`) with the repo hash width.
@@ -1302,7 +988,7 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
 /// Returns [`Error::CorruptObject`] when format checks fail.
 pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
     let bytes = fs::read(idx_path).map_err(Error::Io)?;
-    parse_pack_index_bytes(idx_path, &bytes, true)
+    parse_pack_index_bytes(idx_path, bytes, true)
 }
 
 /// Parse a pack index file without verifying the SHA-1 trailer checksum.
@@ -1312,22 +998,7 @@ pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
 /// corrupted-but-structurally-valid idx (t5319 64-bit offset tests) still loads.
 pub fn read_pack_index_no_verify(idx_path: &Path) -> Result<PackIndex> {
     let bytes = fs::read(idx_path).map_err(Error::Io)?;
-    parse_pack_index_bytes(idx_path, &bytes, false)
-}
-
-fn parse_pack_index_bytes(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<PackIndex> {
-    if bytes.len() < 8 {
-        return Err(Error::CorruptObject(format!(
-            "index file {} is too small",
-            idx_path.display()
-        )));
-    }
-    let magic = &bytes[0..4];
-    if magic == [0xff, b't', b'O', b'c'] {
-        read_pack_index_v2(idx_path, bytes, verify)
-    } else {
-        read_pack_index_v1(idx_path, bytes, verify)
-    }
+    parse_pack_index_bytes(idx_path, bytes, false)
 }
 
 /// A pack object type as encoded in the packed stream header.
@@ -1496,7 +1167,7 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
     let idx = read_pack_index(idx_path)?;
     let idx_file_bytes = fs::read(idx_path).map_err(Error::Io)?;
     let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
-    let hb = idx.hash_bytes;
+    let hb = idx.hash_bytes();
     if pack_bytes.len() < 12 + hb {
         return Err(Error::CorruptObject(format!(
             "pack file {} is too small",
@@ -1543,7 +1214,7 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
         )));
     }
     let count = u32::from_be_bytes(pack_bytes[8..12].try_into().unwrap_or([0, 0, 0, 0])) as usize;
-    if count != idx.entries.len() {
+    if count != idx.len() {
         return Err(Error::CorruptObject(format!(
             "pack/index object count mismatch for {}",
             idx.pack_path.display()
@@ -1551,8 +1222,8 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
     }
 
     let mut by_offset: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
-    for entry in &idx.entries {
-        by_offset.insert(entry.offset, entry.oid.clone());
+    for entry in idx.iter() {
+        by_offset.insert(entry.offset(), entry.oid().to_vec());
     }
     let offsets: Vec<u64> = by_offset.keys().copied().collect();
     if offsets.is_empty() {
@@ -1629,14 +1300,14 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
         }
     }
 
-    for entry in &idx.entries {
-        let obj = read_object_from_pack_bytes(&pack_bytes, &idx, &entry.oid)?;
+    for entry in idx.iter() {
+        let obj = read_object_from_pack_bytes(&pack_bytes, &idx, entry.oid())?;
         let computed = hash_object_bytes(obj.kind, &obj.data, hb)?;
-        if computed.as_slice() != entry.oid.as_slice() {
+        if computed.as_slice() != entry.oid() {
             return Err(Error::CorruptObject(format!(
                 "pack object hash mismatch at offset {} (index says {})",
-                entry.offset,
-                oid_bytes_to_hex(&entry.oid)
+                entry.offset(),
+                oid_bytes_to_hex(entry.oid())
             )));
         }
     }
@@ -1855,13 +1526,14 @@ fn rescue_in_pack_base(
     objects_dir: Option<&Path>,
     state: &mut DeltaChainState,
 ) -> Result<Option<(ObjectKind, Vec<u8>)>> {
-    let Some(entry) = idx.entries.iter().find(|e| e.offset == base_offset) else {
+    let Some(pos) = find_position_by_pack_offset(idx, base_offset) else {
         return Ok(None);
     };
-    if entry.oid.len() != idx.hash_bytes {
+    let entry_oid = idx.oid_at(pos);
+    if entry_oid.len() != idx.hash_bytes() {
         return Ok(None);
     }
-    let base_oid = ObjectId::from_bytes(entry.oid.as_slice())?;
+    let base_oid = ObjectId::from_bytes(entry_oid)?;
     let Some(dir) = objects_dir else {
         return Ok(None);
     };
@@ -2010,7 +1682,7 @@ fn resolve_pack_object_at_body(
             }
             PackedType::RefDelta => {
                 state.next_hop()?;
-                let hb = idx_ref.hash_bytes;
+                let hb = idx_ref.hash_bytes();
                 if pos + hb > cur_bytes.len() {
                     return Err(Error::CorruptObject(
                         "truncated ref-delta base OID".to_owned(),
@@ -2025,26 +1697,23 @@ fn resolve_pack_object_at_body(
                     delta: delta_data,
                 });
 
-                if let Some(base_offset) = idx_ref
-                    .entries
-                    .binary_search_by(|e| e.oid.as_slice().cmp(base_raw.as_slice()))
-                    .ok()
-                    .map(|i| idx_ref.entries[i].offset)
-                {
-                    if let Some((base_kind, base_data)) =
-                        pack_cache::get_delta_base(&idx_ref.pack_path, base_offset)
-                    {
-                        let result = finish_with_whole_base_fixed(
-                            base_kind,
-                            &base_data,
-                            &pending,
-                            &idx_ref.pack_path,
-                            base_offset,
-                        )?;
-                        return Ok((base_kind, result));
+                if let Ok(base_oid) = ObjectId::from_bytes(base_raw.as_slice()) {
+                    if let Some(base_offset) = idx_ref.find_offset(&base_oid) {
+                        if let Some((base_kind, base_data)) =
+                            pack_cache::get_delta_base(&idx_ref.pack_path, base_offset)
+                        {
+                            let result = finish_with_whole_base_fixed(
+                                base_kind,
+                                &base_data,
+                                &pending,
+                                &idx_ref.pack_path,
+                                base_offset,
+                            )?;
+                            return Ok((base_kind, result));
+                        }
+                        cur_offset = base_offset;
+                        continue;
                     }
-                    cur_offset = base_offset;
-                    continue;
                 }
 
                 if let (Some(dir), Ok(base_oid)) =
@@ -2085,7 +1754,7 @@ fn resolve_pack_object_at_body(
                         return Ok((base_kind, result));
                     }
                 }
-                if idx_ref.entries.len() > 100 {
+                if idx_ref.len() > 100 {
                     let raw = pending.last().map(|f| f.delta.clone()).unwrap_or_default();
                     return Ok((ObjectKind::Blob, raw));
                 }
@@ -2181,11 +1850,9 @@ pub fn read_object_from_pack_bytes(
     oid: &[u8],
 ) -> Result<Object> {
     validate_pack_index_object_count(pack_bytes, idx)?;
-    let entry_offset = idx
-        .entries
-        .binary_search_by(|e| e.oid.as_slice().cmp(oid))
+    let entry_offset = ObjectId::from_bytes(oid)
         .ok()
-        .map(|i| idx.entries[i].offset)
+        .and_then(|id| idx.find_offset(&id))
         .ok_or_else(|| Error::ObjectNotFound(oid_bytes_to_hex(oid)))?;
     let (kind, data) = read_pack_object_at(pack_bytes, entry_offset, idx, None, 0)?;
     verify_packed_object_hash(kind, &data, oid)?;
@@ -2198,10 +1865,10 @@ fn validate_pack_index_object_count(pack_bytes: &[u8], idx: &PackIndex) -> Resul
     }
     let count =
         u32::from_be_bytes([pack_bytes[8], pack_bytes[9], pack_bytes[10], pack_bytes[11]]) as usize;
-    if count != idx.entries.len() {
+    if count != idx.len() {
         return Err(Error::CorruptObject(format!(
             "pack object count mismatch: pack has {count}, index has {}",
-            idx.entries.len()
+            idx.len()
         )));
     }
     Ok(())
@@ -2332,7 +1999,7 @@ pub fn packed_ref_delta_reuse_slice(
     let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_oldest_first(&mut indexes);
     for idx in indexes {
-        let hb = idx.hash_bytes;
+        let hb = idx.hash_bytes();
         if hb != 20 {
             continue;
         }
@@ -2355,13 +2022,14 @@ pub fn packed_ref_delta_reuse_slice(
             }
             PackedType::OfsDelta => {
                 let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
-                let Some(base_entry) = idx.entries.iter().find(|e| e.offset == base_off) else {
+                let Some(pos) = find_position_by_pack_offset(&idx, base_off) else {
                     continue;
                 };
-                if base_entry.oid.len() != idx.hash_bytes {
+                let base_oid_bytes = idx.oid_at(pos);
+                if base_oid_bytes.len() != hb {
                     continue;
                 }
-                ObjectId::from_bytes(base_entry.oid.as_slice())?
+                ObjectId::from_bytes(base_oid_bytes)?
             }
             _ => {
                 // Same OID may exist as a full object in an older pack and as a delta in a newer
@@ -2419,7 +2087,7 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
     let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_newest_first(&mut indexes);
     for idx in &indexes {
-        if idx.hash_bytes != 20 {
+        if idx.hash_bytes() != 20 {
             continue;
         }
         let Some(entry_offset) = idx.find_offset(oid) else {
@@ -2430,7 +2098,7 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
         let (packed_type, _) = parse_pack_object_header(&pack_bytes, &mut p)?;
         match packed_type {
             PackedType::RefDelta => {
-                let hb = idx.hash_bytes;
+                let hb = idx.hash_bytes();
                 if p + hb > pack_bytes.len() {
                     return Err(Error::CorruptObject("truncated ref-delta base".to_owned()));
                 }
@@ -2438,11 +2106,8 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
             }
             PackedType::OfsDelta => {
                 let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
-                return Ok(idx
-                    .entries
-                    .iter()
-                    .find(|e| e.offset == base_off)
-                    .and_then(|e| ObjectId::from_bytes(e.oid.as_slice()).ok()));
+                return Ok(find_position_by_pack_offset(idx, base_off)
+                    .and_then(|pos| ObjectId::from_bytes(idx.oid_at(pos)).ok()));
             }
             _ => continue,
         }
@@ -2454,19 +2119,13 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
 ///
 /// Uses the next larger pack offset from the index, or the pack trailer when this is the last object.
 fn pack_entry_raw_end(idx: &PackIndex, pack_bytes: &[u8], entry_offset: u64) -> Option<usize> {
-    let hb = idx.hash_bytes;
+    let hb = idx.hash_bytes();
     let pack_end = pack_bytes.len().checked_sub(hb)?;
     let start = entry_offset as usize;
     if start >= pack_end {
         return None;
     }
-    let next = idx
-        .entries
-        .iter()
-        .map(|e| e.offset)
-        .filter(|&o| o > entry_offset && (o as usize) <= pack_end)
-        .min();
-    Some(next.map(|o| o as usize).unwrap_or(pack_end))
+    Some(idx.next_pack_offset_after(entry_offset, pack_end as u64) as usize)
 }
 
 /// When `oid` is stored as a full (non-delta) object in a local pack, return its verbatim packed
@@ -2491,7 +2150,7 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
     let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_newest_first(&mut indexes);
     for idx in &indexes {
-        if idx.hash_bytes != 20 {
+        if idx.hash_bytes() != 20 {
             continue;
         }
         let Some(entry_offset) = idx.find_offset(oid) else {
@@ -2517,17 +2176,13 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
         // Git `check_pack_crc`: verbatim reuse copies bytes unparsed, so guard with the pack
         // index's CRC32. A corrupt copy is skipped, letting a redundant pack or the normal
         // (validating) read path serve the object instead (t5303).
-        let recorded_crc = idx
-            .entries
-            .iter()
-            .find(|e| e.offset == entry_offset)
-            .and_then(|e| e.crc32);
+        let recorded_crc = idx.crc32_for_pack_offset(entry_offset);
         match recorded_crc {
             Some(crc) if crc32fast::hash(slice) != crc => continue,
             // v1 indexes carry no CRC; verify by inflating and re-hashing the content.
             None if read_object_from_pack(idx, oid)
                 .map(|obj| {
-                    HashAlgo::from_len(idx.hash_bytes)
+                    HashAlgo::from_len(idx.hash_bytes())
                         .map(|algo| hash_object(algo, obj.kind, &obj.data) != *oid)
                         .unwrap_or(true)
                 })
@@ -2719,10 +2374,10 @@ fn read_u64_be(bytes: &[u8], pos: &mut usize) -> Result<u64> {
 pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
     let index = read_pack_index(idx_path)?;
     let mut out = Vec::new();
-    let hash_bytes = index.hash_bytes;
-    for e in index.entries {
-        if e.oid.len() == hash_bytes {
-            out.push(ObjectId::from_bytes(&e.oid)?);
+    let hash_bytes = index.hash_bytes();
+    for e in index.iter() {
+        if e.oid().len() == hash_bytes {
+            out.push(ObjectId::from_bytes(e.oid())?);
         }
     }
     Ok(out)
@@ -3003,25 +2658,15 @@ mod tests {
         pack_path: std::path::PathBuf,
         objects: &[(ObjectId, u64)],
     ) -> PackIndex {
-        let mut entries: Vec<PackIndexEntry> = objects
+        let idx_path = pack_path.with_extension("idx");
+        let pack_bytes = fs::read(&pack_path).expect("read pack for idx trailer");
+        let trailer = &pack_bytes[pack_bytes.len().saturating_sub(20)..];
+        let rows: Vec<(ObjectId, u64, u32)> = objects
             .iter()
-            .map(|(oid, offset)| PackIndexEntry {
-                oid: oid.as_bytes().to_vec(),
-                offset: *offset,
-                crc32: None,
-            })
+            .map(|(oid, offset)| (*oid, *offset, 0))
             .collect();
-        entries.sort_by(|a, b| a.oid.cmp(&b.oid));
-        let fanout = compute_fanout_from_entries(&entries);
-        PackIndex {
-            idx_path: pack_path.with_extension("idx"),
-            pack_path,
-            hash_bytes: 20,
-            entries,
-            fanout,
-            is_promisor: false,
-            is_cruft: false,
-        }
+        write_v2_pack_index_with_trailer(&idx_path, &rows, trailer, 20).expect("write idx");
+        read_pack_index(&idx_path).expect("read idx")
     }
 
     fn index_pack_in_scratch(pack: &[u8]) -> (tempfile::TempDir, PackIndex) {
@@ -3097,21 +2742,16 @@ mod tests {
         let pack_path = dir.path().join("sha256-corrupt.pack");
         fs::write(&pack_path, &pack).expect("write pack");
 
-        let mut entries = vec![PackIndexEntry {
-            oid: wrong_oid.as_bytes().to_vec(),
-            offset: off,
-            crc32: None,
-        }];
-        entries.sort_by(|a, b| a.oid.cmp(&b.oid));
-        let idx = PackIndex {
-            idx_path: pack_path.with_extension("idx"),
-            pack_path,
-            hash_bytes: 32,
-            fanout: compute_fanout_from_entries(&entries),
-            entries,
-            is_promisor: false,
-            is_cruft: false,
-        };
+        let idx_path = pack_path.with_extension("idx");
+        let trailer = &pack[pack.len() - 32..];
+        write_v2_pack_index_with_trailer(
+            &idx_path,
+            &[(wrong_oid, off, 0)],
+            trailer,
+            32,
+        )
+        .expect("write idx");
+        let idx = read_pack_index(&idx_path).expect("read idx");
 
         let err = read_object_from_pack_bytes(&pack, &idx, wrong_oid.as_bytes()).unwrap_err();
         match err {
@@ -3151,13 +2791,13 @@ mod tests {
 
         let (_scratch, idx) = index_pack_in_scratch(&pack);
         assert!(
-            idx.entries.len() > 1,
+            idx.len() > 1,
             "expected a multi-object pack, got {}",
-            idx.entries.len()
+            idx.len()
         );
 
-        for entry in &idx.entries {
-            let oid = ObjectId::from_bytes(&entry.oid).expect("oid in idx");
+        for entry in idx.iter() {
+            let oid = ObjectId::from_bytes(entry.oid()).expect("oid in idx");
             let from_pack = read_object_from_pack(&idx, &oid).expect("read packed object");
             let expected = odb.read(&oid).expect("loose/alt copy for oid");
             assert_eq!(from_pack.kind, expected.kind);
@@ -3268,6 +2908,7 @@ mod tests {
         let pack_path = dir.path().join("mem.pack");
         std::fs::write(&pack_path, &pack).expect("write pack");
         let idx = pack_index_for_objects(pack_path, &[(oid, off)]);
+        std::fs::remove_file(&idx.idx_path).expect("drop on-disk idx");
         assert!(
             !idx.idx_path.exists(),
             "fixture must not rely on an on-disk .idx"
@@ -3310,8 +2951,8 @@ mod tests {
         let objects = dir.path().join("objects");
         let idx_b = install_synthetic_pack(&objects, "cycle-b", &pack_b, &[(oid_b, off_b)]);
         let idx_a = install_synthetic_pack(&objects, "cycle-a", &pack_a, &[(oid_a, off_a)]);
-        assert_eq!(idx_a.entries.len(), 1);
-        assert_eq!(idx_b.entries.len(), 1);
+        assert_eq!(idx_a.len(), 1);
+        assert_eq!(idx_b.len(), 1);
         assert!(idx_b.contains(&oid_b));
         let _ = idx_b;
 
@@ -3600,7 +3241,7 @@ mod tests {
         .expect("idx");
 
         let idx = read_pack_index(&idx_path).expect("parse idx");
-        assert_eq!(idx.entries[0].offset, object_offset);
+        assert_eq!(idx.offset_at(0), object_offset);
         let got = read_object_from_pack(&idx, &oid).expect("read at large offset");
         assert_eq!(got.data, data);
     }
@@ -3718,9 +3359,9 @@ mod cached_lookup_tests {
         for slot in parsed.fanout {
             body.extend_from_slice(&slot.to_be_bytes());
         }
-        for entry in &parsed.entries {
-            body.extend_from_slice(&(entry.offset as u32).to_be_bytes());
-            body.extend_from_slice(&entry.oid);
+        for entry in parsed.iter() {
+            body.extend_from_slice(&(entry.offset() as u32).to_be_bytes());
+            body.extend_from_slice(entry.oid());
         }
         body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
         rewrite_test_file(&idx_path, &body);
@@ -3734,24 +3375,20 @@ mod cached_lookup_tests {
     }
 
     fn synthetic_fanout_index(entries: &[(Vec<u8>, u64)]) -> PackIndex {
-        let mut pack_entries: Vec<PackIndexEntry> = entries
-            .iter()
-            .map(|(oid, off)| PackIndexEntry {
-                oid: oid.clone(),
-                offset: *off,
-                crc32: None,
-            })
-            .collect();
-        pack_entries.sort_by(|a, b| a.oid.cmp(&b.oid));
-        PackIndex {
-            idx_path: PathBuf::from("synthetic.idx"),
-            pack_path: PathBuf::from("synthetic.pack"),
-            hash_bytes: 20,
-            fanout: compute_fanout_from_entries(&pack_entries),
-            entries: pack_entries,
-            is_promisor: false,
-            is_cruft: false,
+        let mut sorted = entries.to_vec();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        let slices: Vec<&[u8]> = sorted.iter().map(|(o, _)| o.as_slice()).collect();
+        let fanout = compute_fanout_from_oid_slices(&slices);
+        let mut body = Vec::new();
+        for f in fanout {
+            body.extend_from_slice(&f.to_be_bytes());
         }
+        for (oid, off) in sorted {
+            body.extend_from_slice(&(off as u32).to_be_bytes());
+            body.extend_from_slice(&oid);
+        }
+        body.extend_from_slice(HashAlgo::Sha1.digest(&body).as_bytes());
+        parse_pack_index_bytes(Path::new("synthetic.idx"), body, false).expect("v1 idx")
     }
 
     #[test]
@@ -4122,11 +3759,11 @@ mod cached_lookup_tests {
         let idx_path = v2_idx_path(&objects);
         let idx = read_pack_index(&idx_path).expect("read idx");
         let pack_bytes = std::fs::read(&idx.pack_path).expect("read pack");
-        for entry in &idx.entries {
-            let crc = entry.crc32.expect("v2 idx entry crc");
-            let start = entry.offset as usize;
+        for entry in idx.iter() {
+            let crc = entry.crc32().expect("v2 idx entry crc");
+            let start = entry.offset() as usize;
             let end =
-                super::pack_entry_raw_end(&idx, &pack_bytes, entry.offset).expect("entry end");
+                super::pack_entry_raw_end(&idx, &pack_bytes, entry.offset()).expect("entry end");
             assert_eq!(crc32fast::hash(&pack_bytes[start..end]), crc);
         }
         let _ = tree;
@@ -4192,10 +3829,7 @@ mod cached_lookup_tests {
 
         let recorded_crc = read_pack_index(&redundant_idx)
             .expect("redundant idx")
-            .entries
-            .iter()
-            .find(|e| e.offset == off)
-            .and_then(|e| e.crc32)
+            .crc32_for_pack_offset(off)
             .expect("crc");
         let corrupt_slice = &corrupt[start..end];
         assert_ne!(

@@ -623,11 +623,11 @@ fn build_midx_bytes_filtered(
             Error::CorruptObject("too many pack files for multi-pack-index".to_owned())
         })?;
         let mtime = pack_mtimes[pack_id as usize];
-        for e in &idx.entries {
-            if e.oid.len() != hash_len {
+        for e in idx.iter() {
+            if e.oid().len() != hash_len {
                 continue;
             }
-            let Ok(oid) = ObjectId::from_bytes(&e.oid) else {
+            let Ok(oid) = ObjectId::from_bytes(e.oid()) else {
                 continue;
             };
             if let Some(ex) = exclude_oids {
@@ -638,7 +638,7 @@ fn build_midx_bytes_filtered(
             let cand = MidxEntry {
                 oid,
                 pack_id,
-                offset: e.offset,
+                offset: e.offset(),
                 pack_mtime: mtime,
             };
             match best.get(&oid) {
@@ -646,7 +646,7 @@ fn build_midx_bytes_filtered(
                     best.insert(oid, cand);
                 }
                 Some(cur) => {
-                    if midx_pick_better_entry(cur, pack_id, e.offset, mtime, preferred_pack_idx) {
+                    if midx_pick_better_entry(cur, pack_id, e.offset(), mtime, preferred_pack_idx) {
                         best.insert(oid, cand);
                     }
                 }
@@ -2426,7 +2426,7 @@ pub fn write_multi_pack_index_with_options(
 
     // Git refuses an explicitly preferred pack that has no objects.
     if let Some(p) = preferred_idx {
-        if indexes.get(p).map(|i| i.entries.len()).unwrap_or(0) == 0 {
+        if indexes.get(p).map(PackIndex::len).unwrap_or(0) == 0 {
             let name = work_names.get(p).cloned().unwrap_or_default();
             let pack_name = name.strip_suffix(".idx").unwrap_or(&name);
             eprintln!("error: cannot select preferred pack {pack_name}.pack with no objects");
@@ -2448,11 +2448,11 @@ pub fn write_multi_pack_index_with_options(
             Error::CorruptObject("too many pack files for multi-pack-index".to_owned())
         })?;
         let mtime = pack_mtimes_layer[pack_id as usize];
-        for e in &idx.entries {
-            if e.oid.len() != select_hash_len {
+        for e in idx.iter() {
+            if e.oid().len() != select_hash_len {
                 continue;
             }
-            let Ok(oid) = ObjectId::from_bytes(&e.oid) else {
+            let Ok(oid) = ObjectId::from_bytes(e.oid()) else {
                 continue;
             };
             if opts.incremental && base_oids.contains(&oid) {
@@ -2461,7 +2461,7 @@ pub fn write_multi_pack_index_with_options(
             let cand = MidxEntry {
                 oid,
                 pack_id,
-                offset: e.offset,
+                offset: e.offset(),
                 pack_mtime: mtime,
             };
             match best.get(&oid) {
@@ -2469,7 +2469,7 @@ pub fn write_multi_pack_index_with_options(
                     best.insert(oid, cand);
                 }
                 Some(cur) => {
-                    if midx_pick_better_entry(cur, pack_id, e.offset, mtime, preferred_u32) {
+                    if midx_pick_better_entry(cur, pack_id, e.offset(), mtime, preferred_u32) {
                         best.insert(oid, cand);
                     }
                 }

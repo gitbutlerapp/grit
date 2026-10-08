@@ -50,7 +50,7 @@ pub fn hashfile_checksum_valid(data: &[u8], hash_len: usize) -> bool {
 /// Build `.rev` file bytes for a pack index (RIDX body + trailing SHA-1 of the body).
 #[must_use]
 pub fn build_pack_rev_bytes(index: &PackIndex) -> Vec<u8> {
-    let offsets: Vec<u64> = index.entries.iter().map(|e| e.offset).collect();
+    let offsets: Vec<u64> = index.iter().map(|e| e.offset()).collect();
     build_pack_rev_bytes_from_index_order_offsets(&offsets)
 }
 
@@ -137,8 +137,8 @@ pub fn pack_rev_fsck_messages(
     index: &PackIndex,
     rev_path_display: &str,
 ) -> Vec<String> {
-    let n = index.entries.len();
-    let hash_len = index.hash_bytes;
+    let n = index.len();
+    let hash_len = index.hash_bytes();
     let expected_len = HEADER_LEN + n * 4 + hash_len + hash_len;
     if data.len() < HEADER_LEN + hash_len {
         return vec![format!(
@@ -181,7 +181,7 @@ pub fn pack_rev_fsck_messages(
     }
 
     let mut order: Vec<u32> = (0..n as u32).collect();
-    order.sort_by_key(|&i| index.entries[i as usize].offset);
+    order.sort_by_key(|&i| index.offset_at(i as usize));
 
     for (i, &expected) in order.iter().enumerate() {
         let Some(got) = read_u32_be(data, &mut pos) else {
@@ -205,11 +205,11 @@ pub fn verify_pack_rev_file_contents(
     index: &PackIndex,
     path_for_errors: &str,
 ) -> std::result::Result<(), String> {
-    let hash_len = index.hash_bytes;
+    let hash_len = index.hash_bytes();
     if !hashfile_checksum_valid(data, hash_len) {
         return Err(format!("sha1 file '{path_for_errors}': validation error"));
     }
-    let n = index.entries.len();
+    let n = index.len();
     let expected_len = HEADER_LEN + n * 4 + hash_len + hash_len;
     if data.len() != expected_len {
         return Err(format!("reverse-index file {path_for_errors} is corrupt"));
@@ -235,7 +235,7 @@ pub fn verify_pack_rev_file_contents(
         ));
     }
     let mut order: Vec<u32> = (0..n as u32).collect();
-    order.sort_by_key(|&i| index.entries[i as usize].offset);
+    order.sort_by_key(|&i| index.offset_at(i as usize));
     for (i, &expected) in order.iter().enumerate() {
         let got =
             read_u32_be(data, &mut pos).ok_or_else(|| "truncated rev-index data".to_owned())?;

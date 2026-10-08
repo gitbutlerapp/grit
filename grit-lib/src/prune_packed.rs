@@ -116,8 +116,8 @@ fn collect_packed_ids(objects_dir: &Path) -> Result<HashSet<ObjectId>> {
     let indexes = read_local_pack_indexes(objects_dir)?;
     let mut ids = HashSet::new();
     for idx in indexes {
-        for entry in idx.entries {
-            if let Ok(oid) = ObjectId::from_bytes(&entry.oid) {
+        for entry in idx.iter() {
+            if let Ok(oid) = ObjectId::from_bytes(entry.oid()) {
                 ids.insert(oid);
             }
         }

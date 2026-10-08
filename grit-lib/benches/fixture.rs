@@ -326,9 +326,9 @@ fn build_large_pack_index(objects_dir: &Path, object_count: usize) -> (PackIndex
     clear_pack_cache();
     let idx = read_pack_index(&dest_idx).expect("read large idx");
     assert!(
-        idx.entries.len() >= object_count,
+        idx.len() >= object_count,
         "large idx should list many objects, got {}",
-        idx.entries.len()
+        idx.len()
     );
     (idx, tip)
 }

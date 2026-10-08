@@ -1859,11 +1859,11 @@ fn object_storage_dirs_for_abbrev(repo: &Repository) -> Result<Vec<PathBuf>> {
 fn collect_pack_oids_with_prefix(objects_dir: &Path, prefix: &str) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     for idx in pack::read_local_pack_indexes_cached(objects_dir)? {
-        for e in &idx.entries {
-            let Ok(oid) = crate::objects::ObjectId::from_bytes(&e.oid) else {
+        for e in idx.iter() {
+            let Ok(oid) = crate::objects::ObjectId::from_bytes(e.oid()) else {
                 continue;
             };
-            let hex = pack::oid_bytes_to_hex(&e.oid);
+            let hex = pack::oid_bytes_to_hex(e.oid());
             if hex.starts_with(prefix) {
                 out.push(oid);
             }
