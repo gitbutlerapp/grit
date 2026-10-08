@@ -2650,7 +2650,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::AttrRule` | struct | A parsed .gitattributes rule. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.AttrRule.html) |
 | `grit_lib::crlf::AutoCrlf` | enum | What core.autocrlf is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.AutoCrlf.html) |
 | `grit_lib::crlf::ConversionConfig` | struct | Global conversion settings derived from config. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.ConversionConfig.html) |
-| `grit_lib::crlf::ConversionError` | enum | Error from convert_to_git, convert_to_worktree, and related CRLF/encoding helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.ConversionError.html) |
+| `grit_lib::crlf::ConversionError` | enum | Error from internal encoding helpers (not public convert_to_git surface). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.ConversionError.html) |
 | `grit_lib::crlf::ConvertToGitOpts` | struct | Optional inputs for convert_to_git_with_opts (Git CONV_EOL_RENORMALIZE / index blob). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.ConvertToGitOpts.html) |
 | `grit_lib::crlf::CoreEol` | enum | What core.eol is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.CoreEol.html) |
 | `grit_lib::crlf::CrlfLegacyAttr` | enum | Legacy crlf gitattribute (deprecated in Git; still honored for EOL conversion). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.CrlfLegacyAttr.html) |
@@ -2665,6 +2665,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::delta_islands` | module | Delta islands — restrict cross-island deltas in pack-objects (--delta-islands). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/index.html) |
 | `grit_lib::delta_islands::DeltaIslands` | struct | Computed island marks for a pack-objects run. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.DeltaIslands.html) |
 | `grit_lib::delta_islands::IslandBitmap` | struct | One island membership bitmap (one bit per deduplicated island). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.IslandBitmap.html) |
+| `grit_lib::diagnostics` | module | Git-style diagnostic prefixes without embedding fatal: / warning: literals in call sites. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/index.html) |
 | `grit_lib::diff` | module | Diff machinery — compare trees, index entries, and working tree files. | [API](https://docs.rs/grit-lib/latest/grit_lib/diff/index.html) |
 | `grit_lib::diff::DiffEntry` | struct | A single diff entry representing one changed path. | [API](https://docs.rs/grit-lib/latest/grit_lib/diff/struct.DiffEntry.html) |
 | `grit_lib::diff::DiffIndexToWorktreeOptions` | struct | Additional inputs for diff_index_to_worktree_with_options. | [API](https://docs.rs/grit-lib/latest/grit_lib/diff/struct.DiffIndexToWorktreeOptions.html) |
@@ -2685,7 +2686,16 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::environment::Environment` | struct | Discovery and config variables that affect repository open/discover and ConfigSet loading. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) |
 | `grit_lib::environment::RepositoryOptions` | struct | Options passed to repository open/discover with an explicit Environment. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html) |
 | `grit_lib::error` | module | Shared error types for grit-lib. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/index.html) |
+| `grit_lib::error::ApplyError` | enum | Unified diff / patch application errors. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.ApplyError.html) |
+| `grit_lib::error::BadNumericSource` | enum | Why a Git config numeric value was rejected (git config int strict parsing). | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.BadNumericSource.html) |
+| `grit_lib::error::ConfigError` | enum | Configuration parse and validation failures. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.ConfigError.html) |
+| `grit_lib::error::DiffPathError` | enum | Path lookup failures while formatting a diff. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.DiffPathError.html) |
 | `grit_lib::error::Error` | enum | The top-level error type for all grit-lib operations. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) |
+| `grit_lib::error::FilterError` | enum | Clean/smudge filter and EOL conversion failures. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.FilterError.html) |
+| `grit_lib::error::FilterPhase` | enum | Which filter hook failed. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.FilterPhase.html) |
+| `grit_lib::error::PathOutsideRepoError` | enum | Path outside the repository during pathspec or transport resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.PathOutsideRepoError.html) |
+| `grit_lib::error::RefLockError` | enum | Reference lock failures while creating or updating a ref. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.RefLockError.html) |
+| `grit_lib::error::SparseCheckoutWarning` | enum | Sparse-checkout cone pattern parse warnings (non-fatal). | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.SparseCheckoutWarning.html) |
 | `grit_lib::fetch` | module | Wire-protocol fetch orchestration over a crate::transport::Connection. | [API](https://docs.rs/grit-lib/latest/grit_lib/fetch/index.html) |
 | `grit_lib::fetch::NoProgress` | struct | A Progress that discards everything. | [API](https://docs.rs/grit-lib/latest/grit_lib/fetch/struct.NoProgress.html) |
 | `grit_lib::fetch::Progress` | trait | Sink for the remote’s human-readable progress (side-band channel 2). | [API](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) |
@@ -2753,6 +2763,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::index::IndexEntry` | struct | A single entry in the Git index. | [API](https://docs.rs/grit-lib/latest/grit_lib/index/struct.IndexEntry.html) |
 | `grit_lib::index::IndexLoadOptions` | struct | Options for loading an index from disk. | [API](https://docs.rs/grit-lib/latest/grit_lib/index/struct.IndexLoadOptions.html) |
 | `grit_lib::index::IndexStatFields` | struct | Stat fields copied from a worktree Metadata probe during index staging. | [API](https://docs.rs/grit-lib/latest/grit_lib/index/struct.IndexStatFields.html) |
+| `grit_lib::index::StatMatchPolicy` | struct | Git match_stat_data policy (core.trustctime, core.checkstat, core.usenanosec). | [API](https://docs.rs/grit-lib/latest/grit_lib/index/struct.StatMatchPolicy.html) |
 | `grit_lib::index_name_hash_lazy` | module | Lazy, optionally multi-threaded index name/dir hash initialization compatible with Git’s name-hash.c (used by test-tool lazy-init-name-hash and regression test t3008). | [API](https://docs.rs/grit-lib/latest/grit_lib/index_name_hash_lazy/index.html) |
 | `grit_lib::index_pack` | module | Install a received packfile into the object store (index-pack path). | [API](https://docs.rs/grit-lib/latest/grit_lib/index_pack/index.html) |
 | `grit_lib::index_pack::IngestPackOptions` | struct | Options controlling how a received pack is ingested. | [API](https://docs.rs/grit-lib/latest/grit_lib/index_pack/struct.IngestPackOptions.html) |
