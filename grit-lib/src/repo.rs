@@ -126,7 +126,34 @@ pub struct Repository {
 
 type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
 
-pub(crate) type RepositoryConfigSnapshot = Arc<Mutex<Option<ConfigSnapshotEntry>>>;
+/// Shared config cache between [`Repository`] and its [`crate::odb::Odb`], including the
+/// diagnostic sink used when the cascade is reloaded.
+pub(crate) struct SharedConfigSnapshot {
+    cache: Mutex<Option<ConfigSnapshotEntry>>,
+    diagnostics: Mutex<DiagnosticsHandle>,
+}
+
+impl SharedConfigSnapshot {
+    pub(crate) fn new(diagnostics: DiagnosticsHandle) -> Self {
+        Self {
+            cache: Mutex::new(None),
+            diagnostics: Mutex::new(diagnostics),
+        }
+    }
+
+    pub(crate) fn diagnostics_handle(&self) -> DiagnosticsHandle {
+        self.diagnostics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn set_diagnostics(&self, sink: DiagnosticsHandle) {
+        *self.diagnostics.lock().unwrap_or_else(|e| e.into_inner()) = sink;
+    }
+}
+
+pub(crate) type RepositoryConfigSnapshot = Arc<SharedConfigSnapshot>;
 
 fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
     let meta = fs::metadata(git_dir.join("config")).ok()?;
@@ -134,11 +161,11 @@ fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
 }
 
 pub(crate) fn ensure_shared_config_snapshot(
-    state: &Mutex<Option<ConfigSnapshotEntry>>,
+    state: &SharedConfigSnapshot,
     git_dir: Option<&Path>,
-    diagnostics: Option<DiagnosticsHandle>,
 ) -> Result<Arc<ConfigSet>> {
     let mut guard = state
+        .cache
         .lock()
         .map_err(|e| Error::Message(format!("config snapshot lock poisoned: {e}")))?;
     let disk_identity = git_dir.and_then(local_repo_config_identity);
@@ -157,7 +184,7 @@ pub(crate) fn ensure_shared_config_snapshot(
                     git_dir: Some(git_dir.to_path_buf()),
                     ..Default::default()
                 },
-                diagnostics,
+                diagnostics: Some(state.diagnostics_handle()),
                 ..Default::default()
             };
             Arc::new(ConfigSet::load_with_options(Some(git_dir), &opts)?)
@@ -227,7 +254,7 @@ impl Repository {
             None => None,
         };
 
-        let config_snapshot = Arc::new(Mutex::new(None));
+        let config_snapshot = Arc::new(SharedConfigSnapshot::new(Arc::clone(&options.diagnostics)));
         let odb = if let Some(ref wt) = work_tree {
             Odb::with_work_tree(&objects_dir, wt)
                 .with_config_git_dir(git_dir.clone())
@@ -260,6 +287,7 @@ impl Repository {
 
     /// Replace the diagnostic sink (for embedders and the CLI).
     pub fn set_diagnostics(&mut self, sink: DiagnosticsHandle) {
+        self.config_snapshot.set_diagnostics(Arc::clone(&sink));
         self.diagnostics = sink;
     }
 
@@ -276,10 +304,6 @@ impl Repository {
 
     pub(crate) fn warn(&self, warning: diagnostics::Warning) {
         self.diagnostics.warn(warning);
-    }
-
-    pub(crate) fn trace_network(&self, message: String) {
-        diagnostics::trace_network(&self.diagnostics, self.network_trace, message);
     }
 
     fn repo_cached_settings_from_config(cfg: &ConfigSet) -> RepoCachedSettings {
@@ -303,11 +327,7 @@ impl Repository {
     }
 
     fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
-        ensure_shared_config_snapshot(
-            &self.config_snapshot,
-            Some(&self.git_dir),
-            Some(self.diagnostics()),
-        )
+        ensure_shared_config_snapshot(&self.config_snapshot, Some(&self.git_dir))
     }
 
     /// Return the merged configuration cascade for this repository.
@@ -361,6 +381,7 @@ impl Repository {
         }
         let mut guard = self
             .config_snapshot
+            .cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = Some((config, local_repo_config_identity(&self.git_dir)));

@@ -507,9 +507,15 @@ fn dump_cache_tree_pair(
 /// Read `GIT_INDEX_VERSION` and return the requested version.
 ///
 /// If the environment variable is unset, returns `None`.
-/// If it is set but invalid (non-numeric or out of range 2..=4), prints a
-/// warning to stderr and returns the default version.
-pub fn get_index_format_from_env(
+/// If it is set but invalid (non-numeric or out of range 2..=4), returns the
+/// default version (no diagnostic sink; see [`get_index_format_from_env_with_diagnostics`]).
+#[must_use]
+pub fn get_index_format_from_env() -> Option<u32> {
+    get_index_format_from_env_with_diagnostics(None)
+}
+
+/// Like [`get_index_format_from_env`] but may emit [`crate::diagnostics::Warning::IndexVersionEnvInvalid`].
+pub fn get_index_format_from_env_with_diagnostics(
     diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
 ) -> Option<u32> {
     let val = std::env::var("GIT_INDEX_VERSION").ok()?;
@@ -606,7 +612,7 @@ impl Index {
     /// Respects `GIT_INDEX_VERSION` if set, otherwise defaults to version 2.
     #[must_use]
     pub fn new() -> Self {
-        let version = get_index_format_from_env(None).unwrap_or(2);
+        let version = get_index_format_from_env().unwrap_or(2);
         Self {
             version,
             entries: Vec::new(),
@@ -669,7 +675,7 @@ impl Index {
         config_many_files: Option<&str>,
         diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
     ) -> Self {
-        if let Some(v) = get_index_format_from_env(diagnostics) {
+        if let Some(v) = get_index_format_from_env_with_diagnostics(diagnostics) {
             return Self {
                 version: v,
                 entries: Vec::new(),
@@ -742,7 +748,7 @@ impl Index {
         config: &ConfigSet,
         diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
     ) -> Self {
-        if let Some(v) = get_index_format_from_env(diagnostics) {
+        if let Some(v) = get_index_format_from_env_with_diagnostics(diagnostics) {
             return Self {
                 version: v,
                 entries: Vec::new(),

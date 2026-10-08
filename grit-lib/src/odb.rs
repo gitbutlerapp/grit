@@ -280,7 +280,7 @@ impl Odb {
                 .config_git_dir
                 .as_deref()
                 .or_else(|| self.objects_dir.parent());
-            let cfg = crate::repo::ensure_shared_config_snapshot(state, git_dir, None)?;
+            let cfg = crate::repo::ensure_shared_config_snapshot(state, git_dir)?;
             return Ok(cfg.as_ref().clone());
         }
         let git_dir = self

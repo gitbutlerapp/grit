@@ -514,7 +514,12 @@ impl WriteSplitIndexRequest {
     ///
     /// When `explicit` is `None`, an index that was already split (`split_link` set after load)
     /// stays split until `--no-split-index` (Git keeps `istate->split_index` across commands).
-    pub fn want_write_split(
+    pub fn want_write_split(self, cfg: &ConfigSet, index: &Index) -> bool {
+        self.want_write_split_with_diagnostics(cfg, index, None)
+    }
+
+    /// Like [`Self::want_write_split`] but may emit split-index config warnings.
+    pub fn want_write_split_with_diagnostics(
         self,
         cfg: &ConfigSet,
         index: &Index,
@@ -592,7 +597,7 @@ pub(crate) fn write_index_file_split(
         crate::write_tree::verify_cache_tree(index)?;
     }
 
-    let want_split = request.want_write_split(cfg, index, diagnostics);
+    let want_split = request.want_write_split_with_diagnostics(cfg, index, diagnostics);
 
     let shared_repo = parse_shared_repository_perm(cfg.get("core.sharedRepository").as_deref());
 
