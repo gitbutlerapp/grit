@@ -263,7 +263,7 @@ mod midx_cache {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, OnceLock, RwLock};
 
-    /// Parsed MIDX layer: fanout + binary search, pack indexes opened at prepare time.
+    /// Parsed MIDX layer: fanout + binary search; pack indexes opened on first read per pack id.
     pub struct PreparedMidxLayer {
         bytes: Arc<[u8]>,
         fanout: [u32; 256],
@@ -272,7 +272,9 @@ mod midx_cache {
         hash_len: usize,
         /// Per sorted OID position: `(pack_id, in-pack offset)` decoded at prepare time.
         pack_offsets: Vec<(u32, u64)>,
-        pack_indexes: Vec<Option<Arc<PackIndex>>>,
+        pack_dir: PathBuf,
+        pack_names: Vec<String>,
+        pack_indexes: Vec<Arc<OnceLock<Option<Arc<PackIndex>>>>>,
         packs_validated: AtomicBool,
     }
 
@@ -291,21 +293,35 @@ mod midx_cache {
                 let offset = decode_midx_object_offset(&bytes, raw_off, view.loff).unwrap_or(0);
                 pack_offsets.push((pack_id, offset));
             }
-            let mut pack_indexes = Vec::with_capacity(view.pack_names.len());
-            for name in &view.pack_names {
-                let idx_path = pack_dir.join(name);
-                pack_indexes.push(read_pack_index_cached(&idx_path).ok());
-            }
             Self {
                 fanout,
                 oidl_off: view.oidl_off,
                 num_objects: view.num_objects,
                 hash_len,
                 pack_offsets,
-                pack_indexes,
+                pack_dir: pack_dir.to_path_buf(),
+                pack_names: view.pack_names.clone(),
+                pack_indexes: view
+                    .pack_names
+                    .iter()
+                    .map(|_| Arc::new(OnceLock::new()))
+                    .collect(),
                 packs_validated: AtomicBool::new(false),
                 bytes,
             }
+        }
+
+        fn open_pack_index(&self, pack_id: u32) -> Option<Arc<PackIndex>> {
+            let i = pack_id as usize;
+            let slot = self.pack_indexes.get(i)?;
+            slot.get_or_init(|| {
+                let idx_path = self.pack_dir.join(self.pack_names.get(i)?);
+                if !idx_path.is_file() {
+                    return None;
+                }
+                read_pack_index_cached(&idx_path).ok()
+            })
+            .clone()
         }
 
         fn oid_at(&self, pos: usize) -> &[u8] {
@@ -384,11 +400,11 @@ mod midx_cache {
             if self.packs_validated.swap(true, Ordering::Relaxed) {
                 return;
             }
-            for (idx_name, slot) in pack_names.iter().zip(self.pack_indexes.iter()) {
-                if slot.is_some() {
+            for idx_name in pack_names {
+                let idx_path = pack_dir.join(idx_name);
+                if !idx_path.is_file() {
                     continue;
                 }
-                let idx_path = pack_dir.join(idx_name);
                 if crate::pack::read_pack_index_no_verify(&idx_path).is_err() {
                     let mut pack_path = idx_path.clone();
                     pack_path.set_extension("pack");
@@ -409,11 +425,7 @@ mod midx_cache {
 
         #[inline]
         pub fn read_at(&self, pack_id: u32, offset: u64) -> Result<Option<crate::objects::Object>> {
-            let Some(idx) = self
-                .pack_indexes
-                .get(pack_id as usize)
-                .and_then(|o| o.as_ref())
-            else {
+            let Some(idx) = self.open_pack_index(pack_id) else {
                 return Ok(None);
             };
             match read_object_at(idx.as_ref(), offset) {
@@ -507,6 +519,9 @@ mod midx_cache {
         raw_off: u32,
         loff: Option<(usize, usize)>,
     ) -> Option<u64> {
+        if loff.is_none() {
+            return Some(u64::from(raw_off));
+        }
         if (raw_off & MIDX_LARGE_OFFSET_NEEDED) != 0 {
             let idx = (raw_off & !MIDX_LARGE_OFFSET_NEEDED) as usize;
             let need = (idx + 1) * 8;
@@ -519,6 +534,15 @@ mod midx_cache {
         } else {
             Some(u64::from(raw_off))
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn decode_midx_object_offset_for_test(
+        data: &[u8],
+        raw_off: u32,
+        loff: Option<(usize, usize)>,
+    ) -> Option<u64> {
+        decode_midx_object_offset(data, raw_off, loff)
     }
 
     static CHAINS: OnceLock<RwLock<HashMap<PathBuf, Arc<PreparedMidxChain>>>> = OnceLock::new();
@@ -3100,6 +3124,56 @@ mod tests {
         }
         metrics.set_stamp_counting(false);
         assert_eq!(metrics.midx_stamp_stat_calls(), 0);
+    }
+
+    #[test]
+    fn decode_high_bit_offset_is_raw_without_loff_chunk() {
+        use super::midx_cache::decode_midx_object_offset_for_test;
+        assert_eq!(
+            decode_midx_object_offset_for_test(&[], 0x8000_0010, None),
+            Some(0x8000_0010)
+        );
+    }
+
+    #[test]
+    fn lookup_high_bit_raw_offset_written_without_loff() {
+        use super::{
+            clear_pack_midx_state, find_chunk, midx_lookup_pack_and_offset_opt, parse_midx_header,
+            MIDX_CHUNKID_OBJECTOFFSETS, MIDX_CHUNKID_OIDLOOKUP,
+        };
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        let mut data = std::fs::read(&midx_path).expect("midx bytes");
+        let (_, hdr_end, _) = parse_midx_header(&data).expect("header");
+        let (oidl_off, oidl_len) =
+            find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP).expect("oidl");
+        let (ooff_off, _) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS).expect("ooff");
+        let hash_len = oid.as_bytes().len();
+        let num_objects = oidl_len / hash_len;
+        let needle = oid.as_bytes();
+        let mut patched = false;
+        for i in 0..num_objects {
+            let start = oidl_off + i * hash_len;
+            if data[start..start + hash_len] == *needle {
+                let ob = ooff_off + i * 8 + 4;
+                data[ob..ob + 4].copy_from_slice(&0x8000_0010u32.to_be_bytes());
+                patched = true;
+                break;
+            }
+        }
+        assert!(patched, "oid row in MIDX");
+        clear_pack_midx_state(&pack_dir).expect("evict midx cache");
+        std::fs::write(&midx_path, &data).expect("write midx");
+        crate::pack::clear_pack_cache();
+        let (_pack_id, off) = midx_lookup_pack_and_offset_opt(&objects, &oid)
+            .expect("lookup")
+            .expect("listed");
+        assert_eq!(off, 0x8000_0010);
     }
 
     #[test]

@@ -42,7 +42,7 @@ impl MidxBenchFixture {
             std::fs::write(dir.join(format!("p{i}.txt")), format!("data-{i}")).ok()?;
             run_git(dir, &["add", &format!("p{i}.txt")]);
             run_git(dir, &["commit", "-q", "-m", &format!("c{i}")]);
-            pack_layer(dir, i);
+            pack_layer(dir, i, i + 1 == pack_count);
         }
         run_git(dir, &["multi-pack-index", "write"]);
         let objects = dir.join(".git/objects");
@@ -59,13 +59,14 @@ impl MidxBenchFixture {
         let hit = ObjectId::from_hex(std::str::from_utf8(&out.stdout).ok()?.trim()).ok()?;
         let miss = ObjectId::from_hex("00000000000000000000000000000000000000f1").ok()?;
         let pack_dir = objects.join("pack");
-        let pack_indexes: Vec<Arc<grit_lib::pack::PackIndex>> = std::fs::read_dir(&pack_dir)
+        let mut pack_indexes: Vec<Arc<grit_lib::pack::PackIndex>> = std::fs::read_dir(&pack_dir)
             .ok()?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|x| x == "idx"))
             .map(|p| read_pack_index_cached(&p).expect("idx"))
             .collect();
+        pack_indexes.sort_by_key(|idx| idx.idx_path.clone());
         std::mem::forget(tmp);
         Some(Self {
             objects,
@@ -76,14 +77,24 @@ impl MidxBenchFixture {
     }
 }
 
-fn pack_layer(dir: &Path, layer: usize) {
-    let rev = Command::new("git")
-        .current_dir(dir)
-        .args(["rev-list", "--objects", "--all"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("rev-list");
+fn pack_layer(dir: &Path, layer: usize, all_objects: bool) {
+    let rev = if all_objects {
+        Command::new("git")
+            .current_dir(dir)
+            .args(["rev-list", "--objects", "--all"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list")
+    } else {
+        Command::new("git")
+            .current_dir(dir)
+            .args(["rev-list", "--objects", "-1", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list")
+    };
     assert!(rev.status.success());
     let mut child = Command::new("git")
         .current_dir(dir)
@@ -123,7 +134,13 @@ fn run_git(dir: &Path, args: &[&str]) {
 }
 
 fn lookup_all_packs(idxs: &[Arc<grit_lib::pack::PackIndex>], oid: &ObjectId) -> bool {
-    idxs.iter().any(|idx| idx.find_offset(oid).is_some())
+    let mut found = false;
+    for idx in idxs {
+        if idx.find_offset(oid).is_some() {
+            found = true;
+        }
+    }
+    found
 }
 
 fn lookup_all_packs_miss(idxs: &[Arc<grit_lib::pack::PackIndex>], oid: &ObjectId) -> bool {

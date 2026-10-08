@@ -65,6 +65,8 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 fn git_cat_file_batch(objects: &Path, oids: &[ObjectId]) -> Vec<(ObjectId, ObjectKind, Vec<u8>)> {
+    use std::thread;
+
     let mut child = Command::new("git")
         .args(["cat-file", "--batch"])
         .env("GIT_DIR", objects.parent().expect("git dir"))
@@ -73,19 +75,23 @@ fn git_cat_file_batch(objects: &Path, oids: &[ObjectId]) -> Vec<(ObjectId, Objec
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn cat-file");
+    let stdout = child.stdout.take().expect("stdout");
+    let reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        std::io::copy(&mut BufReader::new(stdout), &mut buf).expect("drain cat-file stdout");
+        buf
+    });
     {
         let stdin = child.stdin.as_mut().expect("stdin");
         for oid in oids {
             writeln!(stdin, "{}", oid.to_hex()).expect("write oid");
         }
     }
-    let out = child.wait_with_output().expect("wait cat-file");
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let mut reader = BufReader::new(out.stdout.as_slice());
+    drop(child.stdin.take());
+    let stdout_bytes = reader.join().expect("stdout reader");
+    let status = child.wait().expect("wait cat-file");
+    assert!(status.success(), "git cat-file --batch failed");
+    let mut reader = BufReader::new(stdout_bytes.as_slice());
     let mut parsed = Vec::with_capacity(oids.len());
     for oid in oids {
         let mut hdr = String::new();
@@ -108,6 +114,27 @@ fn git_cat_file_batch(objects: &Path, oids: &[ObjectId]) -> Vec<(ObjectId, Objec
         parsed.push((got_oid, kind, data));
     }
     parsed
+}
+
+/// Like Git `cat-file --batch` for timing only (stdout discarded; stdin fully closed).
+fn git_cat_file_batch_timed(objects: &Path, oids: &[ObjectId]) {
+    let mut child = Command::new("git")
+        .args(["cat-file", "--batch"])
+        .env("GIT_DIR", objects.parent().expect("git dir"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn cat-file");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for oid in oids {
+            writeln!(stdin, "{}", oid.to_hex()).expect("write oid");
+        }
+    }
+    drop(child.stdin.take());
+    let status = child.wait().expect("wait cat-file");
+    assert!(status.success(), "git cat-file --batch failed");
 }
 
 /// Build a repo with `pack_count` separate packs and a Git-written MIDX.
@@ -275,7 +302,11 @@ fn odb_midx_packed_read_batch_smoke() {
     clear_pack_cache();
     let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
     let oid = *oids.last().expect("head");
-    let n = if cfg!(debug_assertions) { 3_000 } else { 30_000 };
+    let n = if cfg!(debug_assertions) {
+        3_000
+    } else {
+        30_000
+    };
     let _ = odb.read(&oid).expect("warm");
 
     let start = std::time::Instant::now();
@@ -286,7 +317,7 @@ fn odb_midx_packed_read_batch_smoke() {
 
     let batch: Vec<ObjectId> = vec![oid; n];
     let git_start = std::time::Instant::now();
-    git_cat_file_batch(&objects, &batch);
+    git_cat_file_batch_timed(&objects, &batch);
     let git_elapsed = git_start.elapsed();
 
     assert!(
