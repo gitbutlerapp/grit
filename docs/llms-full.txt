@@ -1191,6 +1191,8 @@ The message can be given as an argument or with `-m`. A message with several lin
 
 The author and committer come from the `user.name` and `user.email` settings (see [`grit config`](https://grit-scm.com/docs/config/index.md)). To set the recorded time, use the `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` environment variables.
 
+When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new commit object the same way Git does: OpenPGP and X.509 via your configured `gpg`/`gpgsm` program, or SSH via `ssh-keygen -Y sign` when `gpg.format` is `ssh`. Signing uses `user.signingkey` and the same `gpg.*` settings Git reads. [`grit merge`](https://grit-scm.com/docs/merge/index.md) and [`grit pick`](https://grit-scm.com/docs/pick/index.md) honor the same policy when they create commits.
+
 `grit commit` fails when there's nothing to commit, and when HEAD is detached rather than on a branch.
 
 ## Options
@@ -1802,7 +1804,7 @@ Brings the commits from `<branch>` into the current branch:
 
 - If the current branch already has everything, nothing changes.
 - If the current branch has no commits of its own since they diverged, it's moved forward to `<branch>` (a fast-forward). No new commit is made.
-- Otherwise both sides are merged and a merge commit is recorded, with the message `Merge <branch>`.
+- Otherwise both sides are merged and a merge commit is recorded, with the message `Merge <branch>`. When `commit.gpgsign` is enabled, that merge commit is signed like [`grit commit`](https://grit-scm.com/docs/commit/index.md).
 
 `<branch>` can be a local branch or a remote-tracking branch such as `origin/main`. Local branches are looked up first.
 
@@ -1881,7 +1883,7 @@ grit pick <commit>
 
 ## Description
 
-Takes the change `<commit>` made and applies it to the current branch as a new commit (a cherry-pick). The new commit keeps the original author and message.
+Takes the change `<commit>` made and applies it to the current branch as a new commit (a cherry-pick). The new commit keeps the original author and message. When `commit.gpgsign` is enabled, the new commit is signed like [`grit commit`](https://grit-scm.com/docs/commit/index.md).
 
 `<commit>` can be a full or short commit id, a branch name (to pick the commit at its tip) or an expression like `feature~2`.
 
@@ -2966,7 +2968,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::ident_resolve::IdentRole` | enum | Author vs committer for GIT_* / author.* / committer.* lookup. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/enum.IdentRole.html) |
 | `grit_lib::ident_resolve::IdentityEnv` | trait | Environment access used for identity resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/trait.IdentityEnv.html) |
 | `grit_lib::ident_resolve::IdentityError` | enum | Errors returned by strict identity resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/enum.IdentityError.html) |
-| `grit_lib::ident_resolve::SystemIdentityEnv` | struct | Environment provider backed by the current process environment. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/struct.SystemIdentityEnv.html) |
 | `grit_lib::ignore` | module | Ignore and exclude matching for check-ignore. | [API](https://docs.rs/grit-lib/latest/grit_lib/ignore/index.html) |
 | `grit_lib::ignore::IgnoreMatch` | struct | Metadata for a matching rule. | [API](https://docs.rs/grit-lib/latest/grit_lib/ignore/struct.IgnoreMatch.html) |
 | `grit_lib::ignore::IgnoreMatcher` | struct | Engine used to evaluate ignore patterns against repository-relative paths. | [API](https://docs.rs/grit-lib/latest/grit_lib/ignore/struct.IgnoreMatcher.html) |
@@ -4412,6 +4413,25 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | `reset` | none | Deferred |
 | `stash push` | none | Criterion `apply_stash` / library `apply_stash` bench; no `grit stash push` timing |
 
+### Object reads
+
+The **`grit-bench odb`** suite (library drivers in `grit-bench drive …` vs system **`git`**) measures cat-file batch reads, `rev-list --objects --all`, and `log -p` on a cached bare **git.git** clone and a repacked **100k-file / 1000-commit** synthetic repo. JSON reports include **peak RSS** (`getrusage(RUSAGE_CHILDREN)`) per scenario alongside wall time.
+
+Reproduce:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json
+```
+
+**Profiling notes (2026-10-08 factory VM, baseline `grit-utils/baselines/odb-read.json`):**
+
+- **Cat-file batch** on git.git (pack order): grit ~15.8 s / ~543 MiB peak vs git ~10.5 s / ~477 MiB — mostly ODB pack reads; grit is ~1.5× slower on wall time.
+- **`rev-list --objects --all`** on git.git: grit ~1 612 s vs git ~3.0 s — **not ODB-bound**; time is in `rev_list` history/object enumeration (tree walks and object listing), not bulk cat-file batch I/O.
+- **`log -p -2000`** on git.git: grit ~8.8 s vs git ~1.5 s — **mostly revwalk + tree diff/patch formatting** (`rev_list` then per-commit `diff_trees` / unified diff); ODB reads happen per diff hunk but dominate less than walk/diff work at this commit count.
+
+Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / object listing**, not pack index or mmap ODB work.
+
 ### Results
 
 
@@ -4431,6 +4451,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | add | 2 | 3.49× | 4.50× |
 | commit | 2 | 1.00× | 1.16× |
 | merge | 2 | 3.00× | 3.80× |
+| object_reads | 8 | 6.81× | 618.17× |
 | pick | 4 | 6.96× | 16.49× |
 | status | 4 | 9.02× | 46.96× |
 | switch | 4 | 3.25× | 5.36× |
@@ -4455,6 +4476,19 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | --- | --- | ---: | ---: | ---: | --- |
 | `merge-10000` | synthetic-10000 | 116 | 256 | 2.21× | ±38.0 ms |
 | `merge-100000` | synthetic-100000 | 246 | 934 | 3.80× | ±26.5 ms |
+
+### object_reads
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `cat-file-batch-sorted-git.git` | git.git | 32,939 | 48,831 | 1.48× | ±236 ms |
+| `cat-file-batch-unordered-git.git` | git.git | 10,541 | 15,758 | 1.49× | ±187 ms |
+| `log-patch-2000-git.git` | git.git | 1,512 | 8,787 | 5.81× | ±95.2 ms |
+| `rev-list-objects-git.git` | git.git | 2,956 | 1,612,525 | 545.49× | ±8,175 ms |
+| `cat-file-batch-sorted-hot-path-100k` | hot-path-100k | 119 | 926 | 7.81× | ±8.28 ms |
+| `cat-file-batch-unordered-hot-path-100k` | hot-path-100k | 119 | 948 | 7.93× | ±13.7 ms |
+| `log-patch-2000-hot-path-100k` | hot-path-100k | 406 | 1,249 | 3.08× | ±1.38 ms |
+| `rev-list-objects-hot-path-100k` | hot-path-100k | 55.9 | 34,535 | 618.17× | ±241 ms |
 
 ### pick
 

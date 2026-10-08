@@ -10,7 +10,7 @@ grit pick <commit>
 
 ## Description
 
-Takes the change `<commit>` made and applies it to the current branch as a new commit (a cherry-pick). The new commit keeps the original author and message.
+Takes the change `<commit>` made and applies it to the current branch as a new commit (a cherry-pick). The new commit keeps the original author and message. When `commit.gpgsign` is enabled, the new commit is signed like [`grit commit`](https://grit-scm.com/docs/commit/index.md).
 
 `<commit>` can be a full or short commit id, a branch name (to pick the commit at its tip) or an expression like `feature~2`.
 

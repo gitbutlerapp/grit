@@ -130,6 +130,25 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | `reset` | none | Deferred |
 | `stash push` | none | Criterion `apply_stash` / library `apply_stash` bench; no `grit stash push` timing |
 
+### Object reads
+
+The **`grit-bench odb`** suite (library drivers in `grit-bench drive …` vs system **`git`**) measures cat-file batch reads, `rev-list --objects --all`, and `log -p` on a cached bare **git.git** clone and a repacked **100k-file / 1000-commit** synthetic repo. JSON reports include **peak RSS** (`getrusage(RUSAGE_CHILDREN)`) per scenario alongside wall time.
+
+Reproduce:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json
+```
+
+**Profiling notes (2026-10-08 factory VM, baseline `grit-utils/baselines/odb-read.json`):**
+
+- **Cat-file batch** on git.git (pack order): grit ~15.8 s / ~543 MiB peak vs git ~10.5 s / ~477 MiB — mostly ODB pack reads; grit is ~1.5× slower on wall time.
+- **`rev-list --objects --all`** on git.git: grit ~1 612 s vs git ~3.0 s — **not ODB-bound**; time is in `rev_list` history/object enumeration (tree walks and object listing), not bulk cat-file batch I/O.
+- **`log -p -2000`** on git.git: grit ~8.8 s vs git ~1.5 s — **mostly revwalk + tree diff/patch formatting** (`rev_list` then per-commit `diff_trees` / unified diff); ODB reads happen per diff hunk but dominate less than walk/diff work at this commit count.
+
+Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / object listing**, not pack index or mmap ODB work.
+
 ### Results
 
 
@@ -149,6 +168,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | add | 2 | 3.49× | 4.50× |
 | commit | 2 | 1.00× | 1.16× |
 | merge | 2 | 3.00× | 3.80× |
+| object_reads | 8 | 6.81× | 618.17× |
 | pick | 4 | 6.96× | 16.49× |
 | status | 4 | 9.02× | 46.96× |
 | switch | 4 | 3.25× | 5.36× |
@@ -173,6 +193,19 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | --- | --- | ---: | ---: | ---: | --- |
 | `merge-10000` | synthetic-10000 | 116 | 256 | 2.21× | ±38.0 ms |
 | `merge-100000` | synthetic-100000 | 246 | 934 | 3.80× | ±26.5 ms |
+
+### object_reads
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `cat-file-batch-sorted-git.git` | git.git | 32,939 | 48,831 | 1.48× | ±236 ms |
+| `cat-file-batch-unordered-git.git` | git.git | 10,541 | 15,758 | 1.49× | ±187 ms |
+| `log-patch-2000-git.git` | git.git | 1,512 | 8,787 | 5.81× | ±95.2 ms |
+| `rev-list-objects-git.git` | git.git | 2,956 | 1,612,525 | 545.49× | ±8,175 ms |
+| `cat-file-batch-sorted-hot-path-100k` | hot-path-100k | 119 | 926 | 7.81× | ±8.28 ms |
+| `cat-file-batch-unordered-hot-path-100k` | hot-path-100k | 119 | 948 | 7.93× | ±13.7 ms |
+| `log-patch-2000-hot-path-100k` | hot-path-100k | 406 | 1,249 | 3.08× | ±1.38 ms |
+| `rev-list-objects-hot-path-100k` | hot-path-100k | 55.9 | 34,535 | 618.17× | ±241 ms |
 
 ### pick
 

@@ -17,6 +17,8 @@ The message can be given as an argument or with `-m`. A message with several lin
 
 The author and committer come from the `user.name` and `user.email` settings (see [`grit config`](https://grit-scm.com/docs/config/index.md)). To set the recorded time, use the `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` environment variables.
 
+When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new commit object the same way Git does: OpenPGP and X.509 via your configured `gpg`/`gpgsm` program, or SSH via `ssh-keygen -Y sign` when `gpg.format` is `ssh`. Signing uses `user.signingkey` and the same `gpg.*` settings Git reads. [`grit merge`](https://grit-scm.com/docs/merge/index.md) and [`grit pick`](https://grit-scm.com/docs/pick/index.md) honor the same policy when they create commits.
+
 `grit commit` fails when there's nothing to commit, and when HEAD is detached rather than on a branch.
 
 ## Options

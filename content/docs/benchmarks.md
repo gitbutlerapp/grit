@@ -131,6 +131,25 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | `reset` | none | Deferred |
 | `stash push` | none | Criterion `apply_stash` / library `apply_stash` bench; no `grit stash push` timing |
 
+### Object reads
+
+The **`grit-bench odb`** suite (library drivers in `grit-bench drive …` vs system **`git`**) measures cat-file batch reads, `rev-list --objects --all`, and `log -p` on a cached bare **git.git** clone and a repacked **100k-file / 1000-commit** synthetic repo. JSON reports include **peak RSS** (`getrusage(RUSAGE_CHILDREN)`) per scenario alongside wall time.
+
+Reproduce:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json
+```
+
+**Profiling notes (2026-10-08 factory VM, baseline `grit-utils/baselines/odb-read.json`):**
+
+- **Cat-file batch** on git.git (pack order): grit ~15.8 s / ~543 MiB peak vs git ~10.5 s / ~477 MiB — mostly ODB pack reads; grit is ~1.5× slower on wall time.
+- **`rev-list --objects --all`** on git.git: grit ~1 612 s vs git ~3.0 s — **not ODB-bound**; time is in `rev_list` history/object enumeration (tree walks and object listing), not bulk cat-file batch I/O.
+- **`log -p -2000`** on git.git: grit ~8.8 s vs git ~1.5 s — **mostly revwalk + tree diff/patch formatting** (`rev_list` then per-commit `diff_trees` / unified diff); ODB reads happen per diff hunk but dominate less than walk/diff work at this commit count.
+
+Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / object listing**, not pack index or mmap ODB work.
+
 ### Results
 
 <!-- grit:benchmark-tables -->

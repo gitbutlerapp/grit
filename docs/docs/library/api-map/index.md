@@ -195,7 +195,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::ident_resolve::IdentRole` | enum | Author vs committer for GIT_* / author.* / committer.* lookup. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/enum.IdentRole.html) |
 | `grit_lib::ident_resolve::IdentityEnv` | trait | Environment access used for identity resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/trait.IdentityEnv.html) |
 | `grit_lib::ident_resolve::IdentityError` | enum | Errors returned by strict identity resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/enum.IdentityError.html) |
-| `grit_lib::ident_resolve::SystemIdentityEnv` | struct | Environment provider backed by the current process environment. | [API](https://docs.rs/grit-lib/latest/grit_lib/ident_resolve/struct.SystemIdentityEnv.html) |
 | `grit_lib::ignore` | module | Ignore and exclude matching for check-ignore. | [API](https://docs.rs/grit-lib/latest/grit_lib/ignore/index.html) |
 | `grit_lib::ignore::IgnoreMatch` | struct | Metadata for a matching rule. | [API](https://docs.rs/grit-lib/latest/grit_lib/ignore/struct.IgnoreMatch.html) |
 | `grit_lib::ignore::IgnoreMatcher` | struct | Engine used to evaluate ignore patterns against repository-relative paths. | [API](https://docs.rs/grit-lib/latest/grit_lib/ignore/struct.IgnoreMatcher.html) |

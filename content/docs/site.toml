@@ -71,4 +71,5 @@ baseline = [
   "grit-utils/baselines/hot-paths-after.json",
   "grit-utils/baselines/suite-after-LH.json",
   "grit-utils/baselines/commit-after-LH.json",
+  "grit-utils/baselines/odb-read.json",
 ]
