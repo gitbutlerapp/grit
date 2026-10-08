@@ -2,7 +2,9 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::branch_tracking::upstream_tracking_full_ref;
-use grit_lib::check_ref_format::{branch_short_name_error_message, validate_branch_short_name};
+use grit_lib::check_ref_format::validate_branch_short_name;
+
+use crate::ref_name_messages::branch_short_name_error_message;
 use grit_lib::merge_base::is_ancestor;
 use grit_lib::refs;
 use grit_lib::repo::Repository;

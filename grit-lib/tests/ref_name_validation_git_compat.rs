@@ -49,11 +49,39 @@ fn sample_oid() -> ObjectId {
     "67bf698f3ab735e92fb011a99cff3497c44d30c1".parse().unwrap()
 }
 
+fn seed_empty_commit(worktree: &Path) -> ObjectId {
+    let status = Command::new("git")
+        .current_dir(worktree)
+        .args(["commit", "--allow-empty", "-m", "seed"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .status()
+        .expect("git commit");
+    assert!(status.success(), "git commit --allow-empty failed");
+    let out = Command::new("git")
+        .current_dir(worktree)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .expect("rev-parse");
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("HEAD oid")
+}
+
 #[test]
 fn branch_short_names_match_git_check_ref_format() {
     let samples = [
         "main",
         "feature/foo",
+        "@",
+        "-",
+        "-topic",
         "bad name",
         "x..y",
         "a~b",
@@ -98,7 +126,7 @@ fn write_ref_rejects_invalid_branch_names_without_loose_files() {
     let dir = tempdir().unwrap();
     let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
     let git_dir = repo.git_dir.clone();
-    let invalid = ["bad name", "x..y", "a~b", "a.lock", "HEAD"];
+    let invalid = ["bad name", "x..y", "a~b", "a.lock"];
     for name in invalid {
         let refname = format!("refs/heads/{name}");
         assert!(
@@ -112,5 +140,19 @@ fn write_ref_rejects_invalid_branch_names_without_loose_files() {
             loose.display()
         );
     }
-    assert!(git_fsck_strict(&git_dir), "git fsck --strict must pass");
+    assert!(git_fsck_strict(dir.path()), "git fsck --strict must pass");
+}
+
+#[test]
+fn write_ref_accepts_refs_heads_head_like_git() {
+    let dir = tempdir().unwrap();
+    let worktree = dir.path();
+    let repo = init_repository(worktree, false, "main", None, "files").expect("init");
+    let tip = seed_empty_commit(worktree);
+    write_ref(&repo.git_dir, "refs/heads/HEAD", &tip)
+        .expect("plumbing may write refs/heads/HEAD");
+    assert!(
+        git_fsck_strict(worktree),
+        "git fsck --strict must pass on refs/heads/HEAD"
+    );
 }

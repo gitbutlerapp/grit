@@ -10,6 +10,7 @@ mod context;
 mod json_filter;
 mod net;
 mod output;
+mod ref_name_messages;
 mod stdio;
 mod ui;
 

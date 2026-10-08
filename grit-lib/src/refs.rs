@@ -681,11 +681,6 @@ fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
                 "refusing to update ref with bad name '{refname}'"
             )));
         }
-        if refname == "refs/heads/HEAD" {
-            return Err(Error::InvalidRef(
-                "'HEAD' is not a valid branch name".to_owned(),
-            ));
-        }
         return Ok(());
     }
     if crate::check_ref_format::refname_is_safe(refname) {
@@ -2659,7 +2654,6 @@ mod ref_storage_traversal_guard_tests {
             "refs/heads/x..y",
             "refs/heads/a~b",
             "refs/heads/a.lock",
-            "refs/heads/HEAD",
         ] {
             let result = write_ref(&git_dir, refname, &sample_oid());
             assert_invalid_ref_preserves_config(&git_dir, result);
@@ -2670,6 +2664,14 @@ mod ref_storage_traversal_guard_tests {
                 "must not write loose ref for {refname}"
             );
         }
+    }
+
+    #[test]
+    fn write_ref_accepts_refs_heads_head() {
+        let (_dir, git_dir) = bare_repo_with_config();
+        write_ref(&git_dir, "refs/heads/HEAD", &sample_oid())
+            .expect("refs/heads/HEAD is valid ref syntax");
+        assert!(git_dir.join("refs/heads/HEAD").is_file());
     }
 }
 

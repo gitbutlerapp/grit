@@ -5,7 +5,9 @@
 //! annotated-tag ceremony; reach for `grit tag -a` when you need that.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::check_ref_format::{tag_short_name_error_message, validate_tag_short_name};
+use grit_lib::check_ref_format::validate_tag_short_name;
+
+use crate::ref_name_messages::tag_short_name_error_message;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};

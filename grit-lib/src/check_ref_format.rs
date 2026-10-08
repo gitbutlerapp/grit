@@ -69,6 +69,9 @@ pub enum RefNameError {
     /// The branch short name is reserved (e.g. `HEAD`).
     #[error("branch name is reserved")]
     ReservedBranchName,
+    /// Branch short names must not begin with `-` (matches Git's `check_branch_ref`).
+    #[error("branch name must not start with '-'")]
+    BranchStartsWithDash,
     /// The ref name has zero-length components (consecutive slashes) that
     /// cannot be normalized away.
     #[error("ref name contains consecutive slashes")]
@@ -300,12 +303,8 @@ pub fn collapse_slashes(refname: &str) -> String {
     result
 }
 
-/// Reserved branch short names that are valid ref syntax but must not be created as
-/// `refs/heads/…` (matches Git's `check_ref_format` `--branch` / `branch.c`).
-const BRANCH_SHORT_NAME_FORBIDDEN: &[&str] = &["HEAD"];
-
 /// Validate a branch short name (`refs/heads/<name>`) the way `git check-ref-format
-/// --branch` does.
+/// --branch` does (Git's `check_branch_ref` in `refs.c`).
 ///
 /// # Errors
 ///
@@ -314,17 +313,14 @@ pub fn validate_branch_short_name(name: &str) -> Result<(), RefNameError> {
     if name.is_empty() {
         return Err(RefNameError::Empty);
     }
-    if BRANCH_SHORT_NAME_FORBIDDEN.contains(&name) {
+    if name.starts_with('-') {
+        return Err(RefNameError::BranchStartsWithDash);
+    }
+    if name == "HEAD" {
         return Err(RefNameError::ReservedBranchName);
     }
-    check_refname_format(
-        name,
-        &RefNameOptions {
-            allow_onelevel: true,
-            ..Default::default()
-        },
-    )?;
-    Ok(())
+    let full = format!("refs/heads/{name}");
+    check_refname_format(&full, &RefNameOptions::default()).map(|_| ())
 }
 
 /// Validate a tag short name (`refs/tags/<name>`) the way `git check-ref-format
@@ -339,21 +335,6 @@ pub fn validate_tag_short_name(name: &str) -> Result<(), RefNameError> {
     }
     let full = format!("refs/tags/{name}");
     check_refname_format(&full, &RefNameOptions::default()).map(|_| ())
-}
-
-/// Map [`RefNameError`] to a short explanation for branch creation failures.
-#[must_use]
-pub fn branch_short_name_error_message(name: &str, err: &RefNameError) -> String {
-    if matches!(err, RefNameError::ReservedBranchName) {
-        return format!("'{name}' is not a valid branch name");
-    }
-    format!("'{name}' is not a valid branch name ({err})")
-}
-
-/// Map [`RefNameError`] to a short explanation for tag creation failures.
-#[must_use]
-pub fn tag_short_name_error_message(name: &str, err: &RefNameError) -> String {
-    format!("'{name}' is not a valid tag name ({err})")
 }
 
 /// Whether a ref name from a fetch or upload-pack advertisement should be kept.
@@ -595,6 +576,9 @@ mod tests {
         }
         assert!(validate_branch_short_name("main").is_ok());
         assert!(validate_branch_short_name("feature/foo").is_ok());
+        assert!(validate_branch_short_name("@").is_ok());
+        assert!(validate_branch_short_name("-").is_err());
+        assert!(validate_branch_short_name("-topic").is_err());
     }
 
     #[test]
