@@ -2952,6 +2952,16 @@ mod tests {
         Ok((oid, object_offset))
     }
 
+    #[test]
+    fn skip_one_pack_object_rejects_zero_size_with_zlib_payload() {
+        let mut bytes = Vec::new();
+        bytes.push(0x30);
+        bytes.extend_from_slice(&zlib_pack(b"x"));
+        let mut pos = 0usize;
+        let err = skip_one_pack_object(&bytes, &mut pos, 0, 20).unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+    }
+
     fn install_synthetic_pack(
         objects_dir: &Path,
         stem: &str,
