@@ -68,9 +68,10 @@ fn local_change_diffs(
     repo: &Repository,
     snapshot: &WorktreeSnapshot,
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>)> {
-    let work_tree = repo.work_tree.as_deref().ok_or_else(|| {
-        Error::Message("this operation must be run in a work tree".into())
-    })?;
+    let work_tree = repo
+        .work_tree
+        .as_deref()
+        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
 
@@ -153,9 +154,10 @@ pub fn prepare_tree_switch(
         ));
     }
 
-    let work_tree = repo.work_tree.as_deref().ok_or_else(|| {
-        Error::Message("this operation must be run in a work tree".into())
-    })?;
+    let work_tree = repo
+        .work_tree
+        .as_deref()
+        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let (untracked, _) = collect_untracked_and_ignored(
         repo,
         &snapshot.index,

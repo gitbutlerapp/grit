@@ -36,7 +36,9 @@ fn git_fsck(repo: &std::path::Path) {
 }
 
 fn tree_of_head(repo: &std::path::Path) -> ObjectId {
-    let hex = git_cmd(repo, &["rev-parse", "HEAD^{tree}"]).trim().to_owned();
+    let hex = git_cmd(repo, &["rev-parse", "HEAD^{tree}"])
+        .trim()
+        .to_owned();
     ObjectId::from_hex(&hex).expect("tree oid")
 }
 
@@ -53,8 +55,7 @@ fn populate(repo: &std::path::Path) {
 fn create_pick_commit(repo: &std::path::Path) {
     for i in (0..FILE_COUNT).step_by(3) {
         let dir = repo.join(format!("d{:04}", i % 100));
-        std::fs::write(dir.join(format!("f{i:05}.txt")), format!("picked {i}\n"))
-            .expect("write");
+        std::fs::write(dir.join(format!("f{i:05}.txt")), format!("picked {i}\n")).expect("write");
     }
     git_cmd(repo, &["add", "-A"]);
     git_cmd(repo, &["commit", "-qm", "pick source"]);
@@ -129,9 +130,13 @@ fn grit_pick_at_3k_matches_git_cherry_pick_tree() {
     let base = tempfile::tempdir().expect("tempdir");
     init_repo(base.path());
     populate(base.path());
-    let base_head = git_cmd(base.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let base_head = git_cmd(base.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
     create_pick_commit(base.path());
-    let pick_source = git_cmd(base.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let pick_source = git_cmd(base.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
     git_cmd(base.path(), &["reset", "--hard", &base_head]);
 
     let grit_dir = tempfile::tempdir().expect("grit dir");
@@ -161,34 +166,45 @@ fn grit_pick_at_3k_matches_git_cherry_pick_tree() {
 }
 
 #[test]
-fn grit_stash_apply_at_3k_git_clean() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    init_repo(tmp.path());
-    populate(tmp.path());
-    let base_head = git_cmd(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+fn grit_stash_apply_at_3k_matches_git_without_index() {
+    let base = tempfile::tempdir().expect("tempdir");
+    init_repo(base.path());
+    populate(base.path());
+    let base_head = git_cmd(base.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
 
     for i in (0..FILE_COUNT).step_by(100) {
-        let dir = tmp.path().join(format!("d{:04}", i % 100));
-        std::fs::write(
-            dir.join(format!("f{i:05}.txt")),
-            format!("stashed {i}\n"),
-        )
-        .expect("write");
+        let dir = base.path().join(format!("d{:04}", i % 100));
+        std::fs::write(dir.join(format!("f{i:05}.txt")), format!("stashed {i}\n")).expect("write");
     }
-    git_cmd(tmp.path(), &["add", "-A"]);
-    git_cmd(tmp.path(), &["stash", "push", "-qm", "bench"]);
-    let stash_oid_hex = git_cmd(tmp.path(), &["rev-parse", "refs/stash"]).trim().to_owned();
-    git_cmd(tmp.path(), &["reset", "--hard", &base_head]);
+    git_cmd(base.path(), &["add", "-A"]);
+    git_cmd(base.path(), &["stash", "push", "-qm", "bench"]);
+    let stash_oid_hex = git_cmd(base.path(), &["rev-parse", "refs/stash"])
+        .trim()
+        .to_owned();
+    git_cmd(base.path(), &["reset", "--hard", &base_head]);
 
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    copy_repo(base.path(), grit_dir.path());
     let grit_repo =
-        Repository::open(&tmp.path().join(".git"), Some(tmp.path())).expect("grit open");
+        Repository::open(&grit_dir.path().join(".git"), Some(grit_dir.path())).expect("grit open");
     let stash_oid = ObjectId::from_hex(&stash_oid_hex).expect("stash oid");
-    apply_stash(&grit_repo, tmp.path(), &stash_oid, true, false).expect("stash apply");
+    apply_stash(&grit_repo, grit_dir.path(), &stash_oid, false, false).expect("stash apply");
 
-    let porcelain = git_cmd(tmp.path(), &["status", "--porcelain"]);
-    assert!(
-        porcelain.trim().is_empty(),
-        "git status --porcelain must be empty after grit stash apply --index, got:\n{porcelain}"
+    let git_dir = tempfile::tempdir().expect("git copy");
+    copy_repo(base.path(), git_dir.path());
+    git_cmd(git_dir.path(), &["stash", "apply", "stash@{0}"]);
+
+    assert_eq!(
+        git_cmd(grit_dir.path(), &["status", "--porcelain"]),
+        git_cmd(git_dir.path(), &["status", "--porcelain"]),
+        "3k-file apply without --index must match git porcelain"
     );
-    git_fsck(tmp.path());
+    let sample = grit_dir.path().join("d0000/f00000.txt");
+    assert_eq!(
+        std::fs::read(&sample).expect("sample bytes"),
+        b"stashed 0\n"
+    );
+    git_fsck(grit_dir.path());
 }

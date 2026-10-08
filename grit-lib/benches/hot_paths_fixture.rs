@@ -7,11 +7,11 @@ use std::sync::OnceLock;
 
 use grit_lib::error::Result;
 use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
-use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::merge_file::MergeFavor;
 use grit_lib::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
+use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::stash::apply_stash;
@@ -135,8 +135,12 @@ impl HotPathsFixture {
         self.reset_worktree_to_head();
         let stash_tree = self.tree_with_fraction_changed(fraction);
         let head_oid = refs::resolve_ref(&self.repo.git_dir, "HEAD").expect("head");
-        let index_parent =
-            write_tree_commit(&self.repo, self.head_tree, &[head_oid], "stash index parent");
+        let index_parent = write_tree_commit(
+            &self.repo,
+            self.head_tree,
+            &[head_oid],
+            "stash index parent",
+        );
         write_tree_commit(
             &self.repo,
             stash_tree,
@@ -151,8 +155,7 @@ impl HotPathsFixture {
         let head_tree = self.head_tree;
         let head_oid = refs::resolve_ref(&self.repo.git_dir, "HEAD").expect("head");
         let source_tree = self.tree_with_path_count_changed(path_count);
-        let _source_commit =
-            write_tree_commit(&self.repo, source_tree, &[head_oid], "pick source");
+        let _source_commit = write_tree_commit(&self.repo, source_tree, &[head_oid], "pick source");
         (head_tree, head_tree, source_tree)
     }
 
@@ -325,12 +328,7 @@ pub fn bench_pick_path(fx: &HotPathsFixture, path_count: usize) {
     )
     .expect("merge");
     let mut index = merged.index;
-    let new_tree = write_tree_update_index(
-        &fx.repo.odb,
-        &mut index,
-        "",
-        WriteTreeFlags::silent(),
-    )
-    .expect("write tree");
+    let new_tree = write_tree_update_index(&fx.repo.odb, &mut index, "", WriteTreeFlags::silent())
+        .expect("write tree");
     checkout_between_trees(&fx.repo, Some(&head), &new_tree).expect("checkout");
 }

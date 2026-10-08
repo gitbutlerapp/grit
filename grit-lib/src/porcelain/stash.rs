@@ -332,16 +332,18 @@ pub fn apply_stash(
     let current_head_oid = current_head.oid().copied();
     let head_moved = current_head_oid.as_ref() != Some(head_at_stash);
 
-    // Current HEAD tree (for three-way merge when HEAD moved, and for index reset without --index).
-    let current_head_flat: Vec<FlatTreeEntry> = if head_moved {
+    // Current HEAD tree (three-way merge when HEAD moved; index reset without `--index`).
+    let current_head_loaded: Vec<FlatTreeEntry>;
+    let current_head_entries: &[FlatTreeEntry] = if head_moved {
         let Some(head_oid) = current_head_oid.as_ref() else {
             return Err(Error::Message("missing HEAD while applying stash".into()));
         };
         let head_obj = repo.odb.read(head_oid)?;
         let head_commit = parse_commit(&head_obj.data)?;
-        flatten_tree_full(&repo.odb, &head_commit.tree, "")?
+        current_head_loaded = flatten_tree_full(&repo.odb, &head_commit.tree, "")?;
+        &current_head_loaded
     } else {
-        Vec::new()
+        &base_tree_entries
     };
 
     let mut has_conflicts = false;
@@ -441,7 +443,7 @@ pub fn apply_stash(
                         .and_then(|e| repo.odb.read(&e.oid).ok())
                         .map(|o| o.data)
                         .unwrap_or_default();
-                    let ours_content = flat_tree_lookup(&current_head_flat, path)
+                    let ours_content = flat_tree_lookup(current_head_entries, path)
                         .and_then(|e| repo.odb.read(&e.oid).ok())
                         .map(|o| o.data)
                         .unwrap_or_default();
@@ -499,7 +501,7 @@ pub fn apply_stash(
                                     1,
                                 );
                             }
-                            if let Some(ours_entry) = flat_tree_lookup(&current_head_flat, path) {
+                            if let Some(ours_entry) = flat_tree_lookup(current_head_entries, path) {
                                 let mode = current_index
                                     .get(path_bytes, 0)
                                     .map(|e| e.mode)
@@ -598,7 +600,7 @@ pub fn apply_stash(
             }
         }
         for path in &touched {
-            if let Some(te) = flat_tree_lookup(&current_head_flat, path) {
+            if let Some(te) = flat_tree_lookup(current_head_entries, path) {
                 let path_bytes = path.as_bytes();
                 let size = if te.mode == MODE_SYMLINK || te.mode == MODE_GITLINK {
                     0u32
