@@ -11,8 +11,24 @@ use tempfile::NamedTempFile;
 use crate::shell::shell_quote;
 
 /// One entry from hyperfine JSON export (times in seconds).
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HyperfineResultEntry {
+    pub command: String,
+    pub mean: f64,
+    pub stddev: Option<f64>,
+    pub median: f64,
+    pub min: f64,
+    pub max: f64,
+    pub times: Option<Vec<f64>>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+struct HyperfineExportV1 {
+    pub results: Vec<HyperfineResultEntryV1>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+struct HyperfineResultEntryV1 {
     pub command: String,
     pub mean: f64,
     #[serde(default)]
@@ -24,9 +40,41 @@ pub struct HyperfineResultEntry {
     pub times: Option<Vec<f64>>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub struct HyperfineExport {
-    pub results: Vec<HyperfineResultEntry>,
+#[derive(Debug, Clone, Deserialize)]
+struct HyperfineExportV2 {
+    pub results: Vec<HyperfineResultEntryV2>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HyperfineResultEntryV2 {
+    pub command: String,
+    pub measurements: Vec<HyperfineMeasurementV2>,
+    pub summary: HyperfineSummaryV2,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HyperfineMeasurementV2 {
+    pub time_wall_clock: HyperfineMetricV2,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HyperfineMetricV2 {
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HyperfineSummaryV2 {
+    pub time_wall_clock: HyperfineStatsV2,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HyperfineStatsV2 {
+    pub mean: f64,
+    #[serde(default)]
+    pub stddev: Option<f64>,
+    pub median: f64,
+    pub min: f64,
+    pub max: f64,
 }
 
 /// Options passed to a single hyperfine invocation.
@@ -74,6 +122,8 @@ pub fn run_hyperfine(hyperfine: &Path, run: &HyperfineRun) -> Result<HyperfineRe
     if let Some(name) = &run.command_name {
         cmd.arg("--command-name").arg(name);
     }
+    // hyperfine 2.x requires an explicit shell when the command uses `&&` (our `cd … && …` wrapper).
+    cmd.arg("--shell=default");
     cmd.arg(command);
 
     let output = cmd
@@ -92,11 +142,59 @@ fn wrap_in_dir(dir: &Path, inner: &str) -> String {
     format!("cd {} && {}", shell_quote(&dir.to_string_lossy()), inner)
 }
 
+fn parse_v2_entry(entry: HyperfineResultEntryV2) -> HyperfineResultEntry {
+    let times: Vec<f64> = entry
+        .measurements
+        .iter()
+        .map(|m| m.time_wall_clock.value)
+        .collect();
+    let wall = &entry.summary.time_wall_clock;
+    HyperfineResultEntry {
+        command: entry.command,
+        mean: wall.mean,
+        stddev: wall.stddev,
+        median: wall.median,
+        min: wall.min,
+        max: wall.max,
+        times: Some(times),
+    }
+}
+
 /// Parse hyperfine JSON export; expects exactly one result entry.
 pub fn parse_hyperfine_json(json: &str) -> Result<HyperfineResultEntry> {
-    let export: HyperfineExport =
+    let value: serde_json::Value =
         serde_json::from_str(json).context("parse hyperfine JSON export")?;
-    let mut results = export.results;
+    let schema_version = value
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+
+    let mut results = if schema_version >= 2 {
+        let export: HyperfineExportV2 =
+            serde_json::from_value(value).context("parse hyperfine v2 export")?;
+        export
+            .results
+            .into_iter()
+            .map(parse_v2_entry)
+            .collect::<Vec<_>>()
+    } else {
+        let export: HyperfineExportV1 =
+            serde_json::from_str(json).context("parse hyperfine v1 export")?;
+        export
+            .results
+            .into_iter()
+            .map(|e| HyperfineResultEntry {
+                command: e.command,
+                mean: e.mean,
+                stddev: e.stddev,
+                median: e.median,
+                min: e.min,
+                max: e.max,
+                times: e.times,
+            })
+            .collect()
+    };
+
     if results.len() != 1 {
         anyhow::bail!(
             "expected exactly one hyperfine result, got {}",
@@ -118,5 +216,33 @@ mod tests {
         assert_eq!(entry.command, "sleep 0.1");
         assert!((entry.median - 0.1020).abs() < 1e-6);
         assert_eq!(entry.times.as_ref().map(|t| t.len()), Some(5));
+    }
+
+    #[test]
+    fn parse_hyperfine_v2_export() {
+        const V2: &str = r#"{
+  "schema_version": 2,
+  "results": [{
+    "command": "sleep 0.01",
+    "measurements": [
+      {"time_wall_clock": {"value": 0.01, "unit": "second"}},
+      {"time_wall_clock": {"value": 0.02, "unit": "second"}}
+    ],
+    "summary": {
+      "time_wall_clock": {
+        "unit": "second",
+        "count": 2,
+        "mean": 0.015,
+        "stddev": 0.005,
+        "median": 0.015,
+        "min": 0.01,
+        "max": 0.02
+      }
+    }
+  }]
+}"#;
+        let entry = parse_hyperfine_json(V2).unwrap();
+        assert!((entry.median - 0.015).abs() < 1e-9);
+        assert_eq!(entry.times.as_deref(), Some([0.01, 0.02].as_slice()));
     }
 }
