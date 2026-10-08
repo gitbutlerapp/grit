@@ -2810,15 +2810,15 @@ fn is_process_running(pid: u64) -> bool {
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {
-        use rustix::errno::Errno;
-        use rustix::process::{kill, Pid};
-        let Ok(pid) = Pid::from_raw(pid as i32) else {
+        use rustix::io::Errno;
+        use rustix::process::{test_kill_process, Pid};
+        let Some(pid) = Pid::from_raw(pid as i32) else {
             return false;
         };
-        match kill(pid, None) {
+        match test_kill_process(pid) {
             Ok(()) => true,
             Err(Errno::SRCH) => false,
-            Err(Errno::EPERM) => true,
+            Err(Errno::PERM) => true,
             Err(_) => false,
         }
     }
