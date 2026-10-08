@@ -151,6 +151,77 @@ fn lookup_oracle_random_hits_and_misses() {
     assert!(!idx.contains(&miss));
 }
 
+fn git_empty_v2_idx(dir: &Path, sha256: bool) -> PathBuf {
+    if sha256 {
+        git(dir, &["init", "-q", "-b", "main", "--object-format=sha256"]);
+    } else {
+        git(dir, &["init", "-q", "-b", "main"]);
+    }
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["pack-objects", "--index-version=2", "empty"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("pack-objects");
+    assert!(
+        out.status.success(),
+        "git pack-objects: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stem = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert!(!stem.is_empty(), "pack-objects hash");
+    dir.join(format!("empty-{stem}.idx"))
+}
+
+#[test]
+fn empty_sha256_v2_index_from_git_verified_and_no_verify() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let idx_path = git_empty_v2_idx(dir.path(), true);
+    assert_eq!(
+        std::fs::metadata(&idx_path).expect("stat idx").len(),
+        1096,
+        "expected SHA-256 empty v2 idx size"
+    );
+    let out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["verify-pack", "-v"])
+        .arg(idx_path.with_extension("pack"))
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("verify-pack");
+    assert!(
+        out.status.success(),
+        "git verify-pack: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    git(dir.path(), &["fsck"]);
+    let no_verify = read_pack_index_no_verify(&idx_path).expect("parse without verify");
+    assert_eq!(no_verify.len(), 0);
+    assert_eq!(no_verify.hash_bytes(), 32);
+    let verified = read_pack_index(&idx_path).expect("parse with verify");
+    assert_eq!(verified.len(), 0);
+    assert_eq!(verified.hash_bytes(), 32);
+}
+
+#[test]
+fn empty_sha1_v2_index_from_git_hash_width() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let idx_path = git_empty_v2_idx(dir.path(), false);
+    assert_eq!(
+        std::fs::metadata(&idx_path).expect("stat idx").len(),
+        1072,
+        "expected SHA-1 empty v2 idx size"
+    );
+    let idx = read_pack_index(&idx_path).expect("parse sha1 empty idx");
+    assert_eq!(idx.len(), 0);
+    assert_eq!(idx.hash_bytes(), 20);
+}
+
 #[test]
 fn corrupt_fanout_rejected() {
     let (_dir, idx_path) = make_repo_with_pack();
