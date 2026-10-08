@@ -553,6 +553,7 @@ pub struct BlameTextconvContext {
     conversion: ConversionConfig,
     pub attrs: GitAttributes,
     diff_attrs: Vec<DiffAttrRule>,
+    filter_process: std::sync::Arc<crate::repo_caches::RepoCaches>,
 }
 
 impl BlameTextconvContext {
@@ -566,7 +567,12 @@ impl BlameTextconvContext {
             conversion,
             attrs,
             diff_attrs,
+            filter_process: std::sync::Arc::clone(repo.caches()),
         }
+    }
+
+    fn filters(&self) -> &crate::filter_process::FilterProcessState {
+        self.filter_process.filters()
     }
 }
 
@@ -791,6 +797,7 @@ fn read_blob_content_for_blame(
         &attrs,
         Some(&oid_hex),
         None,
+        Some(ctx.filters()),
     )
     .map_err(LibError::Filter)?;
     let converted = run_textconv_command(&command, &worktree_data)

@@ -136,8 +136,12 @@ impl FilterProcessState {
     }
 
     pub(crate) fn shutdown_all(&self) {
-        if let Ok(mut reg) = self.registry.lock() {
-            reg.clear();
+        let entries = match self.registry.lock() {
+            Ok(mut reg) => reg.drain().map(|(_, v)| v).collect::<Vec<_>>(),
+            Err(_) => return,
+        };
+        for arc in entries {
+            terminate_shared_filter(&arc);
         }
     }
 
@@ -157,8 +161,12 @@ impl FilterProcessState {
     }
 
     pub(crate) fn remove_process_filter(&self, cmd: &str) {
-        if let Ok(mut reg) = self.registry.lock() {
-            reg.remove(cmd);
+        let arc = match self.registry.lock() {
+            Ok(mut reg) => reg.remove(cmd),
+            Err(_) => return,
+        };
+        if let Some(arc) = arc {
+            terminate_shared_filter(&arc);
         }
     }
 
@@ -170,6 +178,16 @@ impl FilterProcessState {
 /// Stop using a process filter for the rest of this repository handle.
 pub fn disable_process_filter(state: &FilterProcessState, cmd: &str) {
     state.disable_process_filter(cmd);
+}
+
+fn terminate_shared_filter(arc: &Arc<Mutex<RunningFilter>>) {
+    let Ok(mut rf) = arc.lock() else {
+        return;
+    };
+    rf.stdin.take();
+    rf.stdout.take();
+    let _ = rf.child.kill();
+    let _ = rf.child.wait();
 }
 
 fn process_transport_error(err: &str) -> bool {

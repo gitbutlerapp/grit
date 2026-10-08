@@ -2313,7 +2313,8 @@ mod tests {
             check_roundtrip_encoding: None,
         };
         let attrs = FileAttrs::default();
-        let out = convert_to_worktree_eager(&blob, "mixed", &conv, &attrs, None, None).unwrap();
+        let out =
+            convert_to_worktree_eager(&blob, "mixed", &conv, &attrs, None, None, None).unwrap();
         assert_eq!(out, blob);
     }
 
@@ -2327,7 +2328,7 @@ mod tests {
             check_roundtrip_encoding: None,
         };
         let attrs = FileAttrs::default();
-        let out = convert_to_worktree_eager(blob, "x", &conv, &attrs, None, None).unwrap();
+        let out = convert_to_worktree_eager(blob, "x", &conv, &attrs, None, None, None).unwrap();
         assert_eq!(out, b"a\r\nb\r\n");
     }
 

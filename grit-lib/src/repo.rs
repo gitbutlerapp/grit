@@ -787,6 +787,7 @@ impl Repository {
                 work_tree,
                 prev_index_mtime,
                 Some(cfg.as_ref()),
+                Some(self.caches().filters()),
             );
         }
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));

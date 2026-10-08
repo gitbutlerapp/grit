@@ -17,10 +17,12 @@ use crate::config::parse_path;
 use crate::config::ConfigSet;
 use crate::crlf::{self, AttrRule, ConversionConfig, FileAttrs};
 use crate::error::{Error, Result};
+use crate::filter_process::FilterProcessState;
 use crate::ignore::IgnoreMatcher;
 use crate::index::Index;
 use crate::odb::Odb;
 use crate::repo::Repository;
+use crate::repo_caches::RepoCaches;
 
 /// Counts disk reads of attribute/ignore pattern files (tests only).
 ///
@@ -86,6 +88,7 @@ pub struct WorktreeRules {
     conversion: ConversionConfig,
     ignore: RefCell<IgnoreMatcher>,
     attrs: AttributeState,
+    caches: Arc<RepoCaches>,
 }
 
 struct AttributeState {
@@ -192,7 +195,14 @@ impl WorktreeRules {
             conversion,
             ignore,
             attrs,
+            caches: Arc::clone(repo.caches()),
         })
+    }
+
+    /// Long-running filter-process registry for this repository handle.
+    #[must_use]
+    pub fn filter_process(&self) -> &FilterProcessState {
+        self.caches.filters()
     }
 
     /// Repository config snapshot used to build this context.

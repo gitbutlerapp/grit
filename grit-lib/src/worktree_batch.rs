@@ -8,6 +8,7 @@ use crate::config::ConfigSet;
 use crate::crlf::{self, ConversionConfig, FileAttrs, GitAttributes};
 use crate::diff::{hash_worktree_file, mode_from_metadata, worktree_blob_bytes};
 use crate::error::{Error, Result};
+use crate::filter_process::FilterProcessState;
 use crate::hash::{hash_object, try_par_hash_with, ParallelHashError, Parallelism};
 use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -55,6 +56,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
     items: &[WorktreeBlobReadInput],
     conv: &ConversionConfig,
     parallelism: Parallelism,
+    filter_process: Option<&FilterProcessState>,
 ) -> Result<Vec<PreparedWorktreeBlob>> {
     if items.is_empty() {
         return Ok(Vec::new());
@@ -75,6 +77,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
             &item.file_attrs,
             &item.index_relpath,
             item.index_entry.as_ref(),
+            filter_process,
         )?;
         let store_bytes = odb::blob_store_bytes(&data);
         let oid = hash_object(ctx.algo, ObjectKind::Blob, &data);
@@ -224,6 +227,7 @@ pub(crate) fn parallel_refresh_index_stat_hashes(
     attrs: &GitAttributes,
     config: &ConfigSet,
     parallelism: Parallelism,
+    filter_process: Option<&FilterProcessState>,
 ) -> Result<Vec<(usize, RefreshHashOutcome)>> {
     if work.is_empty() {
         return Ok(Vec::new());
@@ -243,6 +247,7 @@ pub(crate) fn parallel_refresh_index_stat_hashes(
             &file_attrs,
             rel_path,
             Some(ie),
+            filter_process,
         )?;
         let content_matches = wt_oid == item.expected_oid;
         let outcome = match item.kind {

@@ -590,6 +590,7 @@ pub fn convert_blob_to_worktree_for_path(
     path: &str,
     blob: &[u8],
     oid_hex: Option<&str>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> std::io::Result<Vec<u8>> {
     let config = ConfigSet::load(
         &crate::environment::Environment::capture_process(),
@@ -603,8 +604,16 @@ pub fn convert_blob_to_worktree_for_path(
         None => crate::crlf::load_gitattributes(work_tree),
     };
     let file_attrs = crate::crlf::get_file_attrs(&rules, path, false, &config);
-    crate::crlf::convert_to_worktree_eager(blob, path, &conv, &file_attrs, oid_hex, None)
-        .map_err(std::io::Error::other)
+    crate::crlf::convert_to_worktree_eager(
+        blob,
+        path,
+        &conv,
+        &file_attrs,
+        oid_hex,
+        None,
+        filter_process,
+    )
+    .map_err(std::io::Error::other)
 }
 
 /// Prepare blob bytes for diff: optional textconv when `use_textconv` and `diff=<driver>`.

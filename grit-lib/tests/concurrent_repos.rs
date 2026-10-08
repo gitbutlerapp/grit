@@ -157,8 +157,7 @@ fn two_repos_on_two_threads() {
     ha.join().expect("join a");
     hb.join().expect("join b");
 
-    for (repo, author, expect_text_attr) in
-        [(&a.root, "Alice", "auto"), (&b.root, "Bob", "unset")]
+    for (repo, author, expect_text_attr) in [(&a.root, "Alice", "auto"), (&b.root, "Bob", "unset")]
     {
         git_in(repo, &["fsck"]);
         let log_authors = git_in(repo, &["log", "--format=%an"]);
