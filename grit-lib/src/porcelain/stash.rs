@@ -13,7 +13,8 @@
 //! [`write_regular_file_replacing_symlink`], [`remove_empty_dirs`]) are shared
 //! with the still-CLI-resident stash-create/show paths, so they are public.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -64,6 +65,57 @@ pub fn flatten_tree_full(
         }
     }
     Ok(result)
+}
+
+/// Lookup a path in a lexicographically sorted [`flatten_tree_full`] slice.
+fn flat_tree_lookup<'a>(entries: &'a [FlatTreeEntry], path: &str) -> Option<&'a FlatTreeEntry> {
+    entries
+        .binary_search_by(|e| e.path.as_str().cmp(path))
+        .ok()
+        .map(|i| &entries[i])
+}
+
+/// Paths whose blob/symlink/gitlink differs between two sorted flat trees.
+///
+/// `None` means the path was removed in `other`; `Some` is the entry in `other`.
+fn collect_flat_tree_worktree_changes<'a>(
+    base: &'a [FlatTreeEntry],
+    other: &'a [FlatTreeEntry],
+) -> Vec<(String, Option<&'a FlatTreeEntry>)> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    while i < base.len() || j < other.len() {
+        match (base.get(i), other.get(j)) {
+            (Some(b), Some(o)) => match b.path.cmp(&o.path) {
+                Ordering::Less => {
+                    out.push((b.path.clone(), None));
+                    i += 1;
+                }
+                Ordering::Greater => {
+                    out.push((o.path.clone(), Some(o)));
+                    j += 1;
+                }
+                Ordering::Equal => {
+                    if b.oid != o.oid || b.mode != o.mode {
+                        out.push((o.path.clone(), Some(o)));
+                    }
+                    i += 1;
+                    j += 1;
+                }
+            },
+            (Some(b), None) => {
+                out.push((b.path.clone(), None));
+                i += 1;
+            }
+            (None, Some(o)) => {
+                out.push((o.path.clone(), Some(o)));
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    out
 }
 
 /// Push a conflict (non-zero) stage entry for `path` into `index`.
@@ -158,35 +210,8 @@ pub fn stash_worktree_change_paths(
     let head_commit = parse_commit(&head_obj.data)?;
     let base_tree_entries = flatten_tree_full(&repo.odb, &head_commit.tree, "")?;
 
-    let base_map: BTreeMap<String, &FlatTreeEntry> = base_tree_entries
-        .iter()
-        .map(|e| (e.path.clone(), e))
-        .collect();
-    let stash_map: BTreeMap<String, &FlatTreeEntry> = stash_tree_entries
-        .iter()
-        .map(|e| (e.path.clone(), e))
-        .collect();
-
-    let mut paths = BTreeSet::new();
-    for (path, stash_entry) in &stash_map {
-        match base_map.get(path) {
-            Some(base_entry)
-                if base_entry.oid != stash_entry.oid || base_entry.mode != stash_entry.mode =>
-            {
-                paths.insert(path.clone());
-            }
-            None => {
-                paths.insert(path.clone());
-            }
-            _ => {}
-        }
-    }
-    for path in base_map.keys() {
-        if !stash_map.contains_key(path) {
-            paths.insert(path.clone());
-        }
-    }
-    Ok(paths)
+    let changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
+    Ok(changes.into_iter().map(|(path, _)| path).collect())
 }
 
 /// Refuse to apply when the stash would clobber a locally-modified file.
@@ -268,40 +293,11 @@ pub fn apply_stash(
     let head_at_stash_commit = parse_commit(&head_at_stash_obj.data)?;
     let base_tree_entries = flatten_tree_full(&repo.odb, &head_at_stash_commit.tree, "")?;
 
-    let base_map: BTreeMap<String, &FlatTreeEntry> = base_tree_entries
-        .iter()
-        .map(|e| (e.path.clone(), e))
-        .collect();
-    let stash_map: BTreeMap<String, &FlatTreeEntry> = stash_tree_entries
-        .iter()
-        .map(|e| (e.path.clone(), e))
-        .collect();
-
-    // Find files changed in the stash working tree vs base
-    let mut wt_changes: BTreeMap<String, Option<&FlatTreeEntry>> = BTreeMap::new();
-    for (path, stash_entry) in &stash_map {
-        match base_map.get(path) {
-            Some(base_entry)
-                if base_entry.oid != stash_entry.oid || base_entry.mode != stash_entry.mode =>
-            {
-                wt_changes.insert(path.clone(), Some(stash_entry));
-            }
-            None => {
-                wt_changes.insert(path.clone(), Some(stash_entry));
-            }
-            _ => {}
-        }
-    }
-    // Track deletions (in base but not in stash)
-    for path in base_map.keys() {
-        if !stash_map.contains_key(path) {
-            wt_changes.insert(path.clone(), None); // None = deleted
-        }
-    }
+    let wt_changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
 
     // Check for conflicts: does the worktree have local modifications to files
     // that the stash also wants to change?
-    for path in wt_changes.keys() {
+    for (path, _) in &wt_changes {
         let file_path = work_tree.join(path);
         // Get the current index entry for this file
         if let Some(idx_entry) = current_index.get(path.as_bytes(), 0) {
@@ -331,37 +327,21 @@ pub fn apply_stash(
     let idx_obj = repo.odb.read(index_commit_oid)?;
     let idx_commit = parse_commit(&idx_obj.data)?;
     let idx_tree_entries = flatten_tree_full(&repo.odb, &idx_commit.tree, "")?;
-    let idx_map: BTreeMap<String, &FlatTreeEntry> = idx_tree_entries
-        .iter()
-        .map(|e| (e.path.clone(), e))
-        .collect();
-
     // Determine if HEAD has moved since the stash was created
     let current_head = resolve_head(&repo.git_dir)?;
     let current_head_oid = current_head.oid().copied();
     let head_moved = current_head_oid.as_ref() != Some(head_at_stash);
 
     // Current HEAD tree (for three-way merge when HEAD moved, and for index reset without --index).
-    let current_head_flat: Vec<FlatTreeEntry> = if let Some(ref h) = current_head_oid {
-        let head_obj = repo.odb.read(h)?;
+    let current_head_flat: Vec<FlatTreeEntry> = if head_moved {
+        let Some(head_oid) = current_head_oid.as_ref() else {
+            return Err(Error::Message("missing HEAD while applying stash".into()));
+        };
+        let head_obj = repo.odb.read(head_oid)?;
         let head_commit = parse_commit(&head_obj.data)?;
         flatten_tree_full(&repo.odb, &head_commit.tree, "")?
     } else {
         Vec::new()
-    };
-    let cur_head_map: BTreeMap<String, &FlatTreeEntry> = current_head_flat
-        .iter()
-        .map(|e| (e.path.clone(), e))
-        .collect();
-
-    // Build current HEAD tree map for three-way merge (OID only)
-    let current_tree_map: BTreeMap<String, ObjectId> = if head_moved {
-        current_head_flat
-            .iter()
-            .map(|e| (e.path.clone(), e.oid))
-            .collect()
-    } else {
-        BTreeMap::new()
     };
 
     let mut has_conflicts = false;
@@ -457,14 +437,12 @@ pub fn apply_stash(
                     fs::write(&file_path, target.as_bytes())?;
                 } else if head_moved {
                     // Three-way merge: base (head_at_stash), ours (current HEAD), theirs (stash)
-                    let base_content = base_map
-                        .get(path)
+                    let base_content = flat_tree_lookup(&base_tree_entries, path)
                         .and_then(|e| repo.odb.read(&e.oid).ok())
                         .map(|o| o.data)
                         .unwrap_or_default();
-                    let ours_content = current_tree_map
-                        .get(path)
-                        .and_then(|oid| repo.odb.read(oid).ok())
+                    let ours_content = flat_tree_lookup(&current_head_flat, path)
+                        .and_then(|e| repo.odb.read(&e.oid).ok())
                         .map(|o| o.data)
                         .unwrap_or_default();
                     let theirs_content = stash_blob.data;
@@ -512,7 +490,7 @@ pub fn apply_stash(
                             // index"; t7600 'merge with conflicted --autostash changes').
                             new_index.invalidate_cache_tree_for_path(path_bytes);
                             // Add stage entries
-                            if let Some(base_entry) = base_map.get(path) {
+                            if let Some(base_entry) = flat_tree_lookup(&base_tree_entries, path) {
                                 add_stage_entry(
                                     &mut new_index,
                                     path_bytes,
@@ -521,12 +499,18 @@ pub fn apply_stash(
                                     1,
                                 );
                             }
-                            if let Some(ours_oid) = current_tree_map.get(path) {
+                            if let Some(ours_entry) = flat_tree_lookup(&current_head_flat, path) {
                                 let mode = current_index
                                     .get(path_bytes, 0)
                                     .map(|e| e.mode)
                                     .unwrap_or(0o100644);
-                                add_stage_entry(&mut new_index, path_bytes, ours_oid, mode, 2);
+                                add_stage_entry(
+                                    &mut new_index,
+                                    path_bytes,
+                                    &ours_entry.oid,
+                                    mode,
+                                    2,
+                                );
                             }
                             add_stage_entry(&mut new_index, path_bytes, &entry.oid, entry.mode, 3);
                         }
@@ -557,8 +541,9 @@ pub fn apply_stash(
 
     if restore_index {
         // --index: restore the index to the stash's index state for changed files
-        for (path, idx_entry) in &idx_map {
-            let base_oid = base_map.get(path).map(|e| &e.oid);
+        for idx_entry in &idx_tree_entries {
+            let path = &idx_entry.path;
+            let base_oid = flat_tree_lookup(&base_tree_entries, path).map(|e| &e.oid);
             if base_oid != Some(&idx_entry.oid) {
                 // This file was staged differently from base in the stash
                 let path_bytes = path.as_bytes();
@@ -593,7 +578,7 @@ pub fn apply_stash(
         }
         // Handle files added in the index but not in base
         // (already covered above)
-        for path in wt_changes.keys() {
+        for (path, _) in &wt_changes {
             if let Some(ie) = new_index.get_mut(path.as_bytes(), 0) {
                 ie.set_skip_worktree(false);
             }
@@ -606,17 +591,14 @@ pub fn apply_stash(
         // Exception: paths that exist in the stash index parent but not on **current** HEAD
         // (e.g. a newly `git add`ed file) must be re-staged from the stash index parent
         // (t3903 `stash an added file`).
-        let mut touched: BTreeSet<String> = BTreeSet::new();
-        for p in wt_changes.keys() {
-            touched.insert(p.clone());
-        }
-        for path in idx_map.keys() {
-            if !base_map.contains_key(path) {
-                touched.insert(path.clone());
+        let mut touched: BTreeSet<String> = wt_changes.iter().map(|(p, _)| p.clone()).collect();
+        for entry in &idx_tree_entries {
+            if flat_tree_lookup(&base_tree_entries, &entry.path).is_none() {
+                touched.insert(entry.path.clone());
             }
         }
         for path in &touched {
-            if let Some(te) = cur_head_map.get(path.as_str()) {
+            if let Some(te) = flat_tree_lookup(&current_head_flat, path) {
                 let path_bytes = path.as_bytes();
                 let size = if te.mode == MODE_SYMLINK || te.mode == MODE_GITLINK {
                     0u32
@@ -658,8 +640,8 @@ pub fn apply_stash(
                 if has_unmerged {
                     continue;
                 }
-                if let Some(ie) = idx_map.get(path.as_str()) {
-                    let had_staged = match base_map.get(path.as_str()) {
+                if let Some(ie) = flat_tree_lookup(&idx_tree_entries, path) {
+                    let had_staged = match flat_tree_lookup(&base_tree_entries, path) {
                         Some(b) => b.oid != ie.oid || b.mode != ie.mode,
                         None => true,
                     };

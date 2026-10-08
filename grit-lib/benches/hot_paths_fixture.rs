@@ -8,8 +8,13 @@ use std::sync::OnceLock;
 use grit_lib::error::Result;
 use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::merge_file::MergeFavor;
+use grit_lib::merge_trees::{
+    merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
+};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::staging::stage_worktree_changes;
+use grit_lib::porcelain::stash::apply_stash;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -124,6 +129,49 @@ impl HotPathsFixture {
     pub fn reset_worktree_to_head(&self) {
         checkout_between_trees(&self.repo, None, &self.head_tree).expect("reset to head");
     }
+
+    /// Stash commit whose worktree parent differs on `fraction` of tracked paths (index matches HEAD).
+    pub fn build_stash_touching_fraction(&self, fraction: f64) -> ObjectId {
+        self.reset_worktree_to_head();
+        let stash_tree = self.tree_with_fraction_changed(fraction);
+        let head_oid = refs::resolve_ref(&self.repo.git_dir, "HEAD").expect("head");
+        let index_parent =
+            write_tree_commit(&self.repo, self.head_tree, &[head_oid], "stash index parent");
+        write_tree_commit(
+            &self.repo,
+            stash_tree,
+            &[head_oid, index_parent],
+            "WIP on main: bench stash",
+        )
+    }
+
+    /// `(base_tree, head_tree, source_tree)` for a single-parent pick changing `path_count` paths.
+    pub fn pick_three_trees(&self, path_count: usize) -> (ObjectId, ObjectId, ObjectId) {
+        self.reset_worktree_to_head();
+        let head_tree = self.head_tree;
+        let head_oid = refs::resolve_ref(&self.repo.git_dir, "HEAD").expect("head");
+        let source_tree = self.tree_with_path_count_changed(path_count);
+        let _source_commit =
+            write_tree_commit(&self.repo, source_tree, &[head_oid], "pick source");
+        (head_tree, head_tree, source_tree)
+    }
+
+    fn tree_with_path_count_changed(&self, path_count: usize) -> ObjectId {
+        let n = path_count.min(self.file_paths.len()).max(1);
+        let work_tree = self.repo.work_tree.as_ref().expect("work tree");
+        let mut index = self.repo.load_index().expect("load index");
+        for path in self.file_paths.iter().take(n) {
+            let abs = work_tree.join(path);
+            std::fs::write(&abs, format!("pick-{path}\n")).expect("write");
+            let data = std::fs::read(&abs).expect("read");
+            let oid = self.repo.odb.write(ObjectKind::Blob, &data).expect("blob");
+            let entry = entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry");
+            index.add_or_replace(entry);
+        }
+        index.sort();
+        write_tree_update_index(&self.repo.odb, &mut index, "", WriteTreeFlags::silent())
+            .expect("tree")
+    }
 }
 
 fn build_index_mutate_plan(repo: &Repository) -> IndexMutatePlan {
@@ -233,4 +281,56 @@ pub fn bench_checkout_between_trees(repo: &Repository, from: &ObjectId, to: &Obj
 
 pub fn bench_stage_scan(repo: &Repository) {
     let _ = stage_worktree_changes(repo, &[]).expect("stage scan");
+}
+
+fn write_tree_commit(
+    repo: &Repository,
+    tree: ObjectId,
+    parents: &[ObjectId],
+    message: &str,
+) -> ObjectId {
+    let commit_data = CommitData {
+        tree,
+        parents: parents.to_vec(),
+        author: BENCH_IDENT.to_owned(),
+        committer: BENCH_IDENT.to_owned(),
+        author_raw: Vec::new(),
+        committer_raw: Vec::new(),
+        encoding: None,
+        message: format!("{message}\n"),
+        raw_message: None,
+    };
+    let bytes = serialize_commit(&commit_data);
+    repo.odb
+        .write(ObjectKind::Commit, &bytes)
+        .expect("write commit")
+}
+
+pub fn bench_apply_stash(fx: &HotPathsFixture, stash_oid: &ObjectId) {
+    let wt = fx.repo.work_tree.as_ref().expect("work tree");
+    let _ = apply_stash(&fx.repo, wt, stash_oid, false, false).expect("apply_stash");
+}
+
+pub fn bench_pick_path(fx: &HotPathsFixture, path_count: usize) {
+    let (base, head, source) = fx.pick_three_trees(path_count);
+    let merged = merge_trees_three_way(
+        &fx.repo,
+        base,
+        head,
+        source,
+        MergeFavor::default(),
+        WhitespaceMergeOptions::default(),
+        None,
+        TreeMergeConflictPresentation::default(),
+    )
+    .expect("merge");
+    let mut index = merged.index;
+    let new_tree = write_tree_update_index(
+        &fx.repo.odb,
+        &mut index,
+        "",
+        WriteTreeFlags::silent(),
+    )
+    .expect("write tree");
+    checkout_between_trees(&fx.repo, Some(&head), &new_tree).expect("checkout");
 }

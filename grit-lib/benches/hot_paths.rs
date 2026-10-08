@@ -7,7 +7,10 @@ mod hot_paths_fixture;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use hot_paths_fixture::{bench_checkout_between_trees, bench_stage_scan, HotPathsFixture};
+use hot_paths_fixture::{
+    bench_apply_stash, bench_checkout_between_trees, bench_pick_path, bench_stage_scan,
+    HotPathsFixture,
+};
 
 fn bench_index_mutate(c: &mut Criterion) {
     let mut group = c.benchmark_group("index_mutate_batch_10pct");
@@ -53,6 +56,33 @@ fn bench_checkout(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_apply_stash_group(c: &mut Criterion) {
+    let fx = HotPathsFixture::large();
+    let stash_oid = fx.build_stash_touching_fraction(0.01);
+    let mut group = c.benchmark_group("apply_stash");
+    group.bench_function("apply_stash_L", |b| {
+        b.iter_batched(
+            || fx.reset_worktree_to_head(),
+            |_| bench_apply_stash(fx, &stash_oid),
+            BatchSize::SmallInput,
+        );
+    });
+    group.finish();
+}
+
+fn bench_pick_paths(c: &mut Criterion) {
+    let fx = HotPathsFixture::large();
+    let mut group = c.benchmark_group("pick_paths");
+    group.bench_function("pick_2000_paths_L", |b| {
+        b.iter_batched(
+            || fx.reset_worktree_to_head(),
+            |_| bench_pick_path(fx, 2000),
+            BatchSize::SmallInput,
+        );
+    });
+    group.finish();
+}
+
 fn bench_staging_scan(c: &mut Criterion) {
     let mut group = c.benchmark_group("staging_scan_5_modified");
     for (label, fx) in [
@@ -76,6 +106,10 @@ fn bench_staging_scan(c: &mut Criterion) {
 criterion_group!(
     name = hot_paths;
     config = Criterion::default().sample_size(10);
-    targets = bench_index_mutate, bench_checkout, bench_staging_scan
+    targets = bench_index_mutate,
+    bench_checkout,
+    bench_staging_scan,
+    bench_apply_stash_group,
+    bench_pick_paths
 );
 criterion_main!(hot_paths);
