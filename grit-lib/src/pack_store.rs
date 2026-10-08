@@ -23,6 +23,7 @@ pub struct PackStore {
     midx: Mutex<crate::midx::midx_cache::State>,
 }
 
+// hygiene: scoped read contexts and legacy standalone caches must not cross threads
 thread_local! {
     static CURRENT: RefCell<Option<Arc<PackStore>>> = const { RefCell::new(None) };
     static ACTIVE_OBJECTS_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
