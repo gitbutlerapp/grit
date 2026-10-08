@@ -842,6 +842,10 @@ mod pack_cache {
     /// Drop all cached pack indexes and pack bytes. Used by `repack`/`gc` and by tests
     /// that mutate the pack directory in-place without changing its mtime.
     pub fn clear() {
+        #[cfg(test)]
+        if !super::pack_cache_clear_allowed_from_this_thread() {
+            return;
+        }
         let mut g = lock();
         g.by_dir.clear();
         g.by_idx.clear();
@@ -2953,6 +2957,13 @@ mod pack_cache_test_sync {
         _inner: Option<MutexGuard<'static, PackCacheTestCoordinator>>,
     }
 
+    fn thread_id_u64() -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::thread::current().id().hash(&mut hasher);
+        hasher.finish()
+    }
+
     pub fn acquire() -> PackCacheTestGuard {
         let depth = DEPTH.with(|d| {
             let n = d.get();
@@ -2967,6 +2978,7 @@ mod pack_cache_test_sync {
                     "pack cache test coordinator already held"
                 );
                 g.top_level_guards = 1;
+                super::PACK_CACHE_TEST_HOLDER.store(thread_id_u64(), std::sync::atomic::Ordering::Release);
                 Some(g)
             } else {
                 None
@@ -2985,10 +2997,27 @@ mod pack_cache_test_sync {
                         assert_eq!(g.top_level_guards, 1);
                         g.top_level_guards = 0;
                     }
+                    super::PACK_CACHE_TEST_HOLDER.store(0, std::sync::atomic::Ordering::Release);
                 }
             });
         }
     }
+}
+
+#[cfg(test)]
+static PACK_CACHE_TEST_HOLDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(test)]
+fn pack_cache_clear_allowed_from_this_thread() -> bool {
+    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::Ordering;
+    let holder = PACK_CACHE_TEST_HOLDER.load(Ordering::Acquire);
+    if holder == 0 {
+        return true;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::thread::current().id().hash(&mut hasher);
+    holder == hasher.finish()
 }
 
 #[cfg(test)]
