@@ -463,7 +463,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 3
 command_new = 0
-static_global = 0
+static_global = 1
 system_time_now = 0
 
 [file.init_filesystem.rs]
@@ -1261,7 +1261,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 1
 system_time_now = 0
 
 [file.worktree_cwd.rs]
