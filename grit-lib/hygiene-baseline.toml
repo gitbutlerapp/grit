@@ -4,27 +4,6 @@
 [meta]
 updated = "2026-10-08"
 
-[file.apply.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
-
 [file.attributes.rs]
 println = 0
 print = 0
@@ -154,7 +133,7 @@ system_time_now = 0
 [file.config.rs]
 println = 0
 print = 0
-eprintln = 1
+eprintln = 2
 eprint = 0
 dbg = 0
 process_exit = 0
@@ -508,27 +487,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
-[file.mailmap.rs]
-println = 0
-print = 0
-eprintln = 2
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
-
 [file.midx.rs]
 println = 0
 print = 0
@@ -718,48 +676,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
-[file.porcelain/stash.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
-
-[file.precompose_config.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
-
 [file.prune_packed.rs]
 println = 1
 print = 0
@@ -907,27 +823,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
-[file.repo_caches.rs]
-println = 0
-print = 0
-eprintln = 1
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 1
-command_new = 0
-static_global = 0
-system_time_now = 0
-
 [file.rerere.rs]
 println = 0
 print = 0
@@ -990,27 +885,6 @@ literal_warning = 0
 command_new = 0
 static_global = 0
 system_time_now = 1
-
-[file.shared_repo.rs]
-println = 0
-print = 0
-eprintln = 1
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
 
 [file.signing.rs]
 println = 0
@@ -1078,27 +952,6 @@ system_time_now = 1
 [file.submodule_config_cache.rs]
 println = 1
 print = 0
-eprintln = 5
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
-
-[file.submodule_gitdir.rs]
-println = 0
-print = 0
 eprintln = 0
 eprint = 0
 dbg = 0
@@ -1109,7 +962,7 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 0
-literal_fatal = 0
+literal_fatal = 1
 literal_error = 0
 literal_hint = 0
 literal_warning = 0

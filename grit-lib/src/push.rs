@@ -104,6 +104,8 @@ pub fn push_remote(
 ) -> Result<PushOutcome> {
     use crate::net_trace::net_trace;
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "push_remote: begin — {} ref update(s), protocol v{}, {} push-option(s)",
         refs.len(),
         conn.protocol_version(),
@@ -122,6 +124,8 @@ pub fn push_remote(
     //    remote ref map and the `.have` hints, and read the negotiated caps.
     let adv = AdvertisedState::from_connection(conn);
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "push_remote: remote advertised {} ref(s)",
         adv.remote_refs.len()
     );
@@ -143,16 +147,30 @@ pub fn push_remote(
     //    does not read one after a delete-only command block, so sending an empty
     //    pack would leave unread bytes on the wire and reset the connection.
     let commands = build_command_block(&plan, &adv, algo, &opts.push_options)?;
-    net_trace!("push_remote: sending {} command(s)…", plan.decisions.len());
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "push_remote: sending {} command(s)…",
+        plan.decisions.len()
+    );
     conn.writer().write_all(&commands)?;
     conn.writer().flush()?;
 
     if let Some(pack) = build_push_pack(&plan, &local_odb, &adv)? {
-        net_trace!("push_remote: sending pack ({} bytes)…", pack.len());
+        net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
+            "push_remote: sending pack ({} bytes)…",
+            pack.len()
+        );
         conn.writer().write_all(&pack)?;
         conn.writer().flush()?;
     } else {
-        net_trace!("push_remote: no pack (deletion-only / up-to-date)");
+        net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
+            "push_remote: no pack (deletion-only / up-to-date)"
+        );
     }
 
     // 5. Read the server's report. With side-band, band 1 carries the
@@ -179,7 +197,12 @@ pub fn push_remote(
     apply_report_status(&report, &mut plan.decisions);
 
     let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
-    net_trace!("push_remote: done — {} result(s)", results.len());
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "push_remote: done — {} result(s)",
+        results.len()
+    );
     finish_push_outcome(local_git_dir, opts, results)
 }
 
@@ -222,6 +245,8 @@ pub fn push_http(
 ) -> Result<PushOutcome> {
     use crate::net_trace::net_trace;
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "push_http: begin — {} ref update(s) to {}, {} push-option(s)",
         refs.len(),
         repo_url,
@@ -233,6 +258,8 @@ pub fn push_http(
     // 1. Discovery: GET info/refs?service=git-receive-pack.
     let adv = discover_receive_pack(client, repo_url)?;
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "push_http: remote advertised {} ref(s) (protocol v{})",
         adv.state.remote_refs.len(),
         adv.protocol_version
@@ -267,6 +294,8 @@ pub fn push_http(
     let content_type = format!("application/x-{RECEIVE_PACK}-request");
     let accept = format!("application/x-{RECEIVE_PACK}-result");
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "push_http: POST git-receive-pack ({} command(s), {} body bytes)…",
         plan.decisions.len(),
         body.len()
@@ -280,7 +309,12 @@ pub fn push_http(
     };
 
     apply_report_status(&report, &mut plan.decisions);
-    net_trace!("push_http: done — {} result(s)", plan.decisions.len());
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "push_http: done — {} result(s)",
+        plan.decisions.len()
+    );
 
     let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
     finish_push_outcome(local_git_dir, opts, results)

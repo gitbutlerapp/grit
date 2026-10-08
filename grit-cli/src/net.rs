@@ -111,6 +111,10 @@ pub fn fetch_with_options(
     if opts.refspecs.is_empty() {
         opts.refspecs = refspecs;
     }
+    if opts.diagnostics.is_none() {
+        opts.diagnostics = Some(repo.diagnostics());
+        opts.network_trace = repo.network_trace_enabled();
+    }
     let url = remote_url(config, remote)?;
 
     let outcome = if !is_url_scheme(&url) {

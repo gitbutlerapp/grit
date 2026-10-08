@@ -4,6 +4,7 @@
 //! `path.c`.
 
 use crate::config::{parse_bool, ConfigSet};
+use crate::diagnostics::{self, DiagnosticSink};
 #[cfg(unix)]
 use std::fs;
 use std::path::Path;
@@ -24,6 +25,15 @@ pub const PERM_EVERYBODY: i32 = 0o664;
 ///
 /// Returns an error when an octal mode is given but the owner lacks read+write (Git `die`).
 pub fn git_config_perm(var: &str, value: &str) -> Result<i32, String> {
+    git_config_perm_with_diagnostics(var, value, None)
+}
+
+/// Like [`git_config_perm`] but may emit [`diagnostics::Warning::BadBooleanConfig`].
+pub fn git_config_perm_with_diagnostics(
+    var: &str,
+    value: &str,
+    diagnostics: Option<&dyn DiagnosticSink>,
+) -> Result<i32, String> {
     let value = value.trim();
     if value.eq_ignore_ascii_case("umask") {
         return Ok(PERM_UMASK);
@@ -63,12 +73,12 @@ pub fn git_config_perm(var: &str, value: &str) -> Result<i32, String> {
         Ok(true) => Ok(PERM_GROUP),
         Ok(false) => Ok(PERM_UMASK),
         Err(_) => {
-            eprintln!(
-                "{}",
-                crate::diagnostics::warning_line(&format!(
-                    "bad boolean config value '{value}' for option '{var}'"
-                ))
-            );
+            if let Some(d) = diagnostics {
+                d.warn(diagnostics::Warning::BadBooleanConfig {
+                    key: var.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
             Ok(PERM_UMASK)
         }
     }
@@ -154,12 +164,8 @@ pub fn adjust_shared_repo_tree(_git_dir: &Path, _shared_repo: i32) -> std::io::R
 /// Re-run [`adjust_shared_repo_tree`] when `core.sharedRepository` is set (e.g. after commit/repack
 /// created new paths under `.git/`).
 pub fn refresh_repository_shared_tree(git_dir: &Path) -> std::io::Result<()> {
-    let cfg = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(git_dir),
-        true,
-    )
-    .unwrap_or_else(|_| ConfigSet::new());
+    let env = crate::environment::Environment::capture_process();
+    let cfg = ConfigSet::load(&env, Some(git_dir), true).unwrap_or_else(|_| ConfigSet::new());
     let shared =
         match shared_repository_from_config_value(cfg.get("core.sharedRepository").as_deref()) {
             Ok(v) => v,

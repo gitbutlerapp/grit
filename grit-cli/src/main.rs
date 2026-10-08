@@ -7,6 +7,7 @@
 
 mod commands;
 mod context;
+mod diagnostics;
 mod json_filter;
 mod net;
 mod output;

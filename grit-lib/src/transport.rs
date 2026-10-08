@@ -62,13 +62,17 @@ impl Service {
 ///
 /// The default requests protocol version 0 (the classic advertisement) with no
 /// server options.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ConnectOptions {
     /// Requested protocol version (`0`, `1`, or `2`). The server may downgrade.
     pub protocol_version: u8,
     /// `server-option`s to send (protocol v2 `command` arguments / daemon
     /// extra parameters). Ignored by servers that do not support them.
     pub server_options: Vec<String>,
+    /// Diagnostic sink for [`crate::diagnostics::Trace::Network`] events.
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When true with [`Self::diagnostics`], connect paths may emit network traces.
+    pub network_trace: bool,
 }
 
 /// A live, bidirectional pkt-line connection to a Git service, with the
@@ -436,6 +440,8 @@ impl Transport for GitDaemonTransport {
         opts: &ConnectOptions,
     ) -> Result<Box<dyn Connection>> {
         crate::net_trace::net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "git:// connect {url} (service={}, request protocol v{})",
             service.wire_name(),
             opts.protocol_version
@@ -480,6 +486,8 @@ impl Transport for GitDaemonTransport {
         let mut reader = stream;
         let adv = read_advertisement(&mut reader)?;
         crate::net_trace::net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "git:// connected: protocol v{}, {} ref(s) advertised",
             adv.protocol_version,
             adv.refs.len()
@@ -1052,6 +1060,8 @@ impl Transport for SshTransport {
         opts: &ConnectOptions,
     ) -> Result<Box<dyn Connection>> {
         crate::net_trace::net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "ssh connect {url} (service={}, request protocol v{})",
             service.wire_name(),
             opts.protocol_version
@@ -1070,6 +1080,8 @@ impl Transport for SshTransport {
 
         let adv = read_advertisement(&mut reader)?;
         crate::net_trace::net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "ssh connected: protocol v{}, {} ref(s) advertised",
             adv.protocol_version,
             adv.refs.len()

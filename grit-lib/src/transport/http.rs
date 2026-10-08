@@ -595,6 +595,8 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
         // advertisement when it sees `version=2`); fall back to the client's
         // default header otherwise. The server may still downgrade.
         crate::net_trace::net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "http(s) discover {url} (service={}, request protocol v{})",
             service.wire_name(),
             opts.protocol_version
@@ -609,6 +611,8 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
             .collect();
         let caps: Vec<String> = disc.caps.iter().cloned().collect();
         crate::net_trace::net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "http(s) discovered: protocol v{}, {} ref(s) advertised",
             disc.protocol_version,
             adv_refs.len()
@@ -1212,6 +1216,8 @@ pub fn http_fetch(
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "http_fetch: begin — {} ({} refspec(s), tags={:?})",
         repo_url,
         opts.refspecs.len(),
@@ -1230,7 +1236,11 @@ pub fn http_fetch(
     let repo_url_owned;
     let (repo_url, disc) = match rebased {
         Some(new_base) => {
-            net_trace!("http_fetch: redirected base {repo_url} -> {new_base}");
+            net_trace!(
+                opts.network_trace,
+                opts.diagnostics.as_ref(),
+                "http_fetch: redirected base {repo_url} -> {new_base}"
+            );
             client.reset_auth_after_redirect_rebase();
             let url = info_refs_url(&new_base);
             let body = client.get(&url, client.git_protocol_header())?;
@@ -1244,12 +1254,18 @@ pub fn http_fetch(
         }
     };
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "http_fetch: discovered protocol v{}, {} ref(s)",
         disc.protocol_version,
         disc.refs.len()
     );
     if disc.protocol_version >= 2 {
-        net_trace!("http_fetch: delegating to v2 stateless fetch");
+        net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
+            "http_fetch: delegating to v2 stateless fetch"
+        );
         return http_fetch_v2(client, local_git_dir, repo_url, &disc, opts, progress);
     }
 
@@ -1410,7 +1426,12 @@ pub fn http_fetch(
         });
     }
 
-    net_trace!("http_fetch: done — {} ref update(s)", updates.len());
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "http_fetch: done — {} ref update(s)",
+        updates.len()
+    );
     crate::fetch::finish_initial_remote_fetch_layout(
         local_git_dir,
         opts,
@@ -1615,7 +1636,12 @@ fn http_fetch_v2(
         });
     }
 
-    crate::net_trace::net_trace!("http_fetch (v2): done — {} ref update(s)", updates.len());
+    crate::net_trace::net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "http_fetch (v2): done — {} ref update(s)",
+        updates.len()
+    );
     crate::fetch::finish_initial_remote_fetch_layout(
         local_git_dir,
         opts,

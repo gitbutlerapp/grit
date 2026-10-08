@@ -9,7 +9,6 @@
 use std::io::IsTerminal;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::diffstat::{write_diffstat_block, DiffstatOptions, FileStatInput};
 use grit_lib::objects::{parse_tag, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -19,9 +18,15 @@ use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
 use crate::context::{self, subject_line};
 use crate::output::HumanRender;
 
+/// Width budget for the `+`/`-` change bars in the diffstat.
+const BAR_WIDTH: usize = 40;
+
 /// Result of `grit show`.
 #[derive(Serialize)]
 pub struct ShowOutcome {
+    /// Non-fatal warnings emitted while resolving the object.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<crate::diagnostics::WarningRecord>,
     /// `commit` | `branch` | `tag` | `annotated_tag`.
     pub kind: String,
     /// Branch or tag name, when shown via a ref.
@@ -82,7 +87,7 @@ pub struct Person {
 }
 
 pub fn run(object: Option<String>) -> Result<ShowOutcome> {
-    let repo = context::discover()?;
+    let (repo, sink) = context::discover_with_warnings()?;
     let target = object.unwrap_or_else(|| "HEAD".to_owned());
 
     let (kind, ref_name, tag) = classify(&repo, &target)?;
@@ -111,6 +116,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
     let stat = diffstat(&diff_of_commit(&repo, &commit_oid)?);
 
     Ok(ShowOutcome {
+        warnings: sink.warnings(),
         kind,
         ref_name,
         tag,
@@ -311,41 +317,32 @@ fn render_stat(stat: &DiffStat, color: bool) {
     }
     println!();
 
-    let files: Vec<FileStatInput> = stat
+    let name_width = stat
         .files
         .iter()
-        .map(|f| FileStatInput {
-            path_display: stat_path(f),
-            insertions: f.insertions,
-            deletions: f.deletions,
-            is_binary: f.binary,
-            is_unmerged: f.status.eq_ignore_ascii_case("unmerged"),
-        })
-        .collect();
+        .map(|f| stat_path(f).chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(60);
+    let max_changes = stat
+        .files
+        .iter()
+        .map(|f| f.insertions + f.deletions)
+        .max()
+        .unwrap_or(0);
 
-    let color_add = if color { "\x1b[32m" } else { "" };
-    let color_del = if color { "\x1b[31m" } else { "" };
-    let color_reset = if color { "\x1b[m" } else { "" };
-    let opts = DiffstatOptions {
-        total_width: 80,
-        line_prefix: "",
-        width_prefix: "",
-        subtract_prefix_from_terminal: true,
-        terminal_width: crate::ui::terminal_width_columns(),
-        stat_name_width: None,
-        stat_graph_width: None,
-        stat_count: None,
-        color_add,
-        color_del,
-        color_reset,
-        graph_bar_slack: 0,
-        graph_prefix_budget_slack: 0,
-    };
-
-    let mut buf = Vec::new();
-    if write_diffstat_block(&mut buf, &files, &opts).is_ok() {
-        print!("{}", String::from_utf8_lossy(&buf));
+    for file in &stat.files {
+        let path = stat_path(file);
+        if file.binary {
+            println!(" {path:<name_width$} | Bin");
+            continue;
+        }
+        let total = file.insertions + file.deletions;
+        let bar = change_bar(file.insertions, file.deletions, max_changes, color);
+        println!(" {path:<name_width$} | {total:>3} {bar}");
     }
+
+    println!(" {}", summary_line(stat));
 }
 
 /// `old => new` for a rename, otherwise just the path.
@@ -353,6 +350,74 @@ fn stat_path(file: &FileStat) -> String {
     match &file.old_path {
         Some(old) => format!("{old} => {}", file.path),
         None => file.path.clone(),
+    }
+}
+
+/// A scaled `+`/`-` bar (green/red on a TTY), like `git --stat`.
+fn change_bar(insertions: usize, deletions: usize, max_changes: usize, color: bool) -> String {
+    let total = insertions + deletions;
+    if total == 0 {
+        return String::new();
+    }
+    // Scale the longest file's bar to BAR_WIDTH; shorter ones scale proportionally.
+    let scaled = if max_changes > BAR_WIDTH {
+        ((total * BAR_WIDTH).div_ceil(max_changes)).max(1)
+    } else {
+        total
+    };
+    let mut plus = ((insertions * scaled) as f64 / total as f64).round() as usize;
+    let mut minus = scaled.saturating_sub(plus);
+    // Keep at least one cell for a side that actually changed.
+    if insertions > 0 && plus == 0 {
+        plus = 1;
+        minus = minus.saturating_sub(1);
+    }
+    if deletions > 0 && minus == 0 {
+        minus = 1;
+        plus = plus.saturating_sub(1);
+    }
+    let plus_bar = "+".repeat(plus);
+    let minus_bar = "-".repeat(minus);
+    if color {
+        format!(
+            "{}{}",
+            paint(true, "32", &plus_bar),
+            paint(true, "31", &minus_bar)
+        )
+    } else {
+        format!("{plus_bar}{minus_bar}")
+    }
+}
+
+/// `N files changed, N insertions(+), N deletions(-)` (omitting zero parts).
+fn summary_line(stat: &DiffStat) -> String {
+    let mut parts = vec![format!(
+        "{} file{} changed",
+        stat.files_changed,
+        plural(stat.files_changed)
+    )];
+    if stat.insertions > 0 {
+        parts.push(format!(
+            "{} insertion{}(+)",
+            stat.insertions,
+            plural(stat.insertions)
+        ));
+    }
+    if stat.deletions > 0 {
+        parts.push(format!(
+            "{} deletion{}(-)",
+            stat.deletions,
+            plural(stat.deletions)
+        ));
+    }
+    parts.join(", ")
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
     }
 }
 
