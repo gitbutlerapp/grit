@@ -8,11 +8,12 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::hash::Parallelism;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::pack::{clear_pack_cache, verify_pack_and_collect, write_v2_pack_index_with_trailer};
 use crate::transfer::fix_thin_pack;
-use crate::unpack_objects::{pack_index_records_from_bytes, PackIndexRecord};
+use crate::unpack_objects::{pack_index_records_with_threads, PackIndexRecord};
 
 /// Options controlling how a received pack is ingested.
 #[derive(Debug, Clone, Default)]
@@ -20,6 +21,22 @@ pub struct IngestPackOptions {
     /// When true, append missing ref-delta bases from `odb` before indexing
     /// (matches `git index-pack --fix-thin`).
     pub fix_thin: bool,
+    /// Worker threads for index-pack hashing (`None`/`Some(0)` → read `pack.threads` or all CPUs).
+    pub threads: Option<usize>,
+}
+
+impl IngestPackOptions {
+    fn index_parallelism(&self, odb: &Odb) -> Parallelism {
+        if let Some(n) = self.threads {
+            Parallelism::resolve(Some(n))
+        } else if let Some(git_dir) = odb.config_git_dir() {
+            crate::config::ConfigSet::load(Some(git_dir), true)
+                .map(|c| c.pack_index_parallelism())
+                .unwrap_or_else(|_| Parallelism::resolve(None))
+        } else {
+            Parallelism::resolve(None)
+        }
+    }
 }
 
 /// Ingest a pack received from fetch/clone by installing it under `objects/pack/`.
@@ -73,7 +90,7 @@ pub fn install_pack_bytes(
     let install_result = (|| -> Result<HashSet<ObjectId>> {
         std::fs::create_dir_all(&stage).map_err(Error::Io)?;
         std::fs::write(&stage_pack, &pack).map_err(Error::Io)?;
-        let records = pack_index_records_from_bytes(&pack, odb)?;
+        let records = pack_index_records_with_threads(&pack, odb, opts.index_parallelism(odb))?;
         let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
         let entries: Vec<(ObjectId, u64, u32)> = records
             .into_iter()
@@ -177,8 +194,15 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let odb = Odb::new(tmp.path());
-        install_pack_bytes(git_pack, &odb, &IngestPackOptions { fix_thin: false })
-            .expect("install");
+        install_pack_bytes(
+            git_pack,
+            &odb,
+            &IngestPackOptions {
+                fix_thin: false,
+                ..Default::default()
+            },
+        )
+        .expect("install");
 
         let pack_dir = tmp.path().join("pack");
         let packs: Vec<_> = std::fs::read_dir(&pack_dir)
@@ -213,7 +237,15 @@ mod tests {
         std::fs::write(git_dir.join("config"), "[receive]\n\tunpackLimit = 0\n").expect("config");
         let objects = git_dir.join("objects");
         let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
-        install_pack_bytes(pack, &odb, &IngestPackOptions { fix_thin: false }).expect("install");
+        install_pack_bytes(
+            pack,
+            &odb,
+            &IngestPackOptions {
+                fix_thin: false,
+                ..Default::default()
+            },
+        )
+        .expect("install");
         let pack_dir = git_dir.join("objects").join("pack");
         let packs: Vec<_> = std::fs::read_dir(&pack_dir)
             .expect("pack dir")
@@ -250,8 +282,15 @@ mod tests {
         let odb = Odb::new(tmp.path());
         let mut pack = single_blob_pack(b"truncated");
         pack.truncate(pack.len().saturating_sub(8));
-        let err = install_pack_bytes(pack, &odb, &IngestPackOptions { fix_thin: false })
-            .expect_err("truncated pack must fail");
+        let err = install_pack_bytes(
+            pack,
+            &odb,
+            &IngestPackOptions {
+                fix_thin: false,
+                ..Default::default()
+            },
+        )
+        .expect_err("truncated pack must fail");
         assert!(
             matches!(err, Error::CorruptObject(_)),
             "expected corrupt object, got {err:?}"

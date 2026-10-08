@@ -1704,6 +1704,31 @@ impl ConfigSet {
             .unwrap_or(true)
     }
 
+    /// Resolved worker count for pack indexing (`pack.threads`, Git default: unset → all CPUs).
+    #[must_use]
+    pub fn pack_index_threads(&self) -> Option<usize> {
+        self.get_i64("pack.threads")
+            .and_then(|r| r.ok())
+            .and_then(|n| usize::try_from(n).ok())
+    }
+
+    /// [`crate::hash::Parallelism`] for pack indexing from merged config.
+    #[must_use]
+    pub fn pack_index_parallelism(&self) -> crate::hash::Parallelism {
+        crate::hash::Parallelism::resolve(self.pack_index_threads())
+    }
+
+    /// Load config for `git_dir` (if any) and resolve [`crate::hash::Parallelism`] for index-pack.
+    #[must_use]
+    pub fn pack_index_parallelism_for_git_dir(
+        git_dir: Option<&std::path::Path>,
+    ) -> crate::hash::Parallelism {
+        git_dir
+            .and_then(|d| Self::load(Some(d), true).ok())
+            .map(|c| c.pack_index_parallelism())
+            .unwrap_or_else(|| crate::hash::Parallelism::resolve(None))
+    }
+
     /// Default for `pack.readReverseIndex` / `pack.readreverseindex` (Git default: true).
     #[must_use]
     pub fn pack_read_reverse_index_default(&self) -> bool {
