@@ -1395,7 +1395,7 @@ impl std::fmt::Display for PathOutsideRepository {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "fatal: {}: '{}' is outside repository at '{}'",
+            "{}: '{}' is outside repository at '{}'",
             self.elt,
             self.path,
             self.work_tree.display()

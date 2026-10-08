@@ -298,10 +298,16 @@ fn traditional_hook_candidate(
             .unwrap_or(true);
         if show_warning {
             eprintln!(
-                "hint: The '{hook_name}' hook was ignored because it's not set as executable."
+                "{}",
+                crate::diagnostics::hint_line(&format!(
+                    "The '{hook_name}' hook was ignored because it's not set as executable."
+                ))
             );
             eprintln!(
-                "hint: You can disable this warning with `git config set advice.ignoredHook false`."
+                "{}",
+                crate::diagnostics::hint_line(
+                    "You can disable this warning with `git config set advice.ignoredHook false`."
+                )
             );
         }
         return None;
@@ -447,7 +453,10 @@ fn spawn_configured_hook(
 fn report_spawn_error(path: &Path, err: &std::io::Error) {
     let msg = format!("{err}");
     let p = path.display();
-    eprintln!("error: cannot exec '{p}': {msg}");
+    eprintln!(
+        "{}",
+        crate::diagnostics::error_line(&format!("cannot exec '{p}': {msg}"))
+    );
 }
 
 /// Result of running a hook.
@@ -591,7 +600,12 @@ pub fn run_hook_opts(
                 ) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("error: failed to run configured hook: {e}");
+                        eprintln!(
+                            "{}",
+                            crate::diagnostics::error_line(&format!(
+                                "failed to run configured hook: {e}"
+                            ))
+                        );
                         return Ok(HookResult::Failed(1));
                     }
                 }
@@ -602,7 +616,13 @@ pub fn run_hook_opts(
             let file = match fs::File::open(path) {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("error: failed to open stdin file {}: {e}", path.display());
+                    eprintln!(
+                        "{}",
+                        crate::diagnostics::error_line(&format!(
+                            "failed to open stdin file {}: {e}",
+                            path.display()
+                        ))
+                    );
                     return Ok(HookResult::Failed(1));
                 }
             };
@@ -709,7 +729,7 @@ pub fn run_hook(
     ) {
         Ok(r) => r,
         Err(msg) => {
-            eprintln!("fatal: {msg}");
+            eprintln!("{}", crate::diagnostics::fatal_line(&msg));
             HookResult::Failed(1)
         }
     }

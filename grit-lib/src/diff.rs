@@ -2837,9 +2837,9 @@ fn diff_index_to_worktree_inner(
                     && !is_placeholder
                     && submodule_embedded_git_dir(&sub_dir).is_some()
                 {
-                    return Err(Error::ConfigError(format!(
-                        "could not read submodule HEAD for '{path_str_ref}'"
-                    )));
+                    return Err(Error::Config(
+                        format!("could not read submodule HEAD for '{path_str_ref}'").into(),
+                    ));
                 }
                 is_placeholder
             };
@@ -2865,9 +2865,9 @@ fn diff_index_to_worktree_inner(
             // the submodule, which fails, and Git aborts the surrounding status/diff. Mirror that:
             // a broken submodule is a hard error rather than a silently-clean gitlink (t5526 #38).
             if sub_head_oid.is_some() && submodule_head_object_broken(&sub_dir) {
-                return Err(Error::ConfigError(format!(
-                    "'git status --porcelain=2' failed in submodule {path_str_ref}"
-                )));
+                return Err(Error::Config(
+                    format!("'git status --porcelain=2' failed in submodule {path_str_ref}").into(),
+                ));
             }
             let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
             if ignore_submodule_untracked {
@@ -7647,7 +7647,11 @@ pub fn apply_rotate_skip_entries(
     let idx = entries
         .iter()
         .position(|e| e.path() == needle)
-        .ok_or_else(|| Error::Message(format!("fatal: No such path '{needle}' in the diff")))?;
+        .ok_or_else(|| {
+            Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
+                path: needle.to_owned(),
+            })
+        })?;
     if rotate_to.is_some() {
         entries.rotate_left(idx);
     }
@@ -7655,7 +7659,11 @@ pub fn apply_rotate_skip_entries(
         let pos = entries
             .iter()
             .position(|e| e.path() == skip)
-            .ok_or_else(|| Error::Message(format!("fatal: No such path '{skip}' in the diff")))?;
+            .ok_or_else(|| {
+                Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
+                    path: skip.to_owned(),
+                })
+            })?;
         entries.drain(..pos);
     }
     Ok(entries)
@@ -7718,7 +7726,9 @@ fn apply_rotate_skip_ordered_paths(
             .iter()
             .position(|p| p == skip_path)
             .ok_or_else(|| {
-                Error::Message(format!("fatal: No such path '{skip_path}' in the diff"))
+                Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
+                    path: skip_path.to_owned(),
+                })
             })?;
         let mut out = Vec::new();
         for p in tree_paths.iter().skip(idx) {
@@ -7732,15 +7742,18 @@ fn apply_rotate_skip_ordered_paths(
     let Some(needle) = rotate else {
         return Ok(by_path.into_values().collect());
     };
-    let idx = tree_paths
-        .iter()
-        .position(|p| p == needle)
-        .ok_or_else(|| Error::Message(format!("fatal: No such path '{needle}' in the diff")))?;
+    let idx = tree_paths.iter().position(|p| p == needle).ok_or_else(|| {
+        Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
+            path: needle.to_owned(),
+        })
+    })?;
     let mut order: Vec<String> = tree_paths.to_vec();
     order.rotate_left(idx);
     if let Some(skip_path) = skip {
         let pos = order.iter().position(|p| p == skip_path).ok_or_else(|| {
-            Error::Message(format!("fatal: No such path '{skip_path}' in the diff"))
+            Error::DiffPath(crate::error::DiffPathError::NoSuchPathInDiff {
+                path: skip_path.to_owned(),
+            })
         })?;
         order.drain(..pos);
     }

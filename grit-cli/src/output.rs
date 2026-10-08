@@ -104,11 +104,21 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
         eprintln!("error: {filter_err:#}");
         return;
     }
+    let human = err
+        .downcast_ref::<grit_lib::error::Error>()
+        .map(grit_lib::error::Error::git_stderr_message)
+        .unwrap_or_else(|| format!("{err:#}"));
     match opts.mode {
-        OutputMode::Human => eprintln!("error: {err:#}"),
+        OutputMode::Human => {
+            if human.starts_with("fatal:") || human.starts_with("error:") {
+                eprintln!("{human}");
+            } else {
+                eprintln!("error: {human}");
+            }
+        }
         OutputMode::Json => {
             let payload = if let Some(expr) = opts.filter.as_deref() {
-                let full = serde_json::json!({ "error": format!("{err:#}") });
+                let full = serde_json::json!({ "error": human.clone() });
                 match apply_json_filter(&full, expr) {
                     Ok(filtered) => filtered,
                     Err(filter_err) => {
@@ -116,7 +126,7 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
                     }
                 }
             } else {
-                serde_json::json!({ "error": format!("{err:#}") })
+                serde_json::json!({ "error": human })
             };
             let stdout = std::io::stdout();
             let mut lock = stdout.lock();

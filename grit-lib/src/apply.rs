@@ -7,7 +7,7 @@
 //! text-to-structured-data layer lives here so it can be unit-tested and reused
 //! as a library.
 
-use crate::error::{Error, Result};
+use crate::error::{ApplyError, Error, Result};
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -1332,10 +1332,11 @@ fn parse_hunk(
         hunk.old_count = old_seen;
         hunk.new_count = new_seen;
     } else if old_seen < old_count || new_seen < new_count {
-        return Err(Error::Message(format!(
-            "error: corrupt patch at {input_name}:{}",
-            i + 1
-        )));
+        return Err(ApplyError::CorruptPatch {
+            input: input_name.to_owned(),
+            line: i + 1,
+        }
+        .into());
     }
 
     Ok((hunk, i))
@@ -1435,7 +1436,17 @@ mod tests {
                      @@ -1,3 +1,3 @@\n\
                       one\n";
         let err = parse_patch(input, 1, "patch", false, None).unwrap_err();
-        assert_eq!(err.to_string(), "error: corrupt patch at patch:4");
+        assert!(matches!(
+            err,
+            Error::Apply(ApplyError::CorruptPatch {
+                ref input,
+                line: 4
+            }) if input == "patch"
+        ));
+        assert_eq!(
+            err.git_stderr_message(),
+            crate::diagnostics::error_line("corrupt patch at patch:4")
+        );
     }
 
     #[test]

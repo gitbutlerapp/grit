@@ -632,7 +632,7 @@ impl Repository {
     pub fn load_index_at(&self, path: &std::path::Path) -> Result<Index> {
         let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         if let Some(res) = cfg.as_ref().get_bool("index.sparse") {
-            res.map_err(Error::ConfigError)?;
+            res.map_err(|s| Error::Config(s.into()))?;
         }
         let mut idx = Index::load_expand_sparse_optional(path, &self.odb)?;
         crate::split_index::resolve_split_index_if_needed(&mut idx, &self.git_dir, path)?;
@@ -1474,7 +1474,7 @@ fn config_file_bool_true(cfg: &ConfigFile, key: &str) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] or [`Error::ConfigError`] if config files cannot be read or written.
+/// Returns [`Error::Io`] or [`Error::Config`] if config files cannot be read or written.
 pub fn init_worktree_config(git_dir: &Path) -> Result<()> {
     let common_dir = common_git_dir_for_config(git_dir);
     let common_config_path = common_dir.join("config");
@@ -1648,9 +1648,9 @@ fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
             .map(|(prefix, _)| prefix)
             .unwrap_or(lower.as_str());
         if !matches!(name, "files" | "reftable") {
-            return Err(Error::Message(format!(
-                "error: invalid value for 'extensions.refstorage': '{raw}'"
-            )));
+            return Err(Error::Message(crate::diagnostics::error_line(&format!(
+                "invalid value for 'extensions.refstorage': '{raw}'"
+            ))));
         }
     }
 
@@ -1754,7 +1754,7 @@ impl RepositoryFormat {
 ///
 /// # Errors
 ///
-/// Returns [`Error::ConfigError`] if a section header is malformed (no closing `]`).
+/// Returns [`Error::Config`] if a section header is malformed (no closing `]`).
 fn parse_repository_format(content: &str, config_path: &Path) -> Result<RepositoryFormat> {
     let mut in_core = false;
     let mut in_extensions = false;
@@ -1770,10 +1770,9 @@ fn parse_repository_format(content: &str, config_path: &Path) -> Result<Reposito
 
         if line.starts_with('[') {
             let Some(end_idx) = line.find(']') else {
-                return Err(Error::ConfigError(format!(
-                    "invalid config in {}",
-                    config_path.display()
-                )));
+                return Err(Error::Config(
+                    format!("invalid config in {}", config_path.display()).into(),
+                ));
             };
 
             let section = line[1..end_idx].trim();
@@ -1840,7 +1839,7 @@ fn parse_repository_format(content: &str, config_path: &Path) -> Result<Reposito
 /// # Errors
 ///
 /// Returns [`Error::Io`] if the config file exists but cannot be read, or
-/// [`Error::ConfigError`] if a section header is malformed.
+/// [`Error::Config`] if a section header is malformed.
 pub fn repository_format_warning(git_dir: &Path) -> Result<Option<String>> {
     const GIT_REPO_VERSION_READ: u32 = 1;
     let Some(config_path) = repository_config_path(git_dir) else {
@@ -1974,7 +1973,7 @@ fn try_open_at(env: &Environment, dir: &Path) -> Result<Option<DiscoveredAt>> {
                     gitfile: None,
                 }));
             }
-            Err(Error::NotARepository(_)) | Err(Error::ConfigError(_)) => return Ok(None),
+            Err(Error::NotARepository(_)) | Err(Error::Config(_)) => return Ok(None),
             Err(Error::Message(ref msg)) if msg.contains("bad config") => return Ok(None),
             Err(e) => return Err(e),
         }
@@ -2358,7 +2357,12 @@ fn warn_core_bare_worktree_conflict(git_dir: &Path, environment: &Environment) {
             let mut guard = WARNED_DIRS.lock().unwrap_or_else(|e| e.into_inner());
             let set = guard.get_or_insert_with(HashSet::new);
             if set.insert(key) {
-                eprintln!("warning: core.bare and core.worktree do not make sense");
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::warning_line(
+                        "core.bare and core.worktree do not make sense"
+                    )
+                );
             }
         }
     }

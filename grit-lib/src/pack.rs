@@ -3136,7 +3136,8 @@ mod pack_cache_test_sync {
                     "pack cache test coordinator already held"
                 );
                 g.top_level_guards = 1;
-                super::PACK_CACHE_TEST_HOLDER.store(thread_id_u64(), std::sync::atomic::Ordering::Release);
+                super::PACK_CACHE_TEST_HOLDER
+                    .store(thread_id_u64(), std::sync::atomic::Ordering::Release);
                 Some(g)
             } else {
                 None

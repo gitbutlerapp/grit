@@ -85,7 +85,7 @@ fn read_gitmodules_text(
     }
     String::from_utf8(obj.data)
         .map(Some)
-        .map_err(|e| crate::error::Error::ConfigError(format!("invalid .gitmodules utf-8: {e}")))
+        .map_err(|e| crate::error::Error::Config(format!("invalid .gitmodules utf-8: {e}").into()))
 }
 
 /// Resolve the submodule **logical name** for an index path (`.gitmodules` `submodule.<name>.path`).
@@ -202,7 +202,9 @@ pub fn submodule_active_pathspec_match(
 ) -> std::result::Result<bool, String> {
     for v in specs {
         if v.is_empty() {
-            return Err("error: missing value for 'submodule.active'".to_string());
+            return Err(crate::diagnostics::error_line(
+                "missing value for 'submodule.active'",
+            ));
         }
     }
     let ctx = index_gitlink_match_for_path(index, path).unwrap_or(PathspecMatchContext {

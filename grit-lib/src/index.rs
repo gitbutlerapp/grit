@@ -610,8 +610,11 @@ pub fn get_index_format_from_env() -> Option<u32> {
         Ok(v) if (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(&v) => Some(v),
         _ => {
             eprintln!(
-                "warning: GIT_INDEX_VERSION set, but the value is invalid.\n\
+                "{}",
+                crate::diagnostics::warning_line(&format!(
+                    "GIT_INDEX_VERSION set, but the value is invalid.\n\
                  Using version {INDEX_ENV_INVALID_FALLBACK}"
+                ))
             );
             Some(INDEX_ENV_INVALID_FALLBACK)
         }
@@ -780,8 +783,11 @@ impl Index {
                     }
                     _ => {
                         eprintln!(
-                            "warning: index.version set, but the value is invalid.\n\
+                            "{}",
+                            crate::diagnostics::warning_line(&format!(
+                                "index.version set, but the value is invalid.\n\
                              Using version {INDEX_CONFIG_INVALID_FALLBACK}"
+                            ))
                         );
                         version = INDEX_CONFIG_INVALID_FALLBACK;
                     }
@@ -847,8 +853,11 @@ impl Index {
                     }
                     _ => {
                         eprintln!(
-                            "warning: index.version set, but the value is invalid.\n\
+                            "{}",
+                            crate::diagnostics::warning_line(&format!(
+                                "index.version set, but the value is invalid.\n\
                              Using version {INDEX_CONFIG_INVALID_FALLBACK}"
+                            ))
                         );
                         version = INDEX_CONFIG_INVALID_FALLBACK;
                     }

@@ -1167,6 +1167,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
                 // branch in a fresh repo). The warning is only emitted for other
                 // dangling symrefs encountered while DWIM-resolving a ref.
                 if candidate != "HEAD" {
+                    // hygiene: step 501
                     eprintln!("warning: ignoring dangling symref {candidate}");
                 }
                 continue;
@@ -1974,6 +1975,7 @@ fn warn_if_branch_refname_collides_with_abbrev_hex(
         return;
     };
     if ref_oid != object_oid {
+        // hygiene: step 501
         eprintln!("warning: refname '{spec}' is ambiguous.");
     }
 }
@@ -1991,6 +1993,7 @@ fn warn_if_hex_ref_collides_with_objects(repo: &Repository, spec: &str, ref_oid:
         return;
     }
     if matches.len() > 1 || matches[0] != ref_oid {
+        // hygiene: step 501
         eprintln!("warning: refname '{spec}' is ambiguous.");
     }
 }
@@ -2326,6 +2329,7 @@ fn resolve_base(
         // doesn't exist in the ODB (matches git behavior).
         let rn = format!("refs/heads/{spec}");
         if refs::resolve_ref(&repo.git_dir, &rn).is_ok() {
+            // hygiene: step 501
             eprintln!("warning: refname '{spec}' is ambiguous.");
         }
         return Ok(oid);
@@ -2393,6 +2397,7 @@ fn resolve_base(
 
     let (dwim_count, dwim_oid) = resolve_ref_dwim_for_rev_parse(repo, spec);
     if dwim_count > 1 {
+        // hygiene: step 501
         eprintln!("warning: refname '{spec}' is ambiguous.");
     }
     if let Some(oid) = dwim_oid {
@@ -2442,6 +2447,7 @@ fn resolve_base(
     let tag_oid = refs::resolve_ref(&repo.git_dir, &tag_ref).ok();
     match (head_oid, tag_oid) {
         (Some(h), Some(t)) if h != t => {
+            // hygiene: step 501
             eprintln!("warning: refname '{spec}' is ambiguous.");
             return Ok(h);
         }

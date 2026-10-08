@@ -150,10 +150,10 @@ pub fn parse_protocol_version_digit(s: &str) -> Option<u8> {
 
 /// Parse `protocol.version` from config (strict: invalid values are rejected).
 ///
-/// Returns [`Error::ConfigError`] when the value is present but not `0`, `1`, or `2`.
+/// Returns [`Error::Config`] when the value is present but not `0`, `1`, or `2`.
 pub fn try_protocol_version_from_config_value(raw: &str) -> Result<u8, Error> {
     parse_protocol_version_digit(raw)
-        .ok_or_else(|| Error::ConfigError(format!("bad protocol version '{raw}'")))
+        .ok_or_else(|| Error::Config(format!("bad protocol version '{raw}'").into()))
 }
 
 /// Select the effective client-side protocol version (strict).
@@ -217,7 +217,7 @@ pub fn client_git_protocol_header_value(version: u8) -> Option<String> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::ConfigError`] when `protocol.version` is set to an invalid value.
+/// Returns [`Error::Config`] when `protocol.version` is set to an invalid value.
 pub fn client_git_protocol_header_from_config(config: &ConfigSet) -> Result<Option<String>, Error> {
     Ok(client_git_protocol_header_value(
         try_effective_client_protocol_version_from_config(config)?,
@@ -324,7 +324,7 @@ mod tests {
             .expect("override");
         let err = client_git_protocol_header_from_config(&config).expect_err("invalid");
         assert!(
-            matches!(err, Error::ConfigError(_)),
+            matches!(err, Error::Config(_)),
             "expected ConfigError, got {err:?}"
         );
     }

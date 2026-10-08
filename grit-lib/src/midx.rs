@@ -2201,9 +2201,9 @@ fn midx_die(lines: &[&str]) -> ! {
     let n = lines.len();
     for (i, l) in lines.iter().enumerate() {
         if i + 1 == n {
-            let _ = writeln!(err, "fatal: {l}");
+            let _ = writeln!(err, "{}", crate::diagnostics::fatal_line(l));
         } else {
-            let _ = writeln!(err, "error: {l}");
+            let _ = writeln!(err, "{}", crate::diagnostics::error_line(l));
         }
     }
     let _ = err.flush();
@@ -2234,9 +2234,9 @@ fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult 
         // `load_multi_pack_index` error()s then `goto cleanup_fail` (returns NULL),
         // so this is recoverable, not fatal. The expected version is the repository's
         // own `oid_version(hash_algo)` (SHA-1 → 1, SHA-256 → 2).
-        midx_warn_once(&format!(
-            "error: multi-pack-index hash version {hash_version} does not match version {expected_hash_version}"
-        ));
+        midx_warn_once(&crate::diagnostics::error_line(&format!(
+            "multi-pack-index hash version {hash_version} does not match version {expected_hash_version}"
+        )));
         return MidxLoadResult::Skip;
     }
     let hash_len = if hash_version == 2 { 32usize } else { 20usize };
@@ -2250,7 +2250,7 @@ fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult 
         Ok(c) => c,
         Err(_) => {
             for e in &toc_errors {
-                midx_warn_once(&format!("error: {e}"));
+                midx_warn_once(&crate::diagnostics::error_line(e));
             }
             return MidxLoadResult::Skip;
         }
@@ -2322,8 +2322,12 @@ fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult 
     // Optional revindex chunk — wrong size warns but does not fail the load.
     if let Some((_, rlen)) = toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_REVINDEX) {
         if rlen != num_objects * 4 {
-            midx_warn_once("error: multi-pack-index reverse-index chunk is the wrong size");
-            midx_warn_once("warning: multi-pack bitmap is missing required reverse index");
+            midx_warn_once(&crate::diagnostics::error_line(
+                "multi-pack-index reverse-index chunk is the wrong size",
+            ));
+            midx_warn_once(&crate::diagnostics::warning_line(
+                "multi-pack bitmap is missing required reverse index",
+            ));
         }
     }
 
@@ -2480,7 +2484,12 @@ pub fn write_multi_pack_index_with_options(
                         for (i, name) in existing_names.iter().enumerate() {
                             let stem = name.strip_suffix(".idx").unwrap_or(name);
                             if !pack_dir.join(format!("{stem}.pack")).exists() {
-                                eprintln!("error: could not load pack {i}");
+                                eprintln!(
+                                    "{}",
+                                    crate::diagnostics::error_line(&format!(
+                                        "could not load pack {i}"
+                                    ))
+                                );
                                 return Err(Error::CorruptObject(format!(
                                     "could not load pack {i}"
                                 )));
@@ -2488,7 +2497,12 @@ pub fn write_multi_pack_index_with_options(
                         }
                     }
                 } else {
-                    eprintln!("warning: ignoring existing multi-pack-index; checksum mismatch");
+                    eprintln!(
+                        "{}",
+                        crate::diagnostics::warning_line(
+                            "ignoring existing multi-pack-index; checksum mismatch"
+                        )
+                    );
                 }
             }
         }
@@ -2541,14 +2555,20 @@ pub fn write_multi_pack_index_with_options(
                 .iter()
                 .any(|n| cmp_idx_or_pack_name(raw, n).is_eq())
         {
-            eprintln!("warning: unknown preferred pack: '{raw}'");
+            eprintln!(
+                "{}",
+                crate::diagnostics::warning_line(&format!("unknown preferred pack: '{raw}'"))
+            );
             preferred_warned = true;
         }
     }
 
     if idx_names.is_empty() {
         // Git `write_midx_internal`: `error("no pack files to index.")` then fail.
-        eprintln!("error: no pack files to index.");
+        eprintln!(
+            "{}",
+            crate::diagnostics::error_line("no pack files to index.")
+        );
         return Err(Error::CorruptObject("no pack files to index.".to_owned()));
     }
 
@@ -2615,7 +2635,12 @@ pub fn write_multi_pack_index_with_options(
         if indexes.get(p).map(PackIndex::len).unwrap_or(0) == 0 {
             let name = work_names.get(p).cloned().unwrap_or_default();
             let pack_name = name.strip_suffix(".idx").unwrap_or(&name);
-            eprintln!("error: cannot select preferred pack {pack_name}.pack with no objects");
+            eprintln!(
+                "{}",
+                crate::diagnostics::error_line(&format!(
+                    "cannot select preferred pack {pack_name}.pack with no objects"
+                ))
+            );
             return Err(Error::CorruptObject(
                 "cannot select preferred pack with no objects".to_owned(),
             ));

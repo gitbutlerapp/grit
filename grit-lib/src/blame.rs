@@ -817,7 +817,7 @@ fn read_blob_content_for_blame(
         Some(&oid_hex),
         None,
     )
-    .map_err(|e| LibError::Message(e.to_string()))?;
+    .map_err(LibError::Filter)?;
     let converted = run_textconv_command(&command, &worktree_data)
         .or_else(|_| run_textconv_command(&command, &obj.data))?;
     Ok(String::from_utf8_lossy(&converted).into_owned())
@@ -2193,8 +2193,7 @@ fn read_worktree_content_for_blame(
     // Normalize worktree content to git-internal form first (CRLF/text attrs).
     let normalized = if let Some(ctx) = textconv_ctx {
         let attrs = get_file_attrs(&ctx.attrs, rel_path, false, &ctx.config);
-        convert_to_git(&bytes, rel_path, &ctx.conversion, &attrs)
-            .map_err(|e| LibError::Message(format!("failed to normalize worktree content: {e}")))?
+        convert_to_git(&bytes, rel_path, &ctx.conversion, &attrs).map_err(LibError::Filter)?
     } else {
         bytes.clone()
     };

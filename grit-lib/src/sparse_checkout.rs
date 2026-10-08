@@ -223,14 +223,22 @@ impl ConePatterns {
                 && !stored.ends_with("\\*")
             {
                 if !negated {
-                    warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                    warnings.push("warning: disabling cone pattern matching".to_string());
+                    warnings.push(crate::diagnostics::warning_line(&format!(
+                        "unrecognized pattern: '{rest}'"
+                    )));
+                    warnings.push(crate::diagnostics::warning_line(
+                        "disabling cone pattern matching",
+                    ));
                     return None;
                 }
                 let key = dup_and_filter_pattern(stored);
                 if !recursive.contains(&key) {
-                    warnings.push(format!("warning: unrecognized negative pattern: '{rest}'"));
-                    warnings.push("warning: disabling cone pattern matching".to_string());
+                    warnings.push(crate::diagnostics::warning_line(&format!(
+                        "unrecognized negative pattern: '{rest}'"
+                    )));
+                    warnings.push(crate::diagnostics::warning_line(
+                        "disabling cone pattern matching",
+                    ));
                     return None;
                 }
                 recursive.remove(&key);
@@ -239,8 +247,12 @@ impl ConePatterns {
             }
 
             if negated {
-                warnings.push(format!("warning: unrecognized negative pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized negative pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
 
@@ -249,36 +261,60 @@ impl ConePatterns {
             }
 
             if !rest.starts_with('/') {
-                warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
             if rest.contains("**") {
-                warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
             if rest.len() < 2 {
-                warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
 
             let must_be_dir = rest.ends_with('/');
             let body = rest[1..].trim_end_matches('/');
             if body.is_empty() {
-                warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
             if !must_be_dir {
-                warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
             if glob_special_unescaped(body.as_bytes()) {
-                warnings.push(format!("warning: unrecognized pattern: '{rest}'"));
-                warnings.push("warning: disabling cone pattern matching".to_string());
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unrecognized pattern: '{rest}'"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
+                ));
                 return None;
             }
 
@@ -287,10 +323,12 @@ impl ConePatterns {
             // which lets the duplicate-with-parent check fire (t1091 malformed cone patterns).
             let key = dup_and_filter_pattern(&format!("/{body}"));
             if parents.contains(&key) {
-                warnings.push(format!(
-                    "warning: your sparse-checkout file may have issues: pattern '{rest}' is repeated"
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "your sparse-checkout file may have issues: pattern '{rest}' is repeated"
+                )));
+                warnings.push(crate::diagnostics::warning_line(
+                    "disabling cone pattern matching",
                 ));
-                warnings.push("warning: disabling cone pattern matching".to_string());
                 return None;
             }
             recursive.insert(key.clone());

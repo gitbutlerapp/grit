@@ -20,6 +20,7 @@ use std::process::{Command, Stdio};
 use encoding_rs::UTF_8;
 
 use crate::config::ConfigSet;
+use crate::error::{FilterError, FilterPhase};
 use crate::filter_process::{apply_process_clean, apply_process_smudge, FilterSmudgeMeta};
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -35,7 +36,7 @@ pub enum WorkTreeEncodingError {
     },
 }
 
-/// Error from [`convert_to_git`], [`convert_to_worktree`], and related CRLF/encoding helpers.
+/// Error from internal encoding helpers (not public convert_to_git surface).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConversionError {
     /// Working-tree encoding could not be resolved or converted.
@@ -61,6 +62,21 @@ impl From<String> for ConversionError {
 impl From<&str> for ConversionError {
     fn from(value: &str) -> Self {
         Self::Message(value.to_owned())
+    }
+}
+
+fn filter_detail(rel_path: &str, detail: String) -> FilterError {
+    FilterError::NotFilteredProperly {
+        path: rel_path.to_owned(),
+        detail,
+    }
+}
+
+fn external_filter_failed(rel_path: &str, driver: &str, phase: FilterPhase) -> FilterError {
+    FilterError::ExternalFilterFailed {
+        driver: driver.to_owned(),
+        path: rel_path.to_owned(),
+        phase,
     }
 }
 
@@ -1144,9 +1160,9 @@ fn validate_utf_bom(
         );
         let body = format!("BOM is prohibited in '{rel_path}' if encoded as {label}");
         if die_on_error {
-            return Err(format!("fatal: {body}"));
+            return Err(body);
         }
-        eprintln!("error: {body}");
+        eprintln!("{}", crate::diagnostics::error_line(&body));
         return Err(body);
     }
     if is_missing_required_utf_bom(canon, data) {
@@ -1160,9 +1176,9 @@ fn validate_utf_bom(
         );
         let body = format!("BOM is required in '{rel_path}' if encoded as {label}");
         if die_on_error {
-            return Err(format!("fatal: {body}"));
+            return Err(body);
         }
-        eprintln!("error: {body}");
+        eprintln!("{}", crate::diagnostics::error_line(&body));
         return Err(body);
     }
     Ok(())
@@ -1498,7 +1514,7 @@ pub fn convert_to_git(
     rel_path: &str,
     conv: &ConversionConfig,
     file_attrs: &FileAttrs,
-) -> Result<Vec<u8>, ConversionError> {
+) -> Result<Vec<u8>, FilterError> {
     convert_to_git_with_opts(
         data,
         rel_path,
@@ -1515,7 +1531,7 @@ pub fn convert_to_git_with_opts(
     conv: &ConversionConfig,
     file_attrs: &FileAttrs,
     opts: ConvertToGitOpts<'_>,
-) -> Result<Vec<u8>, ConversionError> {
+) -> Result<Vec<u8>, FilterError> {
     let mut buf = data.to_vec();
 
     // 1. Run clean filter if configured (long-running `process` overrides clean command)
@@ -1526,14 +1542,21 @@ pub fn convert_to_git_with_opts(
             Err(e) => {
                 if file_attrs.filter_clean_required {
                     if e.contains("expected git-filter-server") {
-                        return Err(e.into());
+                        return Err(filter_detail(rel_path, e));
                     }
-                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed").into());
+                    return Err(FilterError::ExternalFilterFailed {
+                        driver: name.to_owned(),
+                        path: rel_path.to_owned(),
+                        phase: FilterPhase::Clean,
+                    });
                 }
                 if e.starts_with("filter status: abort") {
                     crate::filter_process::disable_process_filter(proc_cmd);
                 }
-                eprintln!("error: external filter '{name}' failed");
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::error_line(&format!("external filter '{name}' failed"))
+                );
             }
         }
     } else {
@@ -1542,16 +1565,24 @@ pub fn convert_to_git_with_opts(
                 buf = run_filter(clean_cmd, &buf, rel_path).map_err(|e| {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
                     if file_attrs.filter_clean_required {
-                        format!("fatal: {rel_path}: clean filter '{name}' failed")
+                        FilterError::ExternalFilterFailed {
+                            driver: name.to_owned(),
+                            path: rel_path.to_owned(),
+                            phase: FilterPhase::Clean,
+                        }
                     } else {
-                        format!("clean filter failed: {e}")
+                        filter_detail(rel_path, format!("clean filter failed: {e}"))
                     }
                 })?;
             }
             None => {
                 if file_attrs.filter_clean_required {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
-                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed").into());
+                    return Err(FilterError::ExternalFilterFailed {
+                        driver: name.to_owned(),
+                        path: rel_path.to_owned(),
+                        phase: FilterPhase::Clean,
+                    });
                 }
             }
         }
@@ -1562,11 +1593,12 @@ pub fn convert_to_git_with_opts(
         // Bare `working-tree-encoding` (boolean true) / `false` are rejected (Git
         // `git_path_check_encoding`).
         if enc == "set" || enc == "true" || enc == "false" {
-            return Err("fatal: true/false are no valid working-tree-encodings".into());
+            return Err(FilterError::InvalidWorkingTreeEncoding);
         }
         // `CONV_WRITE_OBJECT` → validate BOM rules and die on error (Git `encode_to_git`).
         let writing_object = opts.check_safecrlf;
-        buf = decode_working_tree_bytes_to_utf8(&buf, rel_path, enc, writing_object)?;
+        buf = decode_working_tree_bytes_to_utf8(&buf, rel_path, enc, writing_object)
+            .map_err(|e| filter_detail(rel_path, e.to_string()))?;
         // Git `encode_to_git`: when writing to the object DB, verify the round trip for encodings
         // listed in `core.checkRoundtripEncoding` (default `SHIFT-JIS`); emit the GIT_TRACE line.
         if writing_object && encoding_needs_roundtrip_check(enc, conv) {
@@ -1663,14 +1695,20 @@ fn would_convert_on_input(conv: &ConversionConfig, attrs: &FileAttrs, data: &[u8
 /// Git-compatible stderr when `core.safecrlf` is `warn` (clean direction, CRLF→LF).
 fn eprint_safecrlf_warn_crlf_to_lf(rel_path: &str) {
     eprintln!(
-        "warning: in the working copy of '{rel_path}', CRLF will be replaced by LF the next time Git touches it"
+        "{}",
+        crate::diagnostics::warning_line(&format!(
+            "in the working copy of '{rel_path}', CRLF will be replaced by LF the next time Git touches it"
+        ))
     );
 }
 
 /// Git-compatible stderr when `core.safecrlf` is `warn` (clean direction, LF→CRLF).
 fn eprint_safecrlf_warn_lf_to_crlf(rel_path: &str) {
     eprintln!(
-        "warning: in the working copy of '{rel_path}', LF will be replaced by CRLF the next time Git touches it"
+        "{}",
+        crate::diagnostics::warning_line(&format!(
+            "in the working copy of '{rel_path}', LF will be replaced by CRLF the next time Git touches it"
+        ))
     );
 }
 
@@ -1681,7 +1719,7 @@ fn check_safecrlf_roundtrip(
     data: &[u8],
     rel_path: &str,
     convert_crlf_into_lf: bool,
-) -> Result<(), String> {
+) -> Result<(), FilterError> {
     if conv.safecrlf == SafeCrlf::False {
         return Ok(());
     }
@@ -1699,15 +1737,19 @@ fn check_safecrlf_roundtrip(
     }
 
     if old_stats.crlf > 0 && new_stats.crlf == 0 {
-        let msg = format!("fatal: CRLF would be replaced by LF in {rel_path}");
+        let err = FilterError::LineEndingWouldChange {
+            detail: format!("CRLF would be replaced by LF in {rel_path}"),
+        };
         if conv.safecrlf == SafeCrlf::True {
-            return Err(msg);
+            return Err(err);
         }
         eprint_safecrlf_warn_crlf_to_lf(rel_path);
     } else if old_stats.lonelf > 0 && new_stats.lonelf == 0 {
-        let msg = format!("fatal: LF would be replaced by CRLF in {rel_path}");
+        let err = FilterError::LineEndingWouldChange {
+            detail: format!("LF would be replaced by CRLF in {rel_path}"),
+        };
         if conv.safecrlf == SafeCrlf::True {
-            return Err(msg);
+            return Err(err);
         }
         eprint_safecrlf_warn_lf_to_crlf(rel_path);
     }
@@ -1770,7 +1812,7 @@ pub fn convert_to_worktree(
     oid_hex: Option<&str>,
     smudge_meta: Option<&FilterSmudgeMeta>,
     delayed_checkout: Option<&mut crate::filter_process::DelayedProcessCheckout>,
-) -> Result<Option<Vec<u8>>, ConversionError> {
+) -> Result<Option<Vec<u8>>, FilterError> {
     let mut buf = data.to_vec();
 
     // 1. Ident expansion
@@ -1801,7 +1843,8 @@ pub fn convert_to_worktree(
 
     // 3. working-tree-encoding (Git `encode_to_worktree`)
     if let Some(ref enc) = file_attrs.working_tree_encoding {
-        buf = encode_utf8_blob_to_working_tree_bytes(&buf, rel_path, enc)?;
+        buf = encode_utf8_blob_to_working_tree_bytes(&buf, rel_path, enc)
+            .map_err(|e| filter_detail(rel_path, e.to_string()))?;
     }
 
     // 4. Smudge filter — process driver overrides shell smudge
@@ -1812,23 +1855,30 @@ pub fn convert_to_worktree(
                 Ok(out) => out,
                 Err(e) => {
                     if file_attrs.filter_smudge_required {
-                        return Err(
-                            format!("fatal: {rel_path}: smudge filter {driver} failed").into()
-                        );
+                        return Err(external_filter_failed(
+                            rel_path,
+                            driver,
+                            FilterPhase::Smudge,
+                        ));
                     }
                     if e.starts_with("filter status: abort") {
                         crate::filter_process::disable_process_filter(proc_cmd);
                     }
-                    eprintln!("error: external filter '{driver}' failed");
+                    eprintln!(
+                        "{}",
+                        crate::diagnostics::error_line(&format!(
+                            "external filter '{driver}' failed"
+                        ))
+                    );
                     return Ok(Some(buf));
                 }
             };
         let Some(out) = smudge_out else {
             let Some(q) = delayed_checkout else {
-                return Err(format!(
-                    "internal error: delayed smudge without checkout queue for {rel_path}"
-                )
-                .into());
+                return Err(filter_detail(
+                    rel_path,
+                    format!("internal error: delayed smudge without checkout queue for {rel_path}"),
+                ));
             };
             q.push_delayed(
                 proc_cmd.clone(),
@@ -1844,15 +1894,21 @@ pub fn convert_to_worktree(
                 Ok(filtered) => buf = filtered,
                 Err(_e) => {
                     if file_attrs.filter_smudge_required {
-                        return Err(
-                            format!("fatal: {rel_path}: smudge filter {driver} failed").into()
-                        );
+                        return Err(external_filter_failed(
+                            rel_path,
+                            driver,
+                            FilterPhase::Smudge,
+                        ));
                     }
                 }
             },
             None => {
                 if file_attrs.filter_smudge_required {
-                    return Err(format!("fatal: {rel_path}: smudge filter {driver} failed").into());
+                    return Err(external_filter_failed(
+                        rel_path,
+                        driver,
+                        FilterPhase::Smudge,
+                    ));
                 }
             }
         }
@@ -1869,12 +1925,13 @@ pub fn convert_to_worktree_eager(
     file_attrs: &FileAttrs,
     oid_hex: Option<&str>,
     smudge_meta: Option<&FilterSmudgeMeta>,
-) -> Result<Vec<u8>, ConversionError> {
+) -> Result<Vec<u8>, FilterError> {
     match convert_to_worktree(data, rel_path, conv, file_attrs, oid_hex, smudge_meta, None)? {
         Some(v) => Ok(v),
-        None => Err(ConversionError::Message(format!(
-            "internal error: unexpected delayed smudge for {rel_path}"
-        ))),
+        None => Err(filter_detail(
+            rel_path,
+            format!("internal error: unexpected delayed smudge for {rel_path}"),
+        )),
     }
 }
 

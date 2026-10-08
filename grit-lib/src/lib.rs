@@ -127,6 +127,7 @@ pub mod credentials;
 pub mod crlf;
 pub mod delta_encode;
 pub mod delta_islands;
+pub mod diagnostics;
 pub mod diff;
 pub mod diff_indent_heuristic;
 pub mod diff_moved;

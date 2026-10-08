@@ -764,12 +764,8 @@ mod tests {
 
     fn config_with_xfuncname(driver: &str, pattern: &str) -> ConfigSet {
         let snippet = format!("[diff \"{driver}\"]\n\txfuncname = {pattern}\n");
-        let file = ConfigFile::parse(
-            Path::new(".git/config"),
-            &snippet,
-            ConfigScope::Local,
-        )
-        .expect("parse config snippet");
+        let file = ConfigFile::parse(Path::new(".git/config"), &snippet, ConfigScope::Local)
+            .expect("parse config snippet");
         let mut set = ConfigSet::new();
         set.merge(&file);
         set
