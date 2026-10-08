@@ -293,7 +293,7 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 /// SHA-1 verification of the index trailer is **not** performed on cached reads: Git only
 /// verifies pack indexes during `fsck`/`verify-pack`, not on every object lookup. Use
 /// [`read_pack_index`] when verification is required.
-mod pack_cache {
+pub(crate) mod pack_cache {
     use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
     use std::collections::{HashMap, HashSet};
@@ -482,7 +482,7 @@ mod pack_cache {
     }
 
     #[derive(Default)]
-    struct State {
+    pub(crate) struct State {
         by_dir: HashMap<PathBuf, CachedDir>,
         by_idx: HashMap<PathBuf, CachedIdx>,
         by_pack: HashMap<PathBuf, CachedPack>,
@@ -498,7 +498,14 @@ mod pack_cache {
         test_dir_rescan_counts: HashMap<PathBuf, u64>,
     }
 
-    static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
+    pub(crate) fn with_current<R>(f: impl FnOnce(&mut State) -> R) -> R {
+        crate::pack_store::PackStore::with_current_or_implicit(f)
+    }
+
+    pub(crate) fn clear_on(m: &Mutex<State>) {
+        let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
+        clear_inner(&mut g);
+    }
 
     #[cfg(test)]
     static TEST_MARKER_STAT_COUNT: std::sync::atomic::AtomicU64 =
@@ -568,20 +575,18 @@ mod pack_cache {
 
     /// Get a parsed pack index from cache, parsing from disk only on cache miss.
     pub fn get_index(idx_path: &Path) -> Result<Arc<PackIndex>> {
-        {
-            let g = lock();
-            if let Some(c) = g.by_idx.get(idx_path) {
-                return Ok(Arc::clone(&c.idx));
-            }
+        if let Some(hit) = with_current(|g| g.by_idx.get(idx_path).map(|c| Arc::clone(&c.idx))) {
+            return Ok(hit);
         }
         let parsed = Arc::new(read_pack_index_no_verify(idx_path)?);
-        let mut g = lock();
-        g.by_idx.insert(
-            idx_path.to_path_buf(),
-            CachedIdx {
-                idx: Arc::clone(&parsed),
-            },
-        );
+        with_current(|g| {
+            g.by_idx.insert(
+                idx_path.to_path_buf(),
+                CachedIdx {
+                    idx: Arc::clone(&parsed),
+                },
+            );
+        });
         Ok(parsed)
     }
 
@@ -701,11 +706,8 @@ mod pack_cache {
     /// Get all `.idx` files for `objects_dir`, using the cached directory listing when present.
     pub fn get_dir_indexes(objects_dir: &Path) -> Result<Vec<Arc<PackIndex>>> {
         let pack_dir = objects_dir.join("pack");
-        {
-            let g = lock();
-            if let Some(c) = g.by_dir.get(&pack_dir) {
-                return Ok(c.indexes.clone());
-            }
+        if let Some(hit) = with_current(|g| g.by_dir.get(&pack_dir).map(|c| c.indexes.clone())) {
+            return Ok(hit);
         }
         rescan_dir_indexes(objects_dir)
     }
@@ -715,13 +717,10 @@ mod pack_cache {
     pub fn reprepare_dir_on_miss(objects_dir: &Path) -> Result<bool> {
         let pack_dir = objects_dir.join("pack");
         let dir_mt = dir_mtime(&pack_dir);
-        let needs_rescan = {
-            let g = lock();
-            match g.by_dir.get(&pack_dir) {
-                None => true,
-                Some(c) => c.dir_mtime != dir_mt,
-            }
-        };
+        let needs_rescan = with_current(|g| match g.by_dir.get(&pack_dir) {
+            None => true,
+            Some(c) => c.dir_mtime != dir_mt,
+        });
         if !needs_rescan {
             return Ok(false);
         }
@@ -774,10 +773,7 @@ mod pack_cache {
     /// when packs change.
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<PackData>> {
         {
-            let g = lock();
-            if let Some(c) = g.by_pack.get(pack_path) {
-                return Ok(Arc::clone(&c.bytes));
-            }
+            return Ok(hit);
         }
         let (mtime, size) = file_signature(pack_path).ok_or_else(|| {
             Error::Io(io::Error::new(
@@ -788,30 +784,39 @@ mod pack_cache {
         load_pack_bytes_from_disk(pack_path, mtime, size)
     }
 
-    /// Re-read `pack_path` when its on-disk signature differs from the cached entry.
-    ///
-    /// Returns true when bytes were reloaded or the cache entry was dropped.
-    pub fn revalidate_stale_pack_bytes(pack_path: &Path) -> Result<bool> {
+    fn revalidate_stale_pack_bytes_in_context(pack_path: &Path) -> Result<bool> {
         let Some((mtime, size)) = file_signature(pack_path) else {
-            let mut g = lock();
-            let removed = g.by_pack.remove(pack_path).is_some();
-            if removed {
-                drop_delta_entries_locked(&mut g, pack_path);
-            }
+            let removed = with_current(|g| {
+                let removed = g.by_pack.remove(pack_path).is_some();
+                if removed {
+                    drop_delta_entries_locked(g, pack_path);
+                }
+                removed
+            });
             return Ok(removed);
         };
-        let stale = {
-            let g = lock();
-            match g.by_pack.get(pack_path) {
-                Some(c) => c.mtime != mtime || c.size != size,
-                None => true,
-            }
-        };
+        let stale = with_current(|g| match g.by_pack.get(pack_path) {
+            Some(c) => c.mtime != mtime || c.size != size,
+            None => true,
+        });
         if !stale {
             return Ok(false);
         }
         load_pack_bytes_from_disk(pack_path, mtime, size)?;
         Ok(true)
+    }
+
+    /// Re-read `pack_path` when its on-disk signature differs from the cached entry.
+    ///
+    /// Returns true when bytes were reloaded or the cache entry was dropped.
+    pub fn revalidate_stale_pack_bytes(pack_path: &Path) -> Result<bool> {
+        if crate::pack_store::PackStore::has_context() {
+            return revalidate_stale_pack_bytes_in_context(pack_path);
+        }
+        let store = crate::pack_store::PackStore::legacy_for_pack_path(pack_path);
+        crate::pack_store::PackStore::with_context(store, || {
+            revalidate_stale_pack_bytes_in_context(pack_path)
+        })
     }
 
     /// After a pack parse/decompress failure, reload from disk when cached bytes differ.
@@ -861,9 +866,11 @@ mod pack_cache {
 
     #[cfg(test)]
     pub fn test_reset_dir_rescan_count(pack_dir: &Path) {
-        lock()
-            .test_dir_rescan_counts
-            .insert(pack_dir.to_path_buf(), 0);
+        let objects_dir = pack_dir.parent().expect("pack dir under objects/");
+        crate::pack_store::PackStore::legacy_for_objects_dir(objects_dir).with_pack(|g| {
+            g.by_dir.remove(pack_dir);
+            g.test_dir_rescan_counts.insert(pack_dir.to_path_buf(), 0);
+        });
     }
 
     #[cfg(test)]
@@ -882,11 +889,31 @@ mod pack_cache {
     #[cfg(test)]
     #[must_use]
     pub fn test_dir_rescan_count(pack_dir: &Path) -> u64 {
-        lock()
-            .test_dir_rescan_counts
-            .get(pack_dir)
-            .copied()
-            .unwrap_or(0)
+        let objects_dir = pack_dir.parent().expect("pack dir under objects/");
+        test_dir_rescan_count_on_store(
+            &crate::pack_store::PackStore::legacy_for_objects_dir(objects_dir),
+            pack_dir,
+        )
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_dir_rescan_count_on_store(
+        store: &std::sync::Arc<crate::pack_store::PackStore>,
+        pack_dir: &Path,
+    ) -> u64 {
+        store.with_pack(|g| g.test_dir_rescan_counts.get(pack_dir).copied().unwrap_or(0))
+    }
+
+    #[cfg(test)]
+    pub fn test_reset_dir_rescan_count_on_store(
+        store: &std::sync::Arc<crate::pack_store::PackStore>,
+        pack_dir: &Path,
+    ) {
+        store.with_pack(|g| {
+            g.by_dir.remove(pack_dir);
+            g.test_dir_rescan_counts.insert(pack_dir.to_path_buf(), 0);
+        });
     }
 
     /// Replace cached pack bytes (tests simulating a stale in-memory mapping).
@@ -908,14 +935,11 @@ mod pack_cache {
         );
     }
 
-    /// Drop all cached pack indexes and pack bytes. Used by `repack`/`gc` and by tests
-    /// that mutate the pack directory in-place without changing its mtime.
-    pub fn clear() {
+    fn clear_inner(g: &mut State) {
         #[cfg(test)]
         if !super::pack_cache_clear_allowed_from_this_thread() {
             return;
         }
-        let mut g = lock();
         g.by_dir.clear();
         g.by_idx.clear();
         g.by_pack.clear();
@@ -926,37 +950,49 @@ mod pack_cache {
 
     /// Process-wide delta-base byte cap from config (default [`DELTA_BASE_CACHE_DEFAULT`]).
     pub fn set_delta_base_cache_byte_limit(limit: usize) {
-        lock().delta_lru.set_byte_limit(limit);
+        with_current(|g| g.delta_lru.set_byte_limit(limit));
     }
 
     #[cfg(test)]
-    pub fn test_delta_base_cache_bytes_used() -> usize {
-        lock().delta_lru.bytes_used
+    pub fn test_delta_base_cache_bytes_used(pack_path: &Path) -> usize {
+        crate::pack_store::PackStore::legacy_for_pack_path(pack_path)
+            .with_pack(|g| g.delta_lru.bytes_used)
     }
 
     #[cfg(test)]
-    pub fn test_set_delta_base_cache_byte_limit(limit: usize) {
-        lock().delta_lru.set_byte_limit(limit);
+    pub fn test_set_delta_base_cache_byte_limit(pack_path: &Path, limit: usize) {
+        crate::pack_store::PackStore::legacy_for_pack_path(pack_path)
+            .with_pack(|g| g.delta_lru.set_byte_limit(limit));
     }
 
     #[cfg(test)]
-    pub fn test_delta_base_cached(pack_id: u32, offset: u64) -> bool {
-        lock()
-            .delta_lru
-            .entries
-            .contains_key(&DeltaCacheKey { pack_id, offset })
+    pub fn test_delta_base_cached(pack_path: &Path, pack_id: u32, offset: u64) -> bool {
+        crate::pack_store::PackStore::legacy_for_pack_path(pack_path).with_pack(|g| {
+            g.delta_lru
+                .entries
+                .contains_key(&DeltaCacheKey { pack_id, offset })
+        })
+    }
+
+    fn pack_id_for_in_context(pack_path: &Path) -> u32 {
+        with_current(|g| {
+            if let Some(&id) = g.pack_ids.get(pack_path) {
+                return id;
+            }
+            let id = g.next_pack_id;
+            g.next_pack_id = g.next_pack_id.saturating_add(1);
+            g.pack_ids.insert(pack_path.to_path_buf(), id);
+            id
+        })
     }
 
     /// Stable small id for `pack_path`, assigned on first use.
     pub fn pack_id_for(pack_path: &Path) -> u32 {
-        let mut g = lock();
-        if let Some(&id) = g.pack_ids.get(pack_path) {
-            return id;
+        if crate::pack_store::PackStore::has_context() {
+            return pack_id_for_in_context(pack_path);
         }
-        let id = g.next_pack_id;
-        g.next_pack_id = g.next_pack_id.saturating_add(1);
-        g.pack_ids.insert(pack_path.to_path_buf(), id);
-        id
+        let store = crate::pack_store::PackStore::legacy_for_pack_path(pack_path);
+        crate::pack_store::PackStore::with_context(store, || pack_id_for_in_context(pack_path))
     }
 
     /// Drop every cached delta base inflated from `pack_path`.
@@ -974,7 +1010,7 @@ mod pack_cache {
             return None;
         }
         let key = DeltaCacheKey { pack_id, offset };
-        lock().delta_lru.get(key)
+        with_current(|g| g.delta_lru.get(key))
     }
 
     #[must_use]
@@ -999,7 +1035,7 @@ mod pack_cache {
 
     /// Drop only cached delta bases (pack indexes and bytes stay cached).
     pub fn clear_delta_bases() {
-        lock().delta_lru.clear();
+        with_current(|g| g.delta_lru.clear());
     }
 
     /// Re-stamp the cached signature for `pack_path` after the caller deliberately touched the
@@ -1009,10 +1045,11 @@ mod pack_cache {
     /// lookup. We bump the cached mtime to now without `stat` (the caller just utime'd the file).
     /// External modifications still invalidate via [`revalidate_stale_pack_bytes`].
     pub fn refresh_pack_signature(pack_path: &Path, touched_at: SystemTime) {
-        let mut g = lock();
-        if let Some(c) = g.by_pack.get_mut(pack_path) {
-            c.mtime = touched_at;
-        }
+        with_current(|g| {
+            if let Some(c) = g.by_pack.get_mut(pack_path) {
+                c.mtime = touched_at;
+            }
+        });
     }
 }
 
@@ -1028,7 +1065,11 @@ mod pack_cache {
 ///
 /// Returns [`Error::Io`] when the directory cannot be enumerated.
 pub fn read_local_pack_indexes_cached(objects_dir: &Path) -> Result<Vec<Arc<PackIndex>>> {
-    pack_cache::get_dir_indexes(objects_dir)
+    if crate::pack_store::PackStore::has_context() {
+        return pack_cache::get_dir_indexes(objects_dir);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_objects_dir(objects_dir);
+    crate::pack_store::PackStore::with_context(store, || pack_cache::get_dir_indexes(objects_dir))
 }
 
 /// Re-scan the pack directory when its mtime changed since the cached listing.
@@ -1055,7 +1096,12 @@ pub fn reprepare_pack_directory_on_miss(objects_dir: &Path) -> Result<bool> {
 /// Returns [`Error::Io`] when the file is missing or [`Error::CorruptObject`] for
 /// malformed indexes.
 pub fn read_pack_index_cached(idx_path: &Path) -> Result<Arc<PackIndex>> {
-    pack_cache::get_index(idx_path)
+    if crate::pack_store::PackStore::has_context() {
+        return pack_cache::get_index(idx_path);
+    }
+    let pack_path = idx_path.with_extension("pack");
+    let store = crate::pack_store::PackStore::legacy_for_pack_path(&pack_path);
+    crate::pack_store::PackStore::with_context(store, || pack_cache::get_index(idx_path))
 }
 
 /// Read pack file bytes from the process-wide cache.
@@ -1067,7 +1113,10 @@ pub fn read_pack_bytes_cached(pack_path: &Path) -> Result<Arc<PackData>> {
     pack_cache::get_pack_bytes(pack_path)
 }
 
-/// Drop all cached pack indexes and pack bytes (call after `repack`/`gc`).
+/// Drop pack/MIDX caches on every registered [`PackStore`](crate::pack_store::PackStore).
+///
+/// Prefer [`Odb::invalidate_packs`](crate::odb::Odb::invalidate_packs) when an [`Odb`](crate::odb::Odb)
+/// handle is available. Tests and benchmarks use this to reset all stores in the process.
 pub fn clear_pack_cache() {
     #[cfg(test)]
     let _guard = pack_cache_test_guard();
@@ -2316,7 +2365,13 @@ fn read_pack_object_at(
 ///
 /// Returns [`Error::ObjectNotFound`] if the OID is not in this pack.
 pub fn read_object_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Object> {
-    read_object_from_pack_at_depth(idx, oid, 0)
+    if crate::pack_store::PackStore::has_context() {
+        return read_object_from_pack_at_depth(idx, oid, 0);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_pack_path(&idx.pack_path);
+    crate::pack_store::PackStore::with_context(store, || {
+        read_object_from_pack_at_depth(idx, oid, 0)
+    })
 }
 
 /// Read [`ObjectInfo`] for `oid` stored in `idx`'s pack without inflating the full object body.
@@ -2567,9 +2622,9 @@ pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Obje
             } else {
                 Err(err)
             }
+            Err(err) => Err(err),
         }
-        Err(err) => Err(err),
-    }
+    })
 }
 
 /// Search local packs for `oid` and return its kind and uncompressed size.
@@ -3747,17 +3802,20 @@ mod tests {
     fn delta_base_cache_eviction_respects_byte_limit() {
         let _guard = pack_cache_test_guard();
         clear_pack_cache();
-        pack_cache::test_set_delta_base_cache_byte_limit(4096);
         let Some((_tmp, idx, tip, _odb)) = build_ofs_delta_chain_pack(32) else {
             return;
         };
+        pack_cache::test_set_delta_base_cache_byte_limit(&idx.pack_path, 4096);
         let _ = read_object_from_pack(&idx, &tip).expect("prime cache");
         assert!(
-            pack_cache::test_delta_base_cache_bytes_used() <= 4096,
+            pack_cache::test_delta_base_cache_bytes_used(&idx.pack_path) <= 4096,
             "cache bytes {} exceeded cap",
-            pack_cache::test_delta_base_cache_bytes_used()
+            pack_cache::test_delta_base_cache_bytes_used(&idx.pack_path)
         );
-        pack_cache::test_set_delta_base_cache_byte_limit(pack_cache::DELTA_BASE_CACHE_DEFAULT);
+        pack_cache::test_set_delta_base_cache_byte_limit(
+            &idx.pack_path,
+            pack_cache::DELTA_BASE_CACHE_DEFAULT,
+        );
     }
 
     #[test]
@@ -3773,7 +3831,7 @@ mod tests {
         let mid_off = idx.iter().nth(4).map(|e| e.offset()).expect("mid hop");
         let _ = read_object_from_pack(&idx, &tip).expect("warm cache");
         assert!(
-            pack_cache::test_delta_base_cached(pack_id, mid_off),
+            pack_cache::test_delta_base_cached(&pack_path, pack_id, mid_off),
             "expected intermediate cached at offset {mid_off}"
         );
         set_file_mtime(&pack_path, FileTime::now()).expect("touch pack mtime");
@@ -3782,7 +3840,7 @@ mod tests {
             "expected pack bytes reload"
         );
         assert!(
-            !pack_cache::test_delta_base_cached(pack_id, mid_off),
+            !pack_cache::test_delta_base_cached(&pack_path, pack_id, mid_off),
             "cache must drop when pack bytes reload"
         );
     }
@@ -4027,7 +4085,10 @@ mod tests {
     }
 
     #[test]
-    fn pack_dir_rescan_counts_are_per_directory_under_parallel_tests() {
+    fn two_repositories_concurrent_reads() {
+        use crate::odb::Odb;
+        use std::sync::Arc;
+
         let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let tmp_a = tempfile::tempdir().expect("tempdir a");
@@ -4036,35 +4097,46 @@ mod tests {
         let objects_b = tmp_b.path().join("objects");
         let pack_a_dir = objects_a.join("pack");
         let pack_b_dir = objects_b.join("pack");
-        pack_cache::test_reset_dir_rescan_count(&pack_a_dir);
-        pack_cache::test_reset_dir_rescan_count(&pack_b_dir);
-
         let (pack_a, oid_a, off_a) = single_blob_pack(b"parallel-a");
         let (pack_b, oid_b, off_b) = single_blob_pack(b"parallel-b");
         install_synthetic_pack(&objects_a, "a", &pack_a, &[(oid_a, off_a)]);
         install_synthetic_pack(&objects_b, "b", &pack_b, &[(oid_b, off_b)]);
+        let odb_a = Odb::new(&objects_a);
+        let odb_b = Odb::new(&objects_b);
+        assert!(
+            !Arc::ptr_eq(odb_a.pack_store(), odb_b.pack_store()),
+            "independent Odb opens must not share pack stores"
+        );
+        pack_cache::test_reset_dir_rescan_count_on_store(odb_a.pack_store(), &pack_a_dir);
+        pack_cache::test_reset_dir_rescan_count_on_store(odb_b.pack_store(), &pack_b_dir);
 
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let b0 = Arc::clone(&barrier);
         let b1 = Arc::clone(&barrier);
-        let oa = objects_a.clone();
-        let ob = objects_b.clone();
+        let odb_a_t = odb_a.clone();
+        let odb_b_t = odb_b.clone();
         let id_a = oid_a;
         let id_b = oid_b;
 
         let h1 = std::thread::spawn(move || {
             b0.wait();
-            read_object_from_packs(&oa, &id_a).expect("read a");
+            odb_a_t.read(&id_a).expect("read a");
         });
         let h2 = std::thread::spawn(move || {
             b1.wait();
-            read_object_from_packs(&ob, &id_b).expect("read b");
+            odb_b_t.read(&id_b).expect("read b");
         });
         h1.join().expect("thread a");
         h2.join().expect("thread b");
 
-        assert_eq!(pack_cache::test_dir_rescan_count(&pack_a_dir), 1);
-        assert_eq!(pack_cache::test_dir_rescan_count(&pack_b_dir), 1);
+        assert_eq!(
+            pack_cache::test_dir_rescan_count_on_store(odb_a.pack_store(), &pack_a_dir),
+            1
+        );
+        assert_eq!(
+            pack_cache::test_dir_rescan_count_on_store(odb_b.pack_store(), &pack_b_dir),
+            1
+        );
     }
 
     #[test]
@@ -4220,6 +4292,37 @@ mod tests {
             indexes.is_empty(),
             "after clear, listing should not retain removed packs"
         );
+    }
+
+    #[test]
+    fn repack_while_sibling_odb_holds_store_reprepares_on_miss() {
+        use crate::odb::Odb;
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        let (pack_old, oid_old, off_old) = single_blob_pack(b"before");
+        install_synthetic_pack(&objects, "old", &pack_old, &[(oid_old, off_old)]);
+        let odb_a = Odb::new(&objects);
+        let odb_b = Odb::new(&objects);
+        assert!(
+            !std::sync::Arc::ptr_eq(odb_a.pack_store(), odb_b.pack_store()),
+            "sibling Odbs must have distinct pack stores"
+        );
+        odb_b.read(&oid_old).expect("warm b store");
+
+        std::fs::remove_file(objects.join("pack/old.pack")).expect("rm pack");
+        std::fs::remove_file(objects.join("pack/old.idx")).expect("rm idx");
+        let (pack_new, oid_new, off_new) = single_blob_pack(b"after");
+        install_synthetic_pack(&objects, "new", &pack_new, &[(oid_new, off_new)]);
+        filetime::set_file_mtime(objects.join("pack"), filetime::FileTime::now())
+            .expect("bump pack dir mtime for reprepare");
+        odb_a.invalidate_packs();
+
+        // B's store is unchanged by A's invalidation; a miss on the new oid rescans pack/.
+        let got = odb_b.read(&oid_new).expect("b reprepares after miss");
+        assert_eq!(got.data.as_slice(), b"after");
     }
 }
 #[cfg(test)]

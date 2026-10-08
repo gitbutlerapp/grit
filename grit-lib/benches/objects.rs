@@ -138,11 +138,15 @@ fn bench_packed_read(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("packed_object_read");
     group.bench_function("whole", |b| {
-        b.iter(|| {
-            black_box(
-                read_object_from_pack(&fx.packed_whole_idx, &fx.packed_whole_oid)
-                    .expect("read whole"),
-            )
+        use grit_lib::pack_store::PackStore;
+        use std::sync::Arc;
+        PackStore::with_context(Arc::clone(fx.odb.pack_store()), || {
+            b.iter(|| {
+                black_box(
+                    read_object_from_pack(&fx.packed_whole_idx, &fx.packed_whole_oid)
+                        .expect("read whole"),
+                )
+            });
         });
     });
     group.bench_function("deep_delta_chain", |b| {

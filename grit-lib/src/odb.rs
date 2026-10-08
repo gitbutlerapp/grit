@@ -17,7 +17,7 @@
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -174,6 +174,10 @@ pub struct Odb {
     /// Pack files whose mtimes were already bumped for object freshening on this [`Odb`]
     /// (Git's `packed_git->freshened`: at most one `utimensat` per pack per process).
     freshened_packs: Arc<Mutex<HashSet<PathBuf>>>,
+    /// Repository-scoped pack/MIDX read caches (shared by [`Odb`] clones).
+    pack_store: Arc<PackStore>,
+    /// Cached [`PackStore`] handles for alternate object directories (lazy).
+    alternate_pack_stores: Arc<Mutex<HashMap<PathBuf, Arc<PackStore>>>>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -243,6 +247,8 @@ impl Odb {
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
+            pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
+            alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -277,6 +283,8 @@ impl Odb {
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
+            pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
+            alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -633,9 +641,45 @@ impl Odb {
         self.delta_base_cache_sync.get_or_init(|| {
             if self.config_git_dir.is_some() {
                 let cfg = self.load_config_cascade().unwrap_or_default();
-                pack::configure_delta_base_cache_from_config(Some(&cfg));
+                self.pack_store.configure_delta_base_from_config(Some(&cfg));
             }
         });
+    }
+
+    fn pack_store_for(&self, objects_dir: &Path) -> Arc<PackStore> {
+        if objects_dir == self.objects_dir.as_path() {
+            return Arc::clone(&self.pack_store);
+        }
+        if let Ok(mut guard) = self.alternate_pack_stores.lock() {
+            if let Some(store) = guard.get(objects_dir) {
+                return Arc::clone(store);
+            }
+            let store = Arc::new(PackStore::new(objects_dir.to_path_buf()));
+            guard.insert(objects_dir.to_path_buf(), Arc::clone(&store));
+            return store;
+        }
+        Arc::new(PackStore::new(objects_dir.to_path_buf()))
+    }
+
+    /// Pack/MIDX read cache shared by this handle and its [`Clone`]s.
+    #[must_use]
+    pub fn pack_store(&self) -> &Arc<PackStore> {
+        &self.pack_store
+    }
+
+    /// Drop cached pack listings, parsed indexes, pack bytes, delta bases, and MIDX layers.
+    ///
+    /// Call after in-process repack, garbage collection, or [`crate::index_pack::install_pack_bytes`]
+    /// so the next read rescans `objects/pack/`. Cloned [`Odb`] handles share one
+    /// [`PackStore`] for the primary `objects/` directory; alternates have separate stores
+    /// that are invalidated here as well.
+    pub fn invalidate_packs(&self) {
+        self.pack_store.invalidate_all();
+        if let Ok(guard) = self.alternate_pack_stores.lock() {
+            for store in guard.values() {
+                store.invalidate_all();
+            }
+        }
     }
 
     fn core_multi_pack_index_enabled(&self) -> bool {
@@ -716,7 +760,9 @@ impl Odb {
         if oid.is_canonical_empty_tree() {
             return true;
         }
-        exists_materialized_in_objects_dir(&self.objects_dir, oid)
+        self.with_pack_store_for(&self.objects_dir, || {
+            exists_materialized_in_objects_dir(&self.objects_dir, oid)
+        })
     }
 
     /// Check whether an object exists in the loose store or any pack file.
@@ -773,8 +819,29 @@ impl Odb {
                 Ok(Some(false)) | Ok(None) => {}
                 Err(_) => return false,
             }
-        }
-        false
+            if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
+                && object_in_local_packs(objects_dir, oid)
+            {
+                return true;
+            }
+            if objects_dir == self.objects_dir.as_path()
+                && self.config_git_dir.is_some()
+                && self.core_multi_pack_index_enabled()
+            {
+                match midx_oid_listed_in_tip(objects_dir, oid) {
+                    Ok(Some(true)) => return true,
+                    Ok(Some(false)) | Ok(None) => {}
+                    Err(_) => return false,
+                }
+            }
+            false
+        })
+    }
+
+    /// Run `f` with this [`Odb`]'s [`PackStore`] for `objects_dir` (primary or alternate).
+    fn with_pack_store_for<R>(&self, objects_dir: &Path, f: impl FnOnce() -> R) -> R {
+        let store = self.pack_store_for(objects_dir);
+        PackStore::with_context(store, f)
     }
 
     /// Touch the loose object file or pack file containing `oid`, matching Git's
@@ -834,8 +901,8 @@ impl Odb {
             if idx.contains(oid) {
                 return self.freshen_pack_once(&idx.pack_path, idx.is_cruft);
             }
-        }
-        false
+            false
+        })
     }
 
     /// Touch `pack_path`'s mtime at most once for this [`Odb`], refreshing the pack cache signature.
@@ -881,7 +948,10 @@ impl Odb {
             let _ = self.freshen_object(oid);
             return Some(*oid);
         }
-        if exists_materialized_in_objects_dir(&self.objects_dir, oid) && self.freshen_object(oid) {
+        if self.with_pack_store_for(&self.objects_dir, || {
+            exists_materialized_in_objects_dir(&self.objects_dir, oid)
+        }) && self.freshen_object(oid)
+        {
             return Some(*oid);
         }
         None
@@ -954,13 +1024,11 @@ impl Odb {
             if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
                 return Ok(obj);
             }
-        }
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
             if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
                 return Ok(obj);
             }
-        }
 
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
@@ -1018,13 +1086,11 @@ impl Odb {
             if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, midx_alt) {
                 return Ok(info);
             }
-        }
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
             if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, midx_alt) {
                 return Ok(info);
             }
-        }
 
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
@@ -1032,9 +1098,9 @@ impl Odb {
                     return Ok(info);
                 }
             }
-        }
 
-        Err(Error::ObjectNotFound(oid.to_hex()))
+            Err(Error::ObjectNotFound(oid.to_hex()))
+        })
     }
 
     /// Try to read an object from a specific objects directory (pack-first, matching [`Self::read`]).
@@ -2349,6 +2415,42 @@ mod tests {
     }
 
     #[test]
+    fn exists_and_write_after_invalidate_packs_use_odb_store() {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        let payload = b"invalidate-pack-exists";
+        fs::write(dir.path().join("f"), payload).unwrap();
+        git_in(dir.path(), &["add", "f"]);
+        git_in(dir.path(), &["commit", "-m", "c"]);
+        git_in(dir.path(), &["repack", "-ad"]);
+        let objects = dir.path().join(".git").join("objects");
+        let odb = Odb::new(&objects);
+        let oid = odb.hash(ObjectKind::Blob, payload);
+        assert!(odb.exists(&oid), "blob must live in pack after repack");
+        let pack_dir = objects.join("pack");
+        for entry in fs::read_dir(&pack_dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "pack" || e == "idx") {
+                fs::remove_file(path).unwrap();
+            }
+        }
+        odb.invalidate_packs();
+        assert!(
+            !odb.exists(&oid),
+            "exists must not read stale legacy pack listing after invalidate_packs"
+        );
+        let oid2 = odb.write(ObjectKind::Blob, payload).unwrap();
+        assert_eq!(oid, oid2);
+        assert!(
+            odb.object_path(&oid).is_file(),
+            "write must materialize loose object when pack copy is gone"
+        );
+        odb.read(&oid).expect("read after write");
+    }
+
+    #[test]
     fn write_uses_single_exists_probe_when_not_loose() {
         let dir = TempDir::new().unwrap();
         git_in(dir.path(), &["init", "-q"]);
@@ -2487,7 +2589,7 @@ mod tests {
         let idx_path = pack_dir.join("test-177.idx");
         fs::write(&pack_path, &pack).unwrap();
         write_v2_idx(&idx_path, &pack_path, &[(oid_a, off_a), (oid_b, off_b)]).unwrap();
-        pack::clear_pack_cache();
+        odb.invalidate_packs();
 
         thread::sleep(Duration::from_millis(50));
         let before = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
@@ -2562,7 +2664,7 @@ mod tests {
         buf.extend_from_slice(&pack[pack.len() - 20..]);
         buf.extend_from_slice(HashAlgo::Sha1.digest(&buf).as_bytes());
         fs::write(&idx_path, buf).unwrap();
-        pack::clear_pack_cache();
+        odb.invalidate_packs();
 
         thread::sleep(Duration::from_millis(50));
         let before = FileTime::from_last_modification_time(&fs::metadata(&pack_path).unwrap());
@@ -2604,7 +2706,7 @@ mod tests {
             .path();
         fs::remove_file(&pack_path).unwrap();
         fs::create_dir(&pack_path).unwrap();
-        pack::clear_pack_cache();
+        odb.invalidate_packs();
         assert!(!odb.freshen_object(&oid));
 
         odb.write(ObjectKind::Blob, payload).unwrap();

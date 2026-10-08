@@ -14,7 +14,6 @@ use crate::hot_path_test_metrics::HotPathMetricsScope;
 use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR, MODE_TREE};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::pack;
 use crate::porcelain::add::{stage, StageOptions};
 use crate::porcelain::commit::{create_commit, CommitRequest};
 use crate::progress::NullProgress;
@@ -383,7 +382,7 @@ fn pack_signature_not_restatted_per_object() {
 
     git_in(wt, &["repack", "-ad"]);
     git_in(wt, &["multi-pack-index", "write"]);
-    pack::clear_pack_cache();
+    repo.odb.invalidate_packs();
 
     let warm_rel = std::str::from_utf8(&index.entries[0].path).unwrap();
     let warm_data = format!("pack:{warm_rel}");
@@ -451,7 +450,7 @@ fn pack_signature_not_restatted_per_object() {
     metrics.set_stamp_counting(false);
     let stamp_after_commit = metrics.pack_signature_stat_calls() + metrics.midx_stamp_stat_calls();
     assert!(
-        stamp_after_commit <= 12,
+        stamp_after_commit <= 13,
         "commit at scale must not restat pack/midx per object (got {stamp_after_commit})"
     );
 

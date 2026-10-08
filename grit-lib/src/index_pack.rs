@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::hash::Parallelism;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
-use crate::pack::{clear_pack_cache, verify_pack_and_collect, write_v2_pack_index_with_trailer};
+use crate::pack::{verify_pack_and_collect, write_v2_pack_index_with_trailer};
 use crate::transfer::fix_thin_pack;
 use crate::unpack_objects::{pack_index_records_with_threads, PackIndexRecord};
 
@@ -119,7 +119,7 @@ pub fn install_pack_bytes(
         let _ = std::fs::remove_file(&idx_path);
     }
     let oids = install_result?;
-    clear_pack_cache();
+    odb.invalidate_packs();
     Ok(oids)
 }
 

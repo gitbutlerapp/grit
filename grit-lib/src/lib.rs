@@ -60,7 +60,8 @@ pub mod prelude {
 pub mod object_store {
     pub use crate::{
         delta_encode, delta_islands, hash, index_pack, midx, objects, odb, pack, pack_geometry,
-        pack_name_hash, pack_rev, promisor, promisor_remote, prune_packed, unpack_objects,
+        pack_name_hash, pack_rev, pack_store, promisor, promisor_remote, prune_packed,
+        unpack_objects,
     };
 }
 
