@@ -70,13 +70,20 @@ jobs:
         run: |
           cross build --release --target ${{ matrix.target }} -p grit-cli
 
+      # Completion scripts depend only on the CLI shape, not the target CPU. Generate
+      # them with a host-native binary so cross-compiled artifacts (e.g. aarch64
+      # Linux built on x86_64 Ubuntu) can still ship pre-generated scripts.
+      - name: Build host grit for completions
+        run: cargo build --release -p grit-cli
+
       - name: Package
         run: |
+          host_grit="${GITHUB_WORKSPACE}/target/release/grit"
           cd target/${{ matrix.target }}/release
           mkdir -p completions
-          ./grit completions bash > completions/grit.bash
-          ./grit completions zsh > completions/_grit
-          ./grit completions fish > completions/grit.fish
+          "$host_grit" completions bash > completions/grit.bash
+          "$host_grit" completions zsh > completions/_grit
+          "$host_grit" completions fish > completions/grit.fish
           tar czf ../../../grit-${{ matrix.target }}.tar.gz grit completions
         shell: bash
 
