@@ -283,10 +283,10 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
     let config_path = repo.git_dir.join("config");
     let config_content = fs::read_to_string(&config_path).map_err(Error::Io)?;
     let Some((remote, merge)) = parse_branch_tracking(&config_content, &branch_key) else {
-        return Err(Error::Message(format!(
-            // hygiene: step 501
-            "fatal: no upstream configured for branch '{display_branch}'"
-        )));
+        return Err(RevParseError::NoUpstream {
+            branch: display_branch,
+        }
+        .into());
     };
     if remote == "." {
         let m = merge.trim();
@@ -300,10 +300,10 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         .ok_or_else(|| Error::InvalidRef(format!("invalid merge ref: {merge}")))?;
     let tracking = format!("refs/remotes/{remote}/{merge_branch}");
     if refs::resolve_ref(&repo.git_dir, &tracking).is_err() {
-        return Err(Error::Message(format!(
-            // hygiene: step 501
-            "fatal: upstream branch '{merge}' not stored as a remote-tracking branch"
-        )));
+        return Err(RevParseError::UpstreamNotTracked {
+            merge: merge.to_owned(),
+        }
+        .into());
     }
     Ok(tracking)
 }
@@ -361,10 +361,7 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
         });
 
     let Some(push_remote_name) = push_remote else {
-        return upstream_tracking.ok_or_else(|| {
-            // hygiene: step 501
-            Error::Message("fatal: branch has no configured push remote".to_owned())
-        });
+        return upstream_tracking.ok_or_else(|| RevParseError::NoPushRemote.into());
     };
 
     // When the push remote has any configured `push` refspecs, they take priority
@@ -375,10 +372,11 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
         return match push_refspec_mapped_tracking(&config_content, &push_remote_name, branch_short)
         {
             Some(mapped) => Ok(mapped),
-            None => Err(Error::Message(format!(
-                // hygiene: step 501
-                "fatal: push refspecs for '{push_remote_name}' do not include '{branch_short}'"
-            ))),
+            None => Err(RevParseError::PushRefspecMissing {
+                remote: push_remote_name,
+                branch: branch_short.to_owned(),
+            }
+            .into()),
         };
     }
 
@@ -386,20 +384,17 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
     let push_default = push_default.as_deref().unwrap_or("simple");
 
     if push_default == "nothing" {
-        return Err(Error::Message(
-            // hygiene: step 501
-            "fatal: push.default is nothing; no push destination".to_owned(),
-        ));
+        return Err(RevParseError::PushDefaultNothing.into());
     }
 
     let current_tracking = format!("refs/remotes/{push_remote_name}/{branch_short}");
 
     match push_default {
         "upstream" => upstream_tracking.ok_or_else(|| {
-            Error::Message(format!(
-                // hygiene: step 501
-                "fatal: branch '{branch_short}' has no upstream for push.default upstream"
-            ))
+            RevParseError::NoUpstreamForPush {
+                branch: branch_short.to_owned(),
+            }
+            .into()
         }),
         "simple" => {
             if let Some(ref up) = upstream_tracking {
@@ -409,10 +404,7 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
                     return Ok(current_tracking);
                 }
             }
-            Err(Error::Message(
-                // hygiene: step 501
-                "fatal: push.default simple: upstream and push ref differ".to_owned(),
-            ))
+            Err(RevParseError::PushDefaultSimpleMismatch.into())
         }
         _ => {
             if refs::resolve_ref(&repo.git_dir, &current_tracking).is_ok() {
@@ -420,10 +412,10 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
             } else if let Some(up) = upstream_tracking {
                 Ok(up)
             } else {
-                Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: no push tracking ref for branch '{branch_short}'"
-                )))
+                Err(RevParseError::NoPushTrackingRef {
+                    branch: branch_short.to_owned(),
+                }
+                .into())
             }
         }
     }
@@ -583,16 +575,10 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
 
     if base.is_empty() {
         let Some(head) = refs::read_head(&repo.git_dir)? else {
-            return Err(Error::Message(
-                // hygiene: step 501
-                "fatal: HEAD does not point to a branch".to_owned(),
-            ));
+            return Err(RevParseError::HeadNotBranch.into());
         };
         let Some(short) = head.strip_prefix("refs/heads/") else {
-            return Err(Error::Message(
-                // hygiene: step 501
-                "fatal: HEAD does not point to a branch".to_owned(),
-            ));
+            return Err(RevParseError::HeadNotBranch.into());
         };
         return Ok((short.to_owned(), short.to_owned()));
     }
@@ -605,8 +591,10 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
     }
     let refname = format!("refs/heads/{base}");
     if refs::resolve_ref(&repo.git_dir, &refname).is_err() {
-        // hygiene: step 501
-        return Err(Error::Message(format!("fatal: no such branch: '{base}'")));
+        return Err(RevParseError::NoSuchBranch {
+            branch: base.to_owned(),
+        }
+        .into());
     }
     Ok((base.to_owned(), base.to_owned()))
 }
@@ -1179,7 +1167,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
                 // branch in a fresh repo). The warning is only emitted for other
                 // dangling symrefs encountered while DWIM-resolving a ref.
                 if candidate != "HEAD" {
-                    // hygiene: step 501
+    // hygiene: step 501
                     eprintln!("warning: ignoring dangling symref {candidate}");
                 }
                 continue;
@@ -1349,16 +1337,16 @@ fn resolve_revision_impl(
             ) {
                 Ok(o) => o,
                 Err(Error::ObjectNotFound(s)) if s == before => {
-                    return Err(Error::Message(format!(
-                        // hygiene: step 501
-                        "fatal: invalid object name '{before}'."
-                    )));
+                    return Err(RevParseError::InvalidObjectName {
+                        name: before.to_owned(),
+                    }
+                    .into());
                 }
-                Err(Error::Message(msg)) if msg.contains("ambiguous argument") => {
-                    return Err(Error::Message(format!(
-                        // hygiene: step 501
-                        "fatal: invalid object name '{before}'."
-                    )));
+                Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+                    return Err(RevParseError::InvalidObjectName {
+                        name: before.to_owned(),
+                    }
+                    .into());
                 }
                 Err(e) => return Err(e),
             };
@@ -1376,10 +1364,11 @@ fn resolve_revision_impl(
                         .and_then(|p| p.canonicalize().ok())
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
-                    return Err(Error::Message(format!(
-                        // hygiene: step 501
-                        "fatal: '{after}' is outside repository at '{wt}'"
-                    )));
+                    return Err(RevParseError::OutsideRepository {
+                        path: after.to_owned(),
+                        work_tree: wt,
+                    }
+                    .into());
                 }
                 Err(e) => return Err(e),
             };
@@ -1407,12 +1396,10 @@ fn resolve_revision_impl(
     for step in nav_steps {
         oid = apply_nav_step(repo, oid, step).map_err(|e| {
             if matches!(e, Error::ObjectNotFound(_)) {
-                Error::Message(format!(
-    // hygiene: step 501
-                    "fatal: ambiguous argument '{spec}': unknown revision or path not in the working tree.\n\
-Use '--' to separate paths from revisions, like this:\n\
-'git <command> [<revision>...] -- [<file>...]'"
-                ))
+                RevParseError::AmbiguousArgument {
+                    spec: spec.to_owned(),
+                }
+                .into()
             } else {
                 e
             }
@@ -1627,16 +1614,16 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
         match resolve_revision_impl(repo, before, true, false, true, true, false, false, true) {
             Ok(o) => o,
             Err(Error::ObjectNotFound(s)) if s == before => {
-                return Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: invalid object name '{before}'."
-                )));
+                return Err(RevParseError::InvalidObjectName {
+                    name: before.to_owned(),
+                }
+                .into());
             }
-            Err(Error::Message(msg)) if msg.contains("ambiguous argument") => {
-                return Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: invalid object name '{before}'."
-                )));
+            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+                return Err(RevParseError::InvalidObjectName {
+                    name: before.to_owned(),
+                }
+                .into());
             }
             Err(e) => return Err(e),
         };
@@ -1661,10 +1648,11 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
                 .and_then(|p| p.canonicalize().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            return Err(Error::Message(format!(
-                // hygiene: step 501
-                "fatal: '{after}' is outside repository at '{wt}'"
-            )));
+            return Err(RevParseError::OutsideRepository {
+                path: after.to_owned(),
+                work_tree: wt,
+            }
+            .into());
         }
         Err(e) => return Err(e),
     };
@@ -1987,7 +1975,7 @@ fn warn_if_branch_refname_collides_with_abbrev_hex(
         return;
     };
     if ref_oid != object_oid {
-        // hygiene: step 501
+    // hygiene: step 501
         eprintln!("warning: refname '{spec}' is ambiguous.");
     }
 }
@@ -2005,7 +1993,7 @@ fn warn_if_hex_ref_collides_with_objects(repo: &Repository, spec: &str, ref_oid:
         return;
     }
     if matches.len() > 1 || matches[0] != ref_oid {
-        // hygiene: step 501
+    // hygiene: step 501
         eprintln!("warning: refname '{spec}' is ambiguous.");
     }
 }
@@ -2284,10 +2272,11 @@ fn resolve_base(
                                         .and_then(|p| p.canonicalize().ok())
                                         .map(|p| p.display().to_string())
                                         .unwrap_or_default();
-                                    return Err(Error::Message(format!(
-                                        // hygiene: step 501
-                                        "fatal: '{raw_path}' is outside repository at '{wt}'"
-                                    )));
+                                    return Err(RevParseError::OutsideRepository {
+                                        path: raw_path.to_owned(),
+                                        work_tree: wt,
+                                    }
+                                    .into());
                                 }
                                 Err(e) => return Err(e),
                             };
@@ -2307,10 +2296,11 @@ fn resolve_base(
                         .and_then(|p| p.canonicalize().ok())
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
-                    return Err(Error::Message(format!(
-                        // hygiene: step 501
-                        "fatal: '{rest}' is outside repository at '{wt}'"
-                    )));
+                    return Err(RevParseError::OutsideRepository {
+                        path: rest.to_owned(),
+                        work_tree: wt,
+                    }
+                    .into());
                 }
                 Err(e) => return Err(e),
             };
@@ -2339,7 +2329,7 @@ fn resolve_base(
         // doesn't exist in the ODB (matches git behavior).
         let rn = format!("refs/heads/{spec}");
         if refs::resolve_ref(&repo.git_dir, &rn).is_ok() {
-            // hygiene: step 501
+    // hygiene: step 501
             eprintln!("warning: refname '{spec}' is ambiguous.");
         }
         return Ok(oid);
@@ -2407,7 +2397,7 @@ fn resolve_base(
 
     let (dwim_count, dwim_oid) = resolve_ref_dwim_for_rev_parse(repo, spec);
     if dwim_count > 1 {
-        // hygiene: step 501
+    // hygiene: step 501
         eprintln!("warning: refname '{spec}' is ambiguous.");
     }
     if let Some(oid) = dwim_oid {
@@ -2457,7 +2447,7 @@ fn resolve_base(
     let tag_oid = refs::resolve_ref(&repo.git_dir, &tag_ref).ok();
     match (head_oid, tag_oid) {
         (Some(h), Some(t)) if h != t => {
-            // hygiene: step 501
+    // hygiene: step 501
             eprintln!("warning: refname '{spec}' is ambiguous.");
             return Ok(h);
         }
@@ -2535,12 +2525,10 @@ fn resolve_base(
                 return Ok(oid);
             }
         }
-        return Err(Error::Message(format!(
-    // hygiene: step 501
-            "fatal: ambiguous argument '{spec}': unknown revision or path not in the working tree.\n\
-Use '--' to separate paths from revisions, like this:\n\
-'git <command> [<revision>...] -- [<file>...]'"
-        )));
+        return Err(RevParseError::AmbiguousArgument {
+            spec: spec.to_owned(),
+        }
+        .into());
     }
     Err(Error::ObjectNotFound(spec.to_owned()))
 }
@@ -2744,45 +2732,49 @@ fn resolve_reflog_oid(
                     // back to the ref's current value (the `nth == co_cnt` case in
                     // object-name.c).
                     if !crate::reflog::reflog_exists(&repo.git_dir, refname) {
-                        return Err(Error::Message(format!(
-                            // hygiene: step 501
-                            "fatal: log for '{display}' is empty"
-                        )));
+                        return Err(RevParseError::ReflogEmpty {
+                            ref_display: display.clone(),
+                        }
+                        .into());
                     }
                     return refs::resolve_ref(&repo.git_dir, refname).map_err(|_| {
-                        // hygiene: step 501
-                        Error::Message(format!("fatal: log for '{display}' is empty"))
+                        RevParseError::ReflogEmpty {
+                            ref_display: display.clone(),
+                        }
+                        .into()
                     });
                 }
                 return Ok(entries[len - 1].new_oid);
             }
             if len == 0 {
-                return Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: log for '{display}' is empty"
-                )));
+                return Err(RevParseError::ReflogEmpty {
+                    ref_display: display.clone(),
+                }
+                .into());
             }
             if index > len {
-                return Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: log for '{display}' only has {len} entries"
-                )));
+                return Err(RevParseError::ReflogInsufficientEntries {
+                    ref_display: display.clone(),
+                    available: len,
+                }
+                .into());
             }
             let oid = entries[len - index].old_oid;
             if oid.is_zero() {
-                return Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: log for '{display}' only has {len} entries"
-                )));
+                return Err(RevParseError::ReflogInsufficientEntries {
+                    ref_display: display.clone(),
+                    available: len,
+                }
+                .into());
             }
             Ok(oid)
         }
         ReflogSelector::Date(target_ts) => {
             if entries.is_empty() {
-                return Err(Error::Message(format!(
-                    // hygiene: step 501
-                    "fatal: log for '{display}' is empty"
-                )));
+                return Err(RevParseError::ReflogEmpty {
+                    ref_display: display.clone(),
+                }
+                .into());
             }
             for entry in entries.iter().rev() {
                 let ts = parse_reflog_entry_timestamp(entry);
@@ -3135,10 +3127,11 @@ fn diagnose_tree_path_error(
         };
     if let Ok(head_tree) = head_tree_oid(repo) {
         if path_in_tree(repo, head_tree, clean_path) {
-            return Error::Message(format!(
-                // hygiene: step 501
-                "fatal: path '{rel_display}' exists on disk, but not in '{rev_label}'."
-            ));
+            return RevParseError::PathOnDiskNotInRevision {
+                path: rel_display.to_owned(),
+                revision: rev_label.to_owned(),
+            }
+            .into();
         }
         if let Ok(cwd) = std::env::current_dir() {
             let prefix = show_prefix(repo, &cwd);
@@ -3150,11 +3143,13 @@ fn diagnose_tree_path_error(
                     format!("{pfx}/{clean_path}")
                 };
                 if path_in_tree(repo, head_tree, &candidate) {
-                    return Error::Message(format!(
-                        // hygiene: step 501
-                        "fatal: path '{candidate}' exists, but not '{rel_display}'\n\
-hint: Did you mean '{rev_label}:{candidate}' aka '{rev_label}:./{rel_display}'?"
-                    ));
+                    let alternate_spec = Some(format!("{rev_label}:{candidate}"));
+                    return RevParseError::PathPrefixExists {
+                        candidate,
+                        path: rel_display.to_owned(),
+                        alternate_spec,
+                    }
+                    .into();
                 }
             }
         }
@@ -3165,16 +3160,18 @@ hint: Did you mean '{rev_label}:{candidate}' aka '{rev_label}:./{rel_display}'?"
             .is_some_and(|p| p.exists());
         let in_index = path_in_index(repo, clean_path, 0);
         if on_disk || in_index {
-            return Error::Message(format!(
-                // hygiene: step 501
-                "fatal: path '{rel_display}' exists on disk, but not in '{rev_label}'."
-            ));
+            return RevParseError::PathOnDiskNotInRevision {
+                path: rel_display.to_owned(),
+                revision: rev_label.to_owned(),
+            }
+            .into();
         }
     }
-    Error::Message(format!(
-        // hygiene: step 501
-        "fatal: path '{rel_display}' does not exist in '{rev_label}'"
-    ))
+    RevParseError::PathNotInRevision {
+        path: rel_display.to_owned(),
+        revision: rev_label.to_owned(),
+    }
+    .into()
 }
 
 fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Error) -> Error {
@@ -3204,26 +3201,29 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
                     format!("{pfx}/{path}")
                 };
                 if path_in_index(repo, &candidate, 0) && !path_in_index(repo, &candidate, stage) {
-                    return Error::Message(format!(
-                        // hygiene: step 501
-                        "fatal: path '{candidate}' is in the index, but not '{path}'\n\
-hint: Did you mean ':0:{candidate}' aka ':0:./{path}'?"
-                    ));
+                    let alternate_spec = Some(format!(":0:{candidate}"));
+                    return RevParseError::PathIndexPrefixMismatch {
+                        candidate,
+                        path: path.to_owned(),
+                        alternate_spec,
+                    }
+                    .into();
                 }
             }
         }
-        return Error::Message(format!(
-            // hygiene: step 501
-            "fatal: path '{path}' does not exist (neither on disk nor in the index)"
-        ));
+        return RevParseError::PathMissingFromWorktreeAndIndex {
+            path: path.to_owned(),
+        }
+        .into();
     }
 
     if stage > 0 && in_index && !at_stage {
-        return Error::Message(format!(
-            // hygiene: step 501
-            "fatal: path '{path}' is in the index, but not at stage {stage}\n\
-hint: Did you mean ':0:{path}'?"
-        ));
+        return RevParseError::PathWrongIndexStage {
+            path: path.to_owned(),
+            stage,
+            alternate_spec: Some(format!(":0:{path}")),
+        }
+        .into();
     }
 
     if stage == 0 {
@@ -3238,28 +3238,32 @@ hint: Did you mean ':0:{path}'?"
                         format!("{pfx}/{path}")
                     };
                     if path_in_index(repo, &candidate, 0) {
-                        return Error::Message(format!(
-                            // hygiene: step 501
-                            "fatal: path '{candidate}' is in the index, but not '{path}'\n\
-hint: Did you mean ':0:{candidate}' aka ':0:./{path}'?"
-                        ));
+                        let alternate_spec = Some(format!(":0:{candidate}"));
+                        return RevParseError::PathIndexPrefixMismatch {
+                            candidate,
+                            path: path.to_owned(),
+                            alternate_spec,
+                        }
+                        .into();
                     }
                 }
             }
-            return Error::Message(format!(
-                // hygiene: step 501
-                "fatal: path '{path}' does not exist (neither on disk nor in the index)"
-            ));
+            return RevParseError::PathMissingFromWorktreeAndIndex {
+                path: path.to_owned(),
+            }
+            .into();
         }
         if on_disk && !in_index && !in_head {
-            return Error::Message(format!(
-                // hygiene: step 501
-                "fatal: path '{path}' exists on disk, but not in the index"
-            ));
+            return RevParseError::PathOnDiskNotInIndex {
+                path: path.to_owned(),
+            }
+            .into();
         }
     }
-    // hygiene: step 501
-    Error::Message(format!("fatal: path '{path}' does not exist in the index"))
+    RevParseError::PathNotInIndex {
+        path: path.to_owned(),
+    }
+    .into()
 }
 
 /// Look up a path in the index (stage 0) and return its OID.
@@ -3337,11 +3341,11 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
                 .and_then(|p| p.canonicalize().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            return Err(Error::Message(format!(
-                // hygiene: step 501
-                "fatal: '{}' is outside repository at '{wt}'",
-                colon.raw_path
-            )));
+            return Err(RevParseError::OutsideRepository {
+                path: colon.raw_path.to_owned(),
+                work_tree: wt,
+            }
+            .into());
         }
         Err(e) => return Err(e),
     };
@@ -3572,12 +3576,10 @@ pub fn expand_rev_token_circ_bang(repo: &Repository, token: &str) -> Result<Vec<
         return Ok(vec![token.to_owned()]);
     };
     if base.is_empty() {
-        return Err(Error::Message(format!(
-    // hygiene: step 501
-            "fatal: ambiguous argument '{token}': unknown revision or path not in the working tree.\n\
-Use '--' to separate paths from revisions, like this:\n\
-'git <command> [<revision>...] -- [<file>...]'"
-        )));
+        return Err(RevParseError::AmbiguousArgument {
+            spec: token.to_owned(),
+        }
+        .into());
     }
     let oid = resolve_revision_for_range_end(repo, base)?;
     let commit_oid = peel_to_commit_for_merge_base(repo, oid)?;
