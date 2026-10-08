@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::config::{parse_config_parameters, ConfigFile, ConfigScope};
+use crate::environment::Environment;
 use crate::error::Result;
 use crate::unicode_normalization::probe_filesystem_normalizes_nfd_to_nfc;
 
@@ -18,13 +19,11 @@ pub struct InitFilesystemConfigOptions {
     pub is_reinit: bool,
 }
 
-fn config_bool_from_parameters(key: &str) -> Option<bool> {
-    let Ok(raw) = std::env::var("GIT_CONFIG_PARAMETERS") else {
-        return None;
-    };
+fn config_bool_from_parameters(env: &Environment, key: &str) -> Option<bool> {
+    let raw = env.git_config_parameters.as_deref()?;
     let key_lower = key.to_ascii_lowercase();
     let mut last: Option<bool> = None;
-    for entry in parse_config_parameters(&raw) {
+    for entry in parse_config_parameters(raw) {
         let Some((k, v)) = entry.split_once('=') else {
             continue;
         };
@@ -40,20 +39,20 @@ fn config_bool_from_parameters(key: &str) -> Option<bool> {
     last
 }
 
-fn precompose_from_git_config_parameters() -> Option<bool> {
-    config_bool_from_parameters("core.precomposeunicode")
+fn precompose_from_git_config_parameters(env: &Environment) -> Option<bool> {
+    config_bool_from_parameters(env, "core.precomposeunicode")
 }
 
-fn ignorecase_from_git_config_parameters() -> Option<bool> {
-    config_bool_from_parameters("core.ignorecase")
+fn ignorecase_from_git_config_parameters(env: &Environment) -> Option<bool> {
+    config_bool_from_parameters(env, "core.ignorecase")
 }
 
-fn filemode_from_git_config_parameters() -> Option<bool> {
-    config_bool_from_parameters("core.filemode")
+fn filemode_from_git_config_parameters(env: &Environment) -> Option<bool> {
+    config_bool_from_parameters(env, "core.filemode")
 }
 
-fn symlinks_from_git_config_parameters() -> Option<bool> {
-    config_bool_from_parameters("core.symlinks")
+fn symlinks_from_git_config_parameters(env: &Environment) -> Option<bool> {
+    config_bool_from_parameters(env, "core.symlinks")
 }
 
 /// True when `config` in `git_dir` is visible as `CoNfIg` (case-insensitive git dir).
@@ -160,20 +159,21 @@ pub fn probe_symlinks_supported(git_dir: &Path) -> std::io::Result<bool> {
 pub fn apply_init_filesystem_config(
     git_dir: &Path,
     opts: InitFilesystemConfigOptions,
+    environment: &Environment,
 ) -> Result<()> {
     if opts.is_reinit {
         return Ok(());
     }
 
-    let precompose_from_cmdline = precompose_from_git_config_parameters().is_some();
-    let ignorecase_from_cmdline = ignorecase_from_git_config_parameters().is_some();
-    let filemode_from_cmdline = filemode_from_git_config_parameters().is_some();
-    let symlinks_from_cmdline = symlinks_from_git_config_parameters().is_some();
+    let precompose_from_cmdline = precompose_from_git_config_parameters(environment).is_some();
+    let ignorecase_from_cmdline = ignorecase_from_git_config_parameters(environment).is_some();
+    let filemode_from_cmdline = filemode_from_git_config_parameters(environment).is_some();
+    let symlinks_from_cmdline = symlinks_from_git_config_parameters(environment).is_some();
 
-    let force_precompose_probe = matches!(
-        std::env::var("GIT_TEST_UTF8_NFD_TO_NFC").ok().as_deref(),
-        Some("true") | Some("1")
-    );
+    let force_precompose_probe = environment
+        .git_test_utf8_nfd_to_nfc
+        .as_deref()
+        .is_some_and(|v| v == "true" || v == "1");
 
     let filemode = probe_trust_filemode(git_dir).unwrap_or(true);
     let symlinks = probe_symlinks_supported(git_dir).unwrap_or(false);
@@ -243,8 +243,12 @@ mod tests {
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n",
         )
         .expect("config");
-        apply_init_filesystem_config(&git_dir, InitFilesystemConfigOptions::default())
-            .expect("apply");
+        apply_init_filesystem_config(
+            &git_dir,
+            InitFilesystemConfigOptions::default(),
+            &Environment::capture_process(),
+        )
+        .expect("apply");
         let probed = probe_trust_filemode(&git_dir).expect("probe");
         let text = fs::read_to_string(git_dir.join("config")).expect("read");
         let expected = if probed {
@@ -266,8 +270,12 @@ mod tests {
         )
         .expect("config");
         std::env::set_var("GIT_TEST_UTF8_NFD_TO_NFC", "1");
-        apply_init_filesystem_config(&git_dir, InitFilesystemConfigOptions::default())
-            .expect("apply");
+        apply_init_filesystem_config(
+            &git_dir,
+            InitFilesystemConfigOptions::default(),
+            &Environment::capture_process(),
+        )
+        .expect("apply");
         std::env::remove_var("GIT_TEST_UTF8_NFD_TO_NFC");
         let text = fs::read_to_string(git_dir.join("config")).expect("read");
         assert!(text.contains("precomposeunicode = true"));

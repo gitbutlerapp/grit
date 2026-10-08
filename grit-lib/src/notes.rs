@@ -238,7 +238,11 @@ pub fn write_notes_commit(
     let parent = resolve_ref(&repo.git_dir, notes_ref).ok();
 
     // Build committer/author ident
-    let config = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )?;
     let now = now_for_identity();
     let author = build_ident_role(&config, "AUTHOR", now);
     let committer = build_ident_role(&config, "COMMITTER", now);
@@ -865,7 +869,11 @@ pub fn write_notes_commit_with_parents(
         })
         .collect();
     let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )?;
     let now = now_for_identity();
     let author = build_ident_role(&config, "AUTHOR", now);
     let committer = build_ident_role(&config, "COMMITTER", now);

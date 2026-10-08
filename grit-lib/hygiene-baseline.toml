@@ -137,12 +137,12 @@ eprintln = 1
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 20
-env_var_os = 5
+env_var = 0
+env_var_os = 0
 env_vars = 0
 env_set_var = 0
 env_remove_var = 0
-env_current_dir = 1
+env_current_dir = 0
 literal_fatal = 6
 literal_error = 2
 literal_hint = 0
@@ -214,6 +214,73 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
+<<<<<<< New base: Merge branch 'factory/no-grep-iconv-kill-stty-506'
+||||||| Common ancestor
+[file.diffstat.rs]
+println = 0
+print = 0
+eprintln = 0
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 1
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 1
+static_global = 1
+system_time_now = 0
+
+=======
+[file.diffstat.rs]
+println = 0
+print = 0
+eprintln = 0
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 1
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 1
+static_global = 1
+system_time_now = 0
+
+[file.environment.rs]
+println = 0
+print = 0
+eprintln = 0
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 0
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 1
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 0
+static_global = 0
+system_time_now = 0
+
+>>>>>>> Current commit: lib: add Environment for discovery and config loading
 [file.filter_process.rs]
 println = 0
 print = 0
@@ -464,27 +531,6 @@ literal_hint = 0
 literal_warning = 3
 command_new = 0
 static_global = 1
-system_time_now = 0
-
-[file.init_filesystem.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 2
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
 system_time_now = 0
 
 [file.interpret_trailers.rs]
@@ -767,12 +813,12 @@ eprintln = 0
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 2
+env_var = 0
 env_var_os = 0
 env_vars = 0
 env_set_var = 0
 env_remove_var = 0
-env_current_dir = 1
+env_current_dir = 0
 literal_fatal = 0
 literal_error = 0
 literal_hint = 0
@@ -914,12 +960,12 @@ eprintln = 4
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 24
-env_var_os = 1
+env_var = 0
+env_var_os = 0
 env_vars = 0
-env_set_var = 1
+env_set_var = 0
 env_remove_var = 0
-env_current_dir = 16
+env_current_dir = 0
 literal_fatal = 0
 literal_error = 1
 literal_hint = 0
@@ -1262,27 +1308,6 @@ literal_hint = 0
 literal_warning = 0
 command_new = 0
 static_global = 1
-system_time_now = 0
-
-[file.worktree_cwd.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 2
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 1
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
 system_time_now = 0
 
 [file.worktree_rules.rs]

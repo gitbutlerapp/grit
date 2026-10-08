@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::environment::{Environment, RepositoryOptions};
 use grit_lib::ident_resolve::{
     resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
     IdentityError, SystemIdentityEnv,
@@ -9,7 +10,14 @@ use grit_lib::ident_resolve::{
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
+use std::path::PathBuf;
 use time::OffsetDateTime;
+
+/// Build the process [`Environment`] for repository discovery and config loading.
+pub fn environment() -> Environment {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    Environment::from_vars(std::env::vars_os(), cwd)
+}
 
 /// A resolved "target" branch (the trunk `grit` measures the current branch against).
 #[derive(Debug, Clone)]
@@ -32,7 +40,8 @@ pub struct CommitSummary {
 
 /// Discover the repository containing the current directory.
 pub fn discover() -> Result<Repository> {
-    Repository::discover(None).context("not in a repository")
+    Repository::discover_with(&RepositoryOptions::with_environment(environment()), None)
+        .context("not in a repository")
 }
 
 /// Find the branch `grit` should measure the current branch against, trying

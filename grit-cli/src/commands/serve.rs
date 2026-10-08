@@ -44,7 +44,8 @@ pub fn run(
     advertise_refs: bool,
 ) -> Result<()> {
     let repo = open_served_repo(Path::new(directory))?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .unwrap_or_default();
     let hidden_refs = match service {
         Service::UploadPack => grit_lib::hide_refs::hide_ref_patterns_uploadpack(&config),
         Service::ReceivePack => grit_lib::hide_refs::hide_ref_patterns_receive(&config),

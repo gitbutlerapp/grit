@@ -1598,7 +1598,12 @@ fn widen_oid_to(oid: ObjectId, hash_size: usize) -> ObjectId {
 /// Object-id width for reftables in the repository owning `git_dir`: 32 bytes
 /// (reftable version 2) when `extensions.objectformat=sha256`, else 20 (version 1).
 fn reftable_hash_size_for_git_dir(git_dir: &Path) -> usize {
-    let cfg = crate::config::ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let cfg = crate::config::ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     match cfg
         .get("extensions.objectformat")
         .and_then(|v| crate::objects::HashAlgo::from_name(&v))
@@ -2375,7 +2380,12 @@ impl ReftableStack {
             .reftable_dir
             .parent()
             .unwrap_or(self.reftable_dir.as_path());
-        let config = ConfigSet::load(Some(git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+        let config = ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(git_dir),
+            true,
+        )
+        .unwrap_or_else(|_| ConfigSet::new());
         config
             .get("reftable.lockTimeout")
             .and_then(|value| value.parse::<u64>().ok())
@@ -2879,7 +2889,12 @@ enum LogRefsMode {
 }
 
 fn reftable_log_refs_mode(git_dir: &Path) -> LogRefsMode {
-    let config = ConfigSet::load(Some(git_dir), true).ok();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .ok();
     let value = config
         .as_ref()
         .and_then(|cfg| cfg.get("core.logAllRefUpdates"));
@@ -3065,7 +3080,11 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
         ..Default::default()
     };
 
-    if let Ok(config) = ConfigSet::load(Some(git_dir), true) {
+    if let Ok(config) = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    ) {
         if let Some(value) = config.get("reftable.blockSize") {
             if let Ok(v) = value.parse::<u32>() {
                 opts.block_size = v;

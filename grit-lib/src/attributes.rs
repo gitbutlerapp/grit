@@ -212,7 +212,11 @@ fn default_global_attributes_path() -> Option<PathBuf> {
 fn global_attributes_path(
     repo: &Repository,
 ) -> std::result::Result<Option<PathBuf>, crate::error::Error> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )?;
     if let Some(path) = config.get("core.attributesfile") {
         return Ok(Some(PathBuf::from(parse_path(&path))));
     }
@@ -1307,7 +1311,11 @@ pub fn resolve_attr_treeish(
     let env_src = std::env::var("GIT_ATTR_SOURCE")
         .ok()
         .filter(|s| !s.is_empty());
-    let config = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )?;
     let cfg_tree = config.get("attr.tree");
     if let Some(s) = source_arg.map(|s| s.to_string()) {
         return Ok((Some(s), false));

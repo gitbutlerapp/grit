@@ -53,7 +53,8 @@ fn short_hex(oid: &str) -> &str {
 
 pub fn run(remote: Option<String>) -> Result<FetchOutcome> {
     let repo = context::discover()?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
     let remote = remote.unwrap_or_else(|| net::DEFAULT_REMOTE.to_owned());
 
     let refspecs = net::fetch_refspecs(&config, &remote);

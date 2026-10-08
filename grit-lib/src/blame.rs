@@ -581,7 +581,12 @@ pub struct BlameTextconvContext {
 
 impl BlameTextconvContext {
     pub fn new(repo: &Repository) -> Self {
-        let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+        let config = ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(&repo.git_dir),
+            true,
+        )
+        .unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
         let attrs = load_attr_rules(repo);
         let diff_attrs = load_diff_attr_rules(repo);

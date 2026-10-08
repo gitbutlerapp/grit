@@ -219,12 +219,16 @@ fn confirm(prompt: &str) -> Result<bool> {
 /// `credential.helper` applies), otherwise from the global/system files so
 /// `grit auth` works anywhere.
 fn load_config() -> ConfigSet {
-    if let Ok(repo) = Repository::discover(None) {
-        if let Ok(config) = ConfigSet::load(Some(&repo.git_dir), true) {
+    let env = crate::context::environment();
+    if let Ok(repo) = Repository::discover_with(
+        &grit_lib::environment::RepositoryOptions::with_environment(env.clone()),
+        None,
+    ) {
+        if let Ok(config) = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true) {
             return config;
         }
     }
-    ConfigSet::load(None, true).unwrap_or_default()
+    ConfigSet::load(&env, None, true).unwrap_or_default()
 }
 
 /// Resolve the OAuth App client id (env, then config, then the baked-in value).

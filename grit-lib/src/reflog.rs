@@ -83,7 +83,11 @@ pub fn truncate_last_reflog_line(git_dir: &Path, refname: &str) -> Result<()> {
 /// Apply `core.sharedRepository` permissions to a rewritten reflog file, matching Git's
 /// `adjust_shared_perm` call in `files_reflog_expire`. Best-effort: ignores config and FS errors.
 fn adjust_reflog_shared_perm(git_dir: &Path, path: &Path) {
-    let Ok(config) = ConfigSet::load(Some(git_dir), true) else {
+    let Ok(config) = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    ) else {
         return;
     };
     let raw = config.get("core.sharedRepository");

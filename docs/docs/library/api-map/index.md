@@ -99,6 +99,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::diffstat::DiffstatOptions` | struct | Options for laying out diffstat lines (Git diff_options stat fields). | [API](https://docs.rs/grit-lib/latest/grit_lib/diffstat/struct.DiffstatOptions.html) |
 | `grit_lib::diffstat::FileStatInput` | struct | Default total width for format-patch diffstat (MAIL_DEFAULT_WRAP in Git). | [API](https://docs.rs/grit-lib/latest/grit_lib/diffstat/struct.FileStatInput.html) |
 | `grit_lib::dotfile` | module | Git-compatible .git* / NTFS / HFS path checks (path.c, utf8.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/dotfile/index.html) |
+| `grit_lib::environment` | module | Explicit discovery and configuration environment for embedding callers. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/index.html) |
+| `grit_lib::environment::Environment` | struct | Discovery and config variables that affect repository open/discover and ConfigSet loading. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) |
+| `grit_lib::environment::RepositoryOptions` | struct | Options passed to repository open/discover with an explicit Environment. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html) |
 | `grit_lib::error` | module | Shared error types for grit-lib. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/index.html) |
 | `grit_lib::error::Error` | enum | The top-level error type for all grit-lib operations. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) |
 | `grit_lib::fetch` | module | Wire-protocol fetch orchestration over a crate::transport::Connection. | [API](https://docs.rs/grit-lib/latest/grit_lib/fetch/index.html) |

@@ -61,14 +61,18 @@ pub fn registered_worktree_count(common: &Path) -> usize {
 /// Whether `common` is configured as a bare repository (`core.bare=true`).
 #[must_use]
 pub fn is_bare_repository(common: &Path) -> bool {
-    ConfigSet::load(Some(common), true)
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.bare"))
-        .and_then(|r| r.ok())
-        .unwrap_or_else(|| {
-            // Heuristic when config is missing: bare repos usually are not named `.git`.
-            !common.ends_with(".git") && common.join("config").is_file()
-        })
+    ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(common),
+        true,
+    )
+    .ok()
+    .and_then(|cfg| cfg.get_bool("core.bare"))
+    .and_then(|r| r.ok())
+    .unwrap_or_else(|| {
+        // Heuristic when config is missing: bare repos usually are not named `.git`.
+        !common.ends_with(".git") && common.join("config").is_file()
+    })
 }
 
 /// Enumerate the main and linked worktrees for `repo`.

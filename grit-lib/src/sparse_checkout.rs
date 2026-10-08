@@ -472,8 +472,12 @@ pub fn apply_sparse_checkout_skip_worktree(
         return;
     }
 
-    let config = crate::config::ConfigSet::load(Some(git_dir), true)
-        .unwrap_or_else(|_| crate::config::ConfigSet::new());
+    let config = crate::config::ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_else(|_| crate::config::ConfigSet::new());
     let sparse_enabled = config
         .get_bool("core.sparsecheckout")
         .and_then(|r| r.ok())
@@ -613,9 +617,14 @@ pub fn clear_skip_worktree_from_present_files(
     index: &mut crate::index::Index,
     config: Option<&crate::config::ConfigSet>,
 ) {
-    let config = config
-        .cloned()
-        .unwrap_or_else(|| crate::config::ConfigSet::load(Some(git_dir), true).unwrap_or_default());
+    let config = config.cloned().unwrap_or_else(|| {
+        crate::config::ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(git_dir),
+            true,
+        )
+        .unwrap_or_default()
+    });
     let sparse_enabled = config
         .get_bool("core.sparsecheckout")
         .and_then(|r| r.ok())

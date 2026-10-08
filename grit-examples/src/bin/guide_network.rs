@@ -20,7 +20,11 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let repo = Repository::discover(Some(consumer))?;
     let git_dir = repo.git_dir.clone();
     let work_tree = repo.work_tree.clone();
-    let config = ConfigSet::load(Some(&git_dir), true)?;
+    let config = ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&git_dir),
+        true,
+    )?;
 
     let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)
         .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;

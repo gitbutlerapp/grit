@@ -50,7 +50,8 @@ pub fn run(add: Option<(String, String)>) -> Result<RemoteOutcome> {
 }
 
 fn list(repo: &Repository) -> Result<RemoteOutcome> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
     let remotes = remote_names(&config)
         .into_iter()
         .map(|name| {
@@ -64,7 +65,8 @@ fn list(repo: &Repository) -> Result<RemoteOutcome> {
 }
 
 fn add_remote(repo: &Repository, name: &str, url: &str) -> Result<RemoteOutcome> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
     if remote_names(&config).iter().any(|n| n == name) {
         bail!("remote '{name}' already exists");
     }

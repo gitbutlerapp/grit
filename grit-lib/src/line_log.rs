@@ -514,7 +514,12 @@ fn funcname_matcher_for_path(
 ) -> Option<FuncnameMatcher> {
     let wt = work_tree?;
     let rules = load_gitattributes(wt);
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let fa = get_file_attrs(&rules, path, false, &config);
     let DiffAttr::Driver(ref name) = fa.diff_attr else {
         return None;

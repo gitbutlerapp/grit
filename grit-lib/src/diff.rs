@@ -2690,7 +2690,12 @@ fn diff_index_to_worktree_inner(
     } else if let Some(c) = options.config.as_ref() {
         c.as_ref().clone()
     } else {
-        ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new())
+        ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(repository_git_dir),
+            true,
+        )
+        .unwrap_or_else(|_| ConfigSet::new())
     };
     let conv = rules_lock
         .as_ref()
@@ -3258,9 +3263,14 @@ pub fn smudge_racily_clean_entries(
         return false;
     };
 
-    let config = config
-        .cloned()
-        .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default());
+    let config = config.cloned().unwrap_or_else(|| {
+        ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(git_dir),
+            true,
+        )
+        .unwrap_or_default()
+    });
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
 
@@ -3319,8 +3329,12 @@ pub fn worktree_differs_from_index_entry(
     use crate::crlf;
 
     let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
-    let config =
-        ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(repository_git_dir),
+        true,
+    )
+    .unwrap_or_else(|_| ConfigSet::new());
     let trust_filemode = config
         .get_bool("core.filemode")
         .and_then(|r| r.ok())
@@ -3618,7 +3632,7 @@ pub fn refresh_index_stat_content_verified(
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
     config: Option<&ConfigSet>,
-    stat_parallel_threads: Option<usize>,
+    _stat_parallel_threads: Option<usize>,
 ) -> Result<bool> {
     refresh_index_stat_content_verified_with_rules(
         odb,
@@ -3669,9 +3683,14 @@ pub fn refresh_index_stat_content_verified_with_rules(
         .as_ref()
         .map(|r| r.config().clone())
         .unwrap_or_else(|| {
-            config
-                .cloned()
-                .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default())
+            config.cloned().unwrap_or_else(|| {
+                ConfigSet::load(
+                    &crate::environment::Environment::capture_process(),
+                    Some(git_dir),
+                    true,
+                )
+                .unwrap_or_default()
+            })
         });
     let preload_index = config
         .get_bool("core.preloadIndex")
@@ -3878,7 +3897,12 @@ pub fn path_checkout_skip_blob_write_when_up_to_date(
     if !entry_is_racy(entry, index_mtime) {
         return Ok(true);
     }
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
     let file_attrs = crlf::get_file_attrs(&attrs, rel_path, false, &config);
@@ -4141,7 +4165,12 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
         .map(|r| r.config().clone())
         .unwrap_or_else(|| {
             config.cloned().unwrap_or_else(|| {
-                ConfigSet::load(Some(repository_git_dir), true).unwrap_or_else(|_| ConfigSet::new())
+                ConfigSet::load(
+                    &crate::environment::Environment::capture_process(),
+                    Some(repository_git_dir),
+                    true,
+                )
+                .unwrap_or_else(|_| ConfigSet::new())
             })
         });
     let conv = worktree_rules

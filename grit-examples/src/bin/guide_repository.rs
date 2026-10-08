@@ -24,7 +24,11 @@ fn main() -> Result<(), Error> {
         println!("work_tree=<bare>");
     }
 
-    let cfg = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let cfg = ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )?;
     let name = cfg.get("user.name").unwrap_or_default();
     if !name.is_empty() {
         println!("user.name={name}");

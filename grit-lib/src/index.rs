@@ -1156,7 +1156,14 @@ impl Index {
     /// Returns [`Error::Io`] on filesystem errors.
     pub fn write(&self, path: &Path) -> Result<()> {
         let git_dir = path.parent();
-        let config = git_dir.and_then(|d| ConfigSet::load(Some(d), true).ok());
+        let config = git_dir.and_then(|d| {
+            ConfigSet::load(
+                &crate::environment::Environment::capture_process(),
+                Some(d),
+                true,
+            )
+            .ok()
+        });
         let skip_hash = index_skip_hash_for_write(config.as_ref());
         self.write_to_path(path, skip_hash)
     }
@@ -2601,9 +2608,14 @@ fn lockfile_pid_enabled(index_path: &Path, config: Option<&ConfigSet>) -> bool {
         None => return false,
     };
 
-    let cfg = config
-        .cloned()
-        .unwrap_or_else(|| ConfigSet::load(Some(git_dir), true).unwrap_or_default());
+    let cfg = config.cloned().unwrap_or_else(|| {
+        ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(git_dir),
+            true,
+        )
+        .unwrap_or_default()
+    });
     cfg.get_bool("core.lockfilepid")
         .and_then(|res| res.ok())
         .unwrap_or(false)

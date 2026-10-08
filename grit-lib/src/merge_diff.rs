@@ -265,7 +265,12 @@ fn paths_in_tree_order(
 fn attrs_for_repo_path(git_dir: &Path, path: &str) -> FileAttrs {
     let work_tree = git_dir.parent().unwrap_or(git_dir);
     let rules = load_gitattributes(work_tree);
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     get_file_attrs(&rules, path, false, &config)
 }
 
@@ -583,7 +588,12 @@ pub fn convert_blob_to_worktree_for_path(
     blob: &[u8],
     oid_hex: Option<&str>,
 ) -> std::io::Result<Vec<u8>> {
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let conv = crate::crlf::ConversionConfig::from_config(&config);
     let rules = match index {
         Some(idx) => crate::crlf::load_gitattributes_for_checkout(work_tree, path, idx, odb),

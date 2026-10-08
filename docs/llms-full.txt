@@ -2664,6 +2664,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::diffstat::DiffstatOptions` | struct | Options for laying out diffstat lines (Git diff_options stat fields). | [API](https://docs.rs/grit-lib/latest/grit_lib/diffstat/struct.DiffstatOptions.html) |
 | `grit_lib::diffstat::FileStatInput` | struct | Default total width for format-patch diffstat (MAIL_DEFAULT_WRAP in Git). | [API](https://docs.rs/grit-lib/latest/grit_lib/diffstat/struct.FileStatInput.html) |
 | `grit_lib::dotfile` | module | Git-compatible .git* / NTFS / HFS path checks (path.c, utf8.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/dotfile/index.html) |
+| `grit_lib::environment` | module | Explicit discovery and configuration environment for embedding callers. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/index.html) |
+| `grit_lib::environment::Environment` | struct | Discovery and config variables that affect repository open/discover and ConfigSet loading. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) |
+| `grit_lib::environment::RepositoryOptions` | struct | Options passed to repository open/discover with an explicit Environment. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html) |
 | `grit_lib::error` | module | Shared error types for grit-lib. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/index.html) |
 | `grit_lib::error::Error` | enum | The top-level error type for all grit-lib operations. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) |
 | `grit_lib::fetch` | module | Wire-protocol fetch orchestration over a crate::transport::Connection. | [API](https://docs.rs/grit-lib/latest/grit_lib/fetch/index.html) |
@@ -3253,7 +3256,11 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let repo = Repository::discover(Some(consumer))?;
     let git_dir = repo.git_dir.clone();
     let work_tree = repo.work_tree.clone();
-    let config = ConfigSet::load(Some(&git_dir), true)?;
+    let config = ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&git_dir),
+        true,
+    )?;
 
     let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)
         .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
@@ -3593,19 +3600,29 @@ git -C /path/to/repo reflog show refs/heads/library-guide-demo
 
 # Repository
 
-> Open and discover Git repositories, read git-dir vs work tree, load config, and handle grit_lib::Error.
+> Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.
 
-A [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) is the main handle for grit-lib. It carries the absolute [`git_dir`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) path, an optional [`work_tree`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) for non-bare repos, and an [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) for object reads and writes.
+A [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) is the main handle for grit-lib. It carries the absolute [`git_dir`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) path, an optional [`work_tree`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) for non-bare repos, an [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) for object reads and writes, and the [`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) used to discover or open it.
+
+## Environment
+
+[`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) holds discovery and config variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CEILING_DIRECTORIES`, `GIT_CONFIG_*`, home paths, `cwd`, and related fields) without reading the process environment inside the library. Construct one with `Environment::empty()` (defaults only) or `Environment::from_vars()` (parse an iterator of `(key, value)` pairs plus an explicit working directory). See [`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html).
+
+The `grit` CLI builds an environment from the process in `grit-cli` and passes it into discovery. Embedders should do the same: snapshot the variables you care about once, then call `Repository::discover_with` or `Repository::open_with` with [`RepositoryOptions`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html).
+
+[`Repository::discover`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) and [`Repository::open`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) remain convenience entry points that use `Environment::empty()` (no overrides beyond `cwd = "."`).
+
+[`ConfigSet::load`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) takes `&Environment` as its first argument so config caching and global/system file resolution match the same snapshot as discovery.
 
 ## Discover vs open
 
-Call [`Repository::discover`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) when you have a working directory and want the same upward search Git uses (respecting `GIT_DIR` and `GIT_WORK_TREE`). Call [`Repository::open`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) when you already know the git directory and optionally the work tree path.
+Call `Repository::discover_with` when you have a working directory and want Git-style upward search. Call `Repository::open_with` when you already know the git directory and optionally the work tree path. See [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html).
 
 Bare repositories have `work_tree: None`. Linked worktrees and gitfile indirection are handled during discovery so `git_dir` always points at the directory that contains `objects/`.
 
 ## Config
 
-Repository code does not cache a full config snapshot on the struct. Load settings when you need them with [`ConfigSet::load`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html), passing `Some(&repo.git_dir)` for repository-local files. Keys use Git’s dotted names (`user.name`, `core.bare`, …).
+[`Repository::config`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) returns a lazily loaded snapshot of the merged cascade (system / global / local / worktree / environment overrides). Prefer it on hot paths instead of calling `ConfigSet::load` repeatedly. Keys use Git’s dotted names (`user.name`, `core.bare`, …).
 
 ## Errors
 
@@ -3642,7 +3659,11 @@ fn main() -> Result<(), Error> {
         println!("work_tree=<bare>");
     }
 
-    let cfg = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let cfg = ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )?;
     let name = cfg.get("user.name").unwrap_or_default();
     if !name.is_empty() {
         println!("user.name={name}");

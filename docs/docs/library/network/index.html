@@ -157,7 +157,11 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
     let repo = Repository::discover(Some(consumer))?;
     let git_dir = repo.git_dir.clone();
     let work_tree = repo.work_tree.clone();
-    let config = ConfigSet::load(Some(&amp;git_dir), true)?;
+    let config = ConfigSet::load(
+        &amp;grit_lib::environment::Environment::capture_process(),
+        Some(&amp;git_dir),
+        true,
+    )?;
 
     let remote_info = remote::resolve_remote(&amp;config, &amp;git_dir, Some(&quot;origin&quot;), false)
         .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;

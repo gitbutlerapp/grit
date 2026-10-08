@@ -60,7 +60,8 @@ impl HumanRender for PushOutcome {
 
 pub fn run(tags: bool) -> Result<PushOutcome> {
     let repo = context::discover()?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
 
     let (branch_label, remote, specs) = if tags {
         let entries =
