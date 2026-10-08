@@ -127,6 +127,77 @@ fn read_u32_be(buf: &[u8], pos: &mut usize) -> Option<u32> {
     Some(v)
 }
 
+/// Verify `.rev` bytes against the given pack index.
+///
+/// `rev_path_display` is embedded in messages (use the file path or a placeholder).
+/// Messages for `git fsck` / load order: header checks first (like `load_revindex_from_disk`), then
+/// checksum and index comparison (like `verify_pack_revindex`). May return multiple strings.
+pub fn pack_rev_fsck_messages(
+    data: &[u8],
+    index: &PackIndex,
+    rev_path_display: &str,
+) -> Vec<String> {
+    let n = index.len();
+    let hash_len = index.hash_bytes();
+    let expected_len = HEADER_LEN + n * 4 + hash_len + hash_len;
+    if data.len() < HEADER_LEN + hash_len {
+        return vec![format!(
+            "reverse-index file {rev_path_display} is too small"
+        )];
+    }
+    if data.len() != expected_len {
+        return vec![format!("reverse-index file {rev_path_display} is corrupt")];
+    }
+
+    let mut pos = 0usize;
+    let Some(sig) = read_u32_be(data, &mut pos) else {
+        return vec!["truncated rev-index header".to_owned()];
+    };
+    if sig != RIDX_SIGNATURE {
+        return vec![format!(
+            "reverse-index file {rev_path_display} has unknown signature"
+        )];
+    }
+    let Some(ver) = read_u32_be(data, &mut pos) else {
+        return vec!["truncated rev-index header".to_owned()];
+    };
+    if ver != RIDX_VERSION {
+        return vec![format!(
+            "reverse-index file {rev_path_display} has unsupported version {ver}"
+        )];
+    }
+    let Some(hash_id) = read_u32_be(data, &mut pos) else {
+        return vec!["truncated rev-index header".to_owned()];
+    };
+    if hash_id != RIDX_HASH_ID_SHA1 && hash_id != 2 {
+        return vec![format!(
+            "reverse-index file {rev_path_display} has unsupported hash id {hash_id}"
+        )];
+    }
+
+    let mut msgs = Vec::new();
+    if !hashfile_checksum_valid(data, hash_len) {
+        msgs.push("invalid checksum".to_owned());
+    }
+
+    let mut order: Vec<u32> = (0..n as u32).collect();
+    order.sort_by_key(|&i| index.offset_at(i as usize));
+
+    for (i, &expected) in order.iter().enumerate() {
+        let Some(got) = read_u32_be(data, &mut pos) else {
+            msgs.push("truncated rev-index data".to_owned());
+            break;
+        };
+        if got != expected {
+            msgs.push(format!(
+                "invalid rev-index position at {i}: {got} != {expected}"
+            ));
+        }
+    }
+
+    msgs
+}
+
 /// Verify a `.rev` file for `index-pack --rev-index --verify` (checksum first, like Git's
 /// `verify_pack_revindex`).
 pub fn verify_pack_rev_file_contents(
@@ -238,4 +309,54 @@ pub fn try_rev_positions_in_pack_order(data: &[u8], num_objects: usize) -> Optio
         seen[pi] = true;
     }
     Some(pack_order_idx)
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::objects::ObjectId;
+    use crate::pack::{read_pack_index, write_v2_pack_index_with_trailer};
+
+    #[test]
+    fn append_checksum_sha256_and_short_pack_trailer_padding() {
+        let mut out = b"RIDX".to_vec();
+        append_hashfile_checksum(&mut out, SHA256_TRAILER);
+        assert!(hashfile_checksum_valid(&out, SHA256_TRAILER));
+
+        let rev = build_pack_rev_bytes_from_index_order_offsets_and_checksum(&[0, 64], &[1, 2, 3]);
+        assert!(rev.len() > HEADER_LEN + SHA256_TRAILER);
+    }
+
+    #[test]
+    fn verify_pack_rev_file_io_and_try_rev_none_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let idx_path = tmp.path().join("x.idx");
+        let oid = ObjectId::from_hex("0102030405060708090a0b0c0d0e0f1011121314").expect("oid");
+        write_v2_pack_index_with_trailer(&idx_path, &[(oid, 12, 0)], &[0u8; 20], 20)
+            .expect("write idx");
+        let index = read_pack_index(&idx_path).expect("load idx");
+        let rev_path = rev_path_for_index(&idx_path);
+        std::fs::create_dir_all(&rev_path).expect("dir");
+        assert!(verify_pack_rev_file(&rev_path, &index).is_err());
+
+        let rev = build_pack_rev_bytes(&index);
+        assert!(try_rev_positions_in_pack_order(&rev, index.len()).is_some());
+        assert!(try_rev_positions_in_pack_order(&rev[..rev.len() - 1], index.len()).is_none());
+
+        let mut bad = rev.clone();
+        bad[4..8].copy_from_slice(&8u32.to_be_bytes());
+        assert!(try_rev_positions_in_pack_order(&bad, index.len()).is_none());
+
+        let mut bad_id = rev.clone();
+        bad_id[8..12].copy_from_slice(&8u32.to_be_bytes());
+        assert!(try_rev_positions_in_pack_order(&bad_id, index.len()).is_none());
+
+        let msgs = pack_rev_fsck_messages(&[], &index, "empty");
+        assert!(!msgs.is_empty());
+    }
+
+    #[test]
+    fn hashfile_checksum_valid_sha1_rejects_short_input() {
+        assert!(!hashfile_checksum_valid_sha1(b"short"));
+    }
 }

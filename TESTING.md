@@ -118,10 +118,13 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
+| t5300-pack-objects.sh | v2 pack index + reverse index byte-identical to `git index-pack --rev-index`; ingest passes `verify-pack` / `fsck --strict` | `grit-lib/tests/pack_ingest_roundtrip.rs` (`idx_and_rev_match_git_*`, `ingest_every_option_passes_git_verify_and_fsck_sha1`) | ported (core write/read) |
 | t5303-pack-corruption-resilience.sh | apply_delta accept/reject vs git index-pack; pack corruption recovery | `grit-lib/tests/pack_deltas.rs` (`t5303_apply_delta_*`), `grit-lib/tests/pack_corruption.rs` | covered |
 | t5309-pack-delta-cycles.sh | ref-delta cycles and cross-pack cycles (timeout guard) | `grit-lib/tests/pack_deltas.rs` (`ref_delta_*cycle*`) | covered |
 | t5314-pack-cycle-detection.sh | self-referencing and two-object ref-delta cycles | `grit-lib/tests/pack_deltas.rs` (`ref_delta_self_reference*`, `ref_delta_two_object_cycle*`) | covered |
 | t5316-pack-delta-depth.sh | deep OFS chains (50+) vs verify-pack depth | `grit-lib/tests/pack_deltas.rs` (`t5316_deep_ofs_chain*`) | covered |
+| t5325-reverse-index.sh | RIDX `.rev` verify, corruption cases, `try_rev_positions_in_pack_order`, hashfile checksum | `grit-lib/tests/pack_ingest_roundtrip.rs` (`verify_pack_rev_*`, `try_rev_positions_*`, `hashfile_checksum_*`) | ported |
+| t5351-unpack-large.sh | `unpack-objects` large blobs vs system git; strict missing reference | `grit-lib/tests/pack_ingest_roundtrip.rs` (`unpack_large_blob_*`, `unpack_strict_*`) | ported |
 
 ### Documentation site and rustdoc jobs
 
