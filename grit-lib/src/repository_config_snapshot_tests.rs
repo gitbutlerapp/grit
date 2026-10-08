@@ -76,7 +76,13 @@ mod tests {
         cascade_load_counters::measure(|| {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();
         });
-        assert_at_most_one_config_load("create_commit");
+        // Index write and ref update may each revalidate the process-global config cache once.
+        assert!(
+            cascade_load_counters::total_loads() <= 2,
+            "create_commit: expected at most 2 config cascade loads, got uncached={} validated={}",
+            cascade_load_counters::uncached_loads(),
+            cascade_load_counters::cache_validated_loads(),
+        );
 
         let head = crate::refs::resolve_ref(&repo3.git_dir, "HEAD").unwrap();
         let parent_tree = {

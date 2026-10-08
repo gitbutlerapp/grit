@@ -109,10 +109,7 @@ pub(crate) type RepositoryConfigSnapshot =
 
 fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
     let meta = fs::metadata(git_dir.join("config")).ok()?;
-    Some((
-        meta.modified().ok()?,
-        meta.len(),
-    ))
+    Some((meta.modified().ok()?, meta.len()))
 }
 
 pub(crate) fn ensure_shared_config_snapshot(
@@ -125,7 +122,10 @@ pub(crate) fn ensure_shared_config_snapshot(
     let disk_identity = git_dir.and_then(local_repo_config_identity);
     let stale = match guard.as_ref() {
         None => true,
-        Some((_, cached_identity)) => disk_identity != *cached_identity,
+        Some((_, cached_identity)) => match (cached_identity, disk_identity) {
+            (Some(cached), Some(disk)) => *cached != disk,
+            _ => false,
+        },
     };
     if stale {
         let config = if let Some(git_dir) = git_dir {
@@ -242,7 +242,8 @@ impl Repository {
     /// Return the merged configuration cascade for this repository.
     ///
     /// The snapshot is loaded lazily on first use and reused while the repository `config`
-    /// file's modification time and size are unchanged. Prefer [`Self::reload_config`] after
+    /// file's modification time and size are unchanged. If that file is rewritten on disk,
+    /// the next call reloads the cascade automatically. Prefer [`Self::reload_config`] after
     /// in-process config writes so related caches update immediately.
     ///
     /// # Errors
