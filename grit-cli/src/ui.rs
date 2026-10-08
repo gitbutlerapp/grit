@@ -12,6 +12,7 @@ use crate::context::{self, CommitSummary};
 
 /// Terminal width in columns for diffstat layout (`terminal_size`, then `COLUMNS`, then 80).
 #[must_use]
+#[allow(dead_code)]
 pub fn terminal_width_columns() -> usize {
     terminal_size::terminal_size()
         .map(|(w, _)| w.0 as usize)

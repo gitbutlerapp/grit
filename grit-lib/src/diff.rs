@@ -3719,6 +3719,7 @@ pub fn refresh_index_stat_content_verified(
 /// # Errors
 ///
 /// Propagates I/O errors from the directory-grouped worktree scan.
+#[allow(clippy::too_many_arguments)]
 pub fn refresh_index_stat_content_verified_with_rules(
     odb: &Odb,
     git_dir: &Path,
@@ -4067,6 +4068,7 @@ fn read_regular_worktree_blob_bytes(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn worktree_blob_bytes(
     odb: &Odb,
     path: &Path,
@@ -4147,6 +4149,7 @@ fn worktree_file_oid(
 }
 
 /// Hash normalized worktree bytes for a path (does not write to the object database).
+#[allow(clippy::too_many_arguments)]
 pub fn hash_worktree_file(
     odb: &Odb,
     path: &Path,
@@ -4171,6 +4174,7 @@ pub fn hash_worktree_file(
 }
 
 /// Read, normalize (CRLF/attributes), and store a worktree blob once.
+#[allow(clippy::too_many_arguments)]
 pub fn materialize_worktree_blob(
     odb: &Odb,
     path: &Path,

@@ -213,7 +213,7 @@ pub(crate) fn collect_refresh_hash_work_parallel(
     Ok(rows.into_iter().flatten().collect())
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 /// Hash refresh candidates in parallel; returns `(entry_index, action)` pairs in input order.
 ///
 /// # Errors

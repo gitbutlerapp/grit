@@ -9,7 +9,6 @@ use anyhow::{bail, Context, Result};
 use grit_lib::check_ref_format::validate_branch_short_name;
 
 use crate::ref_name_messages::branch_short_name_error_message;
-use grit_lib::diff::DiffStatus;
 use grit_lib::porcelain::checkout::checkout_tree_changes;
 use grit_lib::porcelain::worktree_guard::{ensure_no_untracked_overwrite, prepare_tree_switch};
 use grit_lib::refs;

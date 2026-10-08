@@ -4,7 +4,6 @@
 //! nofollow for in-tree `.mailmap`, and case-insensitive email/name matching with
 //! per-email buckets (simple remap vs name-specific entries).
 
-use crate::config::ConfigSet;
 use crate::error::Error as GustError;
 use crate::objects::ObjectKind;
 use crate::repo::Repository;

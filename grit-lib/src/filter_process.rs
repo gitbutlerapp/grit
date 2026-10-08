@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout};
 use std::sync::{Arc, Mutex};
 
 use crate::command_runner::{
@@ -140,6 +140,7 @@ impl FilterProcessState {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn command_runner(&self) -> &Arc<dyn CommandRunner> {
         &self.command_runner
     }

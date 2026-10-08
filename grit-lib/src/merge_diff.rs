@@ -591,6 +591,7 @@ pub fn blob_text_for_diff_with_oid(
 ///
 /// When a [`crate::repo::Repository`] handle is available, checkout uses the same smudge path
 /// with destination-index attribute loading (see `WorktreeRules::from_checkout_prospective_index`).
+#[allow(clippy::too_many_arguments)]
 pub fn convert_blob_to_worktree_for_path(
     git_dir: &Path,
     work_tree: &Path,
