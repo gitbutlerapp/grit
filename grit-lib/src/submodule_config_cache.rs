@@ -260,16 +260,15 @@ impl SubmoduleConfigCache {
             ConfigScope::Local,
         );
         if let Some(line) = bad_line {
-            eprintln!(
-                "{}",
-                gitmodules_config_error(
+            repo.warn(crate::diagnostics::Warning::GitmodulesBadConfig {
+                message: gitmodules_config_error(
                     repo,
                     treeish_for_blob_spec,
                     gitmodules_blob,
                     line,
                     "bad config",
-                )
-            );
+                ),
+            });
         }
 
         let mut by_name: HashMap<String, SubmoduleBuild> = HashMap::new();
@@ -279,7 +278,9 @@ impl SubmoduleConfigCache {
                 continue;
             };
             if !check_submodule_name_ok(&name) {
-                eprintln!("warning: ignoring suspicious submodule name: {name}");
+                repo.warn(crate::diagnostics::Warning::SuspiciousSubmoduleName {
+                    name: name.clone(),
+                });
                 continue;
             }
             let entry = by_name
@@ -298,15 +299,17 @@ impl SubmoduleConfigCache {
                         ));
                     };
                     if crate::gitmodules::looks_like_command_line_option(value) {
-                        eprintln!(
-                            "warning: ignoring '{}' which may be interpreted as a command-line option: {value}",
-                            ent.key
+                        repo.warn(
+                            crate::diagnostics::Warning::SubmoduleConfigLooksLikeOption {
+                                key: ent.key.clone(),
+                                value: value.to_string(),
+                            },
                         );
                         continue;
                     }
                     let overwrite = gitmodules_blob.is_zero();
                     if entry.path.is_some() && !overwrite {
-                        warn_multiple_config(treeish_for_warning, &entry.name, "path");
+                        warn_multiple_config(repo, treeish_for_warning, &entry.name, "path");
                     } else {
                         if let Some(old) = &entry.path {
                             self.path_index_remove(gitmodules_blob, old);
@@ -326,15 +329,17 @@ impl SubmoduleConfigCache {
                         ));
                     };
                     if crate::gitmodules::looks_like_command_line_option(value) {
-                        eprintln!(
-                            "warning: ignoring '{}' which may be interpreted as a command-line option: {value}",
-                            ent.key
+                        repo.warn(
+                            crate::diagnostics::Warning::SubmoduleConfigLooksLikeOption {
+                                key: ent.key.clone(),
+                                value: value.to_string(),
+                            },
                         );
                         continue;
                     }
                     let overwrite = gitmodules_blob.is_zero();
                     if entry.url.is_some() && !overwrite {
-                        warn_multiple_config(treeish_for_warning, &entry.name, "url");
+                        warn_multiple_config(repo, treeish_for_warning, &entry.name, "url");
                     } else {
                         entry.url = Some(value.to_string());
                     }
@@ -346,6 +351,7 @@ impl SubmoduleConfigCache {
                     let overwrite = gitmodules_blob.is_zero();
                     if entry.fetch_recurse != FetchRecurse::None && !overwrite {
                         warn_multiple_config(
+                            repo,
                             treeish_for_warning,
                             &entry.name,
                             "fetchrecursesubmodules",
@@ -486,14 +492,15 @@ fn norm_path_key(path: &str) -> String {
     path.replace('\\', "/")
 }
 
-fn warn_multiple_config(treeish: Option<ObjectId>, name: &str, option: &str) {
+fn warn_multiple_config(repo: &Repository, treeish: Option<ObjectId>, name: &str, option: &str) {
     let commit_string = treeish
         .map(|o| o.to_hex())
         .unwrap_or_else(|| "WORKTREE".to_string());
-    eprintln!(
-        "warning: {commit_string}:.gitmodules, multiple configurations found for \
-'submodule.{name}.{option}'. Skipping second one!"
-    );
+    repo.warn(crate::diagnostics::Warning::SubmoduleMultipleConfigs {
+        commit: commit_string,
+        name: name.to_owned(),
+        option: option.to_owned(),
+    });
 }
 
 fn gitmodules_config_error(

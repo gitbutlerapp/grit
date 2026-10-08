@@ -6,36 +6,10 @@ use std::sync::{Arc, Mutex};
 use crate::bloom::{
     bloom_filter_contains, bloom_keyvec_for_path, BloomBuildOutcome, BloomFilterSettings,
 };
+use crate::diagnostics::{self, DiagnosticSink, DiagnosticsHandle, NullDiagnostics};
 use crate::error::Error;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::{hash_algo_for_objects_dir, Odb};
-
-/// Track which commit-graph layers have already emitted the "disabling Bloom
-/// filters ... due to incompatible settings" warning this process, so it is
-/// printed at most once per layer (matching Git, which loads the chain once).
-fn warn_once_for_disabled_bloom_layer(id: &str) -> bool {
-    use std::collections::HashSet;
-    use std::sync::OnceLock;
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let set = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    match set.lock() {
-        Ok(mut guard) => guard.insert(id.to_string()),
-        Err(_) => true,
-    }
-}
-
-/// Emit the "base graphs chunk is too small" warning at most once per layer id
-/// (grit re-reads the chain several times within one command; Git loads it once).
-fn warn_once_for_base_chunk_too_small(id: &str) -> bool {
-    use std::collections::HashSet;
-    use std::sync::OnceLock;
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let set = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    match set.lock() {
-        Ok(mut guard) => guard.insert(id.to_string()),
-        Err(_) => true,
-    }
-}
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
 const GRAPH_VERSION: u8 = 1;
@@ -105,6 +79,15 @@ fn commit_graph_chain_hash_is_valid(h: &str, algo: HashAlgo) -> bool {
 impl CommitGraphLayer {
     /// Parse a commit-graph layer; fails if generation overflow chunk is inconsistent with GDA2.
     pub fn try_parse(path: PathBuf, raw: Vec<u8>) -> Result<Self, Error> {
+        Self::try_parse_with_diagnostics(path, raw, &NullDiagnostics)
+    }
+
+    /// Parse a commit-graph layer, emitting non-fatal warnings through `diagnostics`.
+    pub fn try_parse_with_diagnostics(
+        path: PathBuf,
+        raw: Vec<u8>,
+        diagnostics: &dyn diagnostics::DiagnosticSink,
+    ) -> Result<Self, Error> {
         if raw.len() < 28 {
             return Err(Error::CorruptObject(
                 "commit-graph file too small".to_owned(),
@@ -310,10 +293,10 @@ impl CommitGraphLayer {
         let mut chunk_bloom_data = None;
         if let (Some(_bidx), Some((bdat_off, bdat_len))) = (bloom_idx_off, bloom_data_range) {
             if bdat_len < BLOOM_HEADER {
-                eprintln!(
-                    "warning: ignoring too-small changed-path chunk ({} < {}) in commit-graph file",
-                    bdat_len, BLOOM_HEADER
-                );
+                diagnostics.warn(diagnostics::Warning::CommitGraphChangedPathChunkTooSmall {
+                    actual: bdat_len,
+                    minimum: BLOOM_HEADER,
+                });
             } else if bdat_off + bdat_len <= body.len() {
                 let hdr = &body[bdat_off..bdat_off + BLOOM_HEADER];
                 let hash_version: [u8; 4] = hdr[0..4]
@@ -337,7 +320,7 @@ impl CommitGraphLayer {
 
         let bloom_indexes_ok = if let (Some(bidx), Some(bsize)) = (bloom_idx_off, bidx_len) {
             if bsize / 4 != num_commits as usize || bidx + bsize > body.len() {
-                eprintln!("warning: commit-graph changed-path index chunk is too small");
+                diagnostics.warn(diagnostics::Warning::CommitGraphChangedPathIndexTooSmall);
                 false
             } else {
                 true
@@ -449,7 +432,11 @@ impl CommitGraphLayer {
             .unwrap_or_else(|| "commit-graph".to_string())
     }
 
-    fn bloom_filter_slice(&self, lex_index: u32) -> Option<&[u8]> {
+    fn bloom_filter_slice(
+        &self,
+        lex_index: u32,
+        diagnostics: &dyn diagnostics::DiagnosticSink,
+    ) -> Option<&[u8]> {
         let _settings = self.bloom_settings.as_ref()?;
         let bidx_base = self.chunk_bloom_indexes?;
         let (bdat_off, bdat_total) = self.chunk_bloom_data?;
@@ -480,29 +467,36 @@ impl CommitGraphLayer {
         // back) when it fails.
         let max_payload = payload_len;
         if end_rel > max_payload {
-            eprintln!(
-                "warning: ignoring out-of-range offset ({end_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
-                lex_index,
-                graph_warn,
-                bdat_total = bdat_total
+            diagnostics.warn(
+                diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange {
+                    offset: end_rel,
+                    position: lex_index as usize,
+                    graph: graph_warn.clone(),
+                    chunk_size: bdat_total,
+                },
             );
             return None;
         }
         if start_rel > max_payload {
-            eprintln!(
-                "warning: ignoring out-of-range offset ({start_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
-                lex_index.saturating_sub(1),
-                graph_warn,
-                bdat_total = bdat_total
+            diagnostics.warn(
+                diagnostics::Warning::CommitGraphChangedPathOffsetOutOfRange {
+                    offset: start_rel,
+                    position: lex_index.saturating_sub(1) as usize,
+                    graph: graph_warn.clone(),
+                    chunk_size: bdat_total,
+                },
             );
             return None;
         }
         if end_rel < start_rel {
-            eprintln!(
-                "warning: ignoring decreasing changed-path index offsets ({start_rel} > {end_rel}) for positions {} and {} of {}",
-                lex_index.saturating_sub(1),
-                lex_index,
-                graph_warn
+            diagnostics.warn(
+                diagnostics::Warning::CommitGraphChangedPathOffsetsDecreasing {
+                    start: start_rel,
+                    end: end_rel,
+                    position_start: lex_index.saturating_sub(1) as usize,
+                    position_end: lex_index as usize,
+                    graph: graph_warn,
+                },
             );
             return None;
         }
@@ -559,9 +553,10 @@ impl BloomWalkStats {
 pub type BloomWalkStatsHandle = Arc<Mutex<BloomWalkStats>>;
 
 /// Loaded commit-graph chain (newest layer first, matching `commit-graph-chain` file order).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CommitGraphChain {
     layers: Vec<CommitGraphLayer>,
+    diagnostics: DiagnosticsHandle,
 }
 
 impl CommitGraphChain {
@@ -649,6 +644,7 @@ impl CommitGraphChain {
         }
         Some(Self {
             layers: self.layers[start..end].to_vec(),
+            diagnostics: Arc::clone(&self.diagnostics),
         })
     }
 
@@ -672,6 +668,14 @@ impl CommitGraphChain {
     /// Returns `Ok(None)` when no commit-graph exists. Corrupt graphs (including invalid GDO2)
     /// return [`Err`].
     pub fn try_load(objects_dir: &Path) -> Result<Option<Self>, Error> {
+        Self::try_load_with_diagnostics(objects_dir, Arc::new(NullDiagnostics))
+    }
+
+    /// Like [`Self::try_load`] but delivers warnings through `diagnostics`.
+    pub fn try_load_with_diagnostics(
+        objects_dir: &Path,
+        diagnostics: DiagnosticsHandle,
+    ) -> Result<Option<Self>, Error> {
         let info = objects_dir.join("info");
         let chain_path = info.join("commit-graphs").join("commit-graph-chain");
         if chain_path.is_file() {
@@ -685,7 +689,11 @@ impl CommitGraphChain {
                 }
                 let graph_path = info.join("commit-graphs").join(format!("graph-{h}.graph"));
                 let raw = std::fs::read(&graph_path).map_err(Error::from)?;
-                let layer = CommitGraphLayer::try_parse(graph_path, raw)?;
+                let layer = CommitGraphLayer::try_parse_with_diagnostics(
+                    graph_path,
+                    raw,
+                    diagnostics.as_ref(),
+                )?;
                 // `add_graph_to_chain`: a layer that declares N base graphs must
                 // carry a BASE chunk large enough to hold N hashes. If it is too
                 // small, Git warns and refuses to add this layer (and anything
@@ -694,9 +702,12 @@ impl CommitGraphChain {
                 // already loaded below this one.
                 let n = layers.len();
                 if n > 0 && layer.base_chunk_size / layer.hash_len < n {
-                    if warn_once_for_base_chunk_too_small(&layer.layer_display_id()) {
-                        eprintln!("warning: commit-graph base graphs chunk is too small");
-                    }
+                    diagnostics
+                        .as_ref()
+                        .warn(diagnostics::Warning::CommitGraphChunkTooSmall {
+                            layer: layer.layer_display_id(),
+                            chunk: "base graphs".into(),
+                        });
                     break;
                 }
                 layers.push(layer);
@@ -708,16 +719,24 @@ impl CommitGraphChain {
             // is the base graph, the last line is the tip). Grit's internal
             // representation is tip-first, so reverse after reading.
             layers.reverse();
-            let mut chain = Self { layers };
+            let mut chain = Self {
+                layers,
+                diagnostics: Arc::clone(&diagnostics),
+            };
             chain.validate_bloom_compatibility();
             return Ok(Some(chain));
         }
         let single = info.join("commit-graph");
         if single.is_file() {
             let raw = std::fs::read(&single).map_err(Error::from)?;
-            let layer = CommitGraphLayer::try_parse(single.clone(), raw)?;
+            let layer = CommitGraphLayer::try_parse_with_diagnostics(
+                single.clone(),
+                raw,
+                diagnostics.as_ref(),
+            )?;
             let mut chain = Self {
                 layers: vec![layer],
+                diagnostics: Arc::clone(&diagnostics),
             };
             chain.validate_bloom_compatibility();
             return Ok(Some(chain));
@@ -809,12 +828,20 @@ impl CommitGraphChain {
                 ))
             })?;
             let raw = std::fs::read(&graph_path).map_err(Error::from)?;
-            let layer = CommitGraphLayer::try_parse(graph_path, raw)?;
+            let diagnostics = Arc::new(NullDiagnostics);
+            let layer = CommitGraphLayer::try_parse_with_diagnostics(
+                graph_path,
+                raw,
+                diagnostics.as_ref(),
+            )?;
             let n = layers.len();
             if n > 0 && layer.base_chunk_size / layer.hash_len < n {
-                if warn_once_for_base_chunk_too_small(&layer.layer_display_id()) {
-                    eprintln!("warning: commit-graph base graphs chunk is too small");
-                }
+                diagnostics
+                    .as_ref()
+                    .warn(diagnostics::Warning::CommitGraphChunkTooSmall {
+                        layer: layer.layer_display_id(),
+                        chunk: "base graphs".into(),
+                    });
                 break;
             }
             layers.push(layer);
@@ -823,7 +850,11 @@ impl CommitGraphChain {
             return Ok(None);
         }
         layers.reverse();
-        let mut chain = Self { layers };
+        let diagnostics = Arc::new(NullDiagnostics);
+        let mut chain = Self {
+            layers,
+            diagnostics,
+        };
         chain.validate_bloom_compatibility();
         Ok(Some(chain))
     }
@@ -852,11 +883,8 @@ impl CommitGraphChain {
                         // most once per layer. Grit re-reads the chain from disk several
                         // times within a single command (settings probe, commit set,
                         // filter reuse), so dedupe the warning per layer id to match.
-                        if warn_once_for_disabled_bloom_layer(&id) {
-                            eprintln!(
-                                "warning: disabling Bloom filters for commit-graph layer '{id}' due to incompatible settings"
-                            );
-                        }
+                        self.diagnostics
+                            .warn(diagnostics::Warning::CommitGraphBloomDisabled { layer: id });
                         layer.disable_bloom();
                     }
                 }
@@ -889,7 +917,7 @@ impl CommitGraphChain {
         // `--max-new-filters` budget) and must be (re)computed. Empty-diff
         // filters are stored with length 1 (a single zero byte) and so are
         // reused. Truncated-large filters are length 1 (0xff) and reused too.
-        match layer.bloom_filter_slice(lex) {
+        match layer.bloom_filter_slice(lex, self.diagnostics.as_ref()) {
             Some(s) if !s.is_empty() => Some(s.to_vec()),
             _ => None,
         }
@@ -915,7 +943,7 @@ impl CommitGraphChain {
         {
             return None;
         }
-        match layer.bloom_filter_slice(lex) {
+        match layer.bloom_filter_slice(lex, self.diagnostics.as_ref()) {
             Some(s) if !s.is_empty() => Some(s.to_vec()),
             _ => None,
         }
@@ -1023,7 +1051,7 @@ impl CommitGraphChain {
         // first-parent comparison only (`nth_parent == 0`). The caller is responsible for
         // restricting the precheck to the first parent, so merge commits are handled here
         // exactly like single-parent commits.
-        let filter = match layer.bloom_filter_slice(lex) {
+        let filter = match layer.bloom_filter_slice(lex, self.diagnostics.as_ref()) {
             Some(s) => s,
             None => return Ok(BloomPrecheck::FilterNotPresent),
         };
@@ -1235,7 +1263,7 @@ pub fn dump_bloom_filters(path: &Path) -> Option<Vec<String>> {
     let layer = CommitGraphLayer::parse(path.to_path_buf(), raw)?;
     let mut out = Vec::new();
     for i in 0..layer.num_commits {
-        let slice = layer.bloom_filter_slice(i).unwrap_or(&[]);
+        let slice = layer.bloom_filter_slice(i, &NullDiagnostics).unwrap_or(&[]);
         if slice.is_empty() {
             out.push(String::new());
         } else {

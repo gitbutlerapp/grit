@@ -999,7 +999,12 @@ pub fn rev_list(
             && crate::pathspec::pathspecs_allow_bloom(&options.paths);
         let read_changed = read_paths && options.commit_graph_read_changed_paths;
         let chain = if use_bloom {
-            CommitGraphChain::load(&repo.git_dir.join("objects"))
+            CommitGraphChain::try_load_with_diagnostics(
+                &repo.git_dir.join("objects"),
+                repo.diagnostics(),
+            )
+            .ok()
+            .flatten()
         } else {
             None
         };
@@ -5187,7 +5192,12 @@ impl<'r> CommitGraph<'r> {
         let shallow_boundaries = load_shallow_boundaries(&repo.git_dir);
         let graft_parents = crate::rev_parse::load_graft_parents(&repo.git_dir);
         let graph_chain = if use_commit_graph {
-            CommitGraphChain::load(&repo.git_dir.join("objects"))
+            CommitGraphChain::try_load_with_diagnostics(
+                &repo.git_dir.join("objects"),
+                repo.diagnostics(),
+            )
+            .ok()
+            .flatten()
         } else {
             None
         };

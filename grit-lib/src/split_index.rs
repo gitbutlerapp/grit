@@ -514,21 +514,26 @@ impl WriteSplitIndexRequest {
     ///
     /// When `explicit` is `None`, an index that was already split (`split_link` set after load)
     /// stays split until `--no-split-index` (Git keeps `istate->split_index` across commands).
-    pub fn want_write_split(self, cfg: &ConfigSet, index: &Index) -> bool {
+    pub fn want_write_split(
+        self,
+        cfg: &ConfigSet,
+        index: &Index,
+        diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
+    ) -> bool {
         match self.explicit {
             Some(false) => {
                 if matches!(split_index_config(cfg), SplitIndexConfig::Enabled) {
-                    eprintln!(
-                        "warning: core.splitIndex is set to true; remove or change it, if you really want to disable split index"
-                    );
+                    if let Some(d) = diagnostics {
+                        d.warn(crate::diagnostics::Warning::SplitIndexDisabledWhileConfigEnabled);
+                    }
                 }
                 false
             }
             Some(true) => {
                 if matches!(split_index_config(cfg), SplitIndexConfig::Disabled) {
-                    eprintln!(
-                        "warning: core.splitIndex is set to false; remove or change it, if you really want to enable split index"
-                    );
+                    if let Some(d) = diagnostics {
+                        d.warn(crate::diagnostics::Warning::SplitIndexEnabledWhileConfigDisabled);
+                    }
                 }
                 true
             }
@@ -577,6 +582,7 @@ pub(crate) fn write_index_file_split(
     cfg: &ConfigSet,
     request: WriteSplitIndexRequest,
     skip_hash: bool,
+    diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
 ) -> Result<()> {
     // Mirror upstream `write_locked_index`: under GIT_TEST_CHECK_CACHE_TREE, verify the cache-tree
     // against the index before persisting. A duplicate-entry tree (t4058) produces a cache-tree
@@ -586,7 +592,7 @@ pub(crate) fn write_index_file_split(
         crate::write_tree::verify_cache_tree(index)?;
     }
 
-    let want_split = request.want_write_split(cfg, index);
+    let want_split = request.want_write_split(cfg, index, diagnostics);
 
     let shared_repo = parse_shared_repository_perm(cfg.get("core.sharedRepository").as_deref());
 

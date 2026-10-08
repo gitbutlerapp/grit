@@ -9,6 +9,8 @@ use grit_lib::ident_resolve::{
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
+
+use crate::diagnostics;
 use time::OffsetDateTime;
 
 /// A resolved "target" branch (the trunk `grit` measures the current branch against).
@@ -32,7 +34,16 @@ pub struct CommitSummary {
 
 /// Discover the repository containing the current directory.
 pub fn discover() -> Result<Repository> {
-    Repository::discover(None).context("not in a repository")
+    let (options, _sink) = diagnostics::repository_options(false);
+    Repository::discover_with_options(None, options).context("not in a repository")
+}
+
+/// Like [`discover`], but returns the diagnostic sink used for warnings.
+pub fn discover_with_warnings(
+) -> Result<(Repository, std::sync::Arc<diagnostics::CliDiagnosticSink>)> {
+    let (options, sink) = diagnostics::repository_options(false);
+    let repo = Repository::discover_with_options(None, options).context("not in a repository")?;
+    Ok((repo, sink))
 }
 
 /// Find the branch `grit` should measure the current branch against, trying

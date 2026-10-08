@@ -4,6 +4,7 @@
 //! `path.c`.
 
 use crate::config::{parse_bool, ConfigSet};
+use crate::diagnostics::{self, DiagnosticSink};
 #[cfg(unix)]
 use std::fs;
 use std::path::Path;
@@ -24,6 +25,15 @@ pub const PERM_EVERYBODY: i32 = 0o664;
 ///
 /// Returns an error when an octal mode is given but the owner lacks read+write (Git `die`).
 pub fn git_config_perm(var: &str, value: &str) -> Result<i32, String> {
+    git_config_perm_with_diagnostics(var, value, None)
+}
+
+/// Like [`git_config_perm`] but may emit [`diagnostics::Warning::BadBooleanConfig`].
+pub fn git_config_perm_with_diagnostics(
+    var: &str,
+    value: &str,
+    diagnostics: Option<&dyn DiagnosticSink>,
+) -> Result<i32, String> {
     let value = value.trim();
     if value.eq_ignore_ascii_case("umask") {
         return Ok(PERM_UMASK);
@@ -63,7 +73,12 @@ pub fn git_config_perm(var: &str, value: &str) -> Result<i32, String> {
         Ok(true) => Ok(PERM_GROUP),
         Ok(false) => Ok(PERM_UMASK),
         Err(_) => {
-            eprintln!("warning: bad boolean config value '{value}' for option '{var}'");
+            if let Some(d) = diagnostics {
+                d.warn(diagnostics::Warning::BadBooleanConfig {
+                    key: var.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
             Ok(PERM_UMASK)
         }
     }

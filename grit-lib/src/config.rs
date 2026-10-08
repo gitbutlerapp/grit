@@ -199,7 +199,7 @@ pub struct IncludeContext {
 }
 
 /// Options controlling how [`ConfigSet::load_with_options`] merges files and includes.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LoadConfigOptions {
     /// Load `/etc/gitconfig` (unless `GIT_CONFIG_NOSYSTEM` is enabled).
     pub include_system: bool,
@@ -208,6 +208,8 @@ pub struct LoadConfigOptions {
     /// Expand includes for synthetic command-line config built from `GIT_CONFIG_PARAMETERS`.
     pub command_includes: bool,
     pub include_ctx: IncludeContext,
+    /// Optional sink for non-fatal config load warnings.
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
 }
 
 impl Default for LoadConfigOptions {
@@ -217,6 +219,7 @@ impl Default for LoadConfigOptions {
             process_includes: true,
             command_includes: true,
             include_ctx: IncludeContext::default(),
+            diagnostics: None,
         }
     }
 }
@@ -2060,12 +2063,26 @@ impl ConfigSet {
         if let Some(gd) = git_dir {
             let common_dir = crate::repo::common_git_dir_for_config(gd);
             let local_path = common_dir.join("config");
-            match ConfigFile::from_path(&local_path, ConfigScope::Local) {
-                Ok(Some(f)) => {
-                    Self::merge_with_includes_collect(&mut set, &f, proc, 0, &ctx, included_files)?
+            if let Some(msg) = crate::repo::early_config_ignore_repo_reason(&common_dir) {
+                if let Some(ref diag) = opts.diagnostics {
+                    diag.warn(crate::diagnostics::Warning::IgnoredGitDir {
+                        path: gd.to_path_buf(),
+                        reason: msg,
+                    });
                 }
-                Ok(None) => {}
-                Err(e) => return Err(e),
+            } else {
+                match ConfigFile::from_path(&local_path, ConfigScope::Local) {
+                    Ok(Some(f)) => Self::merge_with_includes_collect(
+                        &mut set,
+                        &f,
+                        proc,
+                        0,
+                        &ctx,
+                        included_files,
+                    )?,
+                    Ok(None) => {}
+                    Err(e) => return Err(e),
+                }
             }
 
             // Worktree config — Git only reads `config.worktree` when
@@ -2177,10 +2194,10 @@ impl ConfigSet {
             let common_dir = crate::repo::common_git_dir_for_config(gd);
             // Local (commondir) — skip when format is newer than supported (t1309).
             let local_path = common_dir.join("config");
-            if let Some(msg) = crate::repo::early_config_ignore_repo_reason(&common_dir) {
-                eprintln!("warning: ignoring git dir '{}': {}", gd.display(), msg);
-            } else if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
-                set.merge_file_with_includes(&f, true, &ctx)?;
+            if crate::repo::early_config_ignore_repo_reason(&common_dir).is_none() {
+                if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
+                    set.merge_file_with_includes(&f, true, &ctx)?;
+                }
             }
 
             // Worktree-specific config (when enabled for this repo).

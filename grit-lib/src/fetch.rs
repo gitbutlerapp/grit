@@ -1130,6 +1130,8 @@ pub fn fetch_remote(
     // `GRIT_NET_DEBUG=1` shows where time goes (see the "matched"/"done" lines).
     let t_begin = std::time::Instant::now();
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "fetch_remote: begin — protocol v{}, {} refspec(s), tags={:?}, depth={:?}",
         conn.protocol_version(),
         opts.refspecs.len(),
@@ -1172,6 +1174,8 @@ pub fn fetch_remote(
         (remote_refs, default_branch, None, advertised_peel)
     };
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "fetch_remote: remote advertised {} ref(s){}",
         remote_refs.len(),
         v2_caps
@@ -1273,6 +1277,8 @@ pub fn fetch_remote(
     let mut pack_oids: HashSet<ObjectId> = HashSet::new();
 
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "fetch_remote: {} matched ref(s), want {} object(s){} [+{:?} since begin]",
         matched.len(),
         wants.len(),
@@ -1285,7 +1291,11 @@ pub fn fetch_remote(
     );
 
     if !wants.is_empty() && !opts.dry_run {
-        net_trace!("fetch_remote: negotiating + fetching pack…");
+        net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
+            "fetch_remote: negotiating + fetching pack…"
+        );
         let (pack, su) = if let Some(caps) = v2_caps.as_ref() {
             let deepen = V2DeepenArgs::from_opts(opts, &local_shallow);
             negotiate_pack_v2(
@@ -1302,6 +1312,8 @@ pub fn fetch_remote(
         };
         shallow_update = su;
         net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
             "fetch_remote: received pack ({} bytes), unpacking…",
             pack.len()
         );
@@ -1335,7 +1347,12 @@ pub fn fetch_remote(
     if opts.tags == crate::transfer::TagMode::Following {
         let t = std::time::Instant::now();
         retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
-        net_trace!("fetch_remote: retain_following_tags {:?}", t.elapsed());
+        net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
+            "fetch_remote: retain_following_tags {:?}",
+            t.elapsed()
+        );
     }
 
     // 5. Classify + apply ref updates (ancestry via the now-populated local repo).
@@ -1438,6 +1455,8 @@ pub fn fetch_remote(
     }
 
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "fetch_remote: apply {:?} — repo_open {:?}, prune {:?}, packed_load {:?}, \
          resolve {:?}, classify {:?} ({} ancestry-checked), write {:?} ({} written)",
         t_apply.elapsed(),
@@ -1452,6 +1471,8 @@ pub fn fetch_remote(
     );
 
     net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
         "fetch_remote: done — {} ref update(s){} [+{:?} total]",
         updates.len(),
         default_branch

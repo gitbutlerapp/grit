@@ -509,7 +509,9 @@ fn dump_cache_tree_pair(
 /// If the environment variable is unset, returns `None`.
 /// If it is set but invalid (non-numeric or out of range 2..=4), prints a
 /// warning to stderr and returns the default version.
-pub fn get_index_format_from_env() -> Option<u32> {
+pub fn get_index_format_from_env(
+    diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
+) -> Option<u32> {
     let val = std::env::var("GIT_INDEX_VERSION").ok()?;
     if val.is_empty() {
         return None;
@@ -517,10 +519,11 @@ pub fn get_index_format_from_env() -> Option<u32> {
     match val.parse::<u32>() {
         Ok(v) if (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(&v) => Some(v),
         _ => {
-            eprintln!(
-                "warning: GIT_INDEX_VERSION set, but the value is invalid.\n\
-                 Using version {INDEX_ENV_INVALID_FALLBACK}"
-            );
+            if let Some(d) = diagnostics {
+                d.warn(crate::diagnostics::Warning::IndexVersionEnvInvalid {
+                    fallback: INDEX_ENV_INVALID_FALLBACK,
+                });
+            }
             Some(INDEX_ENV_INVALID_FALLBACK)
         }
     }
@@ -603,7 +606,7 @@ impl Index {
     /// Respects `GIT_INDEX_VERSION` if set, otherwise defaults to version 2.
     #[must_use]
     pub fn new() -> Self {
-        let version = get_index_format_from_env().unwrap_or(2);
+        let version = get_index_format_from_env(None).unwrap_or(2);
         Self {
             version,
             entries: Vec::new(),
@@ -657,7 +660,16 @@ impl Index {
         config_index_version: Option<&str>,
         config_many_files: Option<&str>,
     ) -> Self {
-        if let Some(v) = get_index_format_from_env() {
+        Self::new_with_config_and_diagnostics(config_index_version, config_many_files, None)
+    }
+
+    /// Like [`Self::new_with_config`] with an optional diagnostic sink for invalid settings.
+    pub fn new_with_config_and_diagnostics(
+        config_index_version: Option<&str>,
+        config_many_files: Option<&str>,
+        diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
+    ) -> Self {
+        if let Some(v) = get_index_format_from_env(diagnostics) {
             return Self {
                 version: v,
                 entries: Vec::new(),
@@ -687,10 +699,11 @@ impl Index {
                         version = v;
                     }
                     _ => {
-                        eprintln!(
-                            "warning: index.version set, but the value is invalid.\n\
-                             Using version {INDEX_CONFIG_INVALID_FALLBACK}"
-                        );
+                        if let Some(d) = diagnostics {
+                            d.warn(crate::diagnostics::Warning::IndexVersionConfigInvalid {
+                                fallback: INDEX_CONFIG_INVALID_FALLBACK,
+                            });
+                        }
                         version = INDEX_CONFIG_INVALID_FALLBACK;
                     }
                 }
@@ -721,7 +734,15 @@ impl Index {
     /// `index.version` from `config`.
     #[must_use]
     pub fn new_from_config(config: &ConfigSet) -> Self {
-        if let Some(v) = get_index_format_from_env() {
+        Self::new_from_config_with_diagnostics(config, None)
+    }
+
+    /// Like [`Self::new_from_config`] with an optional diagnostic sink.
+    pub fn new_from_config_with_diagnostics(
+        config: &ConfigSet,
+        diagnostics: Option<&dyn crate::diagnostics::DiagnosticSink>,
+    ) -> Self {
+        if let Some(v) = get_index_format_from_env(diagnostics) {
             return Self {
                 version: v,
                 entries: Vec::new(),
@@ -754,10 +775,11 @@ impl Index {
                         version = v;
                     }
                     _ => {
-                        eprintln!(
-                            "warning: index.version set, but the value is invalid.\n\
-                             Using version {INDEX_CONFIG_INVALID_FALLBACK}"
-                        );
+                        if let Some(d) = diagnostics {
+                            d.warn(crate::diagnostics::Warning::IndexVersionConfigInvalid {
+                                fallback: INDEX_CONFIG_INVALID_FALLBACK,
+                            });
+                        }
                         version = INDEX_CONFIG_INVALID_FALLBACK;
                     }
                 }

@@ -24,6 +24,9 @@ const BAR_WIDTH: usize = 40;
 /// Result of `grit show`.
 #[derive(Serialize)]
 pub struct ShowOutcome {
+    /// Non-fatal warnings emitted while resolving the object.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<crate::diagnostics::WarningRecord>,
     /// `commit` | `branch` | `tag` | `annotated_tag`.
     pub kind: String,
     /// Branch or tag name, when shown via a ref.
@@ -84,7 +87,7 @@ pub struct Person {
 }
 
 pub fn run(object: Option<String>) -> Result<ShowOutcome> {
-    let repo = context::discover()?;
+    let (repo, sink) = context::discover_with_warnings()?;
     let target = object.unwrap_or_else(|| "HEAD".to_owned());
 
     let (kind, ref_name, tag) = classify(&repo, &target)?;
@@ -113,6 +116,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
     let stat = diffstat(&diff_of_commit(&repo, &commit_oid)?);
 
     Ok(ShowOutcome {
+        warnings: sink.warnings(),
         kind,
         ref_name,
         tag,

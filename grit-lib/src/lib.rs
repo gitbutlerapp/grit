@@ -43,6 +43,9 @@ pub mod progress;
 /// The types most callers need, re-exported for `use grit_lib::prelude::*;`.
 pub mod prelude {
     pub use crate::config::ConfigSet;
+    pub use crate::diagnostics::{
+        CollectingDiagnostics, DiagnosticSink, NullDiagnostics, Trace, Warning,
+    };
     pub use crate::error::{Error, Result};
     pub use crate::index::Index;
     pub use crate::objects::{Object, ObjectId, ObjectKind};
@@ -126,6 +129,7 @@ pub mod credentials;
 pub mod crlf;
 pub mod delta_encode;
 pub mod delta_islands;
+pub mod diagnostics;
 pub mod diff;
 pub mod diff_indent_heuristic;
 pub mod diff_moved;

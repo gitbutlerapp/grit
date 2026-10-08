@@ -24,7 +24,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+use crate::config::{ConfigFile, ConfigScope, ConfigSet, LoadConfigOptions};
+use crate::diagnostics::{self, DiagnosticsHandle, NullDiagnostics};
 use crate::error::{Error, Result};
 use crate::hooks::run_hook;
 use crate::index::Index;
@@ -38,6 +39,24 @@ use crate::state::resolve_head;
 use crate::worktree_cwd::cwd_relative_under_work_tree;
 
 const GIT_PREFIX_ENV: &str = "GIT_PREFIX";
+
+/// Options for [`Repository::open_with_options`] and [`Repository::discover_with_options`].
+#[derive(Clone)]
+pub struct RepositoryOptions {
+    /// Where non-fatal warnings and trace events are delivered.
+    pub diagnostics: DiagnosticsHandle,
+    /// When true, network operations may emit [`diagnostics::Trace::Network`] events.
+    pub network_trace: bool,
+}
+
+impl Default for RepositoryOptions {
+    fn default() -> Self {
+        Self {
+            diagnostics: Arc::new(NullDiagnostics),
+            network_trace: false,
+        }
+    }
+}
 
 /// Set `GIT_PREFIX` to the repository-relative path of the process cwd (POSIX, no trailing `/`).
 ///
@@ -76,7 +95,6 @@ fn read_sparse_checkout_patterns(git_dir: &Path) -> Vec<String> {
 }
 
 /// A handle to an open Git repository.
-#[derive(Debug)]
 pub struct Repository {
     /// Absolute path to the git directory (`.git/` or bare repo root).
     pub git_dir: PathBuf,
@@ -102,6 +120,8 @@ pub struct Repository {
     /// replaces the snapshot after in-process config writes so subsequent operations see updates
     /// without reopening the repository.
     config_snapshot: RepositoryConfigSnapshot,
+    diagnostics: DiagnosticsHandle,
+    network_trace: bool,
 }
 
 type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
@@ -116,6 +136,7 @@ fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
 pub(crate) fn ensure_shared_config_snapshot(
     state: &Mutex<Option<ConfigSnapshotEntry>>,
     git_dir: Option<&Path>,
+    diagnostics: Option<DiagnosticsHandle>,
 ) -> Result<Arc<ConfigSet>> {
     let mut guard = state
         .lock()
@@ -130,7 +151,16 @@ pub(crate) fn ensure_shared_config_snapshot(
     };
     if stale {
         let config = if let Some(git_dir) = git_dir {
-            Arc::new(ConfigSet::load(Some(git_dir), true)?)
+            let opts = LoadConfigOptions {
+                include_system: true,
+                include_ctx: crate::config::IncludeContext {
+                    git_dir: Some(git_dir.to_path_buf()),
+                    ..Default::default()
+                },
+                diagnostics,
+                ..Default::default()
+            };
+            Arc::new(ConfigSet::load_with_options(Some(git_dir), &opts)?)
         } else {
             Arc::new(ConfigSet::new())
         };
@@ -154,7 +184,11 @@ struct RepoCachedSettings {
 }
 
 impl Repository {
-    fn from_canonical_git_dir(git_dir: PathBuf, work_tree: Option<&Path>) -> Result<Self> {
+    fn from_canonical_git_dir(
+        git_dir: PathBuf,
+        work_tree: Option<&Path>,
+        options: &RepositoryOptions,
+    ) -> Result<Self> {
         // Check HEAD exists or is a symlink (linked worktrees have a symlink HEAD)
         let head_path = git_dir.join("HEAD");
         if !head_path.exists() && !head_path.is_symlink() {
@@ -213,7 +247,39 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             config_snapshot,
+            diagnostics: Arc::clone(&options.diagnostics),
+            network_trace: options.network_trace,
         })
+    }
+
+    /// Return the diagnostic sink installed on this repository.
+    #[must_use]
+    pub fn diagnostics(&self) -> DiagnosticsHandle {
+        Arc::clone(&self.diagnostics)
+    }
+
+    /// Replace the diagnostic sink (for embedders and the CLI).
+    pub fn set_diagnostics(&mut self, sink: DiagnosticsHandle) {
+        self.diagnostics = sink;
+    }
+
+    /// Whether network trace events should be delivered to the diagnostic sink.
+    #[must_use]
+    pub fn network_trace_enabled(&self) -> bool {
+        self.network_trace
+    }
+
+    /// Enable or disable network trace events on this handle.
+    pub fn set_network_trace(&mut self, enabled: bool) {
+        self.network_trace = enabled;
+    }
+
+    pub(crate) fn warn(&self, warning: diagnostics::Warning) {
+        self.diagnostics.warn(warning);
+    }
+
+    pub(crate) fn trace_network(&self, message: String) {
+        diagnostics::trace_network(&self.diagnostics, self.network_trace, message);
     }
 
     fn repo_cached_settings_from_config(cfg: &ConfigSet) -> RepoCachedSettings {
@@ -237,7 +303,11 @@ impl Repository {
     }
 
     fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
-        ensure_shared_config_snapshot(&self.config_snapshot, Some(&self.git_dir))
+        ensure_shared_config_snapshot(
+            &self.config_snapshot,
+            Some(&self.git_dir),
+            Some(self.diagnostics()),
+        )
     }
 
     /// Return the merged configuration cascade for this repository.
@@ -263,7 +333,19 @@ impl Repository {
     ///
     /// Propagates errors from [`ConfigSet::load`].
     pub fn reload_config(&self) -> Result<()> {
-        let config = Arc::new(ConfigSet::load(Some(&self.git_dir), true)?);
+        let load_opts = LoadConfigOptions {
+            include_system: true,
+            include_ctx: crate::config::IncludeContext {
+                git_dir: Some(self.git_dir.clone()),
+                ..Default::default()
+            },
+            diagnostics: Some(self.diagnostics()),
+            ..Default::default()
+        };
+        let config = Arc::new(ConfigSet::load_with_options(
+            Some(&self.git_dir),
+            &load_opts,
+        )?);
         self.install_config_snapshot(config);
         Ok(())
     }
@@ -297,13 +379,31 @@ impl Repository {
     /// Returns [`Error::NotARepository`] if `git_dir` does not look like a
     /// valid git directory (missing `objects/`, `HEAD`, etc.).
     pub fn open(git_dir: &Path, work_tree: Option<&Path>) -> Result<Self> {
+        Self::open_with_options(git_dir, work_tree, RepositoryOptions::default())
+    }
+
+    /// Open a repository with explicit discovery and diagnostic options.
+    pub fn open_with_options(
+        git_dir: &Path,
+        work_tree: Option<&Path>,
+        options: RepositoryOptions,
+    ) -> Result<Self> {
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
         validate_repository_format(&git_dir)?;
-        let cfg = Arc::new(ConfigSet::load(Some(&git_dir), true)?);
-        let repo = Self::from_canonical_git_dir(git_dir, work_tree)?;
+        let load_opts = LoadConfigOptions {
+            include_system: true,
+            include_ctx: crate::config::IncludeContext {
+                git_dir: Some(git_dir.clone()),
+                ..Default::default()
+            },
+            diagnostics: Some(Arc::clone(&options.diagnostics)),
+            ..Default::default()
+        };
+        let cfg = Arc::new(ConfigSet::load_with_options(Some(&git_dir), &load_opts)?);
+        let repo = Self::from_canonical_git_dir(git_dir, work_tree, &options)?;
         repo.install_config_snapshot(cfg);
         Ok(repo)
     }
@@ -316,10 +416,23 @@ impl Repository {
         git_dir: &Path,
         work_tree: Option<&Path>,
     ) -> Result<Self> {
+        Self::open_skipping_format_validation_with_options(
+            git_dir,
+            work_tree,
+            &RepositoryOptions::default(),
+        )
+    }
+
+    /// Like [`Self::open_skipping_format_validation`] with explicit options.
+    pub fn open_skipping_format_validation_with_options(
+        git_dir: &Path,
+        work_tree: Option<&Path>,
+        options: &RepositoryOptions,
+    ) -> Result<Self> {
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
-        Self::from_canonical_git_dir(git_dir, work_tree)
+        Self::from_canonical_git_dir(git_dir, work_tree, options)
     }
 
     /// Discover the repository starting from `start` (defaults to cwd if `None`).
@@ -331,6 +444,11 @@ impl Repository {
     ///
     /// Returns [`Error::NotARepository`] if no repository can be found.
     pub fn discover(start: Option<&Path>) -> Result<Self> {
+        Self::discover_with_options(start, RepositoryOptions::default())
+    }
+
+    /// Like [`Self::discover`] with explicit diagnostic and trace options.
+    pub fn discover_with_options(start: Option<&Path>, options: RepositoryOptions) -> Result<Self> {
         // GIT_DIR override
         if let Ok(dir) = env::var("GIT_DIR") {
             let cwd = env::current_dir()?;
@@ -357,7 +475,8 @@ impl Repository {
                 }
             }
             if work_tree.is_some() {
-                let mut repo = Self::open(&git_dir, work_tree.as_deref())?;
+                let mut repo =
+                    Self::open_with_options(&git_dir, work_tree.as_deref(), options.clone())?;
                 repo.explicit_git_dir = true;
                 repo.discovery_root = None;
                 repo.work_tree_from_env = false;
@@ -368,7 +487,7 @@ impl Repository {
             // `GIT_DIR` without `GIT_WORK_TREE`: honour `core.bare` / `core.worktree` like Git.
             let (is_bare, core_wt) = read_core_bare_and_worktree(&git_dir)?;
             if is_bare && core_wt.is_some() {
-                warn_core_bare_worktree_conflict(&git_dir);
+                warn_core_bare_worktree_conflict(&options.diagnostics, &git_dir);
             }
             let resolved_wt = if is_bare {
                 None
@@ -382,7 +501,8 @@ impl Repository {
                 // under `$PWD` (e.g. t5402-post-merge-hook).
                 Some(cwd.canonicalize().unwrap_or_else(|_| cwd.clone()))
             };
-            let mut repo = Self::open(&git_dir, resolved_wt.as_deref())?;
+            let mut repo =
+                Self::open_with_options(&git_dir, resolved_wt.as_deref(), options.clone())?;
             repo.explicit_git_dir = true;
             repo.discovery_root = None;
             repo.work_tree_from_env = false;
@@ -445,15 +565,29 @@ impl Repository {
 
         loop {
             let current = Path::new(&dir_buf);
-            if let Some(DiscoveredAt { mut repo, gitfile }) = try_open_at(current)? {
+            if let Some(DiscoveredAt { mut repo, gitfile }) = try_open_at(current, &options)? {
                 // git/setup.c `setup_git_directory` runs `check_repository_format` on the resolved
                 // git dir and dies on a bad format (e.g. a v1-only `extensions.*` in a
                 // `repositoryformatversion = 0` repo; t0001 #60). Discovery itself opens with
                 // validation skipped so an empty `.git/` is walked past, but a *found* repository
                 // must satisfy the format check.
                 validate_repository_format(&repo.git_dir)?;
-                let cfg = Arc::new(ConfigSet::load(Some(&repo.git_dir), true)?);
+                let load_opts = LoadConfigOptions {
+                    include_system: true,
+                    include_ctx: crate::config::IncludeContext {
+                        git_dir: Some(repo.git_dir.clone()),
+                        ..Default::default()
+                    },
+                    diagnostics: Some(Arc::clone(&options.diagnostics)),
+                    ..Default::default()
+                };
+                let cfg = Arc::new(ConfigSet::load_with_options(
+                    Some(&repo.git_dir),
+                    &load_opts,
+                )?);
                 repo.install_config_snapshot(Arc::clone(&cfg));
+                repo.diagnostics = Arc::clone(&options.diagnostics);
+                repo.network_trace = options.network_trace;
                 if let Some(ref wt) = env_work_tree {
                     repo.work_tree = Some(wt.canonicalize().unwrap_or_else(|_| wt.clone()));
                     repo.work_tree_from_env = true;
@@ -772,7 +906,15 @@ impl Repository {
             );
         }
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
-        write_index_file_split(path, &self.git_dir, index, cfg.as_ref(), split, skip_hash)?;
+        write_index_file_split(
+            path,
+            &self.git_dir,
+            index,
+            cfg.as_ref(),
+            split,
+            skip_hash,
+            Some(self.diagnostics.as_ref()),
+        )?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
         let updated_skipworktree_arg = if updated_skipworktree { "1" } else { "0" };
@@ -1824,7 +1966,7 @@ struct DiscoveredAt {
     gitfile: Option<PathBuf>,
 }
 
-fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
+fn try_open_at(dir: &Path, options: &RepositoryOptions) -> Result<Option<DiscoveredAt>> {
     let dot_git = dir.join(".git");
 
     // Check for special file types (FIFO, socket, etc.) — reject them
@@ -1863,7 +2005,8 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
         let content =
             fs::read_to_string(&dot_git).map_err(|e| Error::NotARepository(e.to_string()))?;
         let git_dir = parse_gitfile(&content, dir)?;
-        let mut repo = Repository::open_skipping_format_validation(&git_dir, Some(dir))?;
+        let mut repo =
+            Repository::open_skipping_format_validation_with_options(&git_dir, Some(dir), options)?;
         // Linked worktree: `core.worktree` in the common config may point at another directory
         // (t1501). When the process cwd is not inside that configured tree, Git uses the
         // discovery directory as the work tree (commondir overrides for ops under the real tree).
@@ -1885,7 +2028,7 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
         };
         repo.discovery_root = Some(root.canonicalize().unwrap_or(root));
         repo.discovery_via_gitfile = true;
-        warn_core_bare_worktree_conflict(&git_dir);
+        warn_core_bare_worktree_conflict(&options.diagnostics, &git_dir);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: Some(dot_git.clone()),
@@ -1904,7 +2047,11 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
         };
         // Try to open; if the directory is empty or invalid, continue
         // walking up (e.g. an empty .git/ directory should be ignored).
-        match Repository::open_skipping_format_validation(&open_path, Some(dir)) {
+        match Repository::open_skipping_format_validation_with_options(
+            &open_path,
+            Some(dir),
+            options,
+        ) {
             Ok(mut repo) => {
                 // Restore the original path so rev-parse shows .git not the
                 // resolved symlink target.
@@ -1938,8 +2085,8 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
     // and can be opened as repositories even without a local objects/ dir.
     if dir.join("HEAD").is_file() && dir.join("commondir").is_file() {
         maybe_trace_implicit_bare_repository(dir);
-        let repo = Repository::open(dir, None)?;
-        warn_core_bare_worktree_conflict(dir);
+        let repo = Repository::open_with_options(dir, None, options.clone())?;
+        warn_core_bare_worktree_conflict(&options.diagnostics, dir);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -1961,8 +2108,8 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
                 }
             }
         }
-        let repo = Repository::open(dir, None)?;
-        warn_core_bare_worktree_conflict(dir);
+        let repo = Repository::open_with_options(dir, None, options.clone())?;
+        warn_core_bare_worktree_conflict(&options.diagnostics, dir);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -2015,9 +2162,6 @@ fn safe_directory_effective_values(git_dir: &Path) -> Vec<String> {
 fn ensure_safe_directory_allows(git_dir: &Path, checked: &Path) -> Result<()> {
     let effective = safe_directory_effective_values(git_dir);
     let checked_s = checked.to_string_lossy().to_string();
-    if std::env::var("GRIT_DEBUG_SAFE_DIR").is_ok() {
-        eprintln!("debug-safe-directory values={:?}", effective);
-    }
     if effective
         .iter()
         .any(|v| safe_directory_matches(v, &checked_s))
@@ -2162,15 +2306,6 @@ impl Repository {
                 .unwrap_or_else(|_| self.git_dir.clone())
         };
 
-        if std::env::var("GRIT_DEBUG_SAFE_DIR").is_ok() {
-            eprintln!(
-                "debug-safe-directory checked={} git_dir={} work_tree={:?} cwd={:?}",
-                checked.display(),
-                self.git_dir.display(),
-                self.work_tree,
-                std::env::current_dir().ok()
-            );
-        }
         self.enforce_safe_directory_checked(&checked)
     }
 
@@ -2193,14 +2328,6 @@ impl Repository {
             .git_dir
             .canonicalize()
             .unwrap_or_else(|_| self.git_dir.clone());
-        if std::env::var("GRIT_DEBUG_SAFE_DIR").is_ok() {
-            eprintln!(
-                "debug-safe-directory(gitdir) checked={} git_dir={} work_tree={:?}",
-                checked.display(),
-                self.git_dir.display(),
-                self.work_tree
-            );
-        }
         self.enforce_safe_directory_checked(&checked)
     }
 
@@ -2323,7 +2450,7 @@ fn safe_directory_matches(config_value: &str, checked: &str) -> bool {
     config_norm == checked_norm
 }
 
-fn warn_core_bare_worktree_conflict(git_dir: &Path) {
+fn warn_core_bare_worktree_conflict(diagnostics: &DiagnosticsHandle, git_dir: &Path) {
     if env::var("GIT_WORK_TREE")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -2342,7 +2469,7 @@ fn warn_core_bare_worktree_conflict(git_dir: &Path) {
             let mut guard = WARNED_DIRS.lock().unwrap_or_else(|e| e.into_inner());
             let set = guard.get_or_insert_with(HashSet::new);
             if set.insert(key) {
-                eprintln!("warning: core.bare and core.worktree do not make sense");
+                diagnostics.warn(diagnostics::Warning::CoreBareWithWorktree);
             }
         }
     }
