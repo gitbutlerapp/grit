@@ -15,7 +15,9 @@ pub struct CompareMismatch {
     pub delta: f64,
 }
 
-/// Compare per-scenario ratios; returns mismatches where `|ratio_a - ratio_b| > tolerance`.
+/// Compare per-scenario ratios; returns mismatches where relative drift exceeds `tolerance`.
+///
+/// Drift is `|ratio_a - ratio_b| / max(|ratio_a|, |ratio_b|)` (so `0.10` means ±10%).
 pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<CompareMismatch> {
     let map_b: HashMap<&str, f64> = b
         .scenarios
@@ -34,7 +36,7 @@ pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<
             });
             continue;
         };
-        let delta = (scenario.ratio - ratio_b).abs();
+        let delta = relative_ratio_drift(scenario.ratio, ratio_b);
         if delta > tolerance {
             mismatches.push(CompareMismatch {
                 scenario_id: scenario.id.clone(),
@@ -45,6 +47,14 @@ pub fn compare_reports(a: &BenchReport, b: &BenchReport, tolerance: f64) -> Vec<
         }
     }
     mismatches
+}
+
+fn relative_ratio_drift(a: f64, b: f64) -> f64 {
+    let base = a.abs().max(b.abs());
+    if base <= f64::EPSILON {
+        return 0.0;
+    }
+    (a - b).abs() / base
 }
 
 /// Load two JSON files and compare; errors if schema is invalid.
@@ -123,6 +133,13 @@ mod tests {
         let b = sample_report("status-100", 0.95);
         let mismatches = compare_reports(&a, &b, 0.10);
         assert_eq!(mismatches.len(), 1);
-        assert!((mismatches[0].delta - 0.15).abs() < f64::EPSILON);
+        assert!((mismatches[0].delta - (0.15 / 0.95)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn compare_large_ratio_within_relative_tolerance() {
+        let a = sample_report("rev-list", 523.82);
+        let b = sample_report("rev-list", 530.26);
+        assert!(compare_reports(&a, &b, 0.10).is_empty());
     }
 }
