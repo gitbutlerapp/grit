@@ -3,6 +3,7 @@
 //! Groups indexed blob paths by parent directory and uses one `read_dir` per directory,
 //! reusing `DirEntry` metadata for tracked files instead of a separate `symlink_metadata`
 //! per index path.
+#![allow(dead_code)]
 //!
 //! When [`WorktreeBlobScanOptions::preload_index`] is true and the tracked blob count is at
 //! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection preloads disk lookups in parallel by

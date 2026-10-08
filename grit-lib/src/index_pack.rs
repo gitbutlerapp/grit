@@ -30,9 +30,13 @@ impl IngestPackOptions {
         if let Some(n) = self.threads {
             Parallelism::resolve(Some(n))
         } else if let Some(git_dir) = odb.config_git_dir() {
-            crate::config::ConfigSet::load(Some(git_dir), true)
-                .map(|c| c.pack_index_parallelism())
-                .unwrap_or_else(|_| Parallelism::resolve(None))
+            crate::config::ConfigSet::load(
+                &crate::environment::Environment::capture_process(),
+                Some(git_dir),
+                true,
+            )
+            .map(|c| c.pack_index_parallelism())
+            .unwrap_or_else(|_| Parallelism::resolve(None))
         } else {
             Parallelism::resolve(None)
         }

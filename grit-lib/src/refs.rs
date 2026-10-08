@@ -1116,11 +1116,15 @@ fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
         // Honor `core.packedrefstimeout`: git retries acquiring the packed-refs lock for up to
         // this many milliseconds before giving up (t0600 "no bogus intermediate values during
         // delete" holds the lock and expects update-ref to block, not fail immediately).
-        let timeout_ms = ConfigSet::load(Some(git_dir), true)
-            .ok()
-            .and_then(|cfg| cfg.get("core.packedrefstimeout"))
-            .and_then(|v| v.trim().parse::<i64>().ok())
-            .unwrap_or(0);
+        let timeout_ms = ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(git_dir),
+            true,
+        )
+        .ok()
+        .and_then(|cfg| cfg.get("core.packedrefstimeout"))
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .unwrap_or(0);
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
         loop {
@@ -1241,9 +1245,13 @@ pub enum LogRefsConfig {
 ///
 /// Returns [`LogRefsConfig::Unset`] when the key is absent.
 pub fn read_log_refs_config(git_dir: &Path) -> LogRefsConfig {
-    ConfigSet::load(Some(git_dir), true)
-        .map(|cfg| log_refs_config_from_set(&cfg))
-        .unwrap_or(LogRefsConfig::Unset)
+    ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .map(|cfg| log_refs_config_from_set(&cfg))
+    .unwrap_or(LogRefsConfig::Unset)
 }
 
 fn log_refs_config_from_set(cfg: &ConfigSet) -> LogRefsConfig {
@@ -1261,9 +1269,13 @@ fn log_refs_config_from_set(cfg: &ConfigSet) -> LogRefsConfig {
 
 /// Effective `logAllRefUpdates` after applying Git's `LOG_REFS_UNSET` rule.
 pub fn effective_log_refs_config(git_dir: &Path) -> LogRefsConfig {
-    ConfigSet::load(Some(git_dir), true)
-        .map(|cfg| cfg.effective_log_refs_config(git_dir))
-        .unwrap_or(LogRefsConfig::Normal)
+    ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .map(|cfg| cfg.effective_log_refs_config(git_dir))
+    .unwrap_or(LogRefsConfig::Normal)
 }
 
 /// Whether a new reflog file may be auto-created for `refname` given an already-resolved
@@ -1285,7 +1297,12 @@ pub fn should_autocreate_reflog_for_mode(refname: &str, mode: LogRefsConfig) -> 
 /// Whether a new reflog file may be auto-created for `refname` (Git `should_autocreate_reflog`).
 #[must_use]
 pub fn should_autocreate_reflog(git_dir: &Path, refname: &str) -> bool {
-    let cfg = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let cfg = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     should_autocreate_reflog_with_config(&cfg, git_dir, refname)
 }
 
@@ -1742,7 +1759,12 @@ fn update_branch_for_commit_reftable(
 
 /// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
 pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'_>) -> Result<()> {
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     update_branch_for_commit_with_config(git_dir, update, &config)
 }
 
@@ -1919,11 +1941,15 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
 fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
     let packed_path = git_dir.join("packed-refs");
     let lock = lock_path_for_ref(&packed_path);
-    let timeout_ms = ConfigSet::load(Some(git_dir), true)
-        .ok()
-        .and_then(|cfg| cfg.get("core.packedrefstimeout"))
-        .and_then(|v| v.trim().parse::<i64>().ok())
-        .unwrap_or(0);
+    let timeout_ms = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .ok()
+    .and_then(|cfg| cfg.get("core.packedrefstimeout"))
+    .and_then(|v| v.trim().parse::<i64>().ok())
+    .unwrap_or(0);
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
     loop {
@@ -2064,7 +2090,11 @@ pub fn list_refs_physical(git_dir: &Path, prefix: &str) -> Result<Vec<(String, O
 /// prefixes are set). Duplicate OIDs are skipped while preserving first-seen
 /// order.
 pub fn collect_alternate_ref_oids(receiving_git_dir: &Path) -> Result<Vec<ObjectId>> {
-    let config = ConfigSet::load(Some(receiving_git_dir), true)?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(receiving_git_dir),
+        true,
+    )?;
     let objects_dir = receiving_git_dir.join("objects");
     let alternates = pack::read_alternates_recursive(&objects_dir).unwrap_or_default();
     let mut out = Vec::new();

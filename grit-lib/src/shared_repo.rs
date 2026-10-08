@@ -149,7 +149,12 @@ pub fn adjust_shared_repo_tree(_git_dir: &Path, _shared_repo: i32) -> std::io::R
 /// Re-run [`adjust_shared_repo_tree`] when `core.sharedRepository` is set (e.g. after commit/repack
 /// created new paths under `.git/`).
 pub fn refresh_repository_shared_tree(git_dir: &Path) -> std::io::Result<()> {
-    let cfg = ConfigSet::load(Some(git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let cfg = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_else(|_| ConfigSet::new());
     let shared =
         match shared_repository_from_config_value(cfg.get("core.sharedRepository").as_deref()) {
             Ok(v) => v,

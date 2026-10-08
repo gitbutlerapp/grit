@@ -149,7 +149,8 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
     checkout_between_trees(&repo, Some(&head_tree), &new_tree)
         .context("could not update the working tree")?;
 
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
     let now = grit_lib::commit::now_for_identity();
     // Preserve the original author (cherry-pick semantics); committer is the
     // current user. `author_raw` is empty so `serialize_commit` re-encodes from
@@ -200,7 +201,8 @@ fn move_branch(
     reason: &str,
 ) -> Result<()> {
     refs::write_ref(&repo.git_dir, refname, &new).context("could not update branch")?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .unwrap_or_default();
     let who = context::reflog_identity(&config, grit_lib::commit::now_for_identity());
     let _ = refs::append_reflog(&repo.git_dir, refname, &old, &new, &who, reason, false);
     let _ = refs::append_reflog(&repo.git_dir, "HEAD", &old, &new, &who, reason, false);

@@ -6,12 +6,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::parse_config_parameters;
+use crate::environment::Environment;
 use crate::unicode_normalization::{precompose_utf8_path, probe_filesystem_normalizes_nfd_to_nfc};
 
-fn parse_ceiling_directories_paths() -> Vec<PathBuf> {
-    let raw = match std::env::var("GIT_CEILING_DIRECTORIES") {
-        Ok(val) => val,
-        Err(_) => return Vec::new(),
+fn parse_ceiling_directories_paths(env: &Environment) -> Vec<PathBuf> {
+    let Some(raw) = env.git_ceiling_directories.as_deref() else {
+        return Vec::new();
     };
     if raw.is_empty() {
         return Vec::new();
@@ -98,8 +98,16 @@ fn probe_git_dir_at(dir: &Path) -> Option<PathBuf> {
 
 /// Walk parents from `cwd` for `.git`, honouring `GIT_CEILING_DIRECTORIES` like Git discovery.
 pub fn locate_git_dir_from_cwd(cwd: PathBuf) -> Option<PathBuf> {
-    let start_canon = cwd.canonicalize().unwrap_or(cwd);
-    let ceilings: Vec<String> = parse_ceiling_directories_paths()
+    locate_git_dir_from_environment(&Environment {
+        cwd: cwd.clone(),
+        ..Environment::empty()
+    })
+}
+
+/// Like [`locate_git_dir_from_cwd`] but honours discovery variables in `environment`.
+pub fn locate_git_dir_from_environment(environment: &Environment) -> Option<PathBuf> {
+    let start_canon = environment.discovery_cwd();
+    let ceilings: Vec<String> = parse_ceiling_directories_paths(environment)
         .into_iter()
         .map(|p| path_for_ceiling_compare(&p))
         .collect();
@@ -182,12 +190,10 @@ pub fn read_core_precomposeunicode(git_dir: &Path) -> Option<bool> {
 }
 
 /// `git -c core.precomposeunicode=…` overrides local config (last token wins).
-fn precompose_from_git_config_parameters() -> Option<bool> {
-    let Ok(raw) = std::env::var("GIT_CONFIG_PARAMETERS") else {
-        return None;
-    };
+fn precompose_from_git_config_parameters(env: &Environment) -> Option<bool> {
+    let raw = env.git_config_parameters.as_deref()?;
     let mut last: Option<bool> = None;
-    for entry in parse_config_parameters(&raw) {
+    for entry in parse_config_parameters(raw) {
         let Some((k, v)) = entry.split_once('=') else {
             continue;
         };
@@ -219,7 +225,7 @@ pub fn effective_core_precomposeunicode_with_config(
     git_dir: Option<&Path>,
     config: Option<&crate::config::ConfigSet>,
 ) -> bool {
-    if let Some(v) = precompose_from_git_config_parameters() {
+    if let Some(v) = precompose_from_git_config_parameters(&Environment::capture_process()) {
         return v;
     }
     if let Some(cfg) = config {
@@ -231,10 +237,14 @@ pub fn effective_core_precomposeunicode_with_config(
     let Some(gd) = git_dir else {
         return false;
     };
-    crate::config::ConfigSet::load(Some(gd), true)
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
-        .unwrap_or(false)
+    crate::config::ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(gd),
+        true,
+    )
+    .ok()
+    .and_then(|cfg| cfg.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
+    .unwrap_or(false)
 }
 
 /// True when the filesystem aliases NFD and NFC spellings for the same path (macOS / HFS+ style).
@@ -268,8 +278,8 @@ pub fn argv_precompose_enabled(git_dir: Option<&Path>) -> bool {
 pub fn pathspec_precompose_enabled() -> bool {
     static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *CACHE.get_or_init(|| {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let gd = locate_git_dir_from_cwd(cwd);
+        let env = Environment::capture_process();
+        let gd = locate_git_dir_from_environment(&env);
         effective_core_precomposeunicode(gd.as_deref())
     })
 }

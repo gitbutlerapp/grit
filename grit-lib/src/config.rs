@@ -28,6 +28,8 @@
 //! and `hasconfig:remote.*.url:`.
 
 use std::collections::HashMap;
+
+use crate::environment::Environment;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -196,6 +198,10 @@ pub struct IncludeContext {
     pub git_dir: Option<PathBuf>,
     /// When true, `git -c include.path=relative` fails instead of ignoring the include.
     pub command_line_relative_include_is_error: bool,
+    /// Working directory for relative include resolution (from [`Environment::cwd`]).
+    pub cwd: PathBuf,
+    /// Symlink-preserving `$PWD` for `gitdir:` matching when set.
+    pub pwd: Option<String>,
 }
 
 /// Options controlling how [`ConfigSet::load_with_options`] merges files and includes.
@@ -1750,8 +1756,8 @@ impl ConfigSet {
     /// Tests set `GIT_TEST_NO_WRITE_REV_INDEX` to force no `.rev` output.
     #[must_use]
     pub fn pack_write_reverse_index_default(&self) -> bool {
-        if std::env::var("GIT_TEST_NO_WRITE_REV_INDEX")
-            .ok()
+        if Environment::capture_process()
+            .git_test_no_write_rev_index
             .as_deref()
             .is_some_and(|v| {
                 let s = v.trim().to_ascii_lowercase();
@@ -1793,7 +1799,7 @@ impl ConfigSet {
         git_dir: Option<&std::path::Path>,
     ) -> crate::hash::Parallelism {
         git_dir
-            .and_then(|d| Self::load(Some(d), true).ok())
+            .and_then(|d| Self::load(&Environment::capture_process(), Some(d), true).ok())
             .map(|c| c.pack_index_parallelism())
             .unwrap_or_else(|| crate::hash::Parallelism::resolve(None))
     }
@@ -1970,16 +1976,18 @@ impl ConfigSet {
     /// # Errors
     ///
     /// Returns errors from file I/O or parsing.
-    pub fn load(git_dir: Option<&Path>, include_system: bool) -> Result<Self> {
+    pub fn load(env: &Environment, git_dir: Option<&Path>, include_system: bool) -> Result<Self> {
         let opts = LoadConfigOptions {
             include_system,
             include_ctx: IncludeContext {
                 git_dir: git_dir.map(PathBuf::from),
+                cwd: env.cwd.clone(),
+                pwd: env.pwd.clone(),
                 ..Default::default()
             },
             ..Default::default()
         };
-        Self::load_with_options(git_dir, &opts)
+        Self::load_with_options(env, git_dir, &opts)
     }
 
     /// Load the standard configuration cascade with explicit include and scope control.
@@ -1989,14 +1997,18 @@ impl ConfigSet {
     /// Results are memoized for the process lifetime and revalidated against
     /// the cascade files' stat stamps on every call (see the cache notes near the internal
     /// `ConfigCacheKey` type).
-    pub fn load_with_options(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Result<Self> {
-        let Some(env_fp) = config_env_fingerprint() else {
+    pub fn load_with_options(
+        env: &Environment,
+        git_dir: Option<&Path>,
+        opts: &LoadConfigOptions,
+    ) -> Result<Self> {
+        let Some(env_fp) = env.config_fingerprint() else {
             #[cfg(test)]
             cascade_load_counters::record_uncached();
-            return Self::load_with_options_uncached(git_dir, opts, &mut Vec::new());
+            return Self::load_with_options_uncached(env, git_dir, opts, &mut Vec::new());
         };
         let key = ConfigCacheKey::new(git_dir, opts);
-        let base_stamps = config_file_stamps(git_dir, opts);
+        let base_stamps = config_file_stamps(env, git_dir, opts);
         if let Some(cached) = config_cache_lookup(&key, &env_fp, &base_stamps) {
             #[cfg(test)]
             cascade_load_counters::record_cache_validated();
@@ -2005,7 +2017,7 @@ impl ConfigSet {
         #[cfg(test)]
         cascade_load_counters::record_uncached();
         let mut included_files = Vec::new();
-        let set = Self::load_with_options_uncached(git_dir, opts, &mut included_files)?;
+        let set = Self::load_with_options_uncached(env, git_dir, opts, &mut included_files)?;
         included_files.sort_unstable();
         included_files.dedup();
         let extra_stamps = stamp_paths(included_files);
@@ -2025,17 +2037,22 @@ impl ConfigSet {
     }
 
     fn load_with_options_uncached(
+        env: &Environment,
         git_dir: Option<&Path>,
         opts: &LoadConfigOptions,
         included_files: &mut Vec<PathBuf>,
     ) -> Result<Self> {
         let mut set = Self::new();
         let proc = opts.process_includes;
-        let ctx = opts.include_ctx.clone();
+        let mut ctx = opts.include_ctx.clone();
+        if ctx.cwd.as_os_str().is_empty() {
+            ctx.cwd = env.cwd.clone();
+        }
+        ctx.pwd = env.pwd.clone();
 
         // System config
-        if opts.include_system && !git_config_nosystem_enabled() {
-            let system_path = system_config_path();
+        if opts.include_system && !git_config_nosystem_enabled(env) {
+            let system_path = system_config_path(env);
             match ConfigFile::from_path(&system_path, ConfigScope::System) {
                 Ok(Some(f)) => {
                     Self::merge_with_includes_collect(&mut set, &f, proc, 0, &ctx, included_files)?
@@ -2046,7 +2063,7 @@ impl ConfigSet {
         }
 
         // Global config (Git merges every existing file: XDG then ~/.gitconfig).
-        for path in global_config_paths() {
+        for path in global_config_paths(env) {
             match ConfigFile::from_path(&path, ConfigScope::Global) {
                 Ok(Some(f)) => {
                     Self::merge_with_includes_collect(&mut set, &f, proc, 0, &ctx, included_files)?
@@ -2088,8 +2105,9 @@ impl ConfigSet {
         }
 
         // Environment overrides: optional file
-        if let Ok(path) = std::env::var("GIT_CONFIG") {
-            match ConfigFile::from_path(Path::new(&path), ConfigScope::Command) {
+        if let Some(path) = env.git_config.as_deref() {
+            let path = resolve_config_override_path(env, path);
+            match ConfigFile::from_path(&path, ConfigScope::Command) {
                 Ok(Some(f)) => {
                     if proc {
                         Self::merge_with_includes_collect(
@@ -2109,13 +2127,13 @@ impl ConfigSet {
             }
         }
 
-        add_environment_config_pairs(&mut set)?;
+        add_environment_config_pairs(&mut set, env)?;
 
         // GIT_CONFIG_PARAMETERS — used by `git -c key=value`.
-        if let Ok(params) = std::env::var("GIT_CONFIG_PARAMETERS") {
+        if let Some(params) = env.git_config_parameters.as_deref() {
             if proc && opts.command_includes && !params.trim().is_empty() {
                 let pseudo = Path::new(":GIT_CONFIG_PARAMETERS");
-                let cmd_file = ConfigFile::from_git_config_parameters(pseudo, &params)?;
+                let cmd_file = ConfigFile::from_git_config_parameters(pseudo, params)?;
                 Self::merge_with_includes_collect(
                     &mut set,
                     &cmd_file,
@@ -2125,7 +2143,7 @@ impl ConfigSet {
                     included_files,
                 )?;
             } else if !params.trim().is_empty() {
-                for entry in parse_config_parameters(&params) {
+                for entry in parse_config_parameters(params) {
                     if let Some((key, val)) =
                         entry.split_once('\u{1}').or_else(|| entry.split_once('='))
                     {
@@ -2151,23 +2169,29 @@ impl ConfigSet {
     /// occurrence).
     ///
     /// This matches upstream ordering for `test-tool config read_early_config` (t1309, t1305).
-    pub fn read_early_config(git_dir: Option<&Path>, key: &str) -> Result<Vec<String>> {
+    pub fn read_early_config(
+        env: &Environment,
+        git_dir: Option<&Path>,
+        key: &str,
+    ) -> Result<Vec<String>> {
         let mut set = Self::new();
         let ctx = IncludeContext {
             git_dir: git_dir.map(PathBuf::from),
             command_line_relative_include_is_error: false,
+            cwd: env.cwd.clone(),
+            pwd: env.pwd.clone(),
         };
 
         // System
-        if !git_config_nosystem_enabled() {
-            let system_path = system_config_path();
+        if !git_config_nosystem_enabled(env) {
+            let system_path = system_config_path(env);
             if let Ok(Some(f)) = ConfigFile::from_path(&system_path, ConfigScope::System) {
                 Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
             }
         }
 
         // Global: all existing candidates (Git merges every readable file).
-        for path in global_config_paths() {
+        for path in global_config_paths(env) {
             if let Ok(Some(f)) = ConfigFile::from_path(&path, ConfigScope::Global) {
                 Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
             }
@@ -2193,10 +2217,10 @@ impl ConfigSet {
         }
 
         // GIT_CONFIG_PARAMETERS — same as full load (`load_with_options` default).
-        if let Ok(params) = std::env::var("GIT_CONFIG_PARAMETERS") {
+        if let Some(params) = env.git_config_parameters.as_deref() {
             if !params.trim().is_empty() {
                 let pseudo = Path::new(":GIT_CONFIG_PARAMETERS");
-                let cmd_file = ConfigFile::from_git_config_parameters(pseudo, &params)?;
+                let cmd_file = ConfigFile::from_git_config_parameters(pseudo, params)?;
                 Self::merge_with_includes(&mut set, &cmd_file, true, 0, &ctx)?;
             }
         }
@@ -2228,6 +2252,8 @@ impl ConfigSet {
         let ctx = IncludeContext {
             git_dir: Some(git_dir.to_path_buf()),
             command_line_relative_include_is_error: false,
+            cwd: PathBuf::from("."),
+            pwd: None,
         };
         if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
             Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
@@ -2245,46 +2271,32 @@ impl ConfigSet {
     /// Global file order matches Git: XDG `git/config` first (when present), then `~/.gitconfig`,
     /// unless `GIT_CONFIG_GLOBAL` is set (single file). When both global files exist, both are
     /// merged so later entries win for duplicate keys.
-    pub fn load_protected(include_system: bool) -> Result<Self> {
+    pub fn load_protected(env: &Environment, include_system: bool) -> Result<Self> {
         let mut set = Self::new();
         let ctx = IncludeContext {
             git_dir: None,
             command_line_relative_include_is_error: false,
+            cwd: env.cwd.clone(),
+            pwd: env.pwd.clone(),
         };
 
-        if include_system && !git_config_nosystem_enabled() {
-            let system_path = system_config_path();
+        if include_system && !git_config_nosystem_enabled(env) {
+            let system_path = system_config_path(env);
             if let Ok(Some(f)) = ConfigFile::from_path(&system_path, ConfigScope::System) {
                 Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
             }
         }
 
-        if let Ok(p) = std::env::var("GIT_CONFIG_GLOBAL") {
-            let path = PathBuf::from(p);
+        for path in global_config_paths(env) {
             if let Ok(Some(f)) = ConfigFile::from_path(&path, ConfigScope::Global) {
                 Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
             }
-        } else {
-            let mut global_paths = Vec::new();
-            if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-                global_paths.push(PathBuf::from(xdg).join("git/config"));
-            } else if let Some(home) = home_dir() {
-                global_paths.push(home.join(".config/git/config"));
-            }
-            if let Some(home) = home_dir() {
-                global_paths.push(home.join(".gitconfig"));
-            }
-            for path in global_paths {
-                if let Ok(Some(f)) = ConfigFile::from_path(&path, ConfigScope::Global) {
-                    Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
-                }
-            }
         }
 
-        add_environment_config_pairs(&mut set)?;
+        add_environment_config_pairs(&mut set, env)?;
 
-        if let Ok(params) = std::env::var("GIT_CONFIG_PARAMETERS") {
-            for entry in parse_config_parameters(&params) {
+        if let Some(params) = env.git_config_parameters.as_deref() {
+            for entry in parse_config_parameters(params) {
                 if let Some((key, val)) =
                     entry.split_once('\u{1}').or_else(|| entry.split_once('='))
                 {
@@ -2468,53 +2480,18 @@ fn config_cache() -> &'static Mutex<HashMap<ConfigCacheKey, ConfigCacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Environment that feeds the cascade (file paths and synthetic entries).
-/// `None` means "do not cache this load".
-fn config_env_fingerprint() -> Option<Vec<(String, Option<String>)>> {
-    const VARS: [&str; 8] = [
-        "GIT_CONFIG_NOSYSTEM",
-        "GIT_CONFIG_SYSTEM",
-        "GIT_CONFIG_GLOBAL",
-        "XDG_CONFIG_HOME",
-        "HOME",
-        "GIT_CONFIG",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_COUNT",
-    ];
-    let mut fp: Vec<(String, Option<String>)> = VARS
-        .iter()
-        .map(|name| ((*name).to_owned(), std::env::var(name).ok()))
-        .collect();
-    if let Ok(count_str) = std::env::var("GIT_CONFIG_COUNT") {
-        // Mirror `add_environment_config_pairs`; absurd counts are not worth caching.
-        const MAX_TRACKED: usize = 256;
-        match count_str.parse::<usize>() {
-            Ok(n) if n <= MAX_TRACKED => {
-                for i in 0..n {
-                    for var in [
-                        format!("GIT_CONFIG_KEY_{i}"),
-                        format!("GIT_CONFIG_VALUE_{i}"),
-                    ] {
-                        let val = std::env::var(&var).ok();
-                        fp.push((var, val));
-                    }
-                }
-            }
-            Ok(_) => return None,
-            Err(_) => {}
-        }
-    }
-    Some(fp)
-}
-
 /// The on-disk files [`ConfigSet::load_with_options_uncached`] would consult,
 /// in cascade order.
-fn config_cascade_file_paths(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Vec<PathBuf> {
+fn config_cascade_file_paths(
+    env: &Environment,
+    git_dir: Option<&Path>,
+    opts: &LoadConfigOptions,
+) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if opts.include_system && !git_config_nosystem_enabled() {
-        paths.push(system_config_path());
+    if opts.include_system && !git_config_nosystem_enabled(env) {
+        paths.push(system_config_path(env));
     }
-    paths.extend(global_config_paths());
+    paths.extend(global_config_paths(env));
     if let Some(gd) = git_dir {
         let common_dir = crate::repo::common_git_dir_for_config(gd);
         paths.push(common_dir.join("config"));
@@ -2530,8 +2507,8 @@ fn config_cascade_file_paths(git_dir: Option<&Path>, opts: &LoadConfigOptions) -
             paths.push(cgd.join("HEAD"));
         }
     }
-    if let Ok(p) = std::env::var("GIT_CONFIG") {
-        paths.push(PathBuf::from(p));
+    if let Some(p) = env.git_config.as_deref() {
+        paths.push(resolve_config_override_path(env, p));
     }
     paths
 }
@@ -2552,8 +2529,12 @@ fn stamp_paths(paths: Vec<PathBuf>) -> Vec<ConfigFileStamp> {
         .collect()
 }
 
-fn config_file_stamps(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Vec<ConfigFileStamp> {
-    stamp_paths(config_cascade_file_paths(git_dir, opts))
+fn config_file_stamps(
+    env: &Environment,
+    git_dir: Option<&Path>,
+    opts: &LoadConfigOptions,
+) -> Vec<ConfigFileStamp> {
+    stamp_paths(config_cascade_file_paths(env, git_dir, opts))
 }
 
 fn config_cache_lookup(
@@ -2590,15 +2571,15 @@ fn evict_config_cache_for_path(path: &Path) {
     });
 }
 
-fn git_config_nosystem_enabled() -> bool {
-    std::env::var("GIT_CONFIG_NOSYSTEM")
-        .ok()
-        .map(|value| parse_bool(&value).unwrap_or(true))
+fn git_config_nosystem_enabled(env: &Environment) -> bool {
+    env.git_config_nosystem
+        .as_deref()
+        .map(|value| parse_bool(value).unwrap_or(true))
         .unwrap_or(false)
 }
 
-fn add_environment_config_pairs(set: &mut ConfigSet) -> Result<()> {
-    let Ok(count_str) = std::env::var("GIT_CONFIG_COUNT") else {
+fn add_environment_config_pairs(set: &mut ConfigSet, env: &Environment) -> Result<()> {
+    let Some(count_str) = env.git_config_count.as_deref() else {
         return Ok(());
     };
     if count_str.is_empty() {
@@ -2615,13 +2596,11 @@ fn add_environment_config_pairs(set: &mut ConfigSet) -> Result<()> {
     }
 
     for i in 0..count {
-        let key_var = format!("GIT_CONFIG_KEY_{i}");
-        let value_var = format!("GIT_CONFIG_VALUE_{i}");
-        let key = std::env::var(&key_var)
-            .map_err(|_| Error::ConfigError(format!("missing config key {key_var}")))?;
-        let value = std::env::var(&value_var)
-            .map_err(|_| Error::ConfigError(format!("missing config value {value_var}")))?;
-        set.add_command_override(&key, &value)?;
+        let (key, value) = env
+            .git_config_pairs
+            .get(i)
+            .ok_or_else(|| Error::ConfigError(format!("missing config key GIT_CONFIG_KEY_{i}")))?;
+        set.add_command_override(key, value)?;
     }
 
     Ok(())
@@ -3314,7 +3293,7 @@ pub fn get_urlmatch_all_in_section(
 /// Does NOT handle :(optional) prefix — use `parse_path_optional` for that.
 pub fn parse_path(s: &str) -> String {
     if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
+        if let Some(home) = home_dir(&Environment::capture_process()) {
             return home.join(rest).to_string_lossy().to_string();
         }
     }
@@ -3512,28 +3491,38 @@ fn needs_sq_backslash_quote(ch: char) -> bool {
     ch == '\'' || ch == '!'
 }
 
+/// Resolve a config file path from `GIT_CONFIG*` overrides relative to [`Environment::cwd`].
+fn resolve_config_override_path(env: &Environment, path: &str) -> PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        env.cwd.join(p)
+    }
+}
+
 /// Return candidate paths for the global config file, in priority order.
 /// Public accessor for the ordered list of global config file paths.
 pub fn global_config_paths_pub() -> Vec<PathBuf> {
-    global_config_paths()
+    global_config_paths(&Environment::capture_process())
 }
 
-fn global_config_paths() -> Vec<PathBuf> {
+fn global_config_paths(env: &Environment) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     // $GIT_CONFIG_GLOBAL overrides
-    if let Ok(p) = std::env::var("GIT_CONFIG_GLOBAL") {
-        paths.push(PathBuf::from(p));
+    if let Some(p) = env.git_config_global.as_deref() {
+        paths.push(resolve_config_override_path(env, p));
         return paths;
     }
 
     // Git order: XDG `git/config` first, then `~/.gitconfig` (see `git_global_config_paths`).
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+    if let Some(xdg) = env.xdg_config_home.as_deref() {
         paths.push(PathBuf::from(xdg).join("git/config"));
-    } else if let Some(home) = home_dir() {
+    } else if let Some(home) = home_dir(env) {
         paths.push(home.join(".config/git/config"));
     }
-    if let Some(home) = home_dir() {
+    if let Some(home) = home_dir(env) {
         paths.push(home.join(".gitconfig"));
     }
 
@@ -3545,9 +3534,9 @@ fn global_config_paths() -> Vec<PathBuf> {
 /// Honors `GIT_CONFIG_SYSTEM`. On Windows, falls back to Git for Windows'
 /// `etc/gitconfig` when `/etc/gitconfig` is absent (stock shells, not MSYS).
 #[must_use]
-pub(crate) fn system_config_path() -> PathBuf {
-    if let Ok(p) = std::env::var("GIT_CONFIG_SYSTEM") {
-        return PathBuf::from(p);
+pub(crate) fn system_config_path(env: &Environment) -> PathBuf {
+    if let Some(p) = env.git_config_system.as_deref() {
+        return resolve_config_override_path(env, p);
     }
     let unix_default = PathBuf::from("/etc/gitconfig");
     #[cfg(windows)]
@@ -3555,18 +3544,22 @@ pub(crate) fn system_config_path() -> PathBuf {
         if unix_default.is_file() {
             return unix_default;
         }
-        if let Some(root) = std::env::var_os("GIT_INSTALL_ROOT") {
+        if let Some(root) = env.git_install_root.as_ref() {
             let candidate = PathBuf::from(root).join("etc").join("gitconfig");
             if candidate.is_file() {
                 return candidate;
             }
         }
-        for var in ["ProgramFiles", "ProgramFiles(x86)"] {
-            if let Ok(pf) = std::env::var(var) {
-                let candidate = PathBuf::from(pf).join("Git").join("etc").join("gitconfig");
-                if candidate.is_file() {
-                    return candidate;
-                }
+        for pf in [
+            env.program_files.as_deref(),
+            env.program_files_x86.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let candidate = PathBuf::from(pf).join("Git").join("etc").join("gitconfig");
+            if candidate.is_file() {
+                return candidate;
             }
         }
     }
@@ -3579,21 +3572,21 @@ pub(crate) fn system_config_path() -> PathBuf {
 /// unset outside a Git-for-Windows/MSYS shell, we fall back to the same sources
 /// Git does: `%HOMEDRIVE%%HOMEPATH%`, then `%USERPROFILE%`. Without this, global
 /// config (`~/.gitconfig`) would be invisible on a stock Windows shell.
-fn home_dir() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+fn home_dir(env: &Environment) -> Option<PathBuf> {
+    if let Some(home) = env.home.as_ref().filter(|h| !h.is_empty()) {
         return Some(PathBuf::from(home));
     }
     #[cfg(windows)]
     {
         if let (Some(drive), Some(path)) = (
-            std::env::var_os("HOMEDRIVE").filter(|d| !d.is_empty()),
-            std::env::var_os("HOMEPATH").filter(|p| !p.is_empty()),
+            env.homedrive.as_ref().filter(|d| !d.is_empty()),
+            env.homepath.as_ref().filter(|p| !p.is_empty()),
         ) {
-            let mut combined = drive;
+            let mut combined = drive.clone();
             combined.push(path);
             return Some(PathBuf::from(combined));
         }
-        if let Some(profile) = std::env::var_os("USERPROFILE").filter(|p| !p.is_empty()) {
+        if let Some(profile) = env.userprofile.as_ref().filter(|p| !p.is_empty()) {
             return Some(PathBuf::from(profile));
         }
     }
@@ -3687,7 +3680,7 @@ fn prepare_gitdir_pattern(condition: &str, file: &ConfigFile) -> Result<(String,
 ///
 /// `text_abs` uses `$PWD` (which preserves symlinks) when available, matching Git's
 /// `strbuf_add_absolute_path` behaviour. This lets `gitdir:bar/` match when `bar` is a symlink.
-fn git_dir_match_texts(git_dir: &Path) -> (String, String) {
+fn git_dir_match_texts(ctx: &IncludeContext, git_dir: &Path) -> (String, String) {
     let real = git_dir
         .canonicalize()
         .map(|p| p.to_string_lossy().into_owned())
@@ -3697,8 +3690,8 @@ fn git_dir_match_texts(git_dir: &Path) -> (String, String) {
     let abs = if git_dir.is_absolute() {
         // If git_dir is already canonical, try to reconstruct the symlink-preserving variant
         // by replacing the canonical cwd prefix with $PWD.
-        let pwd_abs = std::env::var("PWD").ok().and_then(|pwd| {
-            let pwd_path = std::path::Path::new(&pwd);
+        let pwd_abs = ctx.pwd.as_deref().and_then(|pwd| {
+            let pwd_path = std::path::Path::new(pwd);
             if !pwd_path.is_absolute() {
                 return None;
             }
@@ -3710,10 +3703,8 @@ fn git_dir_match_texts(git_dir: &Path) -> (String, String) {
             Some(format!("{pwd}{suffix}"))
         });
         pwd_abs.unwrap_or_else(|| git_dir.to_string_lossy().into_owned())
-    } else if let Ok(cwd) = std::env::current_dir() {
-        cwd.join(git_dir).to_string_lossy().into_owned()
     } else {
-        git_dir.to_string_lossy().into_owned()
+        ctx.cwd.join(git_dir).to_string_lossy().into_owned()
     };
     (real, abs)
 }
@@ -3732,7 +3723,7 @@ fn include_by_gitdir(
         Err(_) => return false,
     };
     let flags = WM_PATHNAME | if icase { WM_CASEFOLD } else { 0 };
-    let (text_real, text_abs) = git_dir_match_texts(git_dir);
+    let (text_real, text_abs) = git_dir_match_texts(ctx, git_dir);
     let try_match = |text: &str| -> bool {
         let t = text.as_bytes();
         let p = pattern.as_bytes();
@@ -4248,7 +4239,8 @@ mod config_cache_tests {
 
     fn load_value(git_dir: &Path) -> Option<String> {
         let opts = local_opts(git_dir);
-        let set = ConfigSet::load_with_options(Some(git_dir), &opts).expect("load cascade");
+        let set = ConfigSet::load_with_options(&Environment::empty(), Some(git_dir), &opts)
+            .expect("load cascade");
         set.get("gritcachetest.value")
     }
 

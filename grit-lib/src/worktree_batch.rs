@@ -1,4 +1,5 @@
 //! Parallel read, filter, hash, and compress of worktree file blobs (add / index refresh).
+#![allow(dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

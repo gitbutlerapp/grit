@@ -212,7 +212,11 @@ fn local_git_dir(url: &str, git_dir: &Path) -> PathBuf {
 /// with a config-driven [`HelperCredentialProvider`] so `credential.helper`
 /// programs satisfy a `401`. Falls back to a plain client if config can't load.
 fn http_client(git_dir: &Path, git_protocol: Option<&str>) -> UreqHttpClient {
-    let client = match ConfigSet::load(Some(git_dir), true) {
+    let client = match ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    ) {
         Ok(config) => {
             let provider = HelperCredentialProvider::new(config.clone());
             match UreqHttpClient::from_config(&config) {

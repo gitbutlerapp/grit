@@ -395,7 +395,12 @@ pub fn submodule_needs_push_to_remote(
 
     // No remote-tracking refs (e.g. `grit fetch` did not update `refs/remotes/*`): probe each
     // configured `remote.*.url` that resolves to a local repo, like a one-sided `--remotes`.
-    let cfg = crate::config::ConfigSet::load(Some(&sub.git_dir), true).unwrap_or_default();
+    let cfg = crate::config::ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&sub.git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let mut saw_url = false;
     for entry in cfg.entries() {
         let Some(rest) = entry.key.strip_prefix("remote.") else {

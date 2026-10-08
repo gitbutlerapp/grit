@@ -173,7 +173,12 @@ fn write_notes_ref(
         .collect();
     let tree_oid = write_notes_subtree(odb, &rewritten)?;
     let parent = resolve_ref(git_dir, notes_ref).ok();
-    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let now = time::OffsetDateTime::now_utc();
     let ident = grit_ident(&config, now);
     let commit = CommitData {

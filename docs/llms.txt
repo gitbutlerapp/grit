@@ -63,7 +63,7 @@ Each docs page has a Markdown twin at the same URL with `index.md` instead of `i
 - [Network](https://grit-scm.com/docs/library/network/index.md): ls-remote, fetch and push over file:// and smart HTTP, credentials, and progress.
 - [Objects](https://grit-scm.com/docs/library/objects/index.md): ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.
 - [Refs](https://grit-scm.com/docs/library/refs/index.md): Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.
-- [Repository](https://grit-scm.com/docs/library/repository/index.md): Open and discover Git repositories, read git-dir vs work tree, load config, and handle grit_lib::Error.
+- [Repository](https://grit-scm.com/docs/library/repository/index.md): Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.
 - [Revwalk](https://grit-scm.com/docs/library/revwalk/index.md): Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.
 - [Index](https://grit-scm.com/docs/library/staging/index.md): Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.
 

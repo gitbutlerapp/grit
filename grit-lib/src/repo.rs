@@ -16,7 +16,6 @@
 //! - [`Odb`] — the loose object database.
 
 use std::collections::{BTreeSet, HashSet};
-use std::env;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -25,6 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+use crate::environment::{Environment, RepositoryOptions};
 use crate::error::{Error, Result};
 use crate::hooks::run_hook;
 use crate::index::Index;
@@ -37,29 +37,20 @@ use crate::split_index::{write_index_file_split, WriteSplitIndexRequest};
 use crate::state::resolve_head;
 use crate::worktree_cwd::cwd_relative_under_work_tree;
 
-const GIT_PREFIX_ENV: &str = "GIT_PREFIX";
-
-/// Set `GIT_PREFIX` to the repository-relative path of the process cwd (POSIX, no trailing `/`).
-///
-/// Git's `git-sh-setup` / `cd_to_toplevel` moves the process to the work tree root but preserves
-/// the original subdirectory in `GIT_PREFIX` (`setup.c`). Helpers such as `git-merge-one-file`
-/// rely on this for correct cwd-sensitive behavior.
-fn export_git_prefix_env(repo: &Repository) {
-    let Some(wt) = repo.work_tree.as_ref() else {
-        return;
-    };
-    let Ok(cwd) = env::current_dir() else {
-        return;
-    };
-    let new_s = cwd_relative_under_work_tree(wt, &cwd).unwrap_or_default();
-    if new_s.is_empty() {
-        if let Ok(existing) = env::var(GIT_PREFIX_ENV) {
-            if !existing.trim().is_empty() {
-                return;
-            }
+/// Compute Git `GIT_PREFIX` for `env.cwd` relative to the work tree (POSIX, no trailing `/`).
+fn compute_git_prefix(env: &Environment, work_tree: &Path) -> Option<String> {
+    if let Some(prefix) = env.git_prefix.as_deref() {
+        let p = prefix.trim();
+        if !p.is_empty() {
+            return Some(p.to_owned());
         }
     }
-    env::set_var(GIT_PREFIX_ENV, new_s);
+    let rel = cwd_relative_under_work_tree(work_tree, &env.cwd)?;
+    if rel.is_empty() {
+        None
+    } else {
+        Some(rel)
+    }
 }
 
 fn read_sparse_checkout_patterns(git_dir: &Path) -> Vec<String> {
@@ -102,6 +93,10 @@ pub struct Repository {
     /// replaces the snapshot after in-process config writes so subsequent operations see updates
     /// without reopening the repository.
     config_snapshot: RepositoryConfigSnapshot,
+    /// Discovery and configuration environment used to open this repository.
+    environment: Arc<Environment>,
+    /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
+    git_prefix: Option<String>,
 }
 
 type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
@@ -115,6 +110,7 @@ fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
 
 pub(crate) fn ensure_shared_config_snapshot(
     state: &Mutex<Option<ConfigSnapshotEntry>>,
+    env: &Environment,
     git_dir: Option<&Path>,
 ) -> Result<Arc<ConfigSet>> {
     let mut guard = state
@@ -130,7 +126,7 @@ pub(crate) fn ensure_shared_config_snapshot(
     };
     if stale {
         let config = if let Some(git_dir) = git_dir {
-            Arc::new(ConfigSet::load(Some(git_dir), true)?)
+            Arc::new(ConfigSet::load(env, Some(git_dir), true)?)
         } else {
             Arc::new(ConfigSet::new())
         };
@@ -154,7 +150,11 @@ struct RepoCachedSettings {
 }
 
 impl Repository {
-    fn from_canonical_git_dir(git_dir: PathBuf, work_tree: Option<&Path>) -> Result<Self> {
+    fn from_canonical_git_dir(
+        environment: Arc<Environment>,
+        git_dir: PathBuf,
+        work_tree: Option<&Path>,
+    ) -> Result<Self> {
         // Check HEAD exists or is a symlink (linked worktrees have a symlink HEAD)
         let head_path = git_dir.join("HEAD");
         if !head_path.exists() && !head_path.is_symlink() {
@@ -177,7 +177,7 @@ impl Repository {
 
         let work_tree = match work_tree {
             Some(p) => {
-                let cwd = env::current_dir().map_err(Error::Io)?;
+                let cwd = environment.discovery_cwd();
                 let mut resolved = if p.is_absolute() {
                     p.to_path_buf()
                 } else {
@@ -204,6 +204,10 @@ impl Repository {
                 .with_shared_config_state(config_snapshot.clone())
         };
 
+        let git_prefix = work_tree
+            .as_ref()
+            .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
+
         Ok(Self {
             git_dir,
             work_tree,
@@ -213,16 +217,34 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             config_snapshot,
+            environment,
+            git_prefix,
         })
     }
 
-    fn repo_cached_settings_from_config(cfg: &ConfigSet) -> RepoCachedSettings {
+    /// Return the [`Environment`] used to discover or open this repository.
+    #[must_use]
+    pub fn environment(&self) -> &Environment {
+        &self.environment
+    }
+
+    /// Repository-relative cwd prefix under the work tree (Git `GIT_PREFIX`), if any.
+    #[must_use]
+    pub fn git_prefix(&self) -> Option<&str> {
+        self.git_prefix.as_deref()
+    }
+
+    fn repo_cached_settings_from_config(
+        cfg: &ConfigSet,
+        environment: &Environment,
+    ) -> RepoCachedSettings {
         let use_replace_refs = cfg
             .get_bool("core.useReplaceRefs")
             .and_then(|r| r.ok())
             .unwrap_or(true);
-        let replace_ref_base = std::env::var("GIT_REPLACE_REF_BASE")
-            .ok()
+        let replace_ref_base = environment
+            .git_replace_ref_base
+            .clone()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "refs/replace/".to_owned());
         let replace_ref_base = if replace_ref_base.ends_with('/') {
@@ -237,7 +259,11 @@ impl Repository {
     }
 
     fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
-        ensure_shared_config_snapshot(&self.config_snapshot, Some(&self.git_dir))
+        ensure_shared_config_snapshot(
+            &self.config_snapshot,
+            self.environment.as_ref(),
+            Some(&self.git_dir),
+        )
     }
 
     /// Return the merged configuration cascade for this repository.
@@ -263,7 +289,11 @@ impl Repository {
     ///
     /// Propagates errors from [`ConfigSet::load`].
     pub fn reload_config(&self) -> Result<()> {
-        let config = Arc::new(ConfigSet::load(Some(&self.git_dir), true)?);
+        let config = Arc::new(ConfigSet::load(
+            self.environment.as_ref(),
+            Some(&self.git_dir),
+            true,
+        )?);
         self.install_config_snapshot(config);
         Ok(())
     }
@@ -286,24 +316,40 @@ impl Repository {
 
     fn cached_settings(&self) -> RepoCachedSettings {
         self.ensure_config_arc()
-            .map(|cfg| Self::repo_cached_settings_from_config(cfg.as_ref()))
-            .unwrap_or_else(|_| Self::repo_cached_settings_from_config(&ConfigSet::new()))
+            .map(|cfg| {
+                Self::repo_cached_settings_from_config(cfg.as_ref(), self.environment.as_ref())
+            })
+            .unwrap_or_else(|_| {
+                Self::repo_cached_settings_from_config(&ConfigSet::new(), self.environment.as_ref())
+            })
     }
 
     /// Open a repository from an explicit git-dir and optional work-tree.
+    ///
+    /// Uses [`RepositoryOptions::empty`] (no discovery overrides beyond `cwd = "."`).
     ///
     /// # Errors
     ///
     /// Returns [`Error::NotARepository`] if `git_dir` does not look like a
     /// valid git directory (missing `objects/`, `HEAD`, etc.).
     pub fn open(git_dir: &Path, work_tree: Option<&Path>) -> Result<Self> {
+        Self::open_with(&RepositoryOptions::empty(), git_dir, work_tree)
+    }
+
+    /// Open a repository with an explicit [`Environment`].
+    pub fn open_with(
+        options: &RepositoryOptions,
+        git_dir: &Path,
+        work_tree: Option<&Path>,
+    ) -> Result<Self> {
+        let environment = Arc::new(options.environment.clone());
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
         validate_repository_format(&git_dir)?;
-        let cfg = Arc::new(ConfigSet::load(Some(&git_dir), true)?);
-        let repo = Self::from_canonical_git_dir(git_dir, work_tree)?;
+        let cfg = Arc::new(ConfigSet::load(environment.as_ref(), Some(&git_dir), true)?);
+        let repo = Self::from_canonical_git_dir(environment, git_dir, work_tree)?;
         repo.install_config_snapshot(cfg);
         Ok(repo)
     }
@@ -319,28 +365,30 @@ impl Repository {
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
-        Self::from_canonical_git_dir(git_dir, work_tree)
+        Self::from_canonical_git_dir(Arc::new(Environment::empty()), git_dir, work_tree)
     }
 
-    /// Discover the repository starting from `start` (defaults to cwd if `None`).
+    /// Discover the repository starting from `start` (defaults to [`Environment::cwd`] if `None`).
     ///
-    /// Checks `GIT_DIR` first; if set, uses it directly.  Otherwise walks up
-    /// the directory tree looking for `.git` (regular directory or gitfile).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NotARepository`] if no repository can be found.
+    /// Uses [`RepositoryOptions::empty`].
     pub fn discover(start: Option<&Path>) -> Result<Self> {
+        Self::discover_with(&RepositoryOptions::empty(), start)
+    }
+
+    /// Discover a repository using an explicit [`Environment`].
+    pub fn discover_with(options: &RepositoryOptions, start: Option<&Path>) -> Result<Self> {
+        let env = &options.environment;
+        let cwd = env.discovery_cwd();
+
         // GIT_DIR override
-        if let Ok(dir) = env::var("GIT_DIR") {
-            let cwd = env::current_dir()?;
-            let mut git_dir = PathBuf::from(&dir);
+        if let Some(dir) = env.git_dir.as_deref() {
+            let mut git_dir = PathBuf::from(dir);
             if git_dir.is_relative() {
                 git_dir = cwd.join(git_dir);
             }
             // `GIT_DIR` may name a gitfile (`.git` as a file); resolve like Git's `read_gitfile`.
             git_dir = resolve_git_dir_env_path(&git_dir)?;
-            let work_tree = env::var("GIT_WORK_TREE").ok().map(|wt| {
+            let work_tree = env.git_work_tree.as_deref().map(|wt| {
                 let p = PathBuf::from(wt);
                 if p.is_absolute() {
                     p
@@ -349,26 +397,26 @@ impl Repository {
                 }
             });
             if let Some(ref wt_path) = work_tree {
-                if env::var("GIT_WORK_TREE")
-                    .ok()
-                    .is_some_and(|raw| Path::new(&raw).is_absolute())
+                if env
+                    .git_work_tree
+                    .as_deref()
+                    .is_some_and(|raw| Path::new(raw).is_absolute())
                 {
                     validate_git_work_tree_path(wt_path)?;
                 }
             }
             if work_tree.is_some() {
-                let mut repo = Self::open(&git_dir, work_tree.as_deref())?;
+                let mut repo = Self::open_with(options, &git_dir, work_tree.as_deref())?;
                 repo.explicit_git_dir = true;
                 repo.discovery_root = None;
                 repo.work_tree_from_env = false;
                 repo.discovery_via_gitfile = false;
-                export_git_prefix_env(&repo);
                 return Ok(repo);
             }
             // `GIT_DIR` without `GIT_WORK_TREE`: honour `core.bare` / `core.worktree` like Git.
             let (is_bare, core_wt) = read_core_bare_and_worktree(&git_dir)?;
             if is_bare && core_wt.is_some() {
-                warn_core_bare_worktree_conflict(&git_dir);
+                warn_core_bare_worktree_conflict(&git_dir, env);
             }
             let resolved_wt = if is_bare {
                 None
@@ -382,20 +430,17 @@ impl Repository {
                 // under `$PWD` (e.g. t5402-post-merge-hook).
                 Some(cwd.canonicalize().unwrap_or_else(|_| cwd.clone()))
             };
-            let mut repo = Self::open(&git_dir, resolved_wt.as_deref())?;
+            let mut repo = Self::open_with(options, &git_dir, resolved_wt.as_deref())?;
             repo.explicit_git_dir = true;
             repo.discovery_root = None;
             repo.work_tree_from_env = false;
             repo.discovery_via_gitfile = false;
-            export_git_prefix_env(&repo);
             return Ok(repo);
         }
 
-        let cwd = env::current_dir()?;
-
         // If GIT_WORK_TREE is set without GIT_DIR, we still need to honor it
         // after discovery (path is relative to cwd, like Git).
-        let env_work_tree = env::var("GIT_WORK_TREE").ok().map(|wt| {
+        let env_work_tree = env.git_work_tree.as_deref().map(|wt| {
             let p = PathBuf::from(wt);
             if p.is_absolute() {
                 p
@@ -404,9 +449,10 @@ impl Repository {
             }
         });
         if let Some(ref p) = env_work_tree {
-            if env::var("GIT_WORK_TREE")
-                .ok()
-                .is_some_and(|raw| Path::new(&raw).is_absolute())
+            if env
+                .git_work_tree
+                .as_deref()
+                .is_some_and(|raw| Path::new(raw).is_absolute())
             {
                 validate_git_work_tree_path(p)?;
             }
@@ -421,7 +467,7 @@ impl Repository {
         // Parse GIT_CEILING_DIRECTORIES — mirror Git `setup_git_directory_gently_1` +
         // `longest_ancestor_length` on the canonical cwd path.
         // A leading colon disables symlink resolution for both ceiling paths and cwd.
-        let (ceiling_paths, no_resolve_ceilings) = parse_ceiling_directories();
+        let (ceiling_paths, no_resolve_ceilings) = parse_ceiling_directories(env);
         let ceiling_dirs: Vec<String> = ceiling_paths
             .into_iter()
             .map(|p| path_for_ceiling_compare(&p))
@@ -439,20 +485,23 @@ impl Repository {
         let mut ceil_offset: isize = longest_ancestor_length(&ceil_cmp_buf, &ceiling_dirs)
             .map(|n| n as isize)
             .unwrap_or(-1);
-        if ceil_offset < 0 {
+        if ceiling_dirs.contains(&dir_buf) {
+            ceil_offset = dir_buf.len() as isize;
+        } else if ceil_offset < 0 {
             ceil_offset = min_offset as isize - 2;
         }
 
         loop {
             let current = Path::new(&dir_buf);
-            if let Some(DiscoveredAt { mut repo, gitfile }) = try_open_at(current)? {
+            if let Some(DiscoveredAt { mut repo, gitfile }) = try_open_at(env, current)? {
                 // git/setup.c `setup_git_directory` runs `check_repository_format` on the resolved
                 // git dir and dies on a bad format (e.g. a v1-only `extensions.*` in a
                 // `repositoryformatversion = 0` repo; t0001 #60). Discovery itself opens with
                 // validation skipped so an empty `.git/` is walked past, but a *found* repository
                 // must satisfy the format check.
                 validate_repository_format(&repo.git_dir)?;
-                let cfg = Arc::new(ConfigSet::load(Some(&repo.git_dir), true)?);
+                repo.environment = Arc::new(env.clone());
+                let cfg = Arc::new(ConfigSet::load(env, Some(&repo.git_dir), true)?);
                 repo.install_config_snapshot(Arc::clone(&cfg));
                 if let Some(ref wt) = env_work_tree {
                     repo.work_tree = Some(wt.canonicalize().unwrap_or_else(|_| wt.clone()));
@@ -474,23 +523,20 @@ impl Repository {
                         }
                     }
                 }
-                let assume_different = env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER")
-                    .ok()
-                    .map(|v| {
-                        let lower = v.to_ascii_lowercase();
-                        v == "1" || lower == "true" || lower == "yes" || lower == "on"
-                    })
-                    .unwrap_or(false);
+                let assume_different = env.test_assume_different_owner();
                 if assume_different {
                     repo.enforce_safe_directory()?;
                 } else {
                     ensure_valid_ownership(
+                        env,
                         gitfile.as_deref(),
                         repo.work_tree.as_deref(),
                         &repo.git_dir,
                     )?;
                 }
-                export_git_prefix_env(&repo);
+                if let Some(wt) = repo.work_tree.as_ref() {
+                    repo.git_prefix = compute_git_prefix(env, wt);
+                }
                 return Ok(repo);
             }
 
@@ -533,7 +579,7 @@ impl Repository {
     /// relative to the work tree root — use that root as the effective cwd.
     #[must_use]
     pub fn effective_pathspec_cwd(&self) -> PathBuf {
-        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd = self.environment.discovery_cwd();
         let Some(wt) = self.work_tree.as_ref() else {
             return cwd;
         };
@@ -560,13 +606,13 @@ impl Repository {
     ///
     /// Relative paths are resolved from the process current directory.
     pub fn index_path_for_env(&self) -> Result<PathBuf> {
-        if let Ok(raw) = env::var("GIT_INDEX_FILE") {
+        if let Some(raw) = self.environment.git_index_file.as_deref() {
             if !raw.is_empty() {
                 let p = PathBuf::from(raw);
                 return Ok(if p.is_absolute() {
                     p
                 } else {
-                    env::current_dir().map_err(Error::Io)?.join(p)
+                    self.environment.discovery_cwd().join(p)
                 });
             }
         }
@@ -840,7 +886,7 @@ impl Repository {
     #[must_use]
     pub fn bloom_pathspec_cwd(&self) -> Option<String> {
         let wt = self.work_tree.as_ref()?;
-        let cwd = env::current_dir().ok()?;
+        let cwd = self.environment.discovery_cwd();
         let wt = wt.canonicalize().ok()?;
         let cwd = cwd.canonicalize().ok()?;
         let rel = cwd.strip_prefix(&wt).ok()?;
@@ -867,7 +913,7 @@ impl Repository {
     /// replacement object instead.  Otherwise it behaves identically
     /// to `self.odb.read(oid)`.
     pub fn read_replaced(&self, oid: &crate::objects::ObjectId) -> Result<crate::objects::Object> {
-        if std::env::var_os("GIT_NO_REPLACE_OBJECTS").is_some() {
+        if self.environment.git_no_replace_objects {
             return self.odb.read(oid);
         }
         let settings = self.cached_settings();
@@ -896,18 +942,18 @@ impl Repository {
 /// Upstream tests grep `^setup: ` from the trace file; they do not use the timestamped
 /// `trace.c:` prefix that full Git tracing adds.
 pub fn trace_repo_setup_if_requested(repo: &Repository) -> std::io::Result<()> {
-    let Ok(path) = env::var("GIT_TRACE_SETUP") else {
+    let Some(path) = repo.environment.git_trace_setup.as_deref() else {
         return Ok(());
     };
     if path.is_empty() || path == "0" {
         return Ok(());
     }
-    let trace_path = Path::new(&path);
+    let trace_path = Path::new(path);
     if !trace_path.is_absolute() {
         return Ok(());
     }
 
-    let actual_cwd = env::current_dir()?;
+    let actual_cwd = repo.environment.discovery_cwd();
     let actual_cwd = actual_cwd
         .canonicalize()
         .unwrap_or_else(|_| actual_cwd.clone());
@@ -1100,7 +1146,7 @@ fn display_git_dir_for_setup_trace(
     // subdirectory it realpath()s to an absolute path (see `setup.c` / t1510).
     if repo.explicit_git_dir {
         if repo.work_tree.is_none() {
-            if let Ok(raw) = env::var("GIT_DIR") {
+            if let Some(raw) = repo.environment.git_dir.as_deref() {
                 let p = Path::new(raw.trim());
                 if p.is_absolute() {
                     return gd.display().to_string();
@@ -1126,7 +1172,7 @@ fn display_git_dir_for_setup_trace(
             if strictly_inside_wt {
                 return gd.display().to_string();
             }
-            if let Ok(raw) = env::var("GIT_DIR") {
+            if let Some(raw) = repo.environment.git_dir.as_deref() {
                 let p = Path::new(raw.trim());
                 if p.is_relative() {
                     let joined = ac.join(p);
@@ -1824,7 +1870,7 @@ struct DiscoveredAt {
     gitfile: Option<PathBuf>,
 }
 
-fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
+fn try_open_at(env: &Environment, dir: &Path) -> Result<Option<DiscoveredAt>> {
     let dot_git = dir.join(".git");
 
     // Check for special file types (FIFO, socket, etc.) — reject them
@@ -1868,7 +1914,7 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
         // (t1501). When the process cwd is not inside that configured tree, Git uses the
         // discovery directory as the work tree (commondir overrides for ops under the real tree).
         if resolve_common_dir(&git_dir).is_some() {
-            let cwd = env::current_dir().map_err(Error::Io)?;
+            let cwd = env.discovery_cwd();
             if repo.work_tree.is_some() && !is_inside_work_tree(&repo, &cwd) {
                 let root = if dir.is_absolute() {
                     dir.to_path_buf()
@@ -1881,11 +1927,11 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
         let root = if dir.is_absolute() {
             dir.to_path_buf()
         } else {
-            env::current_dir().map_err(Error::Io)?.join(dir)
+            env.discovery_cwd().join(dir)
         };
         repo.discovery_root = Some(root.canonicalize().unwrap_or(root));
         repo.discovery_via_gitfile = true;
-        warn_core_bare_worktree_conflict(&git_dir);
+        warn_core_bare_worktree_conflict(&git_dir, env);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: Some(dot_git.clone()),
@@ -1919,7 +1965,7 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
                 let root = if dir.is_absolute() {
                     dir.to_path_buf()
                 } else {
-                    env::current_dir().map_err(Error::Io)?.join(dir)
+                    env.discovery_cwd().join(dir)
                 };
                 repo.discovery_root = Some(root.canonicalize().unwrap_or(root));
                 repo.discovery_via_gitfile = false;
@@ -1937,9 +1983,9 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
     // Linked-worktree gitdir/admin directories contain HEAD and commondir,
     // and can be opened as repositories even without a local objects/ dir.
     if dir.join("HEAD").is_file() && dir.join("commondir").is_file() {
-        maybe_trace_implicit_bare_repository(dir);
+        maybe_trace_implicit_bare_repository(dir, env);
         let repo = Repository::open(dir, None)?;
-        warn_core_bare_worktree_conflict(dir);
+        warn_core_bare_worktree_conflict(dir, env);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -1948,12 +1994,12 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
 
     // Check if `dir` itself is a bare repo (has objects/ and HEAD directly)
     if dir.join("objects").is_dir() && dir.join("HEAD").is_file() {
-        maybe_trace_implicit_bare_repository(dir);
+        maybe_trace_implicit_bare_repository(dir, env);
         // Check safe.bareRepository policy before opening bare repos.
         // When set to "explicit", implicit bare repo discovery is forbidden
         // unless GIT_DIR was set (handled earlier in discover()).
         if !is_inside_dot_git(dir) {
-            if let Ok(cfg) = crate::config::ConfigSet::load(None, true) {
+            if let Ok(cfg) = crate::config::ConfigSet::load(env, None, true) {
                 if let Some(val) = cfg.get("safe.bareRepository") {
                     if val.eq_ignore_ascii_case("explicit") {
                         return Err(Error::ForbiddenBareRepository(dir.display().to_string()));
@@ -1962,7 +2008,7 @@ fn try_open_at(dir: &Path) -> Result<Option<DiscoveredAt>> {
             }
         }
         let repo = Repository::open(dir, None)?;
-        warn_core_bare_worktree_conflict(dir);
+        warn_core_bare_worktree_conflict(dir, env);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -1976,10 +2022,13 @@ fn is_inside_dot_git(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == ".git")
 }
 
-fn maybe_trace_implicit_bare_repository(dir: &Path) {
-    let path = match std::env::var("GIT_TRACE2_PERF") {
-        Ok(p) if !p.is_empty() => p,
-        _ => return,
+fn maybe_trace_implicit_bare_repository(dir: &Path, environment: &Environment) {
+    let Some(path) = environment
+        .git_trace2_perf
+        .as_deref()
+        .filter(|p| !p.is_empty())
+    else {
+        return;
     };
 
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
@@ -1989,8 +2038,8 @@ fn maybe_trace_implicit_bare_repository(dir: &Path) {
 
 /// Collect effective `safe.directory` values from protected config (system/global/command),
 /// applying empty-value resets like Git.
-fn safe_directory_effective_values(git_dir: &Path) -> Vec<String> {
-    let cfg = crate::config::ConfigSet::load(Some(git_dir), true)
+fn safe_directory_effective_values(git_dir: &Path, env: &Environment) -> Vec<String> {
+    let cfg = crate::config::ConfigSet::load(env, Some(git_dir), true)
         .unwrap_or_else(|_| crate::config::ConfigSet::new());
     let mut values: Vec<String> = Vec::new();
     for e in cfg.entries() {
@@ -2012,15 +2061,19 @@ fn safe_directory_effective_values(git_dir: &Path) -> Vec<String> {
     effective
 }
 
-fn ensure_safe_directory_allows(git_dir: &Path, checked: &Path) -> Result<()> {
-    let effective = safe_directory_effective_values(git_dir);
+fn ensure_safe_directory_allows(
+    git_dir: &Path,
+    checked: &Path,
+    environment: &Environment,
+) -> Result<()> {
+    let effective = safe_directory_effective_values(git_dir, environment);
     let checked_s = checked.to_string_lossy().to_string();
-    if std::env::var("GRIT_DEBUG_SAFE_DIR").is_ok() {
+    if environment.grit_debug_safe_dir {
         eprintln!("debug-safe-directory values={:?}", effective);
     }
     if effective
         .iter()
-        .any(|v| safe_directory_matches(v, &checked_s))
+        .any(|v| safe_directory_matches(v, &checked_s, &environment.discovery_cwd()))
     {
         return Ok(());
     }
@@ -2034,62 +2087,52 @@ fn path_lstat_uid(path: &Path) -> std::io::Result<u32> {
     Ok(meta.uid())
 }
 
-#[cfg(unix)]
-fn extract_uid_from_env(name: &str) -> Option<u32> {
-    let raw = std::env::var(name).ok()?;
-    if raw.is_empty() {
-        return None;
-    }
-    raw.parse::<u32>().ok()
-}
-
 /// Match Git's `ensure_valid_ownership`: check gitfile, worktree, and gitdir ownership,
 /// then `safe.directory` when any path is not owned by the effective user.
 #[cfg(unix)]
 fn ensure_valid_ownership(
+    environment: &Environment,
     gitfile: Option<&Path>,
     worktree: Option<&Path>,
     gitdir: &Path,
 ) -> Result<()> {
     const ROOT_UID: u32 = 0;
+    let sudo_euid = environment
+        .sudo_uid
+        .as_deref()
+        .and_then(|s| s.parse::<u32>().ok());
 
-    fn owned_by_effective_user(path: &Path) -> std::io::Result<bool> {
+    fn owned_by_effective_user(path: &Path, sudo_euid: Option<u32>) -> std::io::Result<bool> {
         let st_uid = path_lstat_uid(path)?;
         let mut euid = nix::unistd::geteuid().as_raw();
         if euid == ROOT_UID {
             if st_uid == ROOT_UID {
                 return Ok(true);
             }
-            if let Some(sudo_uid) = extract_uid_from_env("SUDO_UID") {
+            if let Some(sudo_uid) = sudo_euid {
                 euid = sudo_uid;
             }
         }
         Ok(st_uid == euid)
     }
 
-    let assume_different = std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER")
-        .ok()
-        .map(|v| {
-            let lower = v.to_ascii_lowercase();
-            v == "1" || lower == "true" || lower == "yes" || lower == "on"
-        })
-        .unwrap_or(false);
+    let assume_different = environment.test_assume_different_owner();
     if !assume_different {
         let gitfile_ok = gitfile
-            .map(owned_by_effective_user)
+            .map(|p| owned_by_effective_user(p, sudo_euid))
             .transpose()?
             .unwrap_or(true);
         // Git may use a `GIT_WORK_TREE` that does not exist yet (t1510); skip ownership when
         // the path is absent instead of failing discovery with ENOENT.
         let wt_ok = match worktree {
             None => true,
-            Some(wt) => match owned_by_effective_user(wt) {
+            Some(wt) => match owned_by_effective_user(wt, sudo_euid) {
                 Ok(ok) => ok,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
                 Err(e) => return Err(Error::Io(e)),
             },
         };
-        let gd_ok = owned_by_effective_user(gitdir)?;
+        let gd_ok = owned_by_effective_user(gitdir, sudo_euid)?;
         if gitfile_ok && wt_ok && gd_ok {
             return Ok(());
         }
@@ -2102,7 +2145,7 @@ fn ensure_valid_ownership(
             .canonicalize()
             .unwrap_or_else(|_| gitdir.to_path_buf())
     };
-    ensure_safe_directory_allows(gitdir, &data_path)
+    ensure_safe_directory_allows(gitdir, &data_path, environment)
 }
 
 #[cfg(not(unix))]
@@ -2121,13 +2164,7 @@ impl Repository {
     /// unless a matching `safe.directory` value is configured in system/global/
     /// command scopes (repository-local config is ignored).
     pub fn enforce_safe_directory(&self) -> Result<()> {
-        let assume_different = std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER")
-            .ok()
-            .map(|v| {
-                let lower = v.to_ascii_lowercase();
-                v == "1" || lower == "true" || lower == "yes" || lower == "on"
-            })
-            .unwrap_or(false);
+        let assume_different = self.environment.test_assume_different_owner();
         if !assume_different {
             return Ok(());
         }
@@ -2140,7 +2177,7 @@ impl Repository {
         // unless invocation starts inside the gitdir, in which case gitdir is
         // checked.
         let checked = if let Some(wt) = &self.work_tree {
-            let cwd = std::env::current_dir().ok();
+            let cwd = Some(self.environment.discovery_cwd());
             if let Some(cwd) = cwd {
                 if cwd
                     .canonicalize()
@@ -2162,13 +2199,13 @@ impl Repository {
                 .unwrap_or_else(|_| self.git_dir.clone())
         };
 
-        if std::env::var("GRIT_DEBUG_SAFE_DIR").is_ok() {
+        if self.environment.grit_debug_safe_dir {
             eprintln!(
                 "debug-safe-directory checked={} git_dir={} work_tree={:?} cwd={:?}",
                 checked.display(),
                 self.git_dir.display(),
                 self.work_tree,
-                std::env::current_dir().ok()
+                Some(self.environment.discovery_cwd())
             );
         }
         self.enforce_safe_directory_checked(&checked)
@@ -2179,13 +2216,7 @@ impl Repository {
     /// Used by operations that explicitly open another repository by path
     /// (e.g. local clone source).
     pub fn enforce_safe_directory_git_dir(&self) -> Result<()> {
-        let assume_different = std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER")
-            .ok()
-            .map(|v| {
-                let lower = v.to_ascii_lowercase();
-                v == "1" || lower == "true" || lower == "yes" || lower == "on"
-            })
-            .unwrap_or(false);
+        let assume_different = self.environment.test_assume_different_owner();
         if !assume_different {
             return Ok(());
         }
@@ -2193,7 +2224,7 @@ impl Repository {
             .git_dir
             .canonicalize()
             .unwrap_or_else(|_| self.git_dir.clone());
-        if std::env::var("GRIT_DEBUG_SAFE_DIR").is_ok() {
+        if self.environment.grit_debug_safe_dir {
             eprintln!(
                 "debug-safe-directory(gitdir) checked={} git_dir={} work_tree={:?}",
                 checked.display(),
@@ -2206,13 +2237,7 @@ impl Repository {
 
     /// Enforce safe.directory checks against an explicit checked path.
     pub fn enforce_safe_directory_git_dir_with_path(&self, checked: &Path) -> Result<()> {
-        let assume_different = std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER")
-            .ok()
-            .map(|v| {
-                let lower = v.to_ascii_lowercase();
-                v == "1" || lower == "true" || lower == "yes" || lower == "on"
-            })
-            .unwrap_or(false);
+        let assume_different = self.environment.test_assume_different_owner();
         if !assume_different {
             return Ok(());
         }
@@ -2220,7 +2245,7 @@ impl Repository {
     }
 
     fn enforce_safe_directory_checked(&self, checked: &Path) -> Result<()> {
-        ensure_safe_directory_allows(&self.git_dir, checked)
+        ensure_safe_directory_allows(&self.git_dir, checked, self.environment.as_ref())
     }
 
     /// Verify the repository is safe to use as a `git clone` source (local clone).
@@ -2229,19 +2254,13 @@ impl Repository {
     /// rules as discovery. Otherwise checks filesystem ownership of the git directory
     /// only (matching Git's `die_upon_dubious_ownership` for clone).
     pub fn verify_safe_for_clone_source(&self) -> Result<()> {
-        let assume_different = std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER")
-            .ok()
-            .map(|v| {
-                let lower = v.to_ascii_lowercase();
-                v == "1" || lower == "true" || lower == "yes" || lower == "on"
-            })
-            .unwrap_or(false);
+        let assume_different = self.environment.test_assume_different_owner();
         if assume_different {
             self.enforce_safe_directory_git_dir()
         } else {
             #[cfg(unix)]
             {
-                ensure_valid_ownership(None, None, &self.git_dir)
+                ensure_valid_ownership(self.environment.as_ref(), None, None, &self.git_dir)
             }
             #[cfg(not(unix))]
             {
@@ -2281,18 +2300,15 @@ fn normalize_fs_path(raw: &str) -> String {
     out
 }
 
-fn safe_directory_matches(config_value: &str, checked: &str) -> bool {
+fn safe_directory_matches(config_value: &str, checked: &str, cwd: &Path) -> bool {
     if config_value == "*" {
         return true;
     }
     if config_value == "." {
         // CWD only.
-        if let Ok(cwd) = std::env::current_dir() {
-            let cwd_s = normalize_fs_path(&cwd.to_string_lossy());
-            let checked_s = normalize_fs_path(checked);
-            return cwd_s == checked_s;
-        }
-        return false;
+        let cwd_s = normalize_fs_path(&cwd.to_string_lossy());
+        let checked_s = normalize_fs_path(checked);
+        return cwd_s == checked_s;
     }
 
     let canonicalize_or_normalize = |raw: &str| -> String {
@@ -2323,11 +2339,11 @@ fn safe_directory_matches(config_value: &str, checked: &str) -> bool {
     config_norm == checked_norm
 }
 
-fn warn_core_bare_worktree_conflict(git_dir: &Path) {
-    if env::var("GIT_WORK_TREE")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .is_some()
+fn warn_core_bare_worktree_conflict(git_dir: &Path, environment: &Environment) {
+    if environment
+        .git_work_tree
+        .as_deref()
+        .is_some_and(|s| !s.trim().is_empty())
     {
         return;
     }
@@ -2358,7 +2374,12 @@ fn read_core_bare_and_worktree_from_config(cfg: &ConfigSet) -> (bool, Option<Str
 }
 
 fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)> {
-    let cfg = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let cfg = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
     Ok(read_core_bare_and_worktree_from_config(&cfg))
 }
 
@@ -2405,12 +2426,8 @@ fn resolve_core_worktree_path(git_dir: &Path, raw: &str) -> Result<PathBuf> {
     if p.is_absolute() {
         return Ok(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
     }
-    let old = env::current_dir().map_err(Error::Io)?;
-    env::set_current_dir(git_dir).map_err(Error::Io)?;
-    env::set_current_dir(raw).map_err(Error::Io)?;
-    let resolved = env::current_dir().map_err(Error::Io)?;
-    env::set_current_dir(&old).map_err(Error::Io)?;
-    Ok(resolved.canonicalize().unwrap_or(resolved))
+    let joined = git_dir.join(p);
+    Ok(joined.canonicalize().unwrap_or(joined))
 }
 
 /// When `GIT_DIR` names a gitfile, resolve to the real git directory.
@@ -2579,7 +2596,11 @@ fn write_fresh_git_directory(
         }
     }
 
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
+    apply_init_filesystem_config(
+        git_dir,
+        InitFilesystemConfigOptions::default(),
+        &Environment::capture_process(),
+    )?;
 
     fs::write(
         git_dir.join("description"),
@@ -2701,7 +2722,11 @@ pub fn init_bare_clone_minimal(
         config_content.push_str("\trefStorage = reftable\n");
     }
     fs::write(git_dir.join("config"), config_content)?;
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
+    apply_init_filesystem_config(
+        git_dir,
+        InitFilesystemConfigOptions::default(),
+        &Environment::capture_process(),
+    )?;
 
     fs::write(
         git_dir.join("packed-refs"),
@@ -2826,7 +2851,11 @@ pub fn init_repository_separate(
         work_tree_abs.display()
     );
     fs::write(git_dir.join("config"), config_content)?;
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default())?;
+    apply_init_filesystem_config(
+        git_dir,
+        InitFilesystemConfigOptions::default(),
+        &Environment::capture_process(),
+    )?;
     fs::write(
         git_dir.join("description"),
         "Unnamed repository; edit this file 'description' to name the repository.\n",
@@ -2862,10 +2891,9 @@ fn copy_template(src: &Path, dst: &Path) -> Result<()> {
 ///
 /// A leading colon (`:path1:path2`) disables symlink resolution for all
 /// ceiling paths AND the cwd used for comparison (Git `resolve_symlinks` flag).
-fn parse_ceiling_directories() -> (Vec<PathBuf>, bool) {
-    let raw = match env::var("GIT_CEILING_DIRECTORIES") {
-        Ok(val) => val,
-        Err(_) => return (Vec::new(), false),
+fn parse_ceiling_directories(env: &Environment) -> (Vec<PathBuf>, bool) {
+    let Some(raw) = env.git_ceiling_directories.as_deref() else {
+        return (Vec::new(), false);
     };
     if raw.is_empty() {
         return (Vec::new(), false);
@@ -2873,7 +2901,7 @@ fn parse_ceiling_directories() -> (Vec<PathBuf>, bool) {
     // A leading colon means "don't resolve symlinks".
     let (no_resolve, effective) = match raw.strip_prefix(':') {
         Some(rest) => (true, rest),
-        None => (false, raw.as_str()),
+        None => (false, raw),
     };
     let paths = effective
         .split(':')

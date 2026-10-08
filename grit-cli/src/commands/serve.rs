@@ -12,6 +12,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::stdio;
 use grit_lib::config::ConfigSet;
+use grit_lib::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use grit_lib::serve::{self, ProtocolVersion, ReceivePolicy, ServeOptions};
 
@@ -44,7 +45,7 @@ pub fn run(
     advertise_refs: bool,
 ) -> Result<()> {
     let repo = open_served_repo(Path::new(directory))?;
-    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let hidden_refs = match service {
         Service::UploadPack => grit_lib::hide_refs::hide_ref_patterns_uploadpack(&config),
         Service::ReceivePack => grit_lib::hide_refs::hide_ref_patterns_receive(&config),
@@ -77,6 +78,7 @@ pub fn run(
 /// Open the repository a client asked for, without searching parent
 /// directories: a server must only serve exactly the path it was given.
 fn open_served_repo(path: &Path) -> Result<Repository> {
+    let options = RepositoryOptions::with_environment(crate::context::environment());
     let mut with_git_suffix = path.as_os_str().to_owned();
     with_git_suffix.push(".git");
     let candidates = [
@@ -88,7 +90,7 @@ fn open_served_repo(path: &Path) -> Result<Repository> {
         if !git_dir.join("HEAD").is_file() {
             continue;
         }
-        return Repository::open(&git_dir, work_tree.as_deref())
+        return Repository::open_with(&options, &git_dir, work_tree.as_deref())
             .with_context(|| format!("opening repository '{}'", path.display()));
     }
     bail!(
