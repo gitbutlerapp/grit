@@ -2784,28 +2784,31 @@ mod tests {
 
         clear_pack_cache();
         test_reset_pack_marker_stat_count();
-        let odb = Odb::new(&objects);
-        assert!(odb.exists_local(&oid));
         let pack_count = fs::read_dir(objects.join("pack"))
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
             .count();
+        let expected_prepare_stats = u64::try_from(pack_count * 2).unwrap();
+        let odb = Odb::new(&objects);
+        let before_prepare = test_pack_marker_stat_count();
+        assert!(odb.exists_local(&oid));
         assert_eq!(
-            test_pack_marker_stat_count(),
-            u64::try_from(pack_count * 2).unwrap(),
+            test_pack_marker_stat_count().saturating_sub(before_prepare),
+            expected_prepare_stats,
             "prepare should stat promisor and mtimes once per pack"
         );
 
         test_reset_pack_marker_stat_count();
         for _ in 0..10_000 {
+            let before_probe = test_pack_marker_stat_count();
             assert!(odb.exists_local(&oid));
+            assert_eq!(
+                test_pack_marker_stat_count(),
+                before_probe,
+                "cached sidecar flags must not stat markers on each exists_local probe"
+            );
         }
-        assert_eq!(
-            test_pack_marker_stat_count(),
-            0,
-            "cached sidecar flags must not stat markers on each exists_local probe"
-        );
     }
 
     #[test]
