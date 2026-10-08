@@ -14,7 +14,6 @@
 //!   - `filter=<name>` (with `filter.<name>.clean` / `filter.<name>.smudge`)
 //!   - `ident` keyword expansion
 
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -26,20 +25,42 @@ use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 
 /// Working-tree encoding conversion failure (Git `reencode_string_len` returning NULL).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WorkTreeEncodingError {
     /// The encoding label is not supported by `encoding_rs` / [`crate::commit_encoding`].
+    #[error("unsupported encoding '{label}'")]
     UnsupportedEncoding {
         /// Config or attribute encoding name.
         label: String,
     },
 }
 
-impl fmt::Display for WorkTreeEncodingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedEncoding { label } => write!(f, "unsupported encoding '{label}'"),
-        }
+/// Error from [`convert_to_git`], [`convert_to_worktree`], and related CRLF/encoding helpers.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConversionError {
+    /// Working-tree encoding could not be resolved or converted.
+    #[error(transparent)]
+    Encoding(WorkTreeEncodingError),
+    /// Filter, safecrlf, BOM validation, or other conversion failure (Git-compatible message).
+    #[error("{0}")]
+    Message(String),
+}
+
+impl From<WorkTreeEncodingError> for ConversionError {
+    fn from(value: WorkTreeEncodingError) -> Self {
+        Self::Encoding(value)
+    }
+}
+
+impl From<String> for ConversionError {
+    fn from(value: String) -> Self {
+        Self::Message(value)
+    }
+}
+
+impl From<&str> for ConversionError {
+    fn from(value: &str) -> Self {
+        Self::Message(value.to_owned())
     }
 }
 
@@ -1196,7 +1217,7 @@ fn decode_working_tree_bytes_to_utf8(
     rel_path: &str,
     enc_label: &str,
     validate: bool,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ConversionError> {
     let label = enc_label.trim();
     if label.is_empty() {
         return Ok(src.to_vec());
@@ -1240,21 +1261,19 @@ fn decode_working_tree_bytes_to_utf8(
             // Unknown / unsupported label (Git `reencode_string_len` returns NULL →
             // `failed to encode '%s' from %s to %s`).
             let Some(enc) = crate::commit_encoding::resolve(label) else {
-                let _err = WorkTreeEncodingError::UnsupportedEncoding {
+                return Err(WorkTreeEncodingError::UnsupportedEncoding {
                     label: label.to_owned(),
-                };
-                return Err(format!(
-                    "failed to encode '{rel_path}' from {label} to UTF-8"
-                ));
+                }
+                .into());
             };
             if enc == UTF_8 {
                 return Ok(src.to_vec());
             }
             let (cow, _, had_errors) = enc.decode(src);
             if had_errors {
-                return Err(format!(
+                return Err(ConversionError::Message(format!(
                     "failed to encode '{rel_path}' from {label} to UTF-8"
-                ));
+                )));
             }
             return Ok(cow.into_owned().into_bytes());
         }
@@ -1269,8 +1288,12 @@ fn decode_utf_bytes_with_encoding_rs(
     rel_path: &str,
     label: &str,
     iconv_from: &str,
-) -> Result<Vec<u8>, String> {
-    let fail = || format!("failed to encode '{rel_path}' from {label} to UTF-8");
+) -> Result<Vec<u8>, ConversionError> {
+    let fail = || {
+        ConversionError::Message(format!(
+            "failed to encode '{rel_path}' from {label} to UTF-8"
+        ))
+    };
     match iconv_from {
         "UTF-16BE" => {
             let (cow, _, had_errors) = encoding_rs::UTF_16BE.decode(body);
@@ -1314,8 +1337,12 @@ fn decode_utf32_body_to_utf8_bytes(
     body: &[u8],
     rel_path: &str,
     big_endian: bool,
-) -> Result<Vec<u8>, String> {
-    let fail = || format!("failed to encode '{rel_path}' from UTF-32 to UTF-8");
+) -> Result<Vec<u8>, ConversionError> {
+    let fail = || {
+        ConversionError::Message(format!(
+            "failed to encode '{rel_path}' from UTF-32 to UTF-8"
+        ))
+    };
     if !body.len().is_multiple_of(4) {
         return Err(fail());
     }
@@ -1355,7 +1382,7 @@ fn encode_utf8_blob_to_working_tree_bytes(
     src: &[u8],
     rel_path: &str,
     enc_label: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ConversionError> {
     let label = enc_label.trim();
     if label.is_empty() {
         return Ok(src.to_vec());
@@ -1366,19 +1393,36 @@ fn encode_utf8_blob_to_working_tree_bytes(
         return Ok(src.to_vec());
     }
 
-    let fail = || format!("failed to encode '{rel_path}' from UTF-8 to {label}");
+    let fail = || {
+        ConversionError::Message(format!(
+            "failed to encode '{rel_path}' from UTF-8 to {label}"
+        ))
+    };
 
     // The `*-BOM` aliases: encode to the raw form, then prepend the requested BOM.
     match canon.as_deref() {
         Some("utf-16le-bom") => {
-            let body = encode_utf_with_encoding_rs(src, "UTF-16LE").ok_or_else(fail)?;
+            let body = encode_utf_with_encoding_rs(src, "utf-16le").ok_or_else(fail)?;
             let mut out = UTF16_LE_BOM.to_vec();
             out.extend(body);
             return Ok(out);
         }
         Some("utf-16be-bom") => {
-            let body = encode_utf_with_encoding_rs(src, "UTF-16BE").ok_or_else(fail)?;
+            let body = encode_utf_with_encoding_rs(src, "utf-16be").ok_or_else(fail)?;
             let mut out = UTF16_BE_BOM.to_vec();
+            out.extend(body);
+            return Ok(out);
+        }
+        // Bare UTF-16/UTF-32: Git/libiconv emits a BOM then little-endian code units (see `iconv`).
+        Some("utf-16") => {
+            let body = encode_utf_with_encoding_rs(src, "utf-16le").ok_or_else(fail)?;
+            let mut out = UTF16_LE_BOM.to_vec();
+            out.extend(body);
+            return Ok(out);
+        }
+        Some("utf-32") => {
+            let body = encode_utf_with_encoding_rs(src, "utf-32le").ok_or_else(fail)?;
+            let mut out = UTF32_LE_BOM.to_vec();
             out.extend(body);
             return Ok(out);
         }
@@ -1390,12 +1434,10 @@ fn encode_utf8_blob_to_working_tree_bytes(
 
     let s = std::str::from_utf8(src).map_err(|_| fail())?;
     let Some(enc) = crate::commit_encoding::resolve(label) else {
-        let _err = WorkTreeEncodingError::UnsupportedEncoding {
+        return Err(WorkTreeEncodingError::UnsupportedEncoding {
             label: label.to_owned(),
-        };
-        return Err(format!(
-            "unknown working-tree-encoding '{label}' for '{rel_path}'"
-        ));
+        }
+        .into());
     };
     if enc == UTF_8 {
         return Ok(src.to_vec());
@@ -1456,7 +1498,7 @@ pub fn convert_to_git(
     rel_path: &str,
     conv: &ConversionConfig,
     file_attrs: &FileAttrs,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ConversionError> {
     convert_to_git_with_opts(
         data,
         rel_path,
@@ -1473,7 +1515,7 @@ pub fn convert_to_git_with_opts(
     conv: &ConversionConfig,
     file_attrs: &FileAttrs,
     opts: ConvertToGitOpts<'_>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ConversionError> {
     let mut buf = data.to_vec();
 
     // 1. Run clean filter if configured (long-running `process` overrides clean command)
@@ -1484,9 +1526,9 @@ pub fn convert_to_git_with_opts(
             Err(e) => {
                 if file_attrs.filter_clean_required {
                     if e.contains("expected git-filter-server") {
-                        return Err(e);
+                        return Err(e.into());
                     }
-                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed"));
+                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed").into());
                 }
                 if e.starts_with("filter status: abort") {
                     crate::filter_process::disable_process_filter(proc_cmd);
@@ -1509,7 +1551,7 @@ pub fn convert_to_git_with_opts(
             None => {
                 if file_attrs.filter_clean_required {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
-                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed"));
+                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed").into());
                 }
             }
         }
@@ -1520,7 +1562,7 @@ pub fn convert_to_git_with_opts(
         // Bare `working-tree-encoding` (boolean true) / `false` are rejected (Git
         // `git_path_check_encoding`).
         if enc == "set" || enc == "true" || enc == "false" {
-            return Err("fatal: true/false are no valid working-tree-encodings".to_string());
+            return Err("fatal: true/false are no valid working-tree-encodings".into());
         }
         // `CONV_WRITE_OBJECT` → validate BOM rules and die on error (Git `encode_to_git`).
         let writing_object = opts.check_safecrlf;
@@ -1728,7 +1770,7 @@ pub fn convert_to_worktree(
     oid_hex: Option<&str>,
     smudge_meta: Option<&FilterSmudgeMeta>,
     delayed_checkout: Option<&mut crate::filter_process::DelayedProcessCheckout>,
-) -> Result<Option<Vec<u8>>, String> {
+) -> Result<Option<Vec<u8>>, ConversionError> {
     let mut buf = data.to_vec();
 
     // 1. Ident expansion
@@ -1770,7 +1812,9 @@ pub fn convert_to_worktree(
                 Ok(out) => out,
                 Err(e) => {
                     if file_attrs.filter_smudge_required {
-                        return Err(format!("fatal: {rel_path}: smudge filter {driver} failed"));
+                        return Err(
+                            format!("fatal: {rel_path}: smudge filter {driver} failed").into()
+                        );
                     }
                     if e.starts_with("filter status: abort") {
                         crate::filter_process::disable_process_filter(proc_cmd);
@@ -1783,7 +1827,8 @@ pub fn convert_to_worktree(
             let Some(q) = delayed_checkout else {
                 return Err(format!(
                     "internal error: delayed smudge without checkout queue for {rel_path}"
-                ));
+                )
+                .into());
             };
             q.push_delayed(
                 proc_cmd.clone(),
@@ -1799,13 +1844,15 @@ pub fn convert_to_worktree(
                 Ok(filtered) => buf = filtered,
                 Err(_e) => {
                     if file_attrs.filter_smudge_required {
-                        return Err(format!("fatal: {rel_path}: smudge filter {driver} failed"));
+                        return Err(
+                            format!("fatal: {rel_path}: smudge filter {driver} failed").into()
+                        );
                     }
                 }
             },
             None => {
                 if file_attrs.filter_smudge_required {
-                    return Err(format!("fatal: {rel_path}: smudge filter {driver} failed"));
+                    return Err(format!("fatal: {rel_path}: smudge filter {driver} failed").into());
                 }
             }
         }
@@ -1822,12 +1869,12 @@ pub fn convert_to_worktree_eager(
     file_attrs: &FileAttrs,
     oid_hex: Option<&str>,
     smudge_meta: Option<&FilterSmudgeMeta>,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ConversionError> {
     match convert_to_worktree(data, rel_path, conv, file_attrs, oid_hex, smudge_meta, None)? {
         Some(v) => Ok(v),
-        None => Err(format!(
+        None => Err(ConversionError::Message(format!(
             "internal error: unexpected delayed smudge for {rel_path}"
-        )),
+        ))),
     }
 }
 
