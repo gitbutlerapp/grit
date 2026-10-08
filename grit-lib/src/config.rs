@@ -2106,7 +2106,8 @@ impl ConfigSet {
 
         // Environment overrides: optional file
         if let Some(path) = env.git_config.as_deref() {
-            match ConfigFile::from_path(Path::new(path), ConfigScope::Command) {
+            let path = resolve_config_override_path(env, path);
+            match ConfigFile::from_path(&path, ConfigScope::Command) {
                 Ok(Some(f)) => {
                     if proc {
                         Self::merge_with_includes_collect(
@@ -2507,7 +2508,7 @@ fn config_cascade_file_paths(
         }
     }
     if let Some(p) = env.git_config.as_deref() {
-        paths.push(PathBuf::from(p));
+        paths.push(resolve_config_override_path(env, p));
     }
     paths
 }
@@ -3490,6 +3491,16 @@ fn needs_sq_backslash_quote(ch: char) -> bool {
     ch == '\'' || ch == '!'
 }
 
+/// Resolve a config file path from `GIT_CONFIG*` overrides relative to [`Environment::cwd`].
+fn resolve_config_override_path(env: &Environment, path: &str) -> PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        env.cwd.join(p)
+    }
+}
+
 /// Return candidate paths for the global config file, in priority order.
 /// Public accessor for the ordered list of global config file paths.
 pub fn global_config_paths_pub() -> Vec<PathBuf> {
@@ -3501,7 +3512,7 @@ fn global_config_paths(env: &Environment) -> Vec<PathBuf> {
 
     // $GIT_CONFIG_GLOBAL overrides
     if let Some(p) = env.git_config_global.as_deref() {
-        paths.push(PathBuf::from(p));
+        paths.push(resolve_config_override_path(env, p));
         return paths;
     }
 
@@ -3525,7 +3536,7 @@ fn global_config_paths(env: &Environment) -> Vec<PathBuf> {
 #[must_use]
 pub(crate) fn system_config_path(env: &Environment) -> PathBuf {
     if let Some(p) = env.git_config_system.as_deref() {
-        return PathBuf::from(p);
+        return resolve_config_override_path(env, p);
     }
     let unix_default = PathBuf::from("/etc/gitconfig");
     #[cfg(windows)]

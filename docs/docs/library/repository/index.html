@@ -139,16 +139,20 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 //! Source for the library guide &quot;Repository&quot; page (included in the docs site).
 
 use grit_lib::config::ConfigSet;
+use grit_lib::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::Repository;
 
 fn main() -&gt; Result&lt;(), Error&gt; {
-    let repo = match Repository::discover(None) {
+    let cwd = std::env::current_dir().map_err(Error::Io)?;
+    let env = Environment::from_vars(std::env::vars_os(), cwd.clone());
+    let options = RepositoryOptions::with_environment(env.clone());
+
+    let repo = match Repository::discover_with(&amp;options, None) {
         Ok(r) =&gt; r,
         Err(Error::NotARepository(_)) =&gt; {
-            let here = std::env::current_dir().map_err(Error::Io)?;
-            let git_dir = here.join(&quot;.git&quot;);
-            Repository::open(&amp;git_dir, Some(&amp;here))?
+            let git_dir = cwd.join(&quot;.git&quot;);
+            Repository::open_with(&amp;options, &amp;git_dir, Some(&amp;cwd))?
         }
         Err(err) =&gt; return Err(err),
     };
@@ -160,11 +164,7 @@ fn main() -&gt; Result&lt;(), Error&gt; {
         println!(&quot;work_tree=&lt;bare&gt;&quot;);
     }
 
-    let cfg = ConfigSet::load(
-        &amp;grit_lib::environment::Environment::capture_process(),
-        Some(&amp;repo.git_dir),
-        true,
-    )?;
+    let cfg = ConfigSet::load(repo.environment(), Some(&amp;repo.git_dir), true)?;
     let name = cfg.get(&quot;user.name&quot;).unwrap_or_default();
     if !name.is_empty() {
         println!(&quot;user.name={name}&quot;);

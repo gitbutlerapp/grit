@@ -136,6 +136,68 @@ fn git_round_trip_same_git_dir_with_matching_env() {
     };
     let git_dir = git_dir.canonicalize().unwrap_or(git_dir);
     assert_eq!(grit_git, git_dir);
+
+    let git_wt = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .env("GIT_DIR", env.git_dir.as_ref().expect("dir"))
+        .current_dir(&repo_root)
+        .output()
+        .expect("git rev-parse toplevel");
+    assert!(git_wt.status.success(), "git failed: {:?}", git_wt);
+    let git_wt = PathBuf::from(String::from_utf8_lossy(&git_wt.stdout).trim());
+    let git_wt = git_wt.canonicalize().unwrap_or(git_wt);
+    let grit_wt = grit
+        .work_tree
+        .as_ref()
+        .expect("work tree")
+        .canonicalize()
+        .unwrap_or_else(|_| grit.work_tree.clone().expect("work tree"));
+    assert_eq!(grit_wt, git_wt);
+}
+
+#[test]
+fn relative_global_config_resolved_from_environment_cwd() {
+    let td = TempDir::new().expect("tempdir");
+    let repo_root = td.path().join("repo");
+    fs::create_dir_all(&repo_root).expect("repo");
+    fs::write(
+        repo_root.join("global.cfg"),
+        "[user]\n\tname = RelativeGlobal\n",
+    )
+    .expect("global");
+    fs::create_dir_all(repo_root.join(".git/objects")).expect("objects");
+    fs::write(repo_root.join(".git/HEAD"), "ref: refs/heads/main\n").expect("head");
+    fs::write(
+        repo_root.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+    )
+    .expect("config");
+
+    let mut env = Environment::empty();
+    env.cwd = repo_root.clone();
+    env.git_config_global = Some("global.cfg".into());
+    env.git_config_nosystem = Some("true".into());
+
+    let repo = Repository::discover_with(
+        &RepositoryOptions::with_environment(env.clone()),
+        Some(&repo_root),
+    )
+    .expect("discover");
+    let cfg = repo.config().expect("config");
+    assert_eq!(cfg.get("user.name").as_deref(), Some("RelativeGlobal"));
+
+    let git_out = Command::new("git")
+        .args(["config", "user.name"])
+        .current_dir(&repo_root)
+        .env("GIT_CONFIG_NOSYSTEM", "true")
+        .env("GIT_CONFIG_GLOBAL", "global.cfg")
+        .output()
+        .expect("git config");
+    assert!(git_out.status.success(), "git: {:?}", git_out);
+    assert_eq!(
+        String::from_utf8_lossy(&git_out.stdout).trim(),
+        "RelativeGlobal"
+    );
 }
 
 #[test]
