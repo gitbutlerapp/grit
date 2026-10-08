@@ -270,7 +270,7 @@ fn attrs_for_repo_path(git_dir: &Path, path: &str) -> FileAttrs {
     let work_tree = git_dir.parent().unwrap_or(git_dir);
     let rules = load_gitattributes(work_tree);
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -603,7 +603,7 @@ pub fn convert_blob_to_worktree_for_path(
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> std::io::Result<Vec<u8>> {
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )

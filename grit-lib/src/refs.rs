@@ -140,7 +140,7 @@ fn resolve_ref_depth(
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
     let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
     let try_names: Vec<&str> =
-        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix().is_some() {
+        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix_default().is_some() {
             vec![storage_owned.as_str()]
         } else if storage_owned != stor_name {
             vec![storage_owned.as_str(), stor_name.as_str()]
@@ -921,9 +921,7 @@ pub fn write_ref_cached(
 /// path. Git builds these paths relative to the worktree root, so under the normal in-tree
 /// case this yields the `.git/...` form that the upstream tests expect.
 fn ref_path_for_display(path: &Path) -> String {
-    let cwd = crate::environment::Environment::capture_process()
-        .cwd
-        .clone();
+    let cwd = crate::environment::Environment::empty().cwd.clone();
     if let Ok(rel) = path.strip_prefix(&cwd) {
         return rel.to_string_lossy().into_owned();
     }
@@ -1128,7 +1126,7 @@ fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
         // this many milliseconds before giving up (t0600 "no bogus intermediate values during
         // delete" holds the lock and expects update-ref to block, not fail immediately).
         let timeout_ms = ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(git_dir),
             true,
         )
@@ -1215,7 +1213,7 @@ pub fn read_symbolic_ref(git_dir: &Path, refname: &str) -> Result<Option<String>
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
     let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
     let try_names: Vec<&str> =
-        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix().is_some() {
+        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix_default().is_some() {
             vec![storage_owned.as_str()]
         } else if storage_owned != stor_name {
             vec![storage_owned.as_str(), stor_name.as_str()]
@@ -1257,7 +1255,7 @@ pub enum LogRefsConfig {
 /// Returns [`LogRefsConfig::Unset`] when the key is absent.
 pub fn read_log_refs_config(git_dir: &Path) -> LogRefsConfig {
     ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -1281,7 +1279,7 @@ fn log_refs_config_from_set(cfg: &ConfigSet) -> LogRefsConfig {
 /// Effective `logAllRefUpdates` after applying Git's `LOG_REFS_UNSET` rule.
 pub fn effective_log_refs_config(git_dir: &Path) -> LogRefsConfig {
     ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -1309,7 +1307,7 @@ pub fn should_autocreate_reflog_for_mode(refname: &str, mode: LogRefsConfig) -> 
 #[must_use]
 pub fn should_autocreate_reflog(git_dir: &Path, refname: &str) -> bool {
     let cfg = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -1774,7 +1772,7 @@ fn update_branch_for_commit_reftable(
 /// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
 pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'_>) -> Result<()> {
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -1956,7 +1954,7 @@ fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
     let packed_path = git_dir.join("packed-refs");
     let lock = lock_path_for_ref(&packed_path);
     let timeout_ms = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -2027,18 +2025,18 @@ pub fn list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>
     // main git dir case, so `pack-refs` could leave stale packed lines that shadowed updates.
     let mut by_name: HashMap<String, ObjectId> = HashMap::new();
 
-    let stored_prefixes: Vec<String> = if let Some(ns) = crate::ref_namespace::ref_storage_prefix()
-    {
-        if prefix.starts_with("refs/namespaces/") {
-            vec![prefix.to_owned()]
-        } else if prefix.starts_with("refs/") {
-            vec![format!("{ns}{prefix}")]
+    let stored_prefixes: Vec<String> =
+        if let Some(ns) = crate::ref_namespace::ref_storage_prefix_default() {
+            if prefix.starts_with("refs/namespaces/") {
+                vec![prefix.to_owned()]
+            } else if prefix.starts_with("refs/") {
+                vec![format!("{ns}{prefix}")]
+            } else {
+                vec![prefix.to_owned()]
+            }
         } else {
             vec![prefix.to_owned()]
-        }
-    } else {
-        vec![prefix.to_owned()]
-    };
+        };
 
     for stored_prefix in stored_prefixes {
         if let Some(cdir) = common_dir(git_dir) {
@@ -2105,7 +2103,7 @@ pub fn list_refs_physical(git_dir: &Path, prefix: &str) -> Result<Vec<(String, O
 /// order.
 pub fn collect_alternate_ref_oids(receiving_git_dir: &Path) -> Result<Vec<ObjectId>> {
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(receiving_git_dir),
         true,
     )?;

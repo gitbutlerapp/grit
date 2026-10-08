@@ -2470,7 +2470,7 @@ fn read_core_bare_and_worktree_from_config(cfg: &ConfigSet) -> (bool, Option<Str
 
 fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)> {
     let cfg = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -2694,7 +2694,7 @@ fn write_fresh_git_directory(
     apply_init_filesystem_config(
         git_dir,
         InitFilesystemConfigOptions::default(),
-        &Environment::capture_process(),
+        &Environment::empty(),
     )?;
 
     fs::write(
@@ -2820,7 +2820,7 @@ pub fn init_bare_clone_minimal(
     apply_init_filesystem_config(
         git_dir,
         InitFilesystemConfigOptions::default(),
-        &Environment::capture_process(),
+        &crate::environment::Environment::empty(),
     )?;
 
     fs::write(
@@ -2949,7 +2949,7 @@ pub fn init_repository_separate(
     apply_init_filesystem_config(
         git_dir,
         InitFilesystemConfigOptions::default(),
-        &Environment::capture_process(),
+        &Environment::empty(),
     )?;
     fs::write(
         git_dir.join("description"),

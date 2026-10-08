@@ -447,7 +447,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ConfigSet;
 use crate::crlf::{

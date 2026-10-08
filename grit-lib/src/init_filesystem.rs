@@ -245,7 +245,7 @@ mod tests {
         apply_init_filesystem_config(
             &git_dir,
             InitFilesystemConfigOptions::default(),
-            &Environment::capture_process(),
+            &crate::environment::Environment::empty(),
         )
         .expect("apply");
         let probed = probe_trust_filemode(&git_dir).expect("probe");

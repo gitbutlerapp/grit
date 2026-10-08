@@ -129,9 +129,9 @@ pub fn local_tzoffset(time: u64) -> TzHhmm {
 /// Like [`local_tzoffset`] but uses an explicit `TZ`-style string when provided.
 ///
 /// Fixed numeric offsets (`+0200`, `-0500`, `+02:00`) and `UTC`/`GMT` are parsed without
-/// touching the process environment. Named IANA zones (e.g. `America/New_York`) apply that
-/// zone for the instant via a scoped `TZ`/`tzset` sequence so results do not depend on the
-/// ambient process timezone.
+/// touching the process environment. IANA names (e.g. `America/New_York`) and POSIX `TZ`
+/// specs (e.g. `EST5`, `EST5EDT`) are resolved from the tzdata / POSIX rules without
+/// mutating the process environment.
 #[must_use]
 pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
     if date_overflows(time) {
@@ -141,9 +141,7 @@ pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
         if let Some(hhmm) = parse_fixed_tz_hhmm(tz) {
             return hhmm;
         }
-        if is_named_tz(tz) {
-            return local_tzoffset_with_named_zone(time, tz);
-        }
+        return local_tzoffset_with_zone_spec(time, tz);
     }
     let t = time as time_t;
     let mut buf = std::mem::MaybeUninit::<tm>::uninit();
@@ -153,22 +151,25 @@ pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
     }
 }
 
-fn is_named_tz(tz: &str) -> bool {
-    let t = tz.trim();
-    !t.is_empty()
-        && !t.starts_with('+')
-        && !t.starts_with('-')
-        && !t.chars().all(|c| c.is_ascii_digit() || c == ':')
-}
-
-fn local_tzoffset_with_named_zone(time: u64, tz: &str) -> TzHhmm {
-    let Some(zone) = tzdb::tz_by_name(tz) else {
-        return 0;
-    };
-    let Ok(local) = zone.find_local_time_type(time as i64) else {
-        return 0;
-    };
-    utc_offset_secs_to_hhmm(local.ut_offset())
+fn local_tzoffset_with_zone_spec(time: u64, tz: &str) -> TzHhmm {
+    if tz.contains('/') {
+        if let Some(zone) = tzdb::tz_by_name(tz) {
+            if let Ok(local) = zone.find_local_time_type(time as i64) {
+                return utc_offset_secs_to_hhmm(local.ut_offset());
+            }
+        }
+    }
+    if let Ok(zone) = tz::TimeZone::from_posix_tz(tz) {
+        if let Ok(local) = zone.find_local_time_type(time as i64) {
+            return utc_offset_secs_to_hhmm(local.ut_offset());
+        }
+    }
+    if let Some(zone) = tzdb::tz_by_name(tz) {
+        if let Ok(local) = zone.find_local_time_type(time as i64) {
+            return utc_offset_secs_to_hhmm(local.ut_offset());
+        }
+    }
+    0
 }
 
 fn utc_offset_secs_to_hhmm(offset_secs: i32) -> TzHhmm {
@@ -223,8 +224,18 @@ mod local_tz_tests {
     use super::*;
 
     #[test]
+    fn posix_tz_est5_matches_git() {
+        let off = local_tzoffset_with_tz(1_112_911_993, Some("EST5"));
+        assert_eq!(
+            off, -500,
+            "EST5 at 2005-04-07 should be -0500 in Git HHMM encoding"
+        );
+    }
+
+    #[test]
     fn explicit_named_tz_ignores_process_timezone() {
-        let saved = std::env::var("TZ").ok();
+        let env = crate::environment::Environment::empty();
+        let saved = env.var("TZ");
         std::env::set_var("TZ", "UTC");
         refresh_process_tz();
         let off = local_tzoffset_with_tz(1_112_911_993, Some("America/New_York"));

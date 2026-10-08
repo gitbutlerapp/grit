@@ -30,6 +30,7 @@ const PATTERNS: &[&str] = &[
     "command_new",
     "static_global",
     "system_time_now",
+    "capture_process",
 ];
 
 type PatternCounts = BTreeMap<&'static str, u32>;
@@ -798,6 +799,10 @@ fn pattern_hits(line: &str) -> PatternCounts {
         count_substring_occurrences(code, "Command::new")
     );
     bump_count!("system_time_now", count_system_time_now(code));
+    bump_count!(
+        "capture_process",
+        count_substring_occurrences(code, "::capture_process()")
+    );
 
     counts
 }

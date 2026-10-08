@@ -372,7 +372,7 @@ fn resolve_program(program: &str) -> Result<PathBuf> {
 
 /// Look up a bare program name on `$PATH`.
 fn search_path(name: &str) -> Option<PathBuf> {
-    let paths = crate::environment::Environment::capture_process().var_os("PATH")?;
+    let paths = crate::environment::Environment::empty().var_os("PATH")?;
     for dir in paths.to_string_lossy().split(':').map(PathBuf::from) {
         if dir.as_os_str().is_empty() {
             continue;
@@ -401,7 +401,7 @@ fn is_executable_file(path: &Path) -> bool {
 
 /// The user's home directory (`$HOME`).
 fn home_dir() -> Option<PathBuf> {
-    crate::environment::Environment::capture_process()
+    crate::environment::Environment::empty()
         .var_os("HOME")
         .map(PathBuf::from)
 }

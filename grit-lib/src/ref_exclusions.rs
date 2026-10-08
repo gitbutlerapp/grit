@@ -143,9 +143,12 @@ fn skip_prefix_git<'a>(subject: &'a str, prefix: &str) -> Option<&'a str> {
 /// `GIT_NAMESPACE` value (e.g. `namespace` / `a/b`) expanded to the `refs/namespaces/.../`
 /// prefix, or empty string when unset.
 pub fn git_namespace_prefix() -> String {
-    let raw = crate::environment::Environment::capture_process()
-        .var("GIT_NAMESPACE")
-        .unwrap_or_default();
+    git_namespace_prefix_env(&crate::environment::Environment::empty())
+}
+
+/// Like [`git_namespace_prefix`] with an explicit [`Environment`].
+pub fn git_namespace_prefix_env(env: &crate::environment::Environment) -> String {
+    let raw = env.git_namespace.clone().unwrap_or_default();
     if raw.is_empty() {
         return String::new();
     }

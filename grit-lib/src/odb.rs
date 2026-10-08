@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
 use crate::diagnostics::NullDiagnostics;
-use crate::error::{Error, MidxError, Result};
+use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::{
     midx_oid_listed_in_tip, try_read_info_via_midx_with_diagnostics,
@@ -191,6 +191,8 @@ pub struct Odb {
     delta_base_cache_sync: Arc<OnceLock<()>>,
     /// Environment paired with [`Self::shared_config_state`] for repository-scoped config cache.
     shared_environment: Option<Arc<crate::environment::Environment>>,
+    /// Fallback when [`Self::shared_environment`] is unset (repo-local config only).
+    empty_config_env: Arc<OnceLock<crate::environment::Environment>>,
     /// Pack files whose mtimes were already bumped for object freshening on this [`Odb`]
     /// (Git's `packed_git->freshened`: at most one `utimensat` per pack per process).
     freshened_packs: Arc<Mutex<HashSet<PathBuf>>>,
@@ -216,24 +218,23 @@ impl std::fmt::Debug for Odb {
 /// Uses the same config parser as [`Odb::hash_algo`], including case-insensitive section and
 /// key names. Defaults to [`HashAlgo::Sha1`] when the extension is absent or unreadable.
 #[must_use]
-pub fn hash_algo_for_git_dir(git_dir: &Path) -> HashAlgo {
-    ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(git_dir),
-        true,
-    )
-    .ok()
-    .and_then(|cfg| cfg.get("extensions.objectformat"))
-    .and_then(|v| HashAlgo::from_name(&v))
-    .unwrap_or(HashAlgo::Sha1)
+pub fn hash_algo_for_git_dir(env: &crate::environment::Environment, git_dir: &Path) -> HashAlgo {
+    ConfigSet::load(env, Some(git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get("extensions.objectformat"))
+        .and_then(|v| HashAlgo::from_name(&v))
+        .unwrap_or(HashAlgo::Sha1)
 }
 
 /// Like [`hash_algo_for_git_dir`] but takes an `objects/` directory path.
 #[must_use]
-pub fn hash_algo_for_objects_dir(objects_dir: &Path) -> HashAlgo {
+pub fn hash_algo_for_objects_dir(
+    env: &crate::environment::Environment,
+    objects_dir: &Path,
+) -> HashAlgo {
     objects_dir
         .parent()
-        .map(hash_algo_for_git_dir)
+        .map(|d| hash_algo_for_git_dir(env, d))
         .unwrap_or(HashAlgo::Sha1)
 }
 
@@ -267,6 +268,7 @@ impl Odb {
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             shared_environment: None,
+            empty_config_env: Arc::new(OnceLock::new()),
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
@@ -304,6 +306,7 @@ impl Odb {
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             shared_environment: None,
+            empty_config_env: Arc::new(OnceLock::new()),
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
@@ -362,35 +365,41 @@ impl Odb {
             .as_deref()
             .or_else(|| self.objects_dir.parent());
         if let Some(git_dir) = git_dir {
-            ConfigSet::load(
-                &crate::environment::Environment::capture_process(),
-                Some(git_dir),
-                true,
-            )
+            ConfigSet::load(self.config_environment(), Some(git_dir), true)
         } else {
             Ok(ConfigSet::new())
         }
+    }
+
+    fn config_environment(&self) -> &crate::environment::Environment {
+        if let Some(env) = self.shared_environment.as_deref() {
+            return env;
+        }
+        self.empty_config_env
+            .get_or_init(crate::environment::Environment::empty)
     }
 
     fn env_alternate_dirs_snapshot(&self) -> Arc<Vec<PathBuf>> {
         if !self.env_alternate_dirs.is_empty() {
             return Arc::new(self.env_alternate_dirs.clone());
         }
-        Arc::clone(
-            self.env_alternate_lazy.get_or_init(|| {
-                Arc::new(Self::env_alternate_dirs_from_var(self.work_tree.as_deref()))
-            }),
-        )
+        Arc::clone(self.env_alternate_lazy.get_or_init(|| {
+            Arc::new(Self::env_alternate_dirs_from_var(
+                self.config_environment(),
+                self.work_tree.as_deref(),
+            ))
+        }))
     }
 
     /// Parse `GIT_ALTERNATE_OBJECT_DIRECTORIES` once for [`Self::with_env_alternate_dirs`].
     ///
     /// Relative entries are resolved against `resolve_base` (typically the work tree root).
     #[must_use]
-    pub fn env_alternate_dirs_from_var(resolve_base: Option<&Path>) -> Vec<PathBuf> {
-        match crate::environment::Environment::capture_process()
-            .var("GIT_ALTERNATE_OBJECT_DIRECTORIES")
-        {
+    pub fn env_alternate_dirs_from_var(
+        env: &crate::environment::Environment,
+        resolve_base: Option<&Path>,
+    ) -> Vec<PathBuf> {
+        match env.var("GIT_ALTERNATE_OBJECT_DIRECTORIES") {
             Some(val) if !val.is_empty() => {
                 let mut dirs = parse_alternate_env(&val);
                 if let Some(base) = resolve_base {
@@ -1166,7 +1175,7 @@ impl Odb {
         self.read_in_objects_dir(
             objects_dir,
             oid,
-            hash_algo_for_objects_dir(objects_dir),
+            hash_algo_for_objects_dir(self.config_environment(), objects_dir),
             use_midx,
         )
     }
@@ -1180,7 +1189,7 @@ impl Odb {
         self.read_info_in_objects_dir(
             objects_dir,
             oid,
-            hash_algo_for_objects_dir(objects_dir),
+            hash_algo_for_objects_dir(self.config_environment(), objects_dir),
             use_midx,
         )
     }

@@ -31,7 +31,7 @@ impl PathProtection {
     #[must_use]
     pub fn load(git_dir: &Path) -> Self {
         let config = ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(git_dir),
             true,
         )

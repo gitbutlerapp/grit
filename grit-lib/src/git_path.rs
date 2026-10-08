@@ -604,9 +604,7 @@ pub fn real_path_resolving(path: &str) -> PathBuf {
     let abs = if path.starts_with('/') {
         path.to_string()
     } else {
-        let cwd = crate::environment::Environment::capture_process()
-            .cwd
-            .clone();
+        let cwd = crate::environment::Environment::empty().cwd.clone();
         let joined = format!("{}/{}", cwd.display(), path);
         normalize_path_copy(&joined).unwrap_or(joined)
     };

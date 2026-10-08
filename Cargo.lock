@@ -711,6 +711,7 @@ dependencies = [
  "terminal_size",
  "thiserror",
  "time",
+ "tz-rs",
  "tzdb",
  "unicode-width",
  "ureq",

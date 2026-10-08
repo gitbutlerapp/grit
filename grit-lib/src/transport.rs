@@ -835,12 +835,12 @@ impl SshCommand {
     fn resolve(&self) -> SshCommand {
         match self {
             SshCommand::Auto => {
-                if let Some(c) = crate::environment::Environment::capture_process()
+                if let Some(c) = crate::environment::Environment::empty()
                     .var_os("GIT_SSH_COMMAND")
                     .filter(|v| !v.is_empty())
                 {
                     SshCommand::ShellCommand(c)
-                } else if let Some(p) = crate::environment::Environment::capture_process()
+                } else if let Some(p) = crate::environment::Environment::empty()
                     .var_os("GIT_SSH")
                     .filter(|v| !v.is_empty())
                 {

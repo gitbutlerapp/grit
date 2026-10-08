@@ -738,11 +738,7 @@ fn stage_resolved_path(repo: &Repository, index: &mut Index, path: &str) -> Resu
 
 /// Invoked after mergy operations with conflicts (`merge`, `rebase`, …).
 pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Vec<RerereEvent>> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if !rerere_enabled(&config, &repo.git_dir) {
         return Ok(Vec::new());
     }
@@ -963,11 +959,7 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Ve
 
 /// After successful commit: record postimages, clear `MERGE_RR` entries.
 pub fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if !rerere_enabled(&config, &repo.git_dir) {
         return Ok(Vec::new());
     }
@@ -1076,12 +1068,8 @@ fn parse_expiry_days_now(config: &ConfigSet, key: &str, now: i64) -> Option<i64>
 }
 
 /// `git rerere gc`
-pub fn rerere_gc(git_dir: &Path, now: i64) -> Result<()> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(git_dir),
-        true,
-    )?;
+pub fn rerere_gc(env: &crate::environment::Environment, git_dir: &Path, now: i64) -> Result<()> {
+    let config = ConfigSet::load(env, Some(git_dir), true)?;
     if !rerere_enabled(&config, git_dir) {
         return Ok(());
     }
@@ -1161,11 +1149,7 @@ pub fn rerere_gc(git_dir: &Path, now: i64) -> Result<()> {
 
 /// Lines for `git rerere status` (paths listed in `MERGE_RR`).
 pub fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if !rerere_enabled(&config, &repo.git_dir) {
         return Ok(Vec::new());
     }
@@ -1175,11 +1159,7 @@ pub fn rerere_status_lines(repo: &Repository) -> Result<Vec<String>> {
 
 /// Unified diff: recorded preimage vs working tree (Git/xdiff style header).
 pub fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<String>> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if !rerere_enabled(&config, &repo.git_dir) {
         return Ok(None);
     }
@@ -1221,11 +1201,7 @@ pub fn rerere_diff_for_path(repo: &Repository, path: &str) -> Result<Option<Stri
 /// rename/rename) is inserted into the list. Finally emit every MERGE_RR entry
 /// that was not marked resolved.
 pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if !rerere_enabled(&config, &repo.git_dir) {
         return Ok(Vec::new());
     }
@@ -1281,11 +1257,7 @@ pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
 /// Drop recorded resolution for `path` (working tree must show conflict markers).
 pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEvent>> {
     let mut events = Vec::new();
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if !rerere_enabled(&config, &repo.git_dir) {
         return Ok(events);
     }
@@ -1294,9 +1266,7 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
         .as_ref()
         .ok_or_else(|| crate::error::Error::PathError("no work tree".to_string()))?;
     let path = {
-        let cwd = crate::environment::Environment::capture_process()
-            .cwd
-            .clone();
+        let cwd = repo.environment().cwd.clone();
         if let Ok(prefix) = cwd.strip_prefix(wt) {
             let prefix = prefix.to_string_lossy().replace('\\', "/");
             if prefix.is_empty() {

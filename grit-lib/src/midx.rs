@@ -1336,7 +1336,9 @@ fn write_midx_rev_sidecar(
 fn repo_hash_algo_for_pack_dir(pack_dir: &Path) -> HashAlgo {
     pack_dir
         .parent()
-        .map(crate::odb::hash_algo_for_objects_dir)
+        .map(|d| {
+            crate::odb::hash_algo_for_objects_dir(&crate::environment::Environment::empty(), d)
+        })
         .unwrap_or(HashAlgo::Sha1)
 }
 

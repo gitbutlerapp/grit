@@ -174,7 +174,7 @@ fn write_notes_ref(
     let tree_oid = write_notes_subtree(odb, &rewritten)?;
     let parent = resolve_ref(git_dir, notes_ref).ok();
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -204,11 +204,11 @@ fn write_notes_ref(
 }
 
 fn grit_ident(config: &ConfigSet, now: time::OffsetDateTime) -> String {
-    let name = crate::environment::Environment::capture_process()
+    let name = crate::environment::Environment::empty()
         .var("GIT_COMMITTER_NAME")
         .or_else(|| config.get("user.name"))
         .unwrap_or_else(|| "grit".to_owned());
-    let email = crate::environment::Environment::capture_process()
+    let email = crate::environment::Environment::empty()
         .var("GIT_COMMITTER_EMAIL")
         .or_else(|| config.get("user.email"))
         .unwrap_or_default();

@@ -593,11 +593,7 @@ pub fn remove_empty_parent_dirs(work_tree: &Path, path: &Path) {
 }
 
 fn remove_empty_parent_dirs_batch(work_tree: &Path, deleted_paths: &[PathBuf]) {
-    let cwd = Some(
-        crate::environment::Environment::capture_process()
-            .cwd
-            .clone(),
-    );
+    let cwd = Some(crate::environment::Environment::empty().cwd.clone());
     let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
     for path in deleted_paths {
         let mut current = path.parent();

@@ -70,7 +70,7 @@ pub fn tracking_ref_for_remote_push_ref(
     }
 
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )

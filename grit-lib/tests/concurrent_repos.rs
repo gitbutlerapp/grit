@@ -287,8 +287,7 @@ struct ThreadReport {
     email: String,
     wall_epoch: i64,
     rerere_preimage: bool,
-    hook_marker: String,
-    traditional_hook: String,
+    notes_commit_author: String,
 }
 
 fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
@@ -476,8 +475,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         let base = blob_oid_at_path(&repo.odb, &base_tree, path).expect("base blob");
         let ours = blob_oid_at_path(&repo.odb, &main_tree, path).expect("ours blob");
         let theirs = blob_oid_at_path(&repo.odb, &topic_tree, path).expect("theirs blob");
-        let conflict_body =
-            "<<<<<<< ours\nmain\n=======\ntopic\n>>>>>>> theirs\n";
+        let conflict_body = "<<<<<<< ours\nmain\n=======\ntopic\n>>>>>>> theirs\n";
         fs::write(fx.root.join(path), conflict_body).expect("wt conflict");
         let mut index = Index::new();
         index.add_or_replace(index_conflict_entry(path, 1, base));
@@ -517,12 +515,16 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             &format!("note for {email}"),
         )
         .expect("notes");
+        let notes_tip =
+            grit_lib::refs::resolve_ref(&repo.git_dir, "refs/notes/commits").expect("notes tip");
+        let notes_commit =
+            parse_commit(&repo.odb.read(&notes_tip).expect("notes commit object").data)
+                .expect("parse notes commit");
         ack.send(ThreadReport {
-            email,
+            email: email.clone(),
             wall_epoch: repo.wall_clock_epoch(),
             rerere_preimage,
-            hook_marker: fx.hook_marker.clone(),
-            traditional_hook: fx.traditional_hook.to_owned(),
+            notes_commit_author: notes_commit.author,
         })
         .expect("ack");
     }
@@ -584,6 +586,24 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
     assert!(
         !report_b.rerere_preimage,
         "repo B should not record rerere preimage"
+    );
+    assert!(
+        report_a.notes_commit_author.contains("a@example.com"),
+        "notes commit on A must use repo A config identity, got {}",
+        report_a.notes_commit_author
+    );
+    assert!(
+        report_b.notes_commit_author.contains("b@example.com"),
+        "notes commit on B must use repo B config identity, got {}",
+        report_b.notes_commit_author
+    );
+    assert!(
+        !report_a.notes_commit_author.contains("b@example.com"),
+        "repo A notes must not pick up repo B identity"
+    );
+    assert!(
+        !report_b.notes_commit_author.contains("a@example.com"),
+        "repo B notes must not pick up repo A identity"
     );
 
     assert!(

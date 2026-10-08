@@ -21,20 +21,6 @@ pub trait IdentityEnv {
     fn var_os(&self, key: &str) -> Option<OsString>;
 }
 
-/// Environment provider backed by the current process environment.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemIdentityEnv;
-
-impl IdentityEnv for SystemIdentityEnv {
-    fn var(&self, key: &str) -> Option<String> {
-        crate::environment::Environment::capture_process().var(key)
-    }
-
-    fn var_os(&self, key: &str) -> Option<OsString> {
-        crate::environment::Environment::capture_process().var_os(key)
-    }
-}
-
 /// Whether `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` is unset vs set (possibly empty).
 ///
 /// Git treats a set-but-empty value as an explicit override: it must not fall through

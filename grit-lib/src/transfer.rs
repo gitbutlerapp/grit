@@ -979,7 +979,7 @@ fn load_islands_for_pack(
     let Ok(repo) = crate::repo::Repository::open(git_dir, None) else {
         return crate::delta_islands::DeltaIslands::default();
     };
-    let env = crate::environment::Environment::capture_process();
+    let env = crate::environment::Environment::empty();
     let cfg = crate::config::ConfigSet::load(&env, Some(git_dir), true).unwrap_or_default();
     crate::delta_islands::load_delta_islands(&repo, &cfg, in_pack)
 }

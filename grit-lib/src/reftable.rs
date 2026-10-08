@@ -1598,7 +1598,7 @@ fn widen_oid_to(oid: ObjectId, hash_size: usize) -> ObjectId {
 /// (reftable version 2) when `extensions.objectformat=sha256`, else 20 (version 1).
 fn reftable_hash_size_for_git_dir(git_dir: &Path) -> usize {
     let cfg = crate::config::ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -1971,7 +1971,7 @@ impl ReftableStack {
         if table_has_deletion && self.table_names.len() > 2 {
             self.compact_prefix_preserving_newest()?;
         } else if self.table_names.len() > 3
-            && crate::environment::Environment::capture_process()
+            && crate::environment::Environment::empty()
                 .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
                 .map(|value| value != "false")
                 .unwrap_or(true)
@@ -1991,7 +1991,7 @@ impl ReftableStack {
     }
 
     fn compact_prefix_preserving_newest(&mut self) -> Result<()> {
-        if crate::environment::Environment::capture_process()
+        if crate::environment::Environment::empty()
             .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
             .map(|value| value == "false")
             .unwrap_or(false)
@@ -2237,7 +2237,7 @@ impl ReftableStack {
             .iter()
             .any(|name| self.table_is_locked(name));
         if self.table_names.len() > 3
-            && crate::environment::Environment::capture_process()
+            && crate::environment::Environment::empty()
                 .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
                 .map(|value| value != "false")
                 .unwrap_or(true)
@@ -2383,7 +2383,7 @@ impl ReftableStack {
             .parent()
             .unwrap_or(self.reftable_dir.as_path());
         let config = ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(git_dir),
             true,
         )
@@ -2871,7 +2871,7 @@ enum LogRefsMode {
 
 fn reftable_log_refs_mode(git_dir: &Path) -> LogRefsMode {
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -3062,7 +3062,7 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
     };
 
     if let Ok(config) = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     ) {

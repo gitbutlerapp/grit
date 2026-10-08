@@ -515,7 +515,7 @@ fn funcname_matcher_for_path(
     let wt = work_tree?;
     let rules = load_gitattributes(wt);
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )

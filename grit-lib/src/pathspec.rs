@@ -176,7 +176,7 @@ fn parse_maybe_bool(v: &str) -> Option<bool> {
 }
 
 fn git_env_bool(key: &str, default: bool) -> bool {
-    match crate::environment::Environment::capture_process().var(key) {
+    match crate::environment::Environment::empty().var(key) {
         Some(v) => parse_maybe_bool(&v).unwrap_or(default),
         None => default,
     }
@@ -1597,9 +1597,10 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
         };
     }
     if pathspec.contains("../") || pathspec.starts_with("../") {
-        let cwd = crate::environment::Environment::capture_process()
-            .cwd
-            .clone();
+        let cwd = match prefix.filter(|p| !p.is_empty()) {
+            Some(p) => work_tree.join(p),
+            None => work_tree.to_path_buf(),
+        };
         let abs = cwd.join(pathspec);
         let mut parts: Vec<std::ffi::OsString> = Vec::new();
         for component in abs.components() {

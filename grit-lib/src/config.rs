@@ -192,7 +192,7 @@ pub struct ConfigSet {
 }
 
 /// Context for evaluating `[includeIf]` conditions (`gitdir:`, `onbranch:`, `hasconfig:`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct IncludeContext {
     /// Git directory path used for `gitdir:` matching (may contain unresolved symlinks).
     pub git_dir: Option<PathBuf>,
@@ -202,6 +202,20 @@ pub struct IncludeContext {
     pub cwd: PathBuf,
     /// Symlink-preserving `$PWD` for `gitdir:` matching when set.
     pub pwd: Option<String>,
+    /// Environment used for `~/` expansion in include paths.
+    pub env: std::sync::Arc<Environment>,
+}
+
+impl Default for IncludeContext {
+    fn default() -> Self {
+        Self {
+            git_dir: None,
+            command_line_relative_include_is_error: false,
+            cwd: PathBuf::from("."),
+            pwd: None,
+            env: std::sync::Arc::new(Environment::empty()),
+        }
+    }
 }
 
 /// Options controlling how [`ConfigSet::load_with_options`] merges files and includes.
@@ -1784,15 +1798,11 @@ impl ConfigSet {
     ///
     /// Tests set `GIT_TEST_NO_WRITE_REV_INDEX` to force no `.rev` output.
     #[must_use]
-    pub fn pack_write_reverse_index_default(&self) -> bool {
-        if Environment::capture_process()
-            .git_test_no_write_rev_index
-            .as_deref()
-            .is_some_and(|v| {
-                let s = v.trim().to_ascii_lowercase();
-                matches!(s.as_str(), "1" | "true" | "yes" | "on")
-            })
-        {
+    pub fn pack_write_reverse_index_default(&self, env: &Environment) -> bool {
+        if env.git_test_no_write_rev_index.as_deref().is_some_and(|v| {
+            let s = v.trim().to_ascii_lowercase();
+            matches!(s.as_str(), "1" | "true" | "yes" | "on")
+        }) {
             return false;
         }
         if self
@@ -1825,10 +1835,11 @@ impl ConfigSet {
     /// Load config for `git_dir` (if any) and resolve [`crate::hash::Parallelism`] for index-pack.
     #[must_use]
     pub fn pack_index_parallelism_for_git_dir(
+        env: &Environment,
         git_dir: Option<&std::path::Path>,
     ) -> crate::hash::Parallelism {
         git_dir
-            .and_then(|d| Self::load(&Environment::capture_process(), Some(d), true).ok())
+            .and_then(|d| Self::load(env, Some(d), true).ok())
             .map(|c| c.pack_index_parallelism())
             .unwrap_or_else(|| crate::hash::Parallelism::resolve(None))
     }
@@ -2020,6 +2031,7 @@ impl ConfigSet {
                 git_dir: git_dir.map(PathBuf::from),
                 cwd: env.cwd.clone(),
                 pwd: env.pwd.clone(),
+                env: std::sync::Arc::new(env.clone()),
                 ..Default::default()
             },
             ..Default::default()
@@ -2054,6 +2066,7 @@ impl ConfigSet {
             ctx.cwd = env.cwd.clone();
         }
         ctx.pwd = env.pwd.clone();
+        ctx.env = std::sync::Arc::new(env.clone());
 
         // System config
         if opts.include_system && !git_config_nosystem_enabled(env) {
@@ -2199,6 +2212,7 @@ impl ConfigSet {
             command_line_relative_include_is_error: false,
             cwd: env.cwd.clone(),
             pwd: env.pwd.clone(),
+            env: std::sync::Arc::new(env.clone()),
         };
 
         // System
@@ -2273,6 +2287,7 @@ impl ConfigSet {
             command_line_relative_include_is_error: false,
             cwd: PathBuf::from("."),
             pwd: None,
+            env: std::sync::Arc::new(Environment::empty()),
         };
         if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
             Self::merge_with_includes(&mut set, &f, true, 0, &ctx)?;
@@ -2297,6 +2312,7 @@ impl ConfigSet {
             command_line_relative_include_is_error: false,
             cwd: env.cwd.clone(),
             pwd: env.pwd.clone(),
+            env: std::sync::Arc::new(env.clone()),
         };
 
         if include_system && !git_config_nosystem_enabled(env) {
@@ -3319,9 +3335,9 @@ pub fn get_urlmatch_all_in_section(
 /// Parse a Git path value (expand `~/` to home directory).
 /// Parse a path value. Returns the resolved path string.
 /// Does NOT handle :(optional) prefix — use `parse_path_optional` for that.
-pub fn parse_path(s: &str) -> String {
+pub fn parse_path(env: &Environment, s: &str) -> String {
     if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = home_dir(&Environment::capture_process()) {
+        if let Some(home) = home_dir(env) {
             return home.join(rest).to_string_lossy().to_string();
         }
     }
@@ -3332,16 +3348,16 @@ pub fn parse_path(s: &str) -> String {
 ///
 /// Returns `Some(path)` if the path should be used, `None` if the path
 /// is optional and does not exist (meaning the entry should be skipped).
-pub fn parse_path_optional(s: &str) -> Option<String> {
+pub fn parse_path_optional(env: &Environment, s: &str) -> Option<String> {
     if let Some(rest) = s.strip_prefix(":(optional)") {
-        let resolved = parse_path(rest);
+        let resolved = parse_path(env, rest);
         if std::path::Path::new(&resolved).exists() {
             Some(resolved)
         } else {
             None // optional and missing → skip
         }
     } else {
-        Some(parse_path(s))
+        Some(parse_path(env, s))
     }
 }
 
@@ -3531,8 +3547,8 @@ fn resolve_config_override_path(env: &Environment, path: &str) -> PathBuf {
 
 /// Return candidate paths for the global config file, in priority order.
 /// Public accessor for the ordered list of global config file paths.
-pub fn global_config_paths_pub() -> Vec<PathBuf> {
-    global_config_paths(&Environment::capture_process())
+pub fn global_config_paths_pub(env: &Environment) -> Vec<PathBuf> {
+    global_config_paths(env)
 }
 
 fn global_config_paths(env: &Environment) -> Vec<PathBuf> {
@@ -3634,7 +3650,7 @@ fn resolve_include_file_path(
     file: &ConfigFile,
     ctx: &IncludeContext,
 ) -> Result<PathBuf> {
-    let expanded = parse_path(path);
+    let expanded = parse_path(ctx.env.as_ref(), path);
     let p = Path::new(&expanded);
     if p.is_absolute() {
         return Ok(p.to_path_buf());
@@ -3675,9 +3691,13 @@ fn add_trailing_starstar_for_dir(pat: &mut String) {
 }
 
 /// Prepare a `gitdir:` / `gitdir/i:` pattern (Git `prepare_include_condition_pattern`).
-fn prepare_gitdir_pattern(condition: &str, file: &ConfigFile) -> Result<(String, usize)> {
+fn prepare_gitdir_pattern(
+    condition: &str,
+    file: &ConfigFile,
+    ctx: &IncludeContext,
+) -> Result<(String, usize)> {
     // Git `interpolate_path`: expand `~/` in the condition before pattern rules.
-    let mut pat = parse_path(condition);
+    let mut pat = parse_path(ctx.env.as_ref(), condition);
     if pat.starts_with("./") || pat.starts_with(".\\") {
         if !include_source_is_disk_file(file) {
             return Err(Error::Config(
@@ -3754,7 +3774,7 @@ fn include_by_gitdir(
     let Some(git_dir) = ctx.git_dir.as_ref() else {
         return false;
     };
-    let (pattern, prefix) = match prepare_gitdir_pattern(condition, file) {
+    let (pattern, prefix) = match prepare_gitdir_pattern(condition, file, ctx) {
         Ok(x) => x,
         Err(_) => return false,
     };

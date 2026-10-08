@@ -2698,7 +2698,7 @@ fn diff_index_to_worktree_inner(
         c.as_ref().clone()
     } else {
         ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(repository_git_dir),
             true,
         )
@@ -3300,7 +3300,7 @@ pub fn smudge_racily_clean_entries(
 
     let config = config.cloned().unwrap_or_else(|| {
         ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(git_dir),
             true,
         )
@@ -3374,7 +3374,7 @@ pub fn worktree_differs_from_index_entry(
 
     let path_str_ref = std::str::from_utf8(&ie.path).unwrap_or("");
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(repository_git_dir),
         true,
     )
@@ -3751,7 +3751,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
         .unwrap_or_else(|| {
             config.cloned().unwrap_or_else(|| {
                 ConfigSet::load(
-                    &crate::environment::Environment::capture_process(),
+                    &crate::environment::Environment::empty(),
                     Some(git_dir),
                     true,
                 )
@@ -3985,7 +3985,7 @@ pub fn path_checkout_skip_blob_write_when_up_to_date(
         return Ok(true);
     }
     let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -4285,7 +4285,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
         .unwrap_or_else(|| {
             config.cloned().unwrap_or_else(|| {
                 ConfigSet::load(
-                    &crate::environment::Environment::capture_process(),
+                    &crate::environment::Environment::empty(),
                     Some(repository_git_dir),
                     true,
                 )
@@ -5392,7 +5392,7 @@ fn raw_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, String) {
 
 /// Format a diff entry with abbreviated OIDs.
 pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize) -> String {
-    let ellipsis = if crate::environment::Environment::capture_process()
+    let ellipsis = if crate::environment::Environment::empty()
         .var("GIT_PRINT_SHA1_ELLIPSIS")
         .as_deref()
         == Some("yes")

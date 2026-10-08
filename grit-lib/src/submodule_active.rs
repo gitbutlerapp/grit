@@ -46,11 +46,7 @@ fn submodule_active_pattern_values(
 /// configured pattern [`wildmatch`]s the submodule path (flags `0`, matching Git).
 #[must_use]
 pub fn submodule_add_should_set_active(repo: &Repository, sm_path: &str) -> bool {
-    let Ok(cfg) = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    ) else {
+    let Ok(cfg) = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true) else {
         return true;
     };
     let path = sm_path.replace('\\', "/");

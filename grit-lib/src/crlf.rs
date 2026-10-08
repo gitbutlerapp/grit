@@ -1238,8 +1238,7 @@ fn encoding_needs_roundtrip_check(enc_name: &str, conv: &ConversionConfig) -> bo
 /// Git `trace_printf("Checking roundtrip encoding for %s...\n", enc)`.
 fn trace_roundtrip_encoding(enc_name: &str) {
     use std::io::Write;
-    let Some(trace_val) = crate::environment::Environment::capture_process().var("GIT_TRACE")
-    else {
+    let Some(trace_val) = crate::environment::Environment::empty().var("GIT_TRACE") else {
         return;
     };
     if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
@@ -1934,10 +1933,6 @@ pub fn convert_to_worktree_with_runner(
                 if e.starts_with("filter status: abort") {
                     filter_state.disable_process_filter(proc_cmd);
                 }
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::error_line(&format!("external filter '{driver}' failed"))
-                );
                 return Ok(Some(buf));
             }
         };

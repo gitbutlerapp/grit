@@ -589,7 +589,10 @@ pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackI
     pack_index_records_with_threads(
         data,
         odb,
-        crate::config::ConfigSet::pack_index_parallelism_for_git_dir(odb.config_git_dir()),
+        crate::config::ConfigSet::pack_index_parallelism_for_git_dir(
+            &crate::environment::Environment::empty(),
+            odb.config_git_dir(),
+        ),
     )
 }
 

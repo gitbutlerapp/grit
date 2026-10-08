@@ -600,7 +600,7 @@ fn dump_cache_tree_pair(
 /// If it is set but invalid (non-numeric or out of range 2..=4), prints a
 /// warning to stderr and returns the default version.
 pub fn get_index_format_from_env() -> Option<u32> {
-    let val = crate::environment::Environment::capture_process().var("GIT_INDEX_VERSION")?;
+    let val = crate::environment::Environment::empty().var("GIT_INDEX_VERSION")?;
     if val.is_empty() {
         return None;
     }
@@ -1233,12 +1233,7 @@ impl Index {
     pub fn write(&self, path: &Path) -> Result<()> {
         let git_dir = path.parent();
         let config = git_dir.and_then(|d| {
-            ConfigSet::load(
-                &crate::environment::Environment::capture_process(),
-                Some(d),
-                true,
-            )
-            .ok()
+            ConfigSet::load(&crate::environment::Environment::empty(), Some(d), true).ok()
         });
         let skip_hash = index_skip_hash_for_write(config.as_ref());
         self.write_to_path(path, skip_hash)
@@ -2686,7 +2681,7 @@ fn lockfile_pid_enabled(index_path: &Path, config: Option<&ConfigSet>) -> bool {
 
     let cfg = config.cloned().unwrap_or_else(|| {
         ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(git_dir),
             true,
         )

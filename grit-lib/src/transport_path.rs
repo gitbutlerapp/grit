@@ -101,9 +101,7 @@ pub fn absolute_local_clone_source_url(source_path: &Path) -> String {
     let absolute = if source_path.is_absolute() {
         source_path.to_path_buf()
     } else {
-        let c = crate::environment::Environment::capture_process()
-            .cwd
-            .clone();
+        let c = crate::environment::Environment::empty().cwd.clone();
         let cwd = c.canonicalize().unwrap_or(c);
         cwd.join(source_path)
     };
@@ -578,11 +576,7 @@ mod tests {
         let base = std::env::temp_dir().join(format!("grit-abs-clone-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("temp base");
-        let prev = Some(
-            crate::environment::Environment::capture_process()
-                .cwd
-                .clone(),
-        );
+        let prev = Some(crate::environment::Environment::empty().cwd.clone());
         std::env::set_current_dir(&base).expect("chdir");
         let stored = absolute_local_clone_source_url(Path::new("./nested/../peer"));
         if let Some(p) = prev.as_ref() {

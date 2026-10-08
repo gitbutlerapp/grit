@@ -239,14 +239,10 @@ pub fn write_notes_commit(
     let parent = resolve_ref(&repo.git_dir, notes_ref).ok();
 
     // Build committer/author ident
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
-    let author = build_ident_role(repo.environment(), &config, "AUTHOR", now);
-    let committer = build_ident_role(repo.environment(), &config, "COMMITTER", now);
+    let author = build_ident_role(repo.environment(), config.as_ref(), "AUTHOR", now);
+    let committer = build_ident_role(repo.environment(), config.as_ref(), "COMMITTER", now);
 
     let commit = CommitData {
         tree: tree_oid,
@@ -870,14 +866,10 @@ pub fn write_notes_commit_with_parents(
         })
         .collect();
     let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
-    let author = build_ident_role(repo.environment(), &config, "AUTHOR", now);
-    let committer = build_ident_role(repo.environment(), &config, "COMMITTER", now);
+    let author = build_ident_role(repo.environment(), config.as_ref(), "AUTHOR", now);
+    let committer = build_ident_role(repo.environment(), config.as_ref(), "COMMITTER", now);
     let commit = CommitData {
         tree: tree_oid,
         parents: parents.to_vec(),

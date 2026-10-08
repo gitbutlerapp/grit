@@ -52,9 +52,7 @@ pub fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
                 let start = if start.is_absolute() {
                     start.to_path_buf()
                 } else {
-                    let cwd = crate::environment::Environment::capture_process()
-                        .cwd
-                        .clone();
+                    let cwd = crate::environment::Environment::empty().cwd.clone();
                     cwd.join(start)
                 };
                 let dot_git = start.join(".git");
@@ -193,12 +191,7 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
     {
         return None;
     }
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )
-    .ok()?;
+    let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).ok()?;
     let url_key = format!("remote.{name}.url");
     config.get(&url_key)?;
     let head_ref = format!("refs/remotes/{name}/HEAD");
@@ -1459,9 +1452,7 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
         return normalize_colon_path_for_bare_tree(raw_path);
     };
 
-    let cwd = crate::environment::Environment::capture_process()
-        .cwd
-        .clone();
+    let cwd = repo.environment().cwd.clone();
     let wt_canon = work_tree.canonicalize().map_err(Error::Io)?;
 
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
@@ -1948,12 +1939,8 @@ pub fn ambiguous_object_hint_lines(
 }
 
 fn read_core_disambiguate(repo: &Repository) -> Option<&'static str> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )
-    .unwrap_or_else(|_| ConfigSet::new());
+    let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true)
+        .unwrap_or_else(|_| ConfigSet::new());
     let v = config.get("core.disambiguate")?;
     match v.to_ascii_lowercase().as_str() {
         "committish" | "commit" => Some("commit"),
@@ -3028,9 +3015,9 @@ fn approxidate_at(s: &str, now_ts: i64) -> Option<i64> {
     if lower.split_whitespace().next() == Some("now") {
         // Match Git's test harness: `test_tick` sets GIT_COMMITTER_DATE; `@{now}` must use that
         // clock, not wall time (t1507 `log -g other@{u}@{now}`).
-        if let Some(raw) = crate::environment::Environment::capture_process()
+        if let Some(raw) = crate::environment::Environment::empty()
             .var("GIT_COMMITTER_DATE")
-            .or_else(|| crate::environment::Environment::capture_process().var("GIT_AUTHOR_DATE"))
+            .or_else(|| crate::environment::Environment::empty().var("GIT_AUTHOR_DATE"))
         {
             let mut it = raw.split_whitespace();
             if let Some(ts) = it.next().and_then(|p| p.parse::<i64>().ok()) {
@@ -3147,9 +3134,7 @@ fn diagnose_tree_path_error(
             .into();
         }
         {
-            let cwd = crate::environment::Environment::capture_process()
-                .cwd
-                .clone();
+            let cwd = repo.environment().cwd.clone();
             let prefix = show_prefix(repo, &cwd);
             let pfx = prefix.trim_end_matches('/');
             if !pfx.is_empty() {
@@ -3208,9 +3193,7 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
 
     if stage > 0 && !in_index {
         {
-            let cwd = crate::environment::Environment::capture_process()
-                .cwd
-                .clone();
+            let cwd = repo.environment().cwd.clone();
             let prefix = show_prefix(repo, &cwd);
             let pfx = prefix.trim_end_matches('/');
             if !pfx.is_empty() {
@@ -3248,9 +3231,7 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
     if stage == 0 {
         if !on_disk && !in_index {
             {
-                let cwd = crate::environment::Environment::capture_process()
-                    .cwd
-                    .clone();
+                let cwd = repo.environment().cwd.clone();
                 let prefix = show_prefix(repo, &cwd);
                 let pfx = prefix.trim_end_matches('/');
                 if !pfx.is_empty() {
@@ -3371,16 +3352,12 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
         }
         Err(e) => return Err(e),
     };
-    let index_path = if let Some(raw) =
-        crate::environment::Environment::capture_process().var("GIT_INDEX_FILE")
-    {
+    let index_path = if let Some(raw) = repo.environment().var("GIT_INDEX_FILE") {
         let p = std::path::PathBuf::from(raw);
         if p.is_absolute() {
             p
         } else {
-            let cwd = crate::environment::Environment::capture_process()
-                .cwd
-                .clone();
+            let cwd = repo.environment().cwd.clone();
             cwd.join(p)
         }
     } else {
@@ -3402,16 +3379,12 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
 /// Look up a path in the index at a given stage and return its OID.
 fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Result<ObjectId> {
     use crate::index::Index;
-    let index_path = if let Some(raw) =
-        crate::environment::Environment::capture_process().var("GIT_INDEX_FILE")
-    {
+    let index_path = if let Some(raw) = repo.environment().var("GIT_INDEX_FILE") {
         let p = std::path::PathBuf::from(raw);
         if p.is_absolute() {
             p
         } else {
-            let cwd = crate::environment::Environment::capture_process()
-                .cwd
-                .clone();
+            let cwd = repo.environment().cwd.clone();
             cwd.join(p)
         }
     } else {

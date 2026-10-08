@@ -8,6 +8,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::error::Error;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
+use grit_lib::environment::Environment;
 use grit_lib::odb::{hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb, WriteOptions};
 use grit_test_support::objects::{
     flip_byte_at, git_fsck, git_supports_sha256, write_loose_object, HashAlgo as FixtureAlgo,
@@ -32,14 +33,15 @@ fn algos_to_run() -> Vec<HashAlgo> {
 #[test]
 fn hash_algo_for_objects_dir_reads_repository_format() {
     let repo = init_repo(HashAlgo::Sha1);
+    let env = Environment::capture_process();
     assert_eq!(
-        hash_algo_for_objects_dir(&repo.objects_dir()),
+        hash_algo_for_objects_dir(&env, &repo.objects_dir()),
         HashAlgo::Sha1
     );
     let odb = Odb::new(&repo.objects_dir());
     assert_eq!(odb.objects_dir(), repo.objects_dir().as_path());
     assert_eq!(
-        hash_algo_for_git_dir(&repo.path().join(".git")),
+        hash_algo_for_git_dir(&env, &repo.path().join(".git")),
         HashAlgo::Sha1
     );
     odb.invalidate_packs();

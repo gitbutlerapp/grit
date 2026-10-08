@@ -890,7 +890,8 @@ impl CommitGraphChain {
         let info = objects_dir.join("info");
         let chain_path = info.join("commit-graphs").join("commit-graph-chain");
         if chain_path.is_file() {
-            let algo = hash_algo_for_objects_dir(objects_dir);
+            let algo =
+                hash_algo_for_objects_dir(&crate::environment::Environment::empty(), objects_dir);
             let content = std::fs::read_to_string(&chain_path).map_err(Error::from)?;
             let mut layers = Vec::new();
             for line in content.lines() {
@@ -1015,7 +1016,8 @@ impl CommitGraphChain {
             }
         };
 
-        let algo = hash_algo_for_objects_dir(objects_dir);
+        let algo =
+            hash_algo_for_objects_dir(&crate::environment::Environment::empty(), objects_dir);
         let content = std::fs::read_to_string(&chain_path).map_err(Error::from)?;
         let mut layers = Vec::new();
         for line in content.lines() {

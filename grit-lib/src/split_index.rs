@@ -302,9 +302,7 @@ fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &Objec
         }
     }
     {
-        let cwd = crate::environment::Environment::capture_process()
-            .cwd
-            .clone();
+        let cwd = crate::environment::Environment::empty().cwd.clone();
         let mut dir = cwd.as_path();
         loop {
             if let Some(p) = try_path(dir.join(".git").join(&name)) {
@@ -394,7 +392,7 @@ pub(crate) fn should_rebuild_shared_index(index: &Index, cfg: &ConfigSet) -> boo
 }
 
 pub(crate) fn git_test_split_index_env() -> bool {
-    crate::environment::Environment::capture_process()
+    crate::environment::Environment::empty()
         .var("GIT_TEST_SPLIT_INDEX")
         .map(|v| {
             let t = v.trim();
@@ -413,7 +411,7 @@ pub(crate) fn git_test_split_index_env() -> bool {
 /// from a tree with duplicate path entries — `t4058-diff-duplicates`); well-formed trees always
 /// verify cleanly.
 pub(crate) fn git_test_check_cache_tree() -> bool {
-    match crate::environment::Environment::capture_process().var("GIT_TEST_CHECK_CACHE_TREE") {
+    match crate::environment::Environment::empty().var("GIT_TEST_CHECK_CACHE_TREE") {
         Some(v) => {
             let t = v.trim();
             !(t.is_empty()
