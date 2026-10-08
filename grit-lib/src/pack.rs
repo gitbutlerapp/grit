@@ -1500,6 +1500,71 @@ pub fn read_alternates_recursive(objects_dir: &Path) -> Result<Vec<PathBuf>> {
 /// Maximum alternate chain depth (git uses 5).
 const MAX_ALTERNATE_DEPTH: usize = 5;
 
+/// Parse one non-empty line from `objects/info/alternates`.
+///
+/// Blank lines and `#` comments are ignored. Paths may be absolute, relative to the
+/// current `objects/` directory, or C-style quoted (Git `read_info/alternates`).
+fn parse_alternates_file_line(raw: &str) -> Option<PathBuf> {
+    let line = raw.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    if line.starts_with('"') {
+        let path = unquote_alternates_c_style(line)?;
+        if path.is_empty() {
+            return None;
+        }
+        return Some(PathBuf::from(path));
+    }
+    Some(PathBuf::from(line))
+}
+
+/// Unquote a double-quoted alternates path (Git `unquote_c_style` subset).
+fn unquote_alternates_c_style(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    if bytes.first() != Some(&b'"') {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut i = 1usize;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            return String::from_utf8(out).ok();
+        }
+        if bytes[i] == b'\\' {
+            i += 1;
+            if i >= bytes.len() {
+                return None;
+            }
+            match bytes[i] {
+                b'\\' => out.push(b'\\'),
+                b'"' => out.push(b'"'),
+                b'a' => out.push(7),
+                b'b' => out.push(8),
+                b'f' => out.push(12),
+                b'n' => out.push(b'\n'),
+                b'r' => out.push(b'\r'),
+                b't' => out.push(b'\t'),
+                b'v' => out.push(11),
+                c if c.is_ascii_digit() => {
+                    if i + 2 >= bytes.len() {
+                        return None;
+                    }
+                    let oct = std::str::from_utf8(&bytes[i..i + 3]).ok()?;
+                    out.push(u8::from_str_radix(oct, 8).ok()?);
+                    i += 2;
+                }
+                other => out.push(other),
+            }
+            i += 1;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    None
+}
+
 fn read_alternates_inner(
     objects_dir: &Path,
     visited: &mut HashSet<PathBuf>,
@@ -1521,14 +1586,13 @@ fn read_alternates_inner(
     let canonical = canonical_or_self(objects_dir);
 
     for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
+        let Some(path) = parse_alternates_file_line(raw) else {
             continue;
-        }
-        let candidate = if Path::new(line).is_absolute() {
-            PathBuf::from(line)
+        };
+        let candidate = if path.is_absolute() {
+            path
         } else {
-            canonical.join(line)
+            canonical.join(path)
         };
         let candidate = canonical_or_self(&candidate);
         if visited.insert(candidate.clone()) {

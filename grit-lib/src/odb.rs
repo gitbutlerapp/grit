@@ -115,11 +115,24 @@ fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
 }
 
 fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
+    object_in_local_packs_filtered(objects_dir, oid, false)
+}
+
+/// Pack membership for [`Odb::exists`] / [`Odb::read`], including promisor-marked packs.
+fn object_in_local_packs_including_promisor(objects_dir: &Path, oid: &ObjectId) -> bool {
+    object_in_local_packs_filtered(objects_dir, oid, true)
+}
+
+fn object_in_local_packs_filtered(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    include_promisor: bool,
+) -> bool {
     let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
         return false;
     };
     for idx in &indexes {
-        if idx.is_promisor {
+        if !include_promisor && idx.is_promisor {
             continue;
         }
         if idx.contains(oid) {
@@ -821,11 +834,11 @@ impl Odb {
             return true;
         }
         self.with_pack_store_for(objects_dir, || {
-            if object_in_local_packs(objects_dir, oid) {
+            if object_in_local_packs_including_promisor(objects_dir, oid) {
                 return true;
             }
             if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
-                && object_in_local_packs(objects_dir, oid)
+                && object_in_local_packs_including_promisor(objects_dir, oid)
             {
                 return true;
             }
@@ -1018,11 +1031,15 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
+        let mut unreadable_local_loose = None;
         match self.with_pack_store_for(&self.objects_dir, || {
             self.read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
         }) {
             Ok(obj) => return Ok(obj),
             Err(Error::ObjectNotFound(_)) => {}
+            Err(err) if local_loose_unreadable_try_alternates(&self.objects_dir, oid, &err) => {
+                unreadable_local_loose = Some(err);
+            }
             Err(err) => return Err(err),
         }
 
@@ -1053,6 +1070,10 @@ impl Odb {
                     return Ok(obj);
                 }
             }
+        }
+
+        if let Some(err) = unreadable_local_loose {
+            return Err(err);
         }
 
         Err(Error::ObjectNotFound(oid.to_hex()))
@@ -1090,11 +1111,15 @@ impl Odb {
             self.ensure_midx_prepared();
         }
 
+        let mut unreadable_local_loose = None;
         match self.with_pack_store_for(&self.objects_dir, || {
             self.read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
         }) {
             Ok(info) => return Ok(info),
             Err(Error::ObjectNotFound(_)) => {}
+            Err(err) if local_loose_unreadable_try_alternates(&self.objects_dir, oid, &err) => {
+                unreadable_local_loose = Some(err);
+            }
             Err(err) => return Err(err),
         }
 
@@ -1125,6 +1150,10 @@ impl Odb {
                     return Ok(info);
                 }
             }
+        }
+
+        if let Some(err) = unreadable_local_loose {
+            return Err(err);
         }
 
         Err(Error::ObjectNotFound(oid.to_hex()))
@@ -1901,6 +1930,17 @@ fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<O
     }
 
     Ok(Object::new(kind, data))
+}
+
+/// When a loose object file exists locally but cannot be parsed, consult alternates (Git t5613).
+fn local_loose_unreadable_try_alternates(objects_dir: &Path, oid: &ObjectId, err: &Error) -> bool {
+    if !oid.loose_path_in(objects_dir).is_file() {
+        return false;
+    }
+    matches!(
+        err,
+        Error::CorruptObject(_) | Error::LooseHashMismatch { .. } | Error::Zlib(_)
+    )
 }
 
 /// Parse a colon-separated alternates string, handling double-quoted entries

@@ -174,3 +174,15 @@ cargo clippy -p grit-lib --benches -- -D warnings
 **`worktree`** groups: index read and write at 10k and 100k entries (v2 and v4), config load with global/local layering (~500 keys plus `[include]` files), ignore matching (realistic `.gitignore` set against 100k paths), and `.gitattributes` lookup for 100k paths.
 
 **`history`** (fixture helper `benches/s7/mod.rs`) exercises revwalk (topological and date order, with `RevListOptions::use_commit_graph` on/off against an on-disk commit-graph), rev-parse of common spec shapes, tree-to-tree diff on wide (10k-entry) and deeply nested trees with few and many changes, and blob diff (Myers and histogram) at small, 10k-line, and pathological sizes. The default fixture builds 10k commits; override with `GRIT_HISTORY_BENCH_COMMITS` (must exceed `100` for `HEAD~100` specs; CI smoke uses `2000`).
+
+## Upstream Git scenario mapping (object-level)
+
+Rust integration tests live under `grit-lib/tests/`. UX-only upstream cases are omitted. Reachability and alternates order are cross-checked against the system `git` binary where noted.
+
+| Upstream | Rust test(s) | Notes |
+| --- | --- | --- |
+| t1060 (read from alternate) | `odb_alternates.rs` (`alternates_absolute_relative_comments_and_blank_lines`, chain/relative cases) | Relative `info/alternates`, read/exists via alternate |
+| t5613 | `odb_alternates.rs` (full file) | Comments, blank lines, quoted paths, cycles, depth limit, corrupt local loose + good alternate |
+| t5615 | `odb_alternates.rs` (`alternates_append_and_cache_refresh`, env alternates, write never in alternate) | Cache refresh / append / env `GIT_ALTERNATE_OBJECT_DIRECTORIES` |
+| t5616 | `promisor_packs.rs` | Partial clone `--filter=blob:none`, promisor pack markers, `exists` vs `exists_local`, missing blob `ObjectNotFound` |
+| t5330 | — | MIDX alternates scenarios covered in other steps; no additional rows for this change |
