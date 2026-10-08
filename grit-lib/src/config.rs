@@ -4267,7 +4267,9 @@ mod config_cache_tests {
 
     #[test]
     fn cache_serves_same_stamp_and_config_write_evicts() {
-        let caches = crate::repo_caches::RepoCaches::new();
+        let caches = crate::repo_caches::RepoCaches::new(
+            crate::command_runner::system_command_runner(),
+        );
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         let cfg = gd.join("config");
@@ -4295,7 +4297,9 @@ mod config_cache_tests {
 
     #[test]
     fn cache_invalidates_on_size_or_existence_change() {
-        let caches = crate::repo_caches::RepoCaches::new();
+        let caches = crate::repo_caches::RepoCaches::new(
+            crate::command_runner::system_command_runner(),
+        );
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         let cfg = gd.join("config");
@@ -4313,7 +4317,9 @@ mod config_cache_tests {
 
     #[test]
     fn include_targets_are_stamped_and_invalidate() {
-        let caches = crate::repo_caches::RepoCaches::new();
+        let caches = crate::repo_caches::RepoCaches::new(
+            crate::command_runner::system_command_runner(),
+        );
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         fs::write(gd.join("config"), "[include]\n\tpath = extra.conf\n").expect("write parent");
@@ -4336,7 +4342,9 @@ mod config_cache_tests {
 
     #[test]
     fn missing_include_target_is_watched() {
-        let caches = crate::repo_caches::RepoCaches::new();
+        let caches = crate::repo_caches::RepoCaches::new(
+            crate::command_runner::system_command_runner(),
+        );
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         fs::write(gd.join("config"), "[include]\n\tpath = extra.conf\n").expect("write parent");
@@ -4350,7 +4358,9 @@ mod config_cache_tests {
 
     #[test]
     fn onbranch_condition_follows_head() {
-        let caches = crate::repo_caches::RepoCaches::new();
+        let caches = crate::repo_caches::RepoCaches::new(
+            crate::command_runner::system_command_runner(),
+        );
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         fs::write(gd.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");

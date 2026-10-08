@@ -3,17 +3,23 @@
 //! Implements Git's multihook model: hooks from `hook.<name>.*` config plus the
 //! traditional script in the hooks directory (`core.hooksPath` or `.git/hooks/`).
 
+use crate::command_runner::{
+    system_command_runner, CommandEnvironment, CommandRunner, CommandSpec, CommandStdin,
+    CommandStdio, RunningCommand, ShellInvocation,
+};
 use crate::config::{parse_path, ConfigSet};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::state::HeadState;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::sync::Arc;
+use thiserror::Error;
 
 #[cfg(unix)]
 const ENOEXEC: i32 = 8;
@@ -23,12 +29,45 @@ fn is_enoexec(err: &std::io::Error) -> bool {
     err.raw_os_error() == Some(ENOEXEC)
 }
 
-fn stdio_piped(piped: bool) -> Stdio {
-    if piped {
-        Stdio::piped()
-    } else {
-        Stdio::inherit()
+/// Hook subprocess failure (non-zero exit or spawn error).
+#[derive(Debug, Error)]
+pub enum HookError {
+    /// A hook ran and returned a non-zero exit status.
+    #[error("hook {hook_name} failed with exit status {status}")]
+    Failed { hook_name: String, status: i32 },
+    /// The hook executable could not be started.
+    #[error("failed to run hook {hook_name}: {message}")]
+    Spawn { hook_name: String, message: String },
+    /// Configuration or internal error while resolving hooks.
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl From<String> for HookError {
+    fn from(value: String) -> Self {
+        Self::Internal(value)
     }
+}
+
+fn stdio_mode(piped: bool) -> CommandStdio {
+    if piped {
+        CommandStdio::Pipe
+    } else {
+        CommandStdio::Inherit
+    }
+}
+
+fn hook_command_env(git_dir: Option<&Path>, extra_env: &[(String, String)]) -> CommandEnvironment {
+    let mut env = CommandEnvironment::inherit_process_only();
+    if let Some(gd) = git_dir {
+        env.set
+            .push((OsString::from("GIT_DIR"), gd.as_os_str().to_os_string()));
+    }
+    for (k, v) in extra_env {
+        env.set
+            .push((OsString::from(k.as_str()), OsString::from(v.as_str())));
+    }
+    env
 }
 
 /// Environment for commit-style hooks (`GIT_INDEX_FILE`, `GIT_EDITOR`, `GIT_PREFIX`, and extra pairs).
@@ -44,13 +83,11 @@ pub struct CommitHookEnv<'a> {
     pub extra_env: &'a [(&'a str, &'a str)],
 }
 
-fn absolute_index_path(index_file: &Path) -> PathBuf {
+fn absolute_index_path(index_file: &Path, cwd: &Path) -> PathBuf {
     if index_file.is_absolute() {
         index_file.to_path_buf()
-    } else if let Ok(cwd) = std::env::current_dir() {
-        cwd.join(index_file)
     } else {
-        index_file.to_path_buf()
+        cwd.join(index_file)
     }
 }
 
@@ -86,17 +123,19 @@ fn git_prefix_for_invocation(repo: &Repository, invocation_cwd: &Path) -> String
 
 fn build_commit_hook_env(
     repo: &Repository,
-    work_dir: &Path,
+    _work_dir: &Path,
     opts: &CommitHookEnv<'_>,
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = Vec::new();
     if let Some(p) = opts.index_file {
         env.push((
             "GIT_INDEX_FILE".to_string(),
-            absolute_index_path(p).to_string_lossy().into_owned(),
+            absolute_index_path(p, &repo.environment().cwd)
+                .to_string_lossy()
+                .into_owned(),
         ));
     }
-    let invocation_cwd = std::env::current_dir().unwrap_or_else(|_| work_dir.to_path_buf());
+    let invocation_cwd = repo.environment().discovery_cwd();
     let prefix = opts
         .git_prefix
         .map(|s| s.to_string())
@@ -371,44 +410,64 @@ pub fn list_hooks_display_lines(
 #[expect(clippy::too_many_arguments)]
 /// Spawn a traditional hook executable. On ENOEXEC, retry with `/bin/sh`.
 fn spawn_traditional_hook(
+    runner: &dyn CommandRunner,
     argv0: &Path,
     hook_args: &[&str],
     cwd: &Path,
-    git_dir: &Path,
-    extra_env: &[(String, String)],
+    _git_dir: &Path,
+    env: &CommandEnvironment,
     stdin_piped: bool,
     stdout_piped: bool,
     stderr_piped: bool,
     use_shell: bool,
-) -> std::io::Result<std::process::Child> {
-    let mut cmd = if use_shell {
-        let mut sh = Command::new("/bin/sh");
-        sh.arg(argv0);
-        sh
+) -> std::io::Result<RunningCommand> {
+    let spec = if use_shell {
+        CommandSpec {
+            program: PathBuf::from("/bin/sh"),
+            args: Vec::new(),
+            shell: Some(ShellInvocation::ScriptPath {
+                script_path: argv0.to_path_buf(),
+                args: hook_args.iter().map(|s| OsString::from(*s)).collect(),
+            }),
+            cwd: Some(cwd.to_path_buf()),
+            env: env.clone(),
+            stdin: if stdin_piped {
+                CommandStdin::Pipe(Vec::new())
+            } else {
+                CommandStdin::Inherit
+            },
+            stdout: stdio_mode(stdout_piped),
+            stderr: stdio_mode(stderr_piped),
+        }
     } else {
-        Command::new(argv0)
+        CommandSpec {
+            program: argv0.to_path_buf(),
+            args: hook_args.iter().map(|s| OsString::from(*s)).collect(),
+            shell: None,
+            cwd: Some(cwd.to_path_buf()),
+            env: env.clone(),
+            stdin: if stdin_piped {
+                CommandStdin::Pipe(Vec::new())
+            } else {
+                CommandStdin::Inherit
+            },
+            stdout: stdio_mode(stdout_piped),
+            stderr: stdio_mode(stderr_piped),
+        }
     };
-    cmd.args(hook_args)
-        .current_dir(cwd)
-        .env("GIT_DIR", git_dir)
-        .stdin(stdio_piped(stdin_piped))
-        .stdout(stdio_piped(stdout_piped))
-        .stderr(stdio_piped(stderr_piped));
-    for (k, v) in extra_env {
-        cmd.env(k, v);
-    }
-    match cmd.spawn() {
+    match runner.spawn(&spec) {
         Ok(c) => Ok(c),
         Err(e) => {
             #[cfg(unix)]
             {
                 if !use_shell && is_enoexec(&e) {
                     return spawn_traditional_hook(
+                        runner,
                         argv0,
                         hook_args,
                         cwd,
-                        git_dir,
-                        extra_env,
+                        _git_dir,
+                        env,
                         stdin_piped,
                         stdout_piped,
                         stderr_piped,
@@ -423,31 +482,34 @@ fn spawn_traditional_hook(
 #[expect(clippy::too_many_arguments)]
 /// Spawn a configured hook (`/bin/sh -c <command>`) with optional extra args as `$1`, `$2`, …
 fn spawn_configured_hook(
+    runner: &dyn CommandRunner,
     command: &str,
     hook_args: &[&str],
     cwd: &Path,
-    git_dir: Option<&Path>,
-    extra_env: &[(String, String)],
+    env: &CommandEnvironment,
     stdin_piped: bool,
     stdout_piped: bool,
     stderr_piped: bool,
-) -> std::io::Result<std::process::Child> {
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c")
-        .arg(command)
-        .arg("hook")
-        .args(hook_args)
-        .current_dir(cwd)
-        .stdin(stdio_piped(stdin_piped))
-        .stdout(stdio_piped(stdout_piped))
-        .stderr(stdio_piped(stderr_piped));
-    if let Some(gd) = git_dir {
-        cmd.env("GIT_DIR", gd);
-    }
-    for (k, v) in extra_env {
-        cmd.env(k, v);
-    }
-    cmd.spawn()
+) -> std::io::Result<RunningCommand> {
+    let spec = CommandSpec {
+        program: PathBuf::from("/bin/sh"),
+        args: Vec::new(),
+        shell: Some(ShellInvocation::DashC {
+            script: command.to_owned(),
+            argv0: Some("hook".to_owned()),
+            args: hook_args.iter().map(|s| OsString::from(*s)).collect(),
+        }),
+        cwd: Some(cwd.to_path_buf()),
+        env: env.clone(),
+        stdin: if stdin_piped {
+            CommandStdin::Pipe(Vec::new())
+        } else {
+            CommandStdin::Inherit
+        },
+        stdout: stdio_mode(stdout_piped),
+        stderr: stdio_mode(stderr_piped),
+    };
+    runner.spawn(&spec)
 }
 
 fn report_spawn_error(path: &Path, err: &std::io::Error) {
@@ -527,12 +589,16 @@ pub fn run_hook_opts(
     let work_dir: PathBuf = opts.cwd.map_or_else(
         || match repo {
             Some(r) => r.work_tree.clone().unwrap_or_else(|| r.git_dir.clone()),
-            None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            None => PathBuf::from("."),
         },
         Path::to_path_buf,
     );
     let work_dir = work_dir.as_path();
     let git_dir_for_configured = repo.map(|r| r.git_dir.as_path());
+    let runner: Arc<dyn CommandRunner> = match repo {
+        Some(r) => r.command_runner(),
+        None => system_command_runner(),
+    };
 
     let mut merged_env: Vec<(String, String)> = opts
         .env_vars
@@ -544,6 +610,11 @@ pub fn run_hook_opts(
             merged_env.extend(build_commit_hook_env(r, work_dir, ce));
         }
     }
+
+    let hook_env = match repo {
+        Some(r) => CommandEnvironment::from_repository_environment(r.environment(), &merged_env),
+        None => hook_command_env(git_dir_for_configured, &merged_env),
+    };
 
     for h in &seq {
         let (stdin_piped, stdin_file) = match opts.path_to_stdin {
@@ -570,11 +641,12 @@ pub fn run_hook_opts(
                     .map(|hooks_dir| hook_argv0(r, hooks_dir, hook_name, work_dir))
                     .unwrap_or_else(|| argv0.clone());
                 match spawn_traditional_hook(
+                    runner.as_ref(),
                     &effective_argv0,
                     args,
                     work_dir,
                     gd,
-                    &merged_env,
+                    &hook_env,
                     stdin_piped,
                     stdout_piped,
                     stderr_piped,
@@ -589,11 +661,11 @@ pub fn run_hook_opts(
             }
             ResolvedHook::Configured { command } => {
                 match spawn_configured_hook(
+                    runner.as_ref(),
                     command,
                     args,
                     work_dir,
-                    git_dir_for_configured,
-                    &merged_env,
+                    &hook_env,
                     stdin_piped,
                     stdout_piped,
                     stderr_piped,
@@ -626,19 +698,20 @@ pub fn run_hook_opts(
                     return Ok(HookResult::Failed(1));
                 }
             };
-            if let Some(ref mut stdin) = child.stdin {
+            if let Some(stdin) = child.stdin_mut() {
                 let mut file = file;
                 let _ = std::io::copy(&mut file, stdin);
             }
-            drop(child.stdin.take());
         } else if let Some(data) = opts.stdin_data {
-            if let Some(ref mut stdin) = child.stdin {
+            if let Some(stdin) = child.stdin_mut() {
                 let _ = stdin.write_all(data);
             }
-            drop(child.stdin.take());
+        }
+        if stdin_piped {
+            child.close_stdin();
         }
 
-        let status = if capture_mode {
+        let exit = if capture_mode {
             let output = match child.wait_with_output() {
                 Ok(o) => o,
                 Err(_) => return Ok(HookResult::Failed(1)),
@@ -664,8 +737,8 @@ pub fn run_hook_opts(
             }
         };
 
-        if !status.success() {
-            return Ok(HookResult::Failed(status.code().unwrap_or(1)));
+        if !exit.success {
+            return Ok(HookResult::Failed(exit.code.unwrap_or(1)));
         }
     }
 
@@ -673,6 +746,25 @@ pub fn run_hook_opts(
 }
 
 /// Run commit-style hooks with `GIT_INDEX_FILE`, `GIT_PREFIX`, and related env (Git `run_commit_hook`).
+/// Like [`run_commit_hook`] but returns [`HookError`] on failure.
+pub fn run_commit_hook_checked(
+    repo: &Repository,
+    hook_name: &str,
+    args: &[&str],
+    stdin_data: Option<&[u8]>,
+    commit_env: &CommitHookEnv<'_>,
+) -> Result<(), HookError> {
+    match run_commit_hook(repo, hook_name, args, stdin_data, commit_env)
+        .map_err(HookError::Internal)?
+    {
+        HookResult::Success | HookResult::NotFound => Ok(()),
+        HookResult::Failed(status) => Err(HookError::Failed {
+            hook_name: hook_name.to_owned(),
+            status,
+        }),
+    }
+}
+
 pub fn run_commit_hook(
     repo: &Repository,
     hook_name: &str,

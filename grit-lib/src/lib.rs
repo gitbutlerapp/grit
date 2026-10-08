@@ -42,6 +42,7 @@ pub mod progress;
 
 /// The types most callers need, re-exported for `use grit_lib::prelude::*;`.
 pub mod prelude {
+    pub use crate::command_runner::{CommandRunner, RecordingRunner, SystemCommandRunner};
     pub use crate::config::ConfigSet;
     pub use crate::environment::{Environment, RepositoryOptions};
     pub use crate::error::{Error, Result};
@@ -116,6 +117,7 @@ pub mod branch_tracking;
 pub mod check_ref_format;
 pub mod combined_diff_patch;
 pub mod combined_tree_diff;
+pub mod command_runner;
 pub mod commit;
 pub mod commit_encoding;
 pub mod commit_graph_file;

@@ -20,10 +20,15 @@
 //! but its sign/verify paths are not exercised by the commit/verify-commit
 //! tests and return an explanatory error.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::sync::Arc;
 
+use crate::command_runner::{
+    system_command_runner, CommandEnvironment, CommandOutput, CommandRunner, CommandSpec,
+    CommandStdin, CommandStdio,
+};
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 
@@ -153,7 +158,7 @@ impl GpgFormat {
 }
 
 /// Resolved signing/verification configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GpgConfig {
     /// The selected format.
     pub format: GpgFormat,
@@ -176,6 +181,36 @@ pub struct GpgConfig {
     pub ssh_allowed_signers: Option<String>,
     /// `gpg.ssh.revocationFile`, if set (path; leading `~/` expanded).
     pub ssh_revocation_file: Option<String>,
+    /// Subprocess runner for gpg/gpgsm/ssh-signing helpers.
+    pub command_runner: Arc<dyn CommandRunner>,
+}
+
+impl std::fmt::Debug for GpgConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GpgConfig")
+            .field("format", &self.format)
+            .field("program", &self.program)
+            .finish_non_exhaustive()
+    }
+}
+
+fn signing_spawn(
+    cfg: &GpgConfig,
+    spec: CommandSpec,
+    payload: Option<&[u8]>,
+) -> Result<CommandOutput> {
+    let mut running = cfg
+        .command_runner
+        .spawn(&spec)
+        .map_err(|e| Error::Signing(format!("could not run signing program: {e}")))?;
+    if let Some(data) = payload {
+        if let Some(stdin) = running.stdin_mut() {
+            let _ = stdin.write_all(data);
+        }
+    }
+    running
+        .wait_with_output()
+        .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))
 }
 
 impl GpgConfig {
@@ -239,7 +274,15 @@ impl GpgConfig {
             min_trust_level,
             ssh_allowed_signers,
             ssh_revocation_file,
+            command_runner: system_command_runner(),
         })
+    }
+
+    /// Override the subprocess runner (tests and embedders).
+    #[must_use]
+    pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
+        self.command_runner = runner;
+        self
     }
 
     /// Resolve the program for a specific format (honoring `gpg.<fmt>.program`
@@ -396,35 +439,25 @@ pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
 
     let program = cfg.resolve_program_path()?;
 
-    let mut child = Command::new(&program)
-        .arg("--status-fd=2")
-        .arg("-bsau")
-        .arg(signing_key)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            Error::Signing(format!(
-                "could not run gpg program '{}': {e}",
-                program.display()
-            ))
-        })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        // Ignore broken-pipe errors: a bad signing key can make gpg exit
-        // before consuming all input (Git ignores SIGPIPE here too).
-        let _ = stdin.write_all(payload);
-        drop(stdin);
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| Error::Signing(format!("failed waiting for gpg program: {e}")))?;
+    let spec = CommandSpec {
+        program: program.clone(),
+        args: vec![
+            OsString::from("--status-fd=2"),
+            OsString::from("-bsau"),
+            OsString::from(signing_key),
+        ],
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Pipe,
+    };
+    let output = signing_spawn(cfg, spec, Some(payload))?;
 
     let status_text = String::from_utf8_lossy(&output.stderr);
 
-    if !output.status.success() || !has_sig_created(&status_text) {
+    if !output.status.success || !has_sig_created(&status_text) {
         let detail = if status_text.trim().is_empty() {
             "(no gpg output)".to_owned()
         } else {
@@ -505,20 +538,28 @@ fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         }
     };
 
-    let mut cmd = Command::new(&program);
-    cmd.arg("-Y")
-        .arg("sign")
-        .arg("-n")
-        .arg("git")
-        .arg("-f")
-        .arg(&key_file);
+    let mut args = vec![
+        OsString::from("-Y"),
+        OsString::from("sign"),
+        OsString::from("-n"),
+        OsString::from("git"),
+        OsString::from("-f"),
+        OsString::from(key_file.as_str()),
+    ];
     if literal {
-        cmd.arg("-U");
+        args.push(OsString::from("-U"));
     }
-    cmd.arg(&buffer_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    args.push(OsString::from(buffer_path.to_string_lossy().as_ref()));
+    let spec = CommandSpec {
+        program: program.clone(),
+        args,
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Pipe,
+    };
 
     let cleanup = |literal_key_tmp: &Option<PathBuf>, buffer_path: &Path| {
         if let Some(p) = literal_key_tmp {
@@ -528,18 +569,15 @@ fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         let _ = std::fs::remove_file(sig_sibling(buffer_path));
     };
 
-    let output = match cmd.output() {
+    let output = match signing_spawn(cfg, spec, None) {
         Ok(o) => o,
         Err(e) => {
             cleanup(&literal_key_tmp, &buffer_path);
-            return Err(Error::Signing(format!(
-                "could not run ssh-keygen program '{}': {e}",
-                program.display()
-            )));
+            return Err(e);
         }
     };
 
-    if !output.status.success() {
+    if !output.status.success {
         let stderr = String::from_utf8_lossy(&output.stderr);
         cleanup(&literal_key_tmp, &buffer_path);
         if stderr.contains("usage:") {
@@ -800,35 +838,32 @@ pub fn verify_commit(cfg: &GpgConfig, raw_commit: &[u8]) -> Result<SignatureChec
     // Write the detached signature to a temp file.
     let sig_path = write_temp_file(&signature)?;
 
-    let mut cmd = Command::new(&program);
-    cmd.arg("--status-fd=1");
+    let mut args = vec![OsString::from("--status-fd=1")];
     for a in detected_format.verify_args() {
-        cmd.arg(a);
+        args.push(OsString::from(a));
     }
-    cmd.arg("--verify")
-        .arg(&sig_path)
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    args.push(OsString::from("--verify"));
+    args.push(OsString::from(sig_path.to_string_lossy().as_ref()));
+    args.push(OsString::from("-"));
+    let spec = CommandSpec {
+        program: program.clone(),
+        args,
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Pipe,
+    };
 
-    let mut child = cmd.spawn().map_err(|e| {
-        let _ = std::fs::remove_file(&sig_path);
-        Error::Signing(format!(
-            "could not run gpg program '{}': {e}",
-            program.display()
-        ))
-    })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(&payload);
-        drop(stdin);
-    }
-
-    let output = child.wait_with_output();
+    let output = match signing_spawn(cfg, spec, Some(&payload)) {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = std::fs::remove_file(&sig_path);
+            return Err(e);
+        }
+    };
     let _ = std::fs::remove_file(&sig_path);
-    let output =
-        output.map_err(|e| Error::Signing(format!("failed waiting for gpg program: {e}")))?;
 
     // status-fd=1 routes GNUPG status to stdout; human-readable goes to stderr.
     let gpg_status = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -998,34 +1033,35 @@ fn verify_ssh_signed_buffer(
     let verify_time = payload_committer_timestamp(&payload).map(verify_time_arg);
 
     // 1. find-principals: which allowed principals can verify this signature?
-    let mut find_cmd = Command::new(&program);
-    find_cmd
-        .arg("-Y")
-        .arg("find-principals")
-        .arg("-f")
-        .arg(&allowed)
-        .arg("-s")
-        .arg(&sig_path);
+    let mut find_args = vec![
+        OsString::from("-Y"),
+        OsString::from("find-principals"),
+        OsString::from("-f"),
+        OsString::from(allowed.as_str()),
+        OsString::from("-s"),
+        OsString::from(sig_path.to_string_lossy().as_ref()),
+    ];
     if let Some(vt) = &verify_time {
-        find_cmd.arg(vt);
+        find_args.push(OsString::from(vt.as_str()));
     }
-    find_cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let find_out = find_cmd.output().map_err(|e| {
+    let find_spec = CommandSpec {
+        program: program.clone(),
+        args: find_args,
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Pipe,
+    };
+    let find_out = signing_spawn(cfg, find_spec, None).inspect_err(|_| {
         let _ = std::fs::remove_file(&sig_path);
-        Error::Signing(format!(
-            "could not run ssh-keygen program '{}': {e}",
-            program.display()
-        ))
     })?;
 
     let find_stdout = String::from_utf8_lossy(&find_out.stdout).into_owned();
     let find_stderr = String::from_utf8_lossy(&find_out.stderr).into_owned();
 
-    if !find_out.status.success() && find_stderr.contains("usage:") {
+    if !find_out.status.success && find_stderr.contains("usage:") {
         let _ = std::fs::remove_file(&sig_path);
         return Err(Error::Signing(
             "ssh-keygen -Y find-principals/verify is needed for ssh signature verification (available in openssh version 8.2p1+)"
@@ -1038,21 +1074,21 @@ fn verify_ssh_signed_buffer(
     // Tracks Git's `ret` in verify_ssh_signed_buffer: true means failure.
     let mut verifier_failed;
 
-    if !find_out.status.success() || find_stdout.trim().is_empty() {
+    if !find_out.status.success || find_stdout.trim().is_empty() {
         // No matching principal: run check-novalidate to surface signature info,
         // but treat as untrusted (Git forces ret = -1).
-        let mut check = Command::new(&program);
-        check
-            .arg("-Y")
-            .arg("check-novalidate")
-            .arg("-n")
-            .arg("git")
-            .arg("-s")
-            .arg(&sig_path);
+        let mut check_args = vec![
+            OsString::from("-Y"),
+            OsString::from("check-novalidate"),
+            OsString::from("-n"),
+            OsString::from("git"),
+            OsString::from("-s"),
+            OsString::from(sig_path.to_string_lossy().as_ref()),
+        ];
         if let Some(vt) = &verify_time {
-            check.arg(vt);
+            check_args.push(OsString::from(vt.as_str()));
         }
-        let (out, err) = run_with_stdin(&mut check, &payload);
+        let (out, err) = run_with_stdin(cfg, &program, check_args, &payload);
         verify_stdout = out;
         verify_stderr = err;
         verifier_failed = true;
@@ -1064,27 +1100,28 @@ fn verify_ssh_signed_buffer(
             if principal.is_empty() {
                 continue;
             }
-            let mut verify = Command::new(&program);
-            verify
-                .arg("-Y")
-                .arg("verify")
-                .arg("-n")
-                .arg("git")
-                .arg("-f")
-                .arg(&allowed)
-                .arg("-I")
-                .arg(principal)
-                .arg("-s")
-                .arg(&sig_path);
+            let mut verify_args = vec![
+                OsString::from("-Y"),
+                OsString::from("verify"),
+                OsString::from("-n"),
+                OsString::from("git"),
+                OsString::from("-f"),
+                OsString::from(allowed.as_str()),
+                OsString::from("-I"),
+                OsString::from(principal),
+                OsString::from("-s"),
+                OsString::from(sig_path.to_string_lossy().as_ref()),
+            ];
             if let Some(vt) = &verify_time {
-                verify.arg(vt);
+                verify_args.push(OsString::from(vt.as_str()));
             }
             if let Some(rev) = &cfg.ssh_revocation_file {
                 if Path::new(rev).exists() {
-                    verify.arg("-r").arg(rev);
+                    verify_args.push(OsString::from("-r"));
+                    verify_args.push(OsString::from(rev.as_str()));
                 }
             }
-            let (out, err, ok) = run_with_stdin_status(&mut verify, &payload);
+            let (out, err, ok) = run_with_stdin_status(cfg, &program, verify_args, &payload);
             verify_stdout = out;
             verify_stderr = err;
             // Git: ret = !ok; if !ret { ret = !starts_with("Good"); }
@@ -1118,31 +1155,39 @@ fn verify_ssh_signed_buffer(
     Ok(sigc)
 }
 
-/// Run `cmd` feeding `input` on stdin, returning `(stdout, stderr)` as lossy
-/// UTF-8.  Broken-pipe write errors are ignored (ssh-keygen may exit early).
-fn run_with_stdin(cmd: &mut Command, input: &[u8]) -> (String, String) {
-    let (out, err, _ok) = run_with_stdin_status(cmd, input);
+/// Run `program` with `args`, feeding `input` on stdin.
+fn run_with_stdin(
+    cfg: &GpgConfig,
+    program: &Path,
+    args: Vec<OsString>,
+    input: &[u8],
+) -> (String, String) {
+    let (out, err, _ok) = run_with_stdin_status(cfg, program, args, input);
     (out, err)
 }
 
 /// Like [`run_with_stdin`] but also returns whether the child exited zero.
-fn run_with_stdin_status(cmd: &mut Command, input: &[u8]) -> (String, String, bool) {
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(_) => return (String::new(), String::new(), false),
+fn run_with_stdin_status(
+    cfg: &GpgConfig,
+    program: &Path,
+    args: Vec<OsString>,
+    input: &[u8],
+) -> (String, String, bool) {
+    let spec = CommandSpec {
+        program: program.to_path_buf(),
+        args,
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Pipe,
     };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(input);
-        drop(stdin);
-    }
-    match child.wait_with_output() {
+    match signing_spawn(cfg, spec, Some(input)) {
         Ok(o) => (
             String::from_utf8_lossy(&o.stdout).into_owned(),
             String::from_utf8_lossy(&o.stderr).into_owned(),
-            o.status.success(),
+            o.status.success,
         ),
         Err(_) => (String::new(), String::new(), false),
     }
@@ -1456,35 +1501,32 @@ pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> Result<SignatureCheck> {
 
     let sig_path = write_temp_file(&signature)?;
 
-    let mut cmd = Command::new(&program);
-    cmd.arg("--status-fd=1");
+    let mut args = vec![OsString::from("--status-fd=1")];
     for a in detected_format.verify_args() {
-        cmd.arg(a);
+        args.push(OsString::from(a));
     }
-    cmd.arg("--verify")
-        .arg(&sig_path)
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    args.push(OsString::from("--verify"));
+    args.push(OsString::from(sig_path.to_string_lossy().as_ref()));
+    args.push(OsString::from("-"));
+    let spec = CommandSpec {
+        program: program.clone(),
+        args,
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Pipe,
+    };
 
-    let mut child = cmd.spawn().map_err(|e| {
-        let _ = std::fs::remove_file(&sig_path);
-        Error::Signing(format!(
-            "could not run gpg program '{}': {e}",
-            program.display()
-        ))
-    })?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(&payload);
-        drop(stdin);
-    }
-
-    let output = child.wait_with_output();
+    let output = match signing_spawn(cfg, spec, Some(&payload)) {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = std::fs::remove_file(&sig_path);
+            return Err(e);
+        }
+    };
     let _ = std::fs::remove_file(&sig_path);
-    let output =
-        output.map_err(|e| Error::Signing(format!("failed waiting for gpg program: {e}")))?;
 
     let gpg_status = String::from_utf8_lossy(&output.stdout).into_owned();
     let human = String::from_utf8_lossy(&output.stderr).into_owned();

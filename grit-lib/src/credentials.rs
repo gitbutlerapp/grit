@@ -26,10 +26,14 @@
 //! `/dev/tty`. Interactive prompting is an explicitly opt-in concern an
 //! embedder can layer on top.
 
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::command_runner::{
+    system_command_runner, CommandEnvironment, CommandRunner, CommandSpec, CommandStdin,
+    CommandStdio, ShellInvocation,
+};
 use crate::config::{parse_bool, ConfigSet};
 use crate::error::{Error, Result};
 
@@ -270,12 +274,25 @@ pub trait CredentialProvider {
 /// [`NON_INTERACTIVE_MESSAGE`].
 pub struct HelperCredentialProvider {
     config: ConfigSet,
+    command_runner: Arc<dyn CommandRunner>,
+    current_exe: Option<PathBuf>,
 }
 
 impl HelperCredentialProvider {
     /// Build a provider from a loaded [`ConfigSet`].
     pub fn new(config: ConfigSet) -> Self {
-        Self { config }
+        Self {
+            config,
+            command_runner: system_command_runner(),
+            current_exe: std::env::current_exe().ok(),
+        }
+    }
+
+    /// Override the subprocess runner (tests and embedders).
+    #[must_use]
+    pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
+        self.command_runner = runner;
+        self
     }
 
     /// The ordered helper list applicable to `target_url`.
@@ -291,8 +308,15 @@ impl CredentialProvider for HelperCredentialProvider {
             return Ok(filled);
         }
         let target_url = filled.target_url();
-        for helper in self.helpers(target_url.as_deref()) {
-            let response = invoke_helper(&helper, "get", &filled)?;
+        let helper_list = self.helpers(target_url.as_deref());
+        for helper in helper_list {
+            let response = invoke_helper(
+                self.command_runner.as_ref(),
+                self.current_exe.as_deref(),
+                &helper,
+                "get",
+                &filled,
+            )?;
             if response.wants_quit() {
                 return Err(Error::Message(format!(
                     "credential helper '{helper}' told us to quit"
@@ -311,7 +335,13 @@ impl CredentialProvider for HelperCredentialProvider {
     fn approve(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            invoke_helper(&helper, "store", cred)?;
+            invoke_helper(
+                self.command_runner.as_ref(),
+                self.current_exe.as_deref(),
+                &helper,
+                "store",
+                cred,
+            )?;
         }
         Ok(())
     }
@@ -319,7 +349,13 @@ impl CredentialProvider for HelperCredentialProvider {
     fn reject(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            invoke_helper(&helper, "erase", cred)?;
+            invoke_helper(
+                self.command_runner.as_ref(),
+                self.current_exe.as_deref(),
+                &helper,
+                "erase",
+                cred,
+            )?;
         }
         Ok(())
     }
@@ -546,7 +582,13 @@ fn resolve_credential_helper_executable(helper_program: &str) -> PathBuf {
 /// after any arguments from the configured helper string. Credential fields are
 /// written to stdin as `key=value` lines followed by a blank line; stdout is
 /// parsed back into a [`Credential`].
-fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Credential> {
+fn invoke_helper(
+    runner: &dyn CommandRunner,
+    current_exe: Option<&Path>,
+    helper: &str,
+    action: &str,
+    creds: &Credential,
+) -> Result<Credential> {
     let helper_words = shell_words::split(helper)
         .map_err(|e| Error::Message(format!("invalid credential.helper '{helper}': {e}")))?;
     let (first_word, extra_args) = match helper_words.split_first() {
@@ -554,19 +596,25 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
         None => ("", &[][..]),
     };
 
-    let mut child = if let Some(shell_cmd) = helper.strip_prefix('!') {
-        Command::new("sh")
-            .arg("-c")
-            .arg(format!("{shell_cmd} {action}"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| {
-                Error::Message(format!(
-                    "failed to run credential helper shell '{helper}': {e}"
-                ))
-            })?
+    let mut stdin_body = creds.serialize();
+    stdin_body.push('\n');
+    let stdin_bytes = stdin_body.into_bytes();
+
+    let spec = if let Some(shell_cmd) = helper.strip_prefix('!') {
+        CommandSpec {
+            program: "sh".into(),
+            args: Vec::new(),
+            shell: Some(ShellInvocation::DashC {
+                script: format!("{shell_cmd} {action}"),
+                argv0: None,
+                args: Vec::new(),
+            }),
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Pipe(stdin_bytes),
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Inherit,
+        }
     } else if matches!(
         first_word,
         "store" | "cache" | "git-credential-store" | "git-credential-cache"
@@ -576,80 +624,58 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
         } else {
             "credential-cache"
         };
-        let exe = std::env::current_exe()
-            .map_err(|e| Error::Message(format!("resolve current executable: {e}")))?;
-        let mut cmd = Command::new(exe);
-        cmd.arg(subcmd);
+        let exe = current_exe.ok_or_else(|| {
+            Error::Message("resolve current executable for built-in credential helper".into())
+        })?;
+        let mut args: Vec<OsString> = vec![OsString::from(subcmd)];
         for arg in extra_args {
-            cmd.arg(arg);
+            args.push(OsString::from(arg));
         }
-        cmd.arg(action);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| {
-                Error::Message(format!(
-                    "failed to run built-in credential helper '{subcmd}': {e}"
-                ))
-            })?
+        args.push(OsString::from(action));
+        CommandSpec {
+            program: exe.to_path_buf(),
+            args,
+            shell: None,
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Pipe(stdin_bytes.clone()),
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Inherit,
+        }
     } else {
         let helper_program =
             if first_word.contains('/') || first_word.starts_with("git-credential-") {
-                // Already a path or fully-qualified helper binary; use verbatim.
                 first_word.to_string()
             } else {
-                // Bare helper name (e.g. `osxkeychain`) -> `git-credential-osxkeychain`.
                 format!("git-credential-{first_word}")
             };
         let resolved = resolve_credential_helper_executable(&helper_program);
-        let mut cmd = Command::new(&resolved);
-        for arg in extra_args {
-            cmd.arg(arg);
+        let mut args: Vec<OsString> = extra_args
+            .iter()
+            .map(|a| OsString::from(a.as_str()))
+            .collect();
+        args.push(OsString::from(action));
+        CommandSpec {
+            program: resolved,
+            args,
+            shell: None,
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Pipe(stdin_bytes),
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Inherit,
         }
-        cmd.arg(action);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| {
-                Error::Message(format!(
-                    "failed to run credential helper '{helper_program}': {e}"
-                ))
-            })?
     };
 
-    {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| Error::Message("credential helper missing stdin".to_string()))?;
-        // Git terminates the credential record with a blank line. A helper may answer (e.g.
-        // `quit=1`) and exit without reading its input; like Git, ignore the resulting broken
-        // pipe and still read whatever it printed.
-        let payload = creds.serialize();
-        if let Err(e) = stdin.write_all(payload.as_bytes()) {
-            if e.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(Error::Message(format!(
-                    "failed to write credential request to helper '{helper}': {e}"
-                )));
-            }
-        } else if let Err(e) = stdin.write_all(b"\n") {
-            if e.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(Error::Message(format!(
-                    "failed to write credential request to helper '{helper}': {e}"
-                )));
-            }
-        }
-    }
-
-    let output = child
+    let output = runner
+        .spawn(&spec)
+        .map_err(|e| Error::Message(format!("failed to run credential helper '{helper}': {e}")))?
         .wait_with_output()
         .map_err(|e| Error::Message(format!("credential helper '{helper}' failed: {e}")))?;
-    if !output.status.success() {
+    if !output.status.success {
         return Err(Error::Message(format!(
             "credential helper '{helper}' exited with status {}",
-            output.status
+            output.status.code.unwrap_or(-1)
         )));
     }
 
@@ -884,7 +910,14 @@ mod tests {
             password: Some("x".repeat(1 << 20)),
             ..Default::default()
         };
-        let response = invoke_helper("!echo quit=1; exit 0; :", "get", &creds).expect("helper");
+        let response = invoke_helper(
+            system_command_runner().as_ref(),
+            None,
+            "!echo quit=1; exit 0; :",
+            "get",
+            &creds,
+        )
+        .expect("helper");
         assert!(response.wants_quit());
     }
 

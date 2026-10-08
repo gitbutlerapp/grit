@@ -22,7 +22,14 @@
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, ChildStdout};
+use std::sync::Arc;
+
+use crate::command_runner::{
+    system_command_runner, CommandEnvironment, CommandRunner, CommandSpec, CommandStdin,
+    CommandStdio, ShellInvocation,
+};
 use std::time::Duration;
 
 use crate::error::{Error, Result};
@@ -909,10 +916,28 @@ impl Drop for SshConnection {
 /// so embedders can inject their own ssh (or a recording shim) without touching
 /// process globals; the default ([`SshCommand::Auto`]) reproduces Git's
 /// precedence.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone)]
 pub struct SshTransport {
     /// How to invoke ssh. Defaults to [`SshCommand::Auto`] (env, then `ssh`).
     pub ssh_command: SshCommand,
+    command_runner: Arc<dyn CommandRunner>,
+}
+
+impl std::fmt::Debug for SshTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SshTransport")
+            .field("ssh_command", &self.ssh_command)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for SshTransport {
+    fn default() -> Self {
+        Self {
+            ssh_command: SshCommand::Auto,
+            command_runner: system_command_runner(),
+        }
+    }
 }
 
 impl SshTransport {
@@ -923,12 +948,20 @@ impl SshTransport {
         Self::default()
     }
 
+    /// Use a custom [`CommandRunner`] for ssh subprocesses (tests and embedders).
+    #[must_use]
+    pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
+        self.command_runner = runner;
+        self
+    }
+
     /// A transport pinned to a specific ssh *program* (no shell), like
     /// `$GIT_SSH`.
     #[must_use]
     pub fn with_program(program: impl Into<OsString>) -> Self {
         Self {
             ssh_command: SshCommand::Program(program.into()),
+            command_runner: system_command_runner(),
         }
     }
 
@@ -938,20 +971,30 @@ impl SshTransport {
     pub fn with_shell_command(command: impl Into<OsString>) -> Self {
         Self {
             ssh_command: SshCommand::ShellCommand(command.into()),
+            command_runner: system_command_runner(),
         }
     }
 
-    /// Build and spawn the ssh child for `spec`/`service`, returning the live
-    /// child with piped stdin/stdout.
-    fn spawn(&self, spec: &SshUrl, service: Service, opts: &ConnectOptions) -> Result<Child> {
+    fn ssh_command_spec(
+        &self,
+        spec: &SshUrl,
+        service: Service,
+        opts: &ConnectOptions,
+    ) -> CommandSpec {
         let quoted_path = sq_quote_shell_arg(&spec.path);
         let remote_cmd = remote_service_cmd(service, &quoted_path);
         let port = spec.port.as_deref();
 
-        let mut command = match self.ssh_command.resolve() {
+        let mut env = CommandEnvironment::inherit_process_only();
+        if opts.protocol_version > 0 {
+            env.set.push((
+                OsString::from("GIT_PROTOCOL"),
+                OsString::from(format!("version={}", opts.protocol_version)),
+            ));
+        }
+
+        match self.ssh_command.resolve() {
             SshCommand::ShellCommand(cmd) => {
-                // Reproduce Git's `GIT_SSH_COMMAND`: run the command line through
-                // a shell, appending the (shell-quoted) host and remote command.
                 let cmd = cmd.to_string_lossy();
                 let port_opt = match port {
                     Some(p) => format!(" -p {}", shell_words::quote(p)),
@@ -962,39 +1005,42 @@ impl SshTransport {
                     shell_words::quote(&spec.ssh_host),
                     shell_words::quote(&remote_cmd),
                 );
-                let mut c = Command::new("sh");
-                c.arg("-c").arg(script);
-                c
+                CommandSpec {
+                    program: "sh".into(),
+                    args: Vec::new(),
+                    shell: Some(ShellInvocation::DashC {
+                        script,
+                        argv0: None,
+                        args: Vec::new(),
+                    }),
+                    cwd: None,
+                    env,
+                    stdin: CommandStdin::Pipe(Vec::new()),
+                    stdout: CommandStdio::Pipe,
+                    stderr: CommandStdio::Inherit,
+                }
             }
             SshCommand::Program(prog) => {
-                // Reproduce Git's `$GIT_SSH` / default `ssh`: direct argv, no shell.
-                let mut c = Command::new(&prog);
+                let mut args = Vec::new();
                 if let Some(p) = port {
-                    c.arg("-p").arg(p);
+                    args.push(OsString::from("-p"));
+                    args.push(OsString::from(p));
                 }
-                c.arg(&spec.ssh_host).arg(&remote_cmd);
-                c
+                args.push(OsString::from(spec.ssh_host.as_str()));
+                args.push(OsString::from(remote_cmd.as_str()));
+                CommandSpec {
+                    program: PathBuf::from(prog),
+                    args,
+                    shell: None,
+                    cwd: None,
+                    env,
+                    stdin: CommandStdin::Pipe(Vec::new()),
+                    stdout: CommandStdio::Pipe,
+                    stderr: CommandStdio::Inherit,
+                }
             }
-            // `resolve()` never returns `Auto`.
             SshCommand::Auto => unreachable!("SshCommand::resolve never yields Auto"),
-        };
-
-        // Request the wire protocol version the same way Git does: export
-        // `GIT_PROTOCOL=version=N` into the ssh process environment. OpenSSH
-        // forwards it (Git ships a `SendEnv GIT_PROTOCOL` default) and the remote
-        // `git-upload-pack` reads it to switch to v2; servers that don't see it
-        // fall back to the v0 advertisement, which `read_advertisement` still
-        // parses. Only set it for v1/v2 so a plain v0 request is unchanged.
-        if opts.protocol_version > 0 {
-            command.env("GIT_PROTOCOL", format!("version={}", opts.protocol_version));
         }
-
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| Error::Message(format!("failed to spawn ssh for {}: {e}", spec.ssh_host)))
     }
 }
 
@@ -1011,16 +1057,16 @@ impl Transport for SshTransport {
             opts.protocol_version
         );
         let spec = parse_ssh_url(url)?;
-        let mut child = self.spawn(&spec, service, opts)?;
-
-        let writer = child
-            .stdin
-            .take()
-            .ok_or_else(|| Error::Message("ssh child has no stdin".to_owned()))?;
-        let mut reader = child
-            .stdout
-            .take()
-            .ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?;
+        let cmd_spec = self.ssh_command_spec(&spec, service, opts);
+        let running = self.command_runner.spawn(&cmd_spec).map_err(|e| {
+            Error::Message(format!("failed to spawn ssh for {}: {e}", spec.ssh_host))
+        })?;
+        let (child, writer, reader, _stderr) = running
+            .into_system_parts()
+            .map_err(|_| Error::Message("ssh child is not backed by a live process".to_owned()))?;
+        let writer = writer.ok_or_else(|| Error::Message("ssh child has no stdin".to_owned()))?;
+        let mut reader =
+            reader.ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?;
 
         let adv = read_advertisement(&mut reader)?;
         crate::net_trace::net_trace!(

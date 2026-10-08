@@ -4,9 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 use std::sync::{Arc, Mutex};
 
+use crate::command_runner::{
+    CommandEnvironment, CommandRunner, CommandSpec, CommandStdin, CommandStdio, ShellInvocation,
+};
 use crate::objects::ObjectId;
 use crate::refs;
 use crate::repo::Repository;
@@ -117,6 +120,7 @@ pub(crate) struct RunningFilter {
 
 /// Per-repository filter-process registry (long-running `filter.*.process` drivers).
 pub struct FilterProcessState {
+    command_runner: Arc<dyn CommandRunner>,
     registry: Mutex<HashMap<String, Arc<Mutex<RunningFilter>>>>,
     disabled: Mutex<HashSet<String>>,
 }
@@ -128,11 +132,16 @@ impl std::fmt::Debug for FilterProcessState {
 }
 
 impl FilterProcessState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(command_runner: Arc<dyn CommandRunner>) -> Self {
         Self {
+            command_runner,
             registry: Mutex::new(HashMap::new()),
             disabled: Mutex::new(HashSet::new()),
         }
+    }
+
+    pub(crate) fn command_runner(&self) -> &Arc<dyn CommandRunner> {
+        &self.command_runner
     }
 
     pub(crate) fn shutdown_all(&self) {
@@ -369,28 +378,30 @@ fn handshake(stdout: &mut ChildStdout, stdin: &mut ChildStdin) -> std::io::Resul
     Ok(caps)
 }
 
-fn spawn_running(cmd: &str) -> std::io::Result<RunningFilter> {
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        // Upstream tests isolate `HOME` to the trash dir; if the parent shell exports
-        // `GIT_CONFIG_GLOBAL` to a host file, nested `git`/`grit` inside long-running
-        // filters would ignore `$HOME/.gitconfig` and miss `test_config_global` entries
-        // (t2082 delayed checkout).
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| std::io::Error::other("filter process missing stdin"))?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| std::io::Error::other("filter process missing stdout"))?;
+fn spawn_running(runner: &dyn CommandRunner, cmd: &str) -> std::io::Result<RunningFilter> {
+    let mut env = CommandEnvironment::inherit_process_only();
+    env.remove.push("GIT_CONFIG_GLOBAL".into());
+    let spec = CommandSpec {
+        program: "sh".into(),
+        args: Vec::new(),
+        shell: Some(ShellInvocation::DashC {
+            script: cmd.to_owned(),
+            argv0: None,
+            args: Vec::new(),
+        }),
+        cwd: None,
+        env,
+        stdin: CommandStdin::Pipe(Vec::new()),
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Inherit,
+    };
+    let running = runner.spawn(&spec)?;
+    let (child, stdin, stdout, _) = running
+        .into_system_parts()
+        .map_err(|_| std::io::Error::other("filter process is not backed by a live OS process"))?;
+    let mut stdin = stdin.ok_or_else(|| std::io::Error::other("filter process missing stdin"))?;
+    let mut stdout =
+        stdout.ok_or_else(|| std::io::Error::other("filter process missing stdout"))?;
 
     let caps = handshake(&mut stdout, &mut stdin)?;
 
@@ -416,7 +427,7 @@ fn ensure_started(state: &FilterProcessState, cmd: &str) -> Result<(), String> {
     match reg.entry(cmd.to_string()) {
         Entry::Occupied(_) => Ok(()),
         Entry::Vacant(v) => {
-            let rf = spawn_running(cmd).map_err(|e| e.to_string())?;
+            let rf = spawn_running(state.command_runner.as_ref(), cmd).map_err(|e| e.to_string())?;
             v.insert(Arc::new(Mutex::new(rf)));
             Ok(())
         }

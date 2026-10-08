@@ -15,6 +15,10 @@ The `grit` CLI builds an environment from the process in `grit-cli` and passes i
 
 [`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) takes `&Environment` as its first argument and always parses the cascade from disk (no process-global cache). Repository-scoped memoization lives on each open handle: [`Repository::config`](rustdoc:grit_lib::repo::Repository) returns `Arc<ConfigSet>` backed by [`RepoCaches`](rustdoc:grit_lib::repo_caches::RepoCaches) (config cascade, gitattributes stacks, filter-process drivers, precompose flags, and related state).
 
+## Command runner
+
+Hooks, clean/smudge filters, credential helpers, signing, SSH transport, and similar features spawn subprocesses through a [`CommandRunner`](rustdoc:grit_lib::command_runner::CommandRunner) stored on the repository (via [`RepositoryOptions::command_runner`](rustdoc:grit_lib::environment::RepositoryOptions)). The default is [`SystemCommandRunner`](rustdoc:grit_lib::command_runner::SystemCommandRunner), which is the only non-test code path that calls `std::process::Command`. Tests and embedders can install [`RecordingRunner`](rustdoc:grit_lib::command_runner::RecordingRunner) or a custom runner to assert argv, environment, and stdin without executing real programs. Hook failures surface as [`HookError`](rustdoc:grit_lib::hooks::HookError); shell filter subprocess failures use [`FilterError`](rustdoc:grit_lib::error::FilterError).
+
 ## Discover vs open
 
 Call `Repository::discover_with` when you have a working directory and want Git-style upward search. Call `Repository::open_with` when you already know the git directory and optionally the work tree path. See [`Repository`](rustdoc:grit_lib::repo::Repository).

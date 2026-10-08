@@ -24,7 +24,9 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::command_runner::CommandRunner;
 use crate::config::ConfigSet;
 use crate::diff_indent_heuristic;
 use crate::error::{Error, Result};
@@ -3306,7 +3308,10 @@ pub fn smudge_racily_clean_entries(
         )
         .unwrap_or_default()
     });
-    let conv = crlf::ConversionConfig::from_config(&config);
+    let conv = crlf::ConversionConfig::from_config_with_runner(
+        &config,
+        crate::command_runner::system_command_runner(),
+    );
     let attrs = crlf::load_gitattributes(work_tree);
 
     let mut changed = false;
@@ -3474,7 +3479,7 @@ pub struct WorktreeAddRefreshParams<'a> {
     pub index_mtime: Option<(u32, u32)>,
     /// Mode that would be written (after `core.filemode` / `--chmod`).
     pub staged_mode: u32,
-    /// Repository-scoped filter-process registry (when staging through a [`Repository`]).
+    /// Repository-scoped filter-process registry (when staging through a [`crate::repo::Repository`]).
     pub filter_process: Option<&'a crate::filter_process::FilterProcessState>,
 }
 
@@ -4059,6 +4064,7 @@ fn read_regular_worktree_blob_bytes(
         renormalize: false,
         check_safecrlf: false,
         filter_process,
+        command_runner: None,
     };
     Ok(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
@@ -4100,6 +4106,7 @@ pub(crate) fn worktree_blob_bytes(
         renormalize: false,
         check_safecrlf: false,
         filter_process,
+        command_runner: None,
     };
     Ok(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)

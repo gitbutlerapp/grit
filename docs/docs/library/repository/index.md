@@ -12,7 +12,11 @@ The `grit` CLI builds an environment from the process in `grit-cli` and passes i
 
 [`Repository::discover`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) and [`Repository::open`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) remain convenience entry points that use `Environment::empty()` (no overrides beyond `cwd = "."`).
 
-[`ConfigSet::load`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) takes `&Environment` as its first argument so config caching and global/system file resolution match the same snapshot as discovery.
+[`ConfigSet::load`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) takes `&Environment` as its first argument and always parses the cascade from disk (no process-global cache). Repository-scoped memoization lives on each open handle: [`Repository::config`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) returns `Arc<ConfigSet>` backed by [`RepoCaches`](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/struct.RepoCaches.html) (config cascade, gitattributes stacks, filter-process drivers, precompose flags, and related state).
+
+## Command runner
+
+Hooks, clean/smudge filters, credential helpers, signing, SSH transport, and similar features spawn subprocesses through a [`CommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/trait.CommandRunner.html) stored on the repository (via [`RepositoryOptions::command_runner`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html)). The default is [`SystemCommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.SystemCommandRunner.html), which is the only non-test code path that calls `std::process::Command`. Tests and embedders can install [`RecordingRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.RecordingRunner.html) or a custom runner to assert argv, environment, and stdin without executing real programs. Hook failures surface as [`HookError`](https://docs.rs/grit-lib/latest/grit_lib/hooks/enum.HookError.html); shell filter subprocess failures use [`FilterError`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.FilterError.html).
 
 ## Discover vs open
 

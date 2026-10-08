@@ -3,15 +3,19 @@
 //! These mirror the subset of Git's combine-diff output needed for porcelain
 //! commands (`git show`, `git diff` during conflicts, `git diff-tree -c`).
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 use similar::{ChangeTag, TextDiff};
 use tempfile::NamedTempFile;
 
 use crate::combined_diff_patch::{format_combined_diff_body, CombinedDiffWsOptions};
 use crate::combined_tree_diff::CombinedParentSide;
+use crate::command_runner::{
+    run_program, run_sh_dash_c, system_command_runner, CommandEnvironment, CommandSpec,
+    CommandStdin, CommandStdio, ShellInvocation,
+};
 use crate::config::{parse_bool, ConfigSet};
 use crate::crlf::{get_file_attrs, load_gitattributes, DiffAttr, FileAttrs};
 use crate::diff::{detect_renames, diff_trees, DiffStatus};
@@ -370,21 +374,17 @@ pub fn run_textconv_raw(
     } else {
         false
     };
+    let runner = system_command_runner();
     if stdin_mode {
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg(&cmd_line)
-            .current_dir(command_cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let mut stdin = child.stdin.take()?;
-        stdin.write_all(input).ok()?;
-        drop(stdin);
-        let out = child.wait_with_output().ok()?;
-        return if out.status.success() {
+        let out = run_sh_dash_c(
+            runner.as_ref(),
+            &cmd_line,
+            Some(command_cwd),
+            CommandStdin::Pipe(input.to_vec()),
+            CommandStdio::Null,
+        )
+        .ok()?;
+        return if out.status.success {
             Some(out.stdout)
         } else {
             None
@@ -397,28 +397,37 @@ pub fn run_textconv_raw(
     let path = tmp.path().to_owned();
 
     let out = if textconv_cmd_needs_shell_wrapper(&cmd_line) {
-        Command::new("sh")
-            .current_dir(command_cwd)
-            .arg("-c")
-            .arg(format!("{} \"$@\"", cmd_line))
-            .arg(&cmd_line)
-            .arg(&path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .ok()?
+        let spec = CommandSpec {
+            program: "sh".into(),
+            args: Vec::new(),
+            shell: Some(ShellInvocation::DashC {
+                script: format!("{} \"$@\"", cmd_line),
+                argv0: Some(cmd_line.clone()),
+                args: vec![OsString::from(path.to_string_lossy().as_ref())],
+            }),
+            cwd: Some(command_cwd.to_path_buf()),
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Null,
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Null,
+        };
+        runner.spawn(&spec).ok()?.wait_with_output().ok()?
     } else {
-        Command::new("sh")
-            .current_dir(command_cwd)
-            .arg(&cmd_line)
-            .arg(&path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .ok()?
+        run_program(
+            runner.as_ref(),
+            Path::new("sh"),
+            &[
+                OsString::from(&cmd_line),
+                OsString::from(path.to_string_lossy().as_ref()),
+            ],
+            Some(command_cwd),
+            CommandStdin::Null,
+            CommandStdio::Null,
+        )
+        .ok()?
     };
 
-    if !out.status.success() {
+    if !out.status.success {
         return None;
     }
     Some(out.stdout)

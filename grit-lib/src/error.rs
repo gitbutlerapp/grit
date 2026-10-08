@@ -148,6 +148,10 @@ pub enum FilterError {
     /// Line-ending conversion would modify the worktree against user settings.
     #[error("{detail}")]
     LineEndingWouldChange { detail: String },
+
+    /// Shell filter subprocess exited non-zero.
+    #[error("filter command exited with status {status}")]
+    Failed { status: i32 },
 }
 
 /// Which filter hook failed.
@@ -423,6 +427,10 @@ pub enum Error {
     /// Revision walking / `rev-list` option parsing failed ([`crate::rev_list_error::RevListError`]).
     #[error(transparent)]
     RevList(#[from] crate::rev_list_error::RevListError),
+
+    /// A Git hook subprocess failed or could not be started.
+    #[error(transparent)]
+    Hook(#[from] crate::hooks::HookError),
 }
 
 impl Error {

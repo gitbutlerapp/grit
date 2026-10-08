@@ -22,6 +22,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use crate::command_runner::CommandRunner;
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::environment::{Environment, RepositoryOptions};
 use crate::error::{Error, Result};
@@ -67,7 +68,6 @@ fn read_sparse_checkout_patterns(git_dir: &Path) -> Vec<String> {
 }
 
 /// A handle to an open Git repository.
-#[derive(Debug)]
 pub struct Repository {
     /// Absolute path to the git directory (`.git/` or bare repo root).
     pub git_dir: PathBuf,
@@ -98,6 +98,18 @@ pub struct Repository {
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
     git_prefix: Option<String>,
+    /// Injectable subprocess runner (hooks, filters, helpers).
+    command_runner: Arc<dyn CommandRunner>,
+}
+
+impl std::fmt::Debug for Repository {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Repository")
+            .field("git_dir", &self.git_dir)
+            .field("work_tree", &self.work_tree)
+            .field("explicit_git_dir", &self.explicit_git_dir)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Legacy alias kept for [`Odb`] wiring during the repository-cache migration.
@@ -115,6 +127,7 @@ struct RepoCachedSettings {
 impl Repository {
     fn from_canonical_git_dir(
         environment: Arc<Environment>,
+        command_runner: Arc<dyn CommandRunner>,
         git_dir: PathBuf,
         work_tree: Option<&Path>,
     ) -> Result<Self> {
@@ -156,7 +169,7 @@ impl Repository {
             None => None,
         };
 
-        let caches = RepoCaches::new();
+        let caches = RepoCaches::new(Arc::clone(&command_runner));
         let odb = if let Some(ref wt) = work_tree {
             Odb::with_work_tree(&objects_dir, wt)
                 .with_config_git_dir(git_dir.clone())
@@ -182,6 +195,7 @@ impl Repository {
             caches,
             environment,
             git_prefix,
+            command_runner,
         })
     }
 
@@ -206,6 +220,12 @@ impl Repository {
     #[must_use]
     pub fn environment(&self) -> &Environment {
         &self.environment
+    }
+
+    /// Subprocess runner used for hooks, filters, and helpers.
+    #[must_use]
+    pub fn command_runner(&self) -> Arc<dyn CommandRunner> {
+        Arc::clone(&self.command_runner)
     }
 
     /// Repository-relative cwd prefix under the work tree (Git `GIT_PREFIX`), if any.
@@ -312,12 +332,18 @@ impl Repository {
         work_tree: Option<&Path>,
     ) -> Result<Self> {
         let environment = Arc::new(options.environment.clone());
+        let command_runner = Arc::clone(&options.command_runner);
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
         validate_repository_format(&git_dir)?;
-        let repo = Self::from_canonical_git_dir(Arc::clone(&environment), git_dir, work_tree)?;
+        let repo = Self::from_canonical_git_dir(
+            Arc::clone(&environment),
+            Arc::clone(&command_runner),
+            git_dir,
+            work_tree,
+        )?;
         let cfg = repo
             .caches
             .load_config(environment.as_ref(), Some(&repo.git_dir), true)?;
@@ -336,7 +362,12 @@ impl Repository {
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
-        Self::from_canonical_git_dir(Arc::new(Environment::empty()), git_dir, work_tree)
+        Self::from_canonical_git_dir(
+            Arc::new(Environment::empty()),
+            crate::command_runner::system_command_runner(),
+            git_dir,
+            work_tree,
+        )
     }
 
     /// Discover the repository starting from `start` (defaults to [`Environment::cwd`] if `None`).

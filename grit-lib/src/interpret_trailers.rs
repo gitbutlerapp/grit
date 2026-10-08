@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 use crate::config::{ConfigEntry, ConfigSet};
 
@@ -742,31 +741,47 @@ fn parse_trailers_from_input(
 fn apply_command(conf: &ConfInfo, arg: Option<&str>, cwd: Option<&Path>) -> String {
     let arg = arg.unwrap_or("");
     let dir = cwd.unwrap_or_else(|| Path::new("."));
+    use crate::command_runner::{
+        system_command_runner, CommandEnvironment, CommandSpec, CommandStdin, CommandStdio,
+        ShellInvocation,
+    };
+    let runner = system_command_runner();
     let output = if let Some(cmd) = &conf.cmd {
-        // Match Git `prepare_shell_cmd`: `sh -c '$cmd \"$@\"' $cmd <trailer-arg>` (always).
         let script = format!("{cmd} \"$@\"");
-        Command::new("sh")
-            .arg("-c")
-            .arg(&script)
-            .arg(cmd)
-            .arg(arg)
-            .stdin(Stdio::null())
-            .current_dir(dir)
-            .output()
+        let spec = CommandSpec {
+            program: "sh".into(),
+            args: Vec::new(),
+            shell: Some(ShellInvocation::DashC {
+                script,
+                argv0: Some(cmd.clone()),
+                args: vec![std::ffi::OsString::from(arg)],
+            }),
+            cwd: Some(dir.to_path_buf()),
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Null,
+            stdout: CommandStdio::Pipe,
+            stderr: CommandStdio::Inherit,
+        };
+        runner
+            .spawn(&spec)
+            .ok()
+            .and_then(|h| h.wait_with_output().ok())
     } else if let Some(command) = &conf.command {
         let cmd_line = command.replace(TRAILER_ARG_PLACEHOLDER, arg);
-        Command::new("sh")
-            .arg("-c")
-            .arg(&cmd_line)
-            .stdin(Stdio::null())
-            .current_dir(dir)
-            .output()
+        crate::command_runner::run_sh_dash_c(
+            runner.as_ref(),
+            &cmd_line,
+            Some(dir),
+            CommandStdin::Null,
+            CommandStdio::Inherit,
+        )
+        .ok()
     } else {
         return String::new();
     };
 
     match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Some(o) if o.status.success => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => String::new(),
     }
 }

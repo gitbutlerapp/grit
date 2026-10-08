@@ -6,12 +6,15 @@
 
 use crate::diff::{diff_trees, zero_oid};
 use crate::error::{Error, Result};
+use crate::hooks::{run_commit_hook_checked, CommitHookEnv};
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
+use std::fs;
+use std::path::Path;
 
 /// Inputs for [`create_commit`].
 #[derive(Debug, Clone)]
@@ -79,6 +82,15 @@ pub fn create_commit(
     };
 
     let mut index = repo.load_index()?;
+    let index_path = repo.git_dir.join("index");
+    let commit_env = CommitHookEnv {
+        index_file: Some(index_path.as_path()),
+        git_editor: Some(":"),
+        git_prefix: None,
+        extra_env: &[],
+    };
+    run_commit_hook_checked(repo, "pre-commit", &[], None, &commit_env)?;
+
     let parent_tree = parent
         .as_ref()
         .map(|parent_oid| commit_tree_oid(repo, parent_oid))
@@ -99,6 +111,23 @@ pub fn create_commit(
 
     let mut message = req.message.trim().to_owned();
     if !message.is_empty() {
+        message.push('\n');
+    }
+    let editmsg_path = repo.git_dir.join("COMMIT_EDITMSG");
+    fs::write(&editmsg_path, &message).map_err(Error::Io)?;
+    let editmsg_arg = commit_editmsg_hook_argument(repo, &editmsg_path);
+    run_commit_hook_checked(
+        repo,
+        "commit-msg",
+        &[editmsg_arg.as_str()],
+        None,
+        &commit_env,
+    )?;
+    message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
+    if message.is_empty() {
+        return Err(Error::Message("empty commit message".into()));
+    }
+    if !message.ends_with('\n') {
         message.push('\n');
     }
 
@@ -149,6 +178,8 @@ pub fn create_commit(
         config.as_ref(),
     )?;
 
+    let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &commit_env);
+
     progress.finish();
     Ok(CommitOutcome {
         oid,
@@ -171,6 +202,19 @@ fn commit_tree_oid(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId>
 
 fn commit_subject(message: &str) -> &str {
     message.split('\n').next().unwrap_or("").trim_end()
+}
+
+/// Path passed as `argv[1]` to the `commit-msg` hook (Git: `.git/COMMIT_EDITMSG` when possible).
+fn commit_editmsg_hook_argument(repo: &Repository, editmsg_path: &Path) -> String {
+    if let Some(wt) = repo.work_tree.as_deref() {
+        if let Ok(rel) = editmsg_path.strip_prefix(wt) {
+            let s = rel.to_string_lossy();
+            if !s.is_empty() {
+                return s.replace('\\', "/");
+            }
+        }
+    }
+    editmsg_path.to_string_lossy().into_owned()
 }
 
 #[cfg(test)]

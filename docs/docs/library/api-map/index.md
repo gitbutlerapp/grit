@@ -38,6 +38,20 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::combined_tree_diff::CombinedParentSide` | struct | One parent’s contribution at a combined-diff path. | [API](https://docs.rs/grit-lib/latest/grit_lib/combined_tree_diff/struct.CombinedParentSide.html) |
 | `grit_lib::combined_tree_diff::CombinedParentStatus` | enum | Per-parent coarse status in a combined diff (A / M / D). | [API](https://docs.rs/grit-lib/latest/grit_lib/combined_tree_diff/enum.CombinedParentStatus.html) |
 | `grit_lib::combined_tree_diff::CombinedTreeDiffOptions` | struct | Options for the multitree walk. | [API](https://docs.rs/grit-lib/latest/grit_lib/combined_tree_diff/struct.CombinedTreeDiffOptions.html) |
+| `grit_lib::command_runner` | module | Injectable subprocess execution for hooks, filters, credentials, and helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/index.html) |
+| `grit_lib::command_runner::CommandEnvironment` | struct | How a child process should inherit or receive environment variables. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.CommandEnvironment.html) |
+| `grit_lib::command_runner::CommandExit` | struct | Exit status of a completed child. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.CommandExit.html) |
+| `grit_lib::command_runner::CommandHandleError` | struct | Returned when an operation requires a live OS child but the handle is synthetic. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.CommandHandleError.html) |
+| `grit_lib::command_runner::CommandOutput` | struct | Output from RunningCommand::wait_with_output. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.CommandOutput.html) |
+| `grit_lib::command_runner::CommandRunner` | trait | Spawns subprocesses; the only production implementation uses std::process::Command. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/trait.CommandRunner.html) |
+| `grit_lib::command_runner::CommandSpec` | struct | Typed description of a subprocess to spawn. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.CommandSpec.html) |
+| `grit_lib::command_runner::CommandStdin` | enum | Stdin source for the child. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/enum.CommandStdin.html) |
+| `grit_lib::command_runner::CommandStdio` | enum | Stdio disposition for a child stream. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/enum.CommandStdio.html) |
+| `grit_lib::command_runner::RecordedResponse` | enum | Scripted responses for RecordingRunner. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/enum.RecordedResponse.html) |
+| `grit_lib::command_runner::RecordingRunner` | struct | Records CommandSpec invocations and returns configurable exit statuses. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.RecordingRunner.html) |
+| `grit_lib::command_runner::RunningCommand` | struct | Live child process with optional piped stdio. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.RunningCommand.html) |
+| `grit_lib::command_runner::ShellInvocation` | enum | Shell invocation mode (Git sh -c hooks and filters). | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/enum.ShellInvocation.html) |
+| `grit_lib::command_runner::SystemCommandRunner` | struct | Runs commands with the real OS process API. | [API](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.SystemCommandRunner.html) |
 | `grit_lib::commit` | module | Commit-metadata helpers shared by the porcelain commands. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit/index.html) |
 | `grit_lib::commit_encoding` | module | Git commit encoding labels (encoding header, i18n.commitEncoding) mapped to codecs. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_encoding/index.html) |
 | `grit_lib::commit_graph_file` | module | Parsing Git commit-graph files and Bloom filter lookup (commit-graph.c / bloom.c compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/index.html) |
@@ -129,6 +143,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::filter_process::DelayedCheckoutError` | enum | Failure from DelayedProcessCheckout::finish. | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/enum.DelayedCheckoutError.html) |
 | `grit_lib::filter_process::DelayedProcessCheckout` | struct | Paths waiting for list_available_blobs / retry smudge (Git finish_delayed_checkout). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.DelayedProcessCheckout.html) |
 | `grit_lib::filter_process::DelayedProcessCheckoutEntry` | struct | One path deferred by a process filter that returned status=delayed (Git delayed_checkout). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.DelayedProcessCheckoutEntry.html) |
+| `grit_lib::filter_process::FilterProcessState` | struct | Per-repository filter-process registry (long-running filter.*.process drivers). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.FilterProcessState.html) |
 | `grit_lib::filter_process::FilterSmudgeMeta` | struct | Optional metadata sent with smudge (ref, treeish, blob hex). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.FilterSmudgeMeta.html) |
 | `grit_lib::fmt_merge_msg` | module | Merge commit message formatter — git fmt-merge-msg logic. | [API](https://docs.rs/grit-lib/latest/grit_lib/fmt_merge_msg/index.html) |
 | `grit_lib::fmt_merge_msg::FmtMergeMsgOptions` | struct | Options for fmt_merge_msg. | [API](https://docs.rs/grit-lib/latest/grit_lib/fmt_merge_msg/struct.FmtMergeMsgOptions.html) |
@@ -161,6 +176,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::hide_refs` | module | transfer.hideRefs / receive.hideRefs / uploadpack.hideRefs matching (Git ref_is_hidden). | [API](https://docs.rs/grit-lib/latest/grit_lib/hide_refs/index.html) |
 | `grit_lib::hooks` | module | Hook execution utilities. | [API](https://docs.rs/grit-lib/latest/grit_lib/hooks/index.html) |
 | `grit_lib::hooks::CommitHookEnv` | struct | Environment for commit-style hooks (GIT_INDEX_FILE, GIT_EDITOR, GIT_PREFIX, and extra pairs). | [API](https://docs.rs/grit-lib/latest/grit_lib/hooks/struct.CommitHookEnv.html) |
+| `grit_lib::hooks::HookError` | enum | Hook subprocess failure (non-zero exit or spawn error). | [API](https://docs.rs/grit-lib/latest/grit_lib/hooks/enum.HookError.html) |
 | `grit_lib::hooks::HookResult` | enum | Result of running a hook. | [API](https://docs.rs/grit-lib/latest/grit_lib/hooks/enum.HookResult.html) |
 | `grit_lib::hooks::RunHookOptions` | struct | Options for run_hook_opts. | [API](https://docs.rs/grit-lib/latest/grit_lib/hooks/struct.RunHookOptions.html) |
 | `grit_lib::ident` | module | Git author/committer identity lines (ident in Git’s fsck.c / commit.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/ident/index.html) |
@@ -376,6 +392,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::reftable::WriteOptions` | struct | Write options for reftable creation. | [API](https://docs.rs/grit-lib/latest/grit_lib/reftable/struct.WriteOptions.html) |
 | `grit_lib::repo` | module | Repository discovery and the primary Repository handle. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo/index.html) |
 | `grit_lib::repo::Repository` | struct | A handle to an open Git repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) |
+| `grit_lib::repo_caches` | module | Repository-scoped caches shared by an open Repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/index.html) |
+| `grit_lib::repo_caches::RepoCaches` | struct | Per-repository cache arena (held behind Arc on Repository). | [API](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/struct.RepoCaches.html) |
 | `grit_lib::rerere` | module | Git-compatible rerere (MERGE_RR, rr-cache/, conflict ID hashing). | [API](https://docs.rs/grit-lib/latest/grit_lib/rerere/index.html) |
 | `grit_lib::rerere::RerereAutoupdate` | enum | Invoked after mergy operations with conflicts (merge, rebase, …). | [API](https://docs.rs/grit-lib/latest/grit_lib/rerere/enum.RerereAutoupdate.html) |
 | `grit_lib::resolve_undo` | module | Git index REUC (resolve-undo) extension — records unmerged stages when a conflict is resolved. | [API](https://docs.rs/grit-lib/latest/grit_lib/resolve_undo/index.html) |
@@ -494,7 +512,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::worktree_ref::RefWorktreeType` | enum | How a ref name maps to on-disk storage across worktrees. | [API](https://docs.rs/grit-lib/latest/grit_lib/worktree_ref/enum.RefWorktreeType.html) |
 | `grit_lib::worktree_rules` | module | Per-operation worktree attribute and ignore context. | [API](https://docs.rs/grit-lib/latest/grit_lib/worktree_rules/index.html) |
 | `grit_lib::worktree_rules::WorktreeRules` | struct | Attribute/ignore/conversion state shared across one porcelain operation. | [API](https://docs.rs/grit-lib/latest/grit_lib/worktree_rules/struct.WorktreeRules.html) |
-| `grit_lib::worktree_rules::file_load_counters` | module | Counts disk reads of attribute/ignore pattern files (tests only). | [API](https://docs.rs/grit-lib/latest/grit_lib/worktree_rules/file_load_counters/index.html) |
 | `grit_lib::write_tree` | module | Build tree objects from index entries (git write-tree core logic). | [API](https://docs.rs/grit-lib/latest/grit_lib/write_tree/index.html) |
 | `grit_lib::write_tree::WriteTreeFlags` | struct | Options for cache_tree_update and write_tree_update_index. | [API](https://docs.rs/grit-lib/latest/grit_lib/write_tree/struct.WriteTreeFlags.html) |
 | `grit_lib::write_tree::WriteTreePersistence` | enum | How cache_tree_update persists rebuilt tree objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/write_tree/enum.WriteTreePersistence.html) |

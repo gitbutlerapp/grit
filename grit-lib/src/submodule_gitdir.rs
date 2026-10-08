@@ -628,19 +628,20 @@ pub fn die_path_inside_submodule_when_disabled(
     Ok(())
 }
 
-/// Sets `core.worktree` in the submodule repo at `modules_dir` via `grit --git-dir`.
+/// Sets `core.worktree` in the submodule repo at `modules_dir`.
 ///
 /// Stores a path relative to `modules_dir` (e.g. `../../../sub1`), matching C Git and
 /// `test_git_directory_exists` in the ported submodule tests.
-pub fn set_submodule_repo_worktree(grit_bin: &Path, modules_dir: &Path, sub_worktree: &Path) {
+pub fn set_submodule_repo_worktree(modules_dir: &Path, sub_worktree: &Path) -> Result<()> {
     let wt_rel = pathdiff_relative(modules_dir, sub_worktree);
-    let _ = std::process::Command::new(grit_bin)
-        .arg("--git-dir")
-        .arg(modules_dir)
-        .arg("config")
-        .arg("core.worktree")
-        .arg(&wt_rel)
-        .status();
+    let config_path = modules_dir.join("config");
+    let mut file = match ConfigFile::from_path(&config_path, ConfigScope::Local)? {
+        Some(f) => f,
+        None => ConfigFile::parse(&config_path, "", ConfigScope::Local)?,
+    };
+    file.set("core.worktree", &wt_rel)?;
+    file.write()?;
+    Ok(())
 }
 
 /// Writes `sub_worktree/.git` as a gitfile pointing at `modules_dir` (relative when possible).
@@ -672,7 +673,6 @@ fn pathdiff_relative(from: &Path, to: &Path) -> String {
 
 /// Writes the gitfile and `core.worktree` for a submodule using configured `submodule.<name>.gitdir`.
 pub fn connect_submodule_work_tree_and_git_dir(
-    grit_bin: &Path,
     work_tree: &Path,
     super_git_dir: &Path,
     cfg: &ConfigFile,
@@ -682,7 +682,7 @@ pub fn connect_submodule_work_tree_and_git_dir(
     let modules_dir =
         submodule_gitdir_filesystem_path(work_tree, super_git_dir, cfg, submodule_name)?;
     write_submodule_gitfile(sub_worktree, &modules_dir)?;
-    set_submodule_repo_worktree(grit_bin, &modules_dir, sub_worktree);
+    set_submodule_repo_worktree(&modules_dir, sub_worktree)?;
     Ok(())
 }
 

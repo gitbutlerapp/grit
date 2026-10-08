@@ -15,10 +15,12 @@
 //!   - `ident` keyword expansion
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use encoding_rs::UTF_8;
-
+use crate::command_runner::{
+    system_command_runner, CommandRunner, CommandSpec, CommandStdin,
+};
 use crate::config::ConfigSet;
 use crate::error::{FilterError, FilterPhase};
 use crate::filter_process::{
@@ -216,7 +218,7 @@ impl Default for FileAttrs {
 }
 
 /// Global conversion settings derived from config.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConversionConfig {
     pub autocrlf: AutoCrlf,
     pub eol: CoreEol,
@@ -224,6 +226,8 @@ pub struct ConversionConfig {
     /// `core.checkRoundtripEncoding` — comma/space separated encodings whose UTF-8 round trip is
     /// verified when writing to the object DB. `None` keeps Git's default (`SHIFT-JIS`).
     pub check_roundtrip_encoding: Option<String>,
+    /// Subprocess runner for clean/smudge filters and iconv helpers.
+    pub command_runner: Arc<dyn CommandRunner>,
 }
 
 impl ConversionConfig {
@@ -267,7 +271,31 @@ impl ConversionConfig {
             eol,
             safecrlf,
             check_roundtrip_encoding,
+            command_runner: system_command_runner(),
         }
+    }
+
+    /// Like [`Self::from_config`] with an explicit filter/hook subprocess runner.
+    #[must_use]
+    pub fn from_config_with_runner(
+        config: &ConfigSet,
+        command_runner: Arc<dyn CommandRunner>,
+    ) -> Self {
+        let mut cfg = Self::from_config(config);
+        cfg.command_runner = command_runner;
+        cfg
+    }
+}
+
+impl std::fmt::Debug for ConversionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConversionConfig")
+            .field("autocrlf", &self.autocrlf)
+            .field("eol", &self.eol)
+            .field("safecrlf", &self.safecrlf)
+            .field("check_roundtrip_encoding", &self.check_roundtrip_encoding)
+            .field("command_runner", &"<CommandRunner>")
+            .finish()
     }
 }
 
@@ -1055,7 +1083,7 @@ pub fn clean_uses_autocrlf_index_guard(attrs: &FileAttrs, conv: &ConversionConfi
 }
 
 /// Optional inputs for [`convert_to_git_with_opts`] (Git `CONV_EOL_RENORMALIZE` / index blob).
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ConvertToGitOpts<'a> {
     /// Stage-0 blob bytes for this path before the current add (for safer-autocrlf).
     pub index_blob: Option<&'a [u8]>,
@@ -1065,6 +1093,8 @@ pub struct ConvertToGitOpts<'a> {
     pub check_safecrlf: bool,
     /// Long-running filter registry for this repository handle (see [`FilterProcessState`]).
     pub filter_process: Option<&'a FilterProcessState>,
+    /// Subprocess runner for clean/smudge shell filters (defaults to [`ConversionConfig::command_runner`]).
+    pub command_runner: Option<&'a dyn CommandRunner>,
 }
 
 impl Default for ConvertToGitOpts<'_> {
@@ -1074,7 +1104,19 @@ impl Default for ConvertToGitOpts<'_> {
             renormalize: false,
             check_safecrlf: true,
             filter_process: None,
+            command_runner: None,
         }
+    }
+}
+
+impl std::fmt::Debug for ConvertToGitOpts<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConvertToGitOpts")
+            .field("index_blob", &self.index_blob.map(|b| b.len()))
+            .field("renormalize", &self.renormalize)
+            .field("check_safecrlf", &self.check_safecrlf)
+            .field("command_runner", &self.command_runner.is_some())
+            .finish()
     }
 }
 
@@ -1542,9 +1584,13 @@ pub fn convert_to_git_with_opts(
     let filter_state = if let Some(s) = opts.filter_process {
         s
     } else {
-        owned_filter_state = FilterProcessState::new();
+        owned_filter_state =
+            FilterProcessState::new(Arc::clone(&conv.command_runner));
         &owned_filter_state
     };
+    let runner = opts
+        .command_runner
+        .unwrap_or(conv.command_runner.as_ref());
 
     // 1. Run clean filter if configured (long-running `process` overrides clean command)
     if let Some(ref proc_cmd) = file_attrs.filter_process {
@@ -1574,7 +1620,7 @@ pub fn convert_to_git_with_opts(
     } else {
         match file_attrs.filter_clean.as_ref() {
             Some(clean_cmd) => {
-                buf = run_filter(clean_cmd, &buf, rel_path).map_err(|e| {
+                buf = run_filter(runner, clean_cmd, &buf, rel_path).map_err(|e| {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
                     if file_attrs.filter_clean_required {
                         FilterError::ExternalFilterFailed {
@@ -1827,14 +1873,42 @@ pub fn convert_to_worktree(
     delayed_checkout: Option<&mut crate::filter_process::DelayedProcessCheckout>,
     filter_process: Option<&FilterProcessState>,
 ) -> Result<Option<Vec<u8>>, FilterError> {
+    convert_to_worktree_with_runner(
+        data,
+        rel_path,
+        conv,
+        file_attrs,
+        oid_hex,
+        smudge_meta,
+        delayed_checkout,
+        filter_process,
+        None,
+    )
+}
+
+/// Like [`convert_to_worktree`] with an explicit filter [`CommandRunner`].
+#[expect(clippy::too_many_arguments)]
+pub fn convert_to_worktree_with_runner(
+    data: &[u8],
+    rel_path: &str,
+    conv: &ConversionConfig,
+    file_attrs: &FileAttrs,
+    oid_hex: Option<&str>,
+    smudge_meta: Option<&FilterSmudgeMeta>,
+    delayed_checkout: Option<&mut crate::filter_process::DelayedProcessCheckout>,
+    filter_process: Option<&FilterProcessState>,
+    command_runner: Option<&dyn CommandRunner>,
+) -> Result<Option<Vec<u8>>, FilterError> {
     let mut buf = data.to_vec();
     let owned_filter_state;
     let filter_state = if let Some(s) = filter_process {
         s
     } else {
-        owned_filter_state = FilterProcessState::new();
+        owned_filter_state =
+            FilterProcessState::new(Arc::clone(&conv.command_runner));
         &owned_filter_state
     };
+    let runner = command_runner.unwrap_or(conv.command_runner.as_ref());
 
     // 1. Ident expansion
     if file_attrs.ident {
@@ -1917,7 +1991,7 @@ pub fn convert_to_worktree(
         buf = out;
     } else {
         match file_attrs.filter_smudge.as_ref() {
-            Some(smudge_cmd) => match run_filter(smudge_cmd, &buf, rel_path) {
+            Some(smudge_cmd) => match run_filter(runner, smudge_cmd, &buf, rel_path) {
                 Ok(filtered) => buf = filtered,
                 Err(_e) => {
                     if file_attrs.filter_smudge_required {
@@ -2232,35 +2306,25 @@ fn expand_filter_command(cmd: &str, rel_path: &str) -> String {
 }
 
 /// Run a filter command, piping data through stdin→stdout.
-fn run_filter(cmd: &str, data: &[u8], rel_path: &str) -> Result<Vec<u8>, std::io::Error> {
+pub fn run_filter(
+    runner: &dyn CommandRunner,
+    cmd: &str,
+    data: &[u8],
+    rel_path: &str,
+) -> Result<Vec<u8>, FilterError> {
     let expanded = expand_filter_command(cmd, rel_path);
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(&expanded)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    use std::io::{ErrorKind, Write};
-    if let Some(ref mut stdin) = child.stdin {
-        if let Err(e) = stdin.write_all(data) {
-            // Match Git: if the filter exits without reading stdin, ignore EPIPE.
-            if e.kind() != ErrorKind::BrokenPipe {
-                return Err(e);
-            }
-        }
+    let mut spec = CommandSpec::sh_dash_c_filter(expanded);
+    spec.stdin = CommandStdin::Pipe(data.to_vec());
+    let output = runner
+        .spawn(&spec)
+        .map_err(|e| filter_detail(rel_path, e.to_string()))?
+        .wait_with_output()
+        .map_err(|e| filter_detail(rel_path, e.to_string()))?;
+    if !output.status.success {
+        return Err(FilterError::Failed {
+            status: output.status.code.unwrap_or(1),
+        });
     }
-    drop(child.stdin.take());
-
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        return Err(std::io::Error::other(format!(
-            "filter command exited with status {}",
-            output.status
-        )));
-    }
-
     Ok(output.stdout)
 }
 
@@ -2311,6 +2375,7 @@ mod tests {
             eol: CoreEol::Lf,
             safecrlf: SafeCrlf::False,
             check_roundtrip_encoding: None,
+            command_runner: system_command_runner(),
         };
         let attrs = FileAttrs::default();
         let out =
@@ -2326,6 +2391,7 @@ mod tests {
             eol: CoreEol::Lf,
             safecrlf: SafeCrlf::False,
             check_roundtrip_encoding: None,
+            command_runner: system_command_runner(),
         };
         let attrs = FileAttrs::default();
         let out = convert_to_worktree_eager(blob, "x", &conv, &attrs, None, None, None).unwrap();

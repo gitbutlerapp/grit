@@ -9,6 +9,9 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::command_runner::{system_command_runner, CommandRunner};
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 #[derive(Debug, Clone)]
@@ -314,19 +317,154 @@ impl Environment {
     pub fn discovery_cwd(&self) -> PathBuf {
         self.cwd.canonicalize().unwrap_or_else(|_| self.cwd.clone())
     }
+
+    /// Variables exported to hook/filter subprocesses (no process inheritance).
+    #[must_use]
+    pub fn subprocess_environment(&self) -> Vec<(OsString, OsString)> {
+        let mut set = Vec::new();
+        subprocess_push_str(&mut set, "GIT_DIR", self.git_dir.as_deref());
+        subprocess_push_str(&mut set, "GIT_WORK_TREE", self.git_work_tree.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_CEILING_DIRECTORIES",
+            self.git_ceiling_directories.as_deref(),
+        );
+        subprocess_push_str(&mut set, "GIT_INDEX_FILE", self.git_index_file.as_deref());
+        subprocess_push_str(&mut set, "GIT_NAMESPACE", self.git_namespace.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_REPLACE_REF_BASE",
+            self.git_replace_ref_base.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            self.git_alternate_object_directories.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_OBJECT_DIRECTORY",
+            self.git_object_directory.as_deref(),
+        );
+        subprocess_push_str(&mut set, "GIT_PREFIX", self.git_prefix.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_CONFIG_NOSYSTEM",
+            self.git_config_nosystem.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_CONFIG_SYSTEM",
+            self.git_config_system.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_CONFIG_GLOBAL",
+            self.git_config_global.as_deref(),
+        );
+        subprocess_push_str(&mut set, "GIT_CONFIG", self.git_config.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_CONFIG_PARAMETERS",
+            self.git_config_parameters.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_CONFIG_COUNT",
+            self.git_config_count.as_deref(),
+        );
+        for (i, (k, v)) in self.git_config_pairs.iter().enumerate() {
+            set.push((
+                OsString::from(format!("GIT_CONFIG_KEY_{i}")),
+                OsString::from(k),
+            ));
+            set.push((
+                OsString::from(format!("GIT_CONFIG_VALUE_{i}")),
+                OsString::from(v),
+            ));
+        }
+        subprocess_push_os(&mut set, "HOME", self.home.as_ref());
+        subprocess_push_str(&mut set, "XDG_CONFIG_HOME", self.xdg_config_home.as_deref());
+        subprocess_push_os(&mut set, "USERPROFILE", self.userprofile.as_ref());
+        subprocess_push_os(&mut set, "HOMEDRIVE", self.homedrive.as_ref());
+        subprocess_push_os(&mut set, "HOMEPATH", self.homepath.as_ref());
+        subprocess_push_os(&mut set, "GIT_INSTALL_ROOT", self.git_install_root.as_ref());
+        subprocess_push_os(&mut set, "GIT_EXEC_PATH", self.git_exec_path.as_ref());
+        subprocess_push_str(&mut set, "PWD", self.pwd.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_TEST_ASSUME_DIFFERENT_OWNER",
+            self.git_test_assume_different_owner.as_deref(),
+        );
+        subprocess_push_str(&mut set, "GIT_TRACE_SETUP", self.git_trace_setup.as_deref());
+        subprocess_push_str(&mut set, "GIT_TRACE2_PERF", self.git_trace2_perf.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GRIT_INVOCATION_CWD",
+            self.grit_invocation_cwd.as_deref(),
+        );
+        subprocess_push_str(&mut set, "SUDO_UID", self.sudo_uid.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_TEST_UTF8_NFD_TO_NFC",
+            self.git_test_utf8_nfd_to_nfc.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_TEST_NO_WRITE_REV_INDEX",
+            self.git_test_no_write_rev_index.as_deref(),
+        );
+        subprocess_push_str(&mut set, "ProgramFiles", self.program_files.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "ProgramFiles(x86)",
+            self.program_files_x86.as_deref(),
+        );
+        if self.git_no_replace_objects {
+            set.push((OsString::from("GIT_NO_REPLACE_OBJECTS"), OsString::new()));
+        }
+        if self.grit_debug_safe_dir {
+            set.push((OsString::from("GRIT_DEBUG_SAFE_DIR"), OsString::new()));
+        }
+        set
+    }
+}
+
+fn subprocess_push_str(out: &mut Vec<(OsString, OsString)>, key: &str, val: Option<&str>) {
+    if let Some(v) = val {
+        out.push((OsString::from(key), OsString::from(v)));
+    }
+}
+
+fn subprocess_push_os(out: &mut Vec<(OsString, OsString)>, key: &str, val: Option<&OsString>) {
+    if let Some(v) = val {
+        out.push((OsString::from(key), v.clone()));
+    }
 }
 
 /// Options passed to repository open/discover with an explicit [`Environment`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RepositoryOptions {
     /// Discovery and configuration environment.
     pub environment: Environment,
+    /// Subprocess runner for hooks, filters, and helpers.
+    pub command_runner: Arc<dyn CommandRunner>,
+}
+
+impl std::fmt::Debug for RepositoryOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepositoryOptions")
+            .field("environment", &self.environment)
+            .field("command_runner", &"<CommandRunner>")
+            .finish()
+    }
 }
 
 impl Default for RepositoryOptions {
     fn default() -> Self {
         Self {
             environment: Environment::empty(),
+            command_runner: system_command_runner(),
         }
     }
 }
@@ -340,7 +478,16 @@ impl RepositoryOptions {
 
     #[must_use]
     pub fn with_environment(environment: Environment) -> Self {
-        Self { environment }
+        Self {
+            environment,
+            command_runner: system_command_runner(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
+        self.command_runner = runner;
+        self
     }
 }
 

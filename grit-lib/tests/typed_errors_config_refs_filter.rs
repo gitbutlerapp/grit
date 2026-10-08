@@ -105,6 +105,7 @@ fn required_clean_filter_failure_is_typed_message() {
             renormalize: false,
             index_blob: None,
             filter_process: None,
+            command_runner: None,
         },
     )
     .unwrap_err();
@@ -152,6 +153,7 @@ fn bom_filter_error_has_single_fatal_prefix_on_stderr() {
             renormalize: false,
             index_blob: None,
             filter_process: None,
+            command_runner: None,
         },
     )
     .unwrap_err();

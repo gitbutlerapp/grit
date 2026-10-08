@@ -127,7 +127,7 @@ impl WorktreeRules {
             .work_tree
             .clone()
             .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
-        let conversion = ConversionConfig::from_config(&config);
+        let conversion = ConversionConfig::from_config_with_runner(&config, repo.command_runner());
         let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);
         let (stack_prefix, info_rules) = load_attribute_stack_prefix_and_info(
             repo, &work_tree, &config, index, &repo.odb, false,

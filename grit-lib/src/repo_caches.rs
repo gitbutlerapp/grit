@@ -49,7 +49,7 @@ impl std::fmt::Debug for RepoCaches {
 impl RepoCaches {
     /// Create an empty cache arena for one repository handle.
     #[must_use]
-    pub fn new() -> Arc<Self> {
+    pub fn new(command_runner: Arc<dyn crate::command_runner::CommandRunner>) -> Arc<Self> {
         Arc::new(Self {
             config_cache: Mutex::new(HashMap::new()),
             attr_stack: Mutex::new(HashMap::new()),
@@ -57,7 +57,7 @@ impl RepoCaches {
             attr_tree: Mutex::new(HashMap::new()),
             pathspec_precompose: OnceLock::new(),
             reftable_backend: Mutex::new(HashMap::new()),
-            filters: FilterProcessState::new(),
+            filters: FilterProcessState::new(command_runner),
             promisor_hydrate: Mutex::new(None),
             bare_worktree_warn_seen: Mutex::new(HashSet::new()),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),

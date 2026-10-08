@@ -713,25 +713,26 @@ fn is_regular_mode(mode: u32) -> bool {
 }
 
 fn run_textconv_command(command: &str, input_data: &[u8]) -> Result<Vec<u8>> {
+    use crate::command_runner::{run_sh_dash_c, system_command_runner, CommandStdin, CommandStdio};
     let temp_path = create_temp_textconv_file(input_data)?;
     let quoted = shell_quote(temp_path.to_string_lossy().as_ref());
     let shell_command = format!("{command} {quoted}");
 
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(&shell_command)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .output()
-        .map_err(|e| LibError::Message(format!("running textconv command '{command}': {e}")))?;
+    let output = run_sh_dash_c(
+        system_command_runner().as_ref(),
+        &shell_command,
+        None,
+        CommandStdin::Null,
+        CommandStdio::Inherit,
+    )
+    .map_err(|e| LibError::Message(format!("running textconv command '{command}': {e}")))?;
 
     let _ = std::fs::remove_file(&temp_path);
 
-    if !output.status.success() {
+    if !output.status.success {
         return Err(LibError::Message(format!(
             "textconv command exited with status {}",
-            output.status
+            output.status.code.unwrap_or(-1)
         )));
     }
 
