@@ -12,6 +12,11 @@ const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_CONFIG_GLOBAL", "/dev/null"),
     ("GIT_CONFIG_SYSTEM", "/dev/null"),
     ("GIT_CONFIG_NOSYSTEM", "1"),
+    // CI runners have no default identity once global config is masked.
+    ("GIT_AUTHOR_NAME", "Test"),
+    ("GIT_AUTHOR_EMAIL", "test@example.com"),
+    ("GIT_COMMITTER_NAME", "Test"),
+    ("GIT_COMMITTER_EMAIL", "test@example.com"),
 ];
 
 fn git(dir: &std::path::Path, args: &[&str]) -> String {
