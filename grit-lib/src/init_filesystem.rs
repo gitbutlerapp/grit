@@ -17,6 +17,8 @@ use crate::unicode_normalization::probe_filesystem_normalizes_nfd_to_nfc;
 pub struct InitFilesystemConfigOptions {
     /// Skip all probes (Git skips on re-init).
     pub is_reinit: bool,
+    /// Force `core.precomposeunicode` probe (embedder/test knob, not from process env).
+    pub force_precompose_probe: bool,
 }
 
 fn config_bool_from_parameters(env: &Environment, key: &str) -> Option<bool> {
@@ -150,8 +152,8 @@ pub fn probe_symlinks_supported(git_dir: &Path) -> std::io::Result<bool> {
 ///
 /// Honors higher-priority config (system, global, `GIT_CONFIG_PARAMETERS`), values already
 /// present in the local config (including from an init template), and does not override them.
-/// `GIT_TEST_UTF8_NFD_TO_NFC=1` forces the precompose probe on Linux CI only when the key is
-/// not already set locally.
+/// When [`InitFilesystemConfigOptions::force_precompose_probe`] is set, the precompose probe runs
+/// even on filesystems that would not normally normalize NFD to NFC (Linux CI).
 ///
 /// # Errors
 ///
@@ -170,10 +172,7 @@ pub fn apply_init_filesystem_config(
     let filemode_from_cmdline = filemode_from_git_config_parameters(environment).is_some();
     let symlinks_from_cmdline = symlinks_from_git_config_parameters(environment).is_some();
 
-    let force_precompose_probe = environment
-        .git_test_utf8_nfd_to_nfc
-        .as_deref()
-        .is_some_and(|v| v == "true" || v == "1");
+    let force_precompose_probe = opts.force_precompose_probe;
 
     let filemode = probe_trust_filemode(git_dir).unwrap_or(true);
     let symlinks = probe_symlinks_supported(git_dir).unwrap_or(false);
@@ -269,14 +268,15 @@ mod tests {
             "[core]\n\trepositoryformatversion = 0\n",
         )
         .expect("config");
-        std::env::set_var("GIT_TEST_UTF8_NFD_TO_NFC", "1");
         apply_init_filesystem_config(
             &git_dir,
-            InitFilesystemConfigOptions::default(),
-            &Environment::capture_process(),
+            InitFilesystemConfigOptions {
+                force_precompose_probe: true,
+                ..InitFilesystemConfigOptions::default()
+            },
+            &Environment::empty(),
         )
         .expect("apply");
-        std::env::remove_var("GIT_TEST_UTF8_NFD_TO_NFC");
         let text = fs::read_to_string(git_dir.join("config")).expect("read");
         assert!(text.contains("precomposeunicode = true"));
     }
@@ -291,10 +291,8 @@ mod tests {
         .expect("template config");
 
         let root = TempDir::new().expect("worktree");
-        std::env::set_var("GIT_TEST_UTF8_NFD_TO_NFC", "1");
         crate::repo::init_repository(root.path(), false, "main", Some(tmpl.path()), "files")
             .expect("init");
-        std::env::remove_var("GIT_TEST_UTF8_NFD_TO_NFC");
 
         let text = fs::read_to_string(root.path().join(".git/config")).expect("read");
         assert!(

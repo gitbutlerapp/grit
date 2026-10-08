@@ -212,7 +212,7 @@ fn warning_kind(w: &Warning) -> String {
     }
 }
 
-/// Build [`grit_lib::repo::RepositoryOptions`] with a fresh CLI diagnostic sink.
+/// Build [`grit_lib::environment::RepositoryOptions`] with a fresh CLI diagnostic sink.
 pub fn repository_options(
     network_trace: bool,
 ) -> (
@@ -220,7 +220,7 @@ pub fn repository_options(
     Arc<CliDiagnosticSink>,
 ) {
     let sink = Arc::new(CliDiagnosticSink::new());
-    let options = grit_lib::environment::RepositoryOptions {
+    let mut options = grit_lib::environment::RepositoryOptions {
         environment: crate::context::environment(),
         ..grit_lib::environment::RepositoryOptions {
             diagnostics: sink.clone(),
@@ -228,5 +228,9 @@ pub fn repository_options(
             ..Default::default()
         }
     };
+    options.reference_unix_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64);
     (options, sink)
 }

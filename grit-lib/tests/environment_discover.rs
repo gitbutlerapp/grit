@@ -216,7 +216,6 @@ fn safe_directory_from_environment_global_config() {
     env.cwd = repo_root.clone();
     env.git_config_global = Some(global.to_string_lossy().into_owned());
     env.git_config_nosystem = Some("true".into());
-    env.git_test_assume_different_owner = Some("1".into());
 
     let git_status = Command::new("git")
         .args(["status", "--porcelain"])
@@ -240,9 +239,10 @@ fn safe_directory_from_environment_global_config() {
     );
     assert!(std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER").is_err());
 
-    let repo =
-        Repository::discover_with(&RepositoryOptions::with_environment(env), Some(&repo_root))
-            .expect("discover must honor safe.directory from Environment global config");
+    let mut options = RepositoryOptions::with_environment(env);
+    options.test_assume_different_owner = true;
+    let repo = Repository::discover_with(&options, Some(&repo_root))
+        .expect("discover must honor safe.directory from Environment global config");
     repo.enforce_safe_directory()
         .expect("safe.directory allows");
 }

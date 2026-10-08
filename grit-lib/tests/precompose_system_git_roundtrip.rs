@@ -14,10 +14,18 @@ fn null_config() -> &'static str {
     }
 }
 
+fn enable_precomposeunicode(root: &Path) {
+    let config_path = root.join(".git/config");
+    let mut config = fs::read_to_string(&config_path).expect("read config");
+    if !config.contains("precomposeunicode") {
+        config.push_str("\n[core]\n\tprecomposeunicode = true\n");
+        fs::write(&config_path, config).expect("write precomposeunicode");
+    }
+}
+
 fn grit_precompose_env(dir: &Path) -> grit_test_support::Cmd {
     grit_cmd(&["init"])
         .in_dir(dir)
-        .env("GIT_TEST_UTF8_NFD_TO_NFC", "1")
         .env("GIT_CONFIG_GLOBAL", null_config())
         .env("GIT_CONFIG_SYSTEM", null_config())
 }
@@ -28,20 +36,19 @@ fn grit_stages_nfc_paths_readable_by_system_git() {
     let root = dir.path();
 
     grit_precompose_env(root).suc();
+    enable_precomposeunicode(root);
 
     let nfd = format!("cafe\u{0301}.txt");
     fs::write(root.join(&nfd), b"hello\n").expect("write nfd worktree file");
 
     grit_cmd(&["add"])
         .in_dir(root)
-        .env("GIT_TEST_UTF8_NFD_TO_NFC", "1")
         .env("GIT_CONFIG_GLOBAL", null_config())
         .env("GIT_CONFIG_SYSTEM", null_config())
         .suc();
 
     grit_cmd(&["commit", "-m", "nfc path"])
         .in_dir(root)
-        .env("GIT_TEST_UTF8_NFD_TO_NFC", "1")
         .env("GIT_CONFIG_GLOBAL", null_config())
         .env("GIT_CONFIG_SYSTEM", null_config())
         .suc();

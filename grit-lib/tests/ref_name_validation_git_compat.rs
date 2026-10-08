@@ -149,8 +149,7 @@ fn write_ref_accepts_refs_heads_head_like_git() {
     let worktree = dir.path();
     let repo = init_repository(worktree, false, "main", None, "files").expect("init");
     let tip = seed_empty_commit(worktree);
-    write_ref(&repo.git_dir, "refs/heads/HEAD", &tip)
-        .expect("plumbing may write refs/heads/HEAD");
+    write_ref(&repo.git_dir, "refs/heads/HEAD", &tip).expect("plumbing may write refs/heads/HEAD");
     assert!(
         git_fsck_strict(worktree),
         "git fsck --strict must pass on refs/heads/HEAD"

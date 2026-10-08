@@ -24,9 +24,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use crate::command_runner::CommandRunner;
 use crate::config::ConfigSet;
 use crate::diff_indent_heuristic;
 use crate::error::{Error, Result};
@@ -3308,10 +3306,7 @@ pub fn smudge_racily_clean_entries(
         )
         .unwrap_or_default()
     });
-    let conv = crlf::ConversionConfig::from_config_with_runner(
-        &config,
-        crate::command_runner::system_command_runner(),
-    );
+    let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
 
     let mut changed = false;

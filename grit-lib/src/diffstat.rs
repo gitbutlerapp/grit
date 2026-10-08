@@ -43,9 +43,9 @@ pub fn terminal_columns() -> usize {
     // check above stays uncached so per-call env overrides keep working.
     // hygiene: immutable terminal width cache (process tty geometry, set once)
     static TERMINAL_COLS: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
-    if let Some(w) = *TERMINAL_COLS.get_or_init(|| {
-        terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
-    }) {
+    if let Some(w) =
+        *TERMINAL_COLS.get_or_init(|| terminal_size::terminal_size().map(|(w, _)| w.0 as usize))
+    {
         return w;
     }
     80

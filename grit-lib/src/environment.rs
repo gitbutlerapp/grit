@@ -11,8 +11,12 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use time::{OffsetDateTime, UtcOffset};
+
 use crate::command_runner::{system_command_runner, CommandRunner};
 use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics};
+use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
+use crate::ident_resolve::IdentityEnv;
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 #[derive(Debug, Clone)]
@@ -55,6 +59,16 @@ pub struct Environment {
     pub sudo_uid: Option<String>,
     pub git_test_utf8_nfd_to_nfc: Option<String>,
     pub git_test_no_write_rev_index: Option<String>,
+    pub git_author_name: Option<String>,
+    pub git_author_email: Option<String>,
+    pub git_author_date: Option<String>,
+    pub git_committer_name: Option<String>,
+    pub git_committer_email: Option<String>,
+    pub git_committer_date: Option<String>,
+    /// Timezone for local date formatting (`TZ`).
+    pub tz: Option<String>,
+    pub user: Option<String>,
+    pub username: Option<String>,
     /// Windows `%ProgramFiles%` (for Git for Windows system config discovery).
     pub program_files: Option<String>,
     /// Windows `%ProgramFiles(x86)%`.
@@ -100,6 +114,15 @@ impl Environment {
             sudo_uid: None,
             git_test_utf8_nfd_to_nfc: None,
             git_test_no_write_rev_index: None,
+            git_author_name: None,
+            git_author_email: None,
+            git_author_date: None,
+            git_committer_name: None,
+            git_committer_email: None,
+            git_committer_date: None,
+            tz: None,
+            user: None,
+            username: None,
             program_files: None,
             program_files_x86: None,
         }
@@ -166,9 +189,30 @@ impl Environment {
             sudo_uid: get("SUDO_UID"),
             git_test_utf8_nfd_to_nfc: get("GIT_TEST_UTF8_NFD_TO_NFC"),
             git_test_no_write_rev_index: get("GIT_TEST_NO_WRITE_REV_INDEX"),
+            git_author_name: get("GIT_AUTHOR_NAME"),
+            git_author_email: get("GIT_AUTHOR_EMAIL"),
+            git_author_date: get("GIT_AUTHOR_DATE"),
+            git_committer_name: get("GIT_COMMITTER_NAME"),
+            git_committer_email: get("GIT_COMMITTER_EMAIL"),
+            git_committer_date: get("GIT_COMMITTER_DATE"),
+            tz: get("TZ"),
+            user: get("USER"),
+            username: get("USERNAME"),
             program_files: get("ProgramFiles"),
             program_files_x86: get("ProgramFiles(x86)"),
         }
+    }
+
+    /// Parsed epoch from `GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE` when set.
+    #[must_use]
+    pub fn git_now_date_override(&self) -> Option<i64> {
+        let raw = self
+            .git_committer_date
+            .as_deref()
+            .or(self.git_author_date.as_deref())?;
+        raw.split_whitespace()
+            .next()
+            .and_then(|p| p.parse::<i64>().ok())
     }
 
     /// Whether `GIT_TEST_ASSUME_DIFFERENT_OWNER` is enabled.
@@ -267,6 +311,15 @@ impl Environment {
             "GIT_CONFIG_COUNT" => self.git_config_count.clone(),
             "GIT_PREFIX" => self.git_prefix.clone(),
             "GIT_TEST_UTF8_NFD_TO_NFC" => self.git_test_utf8_nfd_to_nfc.clone(),
+            "GIT_AUTHOR_NAME" => self.git_author_name.clone(),
+            "GIT_AUTHOR_EMAIL" => self.git_author_email.clone(),
+            "GIT_AUTHOR_DATE" => self.git_author_date.clone(),
+            "GIT_COMMITTER_NAME" => self.git_committer_name.clone(),
+            "GIT_COMMITTER_EMAIL" => self.git_committer_email.clone(),
+            "GIT_COMMITTER_DATE" => self.git_committer_date.clone(),
+            "TZ" => self.tz.clone(),
+            "USER" => self.user.clone(),
+            "USERNAME" => self.username.clone(),
             "XDG_CONFIG_HOME" => self.xdg_config_home.clone(),
             "HOME" => self
                 .home
@@ -431,6 +484,35 @@ impl Environment {
     }
 }
 
+impl IdentityEnv for Environment {
+    fn var(&self, key: &str) -> Option<String> {
+        Environment::var(self, key)
+    }
+
+    fn var_os(&self, key: &str) -> Option<OsString> {
+        Environment::var_os(self, key)
+    }
+}
+
+/// Map a Unix timestamp through an optional `TZ`-style string (or the process default offset).
+#[must_use]
+pub fn offset_from_epoch_and_tz(epoch: i64, tz: Option<&str>) -> OffsetDateTime {
+    let tz_hhmm = local_tzoffset_with_tz(epoch as u64, tz);
+    let offset = utc_offset_from_tz_hhmm(tz_hhmm).unwrap_or(UtcOffset::UTC);
+    OffsetDateTime::from_unix_timestamp(epoch)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+        .to_offset(offset)
+}
+
+fn utc_offset_from_tz_hhmm(tz: TzHhmm) -> Option<UtcOffset> {
+    let sign: i32 = if tz < 0 { -1 } else { 1 };
+    let abs = tz.unsigned_abs();
+    let hours = (abs / 100) as i32;
+    let minutes = (abs % 100) as i32;
+    let seconds = sign * (hours * 3600 + minutes * 60);
+    UtcOffset::from_whole_seconds(seconds).ok()
+}
+
 fn subprocess_push_str(out: &mut Vec<(OsString, OsString)>, key: &str, val: Option<&str>) {
     if let Some(v) = val {
         out.push((OsString::from(key), OsString::from(v)));
@@ -454,6 +536,12 @@ pub struct RepositoryOptions {
     pub diagnostics: DiagnosticsHandle,
     /// When true, network operations may emit [`crate::diagnostics::Trace::Network`] events.
     pub network_trace: bool,
+    /// When true, treat repository ownership as a different user (`safe.directory` tests).
+    pub test_assume_different_owner: bool,
+    /// When true, force split-index writes (embedder/test harness).
+    pub force_split_index: bool,
+    /// Wall-clock reference for rev-parse date selectors; embedders set explicitly.
+    pub reference_unix_time: Option<i64>,
 }
 
 impl std::fmt::Debug for RepositoryOptions {
@@ -473,6 +561,9 @@ impl Default for RepositoryOptions {
             command_runner: system_command_runner(),
             diagnostics: Arc::new(NullDiagnostics),
             network_trace: false,
+            test_assume_different_owner: false,
+            force_split_index: false,
+            reference_unix_time: None,
         }
     }
 }

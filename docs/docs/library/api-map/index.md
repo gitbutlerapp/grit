@@ -99,7 +99,12 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::delta_islands` | module | Delta islands — restrict cross-island deltas in pack-objects (--delta-islands). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/index.html) |
 | `grit_lib::delta_islands::DeltaIslands` | struct | Computed island marks for a pack-objects run. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.DeltaIslands.html) |
 | `grit_lib::delta_islands::IslandBitmap` | struct | One island membership bitmap (one bit per deduplicated island). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.IslandBitmap.html) |
-| `grit_lib::diagnostics` | module | Git-style diagnostic prefixes without embedding fatal: / warning: literals in call sites. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/index.html) |
+| `grit_lib::diagnostics` | module | Git-style diagnostic prefixes and typed warning sinks for embedders and the CLI. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/index.html) |
+| `grit_lib::diagnostics::CollectingDiagnostics` | struct | Collects warnings (and traces) for tests and the CLI. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/struct.CollectingDiagnostics.html) |
+| `grit_lib::diagnostics::DiagnosticSink` | trait | Receives warnings and optional trace lines from grit-lib. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/trait.DiagnosticSink.html) |
+| `grit_lib::diagnostics::NullDiagnostics` | struct | Discards all diagnostics (default for crate::repo::Repository). | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/struct.NullDiagnostics.html) |
+| `grit_lib::diagnostics::Trace` | enum | Optional trace events (network debugging, etc.), separate from Warning. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/enum.Trace.html) |
+| `grit_lib::diagnostics::Warning` | enum | A non-fatal condition worth surfacing to the user or an embedder. | [API](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/enum.Warning.html) |
 | `grit_lib::diff` | module | Diff machinery — compare trees, index entries, and working tree files. | [API](https://docs.rs/grit-lib/latest/grit_lib/diff/index.html) |
 | `grit_lib::diff::DiffEntry` | struct | A single diff entry representing one changed path. | [API](https://docs.rs/grit-lib/latest/grit_lib/diff/struct.DiffEntry.html) |
 | `grit_lib::diff::DiffIndexToWorktreeOptions` | struct | Additional inputs for diff_index_to_worktree_with_options. | [API](https://docs.rs/grit-lib/latest/grit_lib/diff/struct.DiffIndexToWorktreeOptions.html) |
@@ -141,6 +146,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::fetch_submodules::FetchRecurseSubmodules` | enum | fetch.recurseSubmodules / --recurse-submodules modes for fetch. | [API](https://docs.rs/grit-lib/latest/grit_lib/fetch_submodules/enum.FetchRecurseSubmodules.html) |
 | `grit_lib::filter_process` | module | Long-running Git filter protocol (filter.<name>.process), matching git-filter v2. | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/index.html) |
 | `grit_lib::filter_process::DelayedCheckoutError` | enum | Failure from DelayedProcessCheckout::finish. | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/enum.DelayedCheckoutError.html) |
+| `grit_lib::filter_process::DelayedCheckoutProblem` | enum | One delayed-checkout outcome that would have been printed as Git’s error: ... | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/enum.DelayedCheckoutProblem.html) |
 | `grit_lib::filter_process::DelayedProcessCheckout` | struct | Paths waiting for list_available_blobs / retry smudge (Git finish_delayed_checkout). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.DelayedProcessCheckout.html) |
 | `grit_lib::filter_process::DelayedProcessCheckoutEntry` | struct | One path deferred by a process filter that returned status=delayed (Git delayed_checkout). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.DelayedProcessCheckoutEntry.html) |
 | `grit_lib::filter_process::FilterProcessState` | struct | Per-repository filter-process registry (long-running filter.*.process drivers). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.FilterProcessState.html) |
@@ -242,7 +248,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::midx::WriteMultiPackIndexOptions` | struct | Options for writing a multi-pack index (extension of the simple writer). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.WriteMultiPackIndexOptions.html) |
 | `grit_lib::name_rev` | module | Name-rev: name commits relative to refs. | [API](https://docs.rs/grit-lib/latest/grit_lib/name_rev/index.html) |
 | `grit_lib::name_rev::NameRevOptions` | struct | Options that control which refs participate in naming. | [API](https://docs.rs/grit-lib/latest/grit_lib/name_rev/struct.NameRevOptions.html) |
-| `grit_lib::net_trace` | module | Lightweight, env-gated tracing for the networking paths (transport connect, fetch/push negotiation, pack transfer). | [API](https://docs.rs/grit-lib/latest/grit_lib/net_trace/index.html) |
+| `grit_lib::net_trace` | module | Network operation tracing through crate::diagnostics::Trace::Network. | [API](https://docs.rs/grit-lib/latest/grit_lib/net_trace/index.html) |
 | `grit_lib::notes` | module | git notes tree manipulation — the fanout tree mapping object -> note blob. | [API](https://docs.rs/grit-lib/latest/grit_lib/notes/index.html) |
 | `grit_lib::notes::NotesTreeEntry` | struct | Per-worktree subdirectory holding the conflicted note blobs during a notes merge. | [API](https://docs.rs/grit-lib/latest/grit_lib/notes/struct.NotesTreeEntry.html) |
 | `grit_lib::object_store` | module | Object storage: ids/kinds, the object database, packs, multi-pack index, deltas. | [API](https://docs.rs/grit-lib/latest/grit_lib/object_store/index.html) |
@@ -363,7 +369,10 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::reflog::GcReflogExpireConfig` | struct | Per-ref gc.<pattern>.reflogExpire* rules plus global gc.reflogExpire / gc.reflogExpireUnreachable. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.GcReflogExpireConfig.html) |
 | `grit_lib::reflog::GcReflogPattern` | struct | Per-ref gc.<pattern>.reflogExpire* rule from config. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.GcReflogPattern.html) |
 | `grit_lib::reflog::ReflogEntry` | struct | A single reflog entry. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.ReflogEntry.html) |
+| `grit_lib::reflog::ReflogExpireAction` | struct | Per-entry report from expire_reflog_git. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.ReflogExpireAction.html) |
+| `grit_lib::reflog::ReflogExpireActionKind` | enum | What happened to one reflog entry during expire_reflog_git. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/enum.ReflogExpireActionKind.html) |
 | `grit_lib::reflog::ReflogExpireParams` | struct | Options for expire_reflog_git. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.ReflogExpireParams.html) |
+| `grit_lib::reflog::ReflogExpireResult` | struct | Result of expire_reflog_git: prune count plus a per-entry action list. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.ReflogExpireResult.html) |
 | `grit_lib::refs` | module | Reference storage — files backend + reftable backend. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/index.html) |
 | `grit_lib::refs::BranchCommitRefUpdate` | struct | Move a checked-out branch to new_oid and append matching branch and HEAD reflogs. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/struct.BranchCommitRefUpdate.html) |
 | `grit_lib::refs::LogRefsConfig` | enum | Core logAllRefUpdates modes (after config lookup), matching Git’s log_refs_config. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.LogRefsConfig.html) |
@@ -391,7 +400,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::repo_caches` | module | Repository-scoped caches shared by an open Repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/index.html) |
 | `grit_lib::repo_caches::RepoCaches` | struct | Per-repository cache arena (held behind Arc on Repository). | [API](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/struct.RepoCaches.html) |
 | `grit_lib::rerere` | module | Git-compatible rerere (MERGE_RR, rr-cache/, conflict ID hashing). | [API](https://docs.rs/grit-lib/latest/grit_lib/rerere/index.html) |
-| `grit_lib::rerere::RerereAutoupdate` | enum | Invoked after mergy operations with conflicts (merge, rebase, …). | [API](https://docs.rs/grit-lib/latest/grit_lib/rerere/enum.RerereAutoupdate.html) |
+| `grit_lib::rerere::RerereAutoupdate` | enum | Outcome of rerere handling one path (replaces stderr status lines). | [API](https://docs.rs/grit-lib/latest/grit_lib/rerere/enum.RerereAutoupdate.html) |
+| `grit_lib::rerere::RerereEvent` | struct | One rerere status event for a path. | [API](https://docs.rs/grit-lib/latest/grit_lib/rerere/struct.RerereEvent.html) |
 | `grit_lib::resolve_undo` | module | Git index REUC (resolve-undo) extension — records unmerged stages when a conflict is resolved. | [API](https://docs.rs/grit-lib/latest/grit_lib/resolve_undo/index.html) |
 | `grit_lib::resolve_undo::ResolveUndoRecord` | struct | Per-path undo data: up to three conflict stages (index 0 = stage 1). | [API](https://docs.rs/grit-lib/latest/grit_lib/resolve_undo/struct.ResolveUndoRecord.html) |
 | `grit_lib::rev_list` | module | Commit traversal and output planning for rev-list. | [API](https://docs.rs/grit-lib/latest/grit_lib/rev_list/index.html) |

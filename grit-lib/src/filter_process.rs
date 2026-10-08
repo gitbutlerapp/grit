@@ -427,7 +427,8 @@ fn ensure_started(state: &FilterProcessState, cmd: &str) -> Result<(), String> {
     match reg.entry(cmd.to_string()) {
         Entry::Occupied(_) => Ok(()),
         Entry::Vacant(v) => {
-            let rf = spawn_running(state.command_runner.as_ref(), cmd).map_err(|e| e.to_string())?;
+            let rf =
+                spawn_running(state.command_runner.as_ref(), cmd).map_err(|e| e.to_string())?;
             v.insert(Arc::new(Mutex::new(rf)));
             Ok(())
         }

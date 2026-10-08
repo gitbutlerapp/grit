@@ -88,27 +88,6 @@ command_new = 3
 static_global = 0
 system_time_now = 0
 
-[file.commit.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 2
-env_var_os = 0
-env_vars = 0
-env_set_var = 4
-env_remove_var = 2
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
-system_time_now = 0
-
 [file.commit_graph_file.rs]
 println = 0
 print = 0
@@ -287,15 +266,15 @@ process_exit = 0
 env_var = 1
 env_var_os = 0
 env_vars = 0
-env_set_var = 0
-env_remove_var = 0
+env_set_var = 2
+env_remove_var = 1
 env_current_dir = 0
 literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 0
+static_global = 1
 system_time_now = 1
 
 [file.git_path.rs]

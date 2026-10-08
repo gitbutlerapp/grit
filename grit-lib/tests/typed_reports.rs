@@ -110,12 +110,12 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
         .filter(|a| a.entry.message == "old" || a.entry.message == "new")
         .collect();
     assert_eq!(tagged.len(), 2);
-    assert!(tagged.iter().any(|a| {
-        a.action == ReflogExpireActionKind::WouldPrune && a.entry.message == "old"
-    }));
-    assert!(tagged.iter().any(|a| {
-        a.action == ReflogExpireActionKind::Keep && a.entry.message == "new"
-    }));
+    assert!(tagged
+        .iter()
+        .any(|a| { a.action == ReflogExpireActionKind::WouldPrune && a.entry.message == "old" }));
+    assert!(tagged
+        .iter()
+        .any(|a| { a.action == ReflogExpireActionKind::Keep && a.entry.message == "new" }));
 
     let real_params = ReflogExpireParams {
         dry_run: false,

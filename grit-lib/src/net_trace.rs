@@ -1,6 +1,6 @@
 //! Network operation tracing through [`crate::diagnostics::Trace::Network`].
 //!
-//! Enable tracing on a [`crate::repo::Repository`] with [`RepositoryOptions::network_trace`]
+//! Enable tracing on a [`crate::repo::Repository`] with [`crate::environment::RepositoryOptions::network_trace`]
 //! and wire the same diagnostic sink into fetch/push [`FetchOptions`](crate::transfer::FetchOptions).
 
 use std::sync::OnceLock;

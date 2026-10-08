@@ -17,10 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use encoding_rs::UTF_8;
-use crate::command_runner::{
-    system_command_runner, CommandRunner, CommandSpec, CommandStdin,
-};
+use crate::command_runner::{system_command_runner, CommandRunner, CommandSpec, CommandStdin};
 use crate::config::ConfigSet;
 use crate::error::{FilterError, FilterPhase};
 use crate::filter_process::{
@@ -28,6 +25,7 @@ use crate::filter_process::{
 };
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use encoding_rs::UTF_8;
 
 /// Working-tree encoding conversion failure (Git `reencode_string_len` returning NULL).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -1584,13 +1582,10 @@ pub fn convert_to_git_with_opts(
     let filter_state = if let Some(s) = opts.filter_process {
         s
     } else {
-        owned_filter_state =
-            FilterProcessState::new(Arc::clone(&conv.command_runner));
+        owned_filter_state = FilterProcessState::new(Arc::clone(&conv.command_runner));
         &owned_filter_state
     };
-    let runner = opts
-        .command_runner
-        .unwrap_or(conv.command_runner.as_ref());
+    let runner = opts.command_runner.unwrap_or(conv.command_runner.as_ref());
 
     // 1. Run clean filter if configured (long-running `process` overrides clean command)
     if let Some(ref proc_cmd) = file_attrs.filter_process {
@@ -1904,8 +1899,7 @@ pub fn convert_to_worktree_with_runner(
     let filter_state = if let Some(s) = filter_process {
         s
     } else {
-        owned_filter_state =
-            FilterProcessState::new(Arc::clone(&conv.command_runner));
+        owned_filter_state = FilterProcessState::new(Arc::clone(&conv.command_runner));
         &owned_filter_state
     };
     let runner = command_runner.unwrap_or(conv.command_runner.as_ref());
@@ -1967,9 +1961,7 @@ pub fn convert_to_worktree_with_runner(
                 }
                 eprintln!(
                     "{}",
-                    crate::diagnostics::error_line(&format!(
-                        "external filter '{driver}' failed"
-                    ))
+                    crate::diagnostics::error_line(&format!("external filter '{driver}' failed"))
                 );
                 return Ok(Some(buf));
             }

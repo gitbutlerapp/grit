@@ -152,14 +152,21 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
     checkout_between_trees(&repo, Some(&head_tree), &new_tree)
         .context("could not update the working tree")?;
 
-    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
-        .context("could not load config")?;
-    let now = grit_lib::commit::now_for_identity();
+    let env = repo.environment();
+    let config =
+        ConfigSet::load(env, Some(&repo.git_dir), true).context("could not load config")?;
+    let now = context::wall_clock_now(env);
     // Preserve the original author (cherry-pick semantics); committer is the
     // current user. `author_raw` is empty so `serialize_commit` re-encodes from
     // the textual `author` field — matching `grit commit`.
     let author = source.author.clone();
-    let committer = context::identity(&config, IdentRole::Committer, "GIT_COMMITTER_DATE", now)?;
+    let committer = context::identity(
+        env,
+        &config,
+        IdentRole::Committer,
+        "GIT_COMMITTER_DATE",
+        now,
+    )?;
 
     let commit_data = CommitData {
         tree: new_tree,
@@ -204,9 +211,9 @@ fn move_branch(
     reason: &str,
 ) -> Result<()> {
     refs::write_ref(&repo.git_dir, refname, &new).context("could not update branch")?;
-    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
-        .unwrap_or_default();
-    let who = context::reflog_identity(&config, grit_lib::commit::now_for_identity());
+    let env = repo.environment();
+    let config = ConfigSet::load(env, Some(&repo.git_dir), true).unwrap_or_default();
+    let who = context::reflog_identity(env, &config, context::wall_clock_now(env));
     let _ = refs::append_reflog(&repo.git_dir, refname, &old, &new, &who, reason, false);
     let _ = refs::append_reflog(&repo.git_dir, "HEAD", &old, &new, &who, reason, false);
     Ok(())

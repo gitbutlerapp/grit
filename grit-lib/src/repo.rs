@@ -103,6 +103,10 @@ pub struct Repository {
     command_runner: Arc<dyn CommandRunner>,
     diagnostics: DiagnosticsHandle,
     network_trace: bool,
+    /// Embedder override for rev-parse relative dates (`@{yesterday}`, etc.).
+    reference_unix_time: Option<i64>,
+    test_assume_different_owner: bool,
+    force_split_index: bool,
 }
 
 impl std::fmt::Debug for Repository {
@@ -220,6 +224,9 @@ impl Repository {
             command_runner,
             diagnostics: Arc::clone(&options.diagnostics),
             network_trace: options.network_trace,
+            reference_unix_time: options.reference_unix_time,
+            test_assume_different_owner: options.test_assume_different_owner,
+            force_split_index: options.force_split_index,
         })
     }
 
@@ -244,6 +251,15 @@ impl Repository {
     #[must_use]
     pub fn environment(&self) -> &Environment {
         &self.environment
+    }
+
+    /// Unix timestamp for rev-parse relative date selectors (`@{yesterday}`, etc.).
+    #[must_use]
+    pub fn reference_unix_time(&self) -> i64 {
+        if let Some(ts) = self.reference_unix_time {
+            return ts;
+        }
+        self.environment.git_now_date_override().unwrap_or(0)
     }
 
     /// Subprocess runner used for hooks, filters, and helpers.
@@ -608,7 +624,8 @@ impl Repository {
                         }
                     }
                 }
-                let assume_different = env.test_assume_different_owner();
+                let assume_different =
+                    options.test_assume_different_owner || env.test_assume_different_owner();
                 if assume_different {
                     repo.enforce_safe_directory()?;
                 } else {
@@ -823,7 +840,8 @@ impl Repository {
         matches!(
             crate::split_index::split_index_config(cfg.as_ref()),
             crate::split_index::SplitIndexConfig::Enabled
-        ) || crate::split_index::git_test_split_index_env()
+        ) || self.force_split_index
+            || crate::split_index::git_test_split_index_env()
     }
 
     /// Like [`Repository::write_index_at`], but passes explicit `post-index-change` hook flags.
@@ -2036,8 +2054,11 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
         };
         // Try to open; if the directory is empty or invalid, continue
         // walking up (e.g. an empty .git/ directory should be ignored).
-        match Repository::open_skipping_format_validation_with_options(options, &open_path, Some(dir))
-        {
+        match Repository::open_skipping_format_validation_with_options(
+            options,
+            &open_path,
+            Some(dir),
+        ) {
             Ok(mut repo) => {
                 // Restore the original path so rev-parse shows .git not the
                 // resolved symlink target.
@@ -2249,7 +2270,8 @@ impl Repository {
     /// unless a matching `safe.directory` value is configured in system/global/
     /// command scopes (repository-local config is ignored).
     pub fn enforce_safe_directory(&self) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
+        let assume_different =
+            self.test_assume_different_owner || self.environment.test_assume_different_owner();
         if !assume_different {
             return Ok(());
         }
@@ -2301,7 +2323,8 @@ impl Repository {
     /// Used by operations that explicitly open another repository by path
     /// (e.g. local clone source).
     pub fn enforce_safe_directory_git_dir(&self) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
+        let assume_different =
+            self.test_assume_different_owner || self.environment.test_assume_different_owner();
         if !assume_different {
             return Ok(());
         }
@@ -2322,7 +2345,8 @@ impl Repository {
 
     /// Enforce safe.directory checks against an explicit checked path.
     pub fn enforce_safe_directory_git_dir_with_path(&self, checked: &Path) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
+        let assume_different =
+            self.test_assume_different_owner || self.environment.test_assume_different_owner();
         if !assume_different {
             return Ok(());
         }
@@ -2339,7 +2363,8 @@ impl Repository {
     /// rules as discovery. Otherwise checks filesystem ownership of the git directory
     /// only (matching Git's `die_upon_dubious_ownership` for clone).
     pub fn verify_safe_for_clone_source(&self) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
+        let assume_different =
+            self.test_assume_different_owner || self.environment.test_assume_different_owner();
         if assume_different {
             self.enforce_safe_directory_git_dir()
         } else {

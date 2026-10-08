@@ -14,12 +14,8 @@ fn null_config() -> String {
     }
 }
 
-fn grit_env(null: &str) -> [(&str, &str); 3] {
-    [
-        ("GIT_TEST_UTF8_NFD_TO_NFC", "1"),
-        ("GIT_CONFIG_GLOBAL", null),
-        ("GIT_CONFIG_SYSTEM", null),
-    ]
+fn grit_env(null: &str) -> [(&str, &str); 2] {
+    [("GIT_CONFIG_GLOBAL", null), ("GIT_CONFIG_SYSTEM", null)]
 }
 
 fn run_grit(grit: &str, dir: &std::path::Path, args: &[&str], null: &str) -> std::process::Output {
@@ -44,6 +40,13 @@ fn grit_init_add_nfd_untracked_stores_nfc_in_index() {
         String::from_utf8_lossy(&init.stderr),
         String::from_utf8_lossy(&init.stdout)
     );
+
+    let config_path = dir.path().join(".git/config");
+    let mut config = fs::read_to_string(&config_path).expect("read config");
+    if !config.contains("precomposeunicode") {
+        config.push_str("\n[core]\n\tprecomposeunicode = true\n");
+        fs::write(&config_path, config).expect("write precomposeunicode");
+    }
 
     let nfd = format!("cafe\u{0301}.txt");
     fs::write(dir.path().join(&nfd), b"x\n").expect("write nfd file");
