@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::pack::read_local_pack_indexes;
+use crate::pack::read_local_pack_indexes_cached;
 
 /// One local pack considered for geometric repacking.
 #[derive(Debug, Clone)]
@@ -78,7 +78,7 @@ pub fn collect_geometry_packs(
     keep_pack_names: &[String],
 ) -> Result<Vec<GeometricPack>> {
     let pack_dir = objects_dir.join("pack");
-    let indexes = read_local_pack_indexes(objects_dir)?;
+    let indexes = read_local_pack_indexes_cached(objects_dir)?;
     let mut out = Vec::new();
 
     for idx in indexes {
@@ -111,7 +111,7 @@ pub fn collect_geometry_packs(
             continue;
         }
 
-        if pack_dir.join(format!("{stem}.promisor")).is_file() {
+        if idx.is_promisor {
             continue;
         }
 
@@ -144,7 +144,7 @@ pub fn collect_promisor_geometry_packs(
     keep_pack_names: &[String],
 ) -> Result<Vec<GeometricPack>> {
     let pack_dir = objects_dir.join("pack");
-    let indexes = read_local_pack_indexes(objects_dir)?;
+    let indexes = read_local_pack_indexes_cached(objects_dir)?;
     let mut out = Vec::new();
 
     for idx in indexes {
@@ -177,7 +177,7 @@ pub fn collect_promisor_geometry_packs(
             continue;
         }
 
-        if !pack_dir.join(format!("{stem}.promisor")).is_file() {
+        if !idx.is_promisor {
             continue;
         }
 

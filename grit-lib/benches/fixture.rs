@@ -266,6 +266,31 @@ fn build_delta_chain_pack(depth: usize) -> (Vec<u8>, ObjectId, u64) {
     (pack, delta_oid, chain_depth)
 }
 
+pub fn build_packed_exists_local_fixture(object_count: usize) -> (TempDir, Odb, Vec<ObjectId>) {
+    let root = tempfile::tempdir().expect("exists_local fixture tempdir");
+    let objects = root.path().join("objects");
+    let (idx, _tip) = build_large_pack_index(&objects, object_count);
+    let odb = Odb::new(&objects);
+    let mut oids = Vec::with_capacity(object_count.min(idx.entries.len()));
+    for e in &idx.entries {
+        if e.oid.len() == 20 {
+            if let Ok(oid) = ObjectId::from_bytes(&e.oid) {
+                oids.push(oid);
+                if oids.len() >= object_count {
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        oids.len() >= object_count.min(1000),
+        "expected at least {} packed oids, got {}",
+        object_count.min(1000),
+        oids.len()
+    );
+    (root, odb, oids)
+}
+
 fn build_large_pack_index(objects_dir: &Path, object_count: usize) -> (PackIndex, ObjectId) {
     let tmp = tempfile::tempdir().expect("large pack tempdir");
     let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init repo");

@@ -43,6 +43,10 @@ pub struct PackIndex {
     /// first OID byte is `<= b`. Enables O(log n) lookup via the OID's first byte
     /// (matches Git's `find_pack_entry_one` in `packfile.c`).
     pub fanout: [u32; 256],
+    /// Sibling `pack-*.promisor` marker was present when this index was prepared.
+    pub is_promisor: bool,
+    /// Sibling `pack-*.mtimes` marker was present when this index was prepared (cruft pack).
+    pub is_cruft: bool,
 }
 
 impl PackIndex {
@@ -369,6 +373,47 @@ mod pack_cache {
 
     static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
 
+    #[cfg(test)]
+    static TEST_MARKER_STAT_COUNT: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+
+    fn marker_sidecar_is_file(path: &Path) -> bool {
+        #[cfg(test)]
+        {
+            use std::sync::atomic::Ordering;
+            TEST_MARKER_STAT_COUNT.fetch_add(1, Ordering::Relaxed);
+        }
+        path.is_file()
+    }
+
+    /// Whether sibling `.promisor` / `.mtimes` markers exist next to `pack_path`.
+    pub fn sidecar_flags(pack_path: &Path) -> (bool, bool) {
+        (
+            marker_sidecar_is_file(&pack_path.with_extension("promisor")),
+            marker_sidecar_is_file(&pack_path.with_extension("mtimes")),
+        )
+    }
+
+    fn refresh_pack_sidecar_flags(idx: Arc<PackIndex>) -> Arc<PackIndex> {
+        let (is_promisor, is_cruft) = sidecar_flags(&idx.pack_path);
+        if idx.is_promisor == is_promisor && idx.is_cruft == is_cruft {
+            return idx;
+        }
+        let updated = Arc::new(PackIndex {
+            is_promisor,
+            is_cruft,
+            ..(*idx).clone()
+        });
+        let mut g = lock();
+        g.by_idx.insert(
+            idx.idx_path.clone(),
+            CachedIdx {
+                idx: Arc::clone(&updated),
+            },
+        );
+        updated
+    }
+
     fn lock() -> std::sync::MutexGuard<'static, State> {
         CACHE
             .get_or_init(|| Mutex::new(State::default()))
@@ -442,7 +487,7 @@ mod pack_cache {
             if !idx.pack_path.is_file() {
                 continue;
             }
-            out.push(idx);
+            out.push(refresh_pack_sidecar_flags(idx));
         }
 
         let mut g = lock();
@@ -609,6 +654,19 @@ mod pack_cache {
     }
 
     #[cfg(test)]
+    pub fn test_reset_marker_stat_count() {
+        use std::sync::atomic::Ordering;
+        TEST_MARKER_STAT_COUNT.store(0, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_marker_stat_count() -> u64 {
+        use std::sync::atomic::Ordering;
+        TEST_MARKER_STAT_COUNT.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
     #[must_use]
     pub fn test_dir_rescan_count(pack_dir: &Path) -> u64 {
         lock()
@@ -771,6 +829,17 @@ pub fn clear_pack_cache() {
     pack_cache::clear();
 }
 
+#[cfg(test)]
+pub fn test_reset_pack_marker_stat_count() {
+    pack_cache::test_reset_marker_stat_count();
+}
+
+#[cfg(test)]
+#[must_use]
+pub fn test_pack_marker_stat_count() -> u64 {
+    pack_cache::test_marker_stat_count()
+}
+
 /// Re-stamp the cached pack-bytes signature after deliberately touching `pack_path`'s mtime
 /// (object freshening). See the internal `pack_cache::refresh_pack_signature` helper.
 pub fn refresh_pack_bytes_signature(pack_path: &Path, touched_at: SystemTime) {
@@ -899,6 +968,8 @@ fn read_pack_index_v1(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
         hash_bytes: 20,
         entries,
         fanout,
+        is_promisor: false,
+        is_cruft: false,
     })
 }
 
@@ -1125,6 +1196,8 @@ fn read_pack_index_v2(idx_path: &Path, bytes: &[u8], verify: bool) -> Result<Pac
         hash_bytes,
         entries,
         fanout,
+        is_promisor: false,
+        is_cruft: false,
     })
 }
 
@@ -2645,7 +2718,7 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
 static PACK_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
-fn pack_cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn pack_cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
     PACK_CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -2830,6 +2903,8 @@ mod tests {
             hash_bytes: 20,
             entries,
             fanout,
+            is_promisor: false,
+            is_cruft: false,
         }
     }
 
@@ -2918,6 +2993,8 @@ mod tests {
             hash_bytes: 32,
             fanout: compute_fanout_from_entries(&entries),
             entries,
+            is_promisor: false,
+            is_cruft: false,
         };
 
         let err = read_object_from_pack_bytes(&pack, &idx, wrong_oid.as_bytes()).unwrap_err();
@@ -3440,6 +3517,8 @@ mod cached_lookup_tests {
             hash_bytes: 20,
             fanout: compute_fanout_from_entries(&pack_entries),
             entries: pack_entries,
+            is_promisor: false,
+            is_cruft: false,
         }
     }
 
