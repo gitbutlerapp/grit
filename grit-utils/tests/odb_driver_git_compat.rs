@@ -65,6 +65,137 @@ fn init_small_repo(git: &Path, dir: &Path) {
         .success());
 }
 
+fn init_octopus_merge_head_repo(git: &Path, dir: &Path) {
+    init_small_repo(git, dir);
+    assert!(git_cmd(git, dir)
+        .args(["checkout", "-q", "-b", "topic-a"])
+        .status()
+        .unwrap()
+        .success());
+    std::fs::write(dir.join("a.txt"), "topic-a\n").unwrap();
+    assert!(git_cmd(git, dir)
+        .args(["add", "a.txt"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["commit", "-q", "-m", "topic a"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["checkout", "-q", "main"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["checkout", "-q", "-b", "topic-b"])
+        .status()
+        .unwrap()
+        .success());
+    std::fs::write(dir.join("b.txt"), "topic-b\n").unwrap();
+    assert!(git_cmd(git, dir)
+        .args(["add", "b.txt"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["commit", "-q", "-m", "topic b"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["checkout", "-q", "main"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["checkout", "-q", "-b", "topic-c"])
+        .status()
+        .unwrap()
+        .success());
+    std::fs::write(dir.join("c.txt"), "topic-c\n").unwrap();
+    assert!(git_cmd(git, dir)
+        .args(["add", "c.txt"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["commit", "-q", "-m", "topic c"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["checkout", "-q", "main"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["merge", "-q", "--no-edit", "topic-a", "topic-b", "topic-c"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["repack", "-a", "-d", "-f"])
+        .status()
+        .unwrap()
+        .success());
+}
+
+fn init_binary_add_repo(git: &Path, dir: &Path) {
+    assert!(git_cmd(git, dir)
+        .args(["init", "-q", "-b", "main"])
+        .status()
+        .unwrap()
+        .success());
+    std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+    assert!(git_cmd(git, dir)
+        .args(["add", "a.txt"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["commit", "-q", "-m", "text"])
+        .status()
+        .unwrap()
+        .success());
+    std::fs::write(dir.join("blob.bin"), [0u8, 1, 2, 3, 4]).unwrap();
+    assert!(git_cmd(git, dir)
+        .args(["add", "blob.bin"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["commit", "-q", "-m", "add binary"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["repack", "-a", "-d", "-f"])
+        .status()
+        .unwrap()
+        .success());
+}
+
+fn init_binary_delete_repo(git: &Path, dir: &Path) {
+    init_binary_add_repo(git, dir);
+    assert!(git_cmd(git, dir)
+        .args(["rm", "-q", "blob.bin"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["commit", "-q", "-m", "drop binary"])
+        .status()
+        .unwrap()
+        .success());
+    assert!(git_cmd(git, dir)
+        .args(["repack", "-a", "-d", "-f"])
+        .status()
+        .unwrap()
+        .success());
+}
+
 fn init_merge_head_repo(git: &Path, dir: &Path) {
     init_small_repo(git, dir);
     assert!(git_cmd(git, dir)
@@ -214,4 +345,44 @@ fn odb_driver_log_patch_merge_matches_git() {
         .filter(|w| *w == b"diff --git")
         .count();
     assert_eq!(git_diff_headers, 0, "merge HEAD should not emit patches");
+}
+
+#[test]
+fn odb_driver_log_patch_octopus_merge_matches_git() {
+    let git = system_git();
+    let dir = TempDir::new().unwrap();
+    init_octopus_merge_head_repo(&git, dir.path());
+    let git_out = git_out(&git, dir.path(), &["log", "-p", "-1"]);
+    let grit_out = drive_out("log-patch", dir.path(), &["1"]);
+    assert_eq!(grit_out, git_out);
+    let git_text = String::from_utf8_lossy(&git_out);
+    let merge_line = git_text
+        .lines()
+        .find(|l| l.starts_with("Merge:"))
+        .expect("Merge line");
+    assert_eq!(
+        merge_line.matches(' ').count(),
+        3,
+        "octopus has three parents"
+    );
+}
+
+#[test]
+fn odb_driver_log_patch_binary_add_matches_git() {
+    let git = system_git();
+    let dir = TempDir::new().unwrap();
+    init_binary_add_repo(&git, dir.path());
+    let git_out = git_out(&git, dir.path(), &["log", "-p", "-1"]);
+    let grit_out = drive_out("log-patch", dir.path(), &["1"]);
+    assert_eq!(grit_out, git_out);
+}
+
+#[test]
+fn odb_driver_log_patch_binary_delete_matches_git() {
+    let git = system_git();
+    let dir = TempDir::new().unwrap();
+    init_binary_delete_repo(&git, dir.path());
+    let git_out = git_out(&git, dir.path(), &["log", "-p", "-1"]);
+    let grit_out = drive_out("log-patch", dir.path(), &["1"]);
+    assert_eq!(grit_out, git_out);
 }

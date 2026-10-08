@@ -133,9 +133,11 @@ fn write_commit_patch(out: &mut impl Write, repo: &Repository, oid: &ObjectId) -
     let commit = parse_commit(&raw.data).context("parse commit")?;
     writeln!(out, "commit {oid}")?;
     if commit.parents.len() > 1 {
-        let p0 = abbreviate_oid(repo, &commit.parents[0])?;
-        let p1 = abbreviate_oid(repo, &commit.parents[1])?;
-        writeln!(out, "Merge: {p0} {p1}")?;
+        let mut parts = Vec::with_capacity(commit.parents.len());
+        for parent in &commit.parents {
+            parts.push(abbreviate_oid(repo, parent)?);
+        }
+        writeln!(out, "Merge: {}", parts.join(" "))?;
     }
     writeln!(out, "Author: {}", format_author_display(&commit.author))?;
     writeln!(out, "Date:   {}", format_author_date(&commit.author))?;
@@ -226,7 +228,9 @@ fn write_diff_entry(
     let old_bytes = read_blob_or_empty(repo, entry.old_oid, entry.status == DiffStatus::Added)?;
     let new_bytes = read_blob_or_empty(repo, entry.new_oid, entry.status == DiffStatus::Deleted)?;
     if old_bytes.contains(&0) || new_bytes.contains(&0) {
-        writeln!(out, "Binary files a/{old_path} and b/{new_path} differ")?;
+        let old_disp = log_path_for_binary(old_path, "a/");
+        let new_disp = log_path_for_binary(new_path, "b/");
+        writeln!(out, "Binary files {old_disp} and {new_disp} differ")?;
         return Ok(());
     }
     let old_text = String::from_utf8_lossy(&old_bytes);
@@ -239,6 +243,14 @@ fn write_diff_entry(
         writeln!(out)?;
     }
     Ok(())
+}
+
+fn log_path_for_binary(path: &str, prefix: &str) -> String {
+    if path == "/dev/null" {
+        path.to_owned()
+    } else {
+        format!("{prefix}{path}")
+    }
 }
 
 fn min_abbrev_len(repo: &Repository) -> usize {
