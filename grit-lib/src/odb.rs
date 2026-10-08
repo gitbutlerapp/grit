@@ -27,9 +27,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::diagnostics::NullDiagnostics;
+use crate::error::{Error, MidxError, Result};
 use crate::hash;
-use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
+use crate::midx::{
+    midx_oid_listed_in_tip, try_read_info_via_midx_with_diagnostics,
+    try_read_object_via_midx_with_diagnostics, validate_midx_referenced_packs_with_diagnostics,
+};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::pack;
 use crate::pack_store::PackStore;
@@ -322,6 +326,13 @@ impl Odb {
         self.shared_config_state = Some(state);
         self.shared_environment = Some(env);
         self
+    }
+
+    fn diagnostics_handle(&self) -> crate::diagnostics::DiagnosticsHandle {
+        self.shared_config_state
+            .as_ref()
+            .map(|state| state.diagnostics_handle())
+            .unwrap_or_else(|| Arc::new(NullDiagnostics))
     }
 
     fn load_config_cascade(&self) -> Result<ConfigSet> {
@@ -720,7 +731,11 @@ impl Odb {
             return;
         }
         let _ = self.midx_packs_validated.get_or_init(|| {
-            crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+            let diagnostics = self.diagnostics_handle();
+            validate_midx_referenced_packs_with_diagnostics(
+                &self.objects_dir,
+                diagnostics.as_ref(),
+            );
         });
     }
 
@@ -1004,7 +1019,7 @@ impl Odb {
         self.sync_delta_base_cache_limit();
 
         match self.with_pack_store_for(&self.objects_dir, || {
-            Self::read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
+            self.read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
         }) {
             Ok(obj) => return Ok(obj),
             Err(Error::ObjectNotFound(_)) => {}
@@ -1016,7 +1031,7 @@ impl Odb {
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
             if let Ok(obj) =
-                self.with_pack_store_for(alt_dir, || Self::read_from_dir(alt_dir, oid, midx_alt))
+                self.with_pack_store_for(alt_dir, || self.read_from_dir(alt_dir, oid, midx_alt))
             {
                 return Ok(obj);
             }
@@ -1024,7 +1039,7 @@ impl Odb {
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
             if let Ok(obj) =
-                self.with_pack_store_for(alt_dir, || Self::read_from_dir(alt_dir, oid, midx_alt))
+                self.with_pack_store_for(alt_dir, || self.read_from_dir(alt_dir, oid, midx_alt))
             {
                 return Ok(obj);
             }
@@ -1033,7 +1048,7 @@ impl Odb {
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
                 if let Ok(obj) =
-                    self.with_pack_store_for(alt_dir, || Self::read_from_dir(alt_dir, oid, false))
+                    self.with_pack_store_for(alt_dir, || self.read_from_dir(alt_dir, oid, false))
                 {
                     return Ok(obj);
                 }
@@ -1076,7 +1091,7 @@ impl Odb {
         }
 
         match self.with_pack_store_for(&self.objects_dir, || {
-            Self::read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
+            self.read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
         }) {
             Ok(info) => return Ok(info),
             Err(Error::ObjectNotFound(_)) => {}
@@ -1088,7 +1103,7 @@ impl Odb {
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
             if let Ok(info) = self
-                .with_pack_store_for(alt_dir, || Self::read_info_from_dir(alt_dir, oid, midx_alt))
+                .with_pack_store_for(alt_dir, || self.read_info_from_dir(alt_dir, oid, midx_alt))
             {
                 return Ok(info);
             }
@@ -1096,7 +1111,7 @@ impl Odb {
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
             if let Ok(info) = self
-                .with_pack_store_for(alt_dir, || Self::read_info_from_dir(alt_dir, oid, midx_alt))
+                .with_pack_store_for(alt_dir, || self.read_info_from_dir(alt_dir, oid, midx_alt))
             {
                 return Ok(info);
             }
@@ -1105,7 +1120,7 @@ impl Odb {
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
                 if let Ok(info) = self
-                    .with_pack_store_for(alt_dir, || Self::read_info_from_dir(alt_dir, oid, false))
+                    .with_pack_store_for(alt_dir, || self.read_info_from_dir(alt_dir, oid, false))
                 {
                     return Ok(info);
                 }
@@ -1116,8 +1131,8 @@ impl Odb {
     }
 
     /// Try to read an object from a specific objects directory (pack-first, matching [`Self::read`]).
-    fn read_from_dir(objects_dir: &Path, oid: &ObjectId, use_midx: bool) -> Result<Object> {
-        Self::read_in_objects_dir(
+    fn read_from_dir(&self, objects_dir: &Path, oid: &ObjectId, use_midx: bool) -> Result<Object> {
+        self.read_in_objects_dir(
             objects_dir,
             oid,
             hash_algo_for_objects_dir(objects_dir),
@@ -1126,11 +1141,12 @@ impl Odb {
     }
 
     fn read_info_from_dir(
+        &self,
         objects_dir: &Path,
         oid: &ObjectId,
         use_midx: bool,
     ) -> Result<ObjectInfo> {
-        Self::read_info_in_objects_dir(
+        self.read_info_in_objects_dir(
             objects_dir,
             oid,
             hash_algo_for_objects_dir(objects_dir),
@@ -1139,16 +1155,17 @@ impl Odb {
     }
 
     fn read_in_objects_dir(
+        &self,
         objects_dir: &Path,
         oid: &ObjectId,
         hash_algo: HashAlgo,
         use_midx: bool,
     ) -> Result<Object> {
-        match Self::try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
+        match self.try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
             Ok(obj) => Ok(obj),
             Err(Error::ObjectNotFound(_)) => {
                 if pack::reprepare_pack_directory_on_miss(objects_dir)? {
-                    Self::try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
+                    self.try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
                 } else {
                     Err(Error::ObjectNotFound(oid.to_hex()))
                 }
@@ -1158,6 +1175,7 @@ impl Odb {
     }
 
     fn try_read_in_objects_dir(
+        &self,
         objects_dir: &Path,
         oid: &ObjectId,
         _hash_algo: HashAlgo,
@@ -1170,8 +1188,17 @@ impl Odb {
         };
 
         if use_midx {
-            if let Some(obj) = try_read_object_via_midx(objects_dir, oid)? {
-                return Ok(obj);
+            let diagnostics = if objects_dir == self.objects_dir.as_path() {
+                self.diagnostics_handle()
+            } else {
+                std::sync::Arc::new(NullDiagnostics)
+            };
+            match try_read_object_via_midx_with_diagnostics(objects_dir, oid, diagnostics.as_ref())
+            {
+                Ok(Some(obj)) => return Ok(obj),
+                Ok(None) => {}
+                Err(Error::Midx(MidxError::HashVersionMismatch { .. })) => {}
+                Err(err) => return Err(err),
             }
         }
 
@@ -1209,16 +1236,17 @@ impl Odb {
     }
 
     fn read_info_in_objects_dir(
+        &self,
         objects_dir: &Path,
         oid: &ObjectId,
         hash_algo: HashAlgo,
         use_midx: bool,
     ) -> Result<ObjectInfo> {
-        match Self::try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
+        match self.try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
             Ok(info) => Ok(info),
             Err(Error::ObjectNotFound(_)) => {
                 if pack::reprepare_pack_directory_on_miss(objects_dir)? {
-                    Self::try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
+                    self.try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
                 } else {
                     Err(Error::ObjectNotFound(oid.to_hex()))
                 }
@@ -1228,6 +1256,7 @@ impl Odb {
     }
 
     fn try_read_info_in_objects_dir(
+        &self,
         objects_dir: &Path,
         oid: &ObjectId,
         _hash_algo: HashAlgo,
@@ -1240,8 +1269,16 @@ impl Odb {
         };
 
         if use_midx {
-            if let Some(info) = crate::midx::try_read_info_via_midx(objects_dir, oid)? {
-                return Ok(info);
+            let diagnostics = if objects_dir == self.objects_dir.as_path() {
+                self.diagnostics_handle()
+            } else {
+                Arc::new(NullDiagnostics)
+            };
+            match try_read_info_via_midx_with_diagnostics(objects_dir, oid, diagnostics.as_ref()) {
+                Ok(Some(info)) => return Ok(info),
+                Ok(None) => {}
+                Err(Error::Midx(MidxError::HashVersionMismatch { .. })) => {}
+                Err(err) => return Err(err),
             }
         }
 

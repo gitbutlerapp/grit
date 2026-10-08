@@ -37,17 +37,29 @@ pub fn fatal_line(body: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Warning {
     /// A ref name could mean both a branch/tag ref and an object id prefix.
-    AmbiguousRefname { spec: String },
+    AmbiguousRefname {
+        spec: String,
+    },
     /// A symbolic ref pointed at a missing or invalid target (except bare `HEAD`).
-    DanglingSymref { name: String },
+    DanglingSymref {
+        name: String,
+    },
     /// A commit-graph chunk was smaller than required.
-    CommitGraphChunkTooSmall { layer: String, chunk: String },
+    CommitGraphChunkTooSmall {
+        layer: String,
+        chunk: String,
+    },
     /// Bloom filters were disabled for a commit-graph layer due to incompatible settings.
-    CommitGraphBloomDisabled { layer: String },
+    CommitGraphBloomDisabled {
+        layer: String,
+    },
     /// Changed-path Bloom index chunk does not cover all commits in the layer.
     CommitGraphChangedPathIndexTooSmall,
     /// Changed-path Bloom data chunk header is too small.
-    CommitGraphChangedPathChunkTooSmall { actual: usize, minimum: usize },
+    CommitGraphChangedPathChunkTooSmall {
+        actual: usize,
+        minimum: usize,
+    },
     /// Changed-path Bloom index entry points past the chunk.
     CommitGraphChangedPathOffsetOutOfRange {
         offset: usize,
@@ -64,15 +76,26 @@ pub enum Warning {
         graph: String,
     },
     /// Repository config was skipped because the git directory uses an unsupported format.
-    IgnoredGitDir { path: PathBuf, reason: String },
+    IgnoredGitDir {
+        path: PathBuf,
+        reason: String,
+    },
     /// `core.bare=true` while `core.worktree` is also set.
     CoreBareWithWorktree,
     /// A config value looked boolean but could not be parsed.
-    BadBooleanConfig { key: String, value: String },
+    BadBooleanConfig {
+        key: String,
+        value: String,
+    },
     /// Submodule name failed validation.
-    SuspiciousSubmoduleName { name: String },
+    SuspiciousSubmoduleName {
+        name: String,
+    },
     /// Submodule config value looked like a command-line flag.
-    SubmoduleConfigLooksLikeOption { key: String, value: String },
+    SubmoduleConfigLooksLikeOption {
+        key: String,
+        value: String,
+    },
     /// Duplicate submodule keys in `.gitmodules` for one commit tree.
     SubmoduleMultipleConfigs {
         commit: String,
@@ -80,19 +103,42 @@ pub enum Warning {
         option: String,
     },
     /// `.gitmodules` could not be parsed at a given line.
-    GitmodulesBadConfig { message: String },
+    GitmodulesBadConfig {
+        message: String,
+    },
     /// Split index was requested while `core.splitIndex` disables it.
     SplitIndexDisabledWhileConfigEnabled,
     /// Split index was disabled on the command line while config enables it.
     SplitIndexEnabledWhileConfigDisabled,
     /// `GIT_INDEX_VERSION` was set but invalid.
-    IndexVersionEnvInvalid { fallback: u32 },
+    IndexVersionEnvInvalid {
+        fallback: u32,
+    },
     /// `index.version` in config was invalid.
-    IndexVersionConfigInvalid { fallback: u32 },
+    IndexVersionConfigInvalid {
+        fallback: u32,
+    },
     /// Mailmap blob/object could not be read as a blob.
-    MailmapUnreadable { detail: String },
+    MailmapUnreadable {
+        detail: String,
+    },
     /// A traditional hook script exists but is not executable.
-    NonExecutableHookIgnored { hook_name: String },
+    NonExecutableHookIgnored {
+        hook_name: String,
+    },
+    MidxChecksumMismatch,
+    MidxIgnoringExistingChecksumMismatch,
+    MidxChunkTableError {
+        detail: String,
+    },
+    MidxRevIndexWrongSize,
+    MidxBitmapMissingReverseIndex,
+    MidxPackIndexUnavailable {
+        pack: String,
+    },
+    MidxUnknownPreferredPack {
+        name: String,
+    },
 }
 
 /// Optional trace events (network debugging, etc.), separate from [`Warning`].

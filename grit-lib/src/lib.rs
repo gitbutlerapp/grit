@@ -44,8 +44,11 @@ pub mod progress;
 pub mod prelude {
     pub use crate::command_runner::{CommandRunner, RecordingRunner, SystemCommandRunner};
     pub use crate::config::ConfigSet;
+    pub use crate::diagnostics::{
+        CollectingDiagnostics, DiagnosticSink, NullDiagnostics, Trace, Warning,
+    };
     pub use crate::environment::{Environment, RepositoryOptions};
-    pub use crate::error::{Error, Result};
+    pub use crate::error::{Error, MidxError, Result};
     pub use crate::index::Index;
     pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
     pub use crate::odb::Odb;
@@ -170,6 +173,7 @@ pub mod merge_diff;
 pub mod merge_file;
 pub mod merge_trees;
 pub mod midx;
+pub mod midx_error;
 pub mod name_rev;
 pub mod net_trace;
 pub mod notes;

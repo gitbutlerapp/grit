@@ -147,6 +147,25 @@ pub fn format_warning_message(w: &Warning) -> String {
         Warning::NonExecutableHookIgnored { hook_name } => format!(
             "the '{hook_name}' hook was ignored because it is not executable (see `grit config set advice.ignoredHook false` to silence)"
         ),
+        Warning::MidxChecksumMismatch => {
+            "multi-pack-index checksum does not match; ignoring index".into()
+        }
+        Warning::MidxIgnoringExistingChecksumMismatch => {
+            "existing multi-pack-index checksum failed verification; replacing index".into()
+        }
+        Warning::MidxChunkTableError { detail } => detail.clone(),
+        Warning::MidxRevIndexWrongSize => {
+            "multi-pack-index reverse-index chunk is the wrong size".into()
+        }
+        Warning::MidxBitmapMissingReverseIndex => {
+            "multi-pack bitmap is missing required reverse index".into()
+        }
+        Warning::MidxPackIndexUnavailable { pack } => {
+            format!("packfile {pack} index unavailable")
+        }
+        Warning::MidxUnknownPreferredPack { name } => format!(
+            "multi-pack-index preferred pack '{name}' not found in pack directory"
+        ),
         _ => format!("{w:?}"),
     }
 }
@@ -180,6 +199,15 @@ fn warning_kind(w: &Warning) -> String {
         Warning::IndexVersionConfigInvalid { .. } => "index_version_config_invalid".into(),
         Warning::MailmapUnreadable { .. } => "mailmap_unreadable".into(),
         Warning::NonExecutableHookIgnored { .. } => "non_executable_hook_ignored".into(),
+        Warning::MidxChecksumMismatch => "midx_checksum_mismatch".into(),
+        Warning::MidxIgnoringExistingChecksumMismatch => {
+            "midx_ignoring_existing_checksum_mismatch".into()
+        }
+        Warning::MidxChunkTableError { .. } => "midx_chunk_table_error".into(),
+        Warning::MidxRevIndexWrongSize => "midx_rev_index_wrong_size".into(),
+        Warning::MidxBitmapMissingReverseIndex => "midx_bitmap_missing_reverse_index".into(),
+        Warning::MidxPackIndexUnavailable { .. } => "midx_pack_index_unavailable".into(),
+        Warning::MidxUnknownPreferredPack { .. } => "midx_unknown_preferred_pack".into(),
         _ => "other".into(),
     }
 }

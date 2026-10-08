@@ -466,27 +466,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
-[file.midx.rs]
-println = 0
-print = 0
-eprintln = 7
-eprint = 0
-dbg = 0
-process_exit = 1
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 1
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
-system_time_now = 0
-
 [file.net_trace.rs]
 println = 0
 print = 0

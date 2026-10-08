@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 
+pub use crate::midx_error::MidxError;
+
 /// Why a Git config numeric value was rejected (`git config int` strict parsing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BadNumericSource {
@@ -419,6 +421,10 @@ pub enum Error {
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]
     DetachedHead,
+
+    /// Multi-pack-index load or write failure.
+    #[error(transparent)]
+    Midx(#[from] MidxError),
 
     /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
     #[error(transparent)]
