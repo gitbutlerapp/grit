@@ -88,6 +88,8 @@ struct AttributeState {
     _git_dir: PathBuf,
     odb: Odb,
     index: Index,
+    /// When true, nested and root `.gitattributes` come only from [`Index`] blobs (checkout smudge).
+    gitattributes_index_only: bool,
     /// Global + root `.gitattributes` (lowest precedence among file sources).
     stack_prefix: Vec<AttrRule>,
     /// `.git/info/attributes` — applied after all worktree `.gitattributes` along the path.
@@ -119,13 +121,62 @@ impl WorktreeRules {
             .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
         let conversion = ConversionConfig::from_config(&config);
         let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);
-        let (stack_prefix, info_rules) =
-            load_attribute_stack_prefix_and_info(repo, &work_tree, &config, index, &repo.odb)?;
+        let (stack_prefix, info_rules) = load_attribute_stack_prefix_and_info(
+            repo, &work_tree, &config, index, &repo.odb, false,
+        )?;
         let attrs = AttributeState {
             work_tree,
             _git_dir: repo.git_dir.clone(),
             odb: repo.odb.clone(),
             index: index.clone(),
+            gitattributes_index_only: false,
+            stack_prefix,
+            info_rules,
+            dir_fragment: RefCell::new(HashMap::new()),
+            stack_without_info_by_dir: RefCell::new(HashMap::new()),
+        };
+        Ok(Self {
+            config,
+            conversion,
+            ignore,
+            attrs,
+        })
+    }
+
+    /// Build attribute/conversion context for tree checkout using the **destination** index view.
+    ///
+    /// `.gitattributes` along each path are read from `prospective_index` (and global/info sources),
+    /// not from the working tree, so stale on-disk attribute files cannot override the tree being
+    /// checked out.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors from loading global attribute sources.
+    pub fn from_checkout_prospective_index(
+        repo: &Repository,
+        prospective_index: &Index,
+        config: Arc<ConfigSet>,
+    ) -> Result<Self> {
+        let work_tree = repo
+            .work_tree
+            .clone()
+            .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+        let conversion = ConversionConfig::from_config(&config);
+        let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);
+        let (stack_prefix, info_rules) = load_attribute_stack_prefix_and_info(
+            repo,
+            &work_tree,
+            &config,
+            prospective_index,
+            &repo.odb,
+            true,
+        )?;
+        let attrs = AttributeState {
+            work_tree,
+            _git_dir: repo.git_dir.clone(),
+            odb: repo.odb.clone(),
+            index: prospective_index.clone(),
+            gitattributes_index_only: true,
             stack_prefix,
             info_rules,
             dir_fragment: RefCell::new(HashMap::new()),
@@ -225,16 +276,21 @@ impl AttributeState {
         } else {
             Path::new(dir).join(".gitattributes")
         };
-        let wt_ga = self.work_tree.join(&ga_rel);
-        if let Some(content) = read_worktree_gitattributes(&wt_ga) {
-            rules.extend(crlf::parse_gitattributes_content(&content));
-        } else {
-            let key = path_to_index_bytes(&ga_rel);
-            if let Some(entry) = self.index.get(&key, 0) {
-                if let Ok(obj) = self.odb.read(&entry.oid) {
-                    if let Ok(content) = String::from_utf8(obj.data) {
-                        rules.extend(crlf::parse_gitattributes_content(&content));
-                    }
+        let key = path_to_index_bytes(&ga_rel);
+        if !self.gitattributes_index_only {
+            let wt_ga = self.work_tree.join(&ga_rel);
+            if let Some(content) = read_worktree_gitattributes(&wt_ga) {
+                rules.extend(crlf::parse_gitattributes_content(&content));
+                self.dir_fragment
+                    .borrow_mut()
+                    .insert(dir.to_owned(), rules.clone());
+                return rules;
+            }
+        }
+        if let Some(entry) = self.index.get(&key, 0) {
+            if let Ok(obj) = self.odb.read(&entry.oid) {
+                if let Ok(content) = String::from_utf8(obj.data) {
+                    rules.extend(crlf::parse_gitattributes_content(&content));
                 }
             }
         }
@@ -267,6 +323,7 @@ fn load_attribute_stack_prefix_and_info(
     config: &ConfigSet,
     index: &Index,
     odb: &Odb,
+    gitattributes_index_only: bool,
 ) -> Result<(Vec<AttrRule>, Vec<AttrRule>)> {
     let mut stack_prefix = Vec::new();
     if let Some(g) = global_attributes_path(config)? {
@@ -274,13 +331,23 @@ fn load_attribute_stack_prefix_and_info(
             stack_prefix.extend(crlf::parse_gitattributes_content(&content));
         }
     }
-    let root_ga = work_tree.join(".gitattributes");
-    if let Some(content) = read_worktree_gitattributes(&root_ga) {
-        stack_prefix.extend(crlf::parse_gitattributes_content(&content));
-    } else if let Some(entry) = index.get(b".gitattributes", 0) {
-        if let Ok(obj) = odb.read(&entry.oid) {
-            if let Ok(content) = String::from_utf8(obj.data) {
-                stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+    if gitattributes_index_only {
+        if let Some(entry) = index.get(b".gitattributes", 0) {
+            if let Ok(obj) = odb.read(&entry.oid) {
+                if let Ok(content) = String::from_utf8(obj.data) {
+                    stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+                }
+            }
+        }
+    } else {
+        let root_ga = work_tree.join(".gitattributes");
+        if let Some(content) = read_worktree_gitattributes(&root_ga) {
+            stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+        } else if let Some(entry) = index.get(b".gitattributes", 0) {
+            if let Ok(obj) = odb.read(&entry.oid) {
+                if let Ok(content) = String::from_utf8(obj.data) {
+                    stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+                }
             }
         }
     }

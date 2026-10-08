@@ -21,7 +21,9 @@ use crate::crlf;
 use crate::diff::{diff_trees, DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedCheckoutError, DelayedProcessCheckout, FilterSmudgeMeta};
-use crate::index::{entry_from_metadata, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+use crate::index::{
+    entry_from_metadata, Index, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK,
+};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
@@ -59,7 +61,8 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
 
     let mut index = repo.load_index()?;
     let config = repo.config()?;
-    let rules = WorktreeRules::from_parts(repo, &index, config)?;
+    let prospective_index = prospective_index_for_checkout(&index, changes);
+    let rules = WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)?;
     let mut delayed = DelayedProcessCheckout::default();
     let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
     let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
@@ -159,11 +162,57 @@ struct DelayedCheckoutTarget {
     change: DiffEntry,
 }
 
+/// Index after applying `changes`, used to resolve destination `.gitattributes` before writes land.
+fn prospective_index_for_checkout(index: &Index, changes: &[DiffEntry]) -> Index {
+    let mut idx = index.clone();
+    for change in changes {
+        if change.status == DiffStatus::Deleted {
+            if let Some(path) = &change.old_path {
+                idx.remove(path.as_bytes());
+            }
+            continue;
+        }
+        let Some(path) = &change.new_path else {
+            continue;
+        };
+        if let Some(old) = &change.old_path {
+            if old != path {
+                idx.remove(old.as_bytes());
+            }
+        }
+        let mode = parse_git_mode(&change.new_mode);
+        idx.add_or_replace(prospective_index_entry(path, change.new_oid, mode));
+    }
+    idx.sort();
+    idx
+}
+
+fn prospective_index_entry(path: &str, oid: ObjectId, mode: u32) -> IndexEntry {
+    IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid,
+        flags: path.len().min(0xFFF) as u16,
+        flags_extended: None,
+        path: path.as_bytes().to_vec(),
+        base_index_pos: 0,
+    }
+}
+
 /// Index blob bytes after checkout smudge (EOL, encoding, ident, filters).
 ///
 /// Symlink targets are returned unchanged. When a process filter returns `status=delayed`,
-/// returns `Ok(None)` and records the path in `delayed_checkout` for [`finish_delayed_checkouts`].
-pub fn worktree_bytes_from_index_blob(
+/// returns `Ok(None)` and records the path in `delayed_checkout`; the checkout driver completes
+/// those paths via [`DelayedProcessCheckout::finish`].
+pub(crate) fn worktree_bytes_from_index_blob(
     repo: &Repository,
     rules: &WorktreeRules,
     rel_path: &str,
