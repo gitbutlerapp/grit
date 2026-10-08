@@ -130,7 +130,7 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 </ul>
 <p><code>&lt;branch&gt;</code> can be a local branch or a remote-tracking branch such as <code>origin/main</code>. Local branches are looked up first.</p>
 <p>If both sides changed the same lines, <code>grit</code> lists the conflicting files, exits with an error, and leaves the branch and working tree exactly as they were. <code>grit</code> can&#x27;t resolve conflicts yet; to finish the merge, run <code>git merge &lt;branch&gt;</code>, fix the conflicts and commit.</p>
-<p><code>grit merge</code> won&#x27;t run with uncommitted changes, on a branch with no commits, or with a detached HEAD.</p>
+<p><code>grit merge</code> won&#x27;t run with uncommitted changes, on a branch with no commits, or with a detached HEAD. It also refuses when an untracked file in the working tree would be replaced by a path the merge would check out (same rule as <a href="../switch/"><code>grit switch</code></a>); the branch and file are left unchanged.</p>
 <h2 id="options">Options</h2>
 <div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;branch&gt;</code></td><td>The branch to merge into the current one.</td></tr></tbody></table></div>
 <h2 id="examples">Examples</h2>
@@ -145,6 +145,9 @@ error: merge has conflicts in:
   README.md
 
 Nothing was changed. grit can&#x27;t resolve conflicts yet — run `git merge topic` to resolve them.</code></pre>
+<p>When an untracked file would be overwritten:</p>
+<pre><code>$ grit merge feature
+error: untracked file &#x27;notes.txt&#x27; would be overwritten — move or remove it first</code></pre>
 <h2 id="json-output">JSON output</h2>
 <p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
 <div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>result</code></td><td>string</td><td><code>up_to_date</code>, <code>fast_forward</code>, <code>merged</code>, or <code>set_upstream</code>.</td></tr><tr><td><code>branch</code></td><td>string</td><td>The branch that was merged in (or set as upstream).</td></tr><tr><td><code>oid</code></td><td>string or null</td><td>Commit the current branch points at after the merge, when applicable.</td></tr><tr><td><code>upstream</code></td><td>string or null</td><td>For <code>set_upstream</code>, the remote-tracking branch that was adopted.</td></tr></tbody></table></div>

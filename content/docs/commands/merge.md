@@ -23,7 +23,7 @@ Brings the commits from `<branch>` into the current branch:
 
 If both sides changed the same lines, `grit` lists the conflicting files, exits with an error, and leaves the branch and working tree exactly as they were. `grit` can't resolve conflicts yet; to finish the merge, run `git merge <branch>`, fix the conflicts and commit.
 
-`grit merge` won't run with uncommitted changes, on a branch with no commits, or with a detached HEAD.
+`grit merge` won't run with uncommitted changes, on a branch with no commits, or with a detached HEAD. It also refuses when an untracked file in the working tree would be replaced by a path the merge would check out (same rule as [`grit switch`](../switch/)); the branch and file are left unchanged.
 
 ## Options
 
@@ -49,6 +49,13 @@ error: merge has conflicts in:
   README.md
 
 Nothing was changed. grit can't resolve conflicts yet — run `git merge topic` to resolve them.
+```
+
+When an untracked file would be overwritten:
+
+```console
+$ grit merge feature
+error: untracked file 'notes.txt' would be overwritten — move or remove it first
 ```
 
 ## JSON output

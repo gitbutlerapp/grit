@@ -16,7 +16,7 @@ use grit_lib::merge_trees::{
 };
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_merge;
+use grit_lib::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
@@ -137,6 +137,9 @@ pub fn integrate(
     let other_tree = context::commit_tree(repo, &other_oid)?;
 
     if is_ancestor(repo, into_oid, other_oid)? {
+        prepare_tree_checkout(repo, Some(&into_tree), &other_tree)
+            .map_err(anyhow::Error::new)
+            .context("could not verify working tree")?;
         checkout_between_trees(repo, Some(&into_tree), &other_tree)
             .context("could not update the working tree")?;
         move_branch(
@@ -183,6 +186,9 @@ pub fn integrate(
     let mut index = merged.index;
     let merged_tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())
         .context("could not write merged tree")?;
+    prepare_tree_checkout(repo, Some(&into_tree), &merged_tree)
+        .map_err(anyhow::Error::new)
+        .context("could not verify working tree")?;
     checkout_between_trees(repo, Some(&into_tree), &merged_tree)
         .context("could not update the working tree")?;
 

@@ -5,7 +5,9 @@
 //! the index once, refreshes stat data when needed, and computes those slices without rename
 //! detection, ahead/behind, stash counts, or in-progress operation state.
 
-use crate::diff::{diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffEntry};
+use crate::diff::{
+    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffEntry, DiffStatus,
+};
 use crate::error::{Error, Result};
 use crate::index::{index_file_mtime, Index};
 use crate::objects::{parse_commit, ObjectId};
@@ -161,7 +163,7 @@ pub fn prepare_tree_switch(
         &mut snapshot.index,
         work_tree,
         IgnoredMode::No,
-        false,
+        true,
         &[],
     )?;
     let tree_changes = diff_trees(&repo.odb, from_tree, Some(to_tree), "")?;
@@ -169,6 +171,107 @@ pub fn prepare_tree_switch(
         untracked,
         tree_changes,
     })
+}
+
+/// `true` when `prefix` is a proper path prefix of `path` at a `/` component boundary.
+fn is_component_prefix(prefix: &str, path: &str) -> bool {
+    if path.len() <= prefix.len() {
+        return false;
+    }
+    path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/')
+}
+
+/// Whether an added tree path would replace untracked content at `untracked` (exact or file/dir clash).
+fn added_path_collides_with_untracked(added: &str, untracked: &str) -> bool {
+    added == untracked
+        || is_component_prefix(added, untracked)
+        || is_component_prefix(untracked, added)
+}
+
+/// Paths of untracked worktree files that a tree checkout would replace.
+///
+/// Only tree diff entries with [`DiffStatus::Added`] are considered: the destination
+/// tree introduces a new path that is not present in the source tree. Collisions include
+/// exact matches and file/directory clashes at component boundaries (e.g. added `slot` vs
+/// untracked `slot/precious.txt`, or the reverse).
+#[must_use]
+pub fn untracked_would_be_overwritten_by_tree_changes(
+    untracked_paths: &[String],
+    tree_changes: &[DiffEntry],
+) -> Vec<String> {
+    if untracked_paths.is_empty() {
+        return Vec::new();
+    }
+    let mut collisions = Vec::new();
+    for change in tree_changes {
+        if change.status != DiffStatus::Added {
+            continue;
+        }
+        let Some(added) = &change.new_path else {
+            continue;
+        };
+        for untracked in untracked_paths {
+            let u = untracked.trim_end_matches('/');
+            if u.is_empty() {
+                continue;
+            }
+            if added_path_collides_with_untracked(added, u) {
+                collisions.push(u.to_owned());
+            }
+        }
+    }
+    collisions.sort();
+    collisions.dedup();
+    collisions
+}
+
+/// Refuse when [`untracked_would_be_overwritten_by_tree_changes`] would be non-empty.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] naming the first colliding path (same wording as `grit switch`).
+pub fn ensure_no_untracked_overwrite(
+    untracked_paths: &[String],
+    tree_changes: &[DiffEntry],
+) -> Result<()> {
+    let collisions = untracked_would_be_overwritten_by_tree_changes(untracked_paths, tree_changes);
+    if let Some(path) = collisions.first() {
+        return Err(Error::Message(format!(
+            "untracked file '{path}' would be overwritten — move or remove it first"
+        )));
+    }
+    Ok(())
+}
+
+/// Collect untracked paths and refuse when updating the worktree from `from_tree` to `to_tree`
+/// would clobber an untracked file.
+///
+/// Does not check for staged or unstaged changes; callers such as `grit merge` enforce a clean
+/// worktree separately.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when an untracked path would be overwritten, or on I/O/ODB failures.
+pub fn prepare_tree_checkout(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<()> {
+    let mut snapshot = load_worktree_snapshot(repo)?;
+    let work_tree = repo
+        .work_tree
+        .as_deref()
+        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let (untracked, _) = collect_untracked_and_ignored(
+        repo,
+        &mut snapshot.index,
+        work_tree,
+        IgnoredMode::No,
+        true,
+        &[],
+    )?;
+    let tree_changes = diff_trees(&repo.odb, from_tree, Some(to_tree), "")?;
+    ensure_no_untracked_overwrite(&untracked, &tree_changes)
 }
 
 #[cfg(test)]
@@ -182,6 +285,92 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
         std::fs::write(dir.path().join("tracked.txt"), "v1\n").expect("write");
         (dir, repo)
+    }
+
+    fn added_entry(path: &str) -> DiffEntry {
+        DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(path.to_owned()),
+            old_mode: String::new(),
+            new_mode: "100644".into(),
+            old_oid: ObjectId::zero(),
+            new_oid: ObjectId::zero(),
+            score: None,
+        }
+    }
+
+    fn modified_entry(path: &str) -> DiffEntry {
+        DiffEntry {
+            status: DiffStatus::Modified,
+            old_path: Some(path.to_owned()),
+            new_path: Some(path.to_owned()),
+            old_mode: "100644".into(),
+            new_mode: "100644".into(),
+            old_oid: ObjectId::zero(),
+            new_oid: ObjectId::zero(),
+            score: None,
+        }
+    }
+
+    #[test]
+    fn untracked_collision_only_on_added_paths() {
+        let untracked = vec!["new.txt".into(), "other.txt".into()];
+        let changes = vec![
+            added_entry("new.txt"),
+            modified_entry("tracked.txt"),
+            added_entry("missing.txt"),
+        ];
+        let hits = untracked_would_be_overwritten_by_tree_changes(&untracked, &changes);
+        assert_eq!(hits, vec!["new.txt".to_owned()]);
+    }
+
+    #[test]
+    fn untracked_collision_sorted_and_multiple() {
+        let untracked = vec!["b.txt".into(), "a.txt".into()];
+        let changes = vec![added_entry("b.txt"), added_entry("a.txt")];
+        let hits = untracked_would_be_overwritten_by_tree_changes(&untracked, &changes);
+        assert_eq!(hits, vec!["a.txt".to_owned(), "b.txt".to_owned()]);
+    }
+
+    #[test]
+    fn untracked_collision_file_over_untracked_directory() {
+        let untracked = vec!["slot/precious.txt".into()];
+        let hits =
+            untracked_would_be_overwritten_by_tree_changes(&untracked, &[added_entry("slot")]);
+        assert_eq!(hits, vec!["slot/precious.txt".to_owned()]);
+    }
+
+    #[test]
+    fn untracked_collision_directory_over_untracked_file() {
+        let untracked = vec!["slot".into()];
+        let hits = untracked_would_be_overwritten_by_tree_changes(
+            &untracked,
+            &[added_entry("slot/incoming.txt")],
+        );
+        assert_eq!(hits, vec!["slot".to_owned()]);
+    }
+
+    #[test]
+    fn untracked_collision_allows_sibling_paths() {
+        let untracked = vec!["slot/precious.txt".into()];
+        let hits = untracked_would_be_overwritten_by_tree_changes(
+            &untracked,
+            &[added_entry("slot/incoming.txt")],
+        );
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn ensure_no_untracked_overwrite_err_message() {
+        let err = ensure_no_untracked_overwrite(&["x.txt".into()], &[added_entry("x.txt")])
+            .expect_err("collision");
+        match err {
+            Error::Message(msg) => {
+                assert!(msg.contains("untracked file 'x.txt' would be overwritten"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

@@ -5,6 +5,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::worktree_guard::prepare_tree_checkout;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::state::{resolve_head, HeadState};
@@ -66,6 +67,9 @@ pub fn run() -> Result<MergeOutcome> {
         None => {
             // Unborn branch: adopt the upstream as the first commit.
             let upstream_tree = context::commit_tree(&repo, &upstream_oid)?;
+            prepare_tree_checkout(&repo, None, &upstream_tree)
+                .map_err(anyhow::Error::new)
+                .context("could not verify working tree")?;
             checkout_between_trees(&repo, None, &upstream_tree)
                 .context("could not populate the working tree")?;
             refs::write_ref(&repo.git_dir, &refname, &upstream_oid)

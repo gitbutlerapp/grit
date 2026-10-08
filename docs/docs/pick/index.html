@@ -130,6 +130,7 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 <li><code>&lt;commit&gt;</code> is a merge commit</li>
 <li><code>&lt;commit&gt;</code> doesn&#x27;t change anything, or its change is already on the current branch</li>
 <li>the change conflicts with the current branch; the conflicting files are listed</li>
+<li>an untracked file would be replaced by a path the pick would check out (same rule as <a href="../switch/"><code>grit switch</code></a>)</li>
 </ul>
 <h2 id="options">Options</h2>
 <div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;commit&gt;</code></td><td>The commit to copy onto the current branch.</td></tr></tbody></table></div>
@@ -139,6 +140,9 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 Picked cf18394 → 4be20a1 Say hi</code></pre>
 <p>Pick a commit by id:</p>
 <pre><code>$ grit pick 9a1c2e0</code></pre>
+<p>When an untracked file would be overwritten:</p>
+<pre><code>$ grit pick feature
+error: untracked file &#x27;notes.txt&#x27; would be overwritten — move or remove it first</code></pre>
 <h2 id="json-output">JSON output</h2>
 <p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
 <div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>source</code></td><td>string</td><td>Full id of the commit that was picked.</td></tr><tr><td><code>oid</code></td><td>string</td><td>Full id of the new commit on the current branch.</td></tr><tr><td><code>subject</code></td><td>string</td><td>Subject line of the picked commit.</td></tr></tbody></table></div>

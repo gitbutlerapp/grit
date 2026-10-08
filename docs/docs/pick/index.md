@@ -20,6 +20,7 @@ Takes the change `<commit>` made and applies it to the current branch as a new c
 - `<commit>` is a merge commit
 - `<commit>` doesn't change anything, or its change is already on the current branch
 - the change conflicts with the current branch; the conflicting files are listed
+- an untracked file would be replaced by a path the pick would check out (same rule as [`grit switch`](https://grit-scm.com/docs/switch/index.md))
 
 ## Options
 
@@ -40,6 +41,13 @@ Pick a commit by id:
 
 ```console
 $ grit pick 9a1c2e0
+```
+
+When an untracked file would be overwritten:
+
+```console
+$ grit pick feature
+error: untracked file 'notes.txt' would be overwritten — move or remove it first
 ```
 
 ## JSON output

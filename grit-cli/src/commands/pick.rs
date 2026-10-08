@@ -19,7 +19,7 @@ use grit_lib::merge_trees::{
 };
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
+use grit_lib::porcelain::worktree_guard::{ensure_worktree_clean_for_pick, prepare_tree_checkout};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
@@ -146,6 +146,9 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         );
     }
 
+    prepare_tree_checkout(&repo, Some(&head_tree), &new_tree)
+        .map_err(anyhow::Error::new)
+        .context("could not verify working tree")?;
     checkout_between_trees(&repo, Some(&head_tree), &new_tree)
         .context("could not update the working tree")?;
 

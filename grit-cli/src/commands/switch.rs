@@ -5,12 +5,9 @@
 //! file that the destination branch wants to create. Untracked files that don't
 //! collide come along for the ride.
 
-use std::collections::HashSet;
-
 use anyhow::{bail, Context, Result};
-use grit_lib::diff::DiffStatus;
 use grit_lib::porcelain::checkout::checkout_tree_changes;
-use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
+use grit_lib::porcelain::worktree_guard::{ensure_no_untracked_overwrite, prepare_tree_switch};
 use grit_lib::refs;
 use grit_lib::state::resolve_head;
 use serde::Serialize;
@@ -67,7 +64,8 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
     let plan = prepare_tree_switch(&repo, head_tree.as_ref(), &target_tree)
         .map_err(anyhow::Error::new)
         .context("could not prepare branch switch")?;
-    guard_untracked_changes(&plan.untracked, &plan.tree_changes)?;
+    ensure_no_untracked_overwrite(&plan.untracked, &plan.tree_changes)
+        .map_err(anyhow::Error::new)?;
     checkout_tree_changes(&repo, &plan.tree_changes)
         .context("could not update the working tree")?;
     refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref).context("could not move HEAD")?;
@@ -76,28 +74,4 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
         branch: name.to_owned(),
         created: create,
     })
-}
-
-/// Refuse the switch if it would overwrite an untracked working-tree file with a
-/// path the destination branch newly introduces.
-fn guard_untracked_changes(
-    untracked_paths: &[String],
-    changes: &[grit_lib::diff::DiffEntry],
-) -> Result<()> {
-    if untracked_paths.is_empty() {
-        return Ok(());
-    }
-    let untracked: HashSet<&str> = untracked_paths.iter().map(String::as_str).collect();
-
-    for change in changes {
-        if change.status != DiffStatus::Added {
-            continue;
-        }
-        if let Some(path) = &change.new_path {
-            if untracked.contains(path.as_str()) {
-                bail!("untracked file '{path}' would be overwritten — move or remove it first");
-            }
-        }
-    }
-    Ok(())
 }
