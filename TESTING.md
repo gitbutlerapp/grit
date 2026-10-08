@@ -87,9 +87,37 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
+| **coverage** | `make coverage` (llvm-cov on `grit-lib`, floor ratchet) | `make coverage` |
 | **test** | `cargo test -p grit-lib -p grit-cli`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
 
-Each job uses **`ubuntu-latest`** (the **docs** job uses **`timeout-minutes: 2`**; the others use **15**), and the jobs run in parallel.
+Each job uses **`ubuntu-latest`** (the **docs** job uses **`timeout-minutes: 2`**; **coverage** uses **30**; the others use **15**), and the jobs run in parallel.
+
+## Coverage
+
+Line coverage for the object-database modules is measured with [`cargo llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) and gated by [`scripts/coverage.py`](scripts/coverage.py) against [`grit-lib/coverage-floors.toml`](grit-lib/coverage-floors.toml).
+
+**Run locally:**
+
+```bash
+make coverage
+```
+
+This builds `grit` into `target/llvm-cov-target/` (integration tests such as `precompose_system_git_roundtrip` need that binary via `GRIT_BIN`), runs `cargo llvm-cov -p grit-lib --lib --tests`, prints a per-module table (module, lines, missed, %), and fails if any tracked file, module group, or the **core** set (odb + pack* + midx + commit-graph) is below its floor. HTML and lcov reports land under `target/llvm-cov/html` and `target/llvm-cov/lcov.info`.
+
+**Ratchet:** Floors are minimum allowed line-coverage percentages. After adding tests, raise floors with:
+
+```bash
+python3 scripts/coverage.py --input target/llvm-cov/summary.json --update
+```
+
+Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal; the script never lowers an existing floor. Commit the updated `coverage-floors.toml` with the tests that improved coverage.
+
+**CI:** The **coverage** job runs `make coverage` and uploads the HTML/lcov artifact. Unit tests for the gate live in `scripts/tests/test_coverage.py` and run under `python3 -m unittest discover scripts/tests` with the **docs** job.
+
+### Upstream test mapping
+
+| upstream file | scenario | Rust test | status |
+| --- | --- | --- | --- |
 
 ### Documentation site and rustdoc jobs
 

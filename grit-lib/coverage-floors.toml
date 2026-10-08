@@ -1,0 +1,99 @@
+# grit-lib line-coverage floors (percent). Ratchet: scripts/coverage.py --update
+# Regenerate floors after intentional gains; never lower minimums by hand.
+
+[meta]
+updated = "2026-10-08"
+baseline = "c1509db38"
+
+[core]
+groups = ["odb", "pack", "midx", "commit-graph"]
+minimum = 69.1
+
+[group.odb]
+files = ["odb.rs"]
+minimum = 79.5
+
+[group.pack]
+files = [
+    "pack.rs",
+    "pack_index.rs",
+    "pack_rev.rs",
+    "pack_map.rs",
+    "pack_index_build.rs",
+    "pack_zlib.rs",
+]
+minimum = 77.0
+
+[group.midx]
+files = ["midx.rs"]
+minimum = 58.2
+
+[group.commit-graph]
+files = ["commit_graph_file.rs", "commit_graph_write.rs", "bloom.rs"]
+minimum = 43.0
+
+[group.supporting]
+files = [
+    "objects.rs",
+    "zlib_inflate.rs",
+    "unpack_objects.rs",
+    "index_pack.rs",
+    "delta_encode.rs",
+    "promisor.rs",
+    "fsck_standalone.rs",
+]
+minimum = 59.7
+
+[file."odb.rs"]
+minimum = 79.5
+
+[file."pack.rs"]
+minimum = 78.9
+
+[file."pack_index.rs"]
+minimum = 85.6
+
+[file."pack_rev.rs"]
+minimum = 38.4
+
+[file."pack_map.rs"]
+minimum = 72.9
+
+[file."pack_index_build.rs"]
+minimum = 74.5
+
+[file."pack_zlib.rs"]
+minimum = 73.4
+
+[file."midx.rs"]
+minimum = 58.2
+
+[file."commit_graph_file.rs"]
+minimum = 29.6
+
+[file."commit_graph_write.rs"]
+minimum = 65.5
+
+[file."bloom.rs"]
+minimum = 50.0
+
+[file."objects.rs"]
+minimum = 75.7
+
+[file."zlib_inflate.rs"]
+minimum = 75.6
+
+[file."unpack_objects.rs"]
+minimum = 64.7
+
+[file."index_pack.rs"]
+minimum = 90.7
+
+[file."delta_encode.rs"]
+minimum = 89.3
+
+[file."promisor.rs"]
+minimum = 6.0
+
+[file."fsck_standalone.rs"]
+minimum = 10.5
