@@ -55,10 +55,10 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::commit` | module | Commit-metadata helpers shared by the porcelain commands. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit/index.html) |
 | `grit_lib::commit_encoding` | module | Git commit encoding labels (encoding header, i18n.commitEncoding) mapped to codecs. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_encoding/index.html) |
 | `grit_lib::commit_graph_file` | module | Parsing Git commit-graph files and Bloom filter lookup (commit-graph.c / bloom.c compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/index.html) |
+| `grit_lib::commit_graph_file::BloomPrecheck` | enum | Result of consulting Bloom filters before running a tree diff (matches revision.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/enum.BloomPrecheck.html) |
 | `grit_lib::commit_graph_file::BloomWalkStats` | struct | Counters for GIT_TRACE2_PERF Bloom statistics (revision.c trace2_bloom_filter_statistics_atexit). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.BloomWalkStats.html) |
 | `grit_lib::commit_graph_file::CommitGraphChain` | struct | Loaded commit-graph chain (newest layer first, matching commit-graph-chain file order). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.CommitGraphChain.html) |
 | `grit_lib::commit_graph_file::CommitGraphLayer` | struct | One layer from .git/objects/info/commit-graph or commit-graphs/<hash>.graph. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.CommitGraphLayer.html) |
-| `grit_lib::commit_graph_file::ParsedGraphDump` | struct | Result of consulting Bloom filters before running a tree diff (matches revision.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.ParsedGraphDump.html) |
 | `grit_lib::commit_graph_write` | module | Serialize Git commit-graph v1 files with GDA2 + optional Bloom chunks (commit-graph.c compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_write/index.html) |
 | `grit_lib::commit_graph_write::BloomWriteStats` | struct | Counters emitted as GIT_TRACE2_EVENT for Bloom generation (commit-graph.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_write/struct.BloomWriteStats.html) |
 | `grit_lib::commit_graph_write::CommitGraphCommitInfo` | struct | Per-commit data needed to write CDAT / Bloom. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_write/struct.CommitGraphCommitInfo.html) |
@@ -236,7 +236,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::merging` | module | Merging: merge-base, tree/file merges, rerere, merge-message formatting. | [API](https://docs.rs/grit-lib/latest/grit_lib/merging/index.html) |
 | `grit_lib::midx` | module | Multi-pack-index (MIDX) file writing and minimal reading. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/index.html) |
 | `grit_lib::midx::CompactError` | enum | Failure modes of compact_multi_pack_index, each mapping to one of git’s user-facing diagnostics in cmd_multi_pack_index_compact. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/enum.CompactError.html) |
-| `grit_lib::midx::MidxBtmpPackRange` | struct | One pack’s slice of the MIDX pseudo-bitmap namespace (BTMP chunk). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxBtmpPackRange.html) |
 | `grit_lib::midx::MidxLoadError` | struct | A fatal MIDX parse failure (Git die() in load_multi_pack_index). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxLoadError.html) |
 | `grit_lib::midx::MidxObjectRef` | struct | A single MIDX-referenced object together with the pack it is attributed to. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxObjectRef.html) |
 | `grit_lib::midx::MidxReuseTables` | struct | OID rows from the active multi-pack-index, plus reverse-index order for pack-reuse bitmap bits. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxReuseTables.html) |
@@ -269,10 +268,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack::PackLookupOptions` | struct | Options controlling which local packs participate in a lookup pass. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackLookupOptions.html) |
 | `grit_lib::pack::PackedDeltaDependency` | enum | Dependency of a packed delta object at object_offset within pack_bytes. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedDeltaDependency.html) |
 | `grit_lib::pack::PackedType` | enum | A pack object type as encoded in the packed stream header. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedType.html) |
-| `grit_lib::pack::ShowIndexEntry` | struct | A single entry produced by show-index, with an optional CRC32. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.ShowIndexEntry.html) |
 | `grit_lib::pack::VerifyObjectRecord` | struct | A decoded object header record used by verify-pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.VerifyObjectRecord.html) |
-| `grit_lib::pack_geometry` | module | Pack geometry for git repack --geometric (factor-based progression). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_geometry/index.html) |
-| `grit_lib::pack_geometry::GeometricPack` | struct | One local pack considered for geometric repacking. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_geometry/struct.GeometricPack.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
 | `grit_lib::pack_rev` | module | On-disk pack reverse index (.rev) — RIDX format matching Git’s pack-write.c. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_rev/index.html) |
 | `grit_lib::pack_store` | module | Repository-scoped pack and MIDX read caches. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/index.html) |

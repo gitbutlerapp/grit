@@ -60,9 +60,8 @@ pub mod prelude {
 /// Object storage: ids/kinds, the object database, packs, multi-pack index, deltas.
 pub mod object_store {
     pub use crate::{
-        delta_encode, delta_islands, hash, index_pack, midx, objects, odb, pack, pack_geometry,
-        pack_name_hash, pack_rev, pack_store, promisor, promisor_remote, prune_packed,
-        unpack_objects,
+        delta_encode, delta_islands, hash, index_pack, midx, objects, odb, pack, pack_name_hash,
+        pack_rev, pack_store, promisor, promisor_remote, prune_packed, unpack_objects,
     };
 }
 
@@ -177,7 +176,6 @@ pub mod notes;
 pub mod objects;
 pub mod odb;
 pub mod pack;
-pub mod pack_geometry;
 mod pack_index;
 pub(crate) mod pack_index_build;
 mod pack_map;

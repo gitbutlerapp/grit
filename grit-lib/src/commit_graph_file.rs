@@ -38,7 +38,6 @@ const CHUNK_OID_LOOKUP: u32 = 0x4f49_444c; // OIDL
 const CHUNK_COMMIT_DATA: u32 = 0x4344_4154; // CDAT
 const CHUNK_GENERATION_DATA: u32 = 0x4744_4132; // GDA2
 const CHUNK_GENERATION_DATA_OVERFLOW: u32 = 0x4744_4f32; // GDO2
-const CHUNK_EXTRA_EDGES: u32 = 0x4544_4745; // EDGE
 
 /// CDAT parent word meaning "no parent in this slot" (Git `GRAPH_PARENT_NONE`).
 const GRAPH_PARENT_NONE: u32 = 0x7000_0000;
@@ -73,7 +72,6 @@ pub struct CommitGraphLayer {
     chunk_commit_data_off: usize,
     #[allow(dead_code)]
     chunk_generation_data: Option<usize>,
-    read_generation_data: bool,
     chunk_bloom_indexes: Option<usize>,
     chunk_bloom_data: Option<(usize, usize)>,
     bloom_settings: Option<BloomFilterSettings>,
@@ -298,7 +296,6 @@ impl CommitGraphLayer {
             ));
         }
 
-        let read_generation_data = generation_off.is_some();
         let mut bloom_settings = None;
         let mut chunk_bloom_data = None;
         if let (Some(_bidx), Some((bdat_off, bdat_len))) = (bloom_idx_off, bloom_data_range) {
@@ -377,7 +374,6 @@ impl CommitGraphLayer {
             oid_lookup_off,
             chunk_commit_data_off: commit_data_off,
             chunk_generation_data: generation_off,
-            read_generation_data,
             chunk_bloom_indexes,
             chunk_bloom_data,
             bloom_settings,
@@ -385,10 +381,6 @@ impl CommitGraphLayer {
             base_chunk_size,
             hash_len,
         })
-    }
-
-    fn parse(path: PathBuf, raw: Vec<u8>) -> Option<Self> {
-        Self::try_parse(path, raw).ok()
     }
 
     fn oid_at_lex(&self, lex_index: u32) -> Option<ObjectId> {
@@ -1192,95 +1184,4 @@ pub fn commit_tree_has_high_bit_paths(odb: &Odb, commit_oid: ObjectId) -> bool {
         Ok(tree) => tree_has_high_bit_paths(odb, tree),
         Err(_) => true,
     }
-}
-
-/// Parse all chunks for `test-tool read-graph` / debugging.
-pub fn parse_graph_file(path: &Path) -> Option<ParsedGraphDump> {
-    let raw = std::fs::read(path).ok()?;
-    if raw.len() < 28 {
-        return None;
-    }
-    let hash_len = commit_graph_hash_len(raw[5])?;
-    let body = &raw[..raw.len() - hash_len];
-    if body.len() < 8 || &body[0..4] != SIGNATURE {
-        return None;
-    }
-    let header_word = u32::from_be_bytes(body[0..4].try_into().ok()?);
-    let num_chunks = body[6] as usize;
-    let toc_start = 8;
-    let mut present: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    for i in 0..num_chunks {
-        let e = toc_start + i * 12;
-        let id = u32::from_be_bytes(body[e..e + 4].try_into().ok()?);
-        present.insert(id);
-    }
-    // `git/t/helper/test-read-graph.c` prints a fixed set of recognized chunks in
-    // a fixed order, omitting the BASE chunk and any unknown chunk.
-    let mut chunk_names: Vec<String> = Vec::new();
-    for (id, label) in [
-        (CHUNK_OID_FANOUT, "oid_fanout"),
-        (CHUNK_OID_LOOKUP, "oid_lookup"),
-        (CHUNK_COMMIT_DATA, "commit_metadata"),
-        (CHUNK_GENERATION_DATA, "generation_data"),
-        (CHUNK_GENERATION_DATA_OVERFLOW, "generation_data_overflow"),
-        (CHUNK_EXTRA_EDGES, "extra_edges"),
-        (CHUNK_BLOOM_INDEXES, "bloom_indexes"),
-        (CHUNK_BLOOM_DATA, "bloom_data"),
-    ] {
-        if present.contains(&id) {
-            chunk_names.push(label.to_string());
-        }
-    }
-    let layer = CommitGraphLayer::parse(path.to_path_buf(), raw.clone())?;
-    let bloom_opt = layer.bloom_settings.map(|s| {
-        format!(
-            " bloom({},{},{})",
-            s.hash_version, s.bits_per_entry, s.num_hashes
-        )
-    });
-    let mut options = String::new();
-    if let Some(b) = bloom_opt {
-        options.push_str(&b);
-    }
-    if layer.read_generation_data {
-        options.push_str(" read_generation_data");
-    }
-    Some(ParsedGraphDump {
-        header_word,
-        version: body[4],
-        hash_ver: body[5],
-        num_chunks: body[6],
-        reserved: body[7],
-        num_commits: layer.num_commits,
-        chunks: chunk_names.join(" "),
-        options,
-    })
-}
-
-pub struct ParsedGraphDump {
-    pub header_word: u32,
-    pub version: u8,
-    pub hash_ver: u8,
-    pub num_chunks: u8,
-    pub reserved: u8,
-    pub num_commits: u32,
-    pub chunks: String,
-    pub options: String,
-}
-
-/// Dump hex lines of Bloom filters (one per commit, empty line for empty filter).
-pub fn dump_bloom_filters(path: &Path) -> Option<Vec<String>> {
-    let raw = std::fs::read(path).ok()?;
-    let layer = CommitGraphLayer::parse(path.to_path_buf(), raw)?;
-    let mut out = Vec::new();
-    for i in 0..layer.num_commits {
-        let slice = layer.bloom_filter_slice(i).unwrap_or(&[]);
-        if slice.is_empty() {
-            out.push(String::new());
-        } else {
-            let hex: String = slice.iter().map(|b| format!("{b:02x}")).collect();
-            out.push(hex);
-        }
-    }
-    Some(out)
 }
