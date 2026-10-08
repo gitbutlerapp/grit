@@ -419,18 +419,6 @@ fn expand_tilde(path: &str) -> String {
     path.to_owned()
 }
 
-/// Sign `payload` with `signing_key` using the configured program.
-///
-/// Spawns `<program> --status-fd=2 -bsau <signing_key>`, writes `payload` to
-/// stdin, and returns the armored detached signature from stdout.  Fails if the
-/// child exits non-zero or does not emit a `[GNUPG:] SIG_CREATED` status line —
-/// in either case the program's stderr is surfaced in the error (the
-/// `LET_GPG_PROGRAM_FAIL`/`zOMG` path of subtest 28).
-///
-/// # Errors
-///
-/// Returns [`Error::Signing`] when the program cannot be spawned, exits
-/// non-zero, or fails to produce a signature.
 /// Whether a new commit object should be signed.
 ///
 /// Honors `commit.gpgsign` (and `commit.gpgSign`) when `sign_override` is `None`.
@@ -466,7 +454,8 @@ pub fn commit_gpg_sig_header(hash_algo: HashAlgo) -> &'static str {
 ///
 /// Uses [`sign_buffer`] on `unsigned_bytes` and [`add_header_signature`] with the
 /// header from [`commit_gpg_sig_header`]. The signing key comes from
-/// `signing_key_override`, else `user.signingkey`, else `committer_ident`.
+/// `signing_key_override`, else `user.signingkey`, else
+/// [`committer_signing_default`] applied to `committer_ident`.
 ///
 /// # Errors
 ///
@@ -480,12 +469,25 @@ pub fn sign_serialized_commit(
     signing_key_override: Option<&str>,
     hash_algo: HashAlgo,
 ) -> Result<Vec<u8>> {
-    let signing_key = cfg.resolve_signing_key(signing_key_override, committer_ident);
+    let committer_key = committer_signing_default(committer_ident);
+    let signing_key = cfg.resolve_signing_key(signing_key_override, &committer_key);
     let sig = sign_buffer(cfg, unsigned_bytes, &signing_key)?;
     let header = commit_gpg_sig_header(hash_algo);
     Ok(add_header_signature(unsigned_bytes, &sig, header))
 }
 
+/// Sign `payload` with `signing_key` using the configured program.
+///
+/// Spawns `<program> --status-fd=2 -bsau <signing_key>`, writes `payload` to
+/// stdin, and returns the armored detached signature from stdout.  Fails if the
+/// child exits non-zero or does not emit a `[GNUPG:] SIG_CREATED` status line —
+/// in either case the program's stderr is surfaced in the error (the
+/// `LET_GPG_PROGRAM_FAIL`/`zOMG` path of subtest 28).
+///
+/// # Errors
+///
+/// Returns [`Error::Signing`] when the program cannot be spawned, exits
+/// non-zero, or fails to produce a signature.
 pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result<Vec<u8>> {
     if cfg.format == GpgFormat::Ssh {
         return sign_buffer_ssh(cfg, payload, signing_key);
@@ -1745,12 +1747,30 @@ mod tests {
         assert!(should_sign_commit(&cfg, Some(true)).unwrap());
         assert!(!should_sign_commit(&cfg, Some(false)).unwrap());
 
-        cfg.add_command_override("commit.gpgsign", "true")
-            .unwrap();
+        cfg.add_command_override("commit.gpgsign", "true").unwrap();
         assert!(should_sign_commit(&cfg, None).unwrap());
         assert!(!should_sign_commit(&cfg, Some(false)).unwrap());
     }
 
+    #[test]
+    fn committer_signing_default_strips_timestamp() {
+        assert_eq!(
+            committer_signing_default("T <t@example.com> 1700000000 +0000"),
+            "T <t@example.com>"
+        );
+    }
+
+    #[test]
+    fn resolve_signing_key_uses_no_date_committer_default() {
+        let cfg = GpgConfig::from_config(&ConfigSet::default()).expect("gpg config");
+        let key = cfg.resolve_signing_key(
+            None,
+            &committer_signing_default("T <t@example.com> 1700000000 +0000"),
+        );
+        assert_eq!(key, "T <t@example.com>");
+    }
+
+    #[test]
     fn literal_ssh_key_detection() {
         assert_eq!(
             is_literal_ssh_key("key::ssh-ed25519 AAAA"),
