@@ -437,4 +437,74 @@ mod tests {
         let err = scratch.skip_zlib_stream(&zlib, &mut pos, 1).unwrap_err();
         assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
     }
+
+    #[test]
+    fn skip_zlib_stream_accepts_exact_size() {
+        let plain = b"pack-sized payload";
+        let zlib = deflate(plain);
+        let mut pos = 0usize;
+        let mut scratch = ZlibInflateScratch::default();
+        scratch
+            .skip_zlib_stream(&zlib, &mut pos, plain.len() as u64)
+            .expect("skip");
+        assert_eq!(pos, zlib.len());
+    }
+
+    #[test]
+    fn decompress_loose_payload_reads_from_file() {
+        use std::io::Write;
+        let plain = b"blob 5\0hello";
+        let zlib = deflate(plain);
+        let mut file = tempfile::NamedTempFile::new().expect("temp");
+        file.write_all(&zlib).expect("write");
+        let mut scratch = ZlibInflateScratch::default();
+        let out = scratch
+            .decompress_loose_payload(&[], file.reopen().expect("reopen"), false)
+            .expect("decompress file");
+        assert_eq!(out.as_slice(), plain);
+    }
+
+    #[test]
+    fn inflate_prefix_zero_on_empty_bytes_errors() {
+        let err = inflate_prefix(b"", 0).unwrap_err();
+        assert!(matches!(err, Error::Zlib(_)));
+    }
+
+    #[test]
+    fn reset_allows_reuse_after_failed_decode() {
+        let mut scratch = ZlibInflateScratch::default();
+        let mut pos = 0usize;
+        let _ = scratch.decompress_fixed(b"not-zlib", &mut pos, 1);
+        scratch.reset();
+        let plain = b"ok";
+        let zlib = deflate(plain);
+        pos = 0;
+        let out = scratch
+            .decompress_fixed(&zlib, &mut pos, plain.len() as u64)
+            .expect("after reset");
+        assert_eq!(out.as_slice(), plain);
+    }
+
+    #[test]
+    fn inflate_prefix_zero_consumes_header_without_output() {
+        let zlib = deflate(b"blob 10\0");
+        let (out, consumed) = inflate_prefix(&zlib, 0).expect("prefix zero");
+        assert!(out.is_empty());
+        assert!(consumed > 0);
+    }
+
+    #[test]
+    fn decompress_loose_payload_preset_dictionary_from_file() {
+        let mut file = tempfile::NamedTempFile::new().expect("temp");
+        file.write_all(&[0x78, 0x20, 0, 0, 0, 0, 0x03, 0x00])
+            .expect("write");
+        let mut scratch = ZlibInflateScratch::default();
+        let err = scratch
+            .decompress_loose_payload(&[0x78, 0x20], file.reopen().expect("reopen"), true)
+            .unwrap_err();
+        match err {
+            Error::Zlib(msg) if msg == "needs dictionary" => {}
+            other => panic!("expected needs dictionary, got {other:?}"),
+        }
+    }
 }

@@ -118,6 +118,11 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
+| t1006 | core object reads (`cat-file` -t/-s/-p, fsck); skip `--batch` UX | `grit-lib/tests/odb_loose_objects.rs` (`t1006_grit_written_loose_objects_git_cat_file_and_fsck`, `t1006_zlib_preset_dictionary_returns_needs_dictionary`) | covered |
+| t1007 | `hash-object` / read loose objects | `grit-lib/tests/odb_loose_objects.rs` (`t1007_git_hash_object_w_grit_read_and_read_info`) | covered |
+| t1050 | `hash-object` hashing and large blobs | `grit-lib/tests/odb_loose_objects.rs` (`t1050_odb_hash_matches_git_hash_object`, `large_blob_round_trip_grit_then_git_and_git_then_grit`) | covered |
+| t1060 | loose object corruption and missing objects | `grit-lib/tests/odb_loose_objects.rs` (`t1060_*`) | covered |
+| t1006/t1007 | commit/tree/tag parse and serialize vs git bytes | `grit-lib/tests/objects_parse_roundtrip.rs` | covered |
 | t5300-pack-objects.sh | v2 pack index + reverse index byte-identical to `git index-pack --rev-index`; ingest passes `verify-pack` / `fsck --strict` | `grit-lib/tests/pack_ingest_roundtrip.rs` (`idx_and_rev_match_git_*`, `ingest_every_option_passes_git_verify_and_fsck_sha1`) | ported (core write/read) |
 | t5303-pack-corruption-resilience.sh | apply_delta accept/reject vs git index-pack; pack corruption recovery | `grit-lib/tests/pack_deltas.rs` (`t5303_apply_delta_*`), `grit-lib/tests/pack_corruption.rs` | covered |
 | t5309-pack-delta-cycles.sh | ref-delta cycles and cross-pack cycles (timeout guard) | `grit-lib/tests/pack_deltas.rs` (`ref_delta_*cycle*`) | covered |

@@ -973,4 +973,37 @@ mod commit_parse_tests {
         assert_eq!(c.tree.to_hex(), "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
         assert_eq!(c.message, "msg\n");
     }
+
+    #[test]
+    fn tree_entry_mode_str_and_tag_object_line_oid() {
+        let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
+        let entry = TreeEntry {
+            mode: 0o040000,
+            name: b"dir".to_vec(),
+            oid,
+        };
+        assert_eq!(entry.mode_str(), "40000");
+        let tag_body = format!("object {}\ntype commit\ntag t\n\n", oid.to_hex());
+        assert_eq!(tag_object_line_oid(tag_body.as_bytes()), Some(oid));
+    }
+
+    #[test]
+    fn parse_tree_with_sha256_oid_width() {
+        let oid_bytes = [0x6eu8; 32];
+        let oid = ObjectId::from_bytes(&oid_bytes).expect("oid");
+        let mut raw = b"100644 file\0".to_vec();
+        raw.extend_from_slice(oid.as_bytes());
+        let entries = parse_tree_with_oid_len(&raw, HashAlgo::Sha256.len()).expect("tree");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].oid, oid);
+    }
+
+    #[test]
+    fn object_id_loose_path_helpers() {
+        let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
+        assert_eq!(oid.loose_prefix(), "4b");
+        assert_eq!(oid.loose_suffix().len(), 38);
+        assert!(ObjectId::is_hex_len(40));
+        assert!(ObjectId::is_loose_suffix_len(38));
+    }
 }

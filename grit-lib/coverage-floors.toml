@@ -7,7 +7,7 @@ updated = "2026-10-08"
 
 [core]
 groups = ["odb", "pack", "midx", "commit-graph"]
-minimum = 70.0
+minimum = 72.3
 
 [group.commit-graph]
 files = [
@@ -15,19 +15,19 @@ files = [
     "commit_graph_write.rs",
     "bloom.rs",
 ]
-minimum = 43.0
+minimum = 44.4
 
 [group.midx]
 files = [
     "midx.rs",
 ]
-minimum = 58.2
+minimum = 63.2
 
 [group.odb]
 files = [
     "odb.rs",
 ]
-minimum = 79.7
+minimum = 85.0
 
 [group.pack]
 files = [
@@ -38,7 +38,7 @@ files = [
     "pack_index_build.rs",
     "pack_zlib.rs",
 ]
-minimum = 80.2
+minimum = 80.4
 
 [group.supporting]
 files = [
@@ -50,13 +50,13 @@ files = [
     "promisor.rs",
     "fsck_standalone.rs",
 ]
-minimum = 61.4
+minimum = 66.6
 
 [file."bloom.rs"]
 minimum = 50.0
 
 [file."commit_graph_file.rs"]
-minimum = 29.6
+minimum = 30.8
 
 [file."commit_graph_write.rs"]
 minimum = 65.5
@@ -65,22 +65,22 @@ minimum = 65.5
 minimum = 93.3
 
 [file."fsck_standalone.rs"]
-minimum = 10.5
+minimum = 16.3
 
 [file."index_pack.rs"]
 minimum = 90.7
 
 [file."midx.rs"]
-minimum = 58.2
+minimum = 63.2
 
 [file."objects.rs"]
-minimum = 75.7
+minimum = 85.6
 
 [file."odb.rs"]
-minimum = 79.7
+minimum = 85.0
 
 [file."pack.rs"]
-minimum = 80.1
+minimum = 82.4
 
 [file."pack_index.rs"]
 minimum = 85.6
@@ -104,4 +104,4 @@ minimum = 6.0
 minimum = 82.2
 
 [file."zlib_inflate.rs"]
-minimum = 75.6
+minimum = 85.0
