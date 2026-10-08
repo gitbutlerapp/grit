@@ -25,8 +25,10 @@ use std::collections::BTreeSet;
 use std::fs::{self, DirEntry, ReadDir};
 use std::path::Path;
 
+use crate::config::ConfigSet;
 use crate::diff::DiffEntry;
 use crate::error::Result;
+use crate::hash::{index_parallelism_from_config, try_par_hash_with, ParallelHashError};
 use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
@@ -153,6 +155,27 @@ pub fn collect_untracked_and_ignored(
     show_all: bool,
     pathspecs: &[String],
 ) -> Result<(Vec<String>, Vec<String>)> {
+    collect_untracked_and_ignored_inner(
+        repo,
+        index,
+        work_tree,
+        ignored_mode,
+        show_all,
+        pathspecs,
+        true,
+    )
+}
+
+/// Like [`collect_untracked_and_ignored`], but optionally skips sorting results.
+pub(crate) fn collect_untracked_and_ignored_inner(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    pathspecs: &[String],
+    sort_paths: bool,
+) -> Result<(Vec<String>, Vec<String>)> {
     // Keep parity with historical status behavior in tests that rely on broad untracked scans
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
     // pathspec-based pruning entirely.
@@ -176,11 +199,27 @@ pub fn collect_untracked_and_ignored(
         .map(|e| String::from_utf8_lossy(&e.path).into_owned())
         .collect();
 
-    let mut matcher = IgnoreMatcher::from_repository(repo)?;
+    let matcher = IgnoreMatcher::from_repository(repo)?;
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
     let precompose_unicode = effective_core_precomposeunicode(Some(&repo.git_dir));
 
+    if !sort_paths && effective_pathspecs.is_empty() && tracked.is_empty() && gitlinks.is_empty() {
+        untracked = collect_untracked_parallel_top_level(
+            repo,
+            index,
+            work_tree,
+            ignored_mode,
+            show_all,
+            precompose_unicode,
+            &tracked_paths,
+            &matcher,
+            effective_pathspecs,
+        )?;
+        return Ok((untracked, ignored));
+    }
+
+    let mut matcher = matcher;
     visit_untracked_node(
         repo,
         index,
@@ -201,8 +240,10 @@ pub fn collect_untracked_and_ignored(
         &mut ignored,
     )?;
 
-    untracked.sort();
-    ignored.sort();
+    if sort_paths {
+        untracked.sort();
+        ignored.sort();
+    }
     Ok((untracked, ignored))
 }
 
@@ -231,6 +272,110 @@ pub(crate) mod untracked_walk_probe {
 enum UntrackedWalkStep {
     Continue,
     Stop,
+}
+
+/// Parallel untracked scan for an empty index (bulk `git add .`), preserving path order loosely.
+#[allow(clippy::too_many_arguments)]
+fn collect_untracked_parallel_top_level(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    ignored_mode: IgnoredMode,
+    show_all: bool,
+    precompose_unicode: bool,
+    tracked_paths: &crate::path_icase::Stage0TrackedPaths,
+    matcher_template: &IgnoreMatcher,
+    pathspecs: &[String],
+) -> Result<Vec<String>> {
+    let empty_tracked = BTreeSet::<String>::new();
+    let empty_gitlinks = BTreeSet::<String>::new();
+    let entries: Vec<DirEntry> = fs::read_dir(work_tree)
+        .map_err(crate::error::Error::Io)?
+        .filter_map(|e| e.ok())
+        .collect();
+
+    let mut root_files = Vec::new();
+    let mut root_dirs = Vec::new();
+    for entry in entries {
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        if entry.path().is_dir() {
+            root_dirs.push(entry);
+        } else {
+            root_files.push(entry);
+        }
+    }
+    root_files.sort_by_key(|e| e.file_name());
+    root_dirs.sort_by_key(|e| e.file_name());
+
+    let mut untracked = Vec::new();
+    let mut ignored = Vec::new();
+    let mut matcher = matcher_template.clone();
+    for entry in root_files {
+        let _ = visit_untracked_dir_entry(
+            repo,
+            index,
+            work_tree,
+            &empty_tracked,
+            &empty_gitlinks,
+            &mut matcher,
+            ignored_mode,
+            show_all,
+            false,
+            None::<&Cell<bool>>,
+            precompose_unicode,
+            tracked_paths,
+            "",
+            &entry,
+            pathspecs,
+            &mut untracked,
+            &mut ignored,
+        )?;
+    }
+
+    if root_dirs.is_empty() {
+        return Ok(untracked);
+    }
+
+    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let parallelism = index_parallelism_from_config(&config);
+    let threads = parallelism.threads();
+    let dir_count = root_dirs.len();
+    let est_bytes = dir_count.saturating_mul(4096);
+    let per_dir = try_par_hash_with(&root_dirs, threads, est_bytes, |entry| {
+        let mut matcher = matcher_template.clone();
+        let mut local_untracked = Vec::new();
+        let mut local_ignored = Vec::new();
+        let _ = visit_untracked_dir_entry(
+            repo,
+            index,
+            work_tree,
+            &empty_tracked,
+            &empty_gitlinks,
+            &mut matcher,
+            ignored_mode,
+            show_all,
+            false,
+            None::<&Cell<bool>>,
+            precompose_unicode,
+            tracked_paths,
+            "",
+            entry,
+            pathspecs,
+            &mut local_untracked,
+            &mut local_ignored,
+        )?;
+        Ok(local_untracked)
+    })
+    .map_err(|e: ParallelHashError<crate::error::Error>| match e {
+        ParallelHashError::Task(err) => err,
+    })?;
+
+    for mut local in per_dir {
+        untracked.append(&mut local);
+    }
+    Ok(untracked)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -974,12 +1119,15 @@ pub fn status(
         Err(e) => return Err(e),
     };
     let index_mtime = index.source_mtime;
+    let config = crate::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let parallelism = crate::hash::index_parallelism_from_config(&config);
     if crate::diff::refresh_index_stat_content_verified(
         &repo.odb,
         &repo.git_dir,
         &mut index,
         work_tree,
         index_mtime,
+        parallelism,
     ) && repo.try_write_index(&mut index)?
     {
         index.source_mtime = crate::index::index_file_mtime(&index_path);

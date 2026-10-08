@@ -231,6 +231,7 @@ pub mod userdiff;
 pub mod whitespace_rule;
 pub mod wildmatch;
 pub mod worktree;
+mod worktree_batch;
 pub mod worktree_cwd;
 pub mod worktree_ref;
 mod worktree_scan;

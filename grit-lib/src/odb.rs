@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,6 +48,15 @@ struct FileAlternatesCache {
 pub struct WriteOptions {
     /// When set, do not touch mtimes on existing objects (Git `WRITE_OBJECT_SILENT`).
     pub silent: bool,
+    /// When set, skip the full [`Self::exists`] scan (packs/alternates) and only
+    /// test for a loose file in this repository's object directory before writing.
+    ///
+    /// Bulk staging of new worktree blobs uses this so each insert does not walk
+    /// every pack on a miss.
+    pub assume_loose_only_existence: bool,
+    /// When set, skip existence probes and write when the loose path is absent
+    /// (bulk add of all-new blobs).
+    pub trust_new_loose: bool,
 }
 
 /// Decompress a zlib-wrapped loose object payload from an open file.
@@ -526,7 +535,7 @@ impl Odb {
     /// # Errors
     ///
     /// Returns errors from loading the config cascade or from invalid compression settings.
-    fn loose_compression(&self) -> Result<Compression> {
+    pub(crate) fn loose_compression(&self) -> Result<Compression> {
         if let Some(cached) = self.loose_zlib_cache.get() {
             return Ok(*cached);
         }
@@ -908,6 +917,132 @@ impl Odb {
         self.write_with_options(kind, data, WriteOptions::default())
     }
 
+    /// Create all 256 loose-object prefix directories (`objects/xx/`).
+    ///
+    /// Bulk `git add`-style staging calls this once before parallel loose writes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] if a directory cannot be created.
+    pub fn ensure_all_loose_prefix_dirs(&self) -> Result<()> {
+        for i in 0u8..=255 {
+            let prefix = self.objects_dir.join(format!("{i:02x}"));
+            fs::create_dir_all(prefix).map_err(Error::Io)?;
+        }
+        Ok(())
+    }
+
+    /// Zlib-compress canonical loose store bytes using the repository's loose level.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Zlib`] when compression fails.
+    pub fn zlib_compress_loose_store(&self, store_bytes: &[u8]) -> Result<Vec<u8>> {
+        let compression = self.loose_compression()?;
+        zlib_compress_store_bytes(store_bytes, compression)
+    }
+
+    /// Publish precompressed bytes to a loose object path via a same-directory temp file.
+    ///
+    /// Readers never observe a partial object at the final name; failed writes remove the temp.
+    fn publish_zlib_loose_object(
+        path: &Path,
+        prefix_dir: &Path,
+        oid: &ObjectId,
+        zlib_store: &[u8],
+        prefix_dirs_precreated: bool,
+    ) -> Result<()> {
+        if !prefix_dirs_precreated {
+            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+        }
+        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
+        if let Err(e) = fs::write(&tmp_path, zlib_store) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(Error::Io(e));
+        }
+        match fs::rename(&tmp_path, path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&tmp_path);
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(Error::Io(e));
+            }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o444));
+        }
+        Ok(())
+    }
+
+    /// Write a loose object from precomputed id and zlib-compressed store bytes.
+    ///
+    /// The caller must supply bytes that [`read_zlib_loose_payload`] would expand to
+    /// valid canonical store form (`"<kind> <len>\\0<payload>"`). Hashing and
+    /// compression are skipped; use after parallel batch preparation.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::write`].
+    pub fn write_loose_zlib_prehashed(
+        &self,
+        oid: &ObjectId,
+        zlib_store: &[u8],
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        let path = self.object_path(oid);
+        if path.is_file() {
+            if !options.silent {
+                let _ = self.touch_object_mtime(&path);
+            }
+            return Ok(*oid);
+        }
+
+        let already_exists = if options.trust_new_loose {
+            false
+        } else if options.assume_loose_only_existence {
+            self.exists_local(oid)
+        } else {
+            self.exists(oid)
+        };
+
+        if self.overlay_active() && !already_exists {
+            if let Ok(raw) = decompress_zlib_loose_bytes(zlib_store) {
+                if let Ok(obj) = parse_object_bytes(&raw) {
+                    if self.overlay_store(*oid, obj.kind, &obj.data) {
+                        return Ok(*oid);
+                    }
+                }
+            }
+        }
+
+        if already_exists {
+            if !options.silent {
+                let _ = self.freshen_object(oid);
+            }
+            return Ok(*oid);
+        }
+
+        let prefix_dir = path
+            .parent()
+            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        if !options.trust_new_loose {
+            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+        }
+
+        Self::publish_zlib_loose_object(
+            &path,
+            prefix_dir,
+            oid,
+            zlib_store,
+            options.trust_new_loose,
+        )?;
+        Ok(*oid)
+    }
+
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
     pub fn write_with_options(
         &self,
@@ -928,7 +1063,11 @@ impl Odb {
             return Ok(oid);
         }
 
-        let already_exists = self.exists(&oid);
+        let already_exists = if options.assume_loose_only_existence {
+            self.exists_local(&oid)
+        } else {
+            self.exists(&oid)
+        };
 
         // When the in-memory overlay is active, keep the object in memory only (unless it is
         // already present on disk, in which case nothing new needs to be written anyway).
@@ -1208,6 +1347,40 @@ fn hash_bytes_with(algo: HashAlgo, data: &[u8]) -> ObjectId {
     algo.digest(data)
 }
 
+/// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).
+pub(crate) fn blob_store_bytes(data: &[u8]) -> Vec<u8> {
+    build_store_bytes(ObjectKind::Blob, data)
+}
+
+pub(crate) fn zlib_compress_loose_store_from_bytes(
+    store_bytes: &[u8],
+    compression: flate2::Compression,
+) -> Result<Vec<u8>> {
+    zlib_compress_store_bytes(store_bytes, compression)
+}
+
+fn zlib_compress_store_bytes(
+    store_bytes: &[u8],
+    compression: flate2::Compression,
+) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut encoder = ZlibEncoder::new(&mut out, compression);
+    encoder
+        .write_all(store_bytes)
+        .map_err(|e| Error::Zlib(e.to_string()))?;
+    encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
+    Ok(out)
+}
+
+fn decompress_zlib_loose_bytes(zlib: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = ZlibDecoder::new(zlib);
+    let mut raw = Vec::new();
+    decoder
+        .read_to_end(&mut raw)
+        .map_err(|e| Error::Zlib(e.to_string()))?;
+    Ok(raw)
+}
+
 /// Build the canonical store byte sequence: `"<kind> <len>\0<data>"`.
 fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
     let header = format!("{} {}\0", kind, data.len());
@@ -1483,6 +1656,38 @@ mod tests {
             "git {:?}: {}",
             args,
             String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn write_loose_zlib_prehashed_matches_write() {
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        let odb = Odb::new(&objects);
+        let data = b"parallel prehash path";
+        let oid_normal = odb.write(ObjectKind::Blob, data).unwrap();
+
+        let dir2 = TempDir::new().unwrap();
+        let objects2 = dir2.path().join("objects");
+        let odb2 = Odb::new(&objects2);
+        let store = super::blob_store_bytes(data);
+        let oid = hash::hash_object(odb2.hash_algo(), ObjectKind::Blob, data);
+        assert_eq!(oid, oid_normal);
+        let zlib = odb2.zlib_compress_loose_store(&store).unwrap();
+        let oid2 = odb2
+            .write_loose_zlib_prehashed(
+                &oid,
+                &zlib,
+                WriteOptions {
+                    assume_loose_only_existence: true,
+                    ..WriteOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(oid2, oid_normal);
+        assert_eq!(
+            fs::read(odb2.object_path(&oid2)).unwrap(),
+            fs::read(odb.object_path(&oid_normal)).unwrap()
         );
     }
 
@@ -2050,14 +2255,28 @@ mod tests {
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         let again = odb
-            .write_with_options(ObjectKind::Blob, b"stable", WriteOptions { silent: true })
+            .write_with_options(
+                ObjectKind::Blob,
+                b"stable",
+                WriteOptions {
+                    silent: true,
+                    ..WriteOptions::default()
+                },
+            )
             .unwrap();
         assert_eq!(oid, again);
         let after = std::fs::metadata(&path).unwrap().modified().unwrap();
         assert_eq!(before, after);
 
         let touched = odb
-            .write_with_options(ObjectKind::Blob, b"stable", WriteOptions { silent: false })
+            .write_with_options(
+                ObjectKind::Blob,
+                b"stable",
+                WriteOptions {
+                    silent: false,
+                    ..WriteOptions::default()
+                },
+            )
             .unwrap();
         assert_eq!(oid, touched);
         let freshened = std::fs::metadata(&path).unwrap().modified().unwrap();

@@ -19,8 +19,9 @@ use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 mod parallel;
 
 pub use parallel::{
-    hash_objects_parallel, par_hash_with, parallel_hash_worthwhile, try_par_hash_with,
-    ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS, PAR_HASH_MIN_TOTAL_BYTES,
+    hash_objects_parallel, index_parallelism_from_config, par_hash_with, parallel_hash_worthwhile,
+    try_par_hash_with, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS,
+    PAR_HASH_MIN_TOTAL_BYTES,
 };
 
 /// Which implementation the `sha1` / `sha2` dependency selects for `algo` on this CPU.

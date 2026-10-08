@@ -42,7 +42,7 @@ struct IgnoreRule {
 }
 
 /// Engine used to evaluate ignore patterns against repository-relative paths.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct IgnoreMatcher {
     /// Patterns from `git ls-files -x` / `--exclude` (Git `EXC_CMDL`), evaluated first.
     cli_rules: Vec<IgnoreRule>,

@@ -3353,9 +3353,88 @@ pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
 /// `entry_is_racy` / Git `is_racy_timestamp`); pass `None` when unknown — racy detection is
 /// then skipped, which is conservative for tree-built indexes whose zeroed stat never matches.
 ///
+/// `parallelism` is the resolved worker count (from `core.preloadindex` / `index.threads`);
+/// callers pass [`crate::hash::index_parallelism_from_config`] output.
+///
 /// Returns `true` when at least one entry was refreshed or invalidated, so callers can write
 /// the index opportunistically (Git only persists a refresh that changed something).
 pub fn refresh_index_stat_content_verified(
+    odb: &Odb,
+    git_dir: &Path,
+    index: &mut Index,
+    work_tree: &Path,
+    index_mtime: Option<(u32, u32)>,
+    parallelism: crate::hash::Parallelism,
+) -> bool {
+    use crate::config::ConfigSet;
+    use crate::crlf;
+    use crate::worktree_batch::{
+        collect_refresh_hash_work, collect_refresh_hash_work_parallel,
+        parallel_refresh_index_stat_hashes, RefreshHashOutcome,
+    };
+
+    let index_mtime = index_mtime_for_diff(index, index_mtime);
+    let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+    let conv = crlf::ConversionConfig::from_config(&config);
+    let attrs = crlf::load_gitattributes(work_tree);
+
+    let work = match collect_refresh_hash_work_parallel(
+        &index.entries,
+        work_tree,
+        index_mtime,
+        parallelism,
+    ) {
+        Ok(work) => work,
+        Err(_) => collect_refresh_hash_work(&index.entries, work_tree, index_mtime),
+    };
+    let outcomes = match parallel_refresh_index_stat_hashes(
+        odb,
+        &index.entries,
+        &work,
+        &conv,
+        &attrs,
+        &config,
+        parallelism,
+    ) {
+        Ok(outcomes) => outcomes,
+        Err(_) => {
+            return serial_refresh_index_stat_content_verified(
+                odb,
+                git_dir,
+                index,
+                work_tree,
+                index_mtime,
+            );
+        }
+    };
+
+    let mut changed = false;
+    for (entry_index, outcome) in outcomes {
+        let ie = &mut index.entries[entry_index];
+        match outcome {
+            RefreshHashOutcome::InvalidateStat => {
+                invalidate_index_stat_cache(ie);
+                changed = true;
+            }
+            RefreshHashOutcome::AdoptStat(meta) => {
+                let refreshed = crate::index::entry_from_metadata(&meta, &ie.path, ie.oid, ie.mode);
+                ie.ctime_sec = refreshed.ctime_sec;
+                ie.ctime_nsec = refreshed.ctime_nsec;
+                ie.mtime_sec = refreshed.mtime_sec;
+                ie.mtime_nsec = refreshed.mtime_nsec;
+                ie.dev = refreshed.dev;
+                ie.ino = refreshed.ino;
+                ie.uid = refreshed.uid;
+                ie.gid = refreshed.gid;
+                ie.size = refreshed.size;
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+fn serial_refresh_index_stat_content_verified(
     odb: &Odb,
     git_dir: &Path,
     index: &mut Index,
@@ -3366,7 +3445,6 @@ pub fn refresh_index_stat_content_verified(
     use crate::crlf;
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 
-    let index_mtime = index_mtime_for_diff(index, index_mtime);
     let config = ConfigSet::load(Some(git_dir), true).unwrap_or_default();
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
@@ -3388,9 +3466,6 @@ pub fn refresh_index_stat_content_verified(
         };
         if stat_matches(ie, &meta) {
             if entry_is_racy(ie, index_mtime) {
-                let Ok(path) = std::str::from_utf8(&ie.path) else {
-                    continue;
-                };
                 let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
                 let content_matches =
                     hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
@@ -3403,9 +3478,6 @@ pub fn refresh_index_stat_content_verified(
             }
             continue;
         }
-        let Ok(path) = std::str::from_utf8(&ie.path) else {
-            continue;
-        };
         let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
         let content_matches =
             hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
@@ -3517,7 +3589,7 @@ pub(crate) fn symlink_target_bytes(target: &Path) -> Vec<u8> {
     }
 }
 
-fn worktree_blob_bytes(
+pub(crate) fn worktree_blob_bytes(
     odb: &Odb,
     path: &Path,
     meta: &fs::Metadata,

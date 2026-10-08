@@ -326,6 +326,7 @@ fn rebuild_directory_node(
 
     let write_opts = WriteOptions {
         silent: flags.silent,
+        ..WriteOptions::default()
     };
 
     let mut members: Vec<TreeEntry> = Vec::new();
