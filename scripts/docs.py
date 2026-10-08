@@ -36,9 +36,23 @@ DOC_ROOT = ROOT / "target" / "doc"
 CONTENT_DIR = ROOT / "content" / "docs"
 MANIFEST_PATH = CONTENT_DIR / "site.toml"
 OUT_DIR = ROOT / "docs" / "docs"
+LLMS_DIR = ROOT / "docs"
+LLMS_TXT_PATH = LLMS_DIR / "llms.txt"
+LLMS_FULL_TXT_PATH = LLMS_DIR / "llms-full.txt"
 SITE_TITLE = "Grit docs"
 DESCRIPTION = "How to use grit, a simple Git client built on grit-lib: a short tutorial and a man page for every command."
+LLMS_TAGLINE = (
+    "Grit is a fast Git implementation in Rust: grit-lib is a linkable library for Rust "
+    "programs, and grit is a modern Git client built on that library. On-disk formats and "
+    "the wire protocol stay compatible with Git."
+)
+LLMS_USAGE = (
+    "Each docs page has a Markdown twin at the same URL with `index.md` instead of `index.html`. "
+    "Use `grit --json` (and `--markdown` on many commands) for script- and agent-friendly CLI output."
+)
 LIBRARY_GUIDE_SLUG = "library"
+DOCS_RS_GRIT_LIB = "https://docs.rs/grit-lib"
+BLOG_INDEX_URL = f"{blog.SITE_URL}/blog/"
 TOC_MIN_HEADINGS = 2
 INCLUDE_RE = re.compile(r"<!--\s*include:\s*(\S+)\s*-->")
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
@@ -448,6 +462,81 @@ def sidebar(site: Site, current: str) -> str:
     return "".join(parts)
 
 
+def llms_link_line(title: str, slug: str, summary: str) -> str:
+    url = markdown_canonical_url(slug)
+    detail = summary.strip()
+    if detail:
+        return f"- [{title}]({url}): {detail}"
+    return f"- [{title}]({url})"
+
+
+def render_llms_txt(site: Site) -> str:
+    """Build ``docs/llms.txt`` following https://llmstxt.org/."""
+    pages_by_slug = {page.slug: page for page in site.pages}
+    lines = ["# Grit", "", f"> {LLMS_TAGLINE}", "", LLMS_USAGE, ""]
+
+    for section in site.sections:
+        lines.append(f"## {section.title}")
+        lines.append("")
+        for spec in section.pages:
+            page = pages_by_slug[spec.slug]
+            lines.append(llms_link_line(page.title, page.slug, page.summary))
+        if section.command_groups:
+            for group in section.command_groups:
+                group_cmds = [p for p in site.command_pages if p.group == group]
+                if not group_cmds:
+                    continue
+                lines.append(f"### {group}")
+                lines.append("")
+                for page in group_cmds:
+                    lines.append(llms_link_line(page.title, page.slug, page.summary))
+        if section.directory:
+            lib_slugs = sorted(
+                slug
+                for slug in pages_by_slug
+                if slug == section.directory or slug.startswith(f"{section.directory}/")
+            )
+            for slug in lib_slugs:
+                page = pages_by_slug[slug]
+                label = "Overview" if slug == section.directory else page.title
+                lines.append(llms_link_line(label, slug, page.summary))
+        lines.append("")
+
+    lines.extend(
+        [
+            "## Optional",
+            "",
+            f"- [grit-lib on docs.rs]({DOCS_RS_GRIT_LIB}): Rust API reference generated from crate rustdoc.",
+            f"- [Blog]({BLOG_INDEX_URL}): release notes and project updates.",
+            "",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_llms_full_txt(
+    site: Site,
+    *,
+    root: Path,
+    manifest_path: Path,
+    listed: dict[Path, PageSpec],
+) -> str:
+    """Concatenate every Markdown twin in pager order with the page URL as a heading."""
+    chunks: list[str] = []
+    for page in site.pager_order:
+        url = markdown_canonical_url(page.slug)
+        spec = next(s for s in listed.values() if s.slug == page.slug)
+        twin = render_markdown_twin(
+            page,
+            site,
+            source=spec.source_at(root),
+            manifest_path=manifest_path,
+            is_index=page.slug == "index",
+        )
+        chunks.append(f"# {url}\n\n{twin.rstrip()}\n")
+    return "\n".join(chunks)
+
+
 def command_index_markdown(site: Site) -> str:
     command_groups: tuple[str, ...] = ()
     for section in site.sections:
@@ -688,7 +777,12 @@ CSS = r'''
 '''
 
 
-def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
+def generate(
+    out_dir: Path,
+    *,
+    content_dir: Path | None = None,
+    llms_dir: Path | None = None,
+) -> Site:
     rustdoc_links.ensure_local_rustdoc(DOC_ROOT, repo_root=ROOT)
     root = content_dir or CONTENT_DIR
     manifest_path = root / "site.toml"
@@ -716,20 +810,51 @@ def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
             encoding="utf-8",
         )
 
+    llms_root = llms_dir if llms_dir is not None else LLMS_DIR
+    llms_root.mkdir(parents=True, exist_ok=True)
+    (llms_root / "llms.txt").write_text(render_llms_txt(site), encoding="utf-8")
+    (llms_root / "llms-full.txt").write_text(
+        render_llms_full_txt(site, root=root, manifest_path=manifest_path, listed=listed),
+        encoding="utf-8",
+    )
+    return site
+
+
+def compare_llms_files(generated_dir: Path, committed_dir: Path) -> list[str]:
+    issues: list[str] = []
+    for name in ("llms.txt", "llms-full.txt"):
+        gen = generated_dir / name
+        com = committed_dir / name
+        if not gen.is_file():
+            issues.append(f"llms: missing generated {name}")
+            continue
+        if not com.is_file():
+            issues.append(f"llms: missing committed {name} (run: make docs)")
+            continue
+        if not site_util.file_equals(gen, com):
+            issues.append(f"llms: content differs for {name}")
+    return issues
+
 
 def check_committed() -> int:
     rustdoc_links.ensure_local_rustdoc(DOC_ROOT, repo_root=ROOT)
     rustdoc_links.validate_rustdoc_links(CONTENT_DIR, DOC_ROOT)
     with tempfile.TemporaryDirectory(prefix="grit-docs-check-") as tmp:
-        generated = Path(tmp) / "docs"
-        generate(generated)
+        tmp_path = Path(tmp)
+        generated = tmp_path / "docs"
+        llms_generated = tmp_path / "llms"
+        generate(generated, llms_dir=llms_generated)
         issues = site_util.compare_directories(generated, OUT_DIR, label="docs")
+        issues.extend(compare_llms_files(llms_generated, LLMS_DIR))
         if issues:
             for line in issues:
                 print(line, file=sys.stderr)
             print("docs output is stale; run: make docs", file=sys.stderr)
             return 1
-    print(f"docs output is up to date ({OUT_DIR.relative_to(ROOT)})")
+    print(
+        f"docs output is up to date ({OUT_DIR.relative_to(ROOT)}, "
+        f"{LLMS_TXT_PATH.relative_to(ROOT)})"
+    )
     return 0
 
 
@@ -743,8 +868,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.check:
         return check_committed()
-    generate(OUT_DIR)
-    site = load_site()
+    site = generate(OUT_DIR)
     print(
         f"generated {len(site.pager_order)} doc page(s) "
         f"({len(site.command_pages)} command(s)) in {OUT_DIR.relative_to(ROOT)}"

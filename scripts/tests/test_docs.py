@@ -1,6 +1,7 @@
 """Unit tests for the sectioned docs generator."""
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import tempfile
@@ -174,6 +175,64 @@ label = "Missing"
             self.assertIn("## Commands", index_md)
             self.assertIn("| Command | Summary |", index_md)
             self.assertIn(f"]({blog.SITE_URL}/docs/status/index.md)", index_md)
+
+    def test_llms_txt_lists_every_manifest_page(self) -> None:
+        site = docs.load_site(content_dir=self.content)
+        llms = docs.render_llms_txt(site)
+        for page in site.pager_order:
+            url = docs.markdown_canonical_url(page.slug)
+            self.assertIn(url, llms, msg=f"missing llms link for {page.slug}")
+
+    def test_llms_txt_follows_llmstxt_structure(self) -> None:
+        site = docs.load_site(content_dir=self.content)
+        llms = docs.render_llms_txt(site)
+        lines = llms.splitlines()
+        self.assertEqual(lines[0], "# Grit")
+        self.assertTrue(any(line.startswith("> ") for line in lines[:10]))
+        section_titles = [f"## {section.title}" for section in site.sections]
+        section_titles.append("## Optional")
+        for heading in section_titles:
+            self.assertIn(heading, llms)
+        link_lines = [line for line in lines if line.startswith("- [")]
+        self.assertGreater(len(link_lines), 20)
+        for line in link_lines:
+            self.assertRegex(line, r"^- \[.+?\]\(.+?\)(: .+)?$")
+
+    def test_llms_full_contains_every_twin_in_pager_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            site = docs.generate(out, content_dir=self.content)
+            root = self.content
+            manifest_path = root / "site.toml"
+            listed = docs.collect_listed_sources_for_dir(
+                docs.load_manifest_from(manifest_path, root),
+                root,
+            )
+            full = docs.render_llms_full_txt(
+                site,
+                root=root,
+                manifest_path=manifest_path,
+                listed=listed,
+            )
+            chunks = re.split(r"^# https://grit-scm\.com/docs/.+$", full, flags=re.MULTILINE)
+            self.assertEqual(len(chunks), len(site.pager_order) + 1)
+            for page, chunk in zip(site.pager_order, chunks[1:], strict=True):
+                twin_path = docs.markdown_output_path(out, page.slug)
+                twin = twin_path.read_text(encoding="utf-8")
+                self.assertEqual(chunk.strip(), twin.strip(), msg=page.slug)
+
+    def test_check_detects_stale_llms_txt(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-check-") as tmp:
+            tmp_path = Path(tmp)
+            committed = tmp_path / "committed"
+            stale = tmp_path / "stale"
+            docs.generate(tmp_path / "docs", content_dir=self.content, llms_dir=committed)
+            shutil.copytree(committed, stale)
+            path = stale / "llms.txt"
+            path.write_text(path.read_text(encoding="utf-8") + "stale\n", encoding="utf-8")
+            issues = docs.compare_llms_files(stale, committed)
+            self.assertTrue(any("llms.txt" in line for line in issues))
+            self.assertFalse(docs.compare_llms_files(committed, committed))
 
     def test_missing_include_file_fails(self) -> None:
         page = self.content / "library-quickstart.md"

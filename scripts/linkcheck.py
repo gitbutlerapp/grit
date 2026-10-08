@@ -113,11 +113,41 @@ def iter_docs_markdown_files() -> list[Path]:
     return sorted(docs_root.rglob("*.md"))
 
 
+def iter_llms_txt_files() -> list[Path]:
+    path = SITE_ROOT / "llms.txt"
+    return [path] if path.is_file() else []
+
+
 def markdown_heading_ids(text: str) -> set[str]:
     ids: set[str] = set()
     for match in HEADING_MD_RE.finditer(text):
         ids.add(blog.slugify(match.group(1).strip()))
     return ids
+
+
+def resolve_grit_site_url(url: str) -> tuple[Path | None, str | None]:
+    """Map an absolute grit-scm.com URL to a file under docs/."""
+    fragment: str | None = None
+    path = url
+    if "#" in url:
+        path, frag = url.split("#", 1)
+        fragment = frag or None
+    prefix = f"{blog.SITE_URL}/"
+    if not path.startswith(prefix):
+        return None, fragment
+    rel = path[len(prefix) :]
+    if not rel or rel.endswith("/"):
+        candidate = SITE_ROOT / rel / "index.html" if rel else SITE_ROOT / "index.html"
+    else:
+        candidate = SITE_ROOT / rel
+        if candidate.is_dir():
+            candidate = candidate / "index.html"
+        elif candidate.suffix == "":
+            index = candidate / "index.html"
+            candidate = index if index.is_file() else candidate.with_suffix(".html")
+    if candidate.is_file():
+        return candidate, fragment
+    return None, fragment
 
 
 def resolve_grit_docs_markdown_url(url: str) -> tuple[Path | None, str | None]:
@@ -135,7 +165,6 @@ def resolve_grit_docs_markdown_url(url: str) -> tuple[Path | None, str | None]:
     else:
         target = SITE_ROOT / "docs" / rel
     return target, fragment
-
 
 def collect_links(path: Path) -> list[LinkRef]:
     refs: list[LinkRef] = []
@@ -205,9 +234,12 @@ def check_markdown_link(
     md_id_cache: dict[Path, set[str]],
 ) -> LinkIssue | None:
     url = ref.raw.strip()
-    if not url.startswith(DOCS_MARKDOWN_PREFIX):
+    if url.startswith(DOCS_MARKDOWN_PREFIX):
+        target, fragment = resolve_grit_docs_markdown_url(url)
+    elif url.startswith(f"{blog.SITE_URL}/"):
+        target, fragment = resolve_grit_site_url(url)
+    else:
         return None
-    target, fragment = resolve_grit_docs_markdown_url(url)
     if target is None:
         return None
     if not target.is_file():
@@ -226,7 +258,6 @@ def check_markdown_link(
             )
     return None
 
-
 def run(*, check_external: bool) -> list[LinkIssue]:
     id_cache: dict[Path, set[str]] = {}
     md_id_cache: dict[Path, set[str]] = {}
@@ -238,6 +269,11 @@ def run(*, check_external: bool) -> list[LinkIssue]:
                 issues.append(issue)
     for md_path in iter_docs_markdown_files():
         for ref in collect_markdown_links(md_path):
+            issue = check_markdown_link(ref, md_id_cache=md_id_cache)
+            if issue:
+                issues.append(issue)
+    for llms_path in iter_llms_txt_files():
+        for ref in collect_markdown_links(llms_path):
             issue = check_markdown_link(ref, md_id_cache=md_id_cache)
             if issue:
                 issues.append(issue)

@@ -1,0 +1,3370 @@
+# https://grit-scm.com/docs/index.md
+
+# Docs
+
+> How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.
+
+Grit is two things:
+
+- **`grit`** — a Git client with a small, modern command line. It works on any Git repository and talks to any Git remote, but its commands are its own: one obvious way to do the common thing, plain-language output, and `--json` on every command.
+- **`grit-lib`** — a fast, linkable Git library for Rust. Everything the CLI does goes through the library; you can embed the same engine in your own tools.
+
+## How these docs are organized
+
+| Section | What you'll find |
+| --- | --- |
+| **Getting started** | [Install](https://grit-scm.com/docs/install/index.md) grit, follow the [tutorial](https://grit-scm.com/docs/tutorial/index.md), or try the [library quick start](https://grit-scm.com/docs/library-quickstart/index.md). |
+| **The grit CLI** | [Global options](https://grit-scm.com/docs/global-options/index.md), [scripting with `--json`](https://grit-scm.com/docs/scripting/index.md), and a man page for every command. |
+| **Library guide** | Rust-oriented guides for `grit-lib` (growing over time), plus the [API reference on docs.rs](https://docs.rs/grit-lib). |
+| **Benchmarks** | How `grit` and `grit-lib` compare to system Git on core operations. |
+
+If you're new to the command line, start with the [tutorial](https://grit-scm.com/docs/tutorial/index.md). If you're wiring Git into a Rust program, start with the [library quick start](https://grit-scm.com/docs/library-quickstart/index.md) and the [library guide overview](https://grit-scm.com/docs/library/index.md).
+
+## CLI vs library
+
+Use **`grit`** when you want a day-to-day Git client from the terminal or in scripts (`--json` / `--filter`). Use **`grit-lib`** when you need programmatic access — opening repositories, reading objects and refs, diffing, revwalking, fetch/push, and the rest of Git's core — inside a Rust binary or service.
+
+On-disk formats and the wire protocol stay compatible with Git; the CLI's argv and messages are deliberately *not* a Git mirror.
+
+See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, and [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`.
+
+## Commands
+
+### Getting started
+
+| Command | Summary |
+| --- | --- |
+| [`grit init`](https://grit-scm.com/docs/init/index.md) | Create a new, empty repository. |
+| [`grit clone`](https://grit-scm.com/docs/clone/index.md) | Copy a remote repository into a new directory. |
+| [`grit status`](https://grit-scm.com/docs/status/index.md) | Show where you are and what's changed. This is what plain grit runs. |
+| [`grit config`](https://grit-scm.com/docs/config/index.md) | Read, set, list or remove configuration values. |
+
+### Making changes
+
+| Command | Summary |
+| --- | --- |
+| [`grit add`](https://grit-scm.com/docs/add/index.md) | Stage changes. With no paths, stages everything. |
+| [`grit commit`](https://grit-scm.com/docs/commit/index.md) | Stage every change and record a new commit. |
+| [`grit diff`](https://grit-scm.com/docs/diff/index.md) | Show uncommitted changes, or the change a commit introduced. |
+
+### History
+
+| Command | Summary |
+| --- | --- |
+| [`grit log`](https://grit-scm.com/docs/log/index.md) | Show recent commits, newest first, a page at a time. |
+| [`grit shortlog`](https://grit-scm.com/docs/shortlog/index.md) | List the commits on this branch that aren't on the target branch yet. |
+| [`grit show`](https://grit-scm.com/docs/show/index.md) | Show a commit, tag or branch, and a summary of what it changed. |
+
+### Branches and tags
+
+| Command | Summary |
+| --- | --- |
+| [`grit branch`](https://grit-scm.com/docs/branch/index.md) | List branches, or create or delete one. |
+| [`grit switch`](https://grit-scm.com/docs/switch/index.md) | Switch to another branch, or create one and switch to it. |
+| [`grit merge`](https://grit-scm.com/docs/merge/index.md) | Merge another branch into the current one. |
+| [`grit pick`](https://grit-scm.com/docs/pick/index.md) | Copy a single commit onto the current branch. |
+| [`grit tag`](https://grit-scm.com/docs/tag/index.md) | List tags, or create or delete one. A new tag points at the current commit. |
+
+### Remotes
+
+| Command | Summary |
+| --- | --- |
+| [`grit remote`](https://grit-scm.com/docs/remote/index.md) | List remotes, or add one. |
+| [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) | Download new commits, branches and tags from a remote. |
+| [`grit pull`](https://grit-scm.com/docs/pull/index.md) | Fetch from the remote and bring the current branch up to date. |
+| [`grit push`](https://grit-scm.com/docs/push/index.md) | Publish the current branch, or your tags, to a remote. |
+| [`grit auth`](https://grit-scm.com/docs/auth/index.md) | Sign in to GitHub so HTTPS pushes and fetches just work. |
+
+### Maintenance
+
+| Command | Summary |
+| --- | --- |
+| [`grit update`](https://grit-scm.com/docs/update/index.md) | Update grit to the latest release. |
+
+### Plumbing
+
+| Command | Summary |
+| --- | --- |
+| [`grit upload-pack`](https://grit-scm.com/docs/upload-pack/index.md) | Serve a fetch or clone of a repository over stdin and stdout. |
+| [`grit receive-pack`](https://grit-scm.com/docs/receive-pack/index.md) | Accept a push to a repository over stdin and stdout. |
+| [`grit manager`](https://grit-scm.com/docs/manager/index.md) | A credential helper that stores passwords and tokens in the Windows Credential Manager. |
+
+# https://grit-scm.com/docs/install/index.md
+
+# Install grit
+
+> Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.
+
+## Stable release (recommended)
+
+On macOS and Linux:
+
+```bash
+curl -fsSL https://grit-scm.com/install | sh
+```
+
+On Windows, run this in PowerShell:
+
+```bash
+irm https://grit-scm.com/install.ps1 | iex
+```
+
+The script downloads the latest release from GitHub, installs the `grit` binary (by default into `~/.local/bin` on Unix), and prints the version it installed.
+
+## Nightly builds
+
+CI publishes a rolling **nightly** prerelease when the release workflow is triggered manually. To install that build instead of the latest stable release:
+
+```bash
+curl -fsSL https://grit-scm.com/install-nightly | sh
+```
+
+On Windows:
+
+```bash
+irm https://grit-scm.com/install-nightly.ps1 | iex
+```
+
+Nightlies track recent `main`; use them when you want to test fixes before the next tagged release.
+
+## Install with Cargo
+
+If you already have a Rust toolchain:
+
+```bash
+cargo install grit-cli
+```
+
+This builds and installs the `grit` executable into Cargo's bin directory (usually `~/.cargo/bin`). Make sure that directory is on your `PATH`.
+
+## Keep grit up to date
+
+After a script install, run [`grit update`](https://grit-scm.com/docs/update/index.md) to re-run the same installer and replace the binary you're running. If you installed with Cargo, update with:
+
+```bash
+cargo install grit-cli
+```
+
+## Build from source
+
+Clone [the repository](https://github.com/gitbutlerapp/grit) and build the CLI crate:
+
+```bash
+cargo build --release -p grit-cli
+```
+
+The binary is `target/release/grit`. You can copy it anywhere on your `PATH`, or run it from the build tree.
+
+### Toolchain
+
+The workspace pins a Rust version in [`rust-toolchain.toml`](https://github.com/gitbutlerapp/grit/blob/main/rust-toolchain.toml) (currently **1.99.0** with `rustfmt` and `clippy`). `rustup` picks this up automatically when you build in the repo.
+
+To use `grit-lib` in your own crate, add it from [crates.io](https://crates.io/crates/grit-lib) — see the [library quick start](https://grit-scm.com/docs/library-quickstart/index.md).
+
+# https://grit-scm.com/docs/tutorial/index.md
+
+# Tutorial
+
+> Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.
+
+This walkthrough covers the commands you'll use every day. It assumes you have [installed grit](https://grit-scm.com/docs/install/index.md) and know roughly what a commit and a branch are. The output shown is what `grit` prints, minus the colors.
+
+Regenerated on 2026-10-07 by running the listed commands with `grit` built from this repository (`cargo build --release -p grit-cli`), with `NO_COLOR=1` and author identity `Ada Lovelace <ada@example.com>`.
+
+## Tell grit who you are
+
+Every commit records an author. Set your name and email once, in your global config:
+
+```console
+$ grit config --global user.name "Ada Lovelace"
+$ grit config --global user.email ada@example.com
+```
+
+`grit` reads and writes the same config files as Git, so if you've already set these up for Git, you can skip this step.
+
+## Create a repository
+
+```console
+$ grit init project
+Initialized empty repository in /workspace/project/.git
+$ cd project
+```
+
+To work on an existing project instead, copy it with [`grit clone`](https://grit-scm.com/docs/clone/index.md) and skip ahead to the next section:
+
+```console
+$ grit clone https://github.com/gitbutlerapp/grit.git
+```
+
+## Your home base: grit status
+
+Running `grit` with no arguments shows where you are and what's changed. Add a couple of files and look:
+
+```console
+$ echo "# Notes" > README.md
+$ echo "fn main() {}" > main.rs
+$ grit
+On main — no commits yet
+
+Untracked
+  ?  untracked     README.md
+  ?  untracked     main.rs
+
+→ grit add <file> to stage
+```
+
+The last line always suggests the next step. You'll come back to this screen a lot; [`grit status`](https://grit-scm.com/docs/status/index.md) (or `grit st`) shows the same thing.
+
+## Record a commit
+
+[`grit commit`](https://grit-scm.com/docs/commit/index.md) stages every change in the working tree and records it in one step:
+
+```console
+$ grit commit "Start the project"
+[main 310fdb0] Start the project
+2 changes committed
+```
+
+There is no separate staging step to remember. [`grit add`](https://grit-scm.com/docs/add/index.md) exists for when you want to stage particular files and check them in `grit status` first, but `grit commit` always records every change.
+
+Look at the history with [`grit log`](https://grit-scm.com/docs/log/index.md):
+
+```console
+$ grit log
+  310fdb0  ada  just now  Start the project
+```
+
+## Work on a branch
+
+Create a branch and switch to it with [`grit switch -c`](https://grit-scm.com/docs/switch/index.md):
+
+```console
+$ grit switch -c feature
+Created and switched to branch feature
+```
+
+Make a change and look at it with [`grit diff`](https://grit-scm.com/docs/diff/index.md) before committing:
+
+```console
+$ printf 'fn main() {\n    println!("hi");\n}\n' > main.rs
+$ grit diff
+
+main.rs
+@@ -1 +1 @@
+ 1    │ - fn main() {}
+    1 │ + fn main() {
+    2 │ +     println!("hi");
+    3 │ + }
+```
+
+The two number columns are the old and new line numbers. Commit the change:
+
+```console
+$ grit commit "Say hi"
+[feature 2e409e2] Say hi
+1 change committed
+```
+
+[`grit show`](https://grit-scm.com/docs/show/index.md) displays a commit, its message and the files it changed. With no argument, it shows the latest commit:
+
+```console
+$ grit show
+branch feature
+commit 2e409e26f8b370ea1928a8fb93dcf2e025418e1f
+Author: Ada Lovelace <ada@example.com>
+Date:   2026-10-07 14:55:47 +0000
+
+    Say hi
+
+ main.rs |   4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+```
+
+## Merge it back
+
+Switch back to `main` and [merge](https://grit-scm.com/docs/merge/index.md) the branch in. Nothing else has happened on `main`, so `grit` just moves `main` forward:
+
+```console
+$ grit switch main
+Switched to branch main
+$ grit merge feature
+Fast-forwarded feature → 2e409e2
+```
+
+The branch is done, so [delete it](https://grit-scm.com/docs/branch/index.md):
+
+```console
+$ grit branch -d feature
+Deleted branch feature (was 2e409e2).
+```
+
+`grit branch -d` refuses to delete a branch whose commits haven't been merged into the branch you're on. Use `-D` when you really mean it.
+
+## Share it with a remote
+
+A remote is another copy of the repository, usually on a server. Add one called `origin` with [`grit remote add`](https://grit-scm.com/docs/remote/index.md), then [push](https://grit-scm.com/docs/push/index.md):
+
+```console
+$ grit remote add origin https://github.com/ada/project.git
+Added remote origin → https://github.com/ada/project.git
+$ grit push
+  pushed main → origin refs/heads/main
+```
+
+`grit push` sends the current branch to a branch with the same name on `origin`, creating it if needed. There are no upstream flags to set. For GitHub over HTTPS, [`grit auth`](https://grit-scm.com/docs/auth/index.md) signs you in, and `grit` offers to run it if a push fails for lack of credentials.
+
+To get other people's work, run [`grit pull`](https://grit-scm.com/docs/pull/index.md). It fetches from the remote and brings your branch up to date, fast-forwarding when it can and recording a merge commit when both sides have new commits:
+
+```console
+$ grit pull
+Merged origin/main into the current branch (91275a2)
+```
+
+If someone pushed before you, `grit push` is rejected and tells you what to do:
+
+```console
+$ grit push
+  rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
+```
+
+## Tag a release
+
+[`grit tag`](https://grit-scm.com/docs/tag/index.md) marks the current commit, and `grit push --tags` publishes your tags:
+
+```console
+$ grit tag v0.1
+Created tag v0.1
+$ grit push --tags
+  pushed --tags → origin refs/tags/v0.1
+```
+
+## When things conflict
+
+`grit merge`, `grit pull` and `grit pick` never leave a half-finished merge behind. If the two sides change the same lines, `grit` lists the conflicting files and leaves your branch and working tree as they were. To resolve the conflict, run the merge with `git`, fix the files and commit. Conflict resolution in `grit` itself is on the roadmap.
+
+`grit` also refuses to switch branches, merge or pull while you have uncommitted changes, so work in progress can't get mixed into a merge. Commit first.
+
+## Scripting
+
+Every command takes `--json` and prints a single JSON object, which is handy for scripts and agents. `--filter` picks out the part you need:
+
+```console
+$ grit status --json --filter '{branch, clean}'
+{
+  "branch": "main",
+  "clean": true
+}
+```
+
+See [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for details, and each command's page for its JSON fields.
+
+## Where to go next
+
+Every command has a man page with its options and examples. Start from the [command list](https://grit-scm.com/docs/index.md#commands).
+
+# https://grit-scm.com/docs/library-quickstart/index.md
+
+# Library quick start
+
+> Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.
+
+This page walks through a minimal program that discovers a Git repository in the current directory (or a parent), resolves `HEAD`, and prints the commit id and subject line. The source below is the real example binary in the Grit repository; it is included automatically so the docs cannot drift from compiled code.
+
+## Add the dependency
+
+In your crate:
+
+```bash
+cargo add grit-lib
+```
+
+Or add to `Cargo.toml`:
+
+```toml
+[dependencies]
+grit-lib = "0.5.0"
+```
+
+Use the [latest version on crates.io](https://crates.io/crates/grit-lib) if the number above is stale.
+
+## Example program
+
+Save as `src/main.rs` (or copy from `grit-examples` in the Grit repo):
+
+```rust
+//! Minimal grit-lib program: discover a repository and print HEAD's commit id.
+//!
+//! Source for the library quick start in the docs; kept in sync via an include directive.
+
+use grit_lib::objects::{parse_commit, ObjectKind};
+use grit_lib::repo::Repository;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = Repository::discover(None)?;
+    let head = grit_lib::refs::resolve_ref(&repo.git_dir, "HEAD")?;
+    let object = repo.odb.read(&head)?;
+    if object.kind != ObjectKind::Commit {
+        return Err("HEAD is not a commit".into());
+    }
+    let commit = parse_commit(&object.data)?;
+    println!("{head}");
+    let subject = commit.message.lines().next().unwrap_or("");
+    if !subject.is_empty() {
+        println!("{subject}");
+    }
+    Ok(())
+}
+```
+
+## Run it
+
+From the root of any Git repository with at least one commit:
+
+```bash
+cargo run
+```
+
+Example output (your commit id will differ):
+
+```text
+217c6f9a1b2c3d4e5f6789012345678901234567
+Start the project
+```
+
+The first line is the full object id of `HEAD`; the second is the first line of the commit message.
+
+## Next steps
+
+- [Library guide overview](https://grit-scm.com/docs/library/index.md) — longer-form guides for objects, refs, diff, and network code.
+- [grit-lib on docs.rs](https://docs.rs/grit-lib) — API reference for `Repository` and the rest of the public surface.
+- [Tutorial](https://grit-scm.com/docs/tutorial/index.md) — the same repository operations from the `grit` CLI.
+
+# https://grit-scm.com/docs/global-options/index.md
+
+# Global options
+
+> Options that apply to every grit command.
+
+These options work on any command (and on `grit` itself when you pass no subcommand).
+
+| Option | Description |
+| --- | --- |
+| `--json` | Print one JSON object instead of human-readable text. Errors become `{"error": "..."}`. |
+| `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. |
+| `-h`, `--help` | Print help for `grit` or for a command. |
+| `-V`, `--version` | Print the version of `grit`. |
+
+Running `grit` with no command is the same as [`grit status`](https://grit-scm.com/docs/status/index.md).
+
+# https://grit-scm.com/docs/scripting/index.md
+
+# Scripting with grit
+
+> Use --json and --filter to build scripts on top of grit.
+
+With `--json`, a command prints exactly one JSON value on stdout, so you can pipe it straight into other tools. The shape of each command's output is documented on its page. `--filter` runs a [jq](https://jqlang.org) expression over that value without needing `jq` installed. When a filter produces several values, they come back as one JSON array:
+
+```console
+$ grit status --json --filter '{branch, clean}'
+{
+  "branch": "main",
+  "clean": true
+}
+
+$ grit log --json --filter '.commits[].subject'
+[
+  "Say hi",
+  "Start the project"
+]
+```
+
+`grit` exits with status `0` on success and `1` when a command fails (including a push with a rejected ref). A mistake on the command line, such as an unknown option, exits with `2`.
+
+Color is used only when stdout is a terminal. Set `NO_COLOR` to turn it off.
+
+# https://grit-scm.com/docs/init/index.md
+
+# grit init
+
+> Create a new, empty repository.
+
+## Synopsis
+
+```text
+grit init [--bare] [<path>]
+```
+
+## Description
+
+Creates an empty Git repository at `<path>`, or in the current directory when no path is given. The directory is created if it doesn't exist. A normal repository keeps its data in a `.git` directory next to your files. A bare repository has no working tree; the repository data is the directory itself, which is what you want for a repository that other people push to.
+
+The first branch is `main`. It has no commits until you make one.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<path>` | Where to create the repository. Defaults to the current directory. |
+| `--bare` | Create a bare repository, with no working tree. |
+
+## Examples
+
+Start a new project in a new directory:
+
+```console
+$ grit init project
+Initialized empty repository in /home/ada/project/.git
+```
+
+Turn the current directory into a repository:
+
+```console
+$ grit init
+```
+
+Create a bare repository to use as a shared remote:
+
+```console
+$ grit init --bare /srv/git/project.git
+Initialized empty bare repository in /srv/git/project.git
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `initialized` | boolean | Whether the repository was created successfully. |
+| `path` | string | Repository directory (the `.git` directory for a normal repository). |
+| `bare` | boolean | Whether the repository is bare. |
+| `branch` | string | Initial branch name. |
+
+Example:
+
+```json
+{
+  "initialized": true,
+  "path": "/home/ada/project/.git",
+  "bare": false,
+  "branch": "main"
+}
+```
+
+## See also
+
+[grit clone](https://grit-scm.com/docs/clone/index.md), [grit remote](https://grit-scm.com/docs/remote/index.md)
+
+# https://grit-scm.com/docs/clone/index.md
+
+# grit clone
+
+> Copy a remote repository into a new directory.
+
+## Synopsis
+
+```text
+grit clone <url> [<dir>]
+```
+
+## Description
+
+Copies the repository at `<url>` into a new directory and checks out the remote's default branch. The remote is saved as `origin`, so [`grit fetch`](https://grit-scm.com/docs/fetch/index.md), [`grit pull`](https://grit-scm.com/docs/pull/index.md) and [`grit push`](https://grit-scm.com/docs/push/index.md) work with no further setup.
+
+`<url>` can be an `https://` or `http://` URL, an `ssh://` URL or `user@host:path` address, a `git://` URL, a `file://` URL, or a path to a local repository. A local path is stored as an absolute path so that later fetches work from anywhere.
+
+Without `<dir>`, the directory is named after the last part of the URL with any `.git` suffix removed, so `https://github.com/gitbutlerapp/grit.git` clones into `grit`. The destination must not exist or must be empty.
+
+For private GitHub repositories over HTTPS, sign in first with [`grit auth`](https://grit-scm.com/docs/auth/index.md).
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<url>` | The repository to clone: a URL or a local path. |
+| `<dir>` | The directory to clone into. Defaults to the repository's name. |
+
+## Examples
+
+Clone a repository from GitHub:
+
+```console
+$ grit clone https://github.com/gitbutlerapp/grit.git
+Cloning into 'grit' ...
+Cloned into 'grit' on branch main.
+```
+
+Clone into a directory with a different name:
+
+```console
+$ grit clone git@github.com:gitbutlerapp/grit.git grit-src
+```
+
+Clone a local repository:
+
+```console
+$ grit clone /srv/git/project.git
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `url` | string | The URL or path that was cloned. |
+| `path` | string | Directory the clone was created in. |
+| `branch` | string | Branch that was checked out. |
+
+Example:
+
+```json
+{
+  "url": "/srv/git/project.git",
+  "path": "project",
+  "branch": "main"
+}
+```
+
+## See also
+
+[grit init](https://grit-scm.com/docs/init/index.md), [grit remote](https://grit-scm.com/docs/remote/index.md), [grit fetch](https://grit-scm.com/docs/fetch/index.md), [grit auth](https://grit-scm.com/docs/auth/index.md)
+
+# https://grit-scm.com/docs/status/index.md
+
+# grit status
+
+> Show where you are and what's changed. This is what plain grit runs.
+
+## Synopsis
+
+```text
+grit
+grit status
+grit st
+```
+
+## Description
+
+The status screen is your home base. It shows, from top to bottom:
+
+- **Where you are.** The current branch and how it compares with its target branch: how many commits ahead it is, followed by those commits (up to ten). A branch with no commits says `no commits yet`, and a detached HEAD shows the commit it's on.
+- **Staged** changes, which are ready to commit.
+- **Changed (not staged)** files, which have been modified since they were last staged.
+- **Untracked** files, which `grit` isn't tracking yet.
+- **A hint** with the next command to run.
+
+Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `type changed` or `conflict`.
+
+Paths are shown relative to the directory you run `grit` from.
+
+### The target branch
+
+The target is the branch your work is headed for. `grit` uses the first of these that exists:
+
+1. the branch named in the `target.branch` config setting
+2. `origin/master`
+3. `origin/main`
+4. `master`
+5. `main`
+
+To compare against something else, set it for the repository:
+
+```console
+$ grit config target.branch origin/develop
+```
+
+## Options
+
+`grit status` takes no options beyond the [global ones](https://grit-scm.com/docs/global-options/index.md).
+
+## Examples
+
+A branch with work in progress:
+
+```console
+$ grit
+On feature  ·  2 ahead of origin/main
+
+  cf18394  ada  2 hours ago  Say hi
+  9a1c2e0  ada  3 hours ago  Add a greeting test
+
+Staged
+  +  new           notes.md
+
+Changed (not staged)
+  ~  modified      main.rs
+
+Untracked
+  ?  untracked     scratch.txt
+
+→ grit add <file> to stage  ·  grit commit "message" to commit
+```
+
+Everything committed and pushed:
+
+```console
+$ grit st
+On main  ·  even with origin/main
+
+Nothing to commit — working tree clean.
+```
+
+Check from a script whether the working tree is clean:
+
+```console
+$ grit status --json --filter .clean
+true
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string or null | Current branch, or `null` when HEAD is detached. |
+| `detached` | boolean | Whether HEAD is detached. |
+| `head` | string or null | Full id of the current commit, or `null` before the first commit. |
+| `target` | string or null | Target branch, or `null` when none was found. |
+| `ahead` | number | Commits on the branch that the target does not have. |
+| `commits` | array | Newest of those commits, up to ten, each with `oid` and `subject`. |
+| `staged` | array | Staged changes with `path` and `status`. |
+| `unstaged` | array | Unstaged changes with `path` and `status`. |
+| `untracked` | array | Paths of untracked files. |
+| `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
+
+Example:
+
+```json
+{
+  "branch": "feature",
+  "detached": false,
+  "head": "cf18394a62c3f845bd9c44927a5a55e014b2a99d",
+  "target": "origin/main",
+  "ahead": 2,
+  "commits": [
+    { "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d", "subject": "Say hi" },
+    { "oid": "9a1c2e0d4b6f8a1c3e5d7f9b0a2c4e6d8f0a1b3c", "subject": "Add a greeting test" }
+  ],
+  "staged": [
+    { "path": "notes.md", "status": "added" }
+  ],
+  "unstaged": [
+    { "path": "main.rs", "status": "modified" }
+  ],
+  "untracked": ["scratch.txt"],
+  "clean": false
+}
+```
+
+## See also
+
+[grit shortlog](https://grit-scm.com/docs/shortlog/index.md), [grit diff](https://grit-scm.com/docs/diff/index.md), [grit add](https://grit-scm.com/docs/add/index.md), [grit commit](https://grit-scm.com/docs/commit/index.md)
+
+# https://grit-scm.com/docs/config/index.md
+
+# grit config
+
+> Read, set, list or remove configuration values.
+
+## Synopsis
+
+```text
+grit config [--global] <key>
+grit config [--global] <key> <value>
+grit config [--global] --unset <key>
+grit config [--global] --list
+```
+
+## Description
+
+Reads and writes Git configuration. `grit` uses the same config files as Git: the repository's `.git/config`, and your per-user `~/.gitconfig`. Settings you've made with Git apply to `grit`, and the other way around.
+
+With just a key, `grit config` prints its value. Reads look at every config file, with the repository's settings taking priority over your global ones. With a key and a value, it sets the value in the repository's config. Add `--global` to read or write your per-user config instead.
+
+Keys are written as `section.name`, for example `user.email`.
+
+### Settings grit uses
+
+| Key | Used for |
+| --- | --- |
+| `user.name`, `user.email` | The author and committer of new commits. |
+| `target.branch` | The branch [`grit status`](https://grit-scm.com/docs/status/index.md) and [`grit shortlog`](https://grit-scm.com/docs/shortlog/index.md) compare against. |
+| `branch.<name>.remote` | Which remote [`grit push`](https://grit-scm.com/docs/push/index.md) and [`grit pull`](https://grit-scm.com/docs/pull/index.md) use for a branch. Defaults to `origin`. |
+| `branch.<name>.merge` | Which remote branch a branch pushes to and pulls from. Defaults to the same name. |
+| `credential.helper` | Where HTTPS credentials are stored and looked up. See [`grit auth`](https://grit-scm.com/docs/auth/index.md). |
+| `grit.githubClientId` | The GitHub OAuth app [`grit auth`](https://grit-scm.com/docs/auth/index.md) signs in with. |
+| `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced by [`grit receive-pack`](https://grit-scm.com/docs/receive-pack/index.md). |
+| `receive.denyDeletes` | Refuse pushes that delete branches or tags. |
+| `receive.denyCurrentBranch` | Refuse pushes to the branch checked out in a non-bare repository. On by default. |
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<key>` | The setting to read, set or remove. |
+| `<value>` | The value to set. Omit it to read the current value. |
+| `--global` | Use your per-user config (`~/.gitconfig`) instead of the repository's. |
+| `-l`, `--list` | List every setting as `key=value`. |
+| `--unset` | Remove the setting. |
+
+Reading or removing a key that isn't set is an error.
+
+## Examples
+
+Set your identity for every repository:
+
+```console
+$ grit config --global user.name "Ada Lovelace"
+$ grit config --global user.email ada@example.com
+```
+
+Read a value:
+
+```console
+$ grit config user.email
+ada@example.com
+```
+
+Use a different email address in one repository:
+
+```console
+$ grit config user.email ada@work.example
+```
+
+List everything:
+
+```console
+$ grit config --list
+user.name=Ada Lovelace
+user.email=ada@example.com
+core.repositoryformatversion=0
+core.bare=false
+remote.origin.url=https://github.com/ada/project.git
+remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*
+```
+
+Remove a setting:
+
+```console
+$ grit config --unset target.branch
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `get`, `set`, `unset`, or `list`. |
+| `key` | string | Configuration key for `get`, `set`, or `unset`. |
+| `value` | string | Value for `get` or `set`. |
+| `entries` | array | For `list`, each entry with `key` and optional `value`. |
+
+Reading a value:
+
+```json
+{
+  "action": "get",
+  "key": "user.name",
+  "value": "Ada Lovelace"
+}
+```
+
+Listing values:
+
+```json
+{
+  "action": "list",
+  "entries": [
+    { "key": "user.name", "value": "Ada Lovelace" }
+  ]
+}
+```
+
+## See also
+
+[grit auth](https://grit-scm.com/docs/auth/index.md), [grit status](https://grit-scm.com/docs/status/index.md)
+
+# https://grit-scm.com/docs/add/index.md
+
+# grit add
+
+> Stage changes. With no paths, stages everything.
+
+## Synopsis
+
+```text
+grit add [<path>...]
+```
+
+## Description
+
+Stages changes so they show up under **Staged** in [`grit status`](https://grit-scm.com/docs/status/index.md). With no paths, `grit add` stages everything `grit status` reports: modified files, deleted files and untracked files. With paths, it stages only those files, or everything under those directories.
+
+Paths are relative to your current directory, so from inside `src/`, `grit add main.rs` stages `src/main.rs`. Paths like `../README.md` and absolute paths inside the repository work too. A path that matches nothing is an error, and nothing is staged.
+
+[`grit commit`](https://grit-scm.com/docs/commit/index.md) stages every change before it records a commit, so you don't need `grit add` to commit. It's useful for starting to track a new file and checking what will be committed.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<path>...` | Files or directories to stage. Omit to stage every change. |
+
+## Examples
+
+Stage everything:
+
+```console
+$ grit add
+Staged 3 changes.
+```
+
+Stage one file and a directory:
+
+```console
+$ grit add README.md src/
+Staged 2 changes.
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `staged` | number | How many paths were staged by this invocation. |
+
+Example:
+
+```json
+{
+  "staged": 2
+}
+```
+
+## See also
+
+[grit status](https://grit-scm.com/docs/status/index.md), [grit commit](https://grit-scm.com/docs/commit/index.md)
+
+# https://grit-scm.com/docs/commit/index.md
+
+# grit commit
+
+> Stage every change and record a new commit.
+
+## Synopsis
+
+```text
+grit commit [-a] <message>
+grit commit [-a] -m <message>
+```
+
+## Description
+
+Stages every change in the working tree (modified, deleted and untracked files) and records a new commit on the current branch with the given message. This is the same as running [`grit add`](https://grit-scm.com/docs/add/index.md) followed by a commit.
+
+The message can be given as an argument or with `-m`. A message with several lines is recorded as is; its first line is the subject that [`grit log`](https://grit-scm.com/docs/log/index.md) shows. A commit needs a message: without one, `grit commit` stages your changes and stops with an error.
+
+The author and committer come from the `user.name` and `user.email` settings (see [`grit config`](https://grit-scm.com/docs/config/index.md)). To set the recorded time, use the `GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE` environment variables.
+
+`grit commit` fails when there's nothing to commit, and when HEAD is detached rather than on a branch.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<message>` | The commit message. |
+| `-m`, `--message <message>` | The commit message, as an option. Use either this or the argument, not both. |
+| `-a`, `--all` | Stage every change first. This is always what `grit commit` does; the option is accepted so that `git` habits like `-am` keep working. |
+
+## Examples
+
+Commit everything:
+
+```console
+$ grit commit "Add the greeting"
+[main 217c6f9] Add the greeting
+2 changes committed
+```
+
+The same, written the way you'd write it for `git`:
+
+```console
+$ grit commit -am "Add the greeting"
+```
+
+A longer message with a body:
+
+```console
+$ grit commit -m "Add the greeting
+
+Prints hi on startup so we know the binary runs."
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `oid` | string | Full commit object id (40 hex chars for SHA-1) |
+| `branch` | string | Short branch name (e.g. `main`) |
+| `subject` | string | First line of the commit message |
+| `changes` | number | Path changes vs the parent commit tree |
+
+Example:
+
+```json
+{
+  "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+  "branch": "main",
+  "subject": "second",
+  "changes": 1
+}
+```
+
+## See also
+
+[grit add](https://grit-scm.com/docs/add/index.md), [grit status](https://grit-scm.com/docs/status/index.md), [grit log](https://grit-scm.com/docs/log/index.md), [grit config](https://grit-scm.com/docs/config/index.md)
+
+# https://grit-scm.com/docs/diff/index.md
+
+# grit diff
+
+> Show uncommitted changes, or the change a commit introduced.
+
+## Synopsis
+
+```text
+grit diff [<commit>]
+```
+
+## Description
+
+With no argument, shows every uncommitted change: the working tree, staged or not, compared with the last commit. With a commit, shows the change that commit introduced, compared with its first parent.
+
+Each file starts with its path, and each hunk with its position. Lines have two number columns, the line number before and after the change. In a terminal, removed lines are red, added lines are green, and the words that changed within a line are highlighted. When the output isn't a terminal, or `NO_COLOR` is set, lines are marked with `-` and `+` instead. Three lines of unchanged context are shown around each change. Binary files are reported but not shown.
+
+`<commit>` can be anything that names a commit: a full or short commit id, a branch or tag name, or an expression like `HEAD~2`.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<commit>` | The commit whose change to show. Omit to show uncommitted changes. |
+
+## Examples
+
+What have I changed since the last commit?
+
+```console
+$ grit diff
+
+main.rs
+@@ -1 +1 @@
+ 1    │ - fn main() {}
+    1 │ + fn main() {
+    2 │ +     println!("hi");
+    3 │ + }
+```
+
+What did the commit before the last one change?
+
+```console
+$ grit diff HEAD~1
+```
+
+List the files changed by a commit:
+
+```console
+$ grit diff v0.1 --json --filter '.files[].path'
+[
+  "README.md",
+  "main.rs"
+]
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `files` | array | Changed files, each with `path`, `status`, `binary`, and `hunks`. |
+
+Nested fields include `files[].status` (`added`, `modified`, `deleted`, and so on), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, and `segments` with optional `emphasis` on intra-line changes.
+
+Example:
+
+```json
+{
+  "files": [
+    {
+      "path": "main.rs",
+      "status": "modified",
+      "binary": false,
+      "hunks": [
+        {
+          "old_start": 1,
+          "new_start": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "segments": [
+                { "text": "fn main() ", "emphasis": false },
+                { "text": "{}", "emphasis": true }
+              ]
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "segments": [
+                { "text": "fn main() ", "emphasis": false },
+                { "text": "{", "emphasis": true }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## See also
+
+[grit status](https://grit-scm.com/docs/status/index.md), [grit show](https://grit-scm.com/docs/show/index.md), [grit log](https://grit-scm.com/docs/log/index.md)
+
+# https://grit-scm.com/docs/log/index.md
+
+# grit log
+
+> Show recent commits, newest first, a page at a time.
+
+## Synopsis
+
+```text
+grit log [--before <commit>]
+```
+
+## Description
+
+Lists the commits reachable from the current commit, newest first, ten at a time. Each line shows the short commit id, the author, when the commit was made and its subject (the first line of its message). The author is shown by the part of their email address before the `@`, or by name when there's no email.
+
+When there's more history, the last line shows the command for the next page.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `--before <commit>` | Start listing at this commit instead of the current one. Use the commit from the `→ more` line to see the next page. |
+
+## Examples
+
+Show recent history:
+
+```console
+$ grit log
+  b52cca6  ada  2 minutes ago  Handle empty input
+  5fbefea  ada  1 hour ago     Add a greeting test
+  ...
+  2efcc2d  ada  3 days ago     Start the project
+
+→ more: grit log --before=a7e3a5e
+```
+
+Show the next page:
+
+```console
+$ grit log --before=a7e3a5e
+```
+
+Get the subjects of the last ten commits:
+
+```console
+$ grit log --json --filter '.commits[].subject'
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `commits` | array | Up to ten commits, newest first, each with `oid` and `subject`. |
+| `next` | string or null | Full commit id to pass to `--before` for the next page, or `null` when there is no more history. |
+
+Example:
+
+```json
+{
+  "commits": [
+    {
+      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+      "subject": "second"
+    },
+    {
+      "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
+      "subject": "initial"
+    }
+  ],
+  "next": null
+}
+```
+
+## See also
+
+[grit shortlog](https://grit-scm.com/docs/shortlog/index.md), [grit show](https://grit-scm.com/docs/show/index.md)
+
+# https://grit-scm.com/docs/shortlog/index.md
+
+# grit shortlog
+
+> List the commits on this branch that aren't on the target branch yet.
+
+## Synopsis
+
+```text
+grit shortlog
+grit sl
+```
+
+## Description
+
+Shows the current branch, its target branch, and every commit on the current branch that the target doesn't have, newest first. It's the list of what you would be proposing if you opened a pull request now.
+
+The target branch is found the same way as for [`grit status`](https://grit-scm.com/docs/status/index.md#the-target-branch): the `target.branch` setting, then `origin/master`, `origin/main`, `master` and `main`. Unlike `grit status`, which shows at most ten commits, `grit shortlog` lists all of them.
+
+## Options
+
+`grit shortlog` takes no options beyond the [global ones](https://grit-scm.com/docs/global-options/index.md).
+
+## Examples
+
+```console
+$ grit shortlog
+On feature
+Ahead of origin/main by 2 commits
+  cf18394  ada  2 hours ago  Say hi
+  9a1c2e0  ada  3 hours ago  Add a greeting test
+```
+
+Count the commits that aren't on the target yet:
+
+```console
+$ grit sl --json --filter .ahead
+2
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | Current branch name. |
+| `target` | string or null | Target branch used for comparison, or `null` when none was found. |
+| `ahead` | number | How many commits are on the branch but not on the target. |
+| `commits` | array | Those commits, newest first, each with `oid` and `subject`. |
+
+Example:
+
+```json
+{
+  "branch": "feature",
+  "target": "main",
+  "ahead": 0,
+  "commits": []
+}
+```
+
+## See also
+
+[grit status](https://grit-scm.com/docs/status/index.md), [grit log](https://grit-scm.com/docs/log/index.md), [grit config](https://grit-scm.com/docs/config/index.md)
+
+# https://grit-scm.com/docs/show/index.md
+
+# grit show
+
+> Show a commit, tag or branch, and a summary of what it changed.
+
+## Synopsis
+
+```text
+grit show [<object>]
+```
+
+## Description
+
+Shows a commit's id, author, date and full message, followed by a summary of the files it changed and how many lines were added and removed in each. With no argument, it shows the current commit.
+
+`<object>` can be a commit id (full or short), an expression like `HEAD~2`, a branch or a tag. For a branch or tag, the first line names it. For an annotated tag, the tag's own author, date and message come before the commit it points at.
+
+To see the full change a commit made, use [`grit diff <commit>`](https://grit-scm.com/docs/diff/index.md).
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<object>` | The commit, branch or tag to show. Defaults to the current commit. |
+
+## Examples
+
+Show the latest commit:
+
+```console
+$ grit show
+branch feature
+commit cf18394a62c3f845bd9c44927a5a55e014b2a99d
+Author: Ada Lovelace <ada@example.com>
+Date:   2026-10-07 10:00:00 +0000
+
+    Say hi
+
+ main.rs |   4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+```
+
+Show what a tag points at:
+
+```console
+$ grit show v0.1
+```
+
+Get the subject of a commit:
+
+```console
+$ grit show HEAD~1 --json --filter .commit.subject
+"Start the project"
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `kind` | string | `commit`, `branch`, `tag`, or `annotated_tag`. |
+| `ref_name` | string | Branch or tag name when you named a ref; omitted for a raw commit id. |
+| `tag` | object | For an annotated tag: `name`, `tagger`, and `message`. |
+| `commit` | object | Commit id, parents, author, committer, subject, and full message. |
+| `stat` | object | Change stats with `files`, `files_changed`, `insertions`, and `deletions`. |
+
+Example:
+
+```json
+{
+  "kind": "branch",
+  "ref_name": "feature",
+  "commit": {
+    "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+    "parents": ["919c45f33de5e5c0bd05f8ffb089f697f4644976"],
+    "author": {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com",
+      "date": "2026-10-07 14:54:02 +0000"
+    },
+    "committer": {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com",
+      "date": "2026-10-07 14:54:02 +0000"
+    },
+    "subject": "second",
+    "message": "second"
+  },
+  "stat": {
+    "files": [
+      {
+        "path": "README.md",
+        "status": "modified",
+        "insertions": 1,
+        "deletions": 0,
+        "binary": false
+      }
+    ],
+    "files_changed": 1,
+    "insertions": 1,
+    "deletions": 0
+  }
+}
+```
+
+## See also
+
+[grit diff](https://grit-scm.com/docs/diff/index.md), [grit log](https://grit-scm.com/docs/log/index.md), [grit tag](https://grit-scm.com/docs/tag/index.md)
+
+# https://grit-scm.com/docs/branch/index.md
+
+# grit branch
+
+> List branches, or create or delete one.
+
+## Synopsis
+
+```text
+grit branch
+grit branch <name>
+grit branch -d <name>
+grit branch -D <name>
+```
+
+## Description
+
+With no arguments, lists your local branches and marks the current one with `*`.
+
+With a name, creates a branch at the current commit. It doesn't switch to the new branch; use [`grit switch -c`](https://grit-scm.com/docs/switch/index.md) to create a branch and switch to it in one step.
+
+With `-d`, deletes a branch. `grit` refuses if the branch has commits that aren't in the current branch, so you can't lose work by accident; `-D` deletes it anyway. You can't delete the branch you're on.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<name>` | The branch to create or delete. Omit to list branches. |
+| `-d`, `--delete` | Delete the branch. It must be fully merged into the current branch. |
+| `-D`, `--force` | Delete the branch even if it isn't merged. |
+
+## Examples
+
+```console
+$ grit branch
+  feature
+* main
+
+$ grit branch experiment
+Created branch experiment
+
+$ grit branch -d experiment
+Deleted branch experiment (was cf18394).
+```
+
+Deleting a branch with unmerged work:
+
+```console
+$ grit branch -d spike
+error: the branch 'spike' is not fully merged.
+If you are sure you want to delete it, run 'grit branch -D spike'
+
+$ grit branch -D spike
+Deleted branch spike (was a7020c2).
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `list`, `create`, or `delete`. |
+| `current` | string or null | For `list`, the current branch, or `null` when detached. |
+| `branches` | array | For `list`, each branch with `name` and `current`. |
+| `name` | string | For `create` or `delete`, the branch name. |
+| `oid` | string | For `delete`, full id of the tip before deletion. |
+| `short_oid` | string | For `delete`, abbreviated tip id. |
+
+Listing branches:
+
+```json
+{
+  "action": "list",
+  "current": "main",
+  "branches": [
+    { "name": "feature", "current": false },
+    { "name": "main", "current": true }
+  ]
+}
+```
+
+Creating a branch:
+
+```json
+{
+  "action": "create",
+  "name": "experiment"
+}
+```
+
+## See also
+
+[grit switch](https://grit-scm.com/docs/switch/index.md), [grit merge](https://grit-scm.com/docs/merge/index.md)
+
+# https://grit-scm.com/docs/switch/index.md
+
+# grit switch
+
+> Switch to another branch, or create one and switch to it.
+
+## Synopsis
+
+```text
+grit switch <branch>
+grit switch -c <branch>
+```
+
+`grit checkout` and `grit co` do the same thing.
+
+## Description
+
+Switches to a local branch and updates the files in your working tree to match it.
+
+`grit switch` won't run while you have uncommitted changes, staged or not, so that nothing gets carried over to the wrong branch by accident. Commit first. Untracked files stay where they are, unless the other branch has a file at the same path; then `grit` stops rather than overwrite it.
+
+With `-c`, creates the branch at the current commit and switches to it.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<branch>` | The branch to switch to, or to create with `-c`. |
+| `-c`, `--create` | Create the branch first, then switch to it. Fails if the branch already exists. |
+
+## Examples
+
+```console
+$ grit switch -c feature
+Created and switched to branch feature
+
+$ grit switch main
+Switched to branch main
+```
+
+With uncommitted changes:
+
+```console
+$ grit switch main
+error: you have uncommitted changes — commit them before switching
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | The branch you switched to. |
+| `created` | boolean | `true` when `-c` created the branch; otherwise `false`. |
+
+Example:
+
+```json
+{
+  "branch": "feature",
+  "created": true
+}
+```
+
+## See also
+
+[grit branch](https://grit-scm.com/docs/branch/index.md), [grit merge](https://grit-scm.com/docs/merge/index.md), [grit status](https://grit-scm.com/docs/status/index.md)
+
+# https://grit-scm.com/docs/merge/index.md
+
+# grit merge
+
+> Merge another branch into the current one.
+
+## Synopsis
+
+```text
+grit merge <branch>
+```
+
+## Description
+
+Brings the commits from `<branch>` into the current branch:
+
+- If the current branch already has everything, nothing changes.
+- If the current branch has no commits of its own since they diverged, it's moved forward to `<branch>` (a fast-forward). No new commit is made.
+- Otherwise both sides are merged and a merge commit is recorded, with the message `Merge <branch>`.
+
+`<branch>` can be a local branch or a remote-tracking branch such as `origin/main`. Local branches are looked up first.
+
+If both sides changed the same lines, `grit` lists the conflicting files, exits with an error, and leaves the branch and working tree exactly as they were. `grit` can't resolve conflicts yet; to finish the merge, run `git merge <branch>`, fix the conflicts and commit.
+
+`grit merge` won't run with uncommitted changes, on a branch with no commits, or with a detached HEAD.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<branch>` | The branch to merge into the current one. |
+
+## Examples
+
+```console
+$ grit merge feature
+Fast-forwarded feature → cf18394
+
+$ grit merge origin/main
+Merged origin/main into the current branch (acd1d4b)
+```
+
+When both branches change the same lines:
+
+```console
+$ grit merge topic
+error: merge has conflicts in:
+  README.md
+
+Nothing was changed. grit can't resolve conflicts yet — run `git merge topic` to resolve them.
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `branch` | string | The branch that was merged in (or set as upstream). |
+| `oid` | string or null | Commit the current branch points at after the merge, when applicable. |
+| `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
+
+Example:
+
+```json
+{
+  "result": "up_to_date",
+  "branch": "main"
+}
+```
+
+## See also
+
+[grit pull](https://grit-scm.com/docs/pull/index.md), [grit pick](https://grit-scm.com/docs/pick/index.md), [grit branch](https://grit-scm.com/docs/branch/index.md)
+
+# https://grit-scm.com/docs/pick/index.md
+
+# grit pick
+
+> Copy a single commit onto the current branch.
+
+## Synopsis
+
+```text
+grit pick <commit>
+```
+
+## Description
+
+Takes the change `<commit>` made and applies it to the current branch as a new commit (a cherry-pick). The new commit keeps the original author and message.
+
+`<commit>` can be a full or short commit id, a branch name (to pick the commit at its tip) or an expression like `feature~2`.
+
+`grit pick` works on one commit at a time and keeps it simple. It refuses, and changes nothing, when:
+
+- you have uncommitted changes, or the current branch has no commits, or HEAD is detached
+- `<commit>` is a merge commit
+- `<commit>` doesn't change anything, or its change is already on the current branch
+- the change conflicts with the current branch; the conflicting files are listed
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<commit>` | The commit to copy onto the current branch. |
+
+## Examples
+
+Pick the latest commit from another branch:
+
+```console
+$ grit pick feature
+Picked cf18394 → 4be20a1 Say hi
+```
+
+Pick a commit by id:
+
+```console
+$ grit pick 9a1c2e0
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `source` | string | Full id of the commit that was picked. |
+| `oid` | string | Full id of the new commit on the current branch. |
+| `subject` | string | Subject line of the picked commit. |
+
+Example:
+
+```json
+{
+  "source": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+  "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+  "subject": "two"
+}
+```
+
+## See also
+
+[grit merge](https://grit-scm.com/docs/merge/index.md), [grit log](https://grit-scm.com/docs/log/index.md)
+
+# https://grit-scm.com/docs/tag/index.md
+
+# grit tag
+
+> List tags, or create or delete one. A new tag points at the current commit.
+
+## Synopsis
+
+```text
+grit tag
+grit tag <name>
+grit tag -d <name>
+```
+
+## Description
+
+With no arguments, lists your tags. With a name, creates a tag pointing at the current commit; tags created by `grit` are lightweight tags, with no message of their own. With `-d`, deletes a tag.
+
+Tags are local until you publish them with [`grit push --tags`](https://grit-scm.com/docs/push/index.md).
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<name>` | The tag to create or delete. Omit to list tags. |
+| `-d`, `--delete` | Delete the tag. |
+
+## Examples
+
+```console
+$ grit tag v0.1
+Created tag v0.1
+
+$ grit tag
+  v0.1
+
+$ grit push --tags
+  pushed --tags → origin refs/tags/v0.1
+
+$ grit tag -d v0.1
+Deleted tag v0.1
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `list`, `create`, or `delete`. |
+| `tags` | array | For `list`, each tag with `name` and `oid`. |
+| `name` | string | For `create` or `delete`, the tag name. |
+| `oid` | string | For `create`, full id of the commit the tag points at. |
+
+Listing tags:
+
+```json
+{
+  "action": "list",
+  "tags": [
+    {
+      "name": "v0.1",
+      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf"
+    }
+  ]
+}
+```
+
+Creating a tag:
+
+```json
+{
+  "action": "create",
+  "name": "v0.1",
+  "oid": "92501f188ae0815af09a0cef6e121eddda4113cf"
+}
+```
+
+## See also
+
+[grit push](https://grit-scm.com/docs/push/index.md), [grit show](https://grit-scm.com/docs/show/index.md)
+
+# https://grit-scm.com/docs/remote/index.md
+
+# grit remote
+
+> List remotes, or add one.
+
+## Synopsis
+
+```text
+grit remote
+grit remote add <name> <url>
+```
+
+## Description
+
+A remote is another copy of the repository that you fetch from and push to, usually on a server. With no arguments, `grit remote` lists your remotes and their URLs.
+
+`grit remote add` adds a remote. [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) then stores the remote's branches as remote-tracking branches named `<name>/<branch>`, such as `origin/main`. [`grit clone`](https://grit-scm.com/docs/clone/index.md) adds a remote called `origin` for you.
+
+The URL can be anything [`grit clone`](https://grit-scm.com/docs/clone/index.md) accepts: an HTTPS, SSH, `git://` or `file://` URL, or a local path.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `add <name> <url>` | Add a remote called `<name>` at `<url>`. Fails if a remote with that name exists. |
+
+## Examples
+
+```console
+$ grit remote add origin https://github.com/ada/project.git
+Added remote origin → https://github.com/ada/project.git
+
+$ grit remote
+origin	https://github.com/ada/project.git
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `action` | string | `list` or `add`. |
+| `remotes` | array | For `list`, each remote with `name` and `url`. |
+| `name` | string | For `add`, the remote name. |
+| `url` | string | For `add`, the remote URL or path. |
+
+Listing remotes:
+
+```json
+{
+  "action": "list",
+  "remotes": [
+    {
+      "name": "origin",
+      "url": "https://github.com/ada/project.git"
+    }
+  ]
+}
+```
+
+Adding a remote:
+
+```json
+{
+  "action": "add",
+  "name": "origin",
+  "url": "https://github.com/ada/project.git"
+}
+```
+
+## See also
+
+[grit fetch](https://grit-scm.com/docs/fetch/index.md), [grit push](https://grit-scm.com/docs/push/index.md), [grit clone](https://grit-scm.com/docs/clone/index.md)
+
+# https://grit-scm.com/docs/fetch/index.md
+
+# grit fetch
+
+> Download new commits, branches and tags from a remote.
+
+## Synopsis
+
+```text
+grit fetch [<remote>]
+```
+
+## Description
+
+Downloads everything new from a remote and updates your remote-tracking branches, such as `origin/main`, along with any new tags. Your own branches and working tree are left alone; to bring the new commits into your branch, use [`grit merge`](https://grit-scm.com/docs/merge/index.md) or [`grit pull`](https://grit-scm.com/docs/pull/index.md).
+
+Each updated ref is listed with its old and new commit.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<remote>` | The remote to fetch from. Defaults to `origin`. |
+
+## Examples
+
+```console
+$ grit fetch
+  refs/remotes/origin/main  a8e620a → b52cca6
+Fetched 1 update from origin.
+
+$ grit fetch
+Already up to date with origin.
+```
+
+Fetch from another remote:
+
+```console
+$ grit fetch upstream
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `remote` | string | Remote that was fetched. |
+| `updates` | array | Ref updates, each with `ref`, `old_oid`, and `new_oid`. |
+| `updated` | number | Count of refs that changed. |
+
+`old_oid` is `null` for a ref that is new, and `new_oid` is `null` for one that was removed.
+
+Example:
+
+```json
+{
+  "remote": "origin",
+  "updates": [],
+  "updated": 0
+}
+```
+
+## See also
+
+[grit pull](https://grit-scm.com/docs/pull/index.md), [grit merge](https://grit-scm.com/docs/merge/index.md), [grit remote](https://grit-scm.com/docs/remote/index.md)
+
+# https://grit-scm.com/docs/pull/index.md
+
+# grit pull
+
+> Fetch from the remote and bring the current branch up to date.
+
+## Synopsis
+
+```text
+grit pull
+```
+
+## Description
+
+Runs [`grit fetch`](https://grit-scm.com/docs/fetch/index.md), then merges the remote's copy of the current branch into it, as [`grit merge`](https://grit-scm.com/docs/merge/index.md) would: a fast-forward when you have no new commits of your own, and a merge commit when both sides do. On a branch with no commits yet, it simply takes the remote's.
+
+The remote is the one in `branch.<name>.remote`, or `origin`. The remote branch is the one in `branch.<name>.merge`, or the branch with the same name as yours.
+
+Like `grit merge`, `grit pull` won't run with uncommitted changes or a detached HEAD, and stops without changing anything if there are conflicts.
+
+## Options
+
+`grit pull` takes no options beyond the [global ones](https://grit-scm.com/docs/global-options/index.md).
+
+## Examples
+
+```console
+$ grit pull
+Fast-forwarded origin/main → b52cca6
+
+$ grit pull
+Merged origin/main into the current branch (acd1d4b)
+
+$ grit pull
+Already up to date.
+```
+
+## JSON output
+
+The same shape as [`grit merge`](https://grit-scm.com/docs/merge/index.md#json-output). Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, or `set_upstream`. |
+| `branch` | string | Remote branch that was integrated. |
+| `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
+| `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
+
+Example:
+
+```json
+{
+  "result": "fast_forward",
+  "branch": "origin/main",
+  "oid": "b52cca65378cf17309f0b1f917c6dc4fdd9256f2"
+}
+```
+
+## See also
+
+[grit fetch](https://grit-scm.com/docs/fetch/index.md), [grit merge](https://grit-scm.com/docs/merge/index.md), [grit push](https://grit-scm.com/docs/push/index.md)
+
+# https://grit-scm.com/docs/push/index.md
+
+# grit push
+
+> Publish the current branch, or your tags, to a remote.
+
+## Synopsis
+
+```text
+grit push
+grit push --tags
+```
+
+## Description
+
+Sends the current branch to the remote, creating the branch there if it doesn't exist. There are no arguments and no upstream to set: the branch goes to `origin`, under the same name. To push a branch somewhere else, set `branch.<name>.remote` and `branch.<name>.merge` with [`grit config`](https://grit-scm.com/docs/config/index.md).
+
+`grit push` never overwrites commits on the remote. If the remote branch has commits you don't have, the push is rejected and `grit` exits with an error; run [`grit pull`](https://grit-scm.com/docs/pull/index.md) and push again.
+
+With `--tags`, pushes every local tag to `origin` instead of the current branch.
+
+For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](https://grit-scm.com/docs/auth/index.md) and then tries again.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `-t`, `--tags` | Push all tags instead of the current branch. |
+
+## Examples
+
+```console
+$ grit push
+  pushed main → origin refs/heads/main
+
+$ grit push
+  origin refs/heads/main already up to date
+
+$ grit push --tags
+  pushed --tags → origin refs/tags/v0.1
+```
+
+When someone else pushed first:
+
+```console
+$ grit push
+  rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `remote` | string | Remote that was pushed to. |
+| `branch` | string | Branch that was pushed, or `--tags`. |
+| `results` | array | Per-ref outcomes with `ref` and `status` (`ok`, `up_to_date`, or a rejection). |
+| `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
+
+Example:
+
+```json
+{
+  "remote": "origin",
+  "branch": "main",
+  "results": [
+    { "ref": "refs/heads/main", "status": "ok" }
+  ],
+  "rejected": false
+}
+```
+
+## See also
+
+[grit pull](https://grit-scm.com/docs/pull/index.md), [grit tag](https://grit-scm.com/docs/tag/index.md), [grit auth](https://grit-scm.com/docs/auth/index.md)
+
+# https://grit-scm.com/docs/auth/index.md
+
+# grit auth
+
+> Sign in to GitHub so HTTPS pushes and fetches just work.
+
+## Synopsis
+
+```text
+grit auth
+grit auth logout
+```
+
+## Description
+
+Signs you in to GitHub and saves the token, so that [`grit push`](https://grit-scm.com/docs/push/index.md), [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) and [`grit clone`](https://grit-scm.com/docs/clone/index.md) work with private repositories over HTTPS.
+
+`grit auth` uses GitHub's device flow. It prints a web address and a short code. Open `https://github.com/login/device` in your browser, enter the code and approve access. `grit` waits until you do, then saves the token with your credential helper. Every request goes straight to github.com.
+
+A credential helper has to be configured to store the token. On Windows, if none is set, `grit` uses its built-in one ([`grit manager`](https://grit-scm.com/docs/manager/index.md)). Elsewhere, set one with [`grit config`](https://grit-scm.com/docs/config/index.md):
+
+```console
+$ grit config --global credential.helper osxkeychain   # macOS
+$ grit config --global credential.helper libsecret     # Linux
+$ grit config --global credential.helper store         # a plain-text file, any system
+```
+
+`grit auth logout` removes the saved GitHub token from your credential helper.
+
+`grit` signs in with its own GitHub OAuth app. To use a different one, set its client id in the `GRIT_GITHUB_CLIENT_ID` environment variable or the `grit.githubClientId` setting.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `logout` | Remove the saved GitHub token. |
+
+## Examples
+
+```console
+$ grit auth
+To authorize grit, open this page in your browser:
+
+    https://github.com/login/device
+
+and enter the code:
+
+    1A2B-3C4D
+
+Waiting for you to authorize… (press Ctrl-C to cancel)
+
+✓ Signed in to GitHub — token stored for github.com.
+
+$ grit auth logout
+✓ Signed out of GitHub — removed the stored token for github.com.
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `authenticated` | boolean | For sign-in, whether a token was stored. |
+| `logged_out` | boolean | For `logout`, whether a stored token was removed. |
+| `host` | string | GitHub host the credential applies to (usually `github.com`). |
+
+After sign-in:
+
+```json
+{
+  "authenticated": true,
+  "host": "github.com"
+}
+```
+
+After logout:
+
+```json
+{
+  "logged_out": true,
+  "host": "github.com"
+}
+```
+
+`logged_out` is `false` when no credential helper is configured, since there's nowhere a token could be stored.
+
+## See also
+
+[grit push](https://grit-scm.com/docs/push/index.md), [grit config](https://grit-scm.com/docs/config/index.md), [grit manager](https://grit-scm.com/docs/manager/index.md)
+
+# https://grit-scm.com/docs/update/index.md
+
+# grit update
+
+> Update grit to the latest release.
+
+## Synopsis
+
+```text
+grit update
+```
+
+## Description
+
+Downloads the latest release of `grit` and installs it over the copy you're running. It does this by running the same install script as the one-line install on the [Install](https://grit-scm.com/docs/install/index.md) page: `curl -fsSL https://grit-scm.com/install | sh` on macOS and Linux, which needs `sh` and `curl`, and `irm https://grit-scm.com/install.ps1 | iex` in PowerShell on Windows.
+
+The installer prints its own progress. If you installed `grit` with `cargo install`, update it with `cargo install grit-cli` instead.
+
+## Options
+
+`grit update` takes no options beyond the [global ones](https://grit-scm.com/docs/global-options/index.md).
+
+## Examples
+
+```console
+$ grit update
+Updating grit (current: 0.5.0)
+Install directory: /home/ada/.local/bin
+...
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `updated` | boolean | Whether the install script was started successfully. |
+| `version` | string | Version of `grit` that ran the update (not necessarily the version installed). |
+
+Example:
+
+```json
+{
+  "updated": true,
+  "version": "0.5.0"
+}
+```
+
+With `--json`, the installer's progress goes to stderr so stdout carries only the JSON object.
+
+## See also
+
+[Docs overview](https://grit-scm.com/docs/index.md)
+
+# https://grit-scm.com/docs/upload-pack/index.md
+
+# grit upload-pack
+
+> Serve a fetch or clone of a repository over stdin and stdout.
+
+## Synopsis
+
+```text
+grit upload-pack [--stateless-rpc] [--advertise-refs] <directory>
+```
+
+## Description
+
+The server side of fetch and clone. It speaks the Git wire protocol on stdin and stdout, so any Git client, `git` or `grit`, can fetch from a repository it serves. You don't normally run it yourself: an SSH server runs it when a client connects, and `grit-http-server` runs it to answer smart HTTP requests. It doesn't appear in `grit --help`.
+
+`<directory>` is the repository to serve: a bare repository, a working tree, or a path that names one once `.git` is added. Unlike other commands, `grit upload-pack` doesn't search parent directories, so it serves exactly the repository it was given.
+
+It supports Git protocol versions 0, 1 and 2, chosen by the client through the `GIT_PROTOCOL` environment variable. Refs matching `uploadpack.hideRefs` or `transfer.hideRefs` are not shown to clients. Shallow clones and partial-clone filters are not supported yet.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<directory>` | The repository to serve. |
+| `--stateless-rpc` | Answer a single request and exit, without advertising refs first. Used for smart HTTP. |
+| `--advertise-refs` | Print the ref advertisement and exit. Used for the first request of smart HTTP. Also accepted as `--http-backend-info-refs`. |
+
+## Examples
+
+Clone over SSH from a server that has `grit` but not `git` installed:
+
+```console
+$ git clone --upload-pack='grit upload-pack' ssh://example.com/srv/git/project.git
+```
+
+Set it for a remote you already have:
+
+```console
+$ git config remote.origin.uploadpack 'grit upload-pack'
+```
+
+## JSON output
+
+None. `--json` has no effect, since stdout carries the Git protocol.
+
+## See also
+
+[grit receive-pack](https://grit-scm.com/docs/receive-pack/index.md), [grit clone](https://grit-scm.com/docs/clone/index.md), [grit fetch](https://grit-scm.com/docs/fetch/index.md)
+
+# https://grit-scm.com/docs/receive-pack/index.md
+
+# grit receive-pack
+
+> Accept a push to a repository over stdin and stdout.
+
+## Synopsis
+
+```text
+grit receive-pack [--stateless-rpc] [--advertise-refs] <directory>
+```
+
+## Description
+
+The server side of push. It speaks the Git wire protocol on stdin and stdout, receives the objects a client sends, and updates the repository's refs. You don't normally run it yourself: an SSH server runs it when a client pushes, and `grit-http-server` runs it to answer smart HTTP requests. It doesn't appear in `grit --help`.
+
+`<directory>` is the repository to push to: a bare repository, a working tree, or a path that names one once `.git` is added. It doesn't search parent directories.
+
+Every ref update is checked before it's applied, and the client is told which updates were accepted and why any were refused. These settings in the served repository's config control what's allowed:
+
+| Setting | Effect |
+| --- | --- |
+| `receive.denyNonFastForwards` | Refuse updates that would discard commits from a branch. |
+| `receive.denyDeletes` | Refuse to delete refs. |
+| `receive.denyCurrentBranch` | Refuse to update the branch checked out in a non-bare repository. On by default; set it to `ignore` or `warn` to allow it. |
+| `receive.hideRefs`, `transfer.hideRefs` | Hide refs from pushing clients and refuse updates to them. |
+
+Pushes that ask for an atomic update are applied all or nothing. Server-side hooks are not supported yet.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `<directory>` | The repository to push to. |
+| `--stateless-rpc` | Answer a single request and exit, without advertising refs first. Used for smart HTTP. |
+| `--advertise-refs` | Print the ref advertisement and exit. Used for the first request of smart HTTP. Also accepted as `--http-backend-info-refs`. |
+
+## Examples
+
+Push over SSH to a server that has `grit` but not `git` installed:
+
+```console
+$ git push --receive-pack='grit receive-pack' origin main
+```
+
+Set it for a remote you already have:
+
+```console
+$ git config remote.origin.receivepack 'grit receive-pack'
+```
+
+## JSON output
+
+None. `--json` has no effect, since stdout carries the Git protocol.
+
+## See also
+
+[grit upload-pack](https://grit-scm.com/docs/upload-pack/index.md), [grit push](https://grit-scm.com/docs/push/index.md)
+
+# https://grit-scm.com/docs/manager/index.md
+
+# grit manager
+
+> A credential helper that stores passwords and tokens in the Windows Credential Manager.
+
+## Synopsis
+
+```text
+grit manager (get | store | erase)
+```
+
+## Description
+
+A Git credential helper backed by the Windows Credential Manager. You don't run it yourself: Git and `grit` run it when they need a password or token. It speaks Git's [credential helper protocol](https://git-scm.com/docs/gitcredentials), reading the request on stdin and, for `get`, writing the credentials it found on stdout.
+
+[`grit auth`](https://grit-scm.com/docs/auth/index.md) sets `credential.helper` to `grit manager` on Windows when no other helper is configured. To set it up yourself:
+
+```text
+> grit config --global credential.helper "grit manager"
+```
+
+It works only on Windows. On other systems it exits with an error.
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `get` | Look up stored credentials for the request. |
+| `store` | Save the credentials in the request. |
+| `erase` | Remove the credentials matching the request. |
+
+## Examples
+
+```text
+> echo "protocol=https`nhost=github.com`n" | grit manager get
+protocol=https
+host=github.com
+username=x-access-token
+password=gho_...
+```
+
+## JSON output
+
+None. `grit manager` always speaks the credential helper protocol.
+
+## See also
+
+[grit auth](https://grit-scm.com/docs/auth/index.md), [grit config](https://grit-scm.com/docs/config/index.md)
+
+# https://grit-scm.com/docs/library/index.md
+
+# Library guide
+
+> Use grit-lib from Rust — the same engine that powers the grit CLI.
+
+These pages walk through opening a repository, the object database, refs, the index, diffs, history walks, and network transport using `grit-lib`. Each guide includes a compiled example from `grit-examples` that tests against the system `git` binary.
+
+| Page | Topic |
+| --- | --- |
+| [Repository](https://grit-scm.com/docs/library/repository/index.md) | Discover, open, config, errors |
+| [Objects](https://grit-scm.com/docs/library/objects/index.md) | Odb read/write, object kinds |
+| [Refs](https://grit-scm.com/docs/library/refs/index.md) | Resolve, list, update refs and reflog |
+| [Index](https://grit-scm.com/docs/library/staging/index.md) | Read index, stage paths, write trees |
+| [Diff](https://grit-scm.com/docs/library/diff/index.md) | Tree, index, and blob diffs |
+| [Revwalk](https://grit-scm.com/docs/library/revwalk/index.md) | Rev-parse, rev-list, ranges, merge base |
+| [Network](https://grit-scm.com/docs/library/network/index.md) | ls-remote, fetch, push, credentials |
+
+For exhaustive API detail see [grit-lib on docs.rs](https://docs.rs/grit-lib).
+
+# https://grit-scm.com/docs/library/diff/index.md
+
+# Diff
+
+> Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.
+
+Diffing in grit-lib centers on [`diff`](https://docs.rs/grit-lib/latest/grit_lib/diff/index.html) and the [`diffing`](https://docs.rs/grit-lib/latest/grit_lib/diffing/index.html) module view. Results are [`DiffEntry`](https://docs.rs/grit-lib/latest/grit_lib/diff/struct.DiffEntry.html) rows with a [`DiffStatus`](https://docs.rs/grit-lib/latest/grit_lib/diff/enum.DiffStatus.html) letter (`M`, `A`, `D`, …), paths, modes, and object ids — the same shape [`grit diff`](https://grit-scm.com/docs/diff/index.md) and [`porcelain::status`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/status/index.html) use before formatting output.
+
+## Tree-to-tree
+
+[`diff_trees`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_trees.html) compares two tree objects recursively and returns changed paths. Pass `None` for either side to diff against an empty tree. [`diff_trees_show_tree_entries`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_trees_show_tree_entries.html) can emit tree objects themselves (Git’s `diff-tree -t` behavior).
+
+Commit-to-commit diffs resolve each commit’s tree with [`parse_commit`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.parse_commit.html), then call `diff_trees` on the parent and child trees.
+
+## Index-to-worktree
+
+[`diff_index_to_worktree`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_index_to_worktree.html) compares the index to files on disk. [`diff_index_to_worktree_with_options`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_index_to_worktree_with_options.html) adds index mtime, submodule/gitlink handling, broken-gitlink detection, and an optional repository git-dir override. [`porcelain::add::stage`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/fn.stage.html) uses [`diff_index_to_worktree_for_staging`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_index_to_worktree_for_staging.html) internally so staging sees the same dirty paths as status.
+
+## Blob diffs
+
+For a single modified file, read old and new bytes from [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) and pass them to [`unified_diff`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.unified_diff.html) (histogram algorithm, Git-compatible hunks). The CLI builds human, `--json`, and `--markdown` views from `DiffEntry` lists plus optional unified bodies.
+
+## Porcelain models
+
+- **Status** — combines index vs HEAD and index vs worktree scans into structured sections (the CLI maps them to default / `--json` / `--markdown` output).
+- **Add** — uses diff results to decide which paths to hash and stage.
+- **Diff command** — tree-to-tree for commit ranges, index-to-worktree for uncommitted changes, then blob-level rendering for text files.
+
+## Example
+
+The program below diffs the latest commit against its parent (tree-to-tree), checks whether the work tree is dirty, and counts unified-diff lines for one modified blob:
+
+```rust
+//! Tree-to-tree, index-to-worktree, and blob diffs used by porcelain and the CLI.
+//!
+//! Source for the library guide "Diff" page (included in the docs site).
+
+use grit_lib::diff::{diff_index_to_worktree, diff_trees, unified_diff, DiffEntry, DiffStatus};
+use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::repo::Repository;
+use grit_lib::state::resolve_head;
+use std::path::{Path, PathBuf};
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId, grit_lib::error::Error> {
+    let obj = repo.odb.read(commit)?;
+    Ok(parse_commit(&obj.data)?.tree)
+}
+
+fn print_name_status(entries: &[DiffEntry]) {
+    for entry in entries {
+        let letter = entry.status.letter();
+        let path = entry.path();
+        if entry.status == DiffStatus::Renamed {
+            if let (Some(old), Some(new)) = (&entry.old_path, &entry.new_path) {
+                println!("{letter}\t{old}\t{new}");
+                continue;
+            }
+        }
+        println!("{letter}\t{path}");
+    }
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let root = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+    let repo = open_repo(&root)?;
+
+    let head = resolve_head(&repo.git_dir)?;
+    let new_commit = head
+        .oid()
+        .cloned()
+        .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
+    let new_obj = repo.odb.read(&new_commit)?;
+    let new_commit_data = parse_commit(&new_obj.data)?;
+    let parent = new_commit_data
+        .parents
+        .first()
+        .copied()
+        .ok_or_else(|| grit_lib::error::Error::Message("need a commit with a parent".into()))?;
+
+    let old_tree = tree_oid(&repo, &parent)?;
+    let new_tree = new_commit_data.tree;
+
+    let tree_changes = diff_trees(&repo.odb, Some(&old_tree), Some(&new_tree), "")?;
+    println!("tree_diff_begin");
+    print_name_status(&tree_changes);
+    println!("tree_diff_end");
+
+    if let Some(wt) = repo.work_tree.as_deref() {
+        let mut index = repo.load_index()?;
+        let wt_changes = diff_index_to_worktree(&repo.odb, &mut index, wt, false, false)?;
+        println!("index_worktree_dirty={}", !wt_changes.is_empty());
+    }
+
+    if let (Some(entry),) = (tree_changes.first(),) {
+        if entry.status == DiffStatus::Modified {
+            let old_blob = repo.odb.read(&entry.old_oid)?.data;
+            let new_blob = repo.odb.read(&entry.new_oid)?.data;
+            let old_text = String::from_utf8_lossy(&old_blob);
+            let new_text = String::from_utf8_lossy(&new_blob);
+            let old_path = entry.old_path.as_deref().unwrap_or(entry.path());
+            let new_path = entry.new_path.as_deref().unwrap_or(entry.path());
+            let patch = unified_diff(&old_text, &new_text, old_path, new_path, 3, false, false);
+            let hunk_lines = patch
+                .lines()
+                .filter(|l| l.starts_with('-') || l.starts_with('+'))
+                .count();
+            println!("blob_unified_hunk_lines={hunk_lines}");
+        }
+    }
+
+    Ok(())
+}
+```
+
+Requires a repository whose `HEAD` has a parent (at least two commits):
+
+```bash
+cargo run --bin guide_diff /path/to/repo
+git -C /path/to/repo diff --name-status HEAD~1 HEAD
+```
+
+# https://grit-scm.com/docs/library/network/index.md
+
+# Network
+
+> ls-remote, fetch and push over file:// and smart HTTP, credentials, and progress.
+
+Network operations in grit-lib are **typed**: you pass option structs, get outcome structs, and wire a [`Progress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) sink for sideband messages. No subprocess `git` on the wire — local, `git://`, SSH, and smart HTTP share the same fetch/push engines.
+
+## Transport matrix
+
+| URL | Fetch | Push | Authentication |
+| --- | --- | --- | --- |
+| `file://` or path | [`fetch_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.fetch_local.html) | [`push_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.push_local.html) | none |
+| `git://` | [`fetch_remote`](https://docs.rs/grit-lib/latest/grit_lib/fetch/fn.fetch_remote.html) over [`GitDaemonTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.GitDaemonTransport.html) | [`push_remote`](https://docs.rs/grit-lib/latest/grit_lib/push/fn.push_remote.html) | none |
+| `ssh` | same over [`SshTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.SshTransport.html) | same | SSH keys/agent |
+| `http(s)` | [`http_fetch`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/fn.http_fetch.html) | [`push_http`](https://docs.rs/grit-lib/latest/grit_lib/push/fn.push_http.html) | [`CredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/trait.CredentialProvider.html) |
+
+Wire transports use [`Transport::connect`](https://docs.rs/grit-lib/latest/grit_lib/transport/trait.Transport.html) with [`Service::UploadPack`](https://docs.rs/grit-lib/latest/grit_lib/transport/enum.Service.html) (fetch) or `ReceivePack` (push). Fetch negotiates protocol v2 when possible; push uses v0/v1.
+
+Local remotes resolve through [`resolve_local_remote_git_dir`](https://docs.rs/grit-lib/latest/grit_lib/transport_path/fn.resolve_local_remote_git_dir.html) so relative `remote.*.url` values behave like Git (repository root, not process cwd).
+
+## ls-remote
+
+For a **local** git directory (bare repo or `.git`), [`ls_remote`](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/fn.ls_remote.html) lists refs with the same ordering and peeling rules as `git ls-remote` on a filesystem remote. Pass [`ls_remote::Options`](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/struct.Options.html) to filter heads, tags, or patterns. Remote listing over HTTP/SSH is driven by fetch negotiation; local enumeration is the usual first step for `file://` tests and tools.
+
+## Fetch and push inputs
+
+[`FetchOptions`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOptions.html) carries refspecs, tag mode ([`TagMode`](https://docs.rs/grit-lib/latest/grit_lib/transfer/enum.TagMode.html)), prune, shallow depth, and related flags. [`FetchOutcome`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOutcome.html) reports ref updates and optional default-branch hints.
+
+Push uses [`PushRefSpec`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushRefSpec.html) entries (source oid, destination ref, force, lease fields) and returns [`PushOutcome`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOutcome.html) with per-ref [`PushRefStatus`](https://docs.rs/grit-lib/latest/grit_lib/push_report/enum.PushRefStatus.html).
+
+## Credentials and progress
+
+HTTP smart transport accepts an [`HttpClient`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/trait.HttpClient.html) implementation. With the `http-ureq` feature, `UreqHttpClient::from_config` honors `http.proxy`, cookies, and extra headers from [`ConfigSet`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html). [`SmartHttpTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/struct.SmartHttpTransport.html) wraps any client for combined fetch/push entry points.
+
+[`HelperCredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/struct.HelperCredentialProvider.html) runs configured `credential.helper` programs on `401` and retries with HTTP Basic. It **never** opens a TTY — missing credentials surface as [`Error::Auth`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html).
+
+Pass [`NoProgress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/struct.NoProgress.html) to ignore sideband progress, or implement [`Progress::message`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) to receive raw progress bytes from side-band channel 2.
+
+## Example
+
+This example resolves `origin`, lists refs on a **local** bare remote, fetches, creates a commit reusing the fetched tip’s tree, and pushes — all over `file://`:
+
+```rust
+//! List refs on a local remote, fetch, create a commit, and push over `file://`.
+//!
+//! Source for the library guide "Network" page (included in the docs site).
+
+use grit_examples::remote;
+use grit_lib::config::ConfigSet;
+use grit_lib::ls_remote::{self, Options as LsRemoteOptions};
+use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
+use grit_lib::refs;
+use grit_lib::repo::Repository;
+use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
+use grit_lib::transport_path::resolve_local_remote_git_dir;
+use std::path::Path;
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let consumer = std::env::args().nth(1).ok_or_else(|| {
+        grit_lib::error::Error::Message("usage: guide_network <consumer-repo>".to_owned())
+    })?;
+    let consumer = Path::new(&consumer);
+    let repo = Repository::discover(Some(consumer))?;
+    let git_dir = repo.git_dir.clone();
+    let work_tree = repo.work_tree.clone();
+    let config = ConfigSet::load(Some(&git_dir), true)?;
+
+    let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+
+    let remote_git_dir =
+        resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
+    let remote_repo = Repository::open(&remote_git_dir, None)?;
+    let refs_on_remote = ls_remote::ls_remote(
+        &remote_git_dir,
+        &remote_repo.odb,
+        &LsRemoteOptions::default(),
+    )?;
+    eprintln!(
+        "ls-remote: {} ref(s) on {}",
+        refs_on_remote.len(),
+        remote_git_dir.display()
+    );
+
+    let fetch_opts = FetchOptions {
+        refspecs: remote_info.fetch_refspecs.clone(),
+        tags: TagMode::Following,
+        ..Default::default()
+    };
+    remote::fetch(&git_dir, &remote_info, &fetch_opts)
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+
+    let tracking = refs::resolve_ref(&git_dir, "refs/remotes/origin/main")?;
+    refs::write_ref(&git_dir, "refs/heads/main", &tracking)?;
+
+    let parent_obj = repo.odb.read(&tracking)?;
+    let parent = parse_commit(&parent_obj.data)?;
+    let commit = CommitData {
+        tree: parent.tree,
+        parents: vec![tracking],
+        author: parent.author.clone(),
+        committer: parent.committer.clone(),
+        author_raw: parent.author_raw.clone(),
+        committer_raw: parent.committer_raw.clone(),
+        encoding: parent.encoding.clone(),
+        message: "library guide network example\n".to_owned(),
+        raw_message: None,
+    };
+    let new_oid = repo
+        .odb
+        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+    refs::write_ref(&git_dir, "refs/heads/main", &new_oid)?;
+
+    let spec = PushRefSpec {
+        src: Some(new_oid),
+        dst: "refs/heads/main".to_owned(),
+        force: false,
+        delete: false,
+        expected_old: None,
+        expect_absent: false,
+    };
+    remote::push(&git_dir, &remote_info, &[spec], &PushOptions::default())
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+
+    println!("{new_oid}");
+    Ok(())
+}
+```
+
+The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs`.
+
+Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
+
+# https://grit-scm.com/docs/library/objects/index.md
+
+# Objects
+
+> ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.
+
+Git stores four object kinds grit-lib exposes as [`ObjectKind`](https://docs.rs/grit-lib/latest/grit_lib/objects/enum.ObjectKind.html). Every object is named by an [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html) (SHA-1 by default). The [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) on [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) reads loose objects and packed storage transparently.
+
+## Writing
+
+[`Odb::write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) takes a kind and payload bytes, stores a loose object under `objects/`, and returns the id. Tree and commit bodies must already be in Git’s text format; use [`parse_tree`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.parse_tree.html) and [`parse_commit`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.parse_commit.html) when reading them back.
+
+[`Odb::hash`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (or [`HashAlgo::hash_object`](https://docs.rs/grit-lib/latest/grit_lib/objects/enum.HashAlgo.html)) computes an id without writing—useful for dry runs and tests. The algorithm follows the repository’s configured object format (SHA-1 or SHA-256).
+
+## Reading
+
+[`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) returns an [`Object`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.Object.html) with `kind` and uncompressed `data`. Packed and loose objects share the same API.
+
+When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (see `read_info` on [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html)). It returns [`ObjectInfo`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectInfo.html) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
+
+## Example
+
+This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
+
+```rust
+//! Write a blob, tree, and commit through [`grit_lib::odb::Odb`], then read them back.
+//!
+//! Source for the library guide "Objects" page (included in the docs site).
+
+use grit_lib::objects::{
+    parse_commit, parse_tree, serialize_commit, serialize_tree, CommitData, ObjectKind, TreeEntry,
+};
+use grit_lib::repo::{init_repository, Repository};
+use std::path::{Path, PathBuf};
+
+fn write_demo_objects(
+    repo: &Repository,
+) -> Result<
+    (
+        grit_lib::objects::ObjectId,
+        grit_lib::objects::ObjectId,
+        grit_lib::objects::ObjectId,
+    ),
+    grit_lib::error::Error,
+> {
+    let blob_data = b"hello from the library guide\n";
+    let blob_oid = repo.odb.write(ObjectKind::Blob, blob_data)?;
+
+    let tree_entries = vec![TreeEntry {
+        mode: 0o100644,
+        name: b"README".to_vec(),
+        oid: blob_oid,
+    }];
+    let tree_oid = repo
+        .odb
+        .write(ObjectKind::Tree, &serialize_tree(&tree_entries))?;
+
+    let commit = CommitData {
+        tree: tree_oid,
+        parents: Vec::new(),
+        author: "Ada Lovelace <ada@example.com> 0 +0000".to_owned(),
+        committer: "Ada Lovelace <ada@example.com> 0 +0000".to_owned(),
+        author_raw: Vec::new(),
+        committer_raw: Vec::new(),
+        encoding: None,
+        message: "Library guide objects example\n".to_owned(),
+        raw_message: None,
+    };
+    let commit_oid = repo
+        .odb
+        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+
+    let tree_obj = repo.odb.read(&tree_oid)?;
+    let entries = parse_tree(&tree_obj.data)?;
+    assert_eq!(entries[0].oid, blob_oid);
+
+    let commit_obj = repo.odb.read(&commit_oid)?;
+    let parsed = parse_commit(&commit_obj.data)?;
+    assert_eq!(parsed.tree, tree_oid);
+
+    Ok((blob_oid, tree_oid, commit_oid))
+}
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let repo = if let Some(root) = std::env::args().nth(1).map(PathBuf::from) {
+        open_repo(&root)?
+    } else {
+        let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+        init_repository(temp.path(), false, "main", None, "files")?;
+        open_repo(temp.path())?
+    };
+
+    let (blob_oid, tree_oid, commit_oid) = write_demo_objects(&repo)?;
+    println!("{commit_oid}");
+    println!("blob={blob_oid} tree={tree_oid}");
+    Ok(())
+}
+```
+
+Objects land on disk in standard loose format. System Git can read them:
+
+```bash
+cargo run --bin guide_objects /path/to/repo
+git -C /path/to/repo fsck --strict
+```
+
+When run without arguments the binary uses a temporary repository (fine for `cargo run`, not for fsck demos).
+
+# https://grit-scm.com/docs/library/refs/index.md
+
+# Refs
+
+> Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.
+
+References name commits (and other objects). grit-lib exposes them through [`refs`](https://docs.rs/grit-lib/latest/grit_lib/refs/index.html) and [`reftable`](https://docs.rs/grit-lib/latest/grit_lib/reftable/index.html), with [`reflog`](https://docs.rs/grit-lib/latest/grit_lib/reflog/index.html) for update history. The [`references`](https://docs.rs/grit-lib/latest/grit_lib/references/index.html) module groups these for navigation in rustdoc.
+
+## Resolving HEAD and symbolic refs
+
+[`resolve_head`](https://docs.rs/grit-lib/latest/grit_lib/state/fn.resolve_head.html) reads `HEAD` and returns a [`HeadState`](https://docs.rs/grit-lib/latest/grit_lib/state/enum.HeadState.html): on a branch (symbolic ref plus commit, if any), detached at a commit, or invalid. To resolve any ref name to an object id, use [`resolve_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.resolve_ref.html), which follows symbolic refs with cycle detection.
+
+[`read_ref_file`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.read_ref_file.html) returns a [`Ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.Ref.html) (`Direct` or `Symbolic`) without resolving the whole chain.
+
+## Listing branches and tags
+
+[`list_refs`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.list_refs.html) takes a prefix such as `refs/heads/` or `refs/tags/` and returns sorted `(name, ObjectId)` pairs. Loose refs under `refs/` override stale lines in `packed-refs`, matching Git. [`list_refs_glob`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.list_refs_glob.html) applies pattern matching when you need DWIM-style filtering.
+
+## Creating and updating refs with reflog
+
+[`write_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.write_ref.html) points a ref at a commit (or other object). [`write_symbolic_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.write_symbolic_ref.html) updates symbolic refs such as `HEAD`.
+
+Record history with [`append_reflog`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.append_reflog.html), then read it back with [`read_reflog`](https://docs.rs/grit-lib/latest/grit_lib/reflog/fn.read_reflog.html). Each [`ReflogEntry`](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.ReflogEntry.html) carries old and new ids, identity, and message. Batch updates can use [`update_refs`](https://docs.rs/grit-lib/latest/grit_lib/gc/fn.update_refs.html) when you need compare-and-swap semantics across many refs.
+
+## Loose, packed, and reftable backends
+
+By default, grit uses the **files** backend: one file per ref under `refs/`, plus an optional `packed-refs` file. [`list_refs`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.list_refs.html) and [`resolve_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.resolve_ref.html) merge packed and loose sources so callers see a single namespace.
+
+When `extensions.refStorage = reftable` is set in config, the same functions dispatch to the **reftable** backend ([`is_reftable_repo`](https://docs.rs/grit-lib/latest/grit_lib/reftable/fn.is_reftable_repo.html)). Reflog appends and ref listing go through reftable files instead of `logs/` and loose ref files. You do not choose the backend per call; discovery is automatic from the repository layout and config.
+
+## Example
+
+The program below resolves `HEAD`, lists branches and tags, updates `refs/heads/library-guide-demo`, and appends a reflog entry:
+
+```rust
+//! Resolve HEAD, list branches and tags, update a branch ref with reflog.
+//!
+//! Source for the library guide "Refs" page (included in the docs site).
+
+use grit_lib::objects::ObjectId;
+use grit_lib::reflog::read_reflog;
+use grit_lib::refs::{self, Ref};
+use grit_lib::repo::Repository;
+use grit_lib::state::resolve_head;
+use std::path::{Path, PathBuf};
+
+const DEMO_BRANCH: &str = "refs/heads/library-guide-demo";
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let root = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+    let repo = open_repo(&root)?;
+    let git_dir = &repo.git_dir;
+
+    let head = resolve_head(git_dir)?;
+    match &head {
+        grit_lib::state::HeadState::Branch { refname, oid, .. } => {
+            println!("head_symbolic={refname}");
+            if let Some(oid) = oid {
+                println!("head_oid={}", oid.to_hex());
+            }
+        }
+        grit_lib::state::HeadState::Detached { oid } => {
+            println!("head_detached={}", oid.to_hex());
+        }
+        grit_lib::state::HeadState::Invalid => println!("head_invalid=1"),
+    }
+
+    let head_file = refs::read_ref_file(&git_dir.join("HEAD"))?;
+    if let Ref::Symbolic(target) = head_file {
+        println!("head_file_symbolic={target}");
+    }
+
+    for (name, oid) in refs::list_refs(git_dir, "refs/heads/")? {
+        println!("branch {name} {}", oid.to_hex());
+    }
+    for (name, oid) in refs::list_refs(git_dir, "refs/tags/")? {
+        println!("tag {name} {}", oid.to_hex());
+    }
+
+    let storage = if grit_lib::reftable::is_reftable_repo(git_dir) {
+        "reftable"
+    } else {
+        "files"
+    };
+    println!("ref_storage={storage}");
+
+    let target = head
+        .oid()
+        .cloned()
+        .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
+
+    let old = refs::resolve_ref(git_dir, DEMO_BRANCH).ok();
+    refs::write_ref(git_dir, DEMO_BRANCH, &target)?;
+
+    let zero = ObjectId::zero();
+    let old_oid = old.as_ref().unwrap_or(&zero);
+    let identity = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
+    refs::append_reflog(
+        git_dir,
+        DEMO_BRANCH,
+        old_oid,
+        &target,
+        identity,
+        "library guide refs example",
+        true,
+    )?;
+
+    println!("demo_ref={DEMO_BRANCH}");
+    println!("demo_oid={}", target.to_hex());
+
+    let entries = read_reflog(git_dir, DEMO_BRANCH)?;
+    if let Some(last) = entries.last() {
+        println!("demo_reflog_new={}", last.new_oid.to_hex());
+        println!("demo_reflog_message={}", last.message);
+    }
+
+    Ok(())
+}
+```
+
+Run against any repository with at least one commit:
+
+```bash
+cargo run --bin guide_refs /path/to/repo
+git -C /path/to/repo rev-parse refs/heads/library-guide-demo
+git -C /path/to/repo reflog show refs/heads/library-guide-demo
+```
+
+# https://grit-scm.com/docs/library/repository/index.md
+
+# Repository
+
+> Open and discover Git repositories, read git-dir vs work tree, load config, and handle grit_lib::Error.
+
+A [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) is the main handle for grit-lib. It carries the absolute [`git_dir`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) path, an optional [`work_tree`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) for non-bare repos, and an [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) for object reads and writes.
+
+## Discover vs open
+
+Call [`Repository::discover`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) when you have a working directory and want the same upward search Git uses (respecting `GIT_DIR` and `GIT_WORK_TREE`). Call [`Repository::open`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) when you already know the git directory and optionally the work tree path.
+
+Bare repositories have `work_tree: None`. Linked worktrees and gitfile indirection are handled during discovery so `git_dir` always points at the directory that contains `objects/`.
+
+## Config
+
+Repository code does not cache a full config snapshot on the struct. Load settings when you need them with [`ConfigSet::load`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html), passing `Some(&repo.git_dir)` for repository-local files. Keys use Git’s dotted names (`user.name`, `core.bare`, …).
+
+## Errors
+
+Library operations return [`grit_lib::error::Result`](https://docs.rs/grit-lib/latest/grit_lib/error/type.Result.html). The [`Error`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) enum covers I/O, missing objects, bad repository layout, and invalid user input. Match on variants in application code; the `grit` CLI maps them to exit codes and messages separately.
+
+## Example
+
+The program below discovers a repository (or opens `.git` in the current directory), prints paths, and reads `user.name` from config:
+
+```rust
+//! Open and discover repositories; load config from the git directory.
+//!
+//! Source for the library guide "Repository" page (included in the docs site).
+
+use grit_lib::config::ConfigSet;
+use grit_lib::error::Error;
+use grit_lib::repo::Repository;
+
+fn main() -> Result<(), Error> {
+    let repo = match Repository::discover(None) {
+        Ok(r) => r,
+        Err(Error::NotARepository(_)) => {
+            let here = std::env::current_dir().map_err(Error::Io)?;
+            let git_dir = here.join(".git");
+            Repository::open(&git_dir, Some(&here))?
+        }
+        Err(err) => return Err(err),
+    };
+
+    println!("git_dir={}", repo.git_dir.display());
+    if let Some(wt) = &repo.work_tree {
+        println!("work_tree={}", wt.display());
+    } else {
+        println!("work_tree=<bare>");
+    }
+
+    let cfg = ConfigSet::load(Some(&repo.git_dir), true)?;
+    let name = cfg.get("user.name").unwrap_or_default();
+    if !name.is_empty() {
+        println!("user.name={name}");
+    }
+
+    Ok(())
+}
+```
+
+Run from any Git checkout:
+
+```bash
+cargo run --bin guide_repository
+```
+
+# https://grit-scm.com/docs/library/revwalk/index.md
+
+# Revwalk
+
+> Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.
+
+History walks start from one or more **tips** (resolved ref names or expressions), follow parent links, optionally subtract another set of tips, then sort the result. grit-lib exposes the same machinery the CLI uses through [`rev_parse`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/index.html) and [`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/index.html).
+
+## Rev-parse
+
+[`resolve_revision`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.resolve_revision.html) turns a single spec (`HEAD`, `main`, `v1.0`, `abc1234`, `main^`, `HEAD~3`, tag peelers, and more) into an [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html). For range endpoints and log-style DWIM, [`resolve_revision_for_range_end`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.resolve_revision_for_range_end.html) matches Git’s `A..B` left/right rules.
+
+Common helpers that do not need a full repository walk:
+
+- [`split_double_dot_range`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.split_double_dot_range.html) — split `main..feature` into two tokens (ignores `...` and path segments).
+- [`abbreviate_ref_name`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.abbreviate_ref_name.html) — shorten `refs/heads/main` to `main` for display.
+
+## Rev-list
+
+[`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/fn.rev_list.html) takes positive and negative revision specs plus [`RevListOptions`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListOptions.html). It returns a [`RevListResult`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListResult.html) whose `commits` field is the final oid list (after skip, max-count, and reverse).
+
+| Option | Meaning |
+| --- | --- |
+| [`ordering`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListOptions.html) | [`OrderingMode`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.OrderingMode.html) — default date order, topo, author-date variants. |
+| `first_parent` | Follow only the first parent at merges. |
+| `max_count` / `skip` | Limit how many commits are returned. |
+| `reverse` | Reverse the selected list after sorting. |
+
+For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.split_double_dot_range.html) as the example does). That matches `git rev-list main..feature`.
+
+## Merge base
+
+[`merge_bases_first_vs_rest`](https://docs.rs/grit-lib/latest/grit_lib/merge_base/fn.merge_bases_first_vs_rest.html) finds minimal common ancestors between one commit and one or more others — the library equivalent of `git merge-base A B`. For diff-style “pick exactly one base or fail”, see [`merge_base_for_diff_two_commits`](https://docs.rs/grit-lib/latest/grit_lib/merge_base/fn.merge_base_for_diff_two_commits.html).
+
+## Example
+
+The program below opens a repository (created by system Git in tests), walks `main..feature`, prints each commit oid, then prints the merge base of the range tips:
+
+```rust
+//! Walk commit history with [`grit_lib::rev_list::rev_list`] and compute a merge base.
+//!
+//! Source for the library guide "Revwalk" page (included in the docs site).
+
+use grit_lib::merge_base::merge_bases_first_vs_rest;
+use grit_lib::repo::Repository;
+use grit_lib::rev_list::{rev_list, RevListOptions};
+use grit_lib::rev_parse::{resolve_revision, split_double_dot_range};
+use std::path::Path;
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let mut args = std::env::args().skip(1);
+    let repo_root = args.next().map(std::path::PathBuf::from).ok_or_else(|| {
+        grit_lib::error::Error::Message("usage: guide_revwalk <repo> [main..feature]".to_owned())
+    })?;
+    let range = args.next().unwrap_or_else(|| "main..feature".to_owned());
+
+    let repo = open_repo(&repo_root)?;
+    let options = RevListOptions::default();
+    let result = if let Some((left, right)) = split_double_dot_range(&range) {
+        let mut positive = Vec::new();
+        let mut negative = Vec::new();
+        if !right.is_empty() {
+            positive.push(right.to_owned());
+        }
+        if !left.is_empty() {
+            negative.push(left.to_owned());
+        }
+        rev_list(&repo, &positive, &negative, &options)?
+    } else {
+        rev_list(&repo, std::slice::from_ref(&range), &[], &options)?
+    };
+
+    for oid in &result.commits {
+        println!("{oid}");
+    }
+
+    let (left_name, right_name) = range_names(&range)?;
+    let left = resolve_revision(&repo, left_name)?;
+    let right = resolve_revision(&repo, right_name)?;
+    let bases = merge_bases_first_vs_rest(&repo, left, &[right])?;
+    let Some(base) = bases.first() else {
+        return Err(grit_lib::error::Error::Message(
+            "no merge base for range tips".to_owned(),
+        ));
+    };
+    println!("merge_base={base}");
+
+    Ok(())
+}
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn range_names(range: &str) -> Result<(&str, &str), grit_lib::error::Error> {
+    split_double_dot_range(range).ok_or_else(|| {
+        grit_lib::error::Error::Message(format!("expected a double-dot range, got {range:?}"))
+    })
+}
+```
+
+Run against a repo with diverged `main` and `feature` branches:
+
+```bash
+cargo run --bin guide_revwalk /path/to/repo main..feature
+```
+
+The integration test `guide_revwalk` checks commit order against `git rev-list` and the merge base against `git merge-base`.
+
+# https://grit-scm.com/docs/library/staging/index.md
+
+# Index
+
+> Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.
+
+The Git index (staging area) lives in [`Index`](https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html). Open a [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html), then call `load_index` (or `write_index` after changes). Index-related modules are grouped under [`worktree_index`](https://docs.rs/grit-lib/latest/grit_lib/worktree_index/index.html) in rustdoc.
+
+See also the [Repository](https://grit-scm.com/docs/library/repository/index.md) and [Objects](https://grit-scm.com/docs/library/objects/index.md) pages for opening repos and writing objects. Other library topics: [Refs](https://grit-scm.com/docs/library/refs/index.md), [Diff](https://grit-scm.com/docs/library/diff/index.md).
+
+## Reading the index
+
+[`Index`](https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html) `load` reads `index` from disk; [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) `load_index` applies sparse-checkout and split-index rules the same way porcelain commands do. Entries are [`IndexEntry`](https://docs.rs/grit-lib/latest/grit_lib/index/struct.IndexEntry.html) values with path, mode, object id, and stage.
+
+## Staging paths
+
+[`porcelain::add::stage`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/fn.stage.html) compares the index to the work tree once, hashes changed blobs, and writes the index back. Pass [`StageOptions`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/struct.StageOptions.html) for pathspecs and [`StageMode`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/enum.StageMode.html) (`All` vs `Update`). Long-running staging reports through a [`ProgressSink`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.ProgressSink.html); examples use [`NullProgress`](https://docs.rs/grit-lib/latest/grit_lib/progress/struct.NullProgress.html) when no UI is needed.
+
+The `grit add` command is a thin wrapper around this API.
+
+## Writing a tree from the index
+
+[`write_tree_from_index`](https://docs.rs/grit-lib/latest/grit_lib/write_tree/fn.write_tree_from_index.html) builds a tree object from stage-0 entries (respecting the optional path prefix). It returns the root [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html). When the index cache-tree extension is valid, grit reuses cached subtree oids for speed; otherwise it walks entries and writes new tree objects through [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html).
+
+## Example
+
+This program loads the index, stages new or changed paths, and prints the tree oid grit would commit:
+
+```rust
+//! Read the index, stage paths, and write a tree from staged entries.
+//!
+//! Source for the library guide "Index" page (included in the docs site).
+
+use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::progress::NullProgress;
+use grit_lib::repo::{init_repository, Repository};
+use grit_lib::write_tree::write_tree_from_index;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let mut temp_guard = None;
+    let repo = if let Some(root) = std::env::args().nth(1).map(PathBuf::from) {
+        open_repo(&root)?
+    } else {
+        let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+        init_repository(temp.path(), false, "main", None, "files")?;
+        let path = temp.path().join("hello.txt");
+        fs::write(&path, b"staged from the library guide\n").map_err(grit_lib::error::Error::Io)?;
+        let opened = open_repo(temp.path())?;
+        temp_guard = Some(temp);
+        opened
+    };
+    let _keep = temp_guard;
+
+    let index = repo.load_index()?;
+    println!("index_entries={}", index.entries().len());
+
+    let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress)?;
+    println!(
+        "staged added={} modified={} removed={}",
+        outcome.added, outcome.modified, outcome.removed
+    );
+
+    let index = repo.load_index()?;
+    let tree_oid = write_tree_from_index(&repo.odb, &index, "")?;
+    println!("tree_oid={}", tree_oid.to_hex());
+
+    Ok(())
+}
+```
+
+With a repository path, compare the printed tree to Git:
+
+```bash
+cargo run --bin guide_index /path/to/repo
+git -C /path/to/repo write-tree
+git -C /path/to/repo fsck --strict
+```
+
+Without arguments the binary uses a temporary repository (useful for `cargo run`, not for fsck demos).
+
+# https://grit-scm.com/docs/benchmarks/index.md
+
+# Benchmarks
+
+> Grit vs Git on realistic workloads, from the committed grit-bench baseline.
+
+Performance work is measured on the factory VM and in CI against the **system** `git` binary. Micro-benchmarks live in `grit-lib` (Criterion) and command-level scenarios in `grit-bench` (`grit-utils`).
+
+Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
+
+## grit-lib: parallel object hashing
+
+Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects hash/batch_parallel`) hashes **20 000** Git blob objects of **16 KiB** each using [`hash_objects_parallel`](https://docs.rs/grit-lib/latest/grit_lib/hash/fn.hash_objects_parallel.html) (SHA-1, release build).
+
+| Threads | Time (median) | Throughput |
+| ------- | ------------- | ---------- |
+| 1       | 173 ms        | 1.76 GiB/s |
+| 8       | 44.5 ms       | 6.86 GiB/s |
+
+**Speedup (8 vs 1 thread): ~3.9×** on the factory VM (2026-10-07).
+
+Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
+
+## grit-lib: parallel index-pack (in-memory)
+
+Hyperfine on a **~90 000-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-07). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) via `cargo run --release -p grit-lib --example index_pack_bench` (see `GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`).
+
+| Command | Mean (8 runs) |
+| ------- | ------------- |
+| `git index-pack --threads=8` | 640 ms |
+| grit index-pack, 1 thread | 1.43 s |
+| grit index-pack, 8 threads | 781 ms |
+
+**Speedup (8 vs 1 thread): ~1.83×** on this fixture. Multi-threaded builds discover object boundaries with a discard decompress pass, then parallel workers inflate and hash whole objects; delta chains inflate, apply, and hash in parallel rounds. Grit does not yet beat `git index-pack --threads=8` on this pack (Git also writes the on-disk `.idx`).
+
+Integration coverage uses a **≥ 50 000** object fixture built with `git fast-import` and shared across tests via `OnceLock` (`grit-lib/tests/index_pack_parallel.rs`); the default release suite completes in about **41 s** on the factory VM.
+
+## Hashing
+
+Raw digest throughput uses [`grit_lib::hash::ObjectHasher`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) (release build, Criterion). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
+
+**Environment (2026-10-07):** Intel Xeon (SHA-NI present), Linux, `git` 2.43.0, OpenSSL 3.0.13, Rust stable. `hash-info --json` reports `{"sha1":"x86_sha_ni","sha256":"x86_sha_ni"}`.
+
+| Workload | grit-lib | Reference | grit / reference |
+| -------- | -------- | --------- | ---------------- |
+| SHA-1, 1 MiB buffer | 1.98 GiB/s | OpenSSL SHA-1 @ 16 KiB: 1.98 GiB/s | **100%** |
+| SHA-256, 1 MiB buffer | 1.80 GiB/s | OpenSSL SHA-256 @ 16 KiB: 1.78 GiB/s | **101%** |
+| SHA-1 blob, 256 MiB file | 0.31 s | `git hash-object`: 0.48 s | **1.55× faster** |
+
+SHA-1 at 1 MiB and above meets the project bar (≥ 95% of OpenSSL on the same CPU). SHA-256 meets ≥ 90% of OpenSSL. End-to-end blob id for a large file beats stock Git 2.43, which still uses sha1dc for object hashing.
+
+### Commands
+
+```bash
+# Backends selected on this CPU
+cargo run -p grit-examples --bin hash-info -- --json
+
+# Criterion throughput (64 B … 64 MiB)
+cargo bench -p grit-lib --bench hash
+
+# OpenSSL + hyperfine vs git (creates a 256 MiB temp file)
+./scripts/bench-hash.sh
+```
+
+## grit-bench vs Git
+
+### Methodology
+
+- **Fixtures** use synthetic repos at large file counts and deep history, built deterministically in a scratch directory.
+- **Drivers** are CLI invocations of `grit` and `git` with equivalent semantics (not argv-for-argv compatibility).
+- **Ratios** are **Grit mean ÷ Git mean**. Values below `1.00×` mean Grit is faster; values above `2.00×` are highlighted as regressions worth investigating.
+- **Spread** shows Grit’s standard deviation across timed runs (hyperfine `--min-runs` / warmup settings from the baseline capture).
+
+### Reproduce locally
+
+Build release binaries, install [hyperfine](https://github.com/sharkdp/hyperfine), then run matching grit-bench scenarios from the repo root (see `grit-utils/README.md` for the current subcommands):
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+
+# Example: hot-path scenarios at L/H tiers (switch, pick, merge)
+./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output /tmp/grit-bench-hot-paths.json
+```
+
+When roadmap item 2 adds more baseline JSON files on `main`, list their paths under `[benchmarks].baseline` in `content/docs/site.toml` and regenerate the site.
+
+Compare a fresh run against the committed baseline (exit non-zero if any scenario ratio drifts beyond tolerance):
+
+```bash
+./target/release/grit-bench compare grit-utils/baselines/hot-paths-before.json /tmp/grit-bench-hot-paths.json --tolerance 0.10
+```
+
+### Results
+
+
+
+| | |
+| --- | --- |
+| Git | git version 2.43.0 |
+| Grit | grit 0.5.0 |
+| CPU | Intel(R) Xeon(R) Processor |
+| OS | linux (Linux 6.12.94+) |
+| Recorded | 2026-10-07 15:15:12.204218776 |
+
+## Summary by operation
+
+| Operation | Scenarios | Median Grit / Git | Worst Grit / Git |
+| --- | ---: | ---: | ---: |
+| merge | 2 | 3.29× | 3.96× |
+| pick | 4 | 9.10× | 19.51× |
+| switch | 4 | 4.28× | 27.42× |
+
+### merge
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `merge-10000` | synthetic-10000 | 104 | 272 | 2.61× | ±11.6 ms |
+| `merge-100000` | synthetic-100000 | 307 | 1,215 | 3.96× | ±4.44 ms |
+
+### pick
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `pick-10000` | synthetic-10000 | 114 | 162 | 1.42× | ±3.24 ms |
+| `pick-series-10000` | synthetic-10000 | 126 | 1,604 | 12.72× | ±40.4 ms |
+| `pick-100000` | synthetic-100000 | 208 | 1,139 | 5.47× | ±18.5 ms |
+| `pick-series-100000` | synthetic-100000 | 1,052 | 20,538 | 19.51× | ±299 ms |
+
+### switch
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `switch-10000` | synthetic-10000 | 22.9 | 83.6 | 3.64× | ±31.0 ms |
+| `switch-wide-10000` | synthetic-10000 | 46.2 | 163 | 3.53× | ±1.55 ms |
+| `switch-100000` | synthetic-100000 | 159 | 778 | 4.91× | ±23.2 ms |
+| `switch-wide-100000` | synthetic-100000 | 397 | 10,875 | 27.42× | ±756 ms |
+
+
+To refresh this page after updating a baseline JSON file, regenerate the static site:
+
+```bash
+make docs
+```
+
+The docs `--check` step fails if baseline numbers change without re-running `make docs`.
+
+For other library surfaces under test, see the [grit-lib API on docs.rs](https://docs.rs/grit-lib).

@@ -73,6 +73,14 @@ class LinkcheckFixture(unittest.TestCase):
             any(i.source.name == "index.md" and "grit-scm.com/docs/index.md" in i.raw for i in issues)
         )
 
+    def test_llms_txt_links_are_checked(self) -> None:
+        (self.site / "llms.txt").write_text(
+            "[bad](https://grit-scm.com/docs/missing/index.md)\n",
+            encoding="utf-8",
+        )
+        issues = linkcheck.run(check_external=False)
+        bad = [i for i in issues if i.source.name == "llms.txt"]
+        self.assertEqual(len(bad), 1)
     def test_external_link_skipped_by_default(self) -> None:
         issues = linkcheck.run(check_external=False)
         external = [

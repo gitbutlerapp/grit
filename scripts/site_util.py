@@ -5,6 +5,11 @@ import filecmp
 from pathlib import Path
 
 
+def file_equals(left: Path, right: Path) -> bool:
+    """Return whether two files have identical contents."""
+    return left.is_file() and right.is_file() and filecmp.cmp(left, right, shallow=False)
+
+
 def collect_files(root: Path) -> dict[Path, Path]:
     """Map relative paths to absolute file paths under ``root``."""
     if not root.is_dir():
