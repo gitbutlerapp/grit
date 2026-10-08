@@ -2627,12 +2627,9 @@ fn add_environment_config_pairs(set: &mut ConfigSet, env: &Environment) -> Resul
     }
 
     for i in 0..count {
-        let (key, value) = env
-            .git_config_pairs
-            .get(i)
-            .ok_or_else(|| {
-                Error::Config(format!("missing config key GIT_CONFIG_KEY_{i}").into())
-            })?;
+        let (key, value) = env.git_config_pairs.get(i).ok_or_else(|| {
+            Error::Config(format!("missing config key GIT_CONFIG_KEY_{i}").into())
+        })?;
         set.add_command_override(key, value)?;
     }
 

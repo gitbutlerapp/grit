@@ -1855,9 +1855,11 @@ pub fn convert_to_worktree(
                 Ok(out) => out,
                 Err(e) => {
                     if file_attrs.filter_smudge_required {
-                        return Err(
-                            external_filter_failed(rel_path, driver, FilterPhase::Smudge).into(),
-                        );
+                        return Err(external_filter_failed(
+                            rel_path,
+                            driver,
+                            FilterPhase::Smudge,
+                        ));
                     }
                     if e.starts_with("filter status: abort") {
                         crate::filter_process::disable_process_filter(proc_cmd);
@@ -1892,17 +1894,21 @@ pub fn convert_to_worktree(
                 Ok(filtered) => buf = filtered,
                 Err(_e) => {
                     if file_attrs.filter_smudge_required {
-                        return Err(
-                            external_filter_failed(rel_path, driver, FilterPhase::Smudge).into(),
-                        );
+                        return Err(external_filter_failed(
+                            rel_path,
+                            driver,
+                            FilterPhase::Smudge,
+                        ));
                     }
                 }
             },
             None => {
                 if file_attrs.filter_smudge_required {
-                    return Err(
-                        external_filter_failed(rel_path, driver, FilterPhase::Smudge).into(),
-                    );
+                    return Err(external_filter_failed(
+                        rel_path,
+                        driver,
+                        FilterPhase::Smudge,
+                    ));
                 }
             }
         }

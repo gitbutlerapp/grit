@@ -96,10 +96,7 @@ fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> boo
 }
 
 fn objects_dir_has_active_midx(objects_dir: &Path) -> bool {
-    matches!(
-        crate::midx::prepared_midx_chain(objects_dir),
-        Ok(Some(_))
-    )
+    matches!(crate::midx::prepared_midx_chain(objects_dir), Ok(Some(_)))
 }
 
 fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
