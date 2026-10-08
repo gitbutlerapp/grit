@@ -132,7 +132,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 
 ### Object reads
 
-The **`grit-bench odb`** suite (library drivers in `grit-bench drive …` vs system **`git`**) measures cat-file batch reads, `rev-list --objects --all`, and `log -p` on a cached bare **git.git** clone and a repacked **100k-file / 1000-commit** synthetic repo. JSON reports include **peak RSS** (`getrusage(RUSAGE_CHILDREN)`) per scenario alongside wall time.
+The **`grit-bench odb`** suite (library drivers in `grit-bench drive …` vs system **`git`**) measures cat-file batch reads, `rev-list --objects --all`, and `log -p` on a cached bare **git.git** clone and a repacked **100k-file / 1000-commit** synthetic repo. JSON reports include **peak RSS** per scenario (each workload measured in a fresh `grit-bench measure-rss` helper process via `getrusage(RUSAGE_CHILDREN)` on that run only) alongside wall time.
 
 Reproduce:
 
@@ -168,7 +168,7 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 | add | 2 | 3.49× | 4.50× |
 | commit | 2 | 1.00× | 1.16× |
 | merge | 2 | 3.00× | 3.80× |
-| object_reads | 8 | 6.81× | 618.17× |
+| object_reads | 8 | 234.49× | 4569.02× |
 | pick | 4 | 6.96× | 16.49× |
 | status | 4 | 9.02× | 46.96× |
 | switch | 4 | 3.25× | 5.36× |
@@ -198,14 +198,14 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `cat-file-batch-sorted-git.git` | git.git | 32,939 | 48,831 | 1.48× | ±236 ms |
-| `cat-file-batch-unordered-git.git` | git.git | 10,541 | 15,758 | 1.49× | ±187 ms |
-| `log-patch-2000-git.git` | git.git | 1,512 | 8,787 | 5.81× | ±95.2 ms |
-| `rev-list-objects-git.git` | git.git | 2,956 | 1,612,525 | 545.49× | ±8,175 ms |
-| `cat-file-batch-sorted-hot-path-100k` | hot-path-100k | 119 | 926 | 7.81× | ±8.28 ms |
-| `cat-file-batch-unordered-hot-path-100k` | hot-path-100k | 119 | 948 | 7.93× | ±13.7 ms |
-| `log-patch-2000-hot-path-100k` | hot-path-100k | 406 | 1,249 | 3.08× | ±1.38 ms |
-| `rev-list-objects-hot-path-100k` | hot-path-100k | 55.9 | 34,535 | 618.17× | ±241 ms |
+| `cat-file-batch-sorted-git.git` | git.git | 32,433 | 46,558 | 1.44× | ±253 ms |
+| `cat-file-batch-unordered-git.git` | git.git | 10,655 | 15,384 | 1.44× | ±62.4 ms |
+| `log-patch-2000-git.git` | git.git | 1,518 | 699,640 | 460.95× | ±15,497 ms |
+| `rev-list-objects-git.git` | git.git | 3,036 | 1,590,307 | 523.82× | ±2,433 ms |
+| `cat-file-batch-sorted-hot-path-100k` | hot-path-100k | 119 | 922 | 7.76× | ±2.48 ms |
+| `cat-file-batch-unordered-hot-path-100k` | hot-path-100k | 117 | 937 | 8.03× | ±28.4 ms |
+| `log-patch-2000-hot-path-100k` | hot-path-100k | 400 | 1,827,664 | 4569.02× | ±12,342 ms |
+| `rev-list-objects-hot-path-100k` | hot-path-100k | 55.4 | 34,028 | 614.25× | ±43.8 ms |
 
 ### pick
 
