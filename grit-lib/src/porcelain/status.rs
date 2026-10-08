@@ -539,7 +539,8 @@ fn collect_untracked_parallel_top_level(
         return Ok(untracked);
     }
 
-    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let config =
+        ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let parallelism = index_parallelism_from_config(&config);
     let threads = parallelism.threads();
     let dir_count = root_dirs.len();

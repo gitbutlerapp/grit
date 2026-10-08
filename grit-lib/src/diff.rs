@@ -3641,7 +3641,7 @@ pub fn refresh_index_stat_content_verified(
         work_tree,
         index_mtime,
         config,
-        stat_parallel_threads,
+        _stat_parallel_threads,
         None,
     )
 }
