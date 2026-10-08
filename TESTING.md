@@ -151,6 +151,9 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 | t1450-fsck.sh | repository connectivity / missing objects | — | not applicable: no repository-level fsck API yet |
 | t1450-fsck.sh | reflog entries | — | not applicable: no repository-level fsck API yet |
 | t1450-fsck.sh | dangling / unreachable object reporting | — | not applicable: no repository-level fsck API yet |
+| `t/t5319-multi-pack-index.sh` | Grit/git MIDX write and verify; preferred pack and RIDX; duplicate OID selection; large offsets (LOFF); stale MIDX after pack changes; `verify_midx` corruption diagnostics | `grit-lib/tests/midx_roundtrip.rs`, `grit-lib/tests/midx_corruption.rs`, `grit-lib/tests/midx_write_coverage.rs` | covered (skip Git MIDX v2 verify on older Git; bitmap UX cases skipped) |
+| `t/t5334-incremental-multi-pack-index.sh` | Incremental chain layers; `resolve_midx_layer_path`; reads through `PreparedMidxChain`; convert to non-incremental via rewrite | `grit-lib/tests/midx_roundtrip.rs` (`incremental_chain_layer_paths_and_reads`; compact/chain tests skip when `git multi-pack-index --incremental` unavailable) | partial (bitmap/rev-list UX skipped) |
+| `t/t5335-compact-multi-pack-index.sh` | `compact_multi_pack_index` success path and `CompactError` variants | `grit-lib/tests/midx_roundtrip.rs` (`compact_multi_pack_index_builds_verified_chain`, `compact_error_variants`) | partial (skips when incremental chain unavailable) |
 
 ### Documentation site and rustdoc jobs
 

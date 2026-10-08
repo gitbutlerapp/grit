@@ -21,7 +21,7 @@ minimum = 85.0
 files = [
     "midx.rs",
 ]
-minimum = 63.2
+minimum = 83.4
 
 [group.odb]
 files = [
@@ -71,7 +71,7 @@ minimum = 85.0
 minimum = 90.7
 
 [file."midx.rs"]
-minimum = 63.2
+minimum = 83.4
 
 [file."objects.rs"]
 minimum = 85.6

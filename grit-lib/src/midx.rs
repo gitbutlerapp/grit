@@ -459,6 +459,60 @@ pub(crate) mod midx_cache {
                 Err(err) => Err(err),
             }
         }
+
+        #[cfg(test)]
+        fn synthetic_test_layer(n: usize) -> Self {
+            let hash_len = 20;
+            let first = 0x42u8;
+            let mut fanout = [0u32; 256];
+            fanout[0x42] = u32::try_from(n).expect("n fits u32");
+            let mut bytes = Vec::with_capacity(n * hash_len);
+            for i in 0..n {
+                let mut h = [0u8; 20];
+                h[0] = first;
+                h[19] = i as u8;
+                bytes.extend_from_slice(&h);
+            }
+            let pack_offsets: Vec<(u32, u64)> = (0..n).map(|i| (0, i as u64)).collect();
+            Self {
+                bytes: Arc::from(bytes),
+                fanout,
+                oidl_off: 0,
+                num_objects: n,
+                hash_len,
+                pack_offsets,
+                pack_dir: PathBuf::from("/nonexistent"),
+                pack_names: vec!["test-pack.idx".into()],
+                pack_indexes: vec![Arc::new(OnceLock::new())],
+                packs_validated: AtomicBool::new(false),
+            }
+        }
+
+        #[cfg(test)]
+        fn test_find_position(&self, oid: &ObjectId) -> Option<usize> {
+            self.find_position(oid)
+        }
+    }
+
+    #[cfg(test)]
+    mod layer_lookup_tests {
+        use super::{read_be_u32, PreparedMidxLayer};
+        use crate::objects::ObjectId;
+
+        #[test]
+        fn interpolation_search_finds_oid_in_wide_fanout_bucket() {
+            let layer = PreparedMidxLayer::synthetic_test_layer(70);
+            let mut h = [0u8; 20];
+            h[0] = 0x42;
+            h[19] = 35;
+            let oid = ObjectId::from_bytes(&h).expect("oid");
+            assert_eq!(layer.test_find_position(&oid), Some(35));
+        }
+
+        #[test]
+        fn midx_cache_read_be_u32_truncated() {
+            assert!(read_be_u32(&[0, 1, 2], 0).is_err());
+        }
     }
 
     /// All incremental MIDX layers for one `objects/pack` directory (newest first).
@@ -3332,6 +3386,56 @@ mod tests {
             ),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn midx_load_error_display_roundtrip() {
+        use crate::midx_error::MidxError;
+        let err = MidxError::VersionNotRecognized { version: 99 };
+        assert!(err.to_string().contains("not recognized"));
+    }
+
+    #[test]
+    fn compact_error_from_library_error() {
+        use crate::error::Error;
+        let err: super::CompactError = Error::CorruptObject("test".into()).into();
+        assert!(err.to_string().contains("test"));
+    }
+
+    #[test]
+    fn verify_midx_reports_missing_pack_name_chunk() {
+        let Some((tmp, _oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let path = pack_dir.join("multi-pack-index");
+        let mut data = std::fs::read(&path).expect("midx");
+        data[6] = 0;
+        data.truncate(super::MIDX_HEADER_SIZE + 24);
+        std::fs::write(&path, &data).expect("write broken midx");
+        super::evict_midx_read_cache_for_pack_dir(&pack_dir);
+        let errs = super::verify_midx(&objects).expect_err("verify");
+        assert!(
+            errs.iter().any(|e| {
+                e.contains("pack-name") || e.contains("pack name") || e.contains("chunk")
+            }),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn find_chunk_reports_missing_id() {
+        let Some((tmp, _oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let midx_path = tmp.path().join(".git/objects/pack/multi-pack-index");
+        let data = std::fs::read(midx_path).expect("midx");
+        let (_, hdr_end, _) = super::parse_midx_header(&data).expect("header");
+        let err = super::find_chunk(&data, hdr_end, 0xdead_beef).expect_err("missing chunk");
+        assert!(err.to_string().contains("not found"));
     }
 
     #[test]
