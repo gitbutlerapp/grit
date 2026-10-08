@@ -518,17 +518,13 @@ impl WriteSplitIndexRequest {
         match self.explicit {
             Some(false) => {
                 if matches!(split_index_config(cfg), SplitIndexConfig::Enabled) {
-                    eprintln!(
-                        "warning: core.splitIndex is set to true; remove or change it, if you really want to disable split index"
-                    );
+                    eprintln!("{}", crate::diagnostics::warning_line("core.splitIndex is set to true; remove or change it, if you really want to disable split index"));
                 }
                 false
             }
             Some(true) => {
                 if matches!(split_index_config(cfg), SplitIndexConfig::Disabled) {
-                    eprintln!(
-                        "warning: core.splitIndex is set to false; remove or change it, if you really want to enable split index"
-                    );
+                    eprintln!("{}", crate::diagnostics::warning_line("core.splitIndex is set to false; remove or change it, if you really want to enable split index"));
                 }
                 true
             }

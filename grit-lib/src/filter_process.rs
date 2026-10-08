@@ -533,8 +533,11 @@ impl DelayedProcessCheckout {
                         // The filter offered a path we never delayed (or already wrote). Match
                         // Git: report it and stop querying this (likely buggy) filter.
                         eprintln!(
-                            "error: external filter '{cmd}' signaled that '{path}' is now \
+                            "{}",
+                            crate::diagnostics::error_line(&format!(
+                                "external filter '{cmd}' signaled that '{path}' is now \
 available although it has not been delayed earlier"
+                            ))
                         );
                         had_error = true;
                         drop_filter = true;
@@ -556,7 +559,13 @@ available although it has not been delayed earlier"
 
         // Any path the filters never made available was not filtered properly.
         for entry in &self.entries {
-            eprintln!("error: '{}' was not filtered properly", entry.path);
+            eprintln!(
+                "{}",
+                crate::diagnostics::error_line(&format!(
+                    "'{}' was not filtered properly",
+                    entry.path
+                ))
+            );
             had_error = true;
         }
         self.entries.clear();

@@ -242,7 +242,9 @@ pub fn check_stash_apply_would_overwrite_local_changes(
             Ok(contents) => {
                 if let Ok(idx_blob) = repo.odb.read(&idx_entry.oid) {
                     if contents != idx_blob.data {
-                        return Err(Error::Message(format!("error: Your local changes to the following files would be overwritten by merge:\n\t{path}\nPlease commit your changes or stash them before you merge.")));
+                        return Err(Error::Message(crate::diagnostics::error_line(&format!(
+                            "Your local changes to the following files would be overwritten by merge:\n\t{path}\nPlease commit your changes or stash them before you merge."
+                        ))));
                     }
                 }
             }
@@ -315,7 +317,9 @@ pub fn apply_stash(
                 Ok(contents) => {
                     if let Ok(idx_blob) = repo.odb.read(&idx_entry.oid) {
                         if contents != idx_blob.data {
-                            return Err(Error::Message(format!("error: Your local changes to the following files would be overwritten by merge:\n\t{path}\nPlease commit your changes or stash them before you merge.")));
+                            return Err(Error::Message(crate::diagnostics::error_line(&format!(
+                            "Your local changes to the following files would be overwritten by merge:\n\t{path}\nPlease commit your changes or stash them before you merge."
+                        ))));
                         }
                     }
                 }

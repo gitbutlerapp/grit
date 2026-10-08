@@ -2913,15 +2913,18 @@ fn sparse_oid_lines_from_filter(
             // A resolved object that is not a parseable sparse blob (e.g. a tree) fails parsing:
             // `unable to parse sparse filter data in <oid>`.
             if obj.kind != ObjectKind::Blob {
-                return Err(RevListError::SparseFilterUnparsable {
-                    object_id: blob_oid.to_hex(),
-                }
-                .into());
+                return Err(Error::Message(format!(
+                    // hygiene: step 501
+                    "fatal: unable to parse sparse filter data in {}",
+                    blob_oid.to_hex()
+                )));
             }
             let text = std::str::from_utf8(&obj.data).map_err(|_| {
-                Error::from(RevListError::SparseFilterUnparsable {
-                    object_id: blob_oid.to_hex(),
-                })
+                Error::Message(format!(
+                    // hygiene: step 501
+                    "fatal: unable to parse sparse filter data in {}",
+                    blob_oid.to_hex()
+                ))
             })?;
             Ok(Some(parse_sparse_patterns_from_blob(text)))
         }
@@ -2939,10 +2942,8 @@ fn sparse_oid_lines_from_filter(
 
 /// Git's `unable to access sparse blob in '<name>'` error for an unresolvable `sparse:oid` spec.
 fn sparse_blob_access_error(spec: &str) -> Error {
-    RevListError::SparseBlobUnreadable {
-        spec: spec.to_owned(),
-    }
-    .into()
+    // hygiene: step 501
+    Error::Message(format!("fatal: unable to access sparse blob in '{spec}'"))
 }
 
 fn packed_object_set(repo: &Repository) -> HashSet<ObjectId> {
@@ -4889,10 +4890,8 @@ fn parse_long_opt_value(opt: &str, argv0: &str, argv1: Option<&str>) -> Option<(
 }
 
 fn stdin_die_requires_value(opt: &str) -> Error {
-    RevListError::MissingOptionValue {
-        option: opt.to_owned(),
-    }
-    .into()
+    // hygiene: step 501
+    Error::Message(format!("fatal: Option '{opt}' requires a value"))
 }
 
 fn apply_stdin_pseudo_opt(
@@ -5047,21 +5046,26 @@ fn apply_stdin_pseudo_opt(
             if rest == "sorted" || rest == "unsorted" {
                 return Ok(Some(1));
             }
-            return Err(RevListError::InvalidNoWalkArgument.into());
+            // hygiene: step 501
+            eprintln!("error: invalid argument to --no-walk");
+            return Err(Error::Message(format!(
+                // hygiene: step 501
+                "fatal: invalid option '{line}' in --stdin mode"
+            )));
         }
         return Ok(Some(1));
     }
     if line.starts_with("--") {
-        return Err(RevListError::InvalidStdinOption {
-            line: line.to_owned(),
-        }
-        .into());
+        return Err(Error::Message(format!(
+            // hygiene: step 501
+            "fatal: invalid option '{line}' in --stdin mode"
+        )));
     }
     if line.starts_with('-') {
-        return Err(RevListError::InvalidStdinOption {
-            line: line.to_owned(),
-        }
-        .into());
+        return Err(Error::Message(format!(
+            // hygiene: step 501
+            "fatal: invalid option '{line}' in --stdin mode"
+        )));
     }
     Ok(None)
 }

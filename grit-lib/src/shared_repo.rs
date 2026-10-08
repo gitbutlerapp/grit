@@ -63,7 +63,12 @@ pub fn git_config_perm(var: &str, value: &str) -> Result<i32, String> {
         Ok(true) => Ok(PERM_GROUP),
         Ok(false) => Ok(PERM_UMASK),
         Err(_) => {
-            eprintln!("warning: bad boolean config value '{value}' for option '{var}'");
+            eprintln!(
+                "{}",
+                crate::diagnostics::warning_line(
+                    "bad boolean config value '{value}' for option '{var}'"
+                )
+            );
             Ok(PERM_UMASK)
         }
     }

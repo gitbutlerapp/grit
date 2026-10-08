@@ -429,9 +429,9 @@ fn load_gitignore_for_dir(
     if path.exists() {
         if let Ok(meta) = fs::symlink_metadata(&path) {
             if meta.file_type().is_symlink() {
-                warnings.push(format!(
-                    "warning: unable to access '{source_display}': Too many levels of symbolic links"
-                ));
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unable to access '{source_display}': Too many levels of symbolic links"
+                )));
                 return Ok(Vec::new());
             }
         }
@@ -491,9 +491,9 @@ fn load_rules_from_file(
     if deny_symlink_gitignore && path.exists() {
         if let Ok(meta) = fs::symlink_metadata(path) {
             if meta.file_type().is_symlink() {
-                warnings.push(format!(
-                    "warning: unable to access '{source_display}': Too many levels of symbolic links"
-                ));
+                warnings.push(crate::diagnostics::warning_line(&format!(
+                    "unable to access '{source_display}': Too many levels of symbolic links"
+                )));
                 return Ok(Vec::new());
             }
         }

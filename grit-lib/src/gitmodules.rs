@@ -642,7 +642,10 @@ pub fn write_gitmodules_cli_option_warnings(
             if looks_like_command_line_option(value) {
                 writeln!(
                     w,
-                    "warning: ignoring '{key}' which may be interpreted as a command-line option: {value}"
+                    "{}",
+                    crate::diagnostics::warning_line(&format!(
+                        "ignoring '{key}' which may be interpreted as a command-line option: {value}"
+                    ))
                 )?;
                 any = true;
             }
@@ -691,7 +694,10 @@ pub fn write_gitmodules_cli_option_warnings(
             };
             writeln!(
                 w,
-                "warning: ignoring '{key_full}' which may be interpreted as a command-line option: {val}"
+                "{}",
+                crate::diagnostics::warning_line(&format!(
+                    "ignoring '{key_full}' which may be interpreted as a command-line option: {val}"
+                ))
             )?;
         }
     }

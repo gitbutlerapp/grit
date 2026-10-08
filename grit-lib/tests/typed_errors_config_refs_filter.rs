@@ -3,7 +3,9 @@
 use grit_lib::config::ConfigSet;
 use grit_lib::config::{ConfigFile, ConfigScope};
 use grit_lib::crlf::{convert_to_git_with_opts, ConversionConfig, ConvertToGitOpts, FileAttrs};
-use grit_lib::error::{ApplyError, ConfigError, Error, RefLockError};
+use grit_lib::error::{
+    ApplyError, BadNumericSource, ConfigError, Error, FilterError, FilterPhase, RefLockError,
+};
 use grit_lib::objects::ObjectId;
 use grit_test_support::git_cmd;
 use std::fs;
@@ -37,12 +39,21 @@ fn non_numeric_diff_context_is_bad_numeric_value() {
     let mut set = grit_lib::config::ConfigSet::new();
     set.merge(&file);
     let err = grit_lib::config::resolve_diff_context_lines(&set).unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Config(
-            ConfigError::BadNumericValue { .. } | ConfigError::BadNumericValueInFile { .. }
-        )
-    ));
+    match err {
+        Error::Config(ConfigError::BadNumericValue { key, value, reason }) => {
+            assert_eq!(key, "diff.context");
+            assert_eq!(value, "not-a-number");
+            assert_eq!(reason, BadNumericSource::InvalidUnit);
+        }
+        Error::Config(ConfigError::BadNumericValueInFile {
+            key, value, reason, ..
+        }) => {
+            assert_eq!(key, "diff.context");
+            assert_eq!(value, "not-a-number");
+            assert_eq!(reason, BadNumericSource::InvalidUnit);
+        }
+        other => panic!("expected bad numeric diff.context, got {other:?}"),
+    }
 }
 
 #[test]
@@ -95,9 +106,14 @@ fn required_clean_filter_failure_is_typed_message() {
         },
     )
     .unwrap_err();
-    assert!(err.contains("clean filter"));
-    assert!(err.contains("file.txt"));
-    assert!(!err.contains("fatal:"));
+    assert_eq!(
+        err,
+        FilterError::ExternalFilterFailed {
+            driver: "testfilter".to_owned(),
+            path: "file.txt".to_owned(),
+            phase: FilterPhase::Clean,
+        }
+    );
 }
 
 #[test]

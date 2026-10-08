@@ -1648,9 +1648,9 @@ fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
             .map(|(prefix, _)| prefix)
             .unwrap_or(lower.as_str());
         if !matches!(name, "files" | "reftable") {
-            return Err(Error::Message(format!(
-                "error: invalid value for 'extensions.refstorage': '{raw}'"
-            )));
+            return Err(Error::Message(crate::diagnostics::error_line(&format!(
+                "invalid value for 'extensions.refstorage': '{raw}'"
+            ))));
         }
     }
 
@@ -2357,7 +2357,12 @@ fn warn_core_bare_worktree_conflict(git_dir: &Path, environment: &Environment) {
             let mut guard = WARNED_DIRS.lock().unwrap_or_else(|e| e.into_inner());
             let set = guard.get_or_insert_with(HashSet::new);
             if set.insert(key) {
-                eprintln!("warning: core.bare and core.worktree do not make sense");
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::warning_line(
+                        "core.bare and core.worktree do not make sense"
+                    )
+                );
             }
         }
     }

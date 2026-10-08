@@ -311,8 +311,11 @@ impl CommitGraphLayer {
         if let (Some(_bidx), Some((bdat_off, bdat_len))) = (bloom_idx_off, bloom_data_range) {
             if bdat_len < BLOOM_HEADER {
                 eprintln!(
-                    "warning: ignoring too-small changed-path chunk ({} < {}) in commit-graph file",
-                    bdat_len, BLOOM_HEADER
+                    "{}",
+                    crate::diagnostics::warning_line(&format!(
+                        "ignoring too-small changed-path chunk ({} < {}) in commit-graph file",
+                        bdat_len, BLOOM_HEADER
+                    ))
                 );
             } else if bdat_off + bdat_len <= body.len() {
                 let hdr = &body[bdat_off..bdat_off + BLOOM_HEADER];
@@ -337,7 +340,12 @@ impl CommitGraphLayer {
 
         let bloom_indexes_ok = if let (Some(bidx), Some(bsize)) = (bloom_idx_off, bidx_len) {
             if bsize / 4 != num_commits as usize || bidx + bsize > body.len() {
-                eprintln!("warning: commit-graph changed-path index chunk is too small");
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::warning_line(
+                        "commit-graph changed-path index chunk is too small"
+                    )
+                );
                 false
             } else {
                 true
@@ -481,28 +489,37 @@ impl CommitGraphLayer {
         let max_payload = payload_len;
         if end_rel > max_payload {
             eprintln!(
-                "warning: ignoring out-of-range offset ({end_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
-                lex_index,
-                graph_warn,
-                bdat_total = bdat_total
+                "{}",
+                crate::diagnostics::warning_line(&format!(
+                    "ignoring out-of-range offset ({end_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
+                    lex_index,
+                    graph_warn,
+                    bdat_total = bdat_total
+                ))
             );
             return None;
         }
         if start_rel > max_payload {
             eprintln!(
-                "warning: ignoring out-of-range offset ({start_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
-                lex_index.saturating_sub(1),
-                graph_warn,
-                bdat_total = bdat_total
+                "{}",
+                crate::diagnostics::warning_line(&format!(
+                    "ignoring out-of-range offset ({start_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
+                    lex_index.saturating_sub(1),
+                    graph_warn,
+                    bdat_total = bdat_total
+                ))
             );
             return None;
         }
         if end_rel < start_rel {
             eprintln!(
-                "warning: ignoring decreasing changed-path index offsets ({start_rel} > {end_rel}) for positions {} and {} of {}",
-                lex_index.saturating_sub(1),
-                lex_index,
-                graph_warn
+                "{}",
+                crate::diagnostics::warning_line(&format!(
+                    "ignoring decreasing changed-path index offsets ({start_rel} > {end_rel}) for positions {} and {} of {}",
+                    lex_index.saturating_sub(1),
+                    lex_index,
+                    graph_warn
+                ))
             );
             return None;
         }
@@ -695,7 +712,12 @@ impl CommitGraphChain {
                 let n = layers.len();
                 if n > 0 && layer.base_chunk_size / layer.hash_len < n {
                     if warn_once_for_base_chunk_too_small(&layer.layer_display_id()) {
-                        eprintln!("warning: commit-graph base graphs chunk is too small");
+                        eprintln!(
+                            "{}",
+                            crate::diagnostics::warning_line(
+                                "commit-graph base graphs chunk is too small"
+                            )
+                        );
                     }
                     break;
                 }
@@ -813,7 +835,12 @@ impl CommitGraphChain {
             let n = layers.len();
             if n > 0 && layer.base_chunk_size / layer.hash_len < n {
                 if warn_once_for_base_chunk_too_small(&layer.layer_display_id()) {
-                    eprintln!("warning: commit-graph base graphs chunk is too small");
+                    eprintln!(
+                        "{}",
+                        crate::diagnostics::warning_line(
+                            "commit-graph base graphs chunk is too small"
+                        )
+                    );
                 }
                 break;
             }
@@ -853,9 +880,7 @@ impl CommitGraphChain {
                         // times within a single command (settings probe, commit set,
                         // filter reuse), so dedupe the warning per layer id to match.
                         if warn_once_for_disabled_bloom_layer(&id) {
-                            eprintln!(
-                                "warning: disabling Bloom filters for commit-graph layer '{id}' due to incompatible settings"
-                            );
+                            eprintln!("{}", crate::diagnostics::warning_line("disabling Bloom filters for commit-graph layer '{id}' due to incompatible settings"));
                         }
                         layer.disable_bloom();
                     }

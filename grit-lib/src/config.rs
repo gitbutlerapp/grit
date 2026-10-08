@@ -722,9 +722,14 @@ impl ConfigFile {
                         if key == "fetch.negotiationalgorithm" && value.is_none() {
                             let file_disp = config_error_path_display(path);
                             return Err(Error::Message(format!(
-                                "error: missing value for 'fetch.negotiationalgorithm'\n\
-fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at line {}",
-                                start_idx + 1
+                                "{}\n{}",
+                                crate::diagnostics::error_line(
+                                    "missing value for 'fetch.negotiationalgorithm'"
+                                ),
+                                crate::diagnostics::fatal_line(&format!(
+                                    "bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at line {}",
+                                    start_idx + 1
+                                ))
                             )));
                         }
                         entries.push(ConfigEntry {
@@ -2221,7 +2226,14 @@ impl ConfigSet {
             // Local (commondir) — skip when format is newer than supported (t1309).
             let local_path = common_dir.join("config");
             if let Some(msg) = crate::repo::early_config_ignore_repo_reason(&common_dir) {
-                eprintln!("warning: ignoring git dir '{}': {}", gd.display(), msg);
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::warning_line(&format!(
+                        "ignoring git dir '{}': {}",
+                        gd.display(),
+                        msg
+                    ))
+                );
             } else if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
                 set.merge_file_with_includes(&f, true, &ctx)?;
             }
@@ -2738,7 +2750,7 @@ fn bad_numeric_diff_context(
     err: GitConfigIntStrictError,
     entry: &ConfigEntry,
 ) -> ConfigError {
-    let source = match err {
+    let reason = match err {
         GitConfigIntStrictError::InvalidUnit => crate::error::BadNumericSource::InvalidUnit,
         GitConfigIntStrictError::OutOfRange => crate::error::BadNumericSource::OutOfRange,
     };
@@ -2746,7 +2758,7 @@ fn bad_numeric_diff_context(
         ConfigError::BadNumericValue {
             key: DIFF_CONTEXT_KEY.to_owned(),
             value: value.to_owned(),
-            detail: source.to_string(),
+            reason,
         }
     } else {
         let path = entry
@@ -2758,7 +2770,7 @@ fn bad_numeric_diff_context(
             key: DIFF_CONTEXT_KEY.to_owned(),
             value: value.to_owned(),
             file: path,
-            detail: source.to_string(),
+            reason,
         }
     }
 }

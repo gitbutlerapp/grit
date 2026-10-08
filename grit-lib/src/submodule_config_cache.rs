@@ -279,7 +279,10 @@ impl SubmoduleConfigCache {
                 continue;
             };
             if !check_submodule_name_ok(&name) {
-                eprintln!("warning: ignoring suspicious submodule name: {name}");
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::warning_line("ignoring suspicious submodule name: {name}")
+                );
                 continue;
             }
             let entry = by_name
@@ -299,8 +302,11 @@ impl SubmoduleConfigCache {
                     };
                     if crate::gitmodules::looks_like_command_line_option(value) {
                         eprintln!(
-                            "warning: ignoring '{}' which may be interpreted as a command-line option: {value}",
-                            ent.key
+                            "{}",
+                            crate::diagnostics::warning_line(&format!(
+                                "ignoring '{}' which may be interpreted as a command-line option: {value}",
+                                ent.key
+                            ))
                         );
                         continue;
                     }
@@ -327,8 +333,11 @@ impl SubmoduleConfigCache {
                     };
                     if crate::gitmodules::looks_like_command_line_option(value) {
                         eprintln!(
-                            "warning: ignoring '{}' which may be interpreted as a command-line option: {value}",
-                            ent.key
+                            "{}",
+                            crate::diagnostics::warning_line(&format!(
+                                "ignoring '{}' which may be interpreted as a command-line option: {value}",
+                                ent.key
+                            ))
                         );
                         continue;
                     }
@@ -491,8 +500,11 @@ fn warn_multiple_config(treeish: Option<ObjectId>, name: &str, option: &str) {
         .map(|o| o.to_hex())
         .unwrap_or_else(|| "WORKTREE".to_string());
     eprintln!(
-        "warning: {commit_string}:.gitmodules, multiple configurations found for \
+        "{}",
+        crate::diagnostics::warning_line(&format!(
+            "{commit_string}:.gitmodules, multiple configurations found for \
 'submodule.{name}.{option}'. Skipping second one!"
+        ))
     );
 }
 
@@ -631,9 +643,9 @@ fn parse_fetch_recurse(value: &str, die_on_error: bool) -> Result<FetchRecurse, 
         return Ok(FetchRecurse::OnDemand);
     }
     if die_on_error {
-        Err(format!(
-            "fatal: bad submodule.fetchRecurseSubmodules argument: '{v}'"
-        ))
+        Err(crate::diagnostics::fatal_line(&format!(
+            "bad submodule.fetchRecurseSubmodules argument: '{v}'"
+        )))
     } else {
         Ok(FetchRecurse::Error)
     }

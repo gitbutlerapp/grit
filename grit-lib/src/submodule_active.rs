@@ -202,7 +202,9 @@ pub fn submodule_active_pathspec_match(
 ) -> std::result::Result<bool, String> {
     for v in specs {
         if v.is_empty() {
-            return Err("error: missing value for 'submodule.active'".to_string());
+            return Err(crate::diagnostics::error_line(
+                "missing value for 'submodule.active'",
+            ));
         }
     }
     let ctx = index_gitlink_match_for_path(index, path).unwrap_or(PathspecMatchContext {

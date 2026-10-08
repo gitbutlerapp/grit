@@ -55,20 +55,20 @@ pub enum ConfigError {
     },
 
     /// Integer config value could not be parsed or is out of range.
-    #[error("bad numeric config value '{value}' for '{key}': {detail}")]
+    #[error("bad numeric config value '{value}' for '{key}': {reason}")]
     BadNumericValue {
         key: String,
         value: String,
-        detail: String,
+        reason: BadNumericSource,
     },
 
     /// Same as [`Self::BadNumericValue`] with file context.
-    #[error("bad numeric config value '{value}' for '{key}' in file {file}: {detail}")]
+    #[error("bad numeric config value '{value}' for '{key}' in file {file}: {reason}")]
     BadNumericValueInFile {
         key: String,
         value: String,
         file: String,
-        detail: String,
+        reason: BadNumericSource,
     },
 
     /// `diff.context` (or similar) failed variable validation.
