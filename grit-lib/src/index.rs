@@ -1651,6 +1651,34 @@ impl Index {
         self.touch_fsmonitor_after_entry_change();
     }
 
+    /// Merge sorted `replacements` into a sorted index in one linear pass.
+    fn merge_replacements_into_sorted_index(&mut self, replacements: Vec<IndexEntry>) {
+        if replacements.is_empty() {
+            return;
+        }
+        if !self.entries_sorted {
+            for entry in replacements {
+                self.add_or_replace(entry);
+            }
+            return;
+        }
+        let repl_for_inval: Vec<Vec<u8>> = replacements
+            .iter()
+            .filter(|e| e.stage() == 0)
+            .map(|e| e.path.clone())
+            .collect();
+        let kept = std::mem::take(&mut self.entries);
+        self.entries = merge_sorted_index_entries(kept, replacements);
+        self.entries_sorted = true;
+        for path in repl_for_inval {
+            if let Ok(p) = std::str::from_utf8(&path) {
+                self.invalidate_untracked_cache_for_path(p);
+            }
+            self.invalidate_cache_tree_for_path(&path);
+        }
+        self.touch_fsmonitor_after_entry_change();
+    }
+
     /// Remove every entry at `paths` (all stages), then merge `replacements` in sorted order.
     ///
     /// When the index is already sorted, this is one removal scan plus an `O(N + M)` merge,
@@ -1666,12 +1694,11 @@ impl Index {
             return;
         }
         replacements.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+        dedup_sorted_replacement_entries(&mut replacements);
 
         let mut paths: Vec<&[u8]> = paths.into_iter().collect();
         if paths.is_empty() {
-            for entry in replacements {
-                self.add_or_replace(entry);
-            }
+            self.merge_replacements_into_sorted_index(replacements);
             return;
         }
         paths.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
@@ -2244,6 +2271,23 @@ fn read_tree_into_overlay(
     Ok(())
 }
 
+/// Collapse consecutive sorted rows with the same `(path, stage)`; the last row wins.
+fn dedup_sorted_replacement_entries(replacements: &mut Vec<IndexEntry>) {
+    if replacements.len() <= 1 {
+        return;
+    }
+    let mut out: Vec<IndexEntry> = Vec::with_capacity(replacements.len());
+    for entry in replacements.drain(..) {
+        match out.last_mut() {
+            Some(last) if last.path == entry.path && last.stage() == entry.stage() => {
+                *last = entry;
+            }
+            _ => out.push(entry),
+        }
+    }
+    *replacements = out;
+}
+
 fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) -> Vec<IndexEntry> {
     let mut kept = kept.into_iter().peekable();
     let mut insert = insert.into_iter().peekable();
@@ -2263,6 +2307,14 @@ fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) ->
                 let ord = (&k.path, k.stage()).cmp(&(&i.path, i.stage()));
                 if ord == std::cmp::Ordering::Less {
                     if let Some(entry) = kept.next() {
+                        out.push(entry);
+                    }
+                } else if ord == std::cmp::Ordering::Equal {
+                    let old = kept.next();
+                    if let Some(mut entry) = insert.next() {
+                        if let Some(old) = old {
+                            entry.base_index_pos = old.base_index_pos;
+                        }
                         out.push(entry);
                     }
                 } else if let Some(entry) = insert.next() {
@@ -3576,6 +3628,32 @@ mod tests {
         idx.remove_descendants_under_path("a");
         oracle.remove_descendants_under_path("a");
         oracle.assert_matches(&idx);
+    }
+
+    #[test]
+    fn merge_replacements_preserves_base_index_pos() {
+        let mut idx = Index::new();
+        let mut kept = make_entry("path/a.txt");
+        kept.base_index_pos = 42;
+        idx.add_or_replace(kept);
+        let mut replacement = make_entry("path/a.txt");
+        replacement.oid = dummy_oid();
+        idx.remove_paths_and_insert([], [replacement]);
+        assert_eq!(idx.entries[0].base_index_pos, 42);
+    }
+
+    #[test]
+    fn remove_paths_and_insert_replaces_equal_path_without_duplicates() {
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("path/a.txt"));
+        idx.add_or_replace(make_entry("path/b.txt"));
+        let mut replacement = make_entry("path/a.txt");
+        replacement.oid = dummy_oid();
+        idx.remove_paths_and_insert(["ghost.txt".as_bytes()], [replacement.clone()]);
+        assert_eq!(idx.entries.len(), 2);
+        assert_eq!(idx.entries[0].path, b"path/a.txt");
+        assert_eq!(idx.entries[0].oid, replacement.oid);
+        assert_eq!(idx.entries[1].path, b"path/b.txt");
     }
 
     #[test]

@@ -114,21 +114,24 @@ fn grit_index_batch_remove_replace_matches_git_ls_files_and_fsck() {
     remove_paths.sort();
     remove_paths.dedup();
 
-    index.remove_paths(remove_paths.iter().map(|p| p.as_slice()));
     let replacement_oid: ObjectId = repo
         .odb
         .write(ObjectKind::Blob, b"replacement\n")
         .expect("replacement blob");
-    for path in &remove_paths {
-        let mut e = entry_for_path(
-            &repo,
-            std::str::from_utf8(path).unwrap(),
-            0,
-            b"replacement\n",
-        );
-        e.oid = replacement_oid;
-        index.add_or_replace(e);
-    }
+    let replacements: Vec<IndexEntry> = remove_paths
+        .iter()
+        .map(|path| {
+            let mut e = entry_for_path(
+                &repo,
+                std::str::from_utf8(path).unwrap(),
+                0,
+                b"replacement\n",
+            );
+            e.oid = replacement_oid;
+            e
+        })
+        .collect();
+    index.remove_paths_and_insert(remove_paths.iter().map(|p| p.as_slice()), replacements);
 
     repo.write_index(&mut index).expect("write index");
 
