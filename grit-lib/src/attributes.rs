@@ -280,9 +280,9 @@ fn parse_gitattributes_content_impl(
         let line_no = idx + 1;
         let line_bytes = raw_line.as_bytes();
         if line_bytes.len() >= MAX_ATTR_LINE_BYTES {
-            out.warnings.push(format!(
-                "warning: ignoring overly long attributes line {line_no}"
-            ));
+            out.warnings.push(crate::diagnostics::warning_line(&format!(
+                "ignoring overly long attributes line {line_no}"
+            )));
             continue;
         }
         parse_one_line(
@@ -1037,10 +1037,12 @@ fn load_gitattributes_stack_uncached(
                     merged.macros.defs.extend(p.macros.defs.drain());
                     merged.warnings.append(&mut p.warnings);
                 } else {
-                    merged.warnings.push(format!(
-                        "warning: ignoring overly large gitattributes file '{}'",
-                        g.display()
-                    ));
+                    merged
+                        .warnings
+                        .push(crate::diagnostics::warning_line(&format!(
+                            "ignoring overly large gitattributes file '{}'",
+                            g.display()
+                        )));
                 }
             }
         }
@@ -1056,9 +1058,9 @@ fn load_gitattributes_stack_uncached(
             merged.macros.defs.extend(p.macros.defs.drain());
             merged.warnings.append(&mut p.warnings);
         } else {
-            merged.warnings.push(
-                "warning: ignoring overly large gitattributes file '.gitattributes'".to_string(),
-            );
+            merged.warnings.push(crate::diagnostics::warning_line(
+                "ignoring overly large gitattributes file '.gitattributes'",
+            ));
         }
     }
 
@@ -1070,10 +1072,12 @@ fn load_gitattributes_stack_uncached(
             &mut merged.warnings,
         ) {
             if content.len() > MAX_ATTR_FILE_BYTES {
-                merged.warnings.push(format!(
-                    "warning: ignoring overly large gitattributes file '{}'",
-                    ga.display()
-                ));
+                merged
+                    .warnings
+                    .push(crate::diagnostics::warning_line(&format!(
+                        "ignoring overly large gitattributes file '{}'",
+                        ga.display()
+                    )));
                 continue;
             }
             let prefix = rel.to_string_lossy().replace('\\', "/");
@@ -1244,10 +1248,9 @@ fn walk_tree_attrs(
                         continue;
                     }
                     if blob.data.len() > MAX_ATTR_FILE_BYTES {
-                        merged.warnings.push(
-                            "warning: ignoring overly large gitattributes blob '.gitattributes'"
-                                .to_string(),
-                        );
+                        merged.warnings.push(crate::diagnostics::warning_line(
+                            "ignoring overly large gitattributes blob '.gitattributes'",
+                        ));
                         continue;
                     }
                     let content = String::from_utf8_lossy(&blob.data).into_owned();
@@ -1366,10 +1369,11 @@ pub fn load_gitattributes_from_index(
         };
         let obj = odb.read(&entry.oid)?;
         if obj.data.len() > MAX_ATTR_FILE_BYTES {
-            merged.warnings.push(format!(
-                "warning: ignoring overly large gitattributes blob '{}'",
-                rel
-            ));
+            merged
+                .warnings
+                .push(crate::diagnostics::warning_line(&format!(
+                    "ignoring overly large gitattributes blob '{rel}'"
+                )));
             continue;
         }
         let content = String::from_utf8_lossy(&obj.data);

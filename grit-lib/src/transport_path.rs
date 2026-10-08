@@ -10,7 +10,7 @@ use crate::error::Error;
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum TransportPathError {
     /// A repository path begins with `-` and could be interpreted as a command option.
-    #[error("fatal: strange pathname '{0}' blocked")]
+    #[error("strange pathname '{0}' blocked")]
     OptionLikePath(String),
 }
 

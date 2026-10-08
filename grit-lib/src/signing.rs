@@ -183,12 +183,12 @@ impl GpgConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ConfigError`] when `gpg.format` holds an unrecognized
+    /// Returns [`Error::Config`] when `gpg.format` holds an unrecognized
     /// value (Git rejects this case-sensitively).
     pub fn from_config(config: &ConfigSet) -> Result<GpgConfig> {
         let format = match config.get("gpg.format") {
             Some(raw) => GpgFormat::from_name(&raw).ok_or_else(|| {
-                Error::ConfigError(format!("invalid value for 'gpg.format': '{raw}'"))
+                Error::Config(format!("invalid value for 'gpg.format': '{raw}'").into())
             })?,
             None => GpgFormat::OpenPgp,
         };

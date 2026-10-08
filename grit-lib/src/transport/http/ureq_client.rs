@@ -1347,7 +1347,7 @@ mod tests {
         match UreqHttpClient::from_config(&cfg) {
             Ok(_) => panic!("invalid protocol.version must be rejected"),
             Err(err) => assert!(
-                matches!(err, Error::ConfigError(_)),
+                matches!(err, Error::Config(_)),
                 "expected ConfigError, got {err:?}"
             ),
         }

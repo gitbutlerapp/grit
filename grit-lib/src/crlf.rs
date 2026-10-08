@@ -20,6 +20,7 @@ use std::process::{Command, Stdio};
 use encoding_rs::UTF_8;
 
 use crate::config::ConfigSet;
+use crate::error::{FilterError, FilterPhase};
 use crate::filter_process::{apply_process_clean, apply_process_smudge, FilterSmudgeMeta};
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -61,6 +62,27 @@ impl From<String> for ConversionError {
 impl From<&str> for ConversionError {
     fn from(value: &str) -> Self {
         Self::Message(value.to_owned())
+    }
+}
+
+impl From<FilterError> for ConversionError {
+    fn from(value: FilterError) -> Self {
+        Self::Message(value.to_string())
+    }
+}
+
+fn filter_detail(rel_path: &str, detail: String) -> FilterError {
+    FilterError::NotFilteredProperly {
+        path: rel_path.to_owned(),
+        detail,
+    }
+}
+
+fn external_filter_failed(rel_path: &str, driver: &str, phase: FilterPhase) -> FilterError {
+    FilterError::ExternalFilterFailed {
+        driver: driver.to_owned(),
+        path: rel_path.to_owned(),
+        phase,
     }
 }
 
@@ -1144,7 +1166,7 @@ fn validate_utf_bom(
         );
         let body = format!("BOM is prohibited in '{rel_path}' if encoded as {label}");
         if die_on_error {
-            return Err(format!("fatal: {body}"));
+            return Err(crate::diagnostics::fatal_line(&body));
         }
         eprintln!("error: {body}");
         return Err(body);
@@ -1160,7 +1182,7 @@ fn validate_utf_bom(
         );
         let body = format!("BOM is required in '{rel_path}' if encoded as {label}");
         if die_on_error {
-            return Err(format!("fatal: {body}"));
+            return Err(crate::diagnostics::fatal_line(&body));
         }
         eprintln!("error: {body}");
         return Err(body);
@@ -1528,12 +1550,21 @@ pub fn convert_to_git_with_opts(
                     if e.contains("expected git-filter-server") {
                         return Err(e.into());
                     }
+<<<<<<< New base: fix: reject bytes between last pack object and trailer
                     return Err(format!("fatal: {rel_path}: clean filter '{name}' failed").into());
+||||||| Common ancestor
+                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed"));
+=======
+                    return Err(external_filter_failed(rel_path, name, FilterPhase::Clean));
+>>>>>>> Current commit: lib: typed errors for config, refs, filters, sparse, and apply
                 }
                 if e.starts_with("filter status: abort") {
                     crate::filter_process::disable_process_filter(proc_cmd);
                 }
-                eprintln!("error: external filter '{name}' failed");
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::error_line(&format!("external filter '{name}' failed"))
+                );
             }
         }
     } else {
@@ -1542,16 +1573,22 @@ pub fn convert_to_git_with_opts(
                 buf = run_filter(clean_cmd, &buf, rel_path).map_err(|e| {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
                     if file_attrs.filter_clean_required {
-                        format!("fatal: {rel_path}: clean filter '{name}' failed")
+                        external_filter_failed(rel_path, name, FilterPhase::Clean).into()
                     } else {
-                        format!("clean filter failed: {e}")
+                        ConversionError::Message(format!("clean filter failed: {e}"))
                     }
                 })?;
             }
             None => {
                 if file_attrs.filter_clean_required {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
+<<<<<<< New base: fix: reject bytes between last pack object and trailer
                     return Err(format!("fatal: {rel_path}: clean filter '{name}' failed").into());
+||||||| Common ancestor
+                    return Err(format!("fatal: {rel_path}: clean filter '{name}' failed"));
+=======
+                    return Err(external_filter_failed(rel_path, name, FilterPhase::Clean));
+>>>>>>> Current commit: lib: typed errors for config, refs, filters, sparse, and apply
                 }
             }
         }
@@ -1562,7 +1599,7 @@ pub fn convert_to_git_with_opts(
         // Bare `working-tree-encoding` (boolean true) / `false` are rejected (Git
         // `git_path_check_encoding`).
         if enc == "set" || enc == "true" || enc == "false" {
-            return Err("fatal: true/false are no valid working-tree-encodings".into());
+            return Err(FilterError::InvalidWorkingTreeEncoding.into());
         }
         // `CONV_WRITE_OBJECT` → validate BOM rules and die on error (Git `encode_to_git`).
         let writing_object = opts.check_safecrlf;
@@ -1699,13 +1736,19 @@ fn check_safecrlf_roundtrip(
     }
 
     if old_stats.crlf > 0 && new_stats.crlf == 0 {
-        let msg = format!("fatal: CRLF would be replaced by LF in {rel_path}");
+        let msg = FilterError::LineEndingWouldChange {
+            detail: format!("CRLF would be replaced by LF in {rel_path}"),
+        }
+        .to_string();
         if conv.safecrlf == SafeCrlf::True {
             return Err(msg);
         }
         eprint_safecrlf_warn_crlf_to_lf(rel_path);
     } else if old_stats.lonelf > 0 && new_stats.lonelf == 0 {
-        let msg = format!("fatal: LF would be replaced by CRLF in {rel_path}");
+        let msg = FilterError::LineEndingWouldChange {
+            detail: format!("LF would be replaced by CRLF in {rel_path}"),
+        }
+        .to_string();
         if conv.safecrlf == SafeCrlf::True {
             return Err(msg);
         }
@@ -1813,13 +1856,18 @@ pub fn convert_to_worktree(
                 Err(e) => {
                     if file_attrs.filter_smudge_required {
                         return Err(
-                            format!("fatal: {rel_path}: smudge filter {driver} failed").into()
+                            external_filter_failed(rel_path, driver, FilterPhase::Smudge).into(),
                         );
                     }
                     if e.starts_with("filter status: abort") {
                         crate::filter_process::disable_process_filter(proc_cmd);
                     }
-                    eprintln!("error: external filter '{driver}' failed");
+                    eprintln!(
+                        "{}",
+                        crate::diagnostics::error_line(&format!(
+                            "external filter '{driver}' failed"
+                        ))
+                    );
                     return Ok(Some(buf));
                 }
             };
@@ -1845,14 +1893,16 @@ pub fn convert_to_worktree(
                 Err(_e) => {
                     if file_attrs.filter_smudge_required {
                         return Err(
-                            format!("fatal: {rel_path}: smudge filter {driver} failed").into()
+                            external_filter_failed(rel_path, driver, FilterPhase::Smudge).into(),
                         );
                     }
                 }
             },
             None => {
                 if file_attrs.filter_smudge_required {
-                    return Err(format!("fatal: {rel_path}: smudge filter {driver} failed").into());
+                    return Err(
+                        external_filter_failed(rel_path, driver, FilterPhase::Smudge).into(),
+                    );
                 }
             }
         }

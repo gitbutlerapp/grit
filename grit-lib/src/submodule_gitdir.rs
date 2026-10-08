@@ -94,7 +94,7 @@ pub fn is_git_directory(path: &Path) -> bool {
 /// and `\` do. A carriage return in a single segment (e.g. `sub\r`) must not be split.
 pub fn validate_submodule_path(work_tree: &Path, rel: &str) -> Result<()> {
     if rel.is_empty() {
-        return Err(Error::ConfigError("empty submodule path".into()));
+        return Err(Error::Config("empty submodule path".into()));
     }
     let mut cur = work_tree.to_path_buf();
     #[cfg(windows)]
@@ -108,9 +108,10 @@ pub fn validate_submodule_path(work_tree: &Path, rel: &str) -> Result<()> {
             Err(_) => continue,
         };
         if meta.file_type().is_symlink() {
-            return Err(Error::ConfigError(format!(
-                "expected '{comp}' in submodule path '{rel}' not to be a symbolic link"
-            )));
+            return Err(Error::Config(
+                format!("expected '{comp}' in submodule path '{rel}' not to be a symbolic link")
+                    .into(),
+            ));
         }
     }
     Ok(())
@@ -257,7 +258,7 @@ pub fn validate_legacy_submodule_git_dir(git_dir: &Path, submodule_name: &str) -
     let gd = git_dir.to_string_lossy();
     let suffix = submodule_name;
     if gd.len() <= suffix.len() {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "submodule name not a suffix of git dir".into(),
         ));
     }
@@ -267,17 +268,17 @@ pub fn validate_legacy_submodule_git_dir(git_dir: &Path, submodule_name: &str) -
         .get(cut.wrapping_sub(1))
         .is_none_or(|&b| b != b'/')
     {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "submodule name not a suffix of git dir".into(),
         ));
     }
     if &gd[cut..] != suffix {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "submodule name not a suffix of git dir".into(),
         ));
     }
     if path_inside_other_gitdir(git_dir, submodule_name) {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "submodule git dir inside another submodule git dir".into(),
         ));
     }
@@ -293,16 +294,16 @@ pub fn validate_encoded_submodule_git_dir(
     super_git_dir: &Path,
 ) -> Result<()> {
     let last = last_modules_segment(git_dir)
-        .ok_or_else(|| Error::ConfigError("submodule gitdir missing /modules/ segment".into()))?;
+        .ok_or_else(|| Error::Config("submodule gitdir missing /modules/ segment".into()))?;
     if last.contains('/') {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "encoded submodule gitdir must not contain '/' in module segment".into(),
         ));
     }
     if is_git_directory(git_dir)
         && gitdir_conflicts_with_existing(work_tree, cfg, git_dir, submodule_name)?
     {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "submodule gitdir conflicts with existing".into(),
         ));
     }
@@ -326,7 +327,7 @@ pub fn validate_encoded_submodule_git_dir(
         }
         let suffixes_match = last == submodule_name;
         if check_casefolding_conflict(git_dir, submodule_name, suffixes_match, &taken) {
-            return Err(Error::ConfigError(
+            return Err(Error::Config(
                 "case-folding conflict for submodule gitdir".into(),
             ));
         }
@@ -412,7 +413,7 @@ pub fn compute_default_submodule_gitdir(
         return Ok(v);
     }
 
-    Err(Error::ConfigError(
+    Err(Error::Config(
         "failed to allocate submodule gitdir path".into(),
     ))
 }
@@ -451,9 +452,12 @@ pub fn submodule_gitdir_filesystem_path(
             .find(|e| e.key == key)
             .and_then(|e| e.value.clone())
             .ok_or_else(|| {
-                Error::ConfigError(format!(
+                Error::Config(
+                    format!(
                     "submodule.{submodule_name}.gitdir is not set (submodulePathConfig enabled)"
-                ))
+                )
+                    .into(),
+                )
             })?;
         Ok(resolve_gitdir_value(work_tree, &value))
     } else {
@@ -610,13 +614,13 @@ pub fn die_path_inside_submodule_when_disabled(
         return Ok(());
     }
     if path_inside_registered_submodule(work_tree, new_path) {
-        return Err(Error::ConfigError(
+        return Err(Error::Config(
             "cannot add submodule: path inside existing submodule".into(),
         ));
     }
     if let Some(ix) = index {
         if path_inside_indexed_submodule(ix, new_path) {
-            return Err(Error::ConfigError(
+            return Err(Error::Config(
                 "cannot add submodule: path inside existing submodule".into(),
             ));
         }

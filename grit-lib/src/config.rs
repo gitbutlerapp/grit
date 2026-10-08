@@ -39,7 +39,7 @@ use std::time::SystemTime;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::error::{Error, Result};
+use crate::error::{ConfigError, Error, Result};
 
 /// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
 #[cfg(test)]
@@ -245,23 +245,22 @@ impl Default for LoadConfigOptions {
 pub fn canonical_key(raw: &str) -> Result<String> {
     // Reject keys containing newlines
     if raw.contains('\n') || raw.contains('\r') {
-        return Err(Error::ConfigError(format!(
-            "invalid key: '{}'",
-            raw.replace('\n', "\\n")
-        )));
+        return Err(Error::Config(
+            format!("invalid key: '{}'", raw.replace('\n', "\\n")).into(),
+        ));
     }
 
     let first_dot = raw
         .find('.')
-        .ok_or_else(|| Error::ConfigError(format!("key does not contain a section: '{raw}'")))?;
+        .ok_or_else(|| Error::Config(format!("key does not contain a section: '{raw}'").into()))?;
     let last_dot = raw
         .rfind('.')
-        .ok_or_else(|| Error::ConfigError(format!("key does not contain a section: '{raw}'")))?;
+        .ok_or_else(|| Error::Config(format!("key does not contain a section: '{raw}'").into()))?;
 
     if last_dot == raw.len() - 1 {
-        return Err(Error::ConfigError(format!(
-            "key does not contain variable name: '{raw}'"
-        )));
+        return Err(Error::Config(
+            format!("key does not contain variable name: '{raw}'").into(),
+        ));
     }
 
     let section = &raw[..first_dot];
@@ -269,18 +268,18 @@ pub fn canonical_key(raw: &str) -> Result<String> {
 
     // Validate section name: must be alphanumeric or hyphen
     if section.is_empty() || !section.chars().all(|c| c.is_alphanumeric() || c == '-') {
-        return Err(Error::ConfigError(format!(
-            "invalid key (bad section): '{raw}'"
-        )));
+        return Err(Error::Config(
+            format!("invalid key (bad section): '{raw}'").into(),
+        ));
     }
 
     // Validate variable name: must start with alpha, rest alphanumeric or hyphen
     if !name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
         || !name.chars().all(|c| c.is_alphanumeric() || c == '-')
     {
-        return Err(Error::ConfigError(format!(
-            "invalid key (bad variable name): '{raw}'"
-        )));
+        return Err(Error::Config(
+            format!("invalid key (bad variable name): '{raw}'").into(),
+        ));
     }
 
     if first_dot == last_dot {
@@ -693,7 +692,7 @@ impl ConfigFile {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ConfigError`] on malformed input.
+    /// Returns [`Error::Config`] on malformed input.
     pub fn parse(path: &Path, content: &str, scope: ConfigScope) -> Result<Self> {
         let raw_lines: Vec<String> = content
             .lines()
@@ -760,19 +759,29 @@ fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at
             }
             if entry_line_value_has_unclosed_quote(&logical_line) {
                 let file_disp = config_error_path_display(path);
-                return Err(Error::ConfigError(format!(
-                    "bad config line {} in file '{file_disp}'",
-                    start_idx + 1
-                )));
+                return Err(ConfigError::BadConfigLineInFile {
+                    file: file_disp,
+                    line: start_idx + 1,
+                }
+                .into());
             }
 
             if let Some((key, value)) = parser.try_parse_entry(&logical_line) {
                 if key == "fetch.negotiationalgorithm" && value.is_none() {
                     let file_disp = config_error_path_display(path);
                     return Err(Error::Message(format!(
-                        "error: missing value for 'fetch.negotiationalgorithm'\n\
-fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at line {}",
-                        start_idx + 1
+                        "{}\n{}",
+                        crate::diagnostics::error_line(
+                            "missing value for 'fetch.negotiationalgorithm'"
+                        ),
+                        crate::diagnostics::fatal_line(
+                            &ConfigError::BadConfigVariable {
+                                key: "fetch.negotiationalgorithm".to_owned(),
+                                file: file_disp,
+                                line: start_idx + 1,
+                            }
+                            .to_string()
+                        )
                     )));
                 }
                 entries.push(ConfigEntry {
@@ -791,10 +800,11 @@ fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at
                 } else {
                     format!("file {file_disp}")
                 };
-                return Err(Error::Message(format!(
-                    "fatal: bad config line {} in {location}",
-                    start_idx + 1
-                )));
+                return Err(ConfigError::BadConfigLine {
+                    location,
+                    line: start_idx + 1,
+                }
+                .into());
             }
         }
 
@@ -965,7 +975,7 @@ fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at
     /// # Errors
     ///
     /// Returns [`Error::Io`] on read failure (other than not-found) or
-    /// [`Error::ConfigError`] on parse failure.
+    /// [`Error::Config`] on parse failure.
     pub fn from_path(path: &Path, scope: ConfigScope) -> Result<Option<Self>> {
         match fs::read_to_string(path) {
             Ok(content) => Ok(Some(Self::parse(path, &content, scope)?)),
@@ -1082,8 +1092,9 @@ fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at
                 } else {
                     (false, pat)
                 };
-                let compiled = regex::Regex::new(actual_pat)
-                    .map_err(|e| Error::ConfigError(format!("invalid value-pattern regex: {e}")))?;
+                let compiled = regex::Regex::new(actual_pat).map_err(|e| {
+                    Error::Config(format!("invalid value-pattern regex: {e}").into())
+                })?;
                 (Some(compiled), neg)
             }
             None => (None, false),
@@ -1125,7 +1136,7 @@ fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at
         } else {
             *matching_indices
                 .last()
-                .ok_or_else(|| Error::ConfigError("missing config match".to_owned()))?
+                .ok_or_else(|| Error::Config("missing config match".to_owned().into()))?
         };
         let target_line_idx = self.entries[target_idx].line - 1;
         let raw_line = &self.raw_lines[target_line_idx];
@@ -1262,13 +1273,13 @@ fatal: bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at
         preserve_empty_section_header: bool,
     ) -> Result<usize> {
         let canon = canonical_key(key)?;
-        let re = match value_pattern {
-            Some(pat) => Some(
-                regex::Regex::new(pat)
-                    .map_err(|e| Error::ConfigError(format!("invalid value-pattern regex: {e}")))?,
-            ),
-            None => None,
-        };
+        let re =
+            match value_pattern {
+                Some(pat) => Some(regex::Regex::new(pat).map_err(|e| {
+                    Error::Config(format!("invalid value-pattern regex: {e}").into())
+                })?),
+                None => None,
+            };
 
         let line_indices: Vec<usize> = self
             .entries
@@ -1854,15 +1865,15 @@ impl ConfigSet {
         const Z_BEST_COMPRESSION: i32 = 9;
 
         let v = parse_git_config_int_strict(raw.trim()).map_err(|_| {
-            Error::ConfigError(format!("bad numeric config value '{raw}' for compression"))
+            Error::Config(format!("bad numeric config value '{raw}' for compression").into())
         })?;
         if v == -1 {
             return Ok(Z_DEFAULT_COMPRESSION);
         }
         if v < 0 || v > i64::from(Z_BEST_COMPRESSION) {
-            return Err(Error::ConfigError(format!(
-                "bad zlib compression level {v}"
-            )));
+            return Err(Error::Config(
+                format!("bad zlib compression level {v}").into(),
+            ));
         }
         Ok(v as i32)
     }
@@ -1871,7 +1882,7 @@ impl ConfigSet {
     ///
     /// Walks [`Self::entries`] in load order. Every `core.compression` and `core.looseCompression`
     /// entry is parsed and validated (including shadowed or overridden values); bare keys and
-    /// invalid numbers return [`Error::ConfigError`]. `core.compression` sets the loose level until
+    /// invalid numbers return [`Error::Config`]. `core.compression` sets the loose level until
     /// the first valid `core.looseCompression` is seen; later `core.compression` entries are still
     /// validated but ignored for the loose level. When neither key appears, returns
     /// [`Self::LOOSE_OBJECTS_ZLIB_DEFAULT`] (`Z_BEST_SPEED`, level 1).
@@ -1885,7 +1896,11 @@ impl ConfigSet {
             match e.key.as_str() {
                 "core.compression" => {
                     let val = e.value.as_deref().ok_or_else(|| {
-                        Error::ConfigError("bad numeric config value '' for compression".to_owned())
+                        Error::Config(
+                            "bad numeric config value '' for compression"
+                                .to_owned()
+                                .into(),
+                        )
                     })?;
                     let level = Self::parse_zlib_compression_level(val)?;
                     if !loose_compression_seen {
@@ -1894,7 +1909,11 @@ impl ConfigSet {
                 }
                 "core.loosecompression" => {
                     let val = e.value.as_deref().ok_or_else(|| {
-                        Error::ConfigError("bad numeric config value '' for compression".to_owned())
+                        Error::Config(
+                            "bad numeric config value '' for compression"
+                                .to_owned()
+                                .into(),
+                        )
                     })?;
                     let level = Self::parse_zlib_compression_level(val)?;
                     loose_level = level;
@@ -2344,8 +2363,8 @@ impl ConfigSet {
         // t0017 expects the diagnostic to contain this exact phrase.
         const MAX_INCLUDE_DEPTH: usize = 10;
         if depth > MAX_INCLUDE_DEPTH {
-            return Err(Error::ConfigError(
-                "exceeded maximum include depth".to_owned(),
+            return Err(Error::Config(
+                "exceeded maximum include depth".to_owned().into(),
             ));
         }
         if !process_includes {
@@ -2369,7 +2388,7 @@ impl ConfigSet {
 
             let resolved = match resolve_include_file_path(&inc_path, file, ctx) {
                 Ok(p) => p,
-                Err(Error::ConfigError(msg)) if msg.is_empty() => continue,
+                Err(Error::Config(ConfigError::Other(msg))) if msg.is_empty() => continue,
                 Err(e) => return Err(e),
             };
             included_files.push(resolved.clone());
@@ -2588,10 +2607,10 @@ fn add_environment_config_pairs(set: &mut ConfigSet, env: &Environment) -> Resul
 
     let count = count_str
         .parse::<usize>()
-        .map_err(|_| Error::ConfigError("bogus count in GIT_CONFIG_COUNT".to_owned()))?;
+        .map_err(|_| Error::Config("bogus count in GIT_CONFIG_COUNT".to_owned().into()))?;
     if count > i32::MAX as usize {
-        return Err(Error::ConfigError(
-            "too many entries in GIT_CONFIG_COUNT".to_owned(),
+        return Err(Error::Config(
+            "too many entries in GIT_CONFIG_COUNT".to_owned().into(),
         ));
     }
 
@@ -2599,7 +2618,9 @@ fn add_environment_config_pairs(set: &mut ConfigSet, env: &Environment) -> Resul
         let (key, value) = env
             .git_config_pairs
             .get(i)
-            .ok_or_else(|| Error::ConfigError(format!("missing config key GIT_CONFIG_KEY_{i}")))?;
+            .ok_or_else(|| {
+                Error::Config(format!("missing config key GIT_CONFIG_KEY_{i}").into())
+            })?;
         set.add_command_override(key, value)?;
     }
 
@@ -2712,58 +2733,70 @@ pub fn parse_git_config_int_strict(raw: &str) -> std::result::Result<i64, GitCon
 
 const DIFF_CONTEXT_KEY: &str = "diff.context";
 
-fn format_bad_numeric_diff_context(
+fn bad_numeric_diff_context(
     value: &str,
     err: GitConfigIntStrictError,
     entry: &ConfigEntry,
-) -> String {
-    let detail = match err {
-        GitConfigIntStrictError::InvalidUnit => "invalid unit",
-        GitConfigIntStrictError::OutOfRange => "out of range",
+) -> ConfigError {
+    let source = match err {
+        GitConfigIntStrictError::InvalidUnit => crate::error::BadNumericSource::InvalidUnit,
+        GitConfigIntStrictError::OutOfRange => crate::error::BadNumericSource::OutOfRange,
     };
     if entry.scope == ConfigScope::Command || entry.file.is_none() {
-        return format!(
-            "fatal: bad numeric config value '{value}' for '{DIFF_CONTEXT_KEY}': {detail}"
-        );
+        ConfigError::BadNumericValue {
+            key: DIFF_CONTEXT_KEY.to_owned(),
+            value: value.to_owned(),
+            detail: source.to_string(),
+        }
+    } else {
+        let path = entry
+            .file
+            .as_deref()
+            .map(config_error_path_display)
+            .unwrap_or_default();
+        ConfigError::BadNumericValueInFile {
+            key: DIFF_CONTEXT_KEY.to_owned(),
+            value: value.to_owned(),
+            file: path,
+            detail: source.to_string(),
+        }
     }
-    let path = entry
-        .file
-        .as_deref()
-        .map(config_error_path_display)
-        .unwrap_or_default();
-    format!("fatal: bad numeric config value '{value}' for '{DIFF_CONTEXT_KEY}' in file {path}: {detail}")
 }
 
-fn format_bad_diff_context_variable(entry: &ConfigEntry) -> String {
+fn bad_diff_context_variable(entry: &ConfigEntry) -> ConfigError {
     if entry.scope == ConfigScope::Command || entry.file.is_none() {
-        return format!("fatal: unable to parse '{DIFF_CONTEXT_KEY}' from command-line config");
+        ConfigError::UnableToParseFromCommandLine {
+            key: DIFF_CONTEXT_KEY.to_owned(),
+        }
+    } else {
+        let path = entry
+            .file
+            .as_deref()
+            .map(config_error_path_display)
+            .unwrap_or_default();
+        ConfigError::BadConfigVariableAtLine {
+            key: DIFF_CONTEXT_KEY.to_owned(),
+            file: path,
+            line: entry.line,
+        }
     }
-    let path = entry
-        .file
-        .as_deref()
-        .map(config_error_path_display)
-        .unwrap_or_default();
-    format!(
-        "fatal: bad config variable '{DIFF_CONTEXT_KEY}' in file '{path}' at line {}",
-        entry.line
-    )
 }
 
 /// Read `diff.context` from a loaded [`ConfigSet`] with Git-compatible validation.
 ///
 /// Returns `Ok(None)` when the key is unset. When set, the value must be a non-negative integer
 /// acceptable to Git's diff machinery (same rules as `git diff` / `git log -p`).
-pub fn resolve_diff_context_lines(cfg: &ConfigSet) -> std::result::Result<Option<usize>, String> {
+pub fn resolve_diff_context_lines(cfg: &ConfigSet) -> Result<Option<usize>> {
     let Some(entry) = cfg.get_last_entry(DIFF_CONTEXT_KEY) else {
         return Ok(None);
     };
     let value_src = entry.value.as_deref().unwrap_or("").trim();
     match parse_git_config_int_strict(value_src) {
-        Ok(n) if n < 0 => Err(format_bad_diff_context_variable(&entry)),
+        Ok(n) if n < 0 => Err(bad_diff_context_variable(&entry).into()),
         Ok(n) => Ok(Some(usize::try_from(n).map_err(|_| {
-            format_bad_numeric_diff_context(value_src, GitConfigIntStrictError::OutOfRange, &entry)
+            bad_numeric_diff_context(value_src, GitConfigIntStrictError::OutOfRange, &entry)
         })?)),
-        Err(e) => Err(format_bad_numeric_diff_context(value_src, e, &entry)),
+        Err(e) => Err(bad_numeric_diff_context(value_src, e, &entry).into()),
     }
 }
 
@@ -3402,8 +3435,8 @@ fn parse_config_parameters_strict(raw: &str) -> Result<Vec<ConfigParameter>> {
         }
 
         if chars[next_idx] != '=' {
-            return Err(Error::ConfigError(
-                "bogus format in GIT_CONFIG_PARAMETERS".to_owned(),
+            return Err(Error::Config(
+                "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
             ));
         }
 
@@ -3415,15 +3448,15 @@ fn parse_config_parameters_strict(raw: &str) -> Result<Vec<ConfigParameter>> {
         }
 
         if chars[value_start] != '\'' {
-            return Err(Error::ConfigError(
-                "bogus format in GIT_CONFIG_PARAMETERS".to_owned(),
+            return Err(Error::Config(
+                "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
             ));
         }
         let (value, value_next) = sq_dequote_step_chars(&chars, value_start)?;
         if let Some(value_next) = value_next {
             if !chars[value_next].is_whitespace() {
-                return Err(Error::ConfigError(
-                    "bogus format in GIT_CONFIG_PARAMETERS".to_owned(),
+                return Err(Error::Config(
+                    "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
                 ));
             }
             idx = skip_config_parameter_spaces(&chars, value_next);
@@ -3448,8 +3481,8 @@ fn skip_config_parameter_spaces(chars: &[char], mut idx: usize) -> usize {
 
 fn sq_dequote_step_chars(chars: &[char], start: usize) -> Result<(String, Option<usize>)> {
     if chars.get(start) != Some(&'\'') {
-        return Err(Error::ConfigError(
-            "bogus format in GIT_CONFIG_PARAMETERS".to_owned(),
+        return Err(Error::Config(
+            "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
         ));
     }
 
@@ -3457,8 +3490,8 @@ fn sq_dequote_step_chars(chars: &[char], start: usize) -> Result<(String, Option
     let mut idx = start + 1;
     loop {
         let Some(&ch) = chars.get(idx) else {
-            return Err(Error::ConfigError(
-                "bogus format in GIT_CONFIG_PARAMETERS".to_owned(),
+            return Err(Error::Config(
+                "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
             ));
         };
         if ch != '\'' {
@@ -3614,14 +3647,18 @@ fn resolve_include_file_path(
     if !include_source_is_disk_file(file) {
         if file.include_origin == ConfigIncludeOrigin::CommandLine {
             if ctx.command_line_relative_include_is_error {
-                return Err(Error::ConfigError(
-                    "relative config includes must come from files".to_owned(),
+                return Err(Error::Config(
+                    "relative config includes must come from files"
+                        .to_owned()
+                        .into(),
                 ));
             }
-            return Err(Error::ConfigError(String::new()));
+            return Err(Error::Config(String::new().into()));
         }
-        return Err(Error::ConfigError(
-            "relative config includes must come from files".to_owned(),
+        return Err(Error::Config(
+            "relative config includes must come from files"
+                .to_owned()
+                .into(),
         ));
     }
     let base = match file.path.parent() {
@@ -3648,13 +3685,17 @@ fn prepare_gitdir_pattern(condition: &str, file: &ConfigFile) -> Result<(String,
     let mut pat = parse_path(condition);
     if pat.starts_with("./") || pat.starts_with(".\\") {
         if !include_source_is_disk_file(file) {
-            return Err(Error::ConfigError(
-                "relative config include conditionals must come from files".to_owned(),
+            return Err(Error::Config(
+                "relative config include conditionals must come from files"
+                    .to_owned()
+                    .into(),
             ));
         }
         let parent = file.path.parent().ok_or_else(|| {
-            Error::ConfigError(
-                "relative config include conditionals must come from files".to_owned(),
+            Error::Config(
+                "relative config include conditionals must come from files"
+                    .to_owned()
+                    .into(),
             )
         })?;
         let real = parent.canonicalize().map_err(Error::Io)?;
@@ -3800,15 +3841,12 @@ fn validate_hasconfig_remote_url_include(
 ) -> Result<()> {
     const MAX_INCLUDE_DEPTH: usize = 10;
     if depth > MAX_INCLUDE_DEPTH {
-        return Err(Error::ConfigError(
-            "exceeded maximum include depth".to_owned(),
+        return Err(Error::Config(
+            "exceeded maximum include depth".to_owned().into(),
         ));
     }
     if file.entries.iter().any(is_remote_url_entry) {
-        return Err(Error::Message(
-            "fatal: remote URLs cannot be configured in file directly or indirectly included by includeIf.hasconfig:remote.*.url"
-                .to_owned(),
-        ));
+        return Err(ConfigError::RemoteUrlInHasconfigInclude.into());
     }
     if !process_includes {
         return Ok(());
@@ -3824,7 +3862,7 @@ fn validate_hasconfig_remote_url_include(
         }
         let resolved = match resolve_include_file_path(&inc_path, file, ctx) {
             Ok(p) => p,
-            Err(Error::ConfigError(msg)) if msg.is_empty() => continue,
+            Err(Error::Config(ConfigError::Other(msg))) if msg.is_empty() => continue,
             Err(e) => return Err(e),
         };
         if let Some(inc_file) = ConfigFile::from_path(&resolved, file.scope)? {
@@ -3863,10 +3901,10 @@ fn evaluate_include_condition(
 fn split_key(key: &str) -> Result<(String, Option<String>, String)> {
     let first_dot = key
         .find('.')
-        .ok_or_else(|| Error::ConfigError(format!("invalid key: '{key}'")))?;
+        .ok_or_else(|| Error::Config(format!("invalid key: '{key}'").into()))?;
     let last_dot = key
         .rfind('.')
-        .ok_or_else(|| Error::ConfigError(format!("invalid key: '{key}'")))?;
+        .ok_or_else(|| Error::Config(format!("invalid key: '{key}'").into()))?;
 
     let section = key[..first_dot].to_owned();
     let variable = key[last_dot + 1..].to_owned();
@@ -3918,9 +3956,9 @@ fn validate_section_name(section: &str, subsection: Option<&str>) -> Result<()> 
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
         || subsection.is_some_and(str::is_empty)
     {
-        return Err(Error::ConfigError(format!(
-            "invalid section name: {section}"
-        )));
+        return Err(Error::Config(
+            format!("invalid section name: {section}").into(),
+        ));
     }
     Ok(())
 }
@@ -4117,27 +4155,27 @@ mod loose_compression_tests {
         let err = set_from_snippet("[core]\n\tloosecompression = 10\n")
             .loose_objects_zlib_level()
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigError(_)));
+        assert!(matches!(err, Error::Config(_)));
 
         let err = set_from_snippet("[core]\n\tloosecompression = not-a-number\n")
             .loose_objects_zlib_level()
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigError(_)));
+        assert!(matches!(err, Error::Config(_)));
 
         let err = set_from_snippet("[core]\n\tcompression = 42\n")
             .loose_objects_zlib_level()
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigError(_)));
+        assert!(matches!(err, Error::Config(_)));
 
         let err = set_from_snippet("[core]\n\tcompression = nope\n\tloosecompression = 1\n")
             .loose_objects_zlib_level()
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigError(_)));
+        assert!(matches!(err, Error::Config(_)));
 
         let err = set_from_snippet("[core]\n\tloosecompression = nope\n\tloosecompression = 1\n")
             .loose_objects_zlib_level()
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigError(_)));
+        assert!(matches!(err, Error::Config(_)));
 
         let set = set_from_snippet("[core]\n\tloosecompression = 1\n\tcompression = 9\n");
         assert_eq!(set.loose_objects_zlib_level().unwrap(), 1);
@@ -4145,7 +4183,7 @@ mod loose_compression_tests {
         let err = set_from_snippet("[core]\n\tloosecompression\n")
             .loose_objects_zlib_level()
             .unwrap_err();
-        assert!(matches!(err, Error::ConfigError(_)));
+        assert!(matches!(err, Error::Config(_)));
     }
 }
 

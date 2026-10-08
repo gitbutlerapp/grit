@@ -735,9 +735,11 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
         .unwrap_or(false)
     {
         let display = ref_path_for_display(&path);
-        return Err(Error::Message(format!(
-            "fatal: cannot lock ref '{refname}': there is a non-empty directory '{display}' blocking reference '{refname}'"
-        )));
+        return Err(crate::error::RefLockError::DirectoryInTheWay {
+            refname: refname.to_owned(),
+            path: display,
+        }
+        .into());
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1640,10 +1642,11 @@ fn update_branch_for_commit_files(
         .unwrap_or(false)
     {
         let display = ref_path_for_display(&path);
-        return Err(Error::Message(format!(
-            "fatal: cannot lock ref '{}': there is a non-empty directory '{display}' blocking reference '{}'",
-            update.branch_ref, update.branch_ref
-        )));
+        return Err(crate::error::RefLockError::DirectoryInTheWay {
+            refname: update.branch_ref.to_owned(),
+            path: display,
+        }
+        .into());
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

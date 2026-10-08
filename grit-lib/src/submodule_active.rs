@@ -85,7 +85,7 @@ fn read_gitmodules_text(
     }
     String::from_utf8(obj.data)
         .map(Some)
-        .map_err(|e| crate::error::Error::ConfigError(format!("invalid .gitmodules utf-8: {e}")))
+        .map_err(|e| crate::error::Error::Config(format!("invalid .gitmodules utf-8: {e}").into()))
 }
 
 /// Resolve the submodule **logical name** for an index path (`.gitmodules` `submodule.<name>.path`).
