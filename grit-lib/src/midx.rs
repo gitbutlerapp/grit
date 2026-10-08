@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::hash::verify_trailer;
 
 use crate::error::{Error, Result};
-use crate::objects::{HashAlgo, ObjectId};
+use crate::objects::{HashAlgo, ObjectId, ObjectInfo};
 use crate::odb::hash_algo_for_objects_dir;
 use crate::pack::{read_pack_index_no_verify, PackIndex};
 use crate::pack_rev::append_hashfile_checksum;
@@ -2211,6 +2211,99 @@ pub fn try_read_object_via_midx(
         }
     };
     crate::pack::read_object_from_pack(idx.as_ref(), oid).map(Some)
+}
+
+/// Like [`try_read_object_via_midx`], but returns [`ObjectInfo`] without inflating object bodies.
+pub fn try_read_info_via_midx(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    let pack_dir = objects_dir.join("pack");
+    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
+    else {
+        return Ok(None);
+    };
+    let data = match midx_cache::get_bytes(&midx_path) {
+        Ok(data) => data,
+        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+
+    let MidxReadView {
+        oidf_off,
+        oidl_off,
+        ooff_off,
+        loff,
+        num_objects,
+        pack_names,
+    } = match midx_load_for_read(&data, hash_algo_for_objects_dir(objects_dir)) {
+        MidxLoadResult::Ok(v) => v,
+        MidxLoadResult::Skip => return Ok(None),
+    };
+
+    let first = oid.as_bytes()[0] as usize;
+    let lo = if first == 0 {
+        0u32
+    } else {
+        read_be_u32(&data, oidf_off + (first - 1) * 4)?
+    };
+    let hi = read_be_u32(&data, oidf_off + first * 4)?;
+
+    let hash_len = midx_hash_len(&data)?;
+    let mut pos = None;
+    let mut i = lo as usize;
+    while i < hi as usize && i < num_objects {
+        let o =
+            ObjectId::from_bytes(&data[oidl_off + i * hash_len..oidl_off + (i + 1) * hash_len])?;
+        let c = o.cmp(oid);
+        if c == std::cmp::Ordering::Equal {
+            pos = Some(i);
+            break;
+        }
+        if c == std::cmp::Ordering::Greater {
+            break;
+        }
+        i += 1;
+    }
+    let Some(pos) = pos else {
+        return Ok(None);
+    };
+
+    let obase = ooff_off + pos * 8;
+    let pack_id = read_be_u32(&data, obase)?;
+    let raw_off = read_be_u32(&data, obase + 4)?;
+    let _offset = if (raw_off & MIDX_LARGE_OFFSET_NEEDED) != 0 {
+        let idx = (raw_off & !MIDX_LARGE_OFFSET_NEEDED) as usize;
+        let need = (idx + 1) * 8;
+        match loff {
+            Some((loff_off, loff_len)) if loff_len >= need => {
+                read_be_u64(&data, loff_off + idx * 8)?
+            }
+            _ => {
+                midx_die(&["multi-pack-index large offset out of bounds"]);
+            }
+        }
+    } else {
+        u64::from(raw_off)
+    };
+
+    let idx_name = pack_names
+        .get(pack_id as usize)
+        .ok_or_else(|| Error::CorruptObject("bad pack-int-id".to_owned()))?;
+    let idx_path = pack_dir.join(idx_name);
+    if !idx_path.exists() {
+        return Ok(None);
+    }
+    let idx = match crate::pack::read_pack_index_cached(&idx_path) {
+        Ok(idx) => idx,
+        Err(_) => {
+            let mut pack_path = idx_path.clone();
+            pack_path.set_extension("pack");
+            midx_warn_once(&format!(
+                "error: packfile {} index unavailable",
+                pack_path.display()
+            ));
+            return Ok(None);
+        }
+    };
+    crate::pack::read_object_info_from_pack(idx.as_ref(), oid).map(Some)
 }
 
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {

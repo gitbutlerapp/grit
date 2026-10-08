@@ -15,6 +15,8 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 [`Odb::read`](rustdoc:grit_lib::odb::Odb) returns an [`Object`](rustdoc:grit_lib::objects::Object) with `kind` and uncompressed `data`. Packed and loose objects share the same API.
 
+When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](rustdoc:grit_lib::odb::Odb) (see `read_info` on [`Odb`](rustdoc:grit_lib::odb::Odb)). It returns [`ObjectInfo`](rustdoc:grit_lib::objects::ObjectInfo) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:

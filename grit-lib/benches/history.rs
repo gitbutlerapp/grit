@@ -2,6 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+mod s1;
 mod s7;
 
 use std::hint::black_box;
@@ -43,6 +44,19 @@ fn revwalk_group(c: &mut Criterion, ordering: OrderingMode, label: &str) {
             },
         );
     }
+    group.finish();
+}
+
+fn bench_s1_rev_list_objects_v1(c: &mut Criterion) {
+    if !s1::fixture_available() {
+        return;
+    }
+    let fx = s1::S1Fixture::global();
+    let mut group = c.benchmark_group("s1");
+    group.sample_size(7);
+    group.bench_function("rev_list_objects_v1.0.0", |b| {
+        b.iter(|| black_box(s1::run_rev_list_objects_v1(&fx.repo)));
+    });
     group.finish();
 }
 
@@ -158,6 +172,7 @@ fn bench_blob_diff(c: &mut Criterion) {
 
 criterion_group!(
     history,
+    bench_s1_rev_list_objects_v1,
     bench_revwalk_topo,
     bench_revwalk_date,
     bench_rev_parse,

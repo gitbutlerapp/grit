@@ -5,6 +5,7 @@
 mod fixture;
 
 use std::hint::black_box;
+use std::io::Read;
 use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -223,6 +224,28 @@ fn bench_hash_batch_parallel(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_read_info_mib_loose(c: &mut Criterion) {
+    static CTX: OnceLock<(tempfile::TempDir, Odb, grit_lib::objects::ObjectId)> = OnceLock::new();
+    let (_tmp, odb, oid) = CTX.get_or_init(|| {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(&tmp.path().join("objects"));
+        let data = vec![0xABu8; 1024 * 1024];
+        let oid = odb
+            .write(ObjectKind::Blob, &data)
+            .expect("write 1 MiB loose blob");
+        (tmp, odb, oid)
+    });
+    let mut group = c.benchmark_group("read_info_vs_read");
+    group.throughput(Throughput::Bytes(1024 * 1024));
+    group.bench_function("loose_read", |b| {
+        b.iter(|| black_box(odb.read(oid).expect("read")));
+    });
+    group.bench_function("loose_read_info", |b| {
+        b.iter(|| black_box(odb.read_info(oid).expect("read_info")));
+    });
+    group.finish();
+}
+
 fn bench_exists_local_10k_oids_packed(c: &mut Criterion) {
     static FIX: OnceLock<(tempfile::TempDir, Odb, Vec<grit_lib::objects::ObjectId>)> =
         OnceLock::new();
@@ -258,6 +281,7 @@ criterion_group!(
     bench_hash_object,
     bench_zlib,
     bench_loose_read,
+    bench_read_info_mib_loose,
     bench_packed_read,
     bench_idx_lookup,
     bench_exists_local_10k_oids_packed,

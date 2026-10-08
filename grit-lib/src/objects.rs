@@ -434,6 +434,15 @@ impl FromStr for ObjectKind {
     }
 }
 
+/// Kind and uncompressed size of a Git object without loading its payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectInfo {
+    /// Object type after resolving any pack delta chain.
+    pub kind: ObjectKind,
+    /// Uncompressed byte length of the object body (after the header NUL).
+    pub size: u64,
+}
+
 /// A decompressed, header-stripped Git object.
 #[derive(Debug, Clone)]
 pub struct Object {
