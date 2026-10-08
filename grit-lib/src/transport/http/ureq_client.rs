@@ -607,20 +607,23 @@ impl UreqHttpClient {
         git_protocol: Option<&str>,
         auth: Option<&str>,
     ) -> Result<RawResponse> {
-        let mut req = self.agent.get(url).header("User-Agent", &self.user_agent);
-        if let Some(v) = git_protocol {
-            req = req.header("Git-Protocol", v);
-        }
-        if let Some(a) = auth {
-            req = req.header("Authorization", a);
-        }
-        if let Some(cookie) = self.cookie_header_for_url(url) {
-            req = req.header("Cookie", &cookie);
-        }
-        for (name, value) in self.extra_headers_for_url(url) {
-            req = req.header(&name, &value);
-        }
-        finish(req.call(), &self.transport_timeouts)
+        let result = retry_interrupted(true, || {
+            let mut req = self.agent.get(url).header("User-Agent", &self.user_agent);
+            if let Some(v) = git_protocol {
+                req = req.header("Git-Protocol", v);
+            }
+            if let Some(a) = auth {
+                req = req.header("Authorization", a);
+            }
+            if let Some(cookie) = self.cookie_header_for_url(url) {
+                req = req.header("Cookie", &cookie);
+            }
+            for (name, value) in self.extra_headers_for_url(url) {
+                req = req.header(&name, &value);
+            }
+            req.call()
+        });
+        finish(result, &self.transport_timeouts)
     }
 
     fn do_post(
@@ -632,25 +635,31 @@ impl UreqHttpClient {
         git_protocol: Option<&str>,
         auth: Option<&str>,
     ) -> Result<RawResponse> {
-        let mut req = self
-            .agent
-            .post(url)
-            .header("Content-Type", content_type)
-            .header("Accept", accept)
-            .header("User-Agent", &self.user_agent);
-        if let Some(v) = git_protocol {
-            req = req.header("Git-Protocol", v);
-        }
-        if let Some(a) = auth {
-            req = req.header("Authorization", a);
-        }
-        if let Some(cookie) = self.cookie_header_for_url(url) {
-            req = req.header("Cookie", &cookie);
-        }
-        for (name, value) in self.extra_headers_for_url(url) {
-            req = req.header(&name, &value);
-        }
-        finish(req.send(body), &self.transport_timeouts)
+        // A fetch negotiation request only reads from the server, so it is safe to resend; a
+        // push (receive-pack) request is not.
+        let idempotent = content_type == "application/x-git-upload-pack-request";
+        let result = retry_interrupted(idempotent, || {
+            let mut req = self
+                .agent
+                .post(url)
+                .header("Content-Type", content_type)
+                .header("Accept", accept)
+                .header("User-Agent", &self.user_agent);
+            if let Some(v) = git_protocol {
+                req = req.header("Git-Protocol", v);
+            }
+            if let Some(a) = auth {
+                req = req.header("Authorization", a);
+            }
+            if let Some(cookie) = self.cookie_header_for_url(url) {
+                req = req.header("Cookie", &cookie);
+            }
+            for (name, value) in self.extra_headers_for_url(url) {
+                req = req.header(&name, &value);
+            }
+            req.send(body)
+        });
+        finish(result, &self.transport_timeouts)
     }
 
     /// Run `attempt` (a GET or POST closure) with auth-retry on 401, returning
@@ -764,6 +773,28 @@ impl HttpClient for UreqHttpClient {
     fn reset_auth_after_redirect_rebase(&self) {
         self.clear_auth_header();
     }
+}
+
+/// Attempts made for an idempotent request whose socket call fails with `EINTR`.
+const INTERRUPTED_ATTEMPTS: usize = 3;
+
+/// Run `send`, resending it when a socket call was interrupted by a signal (`EINTR`) and the
+/// request is `idempotent`. `EINTR` means "try again", not a transport failure.
+fn retry_interrupted<T>(
+    idempotent: bool,
+    mut send: impl FnMut() -> std::result::Result<T, ureq::Error>,
+) -> std::result::Result<T, ureq::Error> {
+    let attempts = if idempotent { INTERRUPTED_ATTEMPTS } else { 1 };
+    let mut result = send();
+    for _ in 1..attempts {
+        match &result {
+            Err(ureq::Error::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted => {
+                result = send();
+            }
+            _ => break,
+        }
+    }
+    result
 }
 
 /// Convert a ureq call result into a [`RawResponse`], reading the body.
@@ -1075,6 +1106,48 @@ fn parse_header_cookie(line: &str) -> Option<CookieSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn interrupted() -> ureq::Error {
+        ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::Interrupted))
+    }
+
+    #[test]
+    fn idempotent_request_is_resent_after_eintr() {
+        let mut calls = 0;
+        let result = retry_interrupted(true, || {
+            calls += 1;
+            if calls < 3 {
+                Err(interrupted())
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(result.ok(), Some(3));
+    }
+
+    #[test]
+    fn non_idempotent_request_is_not_resent_after_eintr() {
+        let mut calls = 0;
+        let result: std::result::Result<(), _> = retry_interrupted(false, || {
+            calls += 1;
+            Err(interrupted())
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn other_errors_are_not_retried() {
+        let mut calls = 0;
+        let result: std::result::Result<(), _> = retry_interrupted(true, || {
+            calls += 1;
+            Err(ureq::Error::Io(std::io::Error::from(
+                std::io::ErrorKind::ConnectionRefused,
+            )))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+    }
 
     #[test]
     fn netscape_cookie_parses_and_matches() {
