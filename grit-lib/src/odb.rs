@@ -2065,6 +2065,12 @@ mod tests {
         assert_eq!(oid.to_hex(), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
     }
 
+    #[test]
+    fn parse_object_header_prefix_unknown_kind_is_typed_error() {
+        let err = parse_object_header_prefix(b"not-a-git-kind 0\0").unwrap_err();
+        assert!(matches!(err, Error::UnknownObjectType(_)));
+    }
+
     fn git_dir_with_config(config: &str) -> (TempDir, PathBuf, PathBuf) {
         let dir = TempDir::new().unwrap();
         let git_dir = dir.path().join(".git");
