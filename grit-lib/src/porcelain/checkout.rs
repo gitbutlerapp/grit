@@ -44,6 +44,7 @@ pub fn checkout_between_trees(
 
     let changes = diff_trees(&repo.odb, from, Some(to), "")?;
     let mut index = repo.load_index()?;
+    let mut paths_to_remove: Vec<Vec<u8>> = Vec::new();
 
     for change in &changes {
         if change.status == DiffStatus::Deleted {
@@ -51,7 +52,7 @@ pub fn checkout_between_trees(
                 let abs = work_tree.join(path);
                 let _ = std::fs::remove_file(&abs);
                 remove_empty_parent_dirs(&work_tree, &abs);
-                index.remove(path.as_bytes());
+                paths_to_remove.push(path.as_bytes().to_vec());
             }
             continue;
         }
@@ -64,6 +65,10 @@ pub fn checkout_between_trees(
         write_to_worktree(&work_tree, path, &object.data, mode)?;
         let entry = entry_from_stat(&work_tree.join(path), path.as_bytes(), change.new_oid, mode)?;
         index.add_or_replace(entry);
+    }
+
+    if !paths_to_remove.is_empty() {
+        index.remove_paths(paths_to_remove.iter().map(|p| p.as_slice()));
     }
 
     index.sort();

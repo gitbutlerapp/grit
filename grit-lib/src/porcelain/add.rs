@@ -1088,7 +1088,7 @@ mod tests {
         let mut index = Index::new();
         let mut gitlink = conflict_index_entry("sub", 0, old_head, MODE_GITLINK);
         gitlink.size = 0;
-        index.entries.push(gitlink);
+        index.push_entry_unsorted(gitlink);
         write_index(&repo, &mut index);
 
         let new_head = commit_in_repo(&sub_repo, "inside.txt", b"new\n", "new");

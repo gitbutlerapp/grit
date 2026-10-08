@@ -28,7 +28,7 @@ fn run() -> Result<()> {
     let repo = Repository::discover(None)?;
     let index = repo.load_index()?;
     let index_paths: BTreeSet<String> = index
-        .entries
+        .entries()
         .iter()
         .map(|e| String::from_utf8_lossy(&e.path).to_string())
         .collect();
@@ -43,7 +43,7 @@ fn run() -> Result<()> {
         .map(|e| (String::from_utf8_lossy(&e.path).to_string(), e.oid))
         .collect();
 
-    for entry in &index.entries {
+    for entry in index.entries() {
         let path = String::from_utf8_lossy(&entry.path).to_string();
         match head_map.get(&path) {
             Some(oid) if oid == &entry.oid => {}
@@ -60,7 +60,7 @@ fn run() -> Result<()> {
     let Some(work_tree) = repo.work_tree.as_ref() else {
         return Ok(());
     };
-    for entry in &index.entries {
+    for entry in index.entries() {
         let path = String::from_utf8_lossy(&entry.path).to_string();
         let full_path = work_tree.join(&path);
         if !full_path.exists() {

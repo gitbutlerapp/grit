@@ -180,7 +180,7 @@ mod tests {
     fn memihash_collision_requires_ascii_case_confirm() {
         assert_eq!(memihash(b"f02398b.txt"), memihash(b"f0688b8.txt"));
         let mut index = Index::new();
-        index.entries.push(dummy_entry("f02398b.txt"));
+        index.push_entry_unsorted(dummy_entry("f02398b.txt"));
         let tracked = Stage0TrackedPaths::from_index(&index, true);
         assert!(tracked.contains("f02398b.txt"));
         assert!(

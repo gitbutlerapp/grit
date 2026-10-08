@@ -221,12 +221,14 @@ impl IndexEntry {
 }
 
 /// The in-memory representation of the Git index file.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Index {
     /// Index format version (2 or 3).
     pub version: u32,
-    /// Index entries, sorted by (path, stage).
-    pub entries: Vec<IndexEntry>,
+    /// Index entries, sorted by (path, stage) when [`Self::entries_sorted`] is true.
+    pub(crate) entries: Vec<IndexEntry>,
+    /// When `true`, `entries` are in Git `(path, stage)` order and O(log n) lookups apply.
+    pub(crate) entries_sorted: bool,
     /// When true, the on-disk index includes the `sdir` extension (sparse index).
     pub sparse_directories: bool,
     /// Optional untracked-cache extension (`UNTR`), matching Git's `istate->untracked`.
@@ -251,6 +253,12 @@ pub struct Index {
     pub hash_algo: HashAlgo,
     /// On-disk index mtime when this index was last read (Git `istate->timestamp`).
     pub source_mtime: Option<(u32, u32)>,
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// One node from Git's `TREE` index extension.
@@ -599,6 +607,7 @@ impl Index {
         Self {
             version,
             entries: Vec::new(),
+            entries_sorted: true,
             sparse_directories: false,
             untracked_cache: None,
             fsmonitor_last_update: None,
@@ -625,6 +634,7 @@ impl Index {
         Self {
             version,
             entries: Vec::new(),
+            entries_sorted: true,
             sparse_directories: false,
             untracked_cache: None,
             fsmonitor_last_update: None,
@@ -651,6 +661,7 @@ impl Index {
             return Self {
                 version: v,
                 entries: Vec::new(),
+                entries_sorted: true,
                 sparse_directories: false,
                 untracked_cache: None,
                 fsmonitor_last_update: None,
@@ -689,6 +700,7 @@ impl Index {
         Self {
             version,
             entries: Vec::new(),
+            entries_sorted: true,
             sparse_directories: false,
             untracked_cache: None,
             fsmonitor_last_update: None,
@@ -713,6 +725,7 @@ impl Index {
             return Self {
                 version: v,
                 entries: Vec::new(),
+                entries_sorted: true,
                 sparse_directories: false,
                 untracked_cache: None,
                 fsmonitor_last_update: None,
@@ -754,6 +767,7 @@ impl Index {
         Self {
             version,
             entries: Vec::new(),
+            entries_sorted: true,
             sparse_directories: false,
             untracked_cache: None,
             fsmonitor_last_update: None,
@@ -1120,6 +1134,7 @@ impl Index {
         Ok(Self {
             version,
             entries,
+            entries_sorted: true,
             sparse_directories,
             untracked_cache,
             fsmonitor_last_update,
@@ -1155,10 +1170,7 @@ impl Index {
         // canonical order; serializing from `&self` skips a full clone of every entry. The
         // comparator must stay identical to [`Index::sort`] (path, then stage) — format v4 path
         // compression depends on it.
-        let already_sorted = self
-            .entries
-            .is_sorted_by(|a, b| (&a.path, a.stage()) <= (&b.path, b.stage()));
-        if already_sorted {
+        if self.entries_sorted {
             self.serialize_into(&mut body)?;
         } else {
             let mut sorted = self.clone();
@@ -1438,30 +1450,294 @@ impl Index {
         Ok(())
     }
 
+    /// Read-only view of index entries.
+    #[must_use]
+    pub fn entries(&self) -> &[IndexEntry] {
+        &self.entries
+    }
+
+    /// Mutable entry list; marks the index unsorted until [`Self::sort`].
+    pub fn entries_mut(&mut self) -> &mut Vec<IndexEntry> {
+        self.entries_sorted = false;
+        &mut self.entries
+    }
+
+    /// Mark `entries` as not in canonical `(path, stage)` order after direct vector mutation.
+    pub fn mark_entries_unsorted(&mut self) {
+        self.entries_sorted = false;
+    }
+
+    /// Append an entry without maintaining sort order (used while building a merge index).
+    pub(crate) fn push_entry_unsorted(&mut self, entry: IndexEntry) {
+        self.entries.push(entry);
+        self.entries_sorted = false;
+    }
+
+    /// Whether [`Self::entries`] are in Git canonical `(path, stage)` order (full scan).
+    #[must_use]
+    pub fn entries_are_sorted(&self) -> bool {
+        self.entries
+            .windows(2)
+            .all(|pair| (&pair[0].path, pair[0].stage()) <= (&pair[1].path, pair[1].stage()))
+    }
+
+    /// Compare two index paths (counts comparisons in unit tests).
+    fn cmp_paths(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+        record_path_cmp_for_tests();
+        a.cmp(b)
+    }
+
+    fn entry_matches(entry: &IndexEntry, path: &[u8], stage: u8) -> bool {
+        entry.path == path && entry.stage() == stage
+    }
+
+    /// Index of `(path, stage)`; binary search when sorted, linear fallback if the flag is stale.
+    fn find_entry_pos(&self, path: &[u8], stage: u8) -> Option<usize> {
+        if self.entries_sorted {
+            if let Ok(pos) = self.entries.binary_search_by(|e| {
+                Self::cmp_paths(e.path.as_slice(), path).then_with(|| e.stage().cmp(&stage))
+            }) {
+                if self
+                    .entries
+                    .get(pos)
+                    .is_some_and(|e| Self::entry_matches(e, path, stage))
+                {
+                    return Some(pos);
+                }
+            }
+        }
+        self.entries
+            .iter()
+            .position(|e| Self::entry_matches(e, path, stage))
+    }
+
+    /// Inclusive start and exclusive end of all entries sharing `path` (sorted indexes only).
+    fn path_run_range_sorted(&self, path: &[u8]) -> (usize, usize) {
+        debug_assert!(self.entries_sorted);
+        let start = self
+            .entries
+            .partition_point(|e| Self::cmp_paths(e.path.as_slice(), path).is_lt());
+        let end = start
+            + self.entries[start..]
+                .iter()
+                .take_while(|e| e.path == path)
+                .count();
+        (start, end)
+    }
+
+    /// Inclusive start and exclusive end of entries strictly under `path/` (sorted indexes only).
+    fn descendant_run_range_sorted(&self, path: &str) -> (usize, usize) {
+        debug_assert!(self.entries_sorted);
+        let prefix = path.as_bytes();
+        let plen = prefix.len();
+        let mut prefix_slash = Vec::with_capacity(plen + 1);
+        prefix_slash.extend_from_slice(prefix);
+        prefix_slash.push(b'/');
+        let start = self.entries.partition_point(|e| {
+            Self::cmp_paths(e.path.as_slice(), prefix_slash.as_slice()).is_lt()
+        });
+        let mut end = start;
+        while end < self.entries.len() {
+            let ep = self.entries[end].path.as_slice();
+            if ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        (start, end)
+    }
+
+    fn record_resolve_undo_for_path(&mut self, path: &[u8]) {
+        for e in &self.entries {
+            if e.path == path && e.stage() != 0 {
+                resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+            }
+        }
+    }
+
+    fn record_resolve_undo_for_run(&mut self, start: usize, end: usize) {
+        for e in &self.entries[start..end] {
+            if e.stage() != 0 {
+                resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+            }
+        }
+    }
+
+    fn invalidate_after_path_removal(&mut self, path: &[u8]) {
+        if let Ok(p) = std::str::from_utf8(path) {
+            self.invalidate_untracked_cache_for_path(p);
+        }
+        self.invalidate_cache_tree_for_path(path);
+    }
+
+    /// Remove many paths (all merge stages per path) in one `O(N + M log M)` compaction pass.
+    pub fn remove_paths<'a>(&mut self, paths: impl IntoIterator<Item = &'a [u8]>) {
+        use std::collections::BTreeSet;
+
+        let mut paths: Vec<&[u8]> = paths.into_iter().collect();
+        if paths.is_empty() {
+            return;
+        }
+        paths.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
+        paths.dedup_by(|a, b| a == b);
+
+        let mut invalidated_paths: Vec<Vec<u8>> = Vec::new();
+        let mut kept = Vec::with_capacity(self.entries.len());
+
+        if self.entries_sorted {
+            let mut path_idx = 0usize;
+            for entry in self.entries.drain(..) {
+                let ep = entry.path.as_slice();
+                while path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_lt() {
+                    path_idx += 1;
+                }
+                let remove = path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_eq();
+                if remove {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths.last().is_none_or(|p| p.as_slice() != ep) {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            self.entries = kept;
+        } else {
+            let remove_set: BTreeSet<&[u8]> = paths.into_iter().collect();
+            for entry in self.entries.drain(..) {
+                if remove_set.contains(entry.path.as_slice()) {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths
+                        .last()
+                        .is_none_or(|p| p.as_slice() != entry.path.as_slice())
+                    {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            self.entries = kept;
+        }
+
+        for path in invalidated_paths {
+            self.invalidate_after_path_removal(&path);
+        }
+        self.touch_fsmonitor_after_entry_change();
+    }
+
+    /// Remove every entry at `paths` (all stages), then merge `replacements` in sorted order.
+    ///
+    /// When the index is already sorted, this is one removal scan plus an `O(N + M)` merge,
+    /// avoiding per-path `Vec::drain` shifts and repeated `insert`/`sort` work.
+    pub fn remove_paths_and_insert<'a>(
+        &mut self,
+        paths: impl IntoIterator<Item = &'a [u8]>,
+        replacements: impl IntoIterator<Item = IndexEntry>,
+    ) {
+        let mut replacements: Vec<IndexEntry> = replacements.into_iter().collect();
+        if replacements.is_empty() {
+            self.remove_paths(paths);
+            return;
+        }
+        replacements.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+
+        let mut paths: Vec<&[u8]> = paths.into_iter().collect();
+        if paths.is_empty() {
+            for entry in replacements {
+                self.add_or_replace(entry);
+            }
+            return;
+        }
+        paths.sort_unstable_by(|a, b| Self::cmp_paths(a, b));
+        paths.dedup_by(|a, b| a == b);
+
+        let mut invalidated_paths: Vec<Vec<u8>> = Vec::new();
+        let mut kept = Vec::with_capacity(self.entries.len());
+
+        if self.entries_sorted {
+            let mut path_idx = 0usize;
+            for entry in self.entries.drain(..) {
+                let ep = entry.path.as_slice();
+                while path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_lt() {
+                    path_idx += 1;
+                }
+                let remove = path_idx < paths.len() && Self::cmp_paths(paths[path_idx], ep).is_eq();
+                if remove {
+                    if entry.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, &entry);
+                    }
+                    if invalidated_paths.last().is_none_or(|p| p.as_slice() != ep) {
+                        invalidated_paths.push(entry.path.clone());
+                    }
+                } else {
+                    kept.push(entry);
+                }
+            }
+            let repl_for_inval = replacements
+                .iter()
+                .filter(|e| e.stage() == 0)
+                .map(|e| e.path.clone())
+                .collect::<Vec<_>>();
+            self.entries = merge_sorted_index_entries(kept, replacements);
+            self.entries_sorted = true;
+            for path in invalidated_paths {
+                self.invalidate_after_path_removal(&path);
+            }
+            for path in repl_for_inval {
+                if let Ok(p) = std::str::from_utf8(&path) {
+                    self.invalidate_untracked_cache_for_path(p);
+                }
+                self.invalidate_cache_tree_for_path(&path);
+            }
+            self.touch_fsmonitor_after_entry_change();
+            return;
+        }
+        self.remove_paths(paths);
+        for entry in replacements {
+            self.add_or_replace(entry);
+        }
+    }
+
     /// Add or replace an entry (matched by path + stage).
     pub fn add_or_replace(&mut self, entry: IndexEntry) {
         let path = entry.path.clone();
         let stage = entry.stage();
         let mut inserted_stage0 = false;
-        // Binary search for the insertion point by (path, stage)
-        let result = self.entries.binary_search_by(|e| {
-            e.path
-                .as_slice()
-                .cmp(path.as_slice())
-                .then_with(|| e.stage().cmp(&stage))
-        });
-        match result {
-            Ok(pos) => {
-                // Preserve split-index row binding across refresh/replace (Git `ce->index`).
-                let mut e = entry;
-                e.base_index_pos = self.entries[pos].base_index_pos;
-                self.entries[pos] = e;
+        if self.entries_sorted {
+            let result = self.entries.binary_search_by(|e| {
+                e.path
+                    .as_slice()
+                    .cmp(path.as_slice())
+                    .then_with(|| e.stage().cmp(&stage))
+            });
+            match result {
+                Ok(pos) => {
+                    let mut e = entry;
+                    e.base_index_pos = self.entries[pos].base_index_pos;
+                    self.entries[pos] = e;
+                }
+                Err(pos) => {
+                    self.entries.insert(pos, entry);
+                    inserted_stage0 = stage == 0;
+                }
             }
-            Err(pos) => {
-                // Not found — insert at sorted position
-                self.entries.insert(pos, entry);
-                inserted_stage0 = stage == 0;
-            }
+        } else if let Some(pos) = self
+            .entries
+            .iter()
+            .position(|e| e.path == path && e.stage() == stage)
+        {
+            let mut e = entry;
+            e.base_index_pos = self.entries[pos].base_index_pos;
+            self.entries[pos] = e;
+        } else {
+            self.entries.push(entry);
+            inserted_stage0 = stage == 0;
         }
         if inserted_stage0 {
             if let Ok(p) = std::str::from_utf8(&path) {
@@ -1479,14 +1755,25 @@ impl Index {
     /// conflicted file during merge/cherry-pick resolution.
     pub fn stage_file(&mut self, entry: IndexEntry) {
         let path = entry.path.clone();
-        for e in &self.entries {
-            if e.path == path && e.stage() != 0 {
-                resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+        if self.entries_sorted {
+            let (start, end) = self.path_run_range_sorted(&path);
+            for i in (start..end).rev() {
+                if self.entries[i].stage() != 0 {
+                    resolve_undo::record_resolve_undo_for_entry(
+                        &mut self.resolve_undo,
+                        &self.entries[i],
+                    );
+                    self.entries.remove(i);
+                }
             }
+        } else {
+            for e in &self.entries {
+                if e.path == path && e.stage() != 0 {
+                    resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+                }
+            }
+            self.entries.retain(|e| e.path != path || e.stage() == 0);
         }
-        // Remove conflict stages first
-        self.entries.retain(|e| e.path != path || e.stage() == 0);
-        // Then add/replace stage-0 entry
         self.add_or_replace(entry);
     }
 
@@ -1507,7 +1794,14 @@ impl Index {
 
     /// Replace all index entries for `path` with unmerged stages from `record`.
     pub fn install_unmerged_from_resolve_undo(&mut self, path: &[u8], record: &ResolveUndoRecord) {
-        self.entries.retain(|e| e.path != path);
+        if self.entries_sorted {
+            let (start, end) = self.path_run_range_sorted(path);
+            if start < end {
+                self.entries.drain(start..end);
+            }
+        } else {
+            self.entries.retain(|e| e.path != path);
+        }
         for stage in 1u8..=3u8 {
             let i = (stage - 1) as usize;
             if record.modes[i] == 0 {
@@ -1532,7 +1826,6 @@ impl Index {
             };
             self.add_or_replace(entry);
         }
-        self.sort();
     }
 
     /// Re-create unmerged index entries for `path` from the resolve-undo extension.
@@ -1560,23 +1853,27 @@ impl Index {
     ///
     /// Returns `true` if at least one entry was removed.
     pub fn remove(&mut self, path: &[u8]) -> bool {
-        let mut removed_any = false;
-        for e in &self.entries {
-            if e.path == path {
-                if e.stage() != 0 {
-                    resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
-                }
-                removed_any = true;
+        if self.entries_sorted {
+            let (start, end) = self.path_run_range_sorted(path);
+            if start < end {
+                self.record_resolve_undo_for_run(start, end);
+                self.entries.drain(start..end);
+                self.invalidate_after_path_removal(path);
+                self.touch_fsmonitor_after_entry_change();
+                return true;
             }
+            if !self.entries.iter().any(|e| e.path == path) {
+                return false;
+            }
+            self.entries_sorted = false;
         }
-        if !removed_any {
+        self.record_resolve_undo_for_path(path);
+        let before = self.entries.len();
+        self.entries.retain(|e| e.path != path);
+        if self.entries.len() == before {
             return false;
         }
-        self.entries.retain(|e| e.path != path);
-        if let Ok(p) = std::str::from_utf8(path) {
-            self.invalidate_untracked_cache_for_path(p);
-        }
-        self.invalidate_cache_tree_for_path(path);
+        self.invalidate_after_path_removal(path);
         self.touch_fsmonitor_after_entry_change();
         true
     }
@@ -1606,31 +1903,51 @@ impl Index {
             return;
         }
         let plen = prefix.len();
-        let had_descendant = self.entries.iter().any(|e| {
-            let ep = e.path.as_slice();
-            ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/'
-        });
-        for e in self.entries.iter() {
-            let ep = e.path.as_slice();
-            if ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/' && e.stage() != 0 {
-                resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+        if self.entries_sorted {
+            let (start, end) = self.descendant_run_range_sorted(path);
+            if start < end {
+                self.record_resolve_undo_for_run(start, end);
+                self.entries.drain(start..end);
+                self.invalidate_untracked_cache_for_path(path);
+                self.invalidate_cache_tree_for_path(path.as_bytes());
+                return;
+            }
+            let any = self.entries.iter().any(|e| {
+                let ep = e.path.as_slice();
+                ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/'
+            });
+            if !any {
+                return;
+            }
+            self.entries_sorted = false;
+        }
+        {
+            let had_descendant = self.entries.iter().any(|e| {
+                let ep = e.path.as_slice();
+                ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/'
+            });
+            for e in self.entries.iter() {
+                let ep = e.path.as_slice();
+                if ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/' && e.stage() != 0 {
+                    resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+                }
+            }
+            self.entries.retain(|e| {
+                let ep = e.path.as_slice();
+                if ep.len() <= plen {
+                    return true;
+                }
+                if !ep.starts_with(prefix) {
+                    return true;
+                }
+                ep[plen] != b'/'
+            });
+            if !had_descendant {
+                return;
             }
         }
-        self.entries.retain(|e| {
-            let ep = e.path.as_slice();
-            if ep.len() <= plen {
-                return true;
-            }
-            if !ep.starts_with(prefix) {
-                return true;
-            }
-            // Drop paths strictly under `prefix/` (keep same-length prefix matches like "d-other").
-            ep[plen] != b'/'
-        });
-        if had_descendant {
-            self.invalidate_untracked_cache_for_path(path);
-            self.invalidate_cache_tree_for_path(path.as_bytes());
-        }
+        self.invalidate_untracked_cache_for_path(path);
+        self.invalidate_cache_tree_for_path(path.as_bytes());
     }
 
     /// Replace the cache-tree extension with a valid tree.
@@ -1729,6 +2046,7 @@ impl Index {
     pub fn sort(&mut self) {
         self.entries
             .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+        self.entries_sorted = true;
     }
 
     /// Collapse duplicate `(path, stage)` entries, keeping the **last** one in current order.
@@ -1750,6 +2068,7 @@ impl Index {
         }
         kept.reverse();
         self.entries = kept;
+        self.entries_sorted = false;
     }
 
     /// OID of the shared index when this index uses split-index mode (`link` extension).
@@ -1761,16 +2080,14 @@ impl Index {
     /// Find an entry by path and stage (0 for normal entries).
     #[must_use]
     pub fn get(&self, path: &[u8], stage: u8) -> Option<&IndexEntry> {
-        self.entries
-            .iter()
-            .find(|e| e.path == path && e.stage() == stage)
+        self.find_entry_pos(path, stage)
+            .map(|pos| &self.entries[pos])
     }
 
     /// Find a mutable entry by path and stage.
     pub fn get_mut(&mut self, path: &[u8], stage: u8) -> Option<&mut IndexEntry> {
-        self.entries
-            .iter_mut()
-            .find(|e| e.path == path && e.stage() == stage)
+        let pos = self.find_entry_pos(path, stage)?;
+        Some(&mut self.entries[pos])
     }
 
     /// Merge tree contents from `treeish` into this index as virtual stage-1 entries, matching
@@ -1899,6 +2216,36 @@ fn read_tree_into_overlay(
         }
     }
     Ok(())
+}
+
+fn merge_sorted_index_entries(kept: Vec<IndexEntry>, insert: Vec<IndexEntry>) -> Vec<IndexEntry> {
+    let mut kept = kept.into_iter().peekable();
+    let mut insert = insert.into_iter().peekable();
+    let mut out = Vec::with_capacity(kept.size_hint().0.saturating_add(insert.size_hint().0));
+    loop {
+        match (kept.peek(), insert.peek()) {
+            (None, None) => break,
+            (Some(_), None) => {
+                out.extend(kept);
+                break;
+            }
+            (None, Some(_)) => {
+                out.extend(insert);
+                break;
+            }
+            (Some(k), Some(i)) => {
+                let ord = (&k.path, k.stage()).cmp(&(&i.path, i.stage()));
+                if ord == std::cmp::Ordering::Less {
+                    if let Some(entry) = kept.next() {
+                        out.push(entry);
+                    }
+                } else if let Some(entry) = insert.next() {
+                    out.push(entry);
+                }
+            }
+        }
+    }
+    out
 }
 
 fn prefix_under_or_equal(prefix: &[u8], path: &[u8]) -> bool {
@@ -2684,6 +3031,36 @@ pub fn normalize_mode(raw_mode: u32) -> u32 {
 }
 
 #[cfg(test)]
+mod index_path_cmp {
+    use std::cell::Cell;
+
+    thread_local! {
+        static PATH_CMP_COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn reset() {
+        PATH_CMP_COUNT.with(|c| c.set(0));
+    }
+
+    pub fn take() -> usize {
+        PATH_CMP_COUNT.with(|c| {
+            let n = c.get();
+            c.set(0);
+            n
+        })
+    }
+
+    pub fn bump() {
+        PATH_CMP_COUNT.with(|c| c.set(c.get() + 1));
+    }
+}
+
+fn record_path_cmp_for_tests() {
+    #[cfg(test)]
+    index_path_cmp::bump();
+}
+
+#[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -2885,6 +3262,232 @@ mod tests {
         assert_ne!(written, fsmn_payload);
         let (_, dirty) = parse_fsmonitor_extension(written).unwrap();
         assert!(dirty.bit_size >= 1);
+    }
+
+    fn make_staged_entry(path: &str, stage: u8) -> IndexEntry {
+        let mut e = make_entry(path);
+        e.set_stage(stage);
+        e
+    }
+
+    /// Naive O(n) index model mirroring pre–binary-search semantics.
+    struct LinearIndex {
+        entries: Vec<IndexEntry>,
+        resolve_undo: Option<BTreeMap<Vec<u8>, ResolveUndoRecord>>,
+    }
+
+    impl LinearIndex {
+        fn from_index(idx: &Index) -> Self {
+            Self {
+                entries: idx.entries.clone(),
+                resolve_undo: idx.resolve_undo.clone(),
+            }
+        }
+
+        fn assert_matches(&self, idx: &Index) {
+            let mut actual = idx.entries.clone();
+            actual.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+            let mut expect = self.entries.clone();
+            expect.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+            assert_eq!(actual, expect);
+            assert_eq!(idx.resolve_undo, self.resolve_undo);
+        }
+
+        fn add_or_replace(&mut self, entry: IndexEntry) {
+            if let Some(pos) = self
+                .entries
+                .iter()
+                .position(|e| e.path == entry.path && e.stage() == entry.stage())
+            {
+                self.entries[pos] = entry;
+            } else {
+                self.entries.push(entry);
+            }
+            self.entries
+                .sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
+        }
+
+        fn remove(&mut self, path: &[u8]) -> bool {
+            let mut removed_any = false;
+            for e in &self.entries {
+                if e.path == path {
+                    if e.stage() != 0 {
+                        resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+                    }
+                    removed_any = true;
+                }
+            }
+            if !removed_any {
+                return false;
+            }
+            self.entries.retain(|e| e.path != path);
+            removed_any
+        }
+
+        fn stage_file(&mut self, entry: IndexEntry) {
+            let path = entry.path.clone();
+            for e in &self.entries {
+                if e.path == path && e.stage() != 0 {
+                    resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+                }
+            }
+            self.entries.retain(|e| e.path != path || e.stage() == 0);
+            self.add_or_replace(entry);
+        }
+
+        fn remove_descendants_under_path(&mut self, path: &str) {
+            let prefix = path.as_bytes();
+            if prefix.is_empty() {
+                return;
+            }
+            let plen = prefix.len();
+            for e in self.entries.iter() {
+                let ep = e.path.as_slice();
+                if ep.len() > plen && ep.starts_with(prefix) && ep[plen] == b'/' && e.stage() != 0 {
+                    resolve_undo::record_resolve_undo_for_entry(&mut self.resolve_undo, e);
+                }
+            }
+            self.entries.retain(|e| {
+                let ep = e.path.as_slice();
+                if ep.len() <= plen {
+                    return true;
+                }
+                if !ep.starts_with(prefix) {
+                    return true;
+                }
+                ep[plen] != b'/'
+            });
+        }
+    }
+
+    #[test]
+    fn sorted_ops_match_linear_oracle() {
+        let paths: Vec<Vec<u8>> = [
+            "a", "a-b", "a/b", "a/b/c", "aa", "b", "dir/x", "dir/x/y", "dir-xy",
+        ]
+        .into_iter()
+        .map(|p| p.as_bytes().to_vec())
+        .collect();
+
+        let mut idx = Index::new();
+        let mut oracle = LinearIndex::from_index(&idx);
+        let mut rng_state: u64 = 376;
+
+        fn next_u64(state: &mut u64) -> u64 {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *state
+        }
+
+        for step in 0..400 {
+            let op = next_u64(&mut rng_state) % 4;
+            match op {
+                0 => {
+                    let p = &paths[(next_u64(&mut rng_state) as usize) % paths.len()];
+                    let stage = (next_u64(&mut rng_state) % 4) as u8;
+                    let mut e = make_staged_entry(std::str::from_utf8(p).unwrap(), stage);
+                    e.oid = ObjectId::from_bytes(&[(step % 256) as u8; 20]).unwrap();
+                    idx.add_or_replace(e.clone());
+                    oracle.add_or_replace(e);
+                }
+                1 => {
+                    let p = &paths[(next_u64(&mut rng_state) as usize) % paths.len()];
+                    idx.remove(p);
+                    oracle.remove(p);
+                }
+                2 => {
+                    let p = &paths[(next_u64(&mut rng_state) as usize) % paths.len()];
+                    let e = make_entry(std::str::from_utf8(p).unwrap());
+                    idx.stage_file(e.clone());
+                    oracle.stage_file(e);
+                }
+                _ => {
+                    let p = &paths[(next_u64(&mut rng_state) as usize) % paths.len()];
+                    let ps = std::str::from_utf8(p).unwrap();
+                    idx.remove_descendants_under_path(ps);
+                    oracle.remove_descendants_under_path(ps);
+                }
+            }
+            oracle.assert_matches(&idx);
+        }
+    }
+
+    #[test]
+    fn stale_sorted_flag_still_finds_and_removes_entries() {
+        let mut idx = Index::new();
+        idx.entries.push(make_entry("z"));
+        idx.entries.push(make_entry("a"));
+        idx.entries.push(make_entry("b"));
+        idx.entries_sorted = true;
+        assert!(!idx.entries_are_sorted());
+        assert!(idx.get(b"z", 0).is_some());
+        assert!(idx.remove(b"z"));
+        assert!(idx.get(b"z", 0).is_none());
+    }
+
+    #[test]
+    fn unsorted_remove_drops_every_matching_stage_globally() {
+        let mut idx = Index::new();
+        idx.mark_entries_unsorted();
+        idx.entries.push(make_staged_entry("a", 1));
+        idx.entries.push(make_entry("z"));
+        idx.entries.push(make_staged_entry("a", 2));
+        assert!(idx.remove(b"a"));
+        assert!(idx.get(b"a", 1).is_none());
+        assert!(idx.get(b"a", 2).is_none());
+        assert!(idx.get(b"z", 0).is_some());
+    }
+
+    #[test]
+    fn unsorted_remove_descendants_drops_noncontiguous_matches() {
+        let mut idx = Index::new();
+        idx.mark_entries_unsorted();
+        idx.entries.push(make_entry("a/x"));
+        idx.entries.push(make_entry("z"));
+        idx.entries.push(make_entry("a/y"));
+        idx.remove_descendants_under_path("a");
+        let paths: Vec<_> = idx.entries.iter().map(|e| e.path.as_slice()).collect();
+        assert_eq!(paths, vec![b"z".as_slice()]);
+    }
+
+    #[test]
+    fn sorted_ops_match_linear_oracle_unsorted_noncontiguous() {
+        let mut idx = Index::new();
+        idx.mark_entries_unsorted();
+        idx.entries.push(make_entry("a/x"));
+        idx.entries.push(make_entry("z"));
+        idx.entries.push(make_staged_entry("a", 1));
+        idx.remove(b"a");
+        idx.entries.push(make_entry("a/y"));
+        idx.sort();
+        let mut oracle = LinearIndex::from_index(&idx);
+        oracle.entries = idx.entries.clone();
+        oracle.assert_matches(&idx);
+        idx.remove_descendants_under_path("a");
+        oracle.remove_descendants_under_path("a");
+        oracle.assert_matches(&idx);
+    }
+
+    #[test]
+    fn remove_is_sublinear() {
+        const N: usize = 100_000;
+        const M: usize = 1_000;
+        let mut idx = Index::new();
+        for i in 0..N {
+            idx.add_or_replace(make_entry(&format!("file/{i:06}.txt")));
+        }
+        let paths: Vec<Vec<u8>> = (0..M)
+            .map(|i| format!("file/{i:06}.txt").into_bytes())
+            .collect();
+        index_path_cmp::reset();
+        idx.remove_paths(paths.iter().map(|p| p.as_slice()));
+        let cmps = index_path_cmp::take();
+        let log_n = (N as f64).log2().ceil() as usize;
+        let bound = 100 * M * log_n;
+        assert!(
+            cmps < bound,
+            "path comparisons {cmps} should stay under {bound} (N={N}, M={M})"
+        );
+        assert_eq!(idx.entries.len(), N - M);
     }
 
     #[test]

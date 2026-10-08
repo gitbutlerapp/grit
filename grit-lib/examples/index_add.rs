@@ -36,8 +36,8 @@ fn main() -> grit_lib::error::Result<()> {
     repo.write_index(&mut index)?;
 
     let round_trip = repo.load_index()?;
-    println!("index entries: {}", round_trip.entries.len());
-    let first = &round_trip.entries[0];
+    println!("index entries: {}", round_trip.entries().len());
+    let first = &round_trip.entries()[0];
     println!(
         "first path: {}, oid: {}",
         String::from_utf8_lossy(&first.path),

@@ -57,8 +57,8 @@ fn grit_init_add_nfd_untracked_stores_nfc_in_index() {
     );
 
     let index = Index::load(&dir.path().join(".git/index")).expect("load index");
-    assert_eq!(index.entries.len(), 1, "expected one staged file");
-    let path = &index.entries[0].path;
+    assert_eq!(index.entries().len(), 1, "expected one staged file");
+    let path = &index.entries()[0].path;
     assert_eq!(
         path.as_slice(),
         b"caf\xc3\xa9.txt",

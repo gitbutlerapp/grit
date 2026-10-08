@@ -325,19 +325,19 @@ fn merge_one_path(
             let mut e = oe.clone();
             e.path = out_path.to_vec();
             e.flags = path_len_flags(out_path);
-            index.entries.push(e);
+            index.push_entry_unsorted(e);
         }
         (Some(be), Some(oe), Some(te)) if same_blob(be, oe) => {
             let mut e = te.clone();
             e.path = out_path.to_vec();
             e.flags = path_len_flags(out_path);
-            index.entries.push(e);
+            index.push_entry_unsorted(e);
         }
         (Some(be), Some(oe), Some(te)) if same_blob(be, te) => {
             let mut e = oe.clone();
             e.path = out_path.to_vec();
             e.flags = path_len_flags(out_path);
-            index.entries.push(e);
+            index.push_entry_unsorted(e);
         }
         (Some(be), Some(oe), Some(te))
             if be.mode == 0o160000 && oe.mode == 0o160000 && te.mode == 0o160000 =>
@@ -346,17 +346,17 @@ fn merge_one_path(
                 let mut e = oe.clone();
                 e.path = out_path.to_vec();
                 e.flags = path_len_flags(out_path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
             } else if same_blob(be, oe) {
                 let mut e = te.clone();
                 e.path = out_path.to_vec();
                 e.flags = path_len_flags(out_path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
             } else if same_blob(be, te) {
                 let mut e = oe.clone();
                 e.path = out_path.to_vec();
                 e.flags = path_len_flags(out_path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
             } else {
                 stage_entry(index, out_path, be, 1);
                 stage_entry(index, out_path, oe, 2);
@@ -382,19 +382,19 @@ fn merge_one_path(
             let mut e = oe.clone();
             e.path = out_path.to_vec();
             e.flags = path_len_flags(out_path);
-            index.entries.push(e);
+            index.push_entry_unsorted(e);
         }
         (None, None, Some(te)) => {
             let mut e = te.clone();
             e.path = out_path.to_vec();
             e.flags = path_len_flags(out_path);
-            index.entries.push(e);
+            index.push_entry_unsorted(e);
         }
         (None, Some(oe), Some(te)) if same_blob(oe, te) => {
             let mut e = oe.clone();
             e.path = out_path.to_vec();
             e.flags = path_len_flags(out_path);
-            index.entries.push(e);
+            index.push_entry_unsorted(e);
         }
         (None, Some(oe), Some(te)) => {
             // add/add conflict: both sides introduced the path with differing content and there
@@ -443,7 +443,7 @@ fn stage_entry(index: &mut Index, path: &[u8], src: &IndexEntry, stage: u8) {
     let mut e = src.clone();
     e.path = path.to_vec();
     e.flags = path_len_flags(path) | ((stage as u16) << 12);
-    index.entries.push(e);
+    index.push_entry_unsorted(e);
 }
 #[expect(clippy::too_many_arguments)]
 fn content_merge_or_conflict(
@@ -484,14 +484,14 @@ fn content_merge_or_conflict(
                 let mut e = theirs.clone();
                 e.path = path.to_vec();
                 e.flags = path_len_flags(path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
                 return Ok(());
             }
             MergeFavor::Ours => {
                 let mut e = ours.clone();
                 e.path = path.to_vec();
                 e.flags = path_len_flags(path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
                 return Ok(());
             }
             _ => {
@@ -542,7 +542,7 @@ fn content_merge_or_conflict(
         if base.mode == ours.mode && base.mode != theirs.mode {
             entry.mode = theirs.mode;
         }
-        index.entries.push(entry);
+        index.push_entry_unsorted(entry);
     }
 
     Ok(())
@@ -587,13 +587,13 @@ fn add_add_content_conflict(
                 let mut e = theirs.clone();
                 e.path = path.to_vec();
                 e.flags = path_len_flags(path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
             }
             MergeFavor::Ours => {
                 let mut e = ours.clone();
                 e.path = path.to_vec();
                 e.flags = path_len_flags(path);
-                index.entries.push(e);
+                index.push_entry_unsorted(e);
             }
             _ => {
                 stage_entry(index, path, ours, 2);
@@ -650,7 +650,7 @@ fn add_add_content_conflict(
         entry.path = path.to_vec();
         entry.flags = path_len_flags(path);
         entry.oid = merged_oid;
-        index.entries.push(entry);
+        index.push_entry_unsorted(entry);
     }
 
     Ok(())

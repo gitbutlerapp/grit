@@ -100,17 +100,17 @@ impl HotPathsFixture {
         let mut index = self.index_mutate_plan.baseline.clone();
         if with_fsmn {
             index.set_fsmonitor_last_update(Some("bench-fsmn-token".into()));
-            for entry in &mut index.entries {
+            for entry in index.entries_mut() {
                 entry.set_fsmonitor_valid(true);
             }
         }
-        for path in &self.index_mutate_plan.remove_paths {
-            index.remove(path);
-        }
-        for entry in &self.index_mutate_plan.replacement_entries {
-            index.add_or_replace(entry.clone());
-        }
-        index.sort();
+        index.remove_paths_and_insert(
+            self.index_mutate_plan
+                .remove_paths
+                .iter()
+                .map(|p| p.as_slice()),
+            self.index_mutate_plan.replacement_entries.iter().cloned(),
+        );
         index
     }
 
@@ -129,13 +129,13 @@ impl HotPathsFixture {
 fn build_index_mutate_plan(repo: &Repository) -> IndexMutatePlan {
     const REPLACEMENT: &[u8] = b"bench-index-replacement\n";
     let baseline = repo.load_index().expect("load index for mutate plan");
-    let n = ((baseline.entries.len() as f64) * 0.10).round() as usize;
+    let n = ((baseline.entries().len() as f64) * 0.10).round() as usize;
     let n = n.max(1);
     let replace_oid = repo
         .odb
         .write(ObjectKind::Blob, REPLACEMENT)
         .expect("replacement blob");
-    let touched: Vec<IndexEntry> = baseline.entries.iter().take(n).cloned().collect();
+    let touched: Vec<IndexEntry> = baseline.entries().iter().take(n).cloned().collect();
     let remove_paths: Vec<Vec<u8>> = touched.iter().map(|e| e.path.clone()).collect();
     let replacement_entries: Vec<IndexEntry> = touched
         .into_iter()

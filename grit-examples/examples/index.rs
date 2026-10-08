@@ -3,5 +3,5 @@ use grit_lib::index::Index;
 
 fn main() {
     let index = Index::new();
-    println!("empty index has {} entries", index.entries.len());
+    println!("empty index has {} entries", index.entries().len());
 }
