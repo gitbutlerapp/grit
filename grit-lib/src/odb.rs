@@ -2761,7 +2761,6 @@ mod tests {
 
     #[test]
     fn promisor_marker_checked_once_per_prepare() {
-        use crate::objects::ObjectId;
         use crate::pack::{
             clear_pack_cache, pack_cache_test_guard, test_pack_marker_stat_count,
             test_reset_pack_marker_stat_count,
@@ -2809,7 +2808,6 @@ mod tests {
 
     #[test]
     fn promisor_marker_added_after_prepare_is_seen_after_reprepare() {
-        use crate::objects::ObjectId;
         use crate::pack::{
             clear_pack_cache, pack_cache_test_guard, reprepare_pack_directory_on_miss,
         };
@@ -2851,7 +2849,6 @@ mod tests {
 
     #[test]
     fn git_promisor_marker_pack_not_materialized_for_exists_local() {
-        use crate::objects::ObjectId;
         use crate::pack::clear_pack_cache;
 
         let dir = TempDir::new().unwrap();

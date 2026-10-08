@@ -3298,7 +3298,6 @@ mod tests {
     use flate2::Compression;
     use std::io::Write;
     use std::process::Command;
-    use std::sync::Arc;
 
     fn git_try(dir: &std::path::Path, args: &[&str]) -> bool {
         Command::new("git")
@@ -3832,18 +3831,20 @@ mod tests {
     fn delta_base_cache_limit_zero_disables_caching() {
         let _guard = pack_cache_test_guard();
         clear_pack_cache();
-        pack_cache::test_set_delta_base_cache_byte_limit(0);
         let Some((_tmp, idx, tip, _odb)) = build_ofs_delta_chain_pack(12) else {
-            pack_cache::test_set_delta_base_cache_byte_limit(pack_cache::DELTA_BASE_CACHE_DEFAULT);
             return;
         };
+        pack_cache::test_set_delta_base_cache_byte_limit(&idx.pack_path, 0);
         let _ = read_object_from_pack(&idx, &tip).expect("read chain");
         assert_eq!(
-            pack_cache::test_delta_base_cache_bytes_used(),
+            pack_cache::test_delta_base_cache_bytes_used(&idx.pack_path),
             0,
             "limit 0 must not retain delta bases"
         );
-        pack_cache::test_set_delta_base_cache_byte_limit(pack_cache::DELTA_BASE_CACHE_DEFAULT);
+        pack_cache::test_set_delta_base_cache_byte_limit(
+            &idx.pack_path,
+            pack_cache::DELTA_BASE_CACHE_DEFAULT,
+        );
     }
 
     #[test]
