@@ -14,6 +14,7 @@
 //!   - `filter=<name>` (with `filter.<name>.clean` / `filter.<name>.smudge`)
 //!   - `ident` keyword expansion
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -23,6 +24,24 @@ use crate::config::ConfigSet;
 use crate::filter_process::{apply_process_clean, apply_process_smudge, FilterSmudgeMeta};
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
+
+/// Working-tree encoding conversion failure (Git `reencode_string_len` returning NULL).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkTreeEncodingError {
+    /// The encoding label is not supported by `encoding_rs` / [`crate::commit_encoding`].
+    UnsupportedEncoding {
+        /// Config or attribute encoding name.
+        label: String,
+    },
+}
+
+impl fmt::Display for WorkTreeEncodingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedEncoding { label } => write!(f, "unsupported encoding '{label}'"),
+        }
+    }
+}
 
 /// What `core.autocrlf` is set to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1168,31 +1187,6 @@ fn trace_roundtrip_encoding(enc_name: &str) {
     }
 }
 
-/// Re-encode `data` from `from` to `to` via the system `iconv`, matching Git's `reencode_string_len`
-/// (which is libiconv). Returns `None` if `iconv` is unavailable or reports a conversion error, so
-/// callers can fall back to `encoding_rs`.
-fn reencode_via_iconv(data: &[u8], from: &str, to: &str) -> Option<Vec<u8>> {
-    use std::io::Write;
-    let mut child = Command::new("iconv")
-        .arg("-f")
-        .arg(from)
-        .arg("-t")
-        .arg(to)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(data);
-    }
-    let output = child.wait_with_output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(output.stdout)
-}
-
 /// Decode raw working-tree bytes (`enc_label`) into UTF-8 for the object DB (Git `encode_to_git`).
 ///
 /// When `validate` is true (writing to the object DB), enforce Git's UTF BOM rules and surface the
@@ -1243,13 +1237,12 @@ fn decode_working_tree_bytes_to_utf8(
         // Bare UTF-16/UTF-32 keep their BOM; iconv consumes it to pick the byte order.
         Some(c) => (utf_canon_to_iconv_name(c), src),
         None => {
-            // Non-UTF label: try iconv, then encoding_rs as a fallback.
-            if let Some(out) = reencode_via_iconv(src, label, "UTF-8") {
-                return Ok(out);
-            }
             // Unknown / unsupported label (Git `reencode_string_len` returns NULL →
             // `failed to encode '%s' from %s to %s`).
             let Some(enc) = crate::commit_encoding::resolve(label) else {
+                let _err = WorkTreeEncodingError::UnsupportedEncoding {
+                    label: label.to_owned(),
+                };
                 return Err(format!(
                     "failed to encode '{rel_path}' from {label} to UTF-8"
                 ));
@@ -1267,15 +1260,10 @@ fn decode_working_tree_bytes_to_utf8(
         }
     };
 
-    if let Some(out) = reencode_via_iconv(body, iconv_from, "UTF-8") {
-        return Ok(out);
-    }
-
-    // Fallback: encoding_rs for UTF-16 families (UTF-32 has no encoding_rs codec).
     decode_utf_bytes_with_encoding_rs(body, rel_path, label, iconv_from)
 }
 
-/// `encoding_rs` fallback for UTF-16/UTF-32 decode when `iconv` is unavailable.
+/// Decode UTF-16/UTF-32 family bytes to UTF-8 (`encoding_rs` or manual UTF-32).
 fn decode_utf_bytes_with_encoding_rs(
     body: &[u8],
     rel_path: &str,
@@ -1383,37 +1371,28 @@ fn encode_utf8_blob_to_working_tree_bytes(
     // The `*-BOM` aliases: encode to the raw form, then prepend the requested BOM.
     match canon.as_deref() {
         Some("utf-16le-bom") => {
-            let body = reencode_via_iconv(src, "UTF-8", "UTF-16LE")
-                .or_else(|| encode_utf_with_encoding_rs(src, "UTF-16LE"))
-                .ok_or_else(fail)?;
+            let body = encode_utf_with_encoding_rs(src, "UTF-16LE").ok_or_else(fail)?;
             let mut out = UTF16_LE_BOM.to_vec();
             out.extend(body);
             return Ok(out);
         }
         Some("utf-16be-bom") => {
-            let body = reencode_via_iconv(src, "UTF-8", "UTF-16BE")
-                .or_else(|| encode_utf_with_encoding_rs(src, "UTF-16BE"))
-                .ok_or_else(fail)?;
+            let body = encode_utf_with_encoding_rs(src, "UTF-16BE").ok_or_else(fail)?;
             let mut out = UTF16_BE_BOM.to_vec();
             out.extend(body);
             return Ok(out);
         }
         Some(c) => {
-            let iconv_name = utf_canon_to_iconv_name(c);
-            if let Some(out) = reencode_via_iconv(src, "UTF-8", iconv_name) {
-                return Ok(out);
-            }
             return encode_utf_with_encoding_rs(src, c).ok_or_else(fail);
         }
         None => {}
     }
 
-    // Non-UTF label: iconv, then encoding_rs.
-    if let Some(out) = reencode_via_iconv(src, "UTF-8", label) {
-        return Ok(out);
-    }
     let s = std::str::from_utf8(src).map_err(|_| fail())?;
     let Some(enc) = crate::commit_encoding::resolve(label) else {
+        let _err = WorkTreeEncodingError::UnsupportedEncoding {
+            label: label.to_owned(),
+        };
         return Err(format!(
             "unknown working-tree-encoding '{label}' for '{rel_path}'"
         ));
@@ -1428,8 +1407,8 @@ fn encode_utf8_blob_to_working_tree_bytes(
     Ok(cow.into_owned())
 }
 
-/// `encoding_rs`/manual fallback for UTF encode when `iconv` is unavailable. `target` is a
-/// canonical label or an iconv name (`UTF-16BE` etc.). Produces raw bytes (no BOM).
+/// UTF encode via `encoding_rs`/manual UTF-32. `target` is a canonical label (`utf-16le` etc.).
+/// Produces raw bytes (no BOM).
 fn encode_utf_with_encoding_rs(src: &[u8], target: &str) -> Option<Vec<u8>> {
     let s = std::str::from_utf8(src).ok()?;
     let lower = target.to_ascii_lowercase();

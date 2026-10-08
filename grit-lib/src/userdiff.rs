@@ -2,15 +2,19 @@
 //!
 //! This module implements the subset of Git's `userdiff` behavior needed for
 //! hunk-header function context extraction.
+//!
+//! POSIX extended patterns from Git config are translated to Rust [`regex`] syntax
+//! (including bracket classes like `[[:alpha:]]`). Matchers for built-in drivers are
+//! compiled once and cached. Rust's regex engine uses leftmost-first alternation; GNU
+//! `grep -E` uses leftmost-longest. Git's built-in funcname patterns are written so
+//! this difference does not change hunk headers for the shipped drivers.
 
 use crate::attributes::{collect_attrs_for_path, AttrValue, MacroTable};
 use crate::config::ConfigSet;
 use crate::crlf::{get_file_attrs, AttrRule, DiffAttr};
 use regex::{Regex, RegexBuilder};
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Built-in diff driver funcname patterns (same strings as Git's userdiff builtin drivers).
 const BUILTIN_PATTERN_DEFS: &[(&str, &str, bool)] = &[
@@ -354,7 +358,6 @@ struct FuncRule {
 #[derive(Debug, Clone)]
 enum RuleMatcher {
     Rust(Regex),
-    Posix { pattern: String, ignore_case: bool },
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +365,9 @@ struct BuiltinPattern {
     pattern: String,
     ignore_case: bool,
 }
+
+static BUILTIN_FUNCNAME_MATCHERS: OnceLock<BTreeMap<String, Arc<FuncnameMatcher>>> =
+    OnceLock::new();
 
 /// Compiled function-name matcher used for diff hunk headers.
 #[derive(Debug, Clone)]
@@ -386,24 +392,18 @@ impl FuncnameMatcher {
         for rule in &self.rules {
             let matched_text = match &rule.matcher {
                 RuleMatcher::Rust(regex) => {
-                    let Some(caps) = regex.captures(text) else {
-                        continue;
-                    };
-                    caps.get(1)
-                        .or_else(|| caps.get(0))
-                        .map(|m| m.as_str())
-                        .unwrap_or_default()
-                        .trim_end_matches(char::is_whitespace)
-                        .to_owned()
-                }
-                RuleMatcher::Posix {
-                    pattern,
-                    ignore_case,
-                } => {
-                    if !posix_line_matches(pattern, *ignore_case, text) {
+                    if let Some(caps) = regex.captures(text) {
+                        caps.get(1)
+                            .or_else(|| caps.get(0))
+                            .map(|m| m.as_str())
+                            .unwrap_or_default()
+                            .trim_end_matches(char::is_whitespace)
+                            .to_owned()
+                    } else if regex.is_match(text) {
+                        text.trim_end_matches(char::is_whitespace).to_owned()
+                    } else {
                         continue;
                     }
-                    text.trim_end_matches(char::is_whitespace).to_owned()
                 }
             };
             if rule.negate {
@@ -506,10 +506,24 @@ pub fn matcher_for_driver(
     if let Some(pattern) = config.get(&format!("diff.{driver}.funcname")) {
         return compile_matcher(&pattern, false, false).map(Some);
     }
-    if let Some(builtin) = builtin_patterns().get(driver) {
-        return compile_matcher(&builtin.pattern, true, builtin.ignore_case).map(Some);
+    if let Some(matcher) = cached_builtin_matcher(driver) {
+        return Ok(Some((*matcher).clone()));
     }
     Ok(None)
+}
+
+fn cached_builtin_matcher(driver: &str) -> Option<Arc<FuncnameMatcher>> {
+    let map = BUILTIN_FUNCNAME_MATCHERS.get_or_init(|| {
+        parse_builtin_patterns()
+            .into_iter()
+            .map(|(name, builtin)| {
+                let matcher = compile_matcher(&builtin.pattern, true, builtin.ignore_case)
+                    .unwrap_or_else(|e| panic!("built-in userdiff driver {name}: {e}"));
+                (name, Arc::new(matcher))
+            })
+            .collect()
+    });
+    map.get(driver).cloned()
 }
 
 fn compile_matcher(
@@ -533,37 +547,25 @@ fn compile_matcher(
             line = &line[1..];
         }
 
-        let rust_pattern = if extended {
-            fix_charclass_escapes(line)
-        } else {
-            bre_to_ere(line)
-        };
         let posix_pattern = if extended {
             line.to_owned()
         } else {
             bre_to_ere(line)
         };
 
-        validate_posix_regex_via_grep(&posix_pattern, ignore_case)
+        validate_posix_ere(&posix_pattern, ignore_case)
             .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))?;
 
+        let rust_pattern = posix_ere_to_rust_regex(&posix_pattern);
         let matcher = RegexBuilder::new(&rust_pattern)
             .case_insensitive(ignore_case)
             .build()
-            .map(RuleMatcher::Rust)
-            .unwrap_or_else(|_| RuleMatcher::Posix {
-                pattern: posix_pattern,
-                ignore_case,
-            });
+            .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))
+            .map(RuleMatcher::Rust)?;
         rules.push(FuncRule { matcher, negate });
     }
 
     Ok(FuncnameMatcher { rules })
-}
-
-fn builtin_patterns() -> &'static BTreeMap<String, BuiltinPattern> {
-    static BUILTIN_PATTERNS: OnceLock<BTreeMap<String, BuiltinPattern>> = OnceLock::new();
-    BUILTIN_PATTERNS.get_or_init(parse_builtin_patterns)
 }
 
 fn parse_builtin_patterns() -> BTreeMap<String, BuiltinPattern> {
@@ -658,97 +660,106 @@ fn bre_to_ere(pattern: &str) -> String {
     result
 }
 
-fn fix_charclass_escapes(pattern: &str) -> String {
-    let mut result = String::with_capacity(pattern.len());
+/// Translate a validated POSIX ERE (as Git uses for `xfuncname`) into Rust `regex` syntax.
+fn posix_ere_to_rust_regex(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len() + 16);
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0usize;
-    let mut in_bracket = false;
-
     while i < chars.len() {
-        if in_bracket {
-            if chars[i] == ']' {
-                result.push(']');
-                in_bracket = false;
-                i += 1;
-            } else if chars[i] == '[' {
-                result.push('[');
-                i += 1;
-            } else if chars[i] == '\\' && i + 1 < chars.len() {
-                let next = chars[i + 1];
-                if next.is_ascii_alphabetic() {
-                    result.push('\\');
-                    result.push('\\');
-                    result.push(next);
-                } else {
-                    result.push('\\');
-                    result.push(next);
-                }
-                i += 2;
-            } else {
-                result.push(chars[i]);
-                i += 1;
-            }
-        } else if chars[i] == '[' {
-            result.push('[');
-            in_bracket = true;
-            i += 1;
-            if i < chars.len() && (chars[i] == '^' || chars[i] == '!') {
-                result.push(chars[i]);
-                i += 1;
-            }
-            if i < chars.len() && chars[i] == ']' {
-                result.push(']');
-                i += 1;
-            }
+        if chars[i] == '[' {
+            let (translated, consumed) = translate_posix_bracket(&chars[i..]);
+            out.push_str(&translated);
+            i += consumed;
         } else if chars[i] == '\\' && i + 1 < chars.len() {
-            result.push(chars[i]);
-            result.push(chars[i + 1]);
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
             i += 2;
         } else {
-            result.push(chars[i]);
+            out.push(chars[i]);
             i += 1;
         }
     }
-
-    result
+    out
 }
 
-fn validate_posix_regex_via_grep(pattern: &str, ignore_case: bool) -> std::io::Result<()> {
-    let mut cmd = Command::new("grep");
-    cmd.arg("-E").arg("-q");
-    if ignore_case {
-        cmd.arg("-i");
+/// Translate one POSIX bracket expression starting at `[`; returns Rust class + bytes consumed.
+fn translate_posix_bracket(src: &[char]) -> (String, usize) {
+    debug_assert!(src.first() == Some(&'['));
+    let mut out = String::from("[");
+    let mut i = 1usize;
+    if i < src.len() && (src[i] == '^' || src[i] == '!') {
+        out.push(src[i]);
+        i += 1;
     }
-    cmd.arg("--").arg(pattern).arg("/dev/null");
-    let status = cmd.status()?;
-    if status.success() || status.code() == Some(1) {
-        Ok(())
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "invalid regex",
-        ))
+    if i < src.len() && src[i] == ']' {
+        out.push(']');
+        i += 1;
     }
+    while i < src.len() {
+        if src[i] == ']' {
+            out.push(']');
+            return (out, i + 1);
+        }
+        if src[i] == '[' && i + 2 < src.len() && src[i + 1] == ':' {
+            let start = i;
+            i += 2;
+            while i + 1 < src.len() {
+                if src[i] == ':' && src[i + 1] == ']' {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            for ch in &src[start..i] {
+                out.push(*ch);
+            }
+            continue;
+        }
+        if src[i] == '\\' && i + 1 < src.len() {
+            out.push('\\');
+            out.push(src[i + 1]);
+            i += 2;
+            continue;
+        }
+        let ch = src[i];
+        if matches!(ch, '[' | ']' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out.push(']');
+    (out, src.len())
 }
 
-fn posix_line_matches(pattern: &str, ignore_case: bool, line: &str) -> bool {
-    let mut cmd = Command::new("grep");
-    cmd.arg("-E").arg("-q");
-    if ignore_case {
-        cmd.arg("-i");
-    }
-    cmd.arg("--").arg(pattern);
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
+/// Compile-check a POSIX ERE without shelling out to `grep`.
+fn validate_posix_ere(pattern: &str, ignore_case: bool) -> Result<(), regex::Error> {
+    RegexBuilder::new(&posix_ere_to_rust_regex(pattern))
+        .case_insensitive(ignore_case)
+        .build()
+        .map(|_| ())
+}
 
-    let Ok(mut child) = cmd.spawn() else {
-        return false;
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(line.as_bytes());
-        let _ = stdin.write_all(b"\n");
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ConfigSet;
 
-    child.wait().map(|status| status.success()).unwrap_or(false)
+    #[test]
+    fn all_builtin_userdiff_drivers_compile_and_cache() {
+        let config = ConfigSet::default();
+        for (name, _, _) in BUILTIN_PATTERN_DEFS {
+            if name.is_empty() || *name == "default" {
+                continue;
+            }
+            let matcher = matcher_for_driver(&config, name)
+                .unwrap_or_else(|e| panic!("driver {name}: {e}"))
+                .unwrap_or_else(|| panic!("driver {name} missing builtin matcher"));
+            assert!(
+                cached_builtin_matcher(name).is_some(),
+                "driver {name} must be cached"
+            );
+            let _ = matcher.match_line(" \n");
+        }
+    }
 }

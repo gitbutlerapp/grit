@@ -2673,19 +2673,43 @@ fn read_lock_pid(pid_path: &Path) -> Option<u64> {
 }
 
 fn is_process_running(pid: u64) -> bool {
-    #[cfg(target_os = "linux")]
+    if pid == 0 || pid > i32::MAX as u64 {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: `OpenProcess` is called with a numeric pid and a read-only access mask.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+            if handle.is_null() {
+                return false;
+            }
+            CloseHandle(handle);
+            true
+        }
+    }
+    #[cfg(all(unix, target_os = "linux"))]
     {
         let proc_path = std::path::PathBuf::from(format!("/proc/{pid}"));
         proc_path.exists()
     }
-
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
-        let status = std::process::Command::new("kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .status();
-        status.map(|s| s.success()).unwrap_or(false)
+        use rustix::errno::Errno;
+        use rustix::process::{kill, Pid};
+        let Ok(pid) = Pid::from_raw(pid as i32) else {
+            return false;
+        };
+        match kill(pid, None) {
+            Ok(()) => true,
+            Err(Errno::SRCH) => false,
+            Err(Errno::EPERM) => true,
+            Err(_) => false,
+        }
     }
 }
 
