@@ -19,6 +19,8 @@ terminal_size = "0.4"
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 hex = "0.4"
+sha1 = "0.11"
+sha2 = "0.11"
 tempfile = "3"
 similar = "3"
 imara-diff = { version = "0.2", features = ["unified_diff"] }

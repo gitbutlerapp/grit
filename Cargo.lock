@@ -704,6 +704,11 @@ dependencies = [
 name = "grit-test-support"
 version = "0.5.2"
 dependencies = [
+ "flate2",
+ "hex",
+ "regex",
+ "sha1",
+ "sha2",
  "similar",
  "tempfile",
 ]
