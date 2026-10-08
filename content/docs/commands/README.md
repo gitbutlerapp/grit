@@ -23,7 +23,7 @@ Closing fences stay untagged: ` ``` ` on its own line.
 5. **JSON output** — for commands that emit JSON with `--json`:
    - at least one fenced ` ```json ` block containing real `grit <cmd> --json` output;
    - a **markdown field table** (`| Field | … |`) documenting every top-level key in each example (prose lists of keys are not enough).
-   **Exception:** plumbing commands (`manager`, `upload-pack`, `receive-pack`) do not use fenced JSON; their JSON output section explains that stdout carries the credential or wire protocol instead. Every other command follows the fenced-JSON + field-table rule.
+   **Exception:** plumbing commands (`manager`, `upload-pack`, `receive-pack`) and [`completions`](completions.md) do not use fenced JSON; their JSON output section explains that stdout carries the wire protocol, credential stream, or completion script instead. Every other command follows the fenced-JSON + field-table rule.
 6. **Markdown output** — only when the command (or global flags) includes `--markdown`. Do not add this section until the flag exists.
 7. **See also** — links to related command pages.
 

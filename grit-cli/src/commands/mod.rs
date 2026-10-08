@@ -5,6 +5,7 @@ pub mod auth;
 pub mod branch;
 pub mod clone;
 pub mod commit;
+pub mod completions;
 pub mod config;
 pub mod diff;
 pub mod fetch;

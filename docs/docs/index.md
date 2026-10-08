@@ -79,6 +79,7 @@ See [Install](https://grit-scm.com/docs/install/index.md) for download options, 
 | --- | --- |
 | [`grit update`](https://grit-scm.com/docs/update/index.md) | Update grit to the latest release. |
 | [`grit skill`](https://grit-scm.com/docs/skill/index.md) | Print an agent skill that explains how to use grit. |
+| [`grit completions`](https://grit-scm.com/docs/completions/index.md) | Generate shell completion scripts for bash, zsh, and fish. |
 
 ### Plumbing
 

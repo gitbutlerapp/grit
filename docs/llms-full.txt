@@ -81,6 +81,7 @@ See [Install](https://grit-scm.com/docs/install/index.md) for download options, 
 | --- | --- |
 | [`grit update`](https://grit-scm.com/docs/update/index.md) | Update grit to the latest release. |
 | [`grit skill`](https://grit-scm.com/docs/skill/index.md) | Print an agent skill that explains how to use grit. |
+| [`grit completions`](https://grit-scm.com/docs/completions/index.md) | Generate shell completion scripts for bash, zsh, and fish. |
 
 ### Plumbing
 
@@ -111,6 +112,37 @@ irm https://grit-scm.com/install.ps1 | iex
 ```
 
 The script downloads the latest release from GitHub, installs the `grit` binary (by default into `~/.local/bin` on Unix), and prints the version it installed.
+
+## Shell completions
+
+Tab completion helps you discover `grit`'s subcommands and flags. Generate a script with [`grit completions`](https://grit-scm.com/docs/completions/index.md) and load it from your shell config, or copy the pre-generated files from a release tarball's `completions/` directory.
+
+**bash** — add to `~/.bashrc`:
+
+```bash
+eval "$(grit completions bash)"
+```
+
+**zsh** — add to `~/.zshrc`:
+
+```bash
+eval "$(grit completions zsh)"
+```
+
+Or install once under a site-functions directory:
+
+```bash
+grit completions zsh > ~/.local/share/zsh/site-functions/_grit
+```
+
+**fish** — write a completion file:
+
+```bash
+mkdir -p ~/.config/fish/completions
+grit completions fish > ~/.config/fish/completions/grit.fish
+```
+
+After [`grit update`](https://grit-scm.com/docs/update/index.md), regenerate completions so new commands appear.
 
 ## Nightly builds
 
@@ -2494,6 +2526,66 @@ Example (with `content` shortened):
 
 [Agent guide](https://grit-scm.com/docs/agents/index.md), [grit update](https://grit-scm.com/docs/update/index.md), [Global options](https://grit-scm.com/docs/global-options/index.md)
 
+# https://grit-scm.com/docs/completions/index.md
+
+# grit completions
+
+> Generate shell completion scripts for bash, zsh, and fish.
+
+## Synopsis
+
+```text
+grit completions <shell>
+```
+
+## Description
+
+Prints a shell completion script for the `grit` subcommands and flags in the running binary. Redirect stdout to a file your shell loads, or evaluate it in the current session during setup.
+
+Supported shells: `bash`, `elvish`, `fish`, `powershell`, and `zsh` (whatever `clap_complete` exposes for the installed `grit` version).
+
+The script always matches the CLI you built or installed. After [`grit update`](https://grit-scm.com/docs/update/index.md), regenerate completions so new commands and flags appear.
+
+Release archives also ship pre-generated scripts under `completions/` when you install from a tarball.
+
+## Options
+
+| Argument | Meaning |
+| -------- | ------- |
+| `<shell>` | One of `bash`, `elvish`, `fish`, `powershell`, or `zsh`. |
+
+`grit completions` ignores the global [`--json`](https://grit-scm.com/docs/global-options/index.md) and [`--filter`](https://grit-scm.com/docs/global-options/index.md) flags; stdout is always the raw completion script.
+
+## Examples
+
+Generate bash completions for the current session:
+
+```console
+$ grit completions bash > /tmp/grit.bash
+$ source /tmp/grit.bash
+```
+
+Install zsh completions for your user (typical layout):
+
+```bash
+grit completions zsh > ~/.local/share/zsh/site-functions/_grit
+```
+
+Install fish completions:
+
+```bash
+mkdir -p ~/.config/fish/completions
+grit completions fish > ~/.config/fish/completions/grit.fish
+```
+
+## JSON output
+
+There is no JSON form. `--json` does not change stdout; use the human completion script only.
+
+## See also
+
+[Install grit](https://grit-scm.com/docs/install/index.md), [grit update](https://grit-scm.com/docs/update/index.md), [Global options](https://grit-scm.com/docs/global-options/index.md)
+
 # https://grit-scm.com/docs/upload-pack/index.md
 
 # grit upload-pack
@@ -2733,10 +2825,10 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::commit` | module | Commit-metadata helpers shared by the porcelain commands. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit/index.html) |
 | `grit_lib::commit_encoding` | module | Git commit encoding labels (encoding header, i18n.commitEncoding) mapped to codecs. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_encoding/index.html) |
 | `grit_lib::commit_graph_file` | module | Parsing Git commit-graph files and Bloom filter lookup (commit-graph.c / bloom.c compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/index.html) |
-| `grit_lib::commit_graph_file::BloomPrecheck` | enum | Result of consulting Bloom filters before running a tree diff (matches revision.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/enum.BloomPrecheck.html) |
 | `grit_lib::commit_graph_file::BloomWalkStats` | struct | Counters for GIT_TRACE2_PERF Bloom statistics (revision.c trace2_bloom_filter_statistics_atexit). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.BloomWalkStats.html) |
 | `grit_lib::commit_graph_file::CommitGraphChain` | struct | Loaded commit-graph chain (newest layer first, matching commit-graph-chain file order). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.CommitGraphChain.html) |
 | `grit_lib::commit_graph_file::CommitGraphLayer` | struct | One layer from .git/objects/info/commit-graph or commit-graphs/<hash>.graph. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.CommitGraphLayer.html) |
+| `grit_lib::commit_graph_file::ParsedGraphDump` | struct | Result of consulting Bloom filters before running a tree diff (matches revision.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_file/struct.ParsedGraphDump.html) |
 | `grit_lib::commit_graph_write` | module | Serialize Git commit-graph v1 files with GDA2 + optional Bloom chunks (commit-graph.c compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_write/index.html) |
 | `grit_lib::commit_graph_write::BloomWriteStats` | struct | Counters emitted as GIT_TRACE2_EVENT for Bloom generation (commit-graph.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_write/struct.BloomWriteStats.html) |
 | `grit_lib::commit_graph_write::CommitGraphCommitInfo` | struct | Per-commit data needed to write CDAT / Bloom. | [API](https://docs.rs/grit-lib/latest/grit_lib/commit_graph_write/struct.CommitGraphCommitInfo.html) |
@@ -2803,7 +2895,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::environment::Environment` | struct | Discovery and config variables that affect repository open/discover and ConfigSet loading. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) |
 | `grit_lib::environment::RepositoryOptions` | struct | Options passed to repository open/discover with an explicit Environment. | [API](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html) |
 | `grit_lib::error` | module | Shared error types for grit-lib. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/index.html) |
-| `grit_lib::error::ApplyError` | enum | Unified diff / patch application errors. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.ApplyError.html) |
 | `grit_lib::error::BadNumericSource` | enum | Why a Git config numeric value was rejected (git config int strict parsing). | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.BadNumericSource.html) |
 | `grit_lib::error::ConfigError` | enum | Configuration parse and validation failures. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.ConfigError.html) |
 | `grit_lib::error::DiffPathError` | enum | Path lookup failures while formatting a diff. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/enum.DiffPathError.html) |
@@ -2831,8 +2922,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::filter_process::FilterSmudgeMeta` | struct | Optional metadata sent with smudge (ref, treeish, blob hex). | [API](https://docs.rs/grit-lib/latest/grit_lib/filter_process/struct.FilterSmudgeMeta.html) |
 | `grit_lib::fmt_merge_msg` | module | Merge commit message formatter — git fmt-merge-msg logic. | [API](https://docs.rs/grit-lib/latest/grit_lib/fmt_merge_msg/index.html) |
 | `grit_lib::fmt_merge_msg::FmtMergeMsgOptions` | struct | Options for fmt_merge_msg. | [API](https://docs.rs/grit-lib/latest/grit_lib/fmt_merge_msg/struct.FmtMergeMsgOptions.html) |
-| `grit_lib::fsck_standalone` | module | Standalone object fsck for hash-object and similar entry points. | [API](https://docs.rs/grit-lib/latest/grit_lib/fsck_standalone/index.html) |
+| `grit_lib::fsck_standalone` | module | Standalone object fsck for loose-object validation before hashing. | [API](https://docs.rs/grit-lib/latest/grit_lib/fsck_standalone/index.html) |
 | `grit_lib::fsck_standalone::FsckError` | struct | Git-compatible fsck failure for loose object validation. | [API](https://docs.rs/grit-lib/latest/grit_lib/fsck_standalone/struct.FsckError.html) |
+| `grit_lib::fsck_standalone::FsckObjectOptions` | struct | Repository hash width for object-id fields in commit, tag, and tree headers. | [API](https://docs.rs/grit-lib/latest/grit_lib/fsck_standalone/struct.FsckObjectOptions.html) |
 | `grit_lib::gc` | module | In-process maintenance primitives that embedders such as jj use in place of shelling out to git gc / git remote show / gix::refs::transaction. | [API](https://docs.rs/grit-lib/latest/grit_lib/gc/index.html) |
 | `grit_lib::gc::PruneStats` | struct | Result of a loose-object prune. | [API](https://docs.rs/grit-lib/latest/grit_lib/gc/struct.PruneStats.html) |
 | `grit_lib::gc::RefTransactionItem` | struct | A single ref change in an update_refs batch transaction. | [API](https://docs.rs/grit-lib/latest/grit_lib/gc/struct.RefTransactionItem.html) |
@@ -2920,10 +3012,13 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::merging` | module | Merging: merge-base, tree/file merges, rerere, merge-message formatting. | [API](https://docs.rs/grit-lib/latest/grit_lib/merging/index.html) |
 | `grit_lib::midx` | module | Multi-pack-index (MIDX) file writing and minimal reading. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/index.html) |
 | `grit_lib::midx::CompactError` | enum | Failure modes of compact_multi_pack_index, each mapping to one of git’s user-facing diagnostics in cmd_multi_pack_index_compact. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/enum.CompactError.html) |
-| `grit_lib::midx::MidxLoadError` | struct | A fatal MIDX parse failure (Git die() in load_multi_pack_index). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxLoadError.html) |
+| `grit_lib::midx::MidxBtmpPackRange` | struct | One pack’s slice of the MIDX pseudo-bitmap namespace (BTMP chunk). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxBtmpPackRange.html) |
 | `grit_lib::midx::MidxObjectRef` | struct | A single MIDX-referenced object together with the pack it is attributed to. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxObjectRef.html) |
 | `grit_lib::midx::MidxReuseTables` | struct | OID rows from the active multi-pack-index, plus reverse-index order for pack-reuse bitmap bits. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxReuseTables.html) |
 | `grit_lib::midx::WriteMultiPackIndexOptions` | struct | Options for writing a multi-pack index (extension of the simple writer). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.WriteMultiPackIndexOptions.html) |
+| `grit_lib::midx_error` | module | Typed errors for multi-pack-index load and verification. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx_error/index.html) |
+| `grit_lib::midx_error::MidxError` | enum | Unified diff / patch application errors. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/../midx_error/enum.MidxError.html) |
+| `grit_lib::midx_error::MidxError` | enum | A fatal multi-pack-index condition (Git die() after error: lines). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx_error/enum.MidxError.html) |
 | `grit_lib::name_rev` | module | Name-rev: name commits relative to refs. | [API](https://docs.rs/grit-lib/latest/grit_lib/name_rev/index.html) |
 | `grit_lib::name_rev::NameRevOptions` | struct | Options that control which refs participate in naming. | [API](https://docs.rs/grit-lib/latest/grit_lib/name_rev/struct.NameRevOptions.html) |
 | `grit_lib::net_trace` | module | Network operation tracing through crate::diagnostics::Trace::Network. | [API](https://docs.rs/grit-lib/latest/grit_lib/net_trace/index.html) |
@@ -3453,6 +3548,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         encoding: parent.encoding.clone(),
         message: "library guide network example\n".to_owned(),
         raw_message: None,
+        extra_headers: Vec::new(),
     };
     let new_oid = repo
         .odb
@@ -3552,6 +3648,7 @@ fn write_demo_objects(
         encoding: None,
         message: "Library guide objects example\n".to_owned(),
         raw_message: None,
+        extra_headers: Vec::new(),
     };
     let commit_oid = repo
         .odb

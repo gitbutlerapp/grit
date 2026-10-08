@@ -21,6 +21,7 @@ expect_used = "deny"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
 grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq"] }
 time.workspace = true
 serde.workspace = true

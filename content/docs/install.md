@@ -19,6 +19,37 @@ irm https://grit-scm.com/install.ps1 | iex
 
 The script downloads the latest release from GitHub, installs the `grit` binary (by default into `~/.local/bin` on Unix), and prints the version it installed.
 
+## Shell completions
+
+Tab completion helps you discover `grit`'s subcommands and flags. Generate a script with [`grit completions`](../completions/) and load it from your shell config, or copy the pre-generated files from a release tarball's `completions/` directory.
+
+**bash** — add to `~/.bashrc`:
+
+```bash
+eval "$(grit completions bash)"
+```
+
+**zsh** — add to `~/.zshrc`:
+
+```bash
+eval "$(grit completions zsh)"
+```
+
+Or install once under a site-functions directory:
+
+```bash
+grit completions zsh > ~/.local/share/zsh/site-functions/_grit
+```
+
+**fish** — write a completion file:
+
+```bash
+mkdir -p ~/.config/fish/completions
+grit completions fish > ~/.config/fish/completions/grit.fish
+```
+
+After [`grit update`](../update/), regenerate completions so new commands appear.
+
 ## Nightly builds
 
 CI publishes a rolling **nightly** prerelease when the release workflow is triggered manually. To install that build instead of the latest stable release:

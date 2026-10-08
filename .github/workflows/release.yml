@@ -73,7 +73,11 @@ jobs:
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../grit-${{ matrix.target }}.tar.gz grit
+          mkdir -p completions
+          ./grit completions bash > completions/grit.bash
+          ./grit completions zsh > completions/_grit
+          ./grit completions fish > completions/grit.fish
+          tar czf ../../../grit-${{ matrix.target }}.tar.gz grit completions
         shell: bash
 
       - name: Upload artifact
@@ -119,7 +123,13 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/grit.exe -DestinationPath grit-${{ matrix.target }}.zip
+          $release = "target/${{ matrix.target }}/release"
+          New-Item -ItemType Directory -Force -Path "$release/completions" | Out-Null
+          & "$release/grit.exe" completions bash | Set-Content -Encoding utf8 "$release/completions/grit.bash"
+          & "$release/grit.exe" completions zsh | Set-Content -Encoding utf8 "$release/completions/_grit"
+          & "$release/grit.exe" completions fish | Set-Content -Encoding utf8 "$release/completions/grit.fish"
+          & "$release/grit.exe" completions powershell | Set-Content -Encoding utf8 "$release/completions/grit.ps1"
+          Compress-Archive -Path "$release/grit.exe","$release/completions" -DestinationPath grit-${{ matrix.target }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

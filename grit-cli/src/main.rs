@@ -17,13 +17,14 @@ mod ui;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 use output::{emit, OutputMode, OutputOptions};
 
 /// A small, opinionated Git client built on `grit-lib`.
 #[derive(Debug, Parser)]
 #[command(name = "grit", version, about = "A simple Grit-powered CLI")]
-struct Cli {
+pub(crate) struct Cli {
     /// Emit machine-readable JSON instead of human-readable text.
     #[arg(long, global = true)]
     json: bool,
@@ -178,6 +179,11 @@ enum Command {
     Update,
     /// Print an agent skill (SKILL.md) that explains how to use grit.
     Skill,
+    /// Generate shell completion scripts for bash, zsh, or fish.
+    Completions {
+        /// Target shell.
+        shell: Shell,
+    },
     /// Read, set, or list configuration values.
     Config {
         /// Use the global (per-user) config file instead of this repository's.
@@ -253,9 +259,10 @@ fn main() {
 /// Run the selected subcommand and render its outcome.
 ///
 /// Each command computes a typed, serializable outcome; [`emit`] renders it as
-/// human text or a single JSON object. The exceptions are `manager` (a raw
-/// credential-helper protocol on stdin/stdout — no outcome), `upload-pack` and
-/// `receive-pack` (the Git wire protocol on stdin/stdout — no outcome), and
+/// human text or a single JSON object. The exceptions are `completions` (a raw
+/// completion script on stdout), `manager` (a raw credential-helper protocol on
+/// stdin/stdout — no outcome), `upload-pack` and `receive-pack` (the Git wire
+/// protocol on stdin/stdout — no outcome), and
 /// `push` (which emits its per-ref outcome and then exits non-zero when a ref
 /// was rejected).
 fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
@@ -304,6 +311,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         },
         Command::Update => emit(&commands::update::run(opts.mode)?, opts),
         Command::Skill => emit(&commands::skill::run()?, opts),
+        Command::Completions { shell } => commands::completions::run(shell),
         Command::Config {
             global,
             list,
@@ -359,7 +367,7 @@ mod tests {
 
     /// Plumbing commands whose stdout is a wire protocol or credential stream,
     /// not a JSON outcome object.
-    const NO_JSON_COMMANDS: &[&str] = &["manager", "upload-pack", "receive-pack"];
+    const NO_JSON_COMMANDS: &[&str] = &["completions", "manager", "upload-pack", "receive-pack"];
 
     fn commands_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands")
