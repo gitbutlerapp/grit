@@ -53,8 +53,7 @@ fn checkout_applies_destination_gitattributes_eol_crlf() {
 
     let grit_bytes = std::fs::read(root.join("f.txt")).expect("read grit checkout");
     assert_eq!(
-        grit_bytes,
-        b"branch\r\n",
+        grit_bytes, b"branch\r\n",
         "destination .gitattributes must drive eol=crlf smudge"
     );
 
