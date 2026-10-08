@@ -231,6 +231,82 @@ mod tests {
         assert_eq!(obj.data.as_slice(), blob);
     }
 
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let out = Command::new("/usr/bin/git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {args:?} in {}: {}",
+            cwd.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn local_fetch_ingest_with_fix_thin_from_bare_remote() {
+        use crate::objects::ObjectId;
+        use crate::transfer::{build_pack, open_odb, PackBuildOptions};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let work = tmp.path().join("work");
+        std::fs::create_dir_all(&work).expect("work");
+        run_git(&work, &["init", "-q", "-b", "main", "."]);
+        run_git(&work, &["commit", "-q", "--allow-empty", "-m", "c1"]);
+        let bare = tmp.path().join("repo.git");
+        run_git(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                work.to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ],
+        );
+
+        let consumer = tmp.path().join("consumer");
+        std::fs::create_dir_all(&consumer).expect("consumer");
+        run_git(&consumer, &["init", "-q", "-b", "main", "."]);
+        let local_git = consumer.join(".git");
+        let local_odb = open_odb(&local_git);
+        let remote_odb = open_odb(&bare);
+
+        let tip_out = Command::new("/usr/bin/git")
+            .args(["rev-parse", "refs/heads/main"])
+            .current_dir(&bare)
+            .output()
+            .expect("rev-parse");
+        assert!(tip_out.status.success());
+        let tip = ObjectId::from_hex(String::from_utf8_lossy(&tip_out.stdout).trim()).expect("oid");
+        let pack =
+            build_pack(&remote_odb, &[tip], &[], &PackBuildOptions::default()).expect("build_pack");
+        assert!(
+            !crate::unpack_objects::pack_is_thin(&pack, remote_odb.hash_algo()),
+            "whole-object local fetch pack must not be classified as thin"
+        );
+        let (_git_dir, _indexed) = git_index_pack(&pack);
+        install_pack_bytes(
+            pack,
+            &local_odb,
+            &IngestPackOptions {
+                fix_thin: true,
+                threads: Some(1),
+                ..Default::default()
+            },
+        )
+        .expect("ingest like fetch_local serial index-pack");
+        assert!(local_odb.exists(&tip));
+    }
+
     #[test]
     fn fetch_ingest_keeps_pack_despite_receive_unpacklimit_zero() {
         let blob = b"unpacklimit must not apply to fetch ingest\n";

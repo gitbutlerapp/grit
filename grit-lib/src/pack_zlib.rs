@@ -34,10 +34,7 @@ pub(crate) fn skip_zlib_at(pack: &[u8], offset: usize, expected_size: usize) -> 
     let mut decoder = ZlibDecoder::new(slice);
     let mut scratch = [0u8; SKIP_BUF_LEN];
     let mut produced = 0usize;
-    loop {
-        if produced >= expected_size {
-            break;
-        }
+    while produced < expected_size {
         let n = decoder
             .read(&mut scratch)
             .map_err(|e| Error::Zlib(e.to_string()))?;
@@ -50,6 +47,16 @@ pub(crate) fn skip_zlib_at(pack: &[u8], offset: usize, expected_size: usize) -> 
         return Err(Error::CorruptObject(format!(
             "decompressed {produced} bytes but expected {expected_size}"
         )));
+    }
+    // Consume the zlib trailer (Adler-32) so `total_in` spans the full member, matching Git's
+    // pack index CRC and object boundaries.
+    loop {
+        let n = decoder
+            .read(&mut scratch)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
     }
     Ok(decoder.total_in() as usize)
 }

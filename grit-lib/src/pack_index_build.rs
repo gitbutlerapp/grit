@@ -354,11 +354,16 @@ fn hash_whole_objects_serial(
 
 fn verify_pack_trailer(pack: &[u8], consumed: usize, algo: HashAlgo) -> Result<()> {
     let hb = algo.len();
-    if pack.len() < consumed + hb {
+    let Some(body_end) = pack.len().checked_sub(hb) else {
         return Err(Error::CorruptObject("pack stream truncated".to_owned()));
+    };
+    if consumed > body_end {
+        return Err(Error::CorruptObject(format!(
+            "pack scanner consumed {consumed} bytes past body end {body_end}"
+        )));
     }
-    let trailing = &pack[consumed..consumed + hb];
-    let expected = algo.digest(&pack[..consumed]);
+    let expected = algo.digest(&pack[..body_end]);
+    let trailing = &pack[body_end..];
     if expected.as_bytes() != trailing {
         return Err(Error::CorruptObject(
             "pack trailing checksum mismatch".to_owned(),
