@@ -624,9 +624,15 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
             .stdin
             .as_mut()
             .ok_or_else(|| Error::Message("credential helper missing stdin".to_string()))?;
-        stdin.write_all(creds.serialize().as_bytes())?;
-        // Git terminates the credential record with a blank line.
-        stdin.write_all(b"\n")?;
+        // Git terminates the credential record with a blank line. A helper may answer (e.g.
+        // `quit=1`) and exit without reading its input; like Git, ignore the resulting broken
+        // pipe and still read whatever it printed.
+        let request = format!("{}\n", creds.serialize());
+        if let Err(e) = stdin.write_all(request.as_bytes()) {
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(e.into());
+            }
+        }
     }
 
     let output = child
@@ -858,6 +864,21 @@ pub mod windows_store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_that_exits_without_reading_stdin_still_answers() {
+        // A request larger than any pipe buffer guarantees the write hits a closed pipe once
+        // the helper has exited without reading it.
+        let creds = Credential {
+            protocol: Some("https".into()),
+            host: Some("example.com".into()),
+            password: Some("x".repeat(1 << 20)),
+            ..Default::default()
+        };
+        let response = invoke_helper("!echo quit=1; exit 0; :", "get", &creds).expect("helper");
+        assert!(response.wants_quit());
+    }
 
     #[test]
     fn parse_round_trips_named_fields() {
