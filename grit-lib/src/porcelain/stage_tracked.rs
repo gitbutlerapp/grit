@@ -128,7 +128,8 @@ pub fn stage_tracked_modifications_in_index(
 
     let mut symlink_parent_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut summary = StageTrackedSummary::default();
-    let ignorecase = ConfigSet::load(Some(&repo.git_dir), true)
+    let ignorecase = repo
+        .config()
         .ok()
         .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
