@@ -130,7 +130,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
 Requires a repository whose `HEAD` has a parent (at least two commits):
 
-```
+```bash
 cargo run --bin guide_diff /path/to/repo
 git -C /path/to/repo diff --name-status HEAD~1 HEAD
 ```

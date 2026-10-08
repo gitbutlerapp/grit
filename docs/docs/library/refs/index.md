@@ -136,7 +136,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
 Run against any repository with at least one commit:
 
-```
+```bash
 cargo run --bin guide_refs /path/to/repo
 git -C /path/to/repo rev-parse refs/heads/library-guide-demo
 git -C /path/to/repo reflog show refs/heads/library-guide-demo

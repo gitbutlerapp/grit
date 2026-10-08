@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit auth
 grit auth logout
 ```
@@ -17,7 +17,7 @@ Signs you in to GitHub and saves the token, so that [`grit push`](https://grit-s
 
 A credential helper has to be configured to store the token. On Windows, if none is set, `grit` uses its built-in one ([`grit manager`](https://grit-scm.com/docs/manager/index.md)). Elsewhere, set one with [`grit config`](https://grit-scm.com/docs/config/index.md):
 
-```
+```console
 $ grit config --global credential.helper osxkeychain   # macOS
 $ grit config --global credential.helper libsecret     # Linux
 $ grit config --global credential.helper store         # a plain-text file, any system
@@ -35,7 +35,7 @@ $ grit config --global credential.helper store         # a plain-text file, any 
 
 ## Examples
 
-```
+```console
 $ grit auth
 To authorize grit, open this page in your browser:
 

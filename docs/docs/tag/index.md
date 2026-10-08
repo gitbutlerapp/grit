@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit tag
 grit tag <name>
 grit tag -d <name>
@@ -25,7 +25,7 @@ Tags are local until you publish them with [`grit push --tags`](https://grit-scm
 
 ## Examples
 
-```
+```console
 $ grit tag v0.1
 Created tag v0.1
 

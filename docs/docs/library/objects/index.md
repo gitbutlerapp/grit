@@ -111,7 +111,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
 Objects land on disk in standard loose format. System Git can read them:
 
-```
+```bash
 cargo run --bin guide_objects /path/to/repo
 git -C /path/to/repo fsck --strict
 ```

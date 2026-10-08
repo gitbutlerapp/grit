@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit pick <commit>
 ```
 
@@ -31,14 +31,14 @@ Takes the change `<commit>` made and applies it to the current branch as a new c
 
 Pick the latest commit from another branch:
 
-```
+```console
 $ grit pick feature
 Picked cf18394 → 4be20a1 Say hi
 ```
 
 Pick a commit by id:
 
-```
+```console
 $ grit pick 9a1c2e0
 ```
 

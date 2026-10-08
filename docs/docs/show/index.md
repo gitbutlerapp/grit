@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit show [<object>]
 ```
 
@@ -26,7 +26,7 @@ To see the full change a commit made, use [`grit diff <commit>`](https://grit-sc
 
 Show the latest commit:
 
-```
+```console
 $ grit show
 branch feature
 commit cf18394a62c3f845bd9c44927a5a55e014b2a99d
@@ -41,13 +41,13 @@ Date:   2026-10-07 10:00:00 +0000
 
 Show what a tag points at:
 
-```
+```console
 $ grit show v0.1
 ```
 
 Get the subject of a commit:
 
-```
+```console
 $ grit show HEAD~1 --json --filter .commit.subject
 "Start the project"
 ```

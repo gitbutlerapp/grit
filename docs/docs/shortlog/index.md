@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit shortlog
 grit sl
 ```
@@ -21,7 +21,7 @@ The target branch is found the same way as for [`grit status`](https://grit-scm.
 
 ## Examples
 
-```
+```console
 $ grit shortlog
 On feature
 Ahead of origin/main by 2 commits
@@ -31,7 +31,7 @@ Ahead of origin/main by 2 commits
 
 Count the commits that aren't on the target yet:
 
-```
+```console
 $ grit sl --json --filter .ahead
 2
 ```

@@ -61,6 +61,6 @@ fn main() -> Result<(), Error> {
 
 Run from any Git checkout:
 
-```
+```bash
 cargo run --bin guide_repository
 ```

@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit push
 grit push --tags
 ```
@@ -27,7 +27,7 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 
 ## Examples
 
-```
+```console
 $ grit push
   pushed main → origin refs/heads/main
 
@@ -40,7 +40,7 @@ $ grit push --tags
 
 When someone else pushed first:
 
-```
+```console
 $ grit push
   rejected origin refs/heads/main: not a fast-forward — run `grit pull` first
 ```

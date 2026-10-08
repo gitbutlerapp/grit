@@ -109,7 +109,7 @@ fn range_names(range: &str) -> Result<(&str, &str), grit_lib::error::Error> {
 
 Run against a repo with diverged `main` and `feature` branches:
 
-```
+```bash
 cargo run --bin guide_revwalk /path/to/repo main..feature
 ```
 

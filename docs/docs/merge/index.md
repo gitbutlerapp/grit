@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit merge <branch>
 ```
 
@@ -30,7 +30,7 @@ If both sides changed the same lines, `grit` lists the conflicting files, exits 
 
 ## Examples
 
-```
+```console
 $ grit merge feature
 Fast-forwarded feature → cf18394
 
@@ -40,7 +40,7 @@ Merged origin/main into the current branch (acd1d4b)
 
 When both branches change the same lines:
 
-```
+```console
 $ grit merge topic
 error: merge has conflicts in:
   README.md

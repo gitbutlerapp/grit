@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit add [<path>...]
 ```
 
@@ -26,14 +26,14 @@ Paths are relative to your current directory, so from inside `src/`, `grit add m
 
 Stage everything:
 
-```
+```console
 $ grit add
 Staged 3 changes.
 ```
 
 Stage one file and a directory:
 
-```
+```console
 $ grit add README.md src/
 Staged 2 changes.
 ```

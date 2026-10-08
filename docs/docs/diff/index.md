@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit diff [<commit>]
 ```
 
@@ -26,7 +26,7 @@ Each file starts with its path, and each hunk with its position. Lines have two 
 
 What have I changed since the last commit?
 
-```
+```console
 $ grit diff
 
 main.rs
@@ -39,13 +39,13 @@ main.rs
 
 What did the commit before the last one change?
 
-```
+```console
 $ grit diff HEAD~1
 ```
 
 List the files changed by a commit:
 
-```
+```console
 $ grit diff v0.1 --json --filter '.files[].path'
 [
   "README.md",

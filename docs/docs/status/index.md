@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit
 grit status
 grit st
@@ -36,7 +36,7 @@ The target is the branch your work is headed for. `grit` uses the first of these
 
 To compare against something else, set it for the repository:
 
-```
+```console
 $ grit config target.branch origin/develop
 ```
 
@@ -48,7 +48,7 @@ $ grit config target.branch origin/develop
 
 A branch with work in progress:
 
-```
+```console
 $ grit
 On feature  ·  2 ahead of origin/main
 
@@ -69,7 +69,7 @@ Untracked
 
 Everything committed and pushed:
 
-```
+```console
 $ grit st
 On main  ·  even with origin/main
 
@@ -78,7 +78,7 @@ Nothing to commit — working tree clean.
 
 Check from a script whether the working tree is clean:
 
-```
+```console
 $ grit status --json --filter .clean
 true
 ```

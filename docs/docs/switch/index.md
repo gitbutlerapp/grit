@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit switch <branch>
 grit switch -c <branch>
 ```
@@ -28,7 +28,7 @@ With `-c`, creates the branch at the current commit and switches to it.
 
 ## Examples
 
-```
+```console
 $ grit switch -c feature
 Created and switched to branch feature
 
@@ -38,7 +38,7 @@ Switched to branch main
 
 With uncommitted changes:
 
-```
+```console
 $ grit switch main
 error: you have uncommitted changes — commit them before switching
 ```

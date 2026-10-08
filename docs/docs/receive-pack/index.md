@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit receive-pack [--stateless-rpc] [--advertise-refs] <directory>
 ```
 
@@ -37,13 +37,13 @@ Pushes that ask for an atomic update are applied all or nothing. Server-side hoo
 
 Push over SSH to a server that has `grit` but not `git` installed:
 
-```
+```console
 $ git push --receive-pack='grit receive-pack' origin main
 ```
 
 Set it for a remote you already have:
 
-```
+```console
 $ git config remote.origin.receivepack 'grit receive-pack'
 ```
 

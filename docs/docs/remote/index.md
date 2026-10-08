@@ -4,7 +4,7 @@
 
 ## Synopsis
 
-```
+```text
 grit remote
 grit remote add <name> <url>
 ```
@@ -25,7 +25,7 @@ The URL can be anything [`grit clone`](https://grit-scm.com/docs/clone/index.md)
 
 ## Examples
 
-```
+```console
 $ grit remote add origin https://github.com/ada/project.git
 Added remote origin → https://github.com/ada/project.git
 

@@ -6,13 +6,13 @@
 
 On macOS and Linux:
 
-```
+```bash
 curl -fsSL https://grit-scm.com/install | sh
 ```
 
 On Windows, run this in PowerShell:
 
-```
+```bash
 irm https://grit-scm.com/install.ps1 | iex
 ```
 
@@ -22,13 +22,13 @@ The script downloads the latest release from GitHub, installs the `grit` binary 
 
 CI publishes a rolling **nightly** prerelease when the release workflow is triggered manually. To install that build instead of the latest stable release:
 
-```
+```bash
 curl -fsSL https://grit-scm.com/install-nightly | sh
 ```
 
 On Windows:
 
-```
+```bash
 irm https://grit-scm.com/install-nightly.ps1 | iex
 ```
 
@@ -38,7 +38,7 @@ Nightlies track recent `main`; use them when you want to test fixes before the n
 
 If you already have a Rust toolchain:
 
-```
+```bash
 cargo install grit-cli
 ```
 
@@ -48,7 +48,7 @@ This builds and installs the `grit` executable into Cargo's bin directory (usual
 
 After a script install, run [`grit update`](https://grit-scm.com/docs/update/index.md) to re-run the same installer and replace the binary you're running. If you installed with Cargo, update with:
 
-```
+```bash
 cargo install grit-cli
 ```
 
@@ -56,7 +56,7 @@ cargo install grit-cli
 
 Clone [the repository](https://github.com/gitbutlerapp/grit) and build the CLI crate:
 
-```
+```bash
 cargo build --release -p grit-cli
 ```
 

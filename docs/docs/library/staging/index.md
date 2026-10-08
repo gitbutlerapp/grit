@@ -84,7 +84,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
 With a repository path, compare the printed tree to Git:
 
-```
+```bash
 cargo run --bin guide_index /path/to/repo
 git -C /path/to/repo write-tree
 git -C /path/to/repo fsck --strict
