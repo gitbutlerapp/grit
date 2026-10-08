@@ -27,11 +27,11 @@ pub struct SystemIdentityEnv;
 
 impl IdentityEnv for SystemIdentityEnv {
     fn var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
+        crate::environment::Environment::capture_process().var(key)
     }
 
     fn var_os(&self, key: &str) -> Option<OsString> {
-        std::env::var_os(key)
+        crate::environment::Environment::capture_process().var_os(key)
     }
 }
 
@@ -287,7 +287,7 @@ pub fn peek_name_with<E: IdentityEnv>(
                     return Some(t.to_owned());
                 }
             }
-            let d = ident_default_name(config);
+            let d = ident_default_name(config, env);
             if d.is_empty() {
                 None
             } else {
@@ -313,10 +313,10 @@ pub fn resolve_name_with<E: IdentityEnv>(
                 if !t.is_empty() {
                     t.to_owned()
                 } else {
-                    ident_default_name(config)
+                    ident_default_name(config, env)
                 }
             } else {
-                ident_default_name(config)
+                ident_default_name(config, env)
             }
         }
     };
@@ -361,7 +361,7 @@ pub fn resolve_loose_committer_parts_with<E: IdentityEnv>(
             .filter(|s| !s.is_empty())
     })
     .or_else(|| {
-        let d = ident_default_name(config);
+        let d = ident_default_name(config, env);
         if d.is_empty() {
             None
         } else {

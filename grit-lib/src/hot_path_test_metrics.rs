@@ -146,6 +146,7 @@ impl HotPathTestMetrics {
     }
 }
 
+// hygiene: per-thread hot-path test metrics scope (test builds only)
 thread_local! {
     static ACTIVE: RefCell<Option<Arc<HotPathTestMetrics>>> = const { RefCell::new(None) };
 }

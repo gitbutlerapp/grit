@@ -133,8 +133,9 @@ fn decoration_pattern_matches(pattern: &str, refname: &str) -> bool {
 }
 
 fn replace_ref_base() -> String {
-    let mut base =
-        std::env::var("GIT_REPLACE_REF_BASE").unwrap_or_else(|_| "refs/replace/".to_owned());
+    let mut base = crate::environment::Environment::capture_process()
+        .var("GIT_REPLACE_REF_BASE")
+        .unwrap_or_else(|| "refs/replace/".to_owned());
     if !base.ends_with('/') {
         base.push('/');
     }

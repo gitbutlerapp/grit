@@ -381,7 +381,8 @@ pub fn url_encode_object_filter_subspec(raw: &str) -> String {
 
 /// Emit `Add to combine filter-spec: …` when `GIT_TRACE` is enabled (Git `list-objects-filter-options.c`).
 pub fn trace_combine_filter_append(encoded_segment: &str) {
-    let Ok(trace_val) = std::env::var("GIT_TRACE") else {
+    let Some(trace_val) = crate::environment::Environment::capture_process().var("GIT_TRACE")
+    else {
         return;
     };
     if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
@@ -985,7 +986,11 @@ pub fn rev_list(
             Some(Ok(b)) => b,
             _ => true,
         };
-        if std::env::var("GIT_TEST_COMMIT_GRAPH").ok().as_deref() == Some("0") {
+        if crate::environment::Environment::capture_process()
+            .var("GIT_TEST_COMMIT_GRAPH")
+            .as_deref()
+            == Some("0")
+        {
             core_cg = false;
         }
         let read_paths = cfg
@@ -2357,10 +2362,7 @@ pub fn render_commit_with_color(
                                 let Some(p) = parse_signature_times(&commit.author) else {
                                     break;
                                 };
-                                let now = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs() as i64;
+                                let now = crate::git_date::tm::get_time_sec();
                                 target.push_str(&format_relative_date(now - p.unix_seconds));
                             }
                             Some(other) => {
@@ -2413,10 +2415,7 @@ pub fn render_commit_with_color(
                                 let Some(p) = parse_signature_times(&commit.committer) else {
                                     break;
                                 };
-                                let now = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_secs() as i64;
+                                let now = crate::git_date::tm::get_time_sec();
                                 target.push_str(&format_relative_date(now - p.unix_seconds));
                             }
                             Some(other) => {
@@ -6403,7 +6402,8 @@ fn walk_needs_top_tree_omit_set(filter: Option<&ObjectFilter>, collect_omits: bo
 }
 
 fn trace_skip_tree_contents(prefix: &str) {
-    let Ok(trace_val) = std::env::var("GIT_TRACE") else {
+    let Some(trace_val) = crate::environment::Environment::capture_process().var("GIT_TRACE")
+    else {
         return;
     };
     if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {

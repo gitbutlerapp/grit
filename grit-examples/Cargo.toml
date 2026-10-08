@@ -32,6 +32,10 @@ name = "guide_repository"
 path = "src/bin/guide_repository.rs"
 
 [[bin]]
+name = "guide_embedding"
+path = "src/bin/guide_embedding.rs"
+
+[[bin]]
 name = "guide_revwalk"
 path = "src/bin/guide_revwalk.rs"
 

@@ -1510,7 +1510,7 @@ pub fn fetch_operation_identity(git_dir: &Path) -> Result<String> {
     use crate::ident_config::ident_default_name;
     let env = crate::environment::Environment::capture_process();
     let cfg = crate::config::ConfigSet::load(&env, Some(git_dir), true)?;
-    let name = ident_default_name(&cfg);
+    let name = ident_default_name(&cfg, &env);
     let email = cfg
         .get("user.email")
         .filter(|e| !e.trim().is_empty())

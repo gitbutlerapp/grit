@@ -143,7 +143,9 @@ fn skip_prefix_git<'a>(subject: &'a str, prefix: &str) -> Option<&'a str> {
 /// `GIT_NAMESPACE` value (e.g. `namespace` / `a/b`) expanded to the `refs/namespaces/.../`
 /// prefix, or empty string when unset.
 pub fn git_namespace_prefix() -> String {
-    let raw = std::env::var("GIT_NAMESPACE").unwrap_or_default();
+    let raw = crate::environment::Environment::capture_process()
+        .var("GIT_NAMESPACE")
+        .unwrap_or_default();
     if raw.is_empty() {
         return String::new();
     }

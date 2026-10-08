@@ -5392,7 +5392,11 @@ fn raw_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, String) {
 
 /// Format a diff entry with abbreviated OIDs.
 pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize) -> String {
-    let ellipsis = if std::env::var("GIT_PRINT_SHA1_ELLIPSIS").ok().as_deref() == Some("yes") {
+    let ellipsis = if crate::environment::Environment::capture_process()
+        .var("GIT_PRINT_SHA1_ELLIPSIS")
+        .as_deref()
+        == Some("yes")
+    {
         "..."
     } else {
         ""

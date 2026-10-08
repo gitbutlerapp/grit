@@ -122,6 +122,8 @@
 ## 8. Library hygiene: no globals, no printing, no exits
 *Workstream: Library*
 
+**Status (2026-10-08).** Hygiene ratchet baseline is all-zero with documented `// hygiene:` exemptions (CLI `Environment::capture_process`, `SystemCommandRunner`, immutable lookup tables, pack/MIDX read caches until item 7). `concurrent_repos` covers two parallel scenarios; embedding guide and example document Environment, sinks, and injectable subprocesses. Remaining typed-error migration continues outside this item where APIs still return legacy `Error::Message` shapes.
+
 **Goal.** Make grit-lib linkable: no process-global state, no hidden environment reads, no printing, no subprocesses.
 
 **Scope.**

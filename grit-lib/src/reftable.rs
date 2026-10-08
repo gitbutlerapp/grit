@@ -1971,7 +1971,8 @@ impl ReftableStack {
         if table_has_deletion && self.table_names.len() > 2 {
             self.compact_prefix_preserving_newest()?;
         } else if self.table_names.len() > 3
-            && std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
+            && crate::environment::Environment::capture_process()
+                .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
                 .map(|value| value != "false")
                 .unwrap_or(true)
         {
@@ -1990,7 +1991,8 @@ impl ReftableStack {
     }
 
     fn compact_prefix_preserving_newest(&mut self) -> Result<()> {
-        if std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
+        if crate::environment::Environment::capture_process()
+            .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
             .map(|value| value == "false")
             .unwrap_or(false)
         {
@@ -2235,7 +2237,8 @@ impl ReftableStack {
             .iter()
             .any(|name| self.table_is_locked(name));
         if self.table_names.len() > 3
-            && std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
+            && crate::environment::Environment::capture_process()
+                .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
                 .map(|value| value != "false")
                 .unwrap_or(true)
         {

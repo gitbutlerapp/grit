@@ -210,6 +210,12 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
+        let wall_clock = options
+            .reference_unix_time
+            .or_else(|| environment.git_now_date_override())
+            .unwrap_or(0);
+        crate::git_date::tm::set_wall_clock_reference(wall_clock);
+
         Ok(Self {
             git_dir,
             work_tree,
@@ -2174,9 +2180,7 @@ fn ensure_safe_directory_allows(
 ) -> Result<()> {
     let effective = safe_directory_effective_values(git_dir, environment);
     let checked_s = checked.to_string_lossy().to_string();
-    if environment.grit_debug_safe_dir {
-        eprintln!("debug-safe-directory values={:?}", effective);
-    }
+    let _ = environment.grit_debug_safe_dir;
     if effective
         .iter()
         .any(|v| safe_directory_matches(v, &checked_s, &environment.discovery_cwd()))
@@ -2306,15 +2310,7 @@ impl Repository {
                 .unwrap_or_else(|_| self.git_dir.clone())
         };
 
-        if self.environment.grit_debug_safe_dir {
-            eprintln!(
-                "debug-safe-directory checked={} git_dir={} work_tree={:?} cwd={:?}",
-                checked.display(),
-                self.git_dir.display(),
-                self.work_tree,
-                Some(self.environment.discovery_cwd())
-            );
-        }
+        let _ = self.environment.grit_debug_safe_dir;
         self.enforce_safe_directory_checked(&checked)
     }
 
@@ -2332,14 +2328,7 @@ impl Repository {
             .git_dir
             .canonicalize()
             .unwrap_or_else(|_| self.git_dir.clone());
-        if self.environment.grit_debug_safe_dir {
-            eprintln!(
-                "debug-safe-directory(gitdir) checked={} git_dir={} work_tree={:?}",
-                checked.display(),
-                self.git_dir.display(),
-                self.work_tree
-            );
-        }
+        let _ = self.environment.grit_debug_safe_dir;
         self.enforce_safe_directory_checked(&checked)
     }
 

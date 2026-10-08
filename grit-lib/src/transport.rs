@@ -835,9 +835,15 @@ impl SshCommand {
     fn resolve(&self) -> SshCommand {
         match self {
             SshCommand::Auto => {
-                if let Some(c) = std::env::var_os("GIT_SSH_COMMAND").filter(|v| !v.is_empty()) {
+                if let Some(c) = crate::environment::Environment::capture_process()
+                    .var_os("GIT_SSH_COMMAND")
+                    .filter(|v| !v.is_empty())
+                {
                     SshCommand::ShellCommand(c)
-                } else if let Some(p) = std::env::var_os("GIT_SSH").filter(|v| !v.is_empty()) {
+                } else if let Some(p) = crate::environment::Environment::capture_process()
+                    .var_os("GIT_SSH")
+                    .filter(|v| !v.is_empty())
+                {
                     SshCommand::Program(p)
                 } else {
                     SshCommand::Program(OsString::from("ssh"))

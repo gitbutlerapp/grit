@@ -407,7 +407,7 @@ impl SystemCommandRunner {
     fn build_command(spec: &CommandSpec) -> Command {
         let mut cmd = match &spec.shell {
             None => {
-                let mut c = Command::new(&spec.program);
+                let mut c = Command::new(&spec.program); // hygiene: centralized subprocess spawn
                 c.args(&spec.args);
                 c
             }
@@ -416,7 +416,7 @@ impl SystemCommandRunner {
                 argv0,
                 args,
             }) => {
-                let mut c = Command::new(&spec.program);
+                let mut c = Command::new(&spec.program); // hygiene: centralized subprocess spawn
                 c.arg("-c").arg(script);
                 if let Some(name) = argv0 {
                     c.arg(name);
@@ -425,7 +425,7 @@ impl SystemCommandRunner {
                 c
             }
             Some(ShellInvocation::ScriptPath { script_path, args }) => {
-                let mut c = Command::new(&spec.program);
+                let mut c = Command::new(&spec.program); // hygiene: centralized subprocess spawn
                 c.arg(script_path);
                 c.args(args);
                 c

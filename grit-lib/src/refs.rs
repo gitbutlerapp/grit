@@ -921,17 +921,18 @@ pub fn write_ref_cached(
 /// path. Git builds these paths relative to the worktree root, so under the normal in-tree
 /// case this yields the `.git/...` form that the upstream tests expect.
 fn ref_path_for_display(path: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(rel) = path.strip_prefix(&cwd) {
+    let cwd = crate::environment::Environment::capture_process()
+        .cwd
+        .clone();
+    if let Ok(rel) = path.strip_prefix(&cwd) {
+        return rel.to_string_lossy().into_owned();
+    }
+    // On platforms where the cwd and the (canonicalized) ref path disagree only by a
+    // symlinked prefix (e.g. macOS `/tmp` -> `/private/tmp`), retry with both sides
+    // canonicalized so the relative form is still recovered.
+    if let (Ok(cwd_c), Ok(path_c)) = (cwd.canonicalize(), path.canonicalize()) {
+        if let Ok(rel) = path_c.strip_prefix(&cwd_c) {
             return rel.to_string_lossy().into_owned();
-        }
-        // On platforms where the cwd and the (canonicalized) ref path disagree only by a
-        // symlinked prefix (e.g. macOS `/tmp` -> `/private/tmp`), retry with both sides
-        // canonicalized so the relative form is still recovered.
-        if let (Ok(cwd_c), Ok(path_c)) = (cwd.canonicalize(), path.canonicalize()) {
-            if let Ok(rel) = path_c.strip_prefix(&cwd_c) {
-                return rel.to_string_lossy().into_owned();
-            }
         }
     }
     path.to_string_lossy().into_owned()
@@ -1481,6 +1482,7 @@ pub fn append_reflog_with_config(
 mod reflog_fail_inject {
     use std::cell::RefCell;
 
+    // hygiene: test-only reflog failure injection hook
     thread_local! {
         pub static INJECT: RefCell<Option<String>> = const { RefCell::new(None) };
     }
@@ -1589,6 +1591,7 @@ mod branch_ref_pause_inject {
         pub cv: Condvar,
     }
 
+    // hygiene: test-only branch-ref commit pause injection
     static PAUSE_BEFORE_COMMIT: OnceLock<Mutex<Option<std::sync::Arc<PauseGate>>>> =
         OnceLock::new();
 

@@ -49,6 +49,16 @@ fn hygiene_ratchet_matches_baseline() {
     let baseline = load_baseline(&baseline_path);
     let (counts, exempt) = scan_tree(&src);
 
+    let total_nonzero: u32 = counts
+        .values()
+        .flat_map(|file| PATTERNS.iter().map(move |p| *file.get(p).unwrap_or(&0)))
+        .sum();
+    assert_eq!(
+        total_nonzero, 0,
+        "grit-lib hygiene: all non-exempt pattern counts must be zero (got {total_nonzero}); \
+         fix code or add `// hygiene: reason` on exempt lines only"
+    );
+
     let mut failures: Vec<String> = Vec::new();
 
     for rel in counts.keys().chain(baseline.files.keys()) {

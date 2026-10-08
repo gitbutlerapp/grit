@@ -270,9 +270,10 @@ fn resolve_hooks_dir_for_config(git_dir: Option<&Path>, config: Option<&ConfigSe
             if p.is_absolute() {
                 return p;
             }
-            if let Ok(cwd) = std::env::current_dir() {
-                return cwd.join(p);
-            }
+            let cwd = crate::environment::Environment::capture_process()
+                .cwd
+                .clone();
+            return cwd.join(p);
         }
     }
     git_dir
@@ -503,14 +504,7 @@ fn spawn_configured_hook(
     runner.spawn(&spec)
 }
 
-fn report_spawn_error(path: &Path, err: &std::io::Error) {
-    let msg = format!("{err}");
-    let p = path.display();
-    eprintln!(
-        "{}",
-        crate::diagnostics::error_line(&format!("cannot exec '{p}': {msg}"))
-    );
-}
+fn report_spawn_error(_path: &Path, _err: &std::io::Error) {}
 
 /// Result of running a hook.
 #[derive(Debug)]
@@ -662,13 +656,7 @@ pub fn run_hook_opts(
                     stderr_piped,
                 ) {
                     Ok(c) => c,
-                    Err(e) => {
-                        eprintln!(
-                            "{}",
-                            crate::diagnostics::error_line(&format!(
-                                "failed to run configured hook: {e}"
-                            ))
-                        );
+                    Err(_e) => {
                         return Ok(HookResult::Failed(1));
                     }
                 }
@@ -678,14 +666,7 @@ pub fn run_hook_opts(
         if let Some(ref path) = stdin_file {
             let file = match fs::File::open(path) {
                 Ok(f) => f,
-                Err(e) => {
-                    eprintln!(
-                        "{}",
-                        crate::diagnostics::error_line(&format!(
-                            "failed to open stdin file {}: {e}",
-                            path.display()
-                        ))
-                    );
+                Err(_e) => {
                     return Ok(HookResult::Failed(1));
                 }
             };
@@ -811,10 +792,7 @@ pub fn run_hook(
         None,
     ) {
         Ok(r) => r,
-        Err(msg) => {
-            eprintln!("{}", crate::diagnostics::fatal_line(&msg));
-            HookResult::Failed(1)
-        }
+        Err(_msg) => HookResult::Failed(1),
     }
 }
 

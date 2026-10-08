@@ -2088,15 +2088,6 @@ impl ConfigSet {
                         path: gd.to_path_buf(),
                         reason: msg,
                     });
-                } else {
-                    eprintln!(
-                        "{}",
-                        crate::diagnostics::warning_line(&format!(
-                            "ignoring git dir '{}': {}",
-                            gd.display(),
-                            msg
-                        ))
-                    );
                 }
             } else {
                 match ConfigFile::from_path(&local_path, ConfigScope::Local) {
@@ -2229,15 +2220,8 @@ impl ConfigSet {
             let common_dir = crate::repo::common_git_dir_for_config(gd);
             // Local (commondir) — skip when format is newer than supported (t1309).
             let local_path = common_dir.join("config");
-            if let Some(msg) = crate::repo::early_config_ignore_repo_reason(&common_dir) {
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::warning_line(&format!(
-                        "ignoring git dir '{}': {}",
-                        gd.display(),
-                        msg
-                    ))
-                );
+            if crate::repo::early_config_ignore_repo_reason(&common_dir).is_some() {
+                // Local config skipped for unsupported repository format (see `Warning::IgnoredGitDir`).
             } else if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
                 set.merge_file_with_includes(&f, true, &ctx)?;
             }

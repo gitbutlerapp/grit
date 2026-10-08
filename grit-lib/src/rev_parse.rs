@@ -51,10 +51,11 @@ pub fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
             if let Some(start) = start {
                 let start = if start.is_absolute() {
                     start.to_path_buf()
-                } else if let Ok(cwd) = std::env::current_dir() {
-                    cwd.join(start)
                 } else {
-                    start.to_path_buf()
+                    let cwd = crate::environment::Environment::capture_process()
+                        .cwd
+                        .clone();
+                    cwd.join(start)
                 };
                 let dot_git = start.join(".git");
                 if dot_git.is_file() || dot_git.is_symlink() {
@@ -1167,8 +1168,10 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
                 // branch in a fresh repo). The warning is only emitted for other
                 // dangling symrefs encountered while DWIM-resolving a ref.
                 if candidate != "HEAD" {
-                    // hygiene: step 501
-                    eprintln!("warning: ignoring dangling symref {candidate}");
+                    repo.diagnostics()
+                        .warn(crate::diagnostics::Warning::DanglingSymref {
+                            name: candidate.clone(),
+                        });
                 }
                 continue;
             }
@@ -1456,7 +1459,9 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
         return normalize_colon_path_for_bare_tree(raw_path);
     };
 
-    let cwd = std::env::current_dir().map_err(Error::Io)?;
+    let cwd = crate::environment::Environment::capture_process()
+        .cwd
+        .clone();
     let wt_canon = work_tree.canonicalize().map_err(Error::Io)?;
 
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
@@ -3012,17 +3017,14 @@ pub fn reflog_date_selector_timestamp(s: &str) -> Option<i64> {
 /// Simple approximate date parser for reflog date lookups.
 /// Handles formats like "2001-09-17", "3.hot.dogs.on.2001-09-17", etc.
 fn approxidate(s: &str) -> Option<i64> {
-    let now_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now_ts = crate::git_date::tm::get_time_sec();
     let lower = s.trim().to_ascii_lowercase();
     if lower.split_whitespace().next() == Some("now") {
         // Match Git's test harness: `test_tick` sets GIT_COMMITTER_DATE; `@{now}` must use that
         // clock, not wall time (t1507 `log -g other@{u}@{now}`).
-        if let Ok(raw) =
-            std::env::var("GIT_COMMITTER_DATE").or_else(|_| std::env::var("GIT_AUTHOR_DATE"))
+        if let Some(raw) = crate::environment::Environment::capture_process()
+            .var("GIT_COMMITTER_DATE")
+            .or_else(|| crate::environment::Environment::capture_process().var("GIT_AUTHOR_DATE"))
         {
             let mut it = raw.split_whitespace();
             if let Some(ts) = it.next().and_then(|p| p.parse::<i64>().ok()) {
@@ -3138,7 +3140,10 @@ fn diagnose_tree_path_error(
             }
             .into();
         }
-        if let Ok(cwd) = std::env::current_dir() {
+        {
+            let cwd = crate::environment::Environment::capture_process()
+                .cwd
+                .clone();
             let prefix = show_prefix(repo, &cwd);
             let pfx = prefix.trim_end_matches('/');
             if !pfx.is_empty() {
@@ -3196,7 +3201,10 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
     let at_stage = path_in_index(repo, path, stage);
 
     if stage > 0 && !in_index {
-        if let Ok(cwd) = std::env::current_dir() {
+        {
+            let cwd = crate::environment::Environment::capture_process()
+                .cwd
+                .clone();
             let prefix = show_prefix(repo, &cwd);
             let pfx = prefix.trim_end_matches('/');
             if !pfx.is_empty() {
@@ -3233,7 +3241,10 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
 
     if stage == 0 {
         if !on_disk && !in_index {
-            if let Ok(cwd) = std::env::current_dir() {
+            {
+                let cwd = crate::environment::Environment::capture_process()
+                    .cwd
+                    .clone();
                 let prefix = show_prefix(repo, &cwd);
                 let pfx = prefix.trim_end_matches('/');
                 if !pfx.is_empty() {
@@ -3354,14 +3365,17 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
         }
         Err(e) => return Err(e),
     };
-    let index_path = if let Ok(raw) = std::env::var("GIT_INDEX_FILE") {
+    let index_path = if let Some(raw) =
+        crate::environment::Environment::capture_process().var("GIT_INDEX_FILE")
+    {
         let p = std::path::PathBuf::from(raw);
         if p.is_absolute() {
             p
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(p)
         } else {
-            p
+            let cwd = crate::environment::Environment::capture_process()
+                .cwd
+                .clone();
+            cwd.join(p)
         }
     } else {
         repo.index_path()
@@ -3382,14 +3396,17 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
 /// Look up a path in the index at a given stage and return its OID.
 fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Result<ObjectId> {
     use crate::index::Index;
-    let index_path = if let Ok(raw) = std::env::var("GIT_INDEX_FILE") {
+    let index_path = if let Some(raw) =
+        crate::environment::Environment::capture_process().var("GIT_INDEX_FILE")
+    {
         let p = std::path::PathBuf::from(raw);
         if p.is_absolute() {
             p
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(p)
         } else {
-            p
+            let cwd = crate::environment::Environment::capture_process()
+                .cwd
+                .clone();
+            cwd.join(p)
         }
     } else {
         repo.index_path()

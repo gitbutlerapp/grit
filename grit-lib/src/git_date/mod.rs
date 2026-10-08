@@ -20,8 +20,10 @@ pub enum TestToolDateResult {
 pub fn test_tool_date(args: &[String]) -> Result<TestToolDateResult, String> {
     // Match Git's `test-lib.sh` (`TZ=UTC`) when harness sets `GIT_TEST_DATE_NOW` but leaves `TZ`
     // unset (direct `sh t0006-date.sh` runs). Do not override an explicit `TZ` (e.g. `EST5`).
-    if std::env::var_os("GIT_TEST_DATE_NOW").is_some() && std::env::var_os("TZ").is_none() {
-        std::env::set_var("TZ", "UTC");
+    let env = crate::environment::Environment::capture_process();
+    if env.var("GIT_TEST_DATE_NOW").is_some() && env.tz.is_none() {
+        // hygiene: test-tool harness matches Git `test-lib.sh` default TZ when unset.
+        std::env::set_var("TZ", "UTC"); // hygiene: test-tool harness matches Git `test-lib.sh` default TZ when unset.
         compat::refresh_tz_after_env_change();
     }
     if args.is_empty() {

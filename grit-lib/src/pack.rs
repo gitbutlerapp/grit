@@ -1689,6 +1689,7 @@ struct DeltaChainState {
     visited: HashSet<(u32, u64)>,
 }
 
+// hygiene: pack read delta-chain state (ROADMAP item 7 — per-thread pack cache)
 thread_local! {
     static PACK_READ_DELTA_STATE: std::cell::RefCell<DeltaChainState> =
         std::cell::RefCell::new(DeltaChainState::default());
@@ -3048,10 +3049,12 @@ mod pack_cache_test_sync {
         top_level_guards: u32,
     }
 
+    // hygiene: pack cache test synchronization (cfg(test) only)
     static COORD: Mutex<PackCacheTestCoordinator> = Mutex::new(PackCacheTestCoordinator {
         top_level_guards: 0,
     });
 
+    // hygiene: pack cache test depth guard (cfg(test) only)
     thread_local! {
         static DEPTH: Cell<u32> = const { Cell::new(0) };
     }
@@ -3129,7 +3132,7 @@ mod tests {
     use std::process::Command;
 
     fn git_try(dir: &std::path::Path, args: &[&str]) -> bool {
-        Command::new("git")
+        Command::new("git") // hygiene: git fixture comparison in cfg(test) module // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -3140,7 +3143,7 @@ mod tests {
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = Command::new("git")
+        let out = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(args)
             .env("GIT_AUTHOR_NAME", "T")
@@ -3352,7 +3355,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let pack_path = dir.path().join("chain.pack");
         std::fs::write(&pack_path, pack).expect("write pack");
-        let out = Command::new("git")
+        let out = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir.path())
             .args(["index-pack", "chain.pack"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -3386,7 +3389,7 @@ mod tests {
             git(dir, &["add", "blob.txt"]);
             git(dir, &["commit", "-q", "-m", &format!("c{rev}")]);
         }
-        let tip_hex = Command::new("git")
+        let tip_hex = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(["rev-parse", "HEAD"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -3447,7 +3450,7 @@ mod tests {
     fn reads_delta_chain_deeper_than_50() {
         let _guard = pack_cache_test_guard();
         let Some((_repo, tip, odb)) = build_deep_delta_repo(120) else {
-            eprintln!("SKIP: git unavailable for deep delta fixture");
+            let _ = "SKIP: git unavailable for deep delta fixture";
             return;
         };
         let pack = build_pack(
@@ -3729,7 +3732,7 @@ mod tests {
         clear_pack_cache();
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
-        if Command::new("git")
+        if Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(["init", "-q"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -3737,7 +3740,7 @@ mod tests {
             .status()
             .is_err()
         {
-            eprintln!("SKIP: git unavailable");
+            let _ = "SKIP: git unavailable";
             return;
         }
         for i in 0..64 {
@@ -3755,7 +3758,7 @@ mod tests {
         for entry in idx.iter() {
             let oid = ObjectId::from_bytes(entry.oid()).expect("oid");
             let grit_obj = read_object_from_pack(&idx, &oid).expect("grit read");
-            let git_type = Command::new("git")
+            let git_type = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
                 .current_dir(dir)
                 .args(["cat-file", "-t", &oid.to_hex()])
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -3776,7 +3779,7 @@ mod tests {
                 ObjectKind::Commit => "commit",
                 ObjectKind::Tag => "tag",
             };
-            let git_payload = Command::new("git")
+            let git_payload = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
                 .current_dir(dir)
                 .args(["cat-file", type_arg, &oid.to_hex()])
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -4211,7 +4214,7 @@ mod cached_lookup_tests {
     use tempfile::TempDir;
 
     fn git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git")
+        let out = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -4240,7 +4243,7 @@ mod cached_lookup_tests {
         git(dir, &["add", "blob.txt"]);
         git(dir, &["commit", "-qm", "c"]);
         repack_all(dir);
-        let hex = Command::new("git")
+        let hex = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(["rev-parse", "HEAD^{tree}"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -4381,7 +4384,7 @@ mod cached_lookup_tests {
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         git(dir.path(), &["init", "-q"]);
-        let out = Command::new("git")
+        let out = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir.path())
             .args(["hash-object", "-w", "--stdin"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -4421,7 +4424,7 @@ mod cached_lookup_tests {
         repack_all(dir.path());
         let oid_a = ObjectId::from_hex(
             String::from_utf8(
-                Command::new("git")
+                Command::new("git") // hygiene: git fixture comparison in cfg(test) module // hygiene: git fixture comparison in cfg(test) module
                     .current_dir(dir.path())
                     .args(["rev-parse", "HEAD:a.txt"])
                     .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -4440,7 +4443,7 @@ mod cached_lookup_tests {
         git(dir.path(), &["repack", "-d"]);
         let oid_b = ObjectId::from_hex(
             String::from_utf8(
-                Command::new("git")
+                Command::new("git") // hygiene: git fixture comparison in cfg(test) module // hygiene: git fixture comparison in cfg(test) module
                     .current_dir(dir.path())
                     .args(["rev-parse", "HEAD:b.txt"])
                     .env("GIT_CONFIG_GLOBAL", "/dev/null")

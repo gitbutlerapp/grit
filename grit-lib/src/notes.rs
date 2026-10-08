@@ -20,6 +20,7 @@ use crate::commit::{assemble_identity, now_for_identity};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
+use crate::ident_resolve::IdentityEnv;
 use crate::merge_base::merge_bases_first_vs_rest;
 use crate::objects::{
     parse_commit, parse_tree, serialize_commit, serialize_tree, tree_entry_cmp, CommitData,
@@ -244,8 +245,8 @@ pub fn write_notes_commit(
         true,
     )?;
     let now = now_for_identity();
-    let author = build_ident_role(&config, "AUTHOR", now);
-    let committer = build_ident_role(&config, "COMMITTER", now);
+    let author = build_ident_role(repo.environment(), &config, "AUTHOR", now);
+    let committer = build_ident_role(repo.environment(), &config, "COMMITTER", now);
 
     let commit = CommitData {
         tree: tree_oid,
@@ -289,19 +290,22 @@ pub fn write_notes_commit(
 /// Build an identity line for the notes commit, honoring the
 /// `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL,DATE}` environment variables exactly like
 /// `git notes` (and `git commit-tree`). `prefix` is either "AUTHOR" or "COMMITTER".
-fn build_ident_role(config: &ConfigSet, prefix: &str, now: time::OffsetDateTime) -> String {
+fn build_ident_role<E: IdentityEnv>(
+    env: &E,
+    config: &ConfigSet,
+    prefix: &str,
+    now: time::OffsetDateTime,
+) -> String {
     let name_key = format!("GIT_{prefix}_NAME");
     let email_key = format!("GIT_{prefix}_EMAIL");
     let date_key = format!("GIT_{prefix}_DATE");
 
-    let name = std::env::var(&name_key)
-        .ok()
+    let name = env
+        .var(&name_key)
         .filter(|n| !n.trim().is_empty())
         .or_else(|| {
             if prefix == "COMMITTER" {
-                std::env::var("GIT_AUTHOR_NAME")
-                    .ok()
-                    .filter(|n| !n.trim().is_empty())
+                env.var("GIT_AUTHOR_NAME").filter(|n| !n.trim().is_empty())
             } else {
                 None
             }
@@ -309,14 +313,12 @@ fn build_ident_role(config: &ConfigSet, prefix: &str, now: time::OffsetDateTime)
         .or_else(|| config.get("user.name"))
         .unwrap_or_else(|| "Unknown".to_owned());
 
-    let email = std::env::var(&email_key)
-        .ok()
+    let email = env
+        .var(&email_key)
         .filter(|e| !e.trim().is_empty())
         .or_else(|| {
             if prefix == "COMMITTER" {
-                std::env::var("GIT_AUTHOR_EMAIL")
-                    .ok()
-                    .filter(|e| !e.trim().is_empty())
+                env.var("GIT_AUTHOR_EMAIL").filter(|e| !e.trim().is_empty())
             } else {
                 None
             }
@@ -324,9 +326,7 @@ fn build_ident_role(config: &ConfigSet, prefix: &str, now: time::OffsetDateTime)
         .or_else(|| config.get("user.email"))
         .unwrap_or_default();
 
-    let date_override = std::env::var(&date_key)
-        .ok()
-        .filter(|d| !d.trim().is_empty());
+    let date_override = env.var(&date_key).filter(|d| !d.trim().is_empty());
     assemble_identity(&name, &email, date_override.as_deref(), now)
 }
 
@@ -876,8 +876,8 @@ pub fn write_notes_commit_with_parents(
         true,
     )?;
     let now = now_for_identity();
-    let author = build_ident_role(&config, "AUTHOR", now);
-    let committer = build_ident_role(&config, "COMMITTER", now);
+    let author = build_ident_role(repo.environment(), &config, "AUTHOR", now);
+    let committer = build_ident_role(repo.environment(), &config, "COMMITTER", now);
     let commit = CommitData {
         tree: tree_oid,
         parents: parents.to_vec(),

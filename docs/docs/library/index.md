@@ -7,6 +7,7 @@ These pages walk through opening a repository, the object database, refs, the in
 | Page | Topic |
 | --- | --- |
 | [Repository](https://grit-scm.com/docs/library/repository/index.md) | Discover, open, config, errors |
+| [Embedding](https://grit-scm.com/docs/library/embedding/index.md) | Environment, sinks, subprocess injection, concurrency |
 | [Objects](https://grit-scm.com/docs/library/objects/index.md) | Odb read/write, object kinds |
 | [Refs](https://grit-scm.com/docs/library/refs/index.md) | Resolve, list, update refs and reflog |
 | [Index](https://grit-scm.com/docs/library/staging/index.md) | Read index, stage paths, write trees |

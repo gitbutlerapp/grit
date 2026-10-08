@@ -204,12 +204,12 @@ fn write_notes_ref(
 }
 
 fn grit_ident(config: &ConfigSet, now: time::OffsetDateTime) -> String {
-    let name = std::env::var("GIT_COMMITTER_NAME")
-        .ok()
+    let name = crate::environment::Environment::capture_process()
+        .var("GIT_COMMITTER_NAME")
         .or_else(|| config.get("user.name"))
         .unwrap_or_else(|| "grit".to_owned());
-    let email = std::env::var("GIT_COMMITTER_EMAIL")
-        .ok()
+    let email = crate::environment::Environment::capture_process()
+        .var("GIT_COMMITTER_EMAIL")
         .or_else(|| config.get("user.email"))
         .unwrap_or_default();
     let epoch = now.unix_timestamp();

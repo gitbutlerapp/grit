@@ -1116,7 +1116,11 @@ pub fn process_trailers(
             &conf_list,
             &separators,
         ));
-        let cwd = std::env::current_dir().ok();
+        let cwd = Some(
+            crate::environment::Environment::capture_process()
+                .cwd
+                .clone(),
+        );
         process_trailers_lists(&mut head, arg_queue, cwd.as_deref());
     }
 

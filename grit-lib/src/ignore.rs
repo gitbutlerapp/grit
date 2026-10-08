@@ -374,14 +374,14 @@ fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
 }
 
 fn default_global_ignore_path() -> Option<String> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+    if let Some(xdg) = crate::environment::Environment::capture_process().var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
             return Some(format!("{xdg}/git/ignore"));
         }
     }
 
-    std::env::var("HOME")
-        .ok()
+    crate::environment::Environment::capture_process()
+        .var("HOME")
         .map(|home| format!("{home}/.config/git/ignore"))
 }
 

@@ -388,16 +388,16 @@ impl HttpTransportTimeouts {
 }
 
 fn parse_low_speed(config: &ConfigSet) -> Option<LowSpeedSettings> {
-    let limit = env::var("GIT_HTTP_LOW_SPEED_LIMIT")
-        .ok()
+    let limit = crate::environment::Environment::capture_process()
+        .var("GIT_HTTP_LOW_SPEED_LIMIT")
         .and_then(|v| parse_i64(v.trim()).ok())
         .or_else(|| {
             config
                 .get("http.lowSpeedLimit")
                 .and_then(|v| parse_i64(v.trim()).ok())
         });
-    let time_secs = env::var("GIT_HTTP_LOW_SPEED_TIME")
-        .ok()
+    let time_secs = crate::environment::Environment::capture_process()
+        .var("GIT_HTTP_LOW_SPEED_TIME")
         .and_then(|v| parse_i64(v.trim()).ok())
         .or_else(|| {
             config

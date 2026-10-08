@@ -388,8 +388,10 @@ impl Odb {
     /// Relative entries are resolved against `resolve_base` (typically the work tree root).
     #[must_use]
     pub fn env_alternate_dirs_from_var(resolve_base: Option<&Path>) -> Vec<PathBuf> {
-        match std::env::var("GIT_ALTERNATE_OBJECT_DIRECTORIES") {
-            Ok(val) if !val.is_empty() => {
+        match crate::environment::Environment::capture_process()
+            .var("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        {
+            Some(val) if !val.is_empty() => {
                 let mut dirs = parse_alternate_env(&val);
                 if let Some(base) = resolve_base {
                     for dir in &mut dirs {
@@ -1753,11 +1755,12 @@ impl Odb {
         #[cfg(test)]
         self.hot_path_test_metrics.record_freshen();
         // `utime(path, NULL)` sets both atime and mtime to the current time.
-        let touched_at = std::time::SystemTime::now();
-        let now = filetime::FileTime::from_system_time(touched_at);
-        filetime::set_file_times(path, now, now)
-            .ok()
-            .map(|()| touched_at)
+        let now = filetime::FileTime::now();
+        filetime::set_file_times(path, now, now).ok()?;
+        Some(
+            std::time::UNIX_EPOCH
+                + std::time::Duration::new(now.unix_seconds() as u64, now.nanoseconds()),
+        )
     }
 }
 
@@ -2159,7 +2162,7 @@ mod tests {
     }
 
     fn git_run(dir: &Path, args: &[&str]) -> std::process::Output {
-        std::process::Command::new("git")
+        std::process::Command::new("git") // hygiene: git fixture comparison in cfg(test) module
             .current_dir(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")

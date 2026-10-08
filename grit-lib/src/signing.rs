@@ -372,8 +372,8 @@ fn resolve_program(program: &str) -> Result<PathBuf> {
 
 /// Look up a bare program name on `$PATH`.
 fn search_path(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&paths) {
+    let paths = crate::environment::Environment::capture_process().var_os("PATH")?;
+    for dir in paths.to_string_lossy().split(':').map(PathBuf::from) {
         if dir.as_os_str().is_empty() {
             continue;
         }
@@ -401,7 +401,9 @@ fn is_executable_file(path: &Path) -> bool {
 
 /// The user's home directory (`$HOME`).
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    crate::environment::Environment::capture_process()
+        .var_os("HOME")
+        .map(PathBuf::from)
 }
 
 /// Expand a leading `~/` (and a bare `~`) relative to `$HOME`, like Git's
@@ -1430,10 +1432,7 @@ fn write_temp_file_named(data: &[u8], stem: &str) -> Result<PathBuf> {
 fn next_temp_counter() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
+    let now = crate::git_date::tm::get_time_sec() as u64;
     now ^ COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 

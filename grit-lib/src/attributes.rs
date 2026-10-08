@@ -200,8 +200,8 @@ pub fn builtin_warnings_for_rules(rules: &[AttrRule], display_path: &str) -> Vec
 }
 
 fn default_global_attributes_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+    let home = crate::environment::Environment::capture_process().var("HOME")?;
+    if let Some(xdg) = crate::environment::Environment::capture_process().var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
             return Some(PathBuf::from(xdg).join("git/attributes"));
         }
@@ -823,7 +823,9 @@ pub fn path_relative_to_worktree(
         .work_tree
         .as_ref()
         .ok_or_else(|| "bare repository — no work tree".to_string())?;
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let cwd = crate::environment::Environment::capture_process()
+        .cwd
+        .clone();
     let p = Path::new(path_str);
     let combined = if p.is_absolute() {
         p.to_path_buf()
@@ -1226,8 +1228,8 @@ pub fn resolve_attr_treeish(
     repo: &Repository,
     source_arg: Option<&str>,
 ) -> std::result::Result<(Option<String>, bool), crate::error::Error> {
-    let env_src = std::env::var("GIT_ATTR_SOURCE")
-        .ok()
+    let env_src = crate::environment::Environment::capture_process()
+        .var("GIT_ATTR_SOURCE")
         .filter(|s| !s.is_empty());
     let config = ConfigSet::load(
         &crate::environment::Environment::capture_process(),

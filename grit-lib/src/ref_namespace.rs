@@ -8,7 +8,7 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 /// Raw value of `GIT_NAMESPACE` (may contain `/`-separated components).
 #[must_use]
 pub fn raw_git_namespace_from_env() -> Option<String> {
-    let v = std::env::var("GIT_NAMESPACE").ok()?;
+    let v = crate::environment::Environment::capture_process().var("GIT_NAMESPACE")?;
     let t = v.trim();
     if t.is_empty() {
         None

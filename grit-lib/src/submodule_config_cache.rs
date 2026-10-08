@@ -640,7 +640,7 @@ fn parse_fetch_recurse(value: &str, die_on_error: bool) -> Result<FetchRecurse, 
     }
     if die_on_error {
         Err(format!(
-            "fatal: bad submodule.fetchRecurseSubmodules argument: '{v}'"
+            "bad submodule.fetchRecurseSubmodules argument: '{v}'"
         ))
     } else {
         Ok(FetchRecurse::Error)

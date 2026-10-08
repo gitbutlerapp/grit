@@ -69,7 +69,10 @@ pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> Str
     // When OIDs are abbreviated, Git appends `...` if `GIT_PRINT_SHA1_ELLIPSIS=yes`
     // (matches the non-combined raw format).
     let ellipsis = if abbrev_len.is_some()
-        && std::env::var("GIT_PRINT_SHA1_ELLIPSIS").ok().as_deref() == Some("yes")
+        && crate::environment::Environment::capture_process()
+            .var("GIT_PRINT_SHA1_ELLIPSIS")
+            .as_deref()
+            == Some("yes")
     {
         "..."
     } else {

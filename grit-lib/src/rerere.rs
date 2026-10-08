@@ -5,7 +5,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use crate::config::ConfigSet;
 use crate::error::Result;
@@ -1086,10 +1085,7 @@ pub fn rerere_gc(git_dir: &Path) -> Result<()> {
     if !rerere_enabled(&config, git_dir) {
         return Ok(());
     }
-    let now: i64 = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now: i64 = crate::git_date::tm::get_time_sec();
     let mut cutoff_resolve = now - 60 * 86400;
     let mut cutoff_unresolved = now - 15 * 86400;
     if let Some(c) = parse_expiry_days_now(&config, "gc.rerereresolved", now) {
@@ -1298,7 +1294,10 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
         .work_tree
         .as_ref()
         .ok_or_else(|| crate::error::Error::PathError("no work tree".to_string()))?;
-    let path = if let Ok(cwd) = std::env::current_dir() {
+    let path = {
+        let cwd = crate::environment::Environment::capture_process()
+            .cwd
+            .clone();
         if let Ok(prefix) = cwd.strip_prefix(wt) {
             let prefix = prefix.to_string_lossy().replace('\\', "/");
             if prefix.is_empty() {
@@ -1309,8 +1308,6 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEve
         } else {
             path.to_string()
         }
-    } else {
-        path.to_string()
     };
     let path = path.as_str();
     let fp = wt.join(path);

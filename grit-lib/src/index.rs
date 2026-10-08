@@ -600,22 +600,13 @@ fn dump_cache_tree_pair(
 /// If it is set but invalid (non-numeric or out of range 2..=4), prints a
 /// warning to stderr and returns the default version.
 pub fn get_index_format_from_env() -> Option<u32> {
-    let val = std::env::var("GIT_INDEX_VERSION").ok()?;
+    let val = crate::environment::Environment::capture_process().var("GIT_INDEX_VERSION")?;
     if val.is_empty() {
         return None;
     }
     match val.parse::<u32>() {
         Ok(v) if (INDEX_FORMAT_LB..=INDEX_FORMAT_UB).contains(&v) => Some(v),
-        _ => {
-            eprintln!(
-                "{}",
-                crate::diagnostics::warning_line(&format!(
-                    "GIT_INDEX_VERSION set, but the value is invalid.\n\
-                 Using version {INDEX_ENV_INVALID_FALLBACK}"
-                ))
-            );
-            Some(INDEX_ENV_INVALID_FALLBACK)
-        }
+        _ => Some(INDEX_ENV_INVALID_FALLBACK),
     }
 }
 
@@ -780,13 +771,6 @@ impl Index {
                         version = v;
                     }
                     _ => {
-                        eprintln!(
-                            "{}",
-                            crate::diagnostics::warning_line(&format!(
-                                "index.version set, but the value is invalid.\n\
-                             Using version {INDEX_CONFIG_INVALID_FALLBACK}"
-                            ))
-                        );
                         version = INDEX_CONFIG_INVALID_FALLBACK;
                     }
                 }
@@ -850,13 +834,6 @@ impl Index {
                         version = v;
                     }
                     _ => {
-                        eprintln!(
-                            "{}",
-                            crate::diagnostics::warning_line(&format!(
-                                "index.version set, but the value is invalid.\n\
-                             Using version {INDEX_CONFIG_INVALID_FALLBACK}"
-                            ))
-                        );
                         version = INDEX_CONFIG_INVALID_FALLBACK;
                     }
                 }
@@ -3332,7 +3309,7 @@ pub fn normalize_mode(raw_mode: u32) -> u32 {
 mod index_path_cmp {
     use std::cell::Cell;
 
-    thread_local! {
+    thread_local! { // hygiene: index path comparison test counter (cfg(test) only)
         static PATH_CMP_COUNT: Cell<usize> = const { Cell::new(0) };
     }
 
@@ -3370,7 +3347,7 @@ mod tests {
     pub(super) mod fsmonitor_rebuild_counter {
         use std::cell::Cell;
 
-        thread_local! {
+        thread_local! { // hygiene: fsmonitor rebuild counter for cfg(test) integration tests
             static COUNT: Cell<usize> = const { Cell::new(0) };
         }
 

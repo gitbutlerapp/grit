@@ -374,8 +374,10 @@ mod tests {
         fs::write(root.join("tracked.txt"), b"x\n").unwrap();
         stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
 
-        let prev_global = env::var("GIT_CONFIG_GLOBAL").ok();
-        let prev_system = env::var("GIT_CONFIG_SYSTEM").ok();
+        let prev_global =
+            crate::environment::Environment::capture_process().var("GIT_CONFIG_GLOBAL");
+        let prev_system =
+            crate::environment::Environment::capture_process().var("GIT_CONFIG_SYSTEM");
         env::set_var("GIT_CONFIG_GLOBAL", &global);
         env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
 
