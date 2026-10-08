@@ -30,6 +30,17 @@ class LinkcheckFixture(unittest.TestCase):
         (self.site / "broken.html").write_text('<a href="missing.html">nope</a>', encoding="utf-8")
         (self.site / "anchor.html").write_text('<a href="good/#ghost">bad frag</a>', encoding="utf-8")
 
+        docs_root = self.site / "docs"
+        docs_root.mkdir()
+        (docs_root / "index.md").write_text("# Overview\n", encoding="utf-8")
+        target = docs_root / "target"
+        target.mkdir()
+        (target / "index.md").write_text("## Section\n\n[home](https://grit-scm.com/docs/index.md)\n", encoding="utf-8")
+        (docs_root / "broken-md.md").write_text(
+            "[nope](https://grit-scm.com/docs/missing-page/index.md)\n",
+            encoding="utf-8",
+        )
+
     def tearDown(self) -> None:
         linkcheck.SITE_ROOT = self._orig_site_root
         self._tmpdir.cleanup()
@@ -50,9 +61,26 @@ class LinkcheckFixture(unittest.TestCase):
         self.assertEqual(len(anchors), 1)
         self.assertIn("missing anchor", anchors[0].detail)
 
+    def test_grit_docs_markdown_link_resolves(self) -> None:
+        issues = linkcheck.run(check_external=False)
+        bad = [i for i in issues if "missing-page" in i.raw]
+        self.assertEqual(len(bad), 1)
+        self.assertIn("not found", bad[0].detail)
+
+    def test_grit_docs_markdown_link_passes_when_target_exists(self) -> None:
+        issues = linkcheck.run(check_external=False)
+        self.assertFalse(
+            any(i.source.name == "index.md" and "grit-scm.com/docs/index.md" in i.raw for i in issues)
+        )
+
     def test_external_link_skipped_by_default(self) -> None:
         issues = linkcheck.run(check_external=False)
-        self.assertFalse(any(i.raw.startswith("https://") for i in issues))
+        external = [
+            i
+            for i in issues
+            if i.raw.startswith("https://") and not i.raw.startswith(linkcheck.DOCS_MARKDOWN_PREFIX)
+        ]
+        self.assertFalse(external)
 
     def test_protocol_relative_external_normalizes_without_crash(self) -> None:
         self.assertEqual(

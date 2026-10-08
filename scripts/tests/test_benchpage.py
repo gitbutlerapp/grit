@@ -181,6 +181,21 @@ class BenchpageTest(unittest.TestCase):
         html_out = benchpage.render_tables(bundle)
         self.assertEqual(benchpage.count_data_rows(html_out), len(FIXTURE_REPORT["scenarios"]))
 
+    def test_benchmark_markdown_tables(self) -> None:
+        bundle = benchpage.merge_baselines([self.baseline])
+        md_out = benchpage.render_tables_markdown(bundle)
+        self.assertIn("## Summary by operation", md_out)
+        self.assertIn("| Scenario | Fixture |", md_out)
+        self.assertIn("`status-1000`", md_out)
+        self.assertNotIn("<table", md_out)
+
+    def test_benchmark_markdown_for_manifest_matches_scenarios(self) -> None:
+        manifest = ROOT / "content" / "docs" / "site.toml"
+        paths = benchpage.load_baseline_paths(manifest)
+        expected = sum(len(benchpage.load_report(p)["scenarios"]) for p in paths)
+        md_out = benchpage.benchmark_markdown_for_manifest(manifest)
+        self.assertEqual(md_out.count("| `"), expected)
+
     def test_committed_baselines_match_rendered_rows(self) -> None:
         manifest = ROOT / "content" / "docs" / "site.toml"
         paths = benchpage.load_baseline_paths(manifest)

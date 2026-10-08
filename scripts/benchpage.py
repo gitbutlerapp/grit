@@ -269,10 +269,79 @@ def render_tables(bundle: BenchBundle) -> str:
     return "\n".join(parts)
 
 
+def render_header_markdown(bundle: BenchBundle) -> str:
+    run_date = bundle.timestamp.replace("T", " ").rstrip("Z")
+    rows = [
+        ("Git", bundle.git_version),
+        ("Grit", bundle.grit_version),
+        ("CPU", bundle.cpu_model),
+        ("OS", bundle.os_label),
+        ("Recorded", run_date),
+    ]
+    lines = ["| | |", "| --- | --- |"]
+    for label, value in rows:
+        lines.append(f"| {label} | {value} |")
+    return "\n".join(lines)
+
+
+def render_group_table_markdown(group: str, scenarios: list[Scenario]) -> str:
+    lines = [
+        f"### {group}",
+        "",
+        "| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |",
+        "| --- | --- | ---: | ---: | ---: | --- |",
+    ]
+    for scenario in scenarios:
+        ratio_text, _slow = format_ratio(scenario.ratio)
+        spread = f"±{format_ms(scenario.grit_stddev_ms)} ms"
+        lines.append(
+            f"| `{scenario.id}` | {scenario.fixture} | {format_ms(scenario.git_mean_ms)} | "
+            f"{format_ms(scenario.grit_mean_ms)} | {ratio_text} | {spread} |"
+        )
+    return "\n".join(lines)
+
+
+def render_summary_markdown(bundle: BenchBundle) -> str:
+    by_group: dict[str, list[Scenario]] = {}
+    for scenario in bundle.scenarios:
+        by_group.setdefault(scenario.group, []).append(scenario)
+    lines = [
+        "## Summary by operation",
+        "",
+        "| Operation | Scenarios | Median Grit / Git | Worst Grit / Git |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for group in sorted(by_group):
+        items = by_group[group]
+        ratios = [s.ratio for s in items]
+        median = statistics.median(ratios)
+        worst = max(ratios)
+        median_text, _ = format_ratio(median)
+        worst_text, _ = format_ratio(worst)
+        lines.append(f"| {group} | {len(items)} | {median_text} | {worst_text} |")
+    return "\n".join(lines)
+
+
+def render_tables_markdown(bundle: BenchBundle) -> str:
+    by_group: dict[str, list[Scenario]] = {}
+    for scenario in bundle.scenarios:
+        by_group.setdefault(scenario.group, []).append(scenario)
+    parts = [render_header_markdown(bundle), render_summary_markdown(bundle)]
+    for group in sorted(by_group):
+        parts.append(render_group_table_markdown(group, by_group[group]))
+    return "\n\n".join(parts)
+
+
 def benchmark_html_for_manifest(manifest_path: Path) -> str:
     paths = load_baseline_paths(manifest_path)
     bundle = merge_baselines(paths)
     return render_tables(bundle)
+
+
+def benchmark_markdown_for_manifest(manifest_path: Path) -> str:
+    paths = load_baseline_paths(manifest_path)
+    bundle = merge_baselines(paths)
+    return render_tables_markdown(bundle)
 
 
 def split_benchmark_markdown(markdown: str) -> tuple[str, str]:

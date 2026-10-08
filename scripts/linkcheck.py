@@ -13,8 +13,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SITE_ROOT = ROOT / "docs"
 
+sys.path.insert(0, str(ROOT / "scripts"))
+import blog  # noqa: E402
+
 HREF_RE = re.compile(r"""(?:href|src)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+HEADING_MD_RE = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 ID_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""")
+DOCS_MARKDOWN_PREFIX = f"{blog.SITE_URL}/docs/"
 
 
 @dataclass(frozen=True)
@@ -100,10 +106,49 @@ def iter_html_files() -> list[Path]:
     return sorted(SITE_ROOT.rglob("*.html"))
 
 
+def iter_docs_markdown_files() -> list[Path]:
+    docs_root = SITE_ROOT / "docs"
+    if not docs_root.is_dir():
+        return []
+    return sorted(docs_root.rglob("*.md"))
+
+
+def markdown_heading_ids(text: str) -> set[str]:
+    ids: set[str] = set()
+    for match in HEADING_MD_RE.finditer(text):
+        ids.add(blog.slugify(match.group(1).strip()))
+    return ids
+
+
+def resolve_grit_docs_markdown_url(url: str) -> tuple[Path | None, str | None]:
+    """Map an absolute grit-scm.com docs Markdown URL to a file under docs/docs/."""
+    fragment: str | None = None
+    path = url
+    if "#" in url:
+        path, frag = url.split("#", 1)
+        fragment = frag or None
+    if not path.startswith(DOCS_MARKDOWN_PREFIX):
+        return None, fragment
+    rel = path[len(DOCS_MARKDOWN_PREFIX) :]
+    if rel == "index.md":
+        target = SITE_ROOT / "docs" / "index.md"
+    else:
+        target = SITE_ROOT / "docs" / rel
+    return target, fragment
+
+
 def collect_links(path: Path) -> list[LinkRef]:
     refs: list[LinkRef] = []
     for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         for match in HREF_RE.finditer(line):
+            refs.append(LinkRef(path, match.group(1), line_no))
+    return refs
+
+
+def collect_markdown_links(path: Path) -> list[LinkRef]:
+    refs: list[LinkRef] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        for match in MARKDOWN_LINK_RE.finditer(line):
             refs.append(LinkRef(path, match.group(1), line_no))
     return refs
 
@@ -154,12 +199,46 @@ def check_link(
     return None
 
 
+def check_markdown_link(
+    ref: LinkRef,
+    *,
+    md_id_cache: dict[Path, set[str]],
+) -> LinkIssue | None:
+    url = ref.raw.strip()
+    if not url.startswith(DOCS_MARKDOWN_PREFIX):
+        return None
+    target, fragment = resolve_grit_docs_markdown_url(url)
+    if target is None:
+        return None
+    if not target.is_file():
+        rel = target.relative_to(SITE_ROOT)
+        return LinkIssue(ref.source, ref.raw, f"target file not found ({rel.as_posix()})", ref.line)
+    if fragment is not None:
+        if target not in md_id_cache:
+            md_id_cache[target] = markdown_heading_ids(target.read_text(encoding="utf-8"))
+        if fragment not in md_id_cache[target]:
+            rel = target.relative_to(SITE_ROOT)
+            return LinkIssue(
+                ref.source,
+                ref.raw,
+                f"missing anchor #{fragment} in {rel.as_posix()}",
+                ref.line,
+            )
+    return None
+
+
 def run(*, check_external: bool) -> list[LinkIssue]:
     id_cache: dict[Path, set[str]] = {}
+    md_id_cache: dict[Path, set[str]] = {}
     issues: list[LinkIssue] = []
     for html_path in iter_html_files():
         for ref in collect_links(html_path):
             issue = check_link(ref, check_external=check_external, id_cache=id_cache)
+            if issue:
+                issues.append(issue)
+    for md_path in iter_docs_markdown_files():
+        for ref in collect_markdown_links(md_path):
+            issue = check_markdown_link(ref, md_id_cache=md_id_cache)
             if issue:
                 issues.append(issue)
     return issues
@@ -176,7 +255,9 @@ def main(argv: list[str] | None = None) -> int:
 
     issues = run(check_external=args.external)
     if not issues:
-        print(f"link check passed ({len(iter_html_files())} HTML file(s))")
+        html_count = len(iter_html_files())
+        md_count = len(iter_docs_markdown_files())
+        print(f"link check passed ({html_count} HTML file(s), {md_count} docs Markdown file(s))")
         return 0
 
     for issue in issues:

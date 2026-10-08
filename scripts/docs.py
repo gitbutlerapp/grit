@@ -41,6 +41,15 @@ DESCRIPTION = "How to use grit, a simple Git client built on grit-lib: a short t
 LIBRARY_GUIDE_SLUG = "library"
 TOC_MIN_HEADINGS = 2
 INCLUDE_RE = re.compile(r"<!--\s*include:\s*(\S+)\s*-->")
+MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+HTML_CHROME_MARKERS = (
+    "<nav",
+    'class="docnav"',
+    'class="pager"',
+    'class="toc"',
+    "<aside",
+    "<table class=\"cmds\"",
+)
 
 
 def expand_includes(body: str) -> str:
@@ -126,6 +135,57 @@ def output_path(out_dir: Path, slug: str) -> Path:
         return out_dir / "index.html"
     parts = slug.split("/")
     return out_dir.joinpath(*parts, "index.html")
+
+
+def markdown_output_path(out_dir: Path, slug: str) -> Path:
+    if slug == "index":
+        return out_dir / "index.md"
+    parts = slug.split("/")
+    return out_dir.joinpath(*parts, "index.md")
+
+
+def markdown_canonical_url(slug: str) -> str:
+    base = f"{blog.SITE_URL}/docs"
+    if slug == "index":
+        return f"{base}/index.md"
+    return f"{base}/{slug}/index.md"
+
+
+def relative_link_to_slug(from_slug: str, url_path: str) -> str:
+    """Map a relative docs link path to a page slug."""
+    parts: list[str] = [] if from_slug == "index" else from_slug.split("/")
+    for segment in url_path.replace("\\", "/").split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(segment)
+    return "/".join(parts) if parts else "index"
+
+
+def rewrite_markdown_links(body: str, from_slug: str) -> str:
+    """Rewrite internal relative links to absolute grit-scm.com Markdown URLs."""
+
+    def replace(match: re.Match[str]) -> str:
+        text, url = match.group(1), match.group(2).strip()
+        fragment = ""
+        path = url
+        if "#" in url:
+            path, frag = url.split("#", 1)
+            fragment = f"#{frag}" if frag else ""
+        if not path:
+            return match.group(0)
+        lowered = path.lower()
+        if lowered.startswith(("http://", "https://", "mailto:", "tel:")):
+            return match.group(0)
+        if path.startswith("#"):
+            return match.group(0)
+        target_slug = relative_link_to_slug(from_slug, path)
+        return f"[{text}]({markdown_canonical_url(target_slug)}{fragment})"
+
+    return MARKDOWN_LINK_RE.sub(replace, body)
 
 
 def load_manifest() -> list[SectionSpec]:
@@ -361,6 +421,28 @@ def sidebar(site: Site, current: str) -> str:
     return "".join(parts)
 
 
+def command_index_markdown(site: Site) -> str:
+    command_groups: tuple[str, ...] = ()
+    for section in site.sections:
+        if section.command_groups:
+            command_groups = section.command_groups
+            break
+    lines = ["## Commands", ""]
+    for group in command_groups:
+        rows = [p for p in site.command_pages if p.group == group]
+        if not rows:
+            continue
+        lines.append(f"### {group}")
+        lines.append("")
+        lines.append("| Command | Summary |")
+        lines.append("| --- | --- |")
+        for page in rows:
+            url = markdown_canonical_url(page.slug)
+            lines.append(f"| [`{page.title}`]({url}) | {page.summary} |")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def command_index(site: Site, from_slug: str) -> str:
     sections = []
     command_groups: tuple[str, ...] = ()
@@ -416,9 +498,12 @@ def page_toc(toc: tuple[blog.TocItem, ...]) -> str:
     return f'<aside class="toc" aria-label="On this page"><h2>On this page</h2><ol>{items}</ol></aside>'
 
 
-def shell(title: str, description: str, body: str, base: str) -> str:
+def shell(title: str, description: str, body: str, base: str, *, extra_head: str = "") -> str:
     home = f"{base}/"
     library_href = f"{base}/docs/library/"
+    head_extra = extra_head
+    if head_extra and not head_extra.endswith("\n"):
+        head_extra += "\n"
     return f"""<!doctype html>
 <html lang=\"en\">
 <head>
@@ -426,7 +511,7 @@ def shell(title: str, description: str, body: str, base: str) -> str:
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
 <title>{html.escape(title)}</title>
 <meta name=\"description\" content=\"{html.escape(description, quote=True)}\" />
-<script async src=\"https://u.gitbutler.com/script.js\" data-website-id=\"2c6f680c-eaf5-4cd7-a419-1032ffab6bbc\"></script>
+{head_extra}<script async src=\"https://u.gitbutler.com/script.js\" data-website-id=\"2c6f680c-eaf5-4cd7-a419-1032ffab6bbc\"></script>
 {blog.FONTS}
 <style>{blog.CSS}{CSS}</style>
 </head>
@@ -456,10 +541,15 @@ def render(page: Page, site: Site, *, is_index: bool) -> str:
     else:
         base = "../" * (doc_depth(page.slug) + 1)
     docs_home = href_to(page.slug, "index")
+    markdown_href = "index.md"
     ref = (
-        '<span class="ref">HEAD → docs</span>'
+        f'<span class="ref">HEAD → docs</span><a class="ref" href="{markdown_href}">Markdown</a>'
         if is_index
-        else f'<a class="ref" href="{docs_home}">← docs</a><span>{"man page" if page.is_command else "guide"}</span>'
+        else (
+            f'<a class="ref" href="{docs_home}">← docs</a>'
+            f'<span>{"man page" if page.is_command else "guide"}</span>'
+            f'<a class="ref" href="{markdown_href}">Markdown</a>'
+        )
     )
     h1_class = ' class="cmd"' if page.is_command else ""
     lede = f'<p class="lede">{html.escape(page.summary)}</p>' if page.summary else ""
@@ -494,7 +584,53 @@ def render(page: Page, site: Site, *, is_index: bool) -> str:
 </main>
 {blog.footer(links)}"""
     title = SITE_TITLE if is_index else f"{page.title} - {SITE_TITLE}"
-    return shell(title, page.summary or DESCRIPTION, body, base)
+    alternate = '<link rel="alternate" type="text/markdown" href="index.md" />'
+    return shell(title, page.summary or DESCRIPTION, body, base, extra_head=alternate)
+
+
+def page_markdown_body(
+    page: Page,
+    site: Site,
+    *,
+    source: Path,
+    manifest_path: Path,
+    is_index: bool,
+) -> str:
+    _meta, body = blog.parse_front_matter(source.read_text(encoding="utf-8"))
+    if page.slug == "benchmarks":
+        body = expand_includes(body)
+        before, after = benchpage.split_benchmark_markdown(body)
+        before = prepare_markdown_body(before)
+        after = prepare_markdown_body(after)
+        tables = benchpage.benchmark_markdown_for_manifest(manifest_path)
+        body = before + "\n\n" + tables + "\n" + after
+    else:
+        body = prepare_markdown_body(body)
+    body = rewrite_markdown_links(body, page.slug)
+    parts = [f"# {page.title}"]
+    if page.summary:
+        parts.append(f"> {page.summary}")
+    parts.append(body.rstrip())
+    if is_index:
+        parts.append(command_index_markdown(site).rstrip())
+    return "\n\n".join(parts) + "\n"
+
+
+def render_markdown_twin(
+    page: Page,
+    site: Site,
+    *,
+    source: Path,
+    manifest_path: Path,
+    is_index: bool,
+) -> str:
+    return page_markdown_body(
+        page,
+        site,
+        source=source,
+        manifest_path=manifest_path,
+        is_index=is_index,
+    )
 
 
 CSS = r'''
@@ -527,7 +663,10 @@ CSS = r'''
 
 def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
     rustdoc_links.ensure_local_rustdoc(DOC_ROOT, repo_root=ROOT)
+    root = content_dir or CONTENT_DIR
+    manifest_path = root / "site.toml"
     site = load_site(content_dir=content_dir)
+    listed = collect_listed_sources_for_dir(load_manifest_from(manifest_path, root), root)
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
@@ -537,6 +676,18 @@ def generate(out_dir: Path, *, content_dir: Path | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         is_index = page.slug == "index"
         path.write_text(render(page, site, is_index=is_index), encoding="utf-8")
+        spec = next(s for s in listed.values() if s.slug == page.slug)
+        md_path = markdown_output_path(out_dir, page.slug)
+        md_path.write_text(
+            render_markdown_twin(
+                page,
+                site,
+                source=spec.source_at(root),
+                manifest_path=manifest_path,
+                is_index=is_index,
+            ),
+            encoding="utf-8",
+        )
 
 
 def check_committed() -> int:

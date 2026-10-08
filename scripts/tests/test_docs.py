@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import blog  # noqa: E402
 import docs  # noqa: E402
 import rustdoc_links  # noqa: E402
 
@@ -102,6 +103,62 @@ label = "Missing"
             self.assertNotIn("struct.parse_tree", html)
 
         restore()
+
+    def test_every_page_has_markdown_twin(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content)
+            html_files = list(out.rglob("index.html"))
+            md_files = list(out.rglob("index.md"))
+            self.assertEqual(len(md_files), len(html_files))
+            for html_path in html_files:
+                md_path = html_path.with_suffix(".md")
+                self.assertTrue(md_path.is_file(), f"missing markdown twin for {html_path}")
+
+    def test_markdown_twin_has_title_summary_and_no_html_chrome(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content)
+            status_md = (out / "status" / "index.md").read_text(encoding="utf-8")
+            self.assertTrue(status_md.startswith("# "))
+            self.assertIn("\n> ", status_md)
+            for marker in docs.HTML_CHROME_MARKERS:
+                self.assertNotIn(marker, status_md)
+
+    def test_markdown_twin_links_are_absolute(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content)
+            tutorial_md = (out / "tutorial" / "index.md").read_text(encoding="utf-8")
+            self.assertIn(f"]({blog.SITE_URL}/docs/install/index.md)", tutorial_md)
+            self.assertNotIn("](../install/)", tutorial_md)
+
+    def test_markdown_twin_expands_includes_and_rustdoc_links(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content)
+            quickstart_md = (out / "library-quickstart" / "index.md").read_text(encoding="utf-8")
+            self.assertIn("```rust", quickstart_md)
+            self.assertIn("docs.rs/grit-lib", quickstart_md)
+            objects_md = (out / "library" / "objects" / "index.md").read_text(encoding="utf-8")
+            self.assertIn("grit_lib/objects/fn.parse_tree.html", objects_md)
+
+    def test_html_head_links_markdown_alternate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content)
+            html_out = (out / "status" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('rel="alternate" type="text/markdown" href="index.md"', html_out)
+            self.assertIn('href="index.md">Markdown</a>', html_out)
+
+    def test_docs_index_markdown_includes_command_table(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content)
+            index_md = (out / "index.md").read_text(encoding="utf-8")
+            self.assertIn("## Commands", index_md)
+            self.assertIn("| Command | Summary |", index_md)
+            self.assertIn(f"]({blog.SITE_URL}/docs/status/index.md)", index_md)
 
     def test_missing_include_file_fails(self) -> None:
         page = self.content / "library-quickstart.md"
