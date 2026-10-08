@@ -97,6 +97,10 @@ fn checkout_between_trees_git_clean_after() {
     git(tmp.path(), &["init", "-q", "-b", "main", "."]);
     git(tmp.path(), &["config", "user.email", "t@example.com"]);
     git(tmp.path(), &["config", "user.name", "Test"]);
+    // Thousands of loose objects can trigger a detached `git gc --auto` after a commit, which
+    // prunes loose objects while the final `git fsck` is reading them.
+    git(tmp.path(), &["config", "gc.auto", "0"]);
+    git(tmp.path(), &["config", "maintenance.auto", "false"]);
 
     populate_initial(tmp.path());
     let from_commit_hex = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_owned();
