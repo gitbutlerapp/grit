@@ -214,51 +214,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
-<<<<<<< New base: Merge branch 'factory/no-grep-iconv-kill-stty-506'
-||||||| Common ancestor
-[file.diffstat.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 1
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 1
-static_global = 1
-system_time_now = 0
-
-=======
-[file.diffstat.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 1
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 1
-static_global = 1
-system_time_now = 0
-
 [file.environment.rs]
 println = 0
 print = 0
@@ -280,7 +235,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
->>>>>>> Current commit: lib: add Environment for discovery and config loading
 [file.filter_process.rs]
 println = 0
 print = 0
