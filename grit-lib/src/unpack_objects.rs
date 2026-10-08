@@ -1785,6 +1785,7 @@ mod tests {
             encoding: None,
             message: "msg".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         };
         let commit_data = serialize_commit(&commit);
         let commit_oid = HashAlgo::Sha1.hash_object(ObjectKind::Commit, &commit_data);
@@ -1831,6 +1832,7 @@ mod tests {
             encoding: None,
             message: "msg".into(),
             raw_message: None,
+            extra_headers: Vec::new(),
         };
         let commit_data = serialize_commit(&commit);
         let commit_oid = HashAlgo::Sha1.hash_object(ObjectKind::Commit, &commit_data);
