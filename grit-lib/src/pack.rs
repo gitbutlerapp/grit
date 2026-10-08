@@ -2995,6 +2995,8 @@ mod tests {
             hash_bytes: 32,
             fanout: compute_fanout_from_entries(&entries),
             entries,
+            is_promisor: false,
+            is_cruft: false,
         };
 
         let err = read_object_from_pack_bytes(&pack, &idx, wrong_oid.as_bytes()).unwrap_err();
