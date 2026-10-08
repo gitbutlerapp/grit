@@ -92,26 +92,35 @@ fn only_spaces_and_periods(name: &str, mut i: usize) -> bool {
     }
 }
 
+fn bytes_eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
 fn is_ntfs_dot_generic(name: &str, dotgit_name: &str, short_prefix: &str) -> bool {
     let b = name.as_bytes();
     let len = dotgit_name.len();
-    if !b.is_empty()
+    let after_prefix = 1 + len;
+    if b.len() >= after_prefix
         && b[0] == b'.'
-        && name.len() > len
-        && name[1..1 + len].eq_ignore_ascii_case(dotgit_name)
+        && bytes_eq_ignore_ascii_case(&b[1..after_prefix], dotgit_name.as_bytes())
     {
-        let i = len + 1;
-        return only_spaces_and_periods(name, i);
+        if b.len() == after_prefix {
+            return true;
+        }
+        return only_spaces_and_periods(name, after_prefix);
     }
 
-    let after_dotgit = 1 + len;
-    if b.len() > after_dotgit + 1
+    if b.len() > after_prefix + 1
         && b[0] == b'.'
-        && name[1..after_dotgit].eq_ignore_ascii_case(dotgit_name)
-        && b[after_dotgit] == b'~'
-        && (b'1'..=b'4').contains(&b[after_dotgit + 1])
+        && bytes_eq_ignore_ascii_case(&b[1..after_prefix], dotgit_name.as_bytes())
+        && b[after_prefix] == b'~'
+        && (b'1'..=b'4').contains(&b[after_prefix + 1])
     {
-        return only_spaces_and_periods(name, after_dotgit + 2);
+        return only_spaces_and_periods(name, after_prefix + 2);
     }
 
     let mut i = 0usize;

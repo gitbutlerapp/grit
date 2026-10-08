@@ -638,6 +638,40 @@ fn object_cases(algo: FixtureAlgo) -> Vec<ObjectCase> {
             git_verdict: None,
         },
         ObjectCase {
+            name: "tree mode 100664 rejected",
+            kind: "tree",
+            body: {
+                let blob = tree;
+                let oid = hex::decode(blob).expect("hex");
+                let mut out = b"100664 file\0".to_vec();
+                out.extend_from_slice(&oid);
+                out
+            },
+            expect_id: Some("badFilemode"),
+            git_strict: true,
+            git_tags: false,
+            git_config: &[("fsck.badFilemode", "error")],
+            git_verdict: None,
+        },
+        ObjectCase {
+            name: "tree multibyte utf-8 entry name",
+            kind: "tree",
+            body: {
+                let blob = tree;
+                let oid = hex::decode(blob).expect("hex");
+                let mut out = b"100644 ".to_vec();
+                out.extend_from_slice(".éé".as_bytes());
+                out.push(0);
+                out.extend_from_slice(&oid);
+                out
+            },
+            expect_id: None,
+            git_strict: true,
+            git_tags: false,
+            git_config: &[],
+            git_verdict: None,
+        },
+        ObjectCase {
             name: "tree empty name",
             kind: "tree",
             body: {

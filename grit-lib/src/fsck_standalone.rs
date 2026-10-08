@@ -560,10 +560,7 @@ fn is_null_oid_bytes(raw: &[u8]) -> bool {
 }
 
 fn mode_allowed(mode: u32) -> bool {
-    matches!(
-        mode,
-        0o100644 | 0o100755 | 0o120000 | 0o040000 | 0o160000 | 0o100664
-    )
+    matches!(mode, 0o100644 | 0o100755 | 0o120000 | 0o040000 | 0o160000)
 }
 
 fn tree_issue_after_scan(
@@ -902,5 +899,26 @@ mod tests {
         let tag = format!("object {sha1_tree}\ntype commit\ntag t\ntagger T <t@e.com> 1 +0000\n\n");
         let e = fsck_object(ObjectKind::Tag, tag.as_bytes(), SHA256_OPTS).unwrap_err();
         assert_eq!(e.id, "badObjectSha1");
+    }
+
+    #[test]
+    fn tree_mode_100664_is_bad_filemode() {
+        let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let oid = hex::decode(tree).expect("hex");
+        let mut body = b"100664 file\0".to_vec();
+        body.extend_from_slice(&oid);
+        let e = fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).unwrap_err();
+        assert_eq!(e.id, "badFilemode");
+    }
+
+    #[test]
+    fn tree_multibyte_utf8_name_does_not_panic() {
+        let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let oid = hex::decode(tree).expect("hex");
+        let mut body = b"100644 ".to_vec();
+        body.extend_from_slice(".éé".as_bytes());
+        body.push(0);
+        body.extend_from_slice(&oid);
+        assert!(fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).is_ok());
     }
 }
