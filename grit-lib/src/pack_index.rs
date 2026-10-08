@@ -772,6 +772,46 @@ mod tests {
     }
 
     #[test]
+    fn find_position_rejects_mismatched_hash_width() {
+        let body = build_v1_idx_bytes(&[(vec![0x01; 20], 12)]);
+        let idx = parse_pack_index_bytes(Path::new("w.idx"), body, false).expect("idx");
+        let wide = ObjectId::from_bytes(&[0x01; 32]).expect("wide");
+        assert!(idx.find_position(&wide).is_none());
+    }
+
+    #[test]
+    fn pack_index_entry_matches_sha1_oid_rejects_wide_rows() {
+        let body = build_v1_idx_bytes(&[(vec![0x01; 20], 12)]);
+        let idx = parse_pack_index_bytes(Path::new("w.idx"), body, false).expect("idx");
+        let entry = idx.iter().next().expect("row");
+        let sha1 = ObjectId::from_bytes(&[0x01; 20]).expect("sha1");
+        assert!(pack_index_entry_matches_sha1_oid(&entry, &sha1));
+        let wide = ObjectId::from_bytes(&[0x01; 32]).expect("wide");
+        assert!(!pack_index_entry_matches_sha1_oid(&entry, &wide));
+    }
+
+    #[test]
+    fn v2_parse_rejects_inconsistent_large_offset_slot() {
+        let oid = ObjectId::from_bytes(&[0x01; 20]).unwrap();
+        let pack_trailer = [0u8; 20];
+        let mut body = Vec::new();
+        body.extend_from_slice(b"\xfftOc");
+        body.extend_from_slice(&2u32.to_be_bytes());
+        let fanout = compute_fanout_from_oid_slices(&[oid.as_bytes()]);
+        for f in fanout {
+            body.extend_from_slice(&f.to_be_bytes());
+        }
+        body.extend_from_slice(oid.as_bytes());
+        body.extend_from_slice(&0u32.to_be_bytes());
+        body.extend_from_slice(&0x8000_0001u32.to_be_bytes());
+        body.extend_from_slice(&1000u64.to_be_bytes());
+        body.extend_from_slice(&pack_trailer);
+        body.extend_from_slice(&pack_trailer);
+        let err = parse_pack_index_bytes(Path::new("bad-large.idx"), body, false).unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)));
+    }
+
+    #[test]
     fn find_position_large_fanout_bucket_sha256_v2_no_panic() {
         use crate::pack::write_v2_pack_index_with_trailer;
         let mut rows: Vec<(ObjectId, u64, u32)> = Vec::new();

@@ -10,6 +10,8 @@ use super::hash::HashAlgo;
 pub enum IndexVersion {
     /// Classic v1 index (32-bit offsets only).
     V1,
+    /// Version 2 index with Git's default large-offset threshold.
+    V2,
     /// Version 2 index; `large_offset_at` sets the 64-bit offset threshold (Git's
     /// `--index-version=2,<offset>`).
     V2LargeOffsetAt(u32),
@@ -74,6 +76,7 @@ pub fn write_pack_and_index(
     if let Some(version) = options.index_version {
         match version {
             IndexVersion::V1 => args.push("--index-version=1".to_string()),
+            IndexVersion::V2 => args.push("--index-version=2".to_string()),
             IndexVersion::V2LargeOffsetAt(threshold) => {
                 args.push(format!("--index-version=2,{threshold}"));
             }

@@ -301,6 +301,47 @@ mod tests {
     }
 
     #[test]
+    fn open_rejects_shorter_than_header() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("short.pack");
+        fs::write(&path, b"PAC").expect("write");
+        assert!(matches!(
+            PackData::open(&path),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
+    fn fingerprint_rejects_unsupported_trailer_width() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("p.pack");
+        fs::write(&path, b"PACK\x00\x00\x00\x02\x00\x00\x00\x00").expect("write");
+        assert!(fingerprint_from_file(&path, 16).is_err());
+        let data = PackData::open(&path).expect("open");
+        assert!(data.fingerprint(16).is_err());
+    }
+
+    #[test]
+    fn fingerprint_accepts_pack_version_three_header() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("v3.pack");
+        let mut pack = Vec::from(b"PACK\x00\x00\x00\x03\x00\x00\x00\x00" as &[u8]);
+        pack.extend_from_slice(&[0u8; 20]);
+        fs::write(&path, &pack).expect("write");
+        let fp = fingerprint_from_file(&path, 20).expect("fp");
+        assert_eq!(u32::from_be_bytes(fp.header[4..8].try_into().unwrap()), 3);
+    }
+
+    #[test]
+    fn fingerprint_from_slice_rejects_bad_signature() {
+        let bytes = b"NOPE\x00\x00\x00\x02\x00\x00\x00\x00";
+        assert!(matches!(
+            fingerprint_from_slice(bytes, 20),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
     fn mmap_large_sparse_pack() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("sparse.pack");
