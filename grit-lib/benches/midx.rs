@@ -7,8 +7,9 @@ use std::path::Path;
 use std::process::Command;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use grit_lib::midx::{midx_lookup_pack_and_offset, try_read_object_via_midx};
+use grit_lib::midx::{midx_lookup_pack_and_offset_opt, try_read_object_via_midx};
 use grit_lib::objects::ObjectId;
+use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_pack_index_cached};
 use std::sync::Arc;
 
@@ -122,13 +123,11 @@ fn run_git(dir: &Path, args: &[&str]) {
 }
 
 fn lookup_all_packs(idxs: &[Arc<grit_lib::pack::PackIndex>], oid: &ObjectId) -> bool {
-    let mut found = false;
-    for idx in idxs {
-        if idx.find_offset(oid).is_some() {
-            found = true;
-        }
-    }
-    found
+    idxs.iter().any(|idx| idx.find_offset(oid).is_some())
+}
+
+fn lookup_all_packs_miss(idxs: &[Arc<grit_lib::pack::PackIndex>], oid: &ObjectId) -> bool {
+    idxs.iter().all(|idx| idx.find_offset(oid).is_none())
 }
 
 fn bench_midx_lookup(c: &mut Criterion) {
@@ -138,22 +137,92 @@ fn bench_midx_lookup(c: &mut Criterion) {
     };
     clear_pack_cache();
     let _ = try_read_object_via_midx(&fx.objects, &fx.hit).expect("warm midx cache");
+    let _ = midx_lookup_pack_and_offset_opt(&fx.objects, &fx.hit).expect("warm lookup api");
 
     let mut group = c.benchmark_group("midx_lookup");
     group.bench_function("hit", |b| {
-        b.iter(|| black_box(midx_lookup_pack_and_offset(&fx.objects, &fx.hit).expect("hit")));
+        b.iter(|| black_box(midx_lookup_pack_and_offset_opt(&fx.objects, &fx.hit).unwrap()));
     });
     group.bench_function("miss", |b| {
-        b.iter(|| black_box(midx_lookup_pack_and_offset(&fx.objects, &fx.miss).ok()));
+        b.iter(|| black_box(midx_lookup_pack_and_offset_opt(&fx.objects, &fx.miss).unwrap()));
     });
     group.bench_function("all_pack_idx_hit", |b| {
         b.iter(|| black_box(lookup_all_packs(&fx.pack_indexes, &fx.hit)));
     });
     group.bench_function("all_pack_idx_miss", |b| {
-        b.iter(|| black_box(lookup_all_packs(&fx.pack_indexes, &fx.miss)));
+        b.iter(|| black_box(lookup_all_packs_miss(&fx.pack_indexes, &fx.miss)));
     });
     group.finish();
 }
 
-criterion_group!(midx, bench_midx_lookup);
+fn bench_midx_batch_reads(c: &mut Criterion) {
+    let Some(fx) = MidxBenchFixture::build(10) else {
+        eprintln!("SKIP midx batch bench: git fixture unavailable");
+        return;
+    };
+    clear_pack_cache();
+    let git_dir = fx.objects.parent().expect("git dir");
+    let odb = Odb::new(&fx.objects).with_config_git_dir(git_dir.to_path_buf());
+    let _ = odb.read(&fx.hit).expect("warm");
+
+    let mut oids = vec![fx.hit];
+    for i in 0..9 {
+        oids.push(fx.hit);
+        let _ = i;
+    }
+    let mut batch: Vec<ObjectId> = Vec::with_capacity(30_000);
+    while batch.len() < 30_000 {
+        batch.extend(oids.iter().copied());
+    }
+    batch.truncate(30_000);
+
+    let mut group = c.benchmark_group("midx_batch_30k");
+    group.sample_size(10);
+    group.bench_function("grit_odb_read", |b| {
+        b.iter(|| {
+            for oid in &batch {
+                black_box(odb.read(oid).expect("read"));
+            }
+        });
+    });
+    group.bench_function("grit_midx_read", |b| {
+        b.iter(|| {
+            for oid in &batch {
+                black_box(
+                    try_read_object_via_midx(&fx.objects, oid)
+                        .expect("read")
+                        .expect("obj"),
+                );
+            }
+        });
+    });
+    group.bench_function("git_cat_file_batch", |b| {
+        b.iter(|| {
+            git_cat_file_batch(git_dir, &batch);
+        });
+    });
+    group.finish();
+}
+
+fn git_cat_file_batch(git_dir: &Path, oids: &[ObjectId]) {
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .args(["cat-file", "--batch"])
+        .env("GIT_DIR", git_dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("git cat-file");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for oid in oids {
+            writeln!(stdin, "{}", oid.to_hex()).expect("write");
+        }
+    }
+    let status = child.wait().expect("wait");
+    assert!(status.success());
+}
+
+criterion_group!(midx, bench_midx_lookup, bench_midx_batch_reads);
 criterion_main!(midx);

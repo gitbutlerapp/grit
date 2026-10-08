@@ -22,7 +22,8 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
@@ -140,6 +141,10 @@ pub struct Odb {
     /// mirrors `git merge-tree --quiet`, which performs a full merge but must leave the object
     /// database untouched (no new loose objects).
     mem_overlay: MemOdbOverlay,
+    /// Whether [`Self::enable_mem_overlay`] activated the in-memory overlay (avoids locking on reads).
+    mem_overlay_active: Arc<AtomicBool>,
+    /// Whether MIDX pack validation has run for this [`Odb`] (Git warns once per process).
+    midx_packs_validated: Arc<OnceLock<()>>,
     /// The repository's object hash algorithm (`extensions.objectformat`),
     /// detected lazily from the config and cached. Determines the hash used
     /// when writing objects. Defaults to SHA-1 when no config is available.
@@ -208,6 +213,8 @@ impl Odb {
             env_alternate_dirs: Vec::new(),
             env_alternate_lazy: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
+            mem_overlay_active: Arc::new(AtomicBool::new(false)),
+            midx_packs_validated: Arc::new(OnceLock::new()),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
@@ -238,6 +245,8 @@ impl Odb {
             env_alternate_dirs: Vec::new(),
             env_alternate_lazy: Arc::new(OnceLock::new()),
             mem_overlay: Arc::new(Mutex::new(None)),
+            mem_overlay_active: Arc::new(AtomicBool::new(false)),
+            midx_packs_validated: Arc::new(OnceLock::new()),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
@@ -444,6 +453,7 @@ impl Odb {
     /// overlay before the on-disk store. Used by `merge-tree --quiet` so a full merge can run
     /// without persisting any new loose objects.
     pub fn enable_mem_overlay(&self) {
+        self.mem_overlay_active.store(true, Ordering::Release);
         if let Ok(mut guard) = self.mem_overlay.lock() {
             *guard = Some(std::collections::HashMap::new());
         }
@@ -451,6 +461,7 @@ impl Odb {
 
     /// Disable the in-memory write overlay, discarding any objects accumulated in it.
     pub fn disable_mem_overlay(&self) {
+        self.mem_overlay_active.store(false, Ordering::Release);
         if let Ok(mut guard) = self.mem_overlay.lock() {
             *guard = None;
         }
@@ -484,6 +495,9 @@ impl Odb {
 
     /// Read `oid` from the in-memory overlay, if active and present.
     fn overlay_read(&self, oid: &ObjectId) -> Option<Object> {
+        if !self.mem_overlay_active.load(Ordering::Acquire) {
+            return None;
+        }
         if let Ok(guard) = self.mem_overlay.lock() {
             if let Some(map) = guard.as_ref() {
                 if let Some((kind, data)) = map.get(oid) {
@@ -859,27 +873,23 @@ impl Odb {
         // serving reads; a MIDX-referenced pack whose `.idx` cannot be opened reports
         // `packfile <pack> index unavailable` even when the requested object turns out to be
         // loose. Reproduce that once-per-process so `rev-list` over a corrupt idx still warns.
-        if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+        let midx_reads_enabled =
+            self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
+        if midx_reads_enabled {
+            let _ = self.midx_packs_validated.get_or_init(|| {
+                crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+            });
+            if let Some(obj) = try_read_object_via_midx(&self.objects_dir, oid)? {
+                return Ok(obj);
+            }
         }
 
         let path = self.object_path(oid);
-        match fs::File::open(&path) {
-            Ok(file) => {
-                let raw = read_zlib_loose_payload(file)?;
-                // Match Git: loose objects are read from the path implied by `oid` without
-                // requiring the payload to hash back to that oid (t1006 corrupt-loose / swapped files).
-                return parse_object_bytes(&raw);
-            }
-            Err(_) => {
-                // Loose object not found; try pack files.
-            }
-        }
-
-        if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            if let Some(obj) = try_read_object_via_midx(&self.objects_dir, oid, self.hash_algo())? {
-                return Ok(obj);
-            }
+        if let Ok(file) = fs::File::open(&path) {
+            let raw = read_zlib_loose_payload(file)?;
+            // Match Git: loose objects are read from the path implied by `oid` without
+            // requiring the payload to hash back to that oid (t1006 corrupt-loose / swapped files).
+            return parse_object_bytes(&raw);
         }
 
         // Fall back to pack files.

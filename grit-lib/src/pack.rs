@@ -295,7 +295,7 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 mod pack_cache {
     use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::fs;
     use std::io;
     use std::path::{Path, PathBuf};
@@ -336,6 +336,8 @@ mod pack_cache {
         /// FIFO eviction order for `delta_bases` (size-bounded).
         delta_order: VecDeque<(PathBuf, u64)>,
         delta_bytes: usize,
+        /// Packs whose header object count was matched to the index (hot read path).
+        validated_pack_counts: HashSet<PathBuf>,
         /// Per `objects/pack` directory rescan count (parallel-safe; tests only).
         #[cfg(test)]
         test_dir_rescan_counts: HashMap<PathBuf, u64>,
@@ -399,6 +401,14 @@ mod pack_cache {
         let m = fs::metadata(path).ok()?;
         let mtime = m.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         Some((mtime, m.len()))
+    }
+
+    pub fn pack_object_count_validated(pack_path: &Path) -> bool {
+        lock().validated_pack_counts.contains(pack_path)
+    }
+
+    pub fn mark_pack_object_count_validated(pack_path: &Path) {
+        lock().validated_pack_counts.insert(pack_path.to_path_buf());
     }
 
     /// Get a parsed pack index from cache, parsing from disk only on cache miss.
@@ -513,6 +523,7 @@ mod pack_cache {
         let mut g = lock();
         drop_delta_entries_locked(&mut g, pack_path);
         g.by_idx.remove(&pack_path.with_extension("idx"));
+        g.validated_pack_counts.remove(pack_path);
         g.by_pack.insert(
             pack_path.to_path_buf(),
             CachedPack {
@@ -1456,6 +1467,23 @@ struct DeltaChainState {
     visited: HashSet<(PathBuf, u64)>,
 }
 
+thread_local! {
+    static PACK_READ_DELTA_STATE: std::cell::RefCell<DeltaChainState> =
+        std::cell::RefCell::new(DeltaChainState::default());
+}
+
+fn with_pack_read_delta_state<R>(
+    start_depth: usize,
+    f: impl FnOnce(&mut DeltaChainState) -> R,
+) -> R {
+    PACK_READ_DELTA_STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        state.depth = start_depth;
+        state.visited.clear();
+        f(&mut state)
+    })
+}
+
 impl DeltaChainState {
     fn check_limits(&self, pack: &Path, offset: u64) -> Result<()> {
         if self.depth > MAX_DELTA_CHAIN_READ_DEPTH {
@@ -1629,6 +1657,14 @@ fn resolve_pack_object_at_body(
     objects_dir: Option<&Path>,
     state: &mut DeltaChainState,
 ) -> Result<(ObjectKind, Vec<u8>)> {
+    if state.depth == 0 {
+        if let Some((kind, data)) =
+            pack_cache::get_delta_base(&cur_idx.get().pack_path, start_offset)
+        {
+            return Ok((kind, data.as_ref().clone()));
+        }
+    }
+
     let cur_bytes = read_pack_bytes_cached(&cur_idx.get().pack_path)?;
     let mut cur_offset = start_offset;
     let mut pending: Vec<PendingDeltaFrame> = Vec::new();
@@ -2013,33 +2049,34 @@ fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize)
 }
 
 fn read_object_at_depth(idx: &PackIndex, offset: u64, depth: usize) -> Result<Object> {
-    let pack_path = idx.pack_path.clone();
+    if depth == 0 {
+        if let Some((kind, data)) = pack_cache::get_delta_base(&idx.pack_path, offset) {
+            return Ok(Object::new(kind, data.as_ref().clone()));
+        }
+    }
+    let pack_path = &idx.pack_path;
     let objects_dir = idx.pack_path.parent().and_then(Path::parent);
     for attempt in 0..2 {
-        let pack_bytes = read_pack_bytes_cached(&pack_path)?;
-        match validate_pack_index_object_count(&pack_bytes, idx) {
-            Ok(()) => {}
-            Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
-                if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
-                    continue;
+        let pack_bytes = read_pack_bytes_cached(pack_path)?;
+        if !pack_cache::pack_object_count_validated(pack_path) {
+            match validate_pack_index_object_count(&pack_bytes, idx) {
+                Ok(()) => pack_cache::mark_pack_object_count_validated(pack_path),
+                Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
+                    if pack_cache::reload_pack_bytes_after_parse_failure(pack_path)? {
+                        continue;
+                    }
+                    return Err(e);
                 }
-                return Err(e);
+                Err(e) => return Err(e),
             }
-            Err(e) => return Err(e),
         }
-        let mut state = DeltaChainState {
-            depth,
-            visited: HashSet::new(),
-        };
-        match resolve_pack_object_at(
-            PackIndexHandle::Borrowed(idx),
-            offset,
-            objects_dir,
-            &mut state,
-        ) {
+        let resolved = with_pack_read_delta_state(depth, |state| {
+            resolve_pack_object_at(PackIndexHandle::Borrowed(idx), offset, objects_dir, state)
+        });
+        match resolved {
             Ok((kind, data)) => return Ok(Object::new(kind, data)),
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
-                if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
+                if pack_cache::reload_pack_bytes_after_parse_failure(pack_path)? {
                     continue;
                 }
                 return Err(e);

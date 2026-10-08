@@ -4,6 +4,7 @@ use grit_lib::midx::{
     midx_lookup_pack_and_offset, read_midx_pack_idx_names, try_read_object_via_midx,
 };
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_pack_index_cached};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -202,6 +203,13 @@ fn midx_deleted_pack_entry_falls_back_to_packs() {
             .is_none(),
         "MIDX entry for a deleted pack must fall through as absent"
     );
+
+    let git_dir = objects.parent().expect("git dir").to_path_buf();
+    let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+    let via_odb = odb
+        .read(&head)
+        .expect("Odb should fall back to another pack when MIDX names a deleted pack");
+    assert_eq!(via_odb.kind, ObjectKind::Commit);
 }
 
 #[test]
@@ -254,6 +262,37 @@ fn midx_incremental_chain_reads_base_layer() {
         .expect("read")
         .expect("base-layer commit");
     assert_eq!(via_midx.kind, ObjectKind::Commit);
+}
+
+#[test]
+#[ignore = "perf smoke (30k reads + git cat-file); run with cargo test --release -- --ignored"]
+fn odb_midx_packed_read_batch_smoke() {
+    let Some((_tmp, objects, oids)) = multi_pack_midx_fixture(10) else {
+        eprintln!("SKIP: git unavailable");
+        return;
+    };
+    let git_dir = objects.parent().expect("git dir").to_path_buf();
+    clear_pack_cache();
+    let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+    let oid = *oids.last().expect("head");
+    let n = if cfg!(debug_assertions) { 3_000 } else { 30_000 };
+    let _ = odb.read(&oid).expect("warm");
+
+    let start = std::time::Instant::now();
+    for _ in 0..n {
+        odb.read(&oid).expect("read");
+    }
+    let grit_elapsed = start.elapsed();
+
+    let batch: Vec<ObjectId> = vec![oid; n];
+    let git_start = std::time::Instant::now();
+    git_cat_file_batch(&objects, &batch);
+    let git_elapsed = git_start.elapsed();
+
+    assert!(
+        grit_elapsed.as_secs_f64() <= git_elapsed.as_secs_f64() * 1.2 + 0.005,
+        "{n} Odb::read should stay within 1.2× git cat-file --batch (grit={grit_elapsed:?}, git={git_elapsed:?})"
+    );
 }
 
 #[test]

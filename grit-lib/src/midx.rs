@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::hash::verify_trailer;
 
@@ -245,11 +246,13 @@ fn repo_midx_hash_version(pack_dir: &Path) -> u8 {
     repo_midx_hash_version_for_objects_dir(objects_dir)
 }
 
-// Process-lifetime MIDX read cache: parsed layer views and chain resolution without
-// per-lookup stat/read/parse. In-process writers call [`midx_cache::evict_pack_dir`].
+// Process-lifetime MIDX read cache: one [`PreparedMidxChain`] per `objects/pack` directory,
+// built once (no stat/read/parse on lookup hits). In-process writers call [`evict_pack_dir`].
 mod midx_cache {
     use super::{
-        midx_load_for_read, midx_warn_once, MidxLoadResult, MidxReadView, MIDX_LARGE_OFFSET_NEEDED,
+        midx_chain_layer_paths_newest_first, midx_load_for_read, midx_warn_once,
+        repo_midx_hash_version_for_objects_dir, MidxLoadResult, MidxReadView,
+        MIDX_LARGE_OFFSET_NEEDED,
     };
     use crate::error::{Error, Result};
     use crate::objects::ObjectId;
@@ -258,53 +261,134 @@ mod midx_cache {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex, OnceLock};
-    use std::time::SystemTime;
+    use std::sync::{Arc, OnceLock, RwLock};
 
-    type Stamp = (SystemTime, u64);
-
-    /// Parsed MIDX image ready for fanout + binary search lookups (built once per layer file).
-    pub struct MultiPackIndexLayer {
-        bytes: Arc<Vec<u8>>,
-        oidf_off: usize,
+    /// Parsed MIDX layer: fanout + binary search, pack indexes opened at prepare time.
+    pub struct PreparedMidxLayer {
+        bytes: Arc<[u8]>,
+        fanout: [u32; 256],
         oidl_off: usize,
-        ooff_off: usize,
-        loff: Option<(usize, usize)>,
         num_objects: usize,
         hash_len: usize,
-        pack_names: Vec<String>,
-        pack_dir: PathBuf,
+        /// Per sorted OID position: `(pack_id, in-pack offset)` decoded at prepare time.
+        pack_offsets: Vec<(u32, u64)>,
+        pack_indexes: Vec<Option<Arc<PackIndex>>>,
         packs_validated: AtomicBool,
-        open_packs: Mutex<HashMap<u32, Arc<PackIndex>>>,
     }
 
-    impl MultiPackIndexLayer {
-        fn from_view(bytes: Arc<Vec<u8>>, view: MidxReadView, pack_dir: PathBuf) -> Self {
+    impl PreparedMidxLayer {
+        fn prepare(bytes: Arc<[u8]>, view: MidxReadView, pack_dir: &Path) -> Self {
             let hash_len = if bytes.get(5) == Some(&2) { 32 } else { 20 };
+            let mut fanout = [0u32; 256];
+            for (i, slot) in fanout.iter_mut().enumerate() {
+                *slot = read_be_u32(&bytes, view.oidf_off + i * 4).unwrap_or(0);
+            }
+            let mut pack_offsets = Vec::with_capacity(view.num_objects);
+            for i in 0..view.num_objects {
+                let ob = view.ooff_off + i * 8;
+                let pack_id = read_be_u32(&bytes, ob).unwrap_or(0);
+                let raw_off = read_be_u32(&bytes, ob + 4).unwrap_or(0);
+                let offset = decode_midx_object_offset(&bytes, raw_off, view.loff).unwrap_or(0);
+                pack_offsets.push((pack_id, offset));
+            }
+            let mut pack_indexes = Vec::with_capacity(view.pack_names.len());
+            for name in &view.pack_names {
+                let idx_path = pack_dir.join(name);
+                pack_indexes.push(read_pack_index_cached(&idx_path).ok());
+            }
             Self {
-                oidf_off: view.oidf_off,
+                fanout,
                 oidl_off: view.oidl_off,
-                ooff_off: view.ooff_off,
-                loff: view.loff,
                 num_objects: view.num_objects,
                 hash_len,
-                pack_names: view.pack_names,
-                pack_dir,
+                pack_offsets,
+                pack_indexes,
                 packs_validated: AtomicBool::new(false),
-                open_packs: Mutex::new(HashMap::new()),
                 bytes,
             }
         }
 
-        pub fn ensure_packs_validated(&self) {
+        fn oid_at(&self, pos: usize) -> &[u8] {
+            let base = self.oidl_off + pos * self.hash_len;
+            &self.bytes[base..base + self.hash_len]
+        }
+
+        #[inline(always)]
+        fn find_position(&self, oid: &ObjectId) -> Option<usize> {
+            let needle = oid.as_bytes();
+            if needle.len() != self.hash_len {
+                return None;
+            }
+            let first = needle[0] as usize;
+            let lo = if first == 0 {
+                0
+            } else {
+                self.fanout[first - 1] as usize
+            };
+            let hi = self.fanout[first] as usize;
+            if lo >= hi || hi > self.num_objects {
+                return None;
+            }
+            if hi - lo >= 64 {
+                if let Some(pos) = self.interpolation_search(lo, hi, needle) {
+                    return Some(pos);
+                }
+            }
+            self.binary_search(lo, hi, needle)
+        }
+
+        fn binary_search(&self, mut lo: usize, mut hi: usize, needle: &[u8]) -> Option<usize> {
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                match self.oid_at(mid).cmp(needle) {
+                    std::cmp::Ordering::Less => lo = mid + 1,
+                    std::cmp::Ordering::Greater => hi = mid,
+                    std::cmp::Ordering::Equal => return Some(mid),
+                }
+            }
+            None
+        }
+
+        fn interpolation_search(&self, lo: usize, hi: usize, needle: &[u8]) -> Option<usize> {
+            use crate::pack_index::oid_interp_prefix_u64;
+            let mut lo = lo;
+            let mut hi = hi;
+            while lo < hi && needle >= self.oid_at(lo) && needle <= self.oid_at(hi - 1) {
+                let lo_oid = self.oid_at(lo);
+                let hi_oid = self.oid_at(hi - 1);
+                if lo_oid == hi_oid {
+                    return if lo_oid == needle { Some(lo) } else { None };
+                }
+                let span = hi - lo - 1;
+                let num = oid_interp_prefix_u64(needle);
+                let lo_val = oid_interp_prefix_u64(lo_oid);
+                let hi_val = oid_interp_prefix_u64(hi_oid);
+                let guess = if hi_val <= lo_val {
+                    lo + span / 2
+                } else {
+                    let num = u128::from(num.saturating_sub(lo_val));
+                    let den = u128::from(hi_val - lo_val);
+                    lo.saturating_add(((num * u128::from(span as u64)) / den) as usize)
+                };
+                let pos = guess.min(hi - 1);
+                match self.oid_at(pos).cmp(needle) {
+                    std::cmp::Ordering::Equal => return Some(pos),
+                    std::cmp::Ordering::Less => lo = pos + 1,
+                    std::cmp::Ordering::Greater => hi = pos,
+                }
+            }
+            None
+        }
+
+        pub fn ensure_packs_validated(&self, pack_dir: &Path, pack_names: &[String]) {
             if self.packs_validated.swap(true, Ordering::Relaxed) {
                 return;
             }
-            for idx_name in &self.pack_names {
-                let idx_path = self.pack_dir.join(idx_name);
-                if !idx_path.exists() {
+            for (idx_name, slot) in pack_names.iter().zip(self.pack_indexes.iter()) {
+                if slot.is_some() {
                     continue;
                 }
+                let idx_path = pack_dir.join(idx_name);
                 if crate::pack::read_pack_index_no_verify(&idx_path).is_err() {
                     let mut pack_path = idx_path.clone();
                     pack_path.set_extension("pack");
@@ -317,95 +401,76 @@ mod midx_cache {
         }
 
         /// Fanout bucket + binary search over OID lookup rows; returns in-pack offset.
+        #[inline(always)]
         pub fn lookup_pack_and_offset(&self, oid: &ObjectId) -> Option<(u32, u64)> {
-            let data = self.bytes.as_slice();
-            let first = oid.as_bytes()[0] as usize;
-            let j0 = if first == 0 {
-                0usize
-            } else {
-                match read_be_u32(data, self.oidf_off + (first - 1) * 4) {
-                    Ok(v) => v as usize,
-                    Err(_) => return None,
-                }
-            };
-            let j1 = match read_be_u32(data, self.oidf_off + first * 4) {
-                Ok(v) => v as usize,
-                Err(_) => return None,
-            };
-            let mut lo = j0;
-            let mut hi = j1.min(self.num_objects);
-            let hash_len = self.hash_len;
-            let needle = oid.as_bytes();
-            while lo < hi {
-                let mid = (lo + hi) / 2;
-                let base = self.oidl_off + mid * hash_len;
-                if base + hash_len > data.len() {
-                    return None;
-                }
-                let cmp = data[base..base + hash_len].cmp(needle);
-                if cmp == std::cmp::Ordering::Less {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
-                }
-            }
-            if lo >= self.num_objects {
-                return None;
-            }
-            let base = self.oidl_off + lo * hash_len;
-            if data[base..base + hash_len] != *needle {
-                return None;
-            }
-            let ob = self.ooff_off + lo * 8;
-            let pack_id = read_be_u32(data, ob).ok()?;
-            let raw_off = read_be_u32(data, ob + 4).ok()?;
-            let offset = decode_midx_object_offset(data, raw_off, self.loff)?;
-            Some((pack_id, offset))
+            let pos = self.find_position(oid)?;
+            Some(self.pack_offsets[pos])
         }
 
-        pub fn oid_listed(&self, oid: &ObjectId) -> bool {
+        #[inline]
+        pub fn read_at(&self, pack_id: u32, offset: u64) -> Result<Option<crate::objects::Object>> {
+            let Some(idx) = self
+                .pack_indexes
+                .get(pack_id as usize)
+                .and_then(|o| o.as_ref())
+            else {
+                return Ok(None);
+            };
+            match read_object_at(idx.as_ref(), offset) {
+                Ok(obj) => Ok(Some(obj)),
+                Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(err) => Err(err),
+            }
+        }
+    }
+
+    /// All incremental MIDX layers for one `objects/pack` directory (newest first).
+    pub struct PreparedMidxChain {
+        pack_dir: PathBuf,
+        pack_names_by_layer: Vec<Vec<String>>,
+        layers: Vec<PreparedMidxLayer>,
+        packs_validated: AtomicBool,
+    }
+
+    impl PreparedMidxChain {
+        #[inline(always)]
+        pub fn lookup_pack_and_offset(&self, oid: &ObjectId) -> Option<(u32, u64)> {
+            for layer in &self.layers {
+                if let Some(found) = layer.lookup_pack_and_offset(oid) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        pub fn oid_listed_in_tip(&self, oid: &ObjectId) -> bool {
             self.lookup_pack_and_offset(oid).is_some()
         }
 
         pub fn try_read_object(&self, oid: &ObjectId) -> Result<Option<crate::objects::Object>> {
-            self.ensure_packs_validated();
-            let Some((pack_id, offset)) = self.lookup_pack_and_offset(oid) else {
-                return Ok(None);
-            };
-            let idx_name = match self.pack_names.get(pack_id as usize) {
-                Some(n) => n,
-                None => return Err(Error::CorruptObject("bad pack-int-id".to_owned())),
-            };
-            let idx_path = self.pack_dir.join(idx_name);
-            if !idx_path.exists() {
-                return Ok(None);
-            }
-            let idx = match self.open_pack_index(pack_id, &idx_path) {
-                Ok(i) => i,
-                Err(_) => {
-                    let mut pack_path = idx_path.clone();
-                    pack_path.set_extension("pack");
-                    midx_warn_once(&format!(
-                        "error: packfile {} index unavailable",
-                        pack_path.display()
-                    ));
-                    return Ok(None);
+            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+                let Some((pack_id, offset)) = layer.lookup_pack_and_offset(oid) else {
+                    continue;
+                };
+                self.ensure_packs_validated();
+                match layer.read_at(pack_id, offset)? {
+                    Some(obj) => return Ok(Some(obj)),
+                    None => {
+                        layer.ensure_packs_validated(&self.pack_dir, names);
+                        return Ok(None);
+                    }
                 }
-            };
-            read_object_at(idx.as_ref(), offset).map(Some)
+            }
+            Ok(None)
         }
 
-        fn open_pack_index(&self, pack_id: u32, idx_path: &Path) -> Result<Arc<PackIndex>> {
-            if let Ok(guard) = self.open_packs.lock() {
-                if let Some(idx) = guard.get(&pack_id) {
-                    return Ok(Arc::clone(idx));
-                }
+        pub fn ensure_packs_validated(&self) {
+            if self.packs_validated.swap(true, Ordering::Relaxed) {
+                return;
             }
-            let idx = read_pack_index_cached(idx_path)?;
-            if let Ok(mut guard) = self.open_packs.lock() {
-                guard.insert(pack_id, Arc::clone(&idx));
+            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+                layer.ensure_packs_validated(&self.pack_dir, names);
             }
-            Ok(idx)
         }
     }
 
@@ -456,89 +521,112 @@ mod midx_cache {
         }
     }
 
-    #[derive(Default)]
-    struct State {
-        layers: HashMap<PathBuf, Arc<MultiPackIndexLayer>>,
-        hash_version: HashMap<PathBuf, (Option<Stamp>, u8)>,
-        layer_paths: HashMap<PathBuf, Vec<PathBuf>>,
+    static CHAINS: OnceLock<RwLock<HashMap<PathBuf, Arc<PreparedMidxChain>>>> = OnceLock::new();
+
+    thread_local! {
+        static HOT_CHAIN: std::cell::RefCell<Option<(PathBuf, Arc<PreparedMidxChain>)>> =
+            const { std::cell::RefCell::new(None) };
     }
 
-    static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
-
-    fn lock() -> std::sync::MutexGuard<'static, State> {
-        CACHE
-            .get_or_init(|| Mutex::new(State::default()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn chains() -> &'static RwLock<HashMap<PathBuf, Arc<PreparedMidxChain>>> {
+        CHAINS.get_or_init(|| RwLock::new(HashMap::new()))
     }
 
-    fn config_stamp(path: &Path) -> Option<Stamp> {
-        let m = fs::metadata(path).ok()?;
-        Some((m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+    fn hot_chain(objects_dir: &Path) -> Option<Arc<PreparedMidxChain>> {
+        HOT_CHAIN.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .and_then(|(p, c)| (p == objects_dir).then(|| Arc::clone(c)))
+        })
     }
 
-    /// Cached `[extensions] objectformat` sniff keyed by the config path.
-    pub fn hash_version(config_path: &Path, compute: impl FnOnce() -> u8) -> u8 {
-        let sig = config_stamp(config_path);
+    fn set_hot_chain(objects_dir: PathBuf, chain: Arc<PreparedMidxChain>) {
+        HOT_CHAIN.with(|slot| *slot.borrow_mut() = Some((objects_dir, chain)));
+    }
+
+    fn build_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
+        let pack_dir = objects_dir.join("pack");
+        let paths = midx_chain_layer_paths_newest_first(&pack_dir);
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
+        let mut layers = Vec::with_capacity(paths.len());
+        let mut pack_names_by_layer = Vec::with_capacity(paths.len());
+        for path in paths {
+            let bytes: Arc<[u8]> = match fs::read(&path) {
+                Ok(b) => Arc::from(b),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(Error::Io(err)),
+            };
+            let view = match midx_load_for_read(&bytes, hash_version) {
+                MidxLoadResult::Ok(v) => v,
+                MidxLoadResult::Skip => continue,
+            };
+            pack_names_by_layer.push(view.pack_names.clone());
+            layers.push(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
+        }
+        if layers.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Arc::new(PreparedMidxChain {
+            pack_dir,
+            pack_names_by_layer,
+            layers,
+            packs_validated: AtomicBool::new(false),
+        })))
+    }
+
+    /// Cached prepared chain for `objects_dir` (thread-local + read-lock on first use per thread).
+    pub fn prepared_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
+        if let Some(chain) = hot_chain(objects_dir) {
+            return Ok(Some(chain));
+        }
+        let pack_dir = objects_dir.join("pack");
         {
-            let g = lock();
-            if let Some((s, v)) = g.hash_version.get(config_path) {
-                if *s == sig {
-                    return *v;
-                }
+            let guard = chains().read().unwrap_or_else(|poison| poison.into_inner());
+            if let Some(chain) = guard.get(&pack_dir) {
+                let chain = Arc::clone(chain);
+                set_hot_chain(objects_dir.to_path_buf(), Arc::clone(&chain));
+                return Ok(Some(chain));
             }
         }
-        let v = compute();
-        lock()
-            .hash_version
-            .insert(config_path.to_path_buf(), (sig, v));
-        v
-    }
-
-    /// Cached MIDX layer path list (newest first) for object-read hot paths only.
-    pub fn layer_paths(pack_dir: &Path, resolve: impl FnOnce() -> Vec<PathBuf>) -> Vec<PathBuf> {
-        if let Some(paths) = lock().layer_paths.get(pack_dir) {
-            return paths.clone();
-        }
-        let paths = resolve();
-        lock()
-            .layer_paths
-            .insert(pack_dir.to_path_buf(), paths.clone());
-        paths
-    }
-
-    /// Load or return a cached [`MultiPackIndexLayer`] for `path` (no stat on cache hit).
-    pub fn prepared_layer(
-        path: &Path,
-        pack_dir: &Path,
-        expected_hash_version: u8,
-    ) -> Result<Option<Arc<MultiPackIndexLayer>>> {
-        if let Some(layer) = lock().layers.get(path) {
-            return Ok(Some(Arc::clone(layer)));
-        }
-        let bytes = match fs::read(path) {
-            Ok(b) => Arc::new(b),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(Error::Io(err)),
+        let built = build_chain(objects_dir)?;
+        let Some(chain) = built else {
+            return Ok(None);
         };
-        let view = match midx_load_for_read(&bytes, expected_hash_version) {
-            MidxLoadResult::Ok(v) => v,
-            MidxLoadResult::Skip => return Ok(None),
-        };
-        let layer = Arc::new(MultiPackIndexLayer::from_view(
-            bytes,
-            view,
-            pack_dir.to_path_buf(),
-        ));
-        lock().layers.insert(path.to_path_buf(), Arc::clone(&layer));
-        Ok(Some(layer))
+        let mut guard = chains()
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(existing) = guard.get(&pack_dir) {
+            set_hot_chain(objects_dir.to_path_buf(), Arc::clone(existing));
+            return Ok(Some(Arc::clone(existing)));
+        }
+        guard.insert(pack_dir.clone(), Arc::clone(&chain));
+        set_hot_chain(objects_dir.to_path_buf(), Arc::clone(&chain));
+        Ok(Some(chain))
     }
 
     pub fn evict_pack_dir(pack_dir: &Path) {
-        let mut g = lock();
-        g.layers.retain(|p, _| !p.starts_with(pack_dir));
-        g.layer_paths.remove(pack_dir);
+        HOT_CHAIN.with(|slot| {
+            if slot.borrow().as_ref().is_some_and(|(objects_dir, _)| {
+                objects_dir.join("pack") == pack_dir || pack_dir.starts_with(objects_dir)
+            }) {
+                *slot.borrow_mut() = None;
+            }
+        });
+        let mut guard = chains()
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.retain(|p, _| !p.starts_with(pack_dir));
     }
+}
+
+/// Cached MIDX chain for object reads (see [`midx_cache::prepared_chain`]).
+pub(crate) use midx_cache::PreparedMidxChain;
+
+pub(crate) fn prepared_midx_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
+    midx_cache::prepared_chain(objects_dir)
 }
 
 /// MIDX layer files to search on object reads, newest chain layer first.
@@ -562,16 +650,11 @@ fn midx_chain_layer_paths_newest_first(pack_dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Like [`repo_midx_hash_version`] but starting from the `objects` directory.
-/// The config sniff is cached per config path with stat-stamp revalidation
-/// (see [`midx_cache`]).
 fn repo_midx_hash_version_for_objects_dir(objects_dir: &Path) -> u8 {
     let Some(gitdir) = objects_dir.parent() else {
         return HASH_VERSION_SHA1;
     };
-    let config_path = gitdir.join("config");
-    midx_cache::hash_version(&config_path, || {
-        sniff_objectformat_hash_version(&config_path)
-    })
+    sniff_objectformat_hash_version(&gitdir.join("config"))
 }
 
 /// Uncached `[extensions] objectformat` scan of one config file.
@@ -1938,49 +2021,37 @@ pub fn format_midx_bitmapped_packs(objects_dir: &Path) -> Result<String> {
     Ok(out)
 }
 
+/// Look up which pack and in-pack offset holds `oid` when listed in the active MIDX.
+///
+/// Returns [`None`] when no MIDX exists or `oid` is absent (no allocation on miss).
+pub fn midx_lookup_pack_and_offset_opt(
+    objects_dir: &Path,
+    oid: &ObjectId,
+) -> Result<Option<(u32, u64)>> {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
+        return Ok(None);
+    };
+    Ok(chain.lookup_pack_and_offset(oid))
+}
+
 /// Look up which pack and in-pack offset holds `oid` according to the active MIDX.
 pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result<(u32, u64)> {
-    let pack_dir = objects_dir.join("pack");
-    let paths =
-        midx_cache::layer_paths(&pack_dir, || midx_chain_layer_paths_newest_first(&pack_dir));
-    if paths.is_empty() {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
         return Err(Error::CorruptObject("no multi-pack-index found".to_owned()));
-    }
-    let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
-    for path in paths {
-        let Some(layer) = midx_cache::prepared_layer(&path, &pack_dir, hash_version)? else {
-            continue;
-        };
-        if let Some(found) = layer.lookup_pack_and_offset(oid) {
-            return Ok(found);
-        }
-    }
-    Err(Error::CorruptObject(format!(
-        "object {} not in multi-pack-index",
-        oid.to_hex()
-    )))
+    };
+    chain.lookup_pack_and_offset(oid).ok_or_else(|| {
+        Error::CorruptObject(format!("object {} not in multi-pack-index", oid.to_hex()))
+    })
 }
 
 /// Returns whether `oid` appears in the active MIDX OID table for `objects_dir`.
 ///
 /// [`None`] means there is no MIDX at the pack tip. [`Some`] is the lookup result when a MIDX exists.
 pub fn midx_oid_listed_in_tip(objects_dir: &Path, oid: &ObjectId) -> Result<Option<bool>> {
-    let pack_dir = objects_dir.join("pack");
-    let paths =
-        midx_cache::layer_paths(&pack_dir, || midx_chain_layer_paths_newest_first(&pack_dir));
-    if paths.is_empty() {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
         return Ok(None);
-    }
-    let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
-    for path in paths {
-        let Some(layer) = midx_cache::prepared_layer(&path, &pack_dir, hash_version)? else {
-            continue;
-        };
-        if layer.oid_listed(oid) {
-            return Ok(Some(true));
-        }
-    }
-    Ok(Some(false))
+    };
+    Ok(Some(chain.oid_listed_in_tip(oid)))
 }
 
 /// Chunk offsets and metadata of a successfully loaded MIDX, ready for object reads.
@@ -2198,17 +2269,9 @@ fn midx_load_for_read(data: &[u8], expected_hash_version: u8) -> MidxLoadResult 
 /// lookup). Runs at most once per process per `objects_dir`.
 /// Validate pack indexes named by the active MIDX once per prepared layer view.
 pub fn validate_midx_referenced_packs(objects_dir: &Path) {
-    let pack_dir = objects_dir.join("pack");
-    let paths =
-        midx_cache::layer_paths(&pack_dir, || midx_chain_layer_paths_newest_first(&pack_dir));
-    if paths.is_empty() {
-        return;
+    if let Ok(Some(chain)) = prepared_midx_chain(objects_dir) {
+        chain.ensure_packs_validated();
     }
-    let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
-    let Ok(Some(layer)) = midx_cache::prepared_layer(&paths[0], &pack_dir, hash_version) else {
-        return;
-    };
-    layer.ensure_packs_validated();
 }
 
 /// When `core.multiPackIndex` is enabled, try to read `oid` from the active MIDX in `objects_dir`.
@@ -2219,27 +2282,10 @@ pub fn try_read_object_via_midx(
     objects_dir: &Path,
     oid: &ObjectId,
 ) -> Result<Option<crate::objects::Object>> {
-    let pack_dir = objects_dir.join("pack");
-    let paths =
-        midx_cache::layer_paths(&pack_dir, || midx_chain_layer_paths_newest_first(&pack_dir));
-    if paths.is_empty() {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
         return Ok(None);
-    }
-    let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
-    for path in paths {
-        let Some(layer) = midx_cache::prepared_layer(&path, &pack_dir, hash_version)? else {
-            continue;
-        };
-        if let Some(obj) = layer.try_read_object(oid)? {
-            return Ok(Some(obj));
-        }
-        // Object listed in this layer but pack missing/unreadable: fall through to older layers
-        // and other object sources (Git skips stale MIDX pack entries).
-        if layer.lookup_pack_and_offset(oid).is_some() {
-            return Ok(None);
-        }
-    }
-    Ok(None)
+    };
+    chain.try_read_object(oid)
 }
 
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {

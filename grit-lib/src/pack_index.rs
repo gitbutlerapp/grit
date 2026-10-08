@@ -336,7 +336,7 @@ impl PackIndex {
 /// Leading OID bytes for interpolation probing (8 bytes — fits in `u64` without overflow).
 const OID_INTERP_PREFIX_LEN: usize = 8;
 
-fn oid_interp_prefix_u64(oid: &[u8]) -> u64 {
+pub(crate) fn oid_interp_prefix_u64(oid: &[u8]) -> u64 {
     let take = oid.len().min(OID_INTERP_PREFIX_LEN);
     let mut v = 0u64;
     for &b in &oid[..take] {
