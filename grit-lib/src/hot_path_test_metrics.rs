@@ -12,9 +12,11 @@ pub struct HotPathTestMetrics {
     blob_content_reads: AtomicUsize,
     pack_signature_stats: AtomicUsize,
     midx_stamp_stats: AtomicUsize,
+    loose_path_open_attempts: AtomicUsize,
     freshen_counting: AtomicBool,
     blob_counting: AtomicBool,
     stamp_counting: AtomicBool,
+    loose_open_counting: AtomicBool,
 }
 
 impl HotPathTestMetrics {
@@ -87,6 +89,27 @@ impl HotPathTestMetrics {
         self.midx_stamp_stats.store(0, Ordering::SeqCst);
     }
 
+    /// Clear loose-object `open` attempt count.
+    pub fn reset_loose_path_open_attempts(&self) {
+        self.loose_path_open_attempts.store(0, Ordering::SeqCst);
+    }
+
+    pub fn set_loose_open_counting(&self, enabled: bool) {
+        self.loose_open_counting.store(enabled, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn loose_path_open_attempts(&self) -> usize {
+        self.loose_path_open_attempts.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_loose_path_open(&self) {
+        if self.loose_open_counting.load(Ordering::Relaxed) {
+            self.loose_path_open_attempts
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     pub fn set_stamp_counting(&self, enabled: bool) {
         self.stamp_counting.store(enabled, Ordering::SeqCst);
     }
@@ -119,6 +142,7 @@ impl HotPathTestMetrics {
         self.set_freshen_counting(false);
         self.set_blob_counting(false);
         self.set_stamp_counting(false);
+        self.set_loose_open_counting(false);
     }
 }
 
@@ -146,6 +170,14 @@ pub(crate) fn record_midx_stamp_stat_for_active_scope() {
     with_active(|active| {
         if let Some(m) = active {
             m.record_midx_stamp_stat();
+        }
+    });
+}
+
+pub(crate) fn record_loose_path_open_for_active_scope() {
+    with_active(|active| {
+        if let Some(m) = active {
+            m.record_loose_path_open();
         }
     });
 }

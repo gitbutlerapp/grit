@@ -305,6 +305,8 @@ mod pack_cache {
     struct CachedDir {
         dir_mtime: SystemTime,
         indexes: Vec<Arc<PackIndex>>,
+        midx_mtime: SystemTime,
+        midx_pack_names: HashSet<String>,
     }
 
     struct CachedIdx {
@@ -443,6 +445,8 @@ mod pack_cache {
                     CachedDir {
                         dir_mtime: dir_mt,
                         indexes: Vec::new(),
+                        midx_mtime: SystemTime::UNIX_EPOCH,
+                        midx_pack_names: HashSet::new(),
                     },
                 );
                 return Ok(Vec::new());
@@ -473,14 +477,72 @@ mod pack_cache {
                 .entry(pack_dir.clone())
                 .or_insert(0) += 1;
         }
+        let midx_pack_names = load_midx_pack_names(&pack_dir);
         g.by_dir.insert(
             pack_dir,
             CachedDir {
                 dir_mtime: dir_mt,
                 indexes: out.clone(),
+                midx_mtime: midx_pack_names.0,
+                midx_pack_names: midx_pack_names.1,
             },
         );
         Ok(out)
+    }
+
+    fn load_midx_pack_names(pack_dir: &Path) -> (SystemTime, HashSet<String>) {
+        let Some(midx_path) = crate::midx::resolve_tip_midx_path(pack_dir) else {
+            return (SystemTime::UNIX_EPOCH, HashSet::new());
+        };
+        let mtime = fs::metadata(&midx_path)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let objects_dir = pack_dir.parent().unwrap_or(pack_dir);
+        let names = crate::midx::read_midx_pack_idx_names(objects_dir)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        (mtime, names)
+    }
+
+    fn refresh_midx_pack_names_locked(pack_dir: &Path, cached: &mut CachedDir) {
+        let (mtime, names) = load_midx_pack_names(pack_dir);
+        if cached.midx_mtime != mtime {
+            cached.midx_mtime = mtime;
+            cached.midx_pack_names = names;
+        }
+    }
+
+    /// Move `idx_path` to the front of the MRU pack search order for `objects_dir`.
+    pub fn promote_pack_index(objects_dir: &Path, idx_path: &Path) {
+        let pack_dir = objects_dir.join("pack");
+        let mut g = lock();
+        let Some(cached) = g.by_dir.get_mut(&pack_dir) else {
+            return;
+        };
+        let Some(pos) = cached
+            .indexes
+            .iter()
+            .position(|idx| idx.idx_path == idx_path)
+        else {
+            return;
+        };
+        if pos == 0 {
+            return;
+        }
+        let hit = cached.indexes.remove(pos);
+        cached.indexes.insert(0, hit);
+    }
+
+    /// Pack index basenames listed in the active multi-pack-index, if any.
+    pub fn midx_covered_pack_names(objects_dir: &Path) -> HashSet<String> {
+        let pack_dir = objects_dir.join("pack");
+        let mut g = lock();
+        if let Some(cached) = g.by_dir.get_mut(&pack_dir) {
+            refresh_midx_pack_names_locked(&pack_dir, cached);
+            return cached.midx_pack_names.clone();
+        }
+        load_midx_pack_names(&pack_dir).1
     }
 
     /// Get all `.idx` files for `objects_dir`, using the cached directory listing when present.
@@ -799,7 +861,11 @@ pub fn read_local_pack_indexes_cached(objects_dir: &Path) -> Result<Vec<Arc<Pack
 ///
 /// Returns [`Error::Io`] when the pack directory cannot be read.
 pub fn reprepare_pack_directory_on_miss(objects_dir: &Path) -> Result<bool> {
-    pack_cache::reprepare_dir_on_miss(objects_dir)
+    let refreshed = pack_cache::reprepare_dir_on_miss(objects_dir)?;
+    if refreshed {
+        crate::midx::evict_midx_read_cache_for_pack_dir(&objects_dir.join("pack"));
+    }
+    Ok(refreshed)
 }
 
 /// Read a single pack index from the process-wide cache (parses from disk on miss).
@@ -1664,7 +1730,6 @@ fn resolve_pack_object_at_body(
             return Ok((kind, data.as_ref().clone()));
         }
     }
-
     let cur_bytes = read_pack_bytes_cached(&cur_idx.get().pack_path)?;
     let mut cur_offset = start_offset;
     let mut pending: Vec<PendingDeltaFrame> = Vec::new();
@@ -2018,7 +2083,12 @@ pub fn read_object_info_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Obj
             objects_dir,
             &mut state,
         ) {
-            Ok(info) => return Ok(info),
+            Ok(info) => {
+                if let Some(dir) = objects_dir {
+                    pack_cache::promote_pack_index(dir, &idx.idx_path);
+                }
+                return Ok(info);
+            }
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
                 if pack_cache::reload_pack_bytes_after_parse_failure(&pack_path)? {
                     continue;
@@ -2074,7 +2144,12 @@ fn read_object_at_depth(idx: &PackIndex, offset: u64, depth: usize) -> Result<Ob
             resolve_pack_object_at(PackIndexHandle::Borrowed(idx), offset, objects_dir, state)
         });
         match resolved {
-            Ok((kind, data)) => return Ok(Object::new(kind, data)),
+            Ok((kind, data)) => {
+                if let Some(dir) = objects_dir {
+                    pack_cache::promote_pack_index(dir, &idx.idx_path);
+                }
+                return Ok(Object::new(kind, data));
+            }
             Err(e) if attempt == 0 && pack_bytes_parse_may_be_stale(&e) => {
                 if pack_cache::reload_pack_bytes_after_parse_failure(pack_path)? {
                     continue;
@@ -2136,6 +2211,63 @@ fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8])
     Ok(())
 }
 
+/// Options controlling which local packs participate in a lookup pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PackLookupOptions {
+    /// When true, skip pack indexes named in the active multi-pack-index (MIDX lookup runs separately).
+    pub skip_midx_covered_packs: bool,
+    /// When true, search only pack indexes named in the active MIDX (rescue pass after a MIDX miss).
+    pub only_midx_covered_packs: bool,
+}
+
+impl PackLookupOptions {
+    /// Search every local pack (including MIDX-covered indexes).
+    pub const ALL_LOCAL_PACKS: Self = Self {
+        skip_midx_covered_packs: false,
+        only_midx_covered_packs: false,
+    };
+
+    /// Search only MIDX-listed pack indexes (Git redundant-pack rescue when MIDX lookup missed).
+    pub const MIDX_COVERED_PACKS: Self = Self {
+        skip_midx_covered_packs: false,
+        only_midx_covered_packs: true,
+    };
+}
+
+fn pack_indexes_for_lookup(
+    objects_dir: &Path,
+    opts: PackLookupOptions,
+) -> Result<Vec<Arc<PackIndex>>> {
+    let indexes = read_local_pack_indexes_cached(objects_dir)?;
+    if !opts.skip_midx_covered_packs && !opts.only_midx_covered_packs {
+        return Ok(indexes);
+    }
+    let covered = pack_cache::midx_covered_pack_names(objects_dir);
+    if covered.is_empty() {
+        return if opts.only_midx_covered_packs {
+            Ok(Vec::new())
+        } else {
+            Ok(indexes)
+        };
+    }
+    Ok(indexes
+        .into_iter()
+        .filter(|idx| {
+            idx.idx_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| {
+                    if opts.only_midx_covered_packs {
+                        covered.contains(name)
+                    } else {
+                        !covered.contains(name)
+                    }
+                })
+                .unwrap_or(!opts.only_midx_covered_packs)
+        })
+        .collect())
+}
+
 /// Search all pack indexes in `objects_dir` for the given OID and read it.
 ///
 /// When more than one pack contains `oid` (a redundant copy), a read failure in
@@ -2148,11 +2280,19 @@ fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8])
 ///
 /// Returns [`Error::ObjectNotFound`] if no pack contains the OID.
 pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
-    match try_read_object_from_packs(objects_dir, oid) {
+    match try_read_object_from_packs_with_options(
+        objects_dir,
+        oid,
+        PackLookupOptions::ALL_LOCAL_PACKS,
+    ) {
         Ok(obj) => Ok(obj),
         Err(err @ Error::ObjectNotFound(_)) => {
             if reprepare_pack_directory_on_miss(objects_dir)? {
-                try_read_object_from_packs(objects_dir, oid)
+                try_read_object_from_packs_with_options(
+                    objects_dir,
+                    oid,
+                    PackLookupOptions::ALL_LOCAL_PACKS,
+                )
             } else {
                 Err(err)
             }
@@ -2167,11 +2307,19 @@ pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Obje
 ///
 /// Returns [`Error::ObjectNotFound`] when no pack lists `oid`.
 pub fn read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<ObjectInfo> {
-    match try_read_object_info_from_packs(objects_dir, oid) {
+    match try_read_object_info_from_packs_with_options(
+        objects_dir,
+        oid,
+        PackLookupOptions::ALL_LOCAL_PACKS,
+    ) {
         Ok(info) => Ok(info),
         Err(err @ Error::ObjectNotFound(_)) => {
             if reprepare_pack_directory_on_miss(objects_dir)? {
-                try_read_object_info_from_packs(objects_dir, oid)
+                try_read_object_info_from_packs_with_options(
+                    objects_dir,
+                    oid,
+                    PackLookupOptions::ALL_LOCAL_PACKS,
+                )
             } else {
                 Err(err)
             }
@@ -2180,8 +2328,13 @@ pub fn read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result
     }
 }
 
-fn try_read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<ObjectInfo> {
-    let indexes = read_local_pack_indexes_cached(objects_dir)?;
+/// Search local packs for `oid` without re-preparing the pack directory listing.
+pub(crate) fn try_read_object_info_from_packs_with_options(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    opts: PackLookupOptions,
+) -> Result<ObjectInfo> {
+    let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
         if idx.find_offset(oid).is_none() {
@@ -2196,8 +2349,13 @@ fn try_read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result
     Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
 }
 
-fn try_read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
-    let indexes = read_local_pack_indexes_cached(objects_dir)?;
+/// Search local packs for `oid` without re-preparing the pack directory listing.
+pub(crate) fn try_read_object_from_packs_with_options(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    opts: PackLookupOptions,
+) -> Result<Object> {
+    let indexes = pack_indexes_for_lookup(objects_dir, opts)?;
     let mut last_err: Option<Error> = None;
     for idx in &indexes {
         if idx.find_offset(oid).is_none() {

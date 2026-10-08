@@ -95,6 +95,23 @@ fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> boo
     false
 }
 
+fn objects_dir_has_active_midx(objects_dir: &Path) -> bool {
+    matches!(
+        crate::midx::prepared_midx_chain(objects_dir),
+        Ok(Some(_))
+    )
+}
+
+fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
+    let pack_dir = objects_dir.join("pack");
+    let Ok(entries) = fs::read_dir(pack_dir) else {
+        return false;
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .any(|ent| ent.path().extension().is_some_and(|ext| ext == "idx"))
+}
+
 fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
     let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
         return false;
@@ -126,6 +143,8 @@ pub struct Odb {
     /// every file; the value cannot change for a process that has opened a single repository, so
     /// caching it here avoids re-loading the cascade for every object read.
     core_multi_pack_index_cache: Arc<OnceLock<bool>>,
+    /// Whether `objects/pack` contains at least one `.idx` file (directory probe, once per Odb).
+    local_pack_indexes_seen: Arc<OnceLock<bool>>,
     /// `info/alternates` chain resolved lazily; generation bumps on invalidation/reload.
     file_alternate_dirs_cache: Arc<RwLock<FileAlternatesCache>>,
     #[cfg(test)]
@@ -206,6 +225,7 @@ impl Odb {
             submodule_alternate_dirs: Arc::new(Mutex::new(Vec::new())),
             config_git_dir: None,
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
+            local_pack_indexes_seen: Arc::new(OnceLock::new()),
             file_alternate_dirs_cache: Arc::new(RwLock::new(FileAlternatesCache {
                 generation: 0,
                 snapshot: None,
@@ -238,6 +258,7 @@ impl Odb {
             submodule_alternate_dirs: Arc::new(Mutex::new(Vec::new())),
             config_git_dir: None,
             core_multi_pack_index_cache: Arc::new(OnceLock::new()),
+            local_pack_indexes_seen: Arc::new(OnceLock::new()),
             file_alternate_dirs_cache: Arc::new(RwLock::new(FileAlternatesCache {
                 generation: 0,
                 snapshot: None,
@@ -612,6 +633,28 @@ impl Odb {
         })
     }
 
+    fn multi_pack_index_reads_enabled(&self) -> bool {
+        if self.config_git_dir.is_none() {
+            return false;
+        }
+        if !*self
+            .local_pack_indexes_seen
+            .get_or_init(|| objects_dir_has_pack_index_files(&self.objects_dir))
+        {
+            return false;
+        }
+        self.core_multi_pack_index_enabled()
+    }
+
+    fn ensure_midx_prepared(&self) {
+        if !self.multi_pack_index_reads_enabled() {
+            return;
+        }
+        let _ = self.midx_packs_validated.get_or_init(|| {
+            crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+        });
+    }
+
     /// Return the path to the `objects/` directory.
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
@@ -869,37 +912,18 @@ impl Odb {
             return Ok(obj);
         }
 
-        // Git prepares the packed object store (registering the packs the MIDX names) before
-        // serving reads; a MIDX-referenced pack whose `.idx` cannot be opened reports
-        // `packfile <pack> index unavailable` even when the requested object turns out to be
-        // loose. Reproduce that once-per-process so `rev-list` over a corrupt idx still warns.
-        let midx_reads_enabled =
-            self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
-        if midx_reads_enabled {
-            let _ = self.midx_packs_validated.get_or_init(|| {
-                crate::midx::validate_midx_referenced_packs(&self.objects_dir);
-            });
-            if let Some(obj) = try_read_object_via_midx(&self.objects_dir, oid)? {
-                return Ok(obj);
-            }
+        let use_midx = self.multi_pack_index_reads_enabled();
+        if use_midx {
+            self.ensure_midx_prepared();
         }
 
-        let path = self.object_path(oid);
-        if let Ok(file) = fs::File::open(&path) {
-            let raw = read_zlib_loose_payload(file)?;
-            // Match Git: loose objects are read from the path implied by `oid` without
-            // requiring the payload to hash back to that oid (t1006 corrupt-loose / swapped files).
-            return parse_object_bytes(&raw);
-        }
-
-        // Fall back to pack files.
-        match pack::read_object_from_packs(&self.objects_dir, oid) {
+        match Self::read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx) {
             Ok(obj) => return Ok(obj),
             Err(Error::ObjectNotFound(_)) => {}
             Err(err) => return Err(err),
         }
 
-        let midx_alt = self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
+        let midx_alt = use_midx;
 
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
@@ -927,8 +951,9 @@ impl Odb {
 
     /// Return the kind and uncompressed size of `oid` without loading the full object body.
     ///
-    /// Resolution order matches [`Self::read`]: in-memory overlay, loose objects, multi-pack-index,
-    /// local packs, then alternates.
+    /// Resolution order matches [`Self::read`]: in-memory overlay, multi-pack-index, local packs
+    /// (MRU order, skipping MIDX-covered indexes when MIDX is enabled), loose objects, a pack
+    /// directory re-prepare and pack retry, then alternates.
     ///
     /// # Errors
     ///
@@ -951,29 +976,18 @@ impl Odb {
             });
         }
 
-        let midx_reads_enabled =
-            self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
-        if midx_reads_enabled {
-            let _ = self.midx_packs_validated.get_or_init(|| {
-                crate::midx::validate_midx_referenced_packs(&self.objects_dir);
-            });
-            if let Some(info) = crate::midx::try_read_info_via_midx(&self.objects_dir, oid)? {
-                return Ok(info);
-            }
+        let use_midx = self.multi_pack_index_reads_enabled();
+        if use_midx {
+            self.ensure_midx_prepared();
         }
 
-        let path = self.object_path(oid);
-        if path.is_file() {
-            return read_loose_object_info(&path);
-        }
-
-        match pack::read_object_info_from_packs(&self.objects_dir, oid) {
+        match Self::read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx) {
             Ok(info) => return Ok(info),
             Err(Error::ObjectNotFound(_)) => {}
             Err(err) => return Err(err),
         }
 
-        let midx_alt = midx_reads_enabled;
+        let midx_alt = use_midx;
 
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
@@ -999,19 +1013,14 @@ impl Odb {
         Err(Error::ObjectNotFound(oid.to_hex()))
     }
 
-    /// Try to read an object from a specific objects directory (loose or pack).
+    /// Try to read an object from a specific objects directory (pack-first, matching [`Self::read`]).
     fn read_from_dir(objects_dir: &Path, oid: &ObjectId, use_midx: bool) -> Result<Object> {
-        let loose = oid.loose_path_in(objects_dir);
-        if let Ok(file) = fs::File::open(&loose) {
-            let raw = read_zlib_loose_payload(file)?;
-            return parse_object_bytes(&raw);
-        }
-        if use_midx {
-            if let Some(obj) = try_read_object_via_midx(objects_dir, oid)? {
-                return Ok(obj);
-            }
-        }
-        pack::read_object_from_packs(objects_dir, oid)
+        Self::read_in_objects_dir(
+            objects_dir,
+            oid,
+            hash_algo_for_objects_dir(objects_dir),
+            use_midx,
+        )
     }
 
     fn read_info_from_dir(
@@ -1019,16 +1028,145 @@ impl Odb {
         oid: &ObjectId,
         use_midx: bool,
     ) -> Result<ObjectInfo> {
-        let loose = oid.loose_path_in(objects_dir);
-        if loose.is_file() {
-            return read_loose_object_info(&loose);
+        Self::read_info_in_objects_dir(
+            objects_dir,
+            oid,
+            hash_algo_for_objects_dir(objects_dir),
+            use_midx,
+        )
+    }
+
+    fn read_in_objects_dir(
+        objects_dir: &Path,
+        oid: &ObjectId,
+        hash_algo: HashAlgo,
+        use_midx: bool,
+    ) -> Result<Object> {
+        match Self::try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
+            Ok(obj) => Ok(obj),
+            Err(Error::ObjectNotFound(_)) => {
+                if pack::reprepare_pack_directory_on_miss(objects_dir)? {
+                    Self::try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
+                } else {
+                    Err(Error::ObjectNotFound(oid.to_hex()))
+                }
+            }
+            Err(err) => Err(err),
         }
+    }
+
+    fn try_read_in_objects_dir(
+        objects_dir: &Path,
+        oid: &ObjectId,
+        _hash_algo: HashAlgo,
+        use_midx: bool,
+    ) -> Result<Object> {
+        let midx_pack_filter = use_midx && objects_dir_has_active_midx(objects_dir);
+        let pack_opts = pack::PackLookupOptions {
+            skip_midx_covered_packs: midx_pack_filter,
+            only_midx_covered_packs: false,
+        };
+
+        if use_midx {
+            if let Some(obj) = try_read_object_via_midx(objects_dir, oid)? {
+                return Ok(obj);
+            }
+        }
+
+        match pack::try_read_object_from_packs_with_options(objects_dir, oid, pack_opts) {
+            Ok(obj) => return Ok(obj),
+            Err(Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+
+        if midx_pack_filter {
+            match pack::try_read_object_from_packs_with_options(
+                objects_dir,
+                oid,
+                pack::PackLookupOptions::MIDX_COVERED_PACKS,
+            ) {
+                Ok(obj) => return Ok(obj),
+                Err(Error::ObjectNotFound(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        let loose = oid.loose_path_in(objects_dir);
+        #[cfg(test)]
+        crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
+        match fs::File::open(&loose) {
+            Ok(file) => {
+                let raw = read_zlib_loose_payload(file)?;
+                return parse_object_bytes(&raw);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(Error::Io(err)),
+        }
+
+        Err(Error::ObjectNotFound(oid.to_hex()))
+    }
+
+    fn read_info_in_objects_dir(
+        objects_dir: &Path,
+        oid: &ObjectId,
+        hash_algo: HashAlgo,
+        use_midx: bool,
+    ) -> Result<ObjectInfo> {
+        match Self::try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
+            Ok(info) => Ok(info),
+            Err(Error::ObjectNotFound(_)) => {
+                if pack::reprepare_pack_directory_on_miss(objects_dir)? {
+                    Self::try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
+                } else {
+                    Err(Error::ObjectNotFound(oid.to_hex()))
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn try_read_info_in_objects_dir(
+        objects_dir: &Path,
+        oid: &ObjectId,
+        _hash_algo: HashAlgo,
+        use_midx: bool,
+    ) -> Result<ObjectInfo> {
+        let midx_pack_filter = use_midx && objects_dir_has_active_midx(objects_dir);
+        let pack_opts = pack::PackLookupOptions {
+            skip_midx_covered_packs: midx_pack_filter,
+            only_midx_covered_packs: false,
+        };
+
         if use_midx {
             if let Some(info) = crate::midx::try_read_info_via_midx(objects_dir, oid)? {
                 return Ok(info);
             }
         }
-        pack::read_object_info_from_packs(objects_dir, oid)
+
+        match pack::try_read_object_info_from_packs_with_options(objects_dir, oid, pack_opts) {
+            Ok(info) => return Ok(info),
+            Err(Error::ObjectNotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+
+        if midx_pack_filter {
+            match pack::try_read_object_info_from_packs_with_options(
+                objects_dir,
+                oid,
+                pack::PackLookupOptions::MIDX_COVERED_PACKS,
+            ) {
+                Ok(info) => return Ok(info),
+                Err(Error::ObjectNotFound(_)) => {}
+                Err(err) => return Err(err),
+            }
+        }
+
+        let loose = oid.loose_path_in(objects_dir);
+        if loose.is_file() {
+            return read_loose_object_info(&loose);
+        }
+
+        Err(Error::ObjectNotFound(oid.to_hex()))
     }
 
     /// Hash raw content of a given kind using this repository's hash algorithm.
@@ -1825,8 +1963,8 @@ mod tests {
         assert!(tmp_loose_object_paths(&objects).is_empty());
     }
 
-    fn git_in(dir: &Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
+    fn git_run(dir: &Path, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("git")
             .current_dir(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -1836,13 +1974,27 @@ mod tests {
             .env("GIT_COMMITTER_NAME", "T")
             .env("GIT_COMMITTER_EMAIL", "t@example.com")
             .output()
-            .unwrap();
+            .unwrap()
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = git_run(dir, args);
         assert!(
             out.status.success(),
             "git {:?}: {}",
             args,
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    fn git_rev_parse_oid(dir: &Path, spec: &str) -> ObjectId {
+        let out = git_run(dir, &["rev-parse", spec]);
+        assert!(
+            out.status.success(),
+            "git rev-parse {spec}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        ObjectId::from_hex(std::str::from_utf8(&out.stdout).unwrap().trim()).unwrap()
     }
 
     #[test]
@@ -2489,15 +2641,7 @@ mod tests {
         }
         git_in(dir.path(), &["repack", "-a", "-d"]);
         let objects = dir.path().join(".git/objects");
-        let head_hex = std::process::Command::new("git")
-            .current_dir(dir.path())
-            .args(["rev-parse", "HEAD"])
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .unwrap();
-        let oid =
-            ObjectId::from_hex(std::str::from_utf8(&head_hex.stdout).unwrap().trim()).unwrap();
+        let oid = git_rev_parse_oid(dir.path(), "HEAD");
 
         clear_pack_cache();
         test_reset_pack_marker_stat_count();
@@ -2542,15 +2686,7 @@ mod tests {
         git_in(dir.path(), &["commit", "-m", "one"]);
         git_in(dir.path(), &["repack", "-a", "-d"]);
         let objects = dir.path().join(".git/objects");
-        let head_hex = std::process::Command::new("git")
-            .current_dir(dir.path())
-            .args(["rev-parse", "HEAD"])
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .unwrap();
-        let oid =
-            ObjectId::from_hex(std::str::from_utf8(&head_hex.stdout).unwrap().trim()).unwrap();
+        let oid = git_rev_parse_oid(dir.path(), "HEAD");
 
         clear_pack_cache();
         let odb = Odb::new(&objects);
@@ -2589,15 +2725,7 @@ mod tests {
         git_in(dir.path(), &["commit", "-m", "seed"]);
         git_in(dir.path(), &["repack", "-a", "-d"]);
         let objects = dir.path().join(".git/objects");
-        let head_hex = std::process::Command::new("git")
-            .current_dir(dir.path())
-            .args(["rev-parse", "HEAD"])
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .unwrap();
-        let oid =
-            ObjectId::from_hex(std::str::from_utf8(&head_hex.stdout).unwrap().trim()).unwrap();
+        let oid = git_rev_parse_oid(dir.path(), "HEAD");
         let pack_path = fs::read_dir(objects.join("pack"))
             .unwrap()
             .filter_map(|e| e.ok())
@@ -2613,16 +2741,168 @@ mod tests {
             "git-written pack with .promisor must not count as local materialization"
         );
 
-        let cat = std::process::Command::new("git")
-            .current_dir(dir.path())
-            .args(["cat-file", "-e", &oid.to_hex()])
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .unwrap();
+        let cat = git_run(dir.path(), &["cat-file", "-e", &oid.to_hex()]);
         assert!(
             cat.status.success(),
             "git still resolves the object in a promisor-marked pack"
+        );
+    }
+
+    #[test]
+    fn packed_object_read_avoids_loose_path_open() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+        use crate::pack::clear_pack_cache;
+
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("packed.txt"), b"packed-only payload").unwrap();
+        git_in(dir.path(), &["add", "packed.txt"]);
+        git_in(dir.path(), &["commit", "-m", "pack"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let oid = git_rev_parse_oid(dir.path(), "HEAD");
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        odb.hot_path_test_metrics().set_loose_open_counting(true);
+        odb.hot_path_test_metrics().reset_loose_path_open_attempts();
+        let _scope = HotPathMetricsScope::install(Arc::clone(&odb.hot_path_test_metrics));
+
+        let obj = odb.read(&oid).expect("packed read");
+        assert_eq!(obj.kind, ObjectKind::Commit);
+        assert_eq!(
+            odb.hot_path_test_metrics().loose_path_open_attempts(),
+            0,
+            "packed objects must not attempt a loose-path open"
+        );
+    }
+
+    #[test]
+    fn loose_and_packed_copies_return_identical_bytes() {
+        use crate::pack::clear_pack_cache;
+
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("dup.txt"), b"duplicate loose and packed\n").unwrap();
+        git_in(dir.path(), &["add", "dup.txt"]);
+        git_in(dir.path(), &["commit", "-m", "seed"]);
+        let objects = dir.path().join(".git/objects");
+        let tree_oid = git_rev_parse_oid(dir.path(), "HEAD^{tree}");
+        git_in(dir.path(), &["repack", "-a"]);
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        let loose_path = tree_oid.loose_path_in(&objects);
+        assert!(
+            loose_path.is_file(),
+            "loose copy must remain after repack -a"
+        );
+        let loose = Odb::read_loose_verify_oid(&loose_path, &tree_oid).expect("loose tree");
+        let packed = odb.read(&tree_oid).expect("packed tree");
+        assert_eq!(packed.data, loose.data);
+        assert_eq!(packed.kind, loose.kind);
+    }
+
+    #[test]
+    fn freshly_written_loose_object_visible_before_repack() {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("seed.txt"), b"seed").unwrap();
+        git_in(dir.path(), &["add", "seed.txt"]);
+        git_in(dir.path(), &["commit", "-m", "seed"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let odb = Odb::new(&objects);
+        let fresh = b"brand-new loose blob\n";
+        let oid = odb.write(ObjectKind::Blob, fresh).expect("loose write");
+        let obj = odb.read(&oid).expect("immediate loose read");
+        assert_eq!(obj.data.as_slice(), fresh);
+    }
+
+    #[test]
+    fn pack_added_after_first_read_found_via_odb_reprepare() {
+        use crate::pack::{clear_pack_cache, pack_cache_test_guard};
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("a.txt"), b"pack-a").unwrap();
+        git_in(dir.path(), &["add", "a.txt"]);
+        git_in(dir.path(), &["commit", "-m", "a"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let git_dir = dir.path().join(".git");
+
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        let warm_oid = git_rev_parse_oid(dir.path(), "HEAD");
+        odb.read(&warm_oid).expect("warm read");
+
+        fs::write(dir.path().join("b.txt"), b"pack-b").unwrap();
+        git_in(dir.path(), &["add", "b.txt"]);
+        git_in(dir.path(), &["commit", "-m", "b"]);
+        let new_oid = git_rev_parse_oid(dir.path(), "HEAD");
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        filetime::set_file_mtime(&pack_dir, filetime::FileTime::now()).unwrap();
+
+        let obj = odb.read(&new_oid).expect("new pack via reprepare");
+        assert_eq!(obj.kind, ObjectKind::Commit);
+    }
+
+    #[test]
+    fn late_midx_after_warm_read_resolves_new_commit() {
+        use crate::pack::{clear_pack_cache, pack_cache_test_guard};
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("a.txt"), b"pack-a").unwrap();
+        git_in(dir.path(), &["add", "a.txt"]);
+        git_in(dir.path(), &["commit", "-m", "a"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let git_dir = dir.path().join(".git");
+        assert!(
+            crate::midx::cached_tip_midx_path(&objects.join("pack")).is_none(),
+            "fixture starts without a MIDX"
+        );
+
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        let warm_oid = git_rev_parse_oid(dir.path(), "HEAD");
+        odb.read(&warm_oid).expect("warm read before MIDX exists");
+
+        fs::write(dir.path().join("b.txt"), b"pack-b").unwrap();
+        git_in(dir.path(), &["add", "b.txt"]);
+        git_in(dir.path(), &["commit", "-m", "b"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        git_in(dir.path(), &["multi-pack-index", "write"]);
+        let new_oid = git_rev_parse_oid(dir.path(), "HEAD");
+
+        let cat = git_run(dir.path(), &["cat-file", "-e", &new_oid.to_hex()]);
+        assert!(
+            cat.status.success(),
+            "system git must resolve the new commit"
+        );
+
+        let obj = odb
+            .read(&new_oid)
+            .expect("MIDX-covered commit after late MIDX write");
+        assert_eq!(obj.kind, ObjectKind::Commit);
+        assert!(
+            crate::midx::cached_tip_midx_path(&objects.join("pack")).is_some(),
+            "successful read after late MIDX must refresh the tip cache"
         );
     }
 }

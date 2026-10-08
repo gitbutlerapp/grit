@@ -744,6 +744,17 @@ fn sniff_objectformat_hash_version(config_path: &Path) -> u8 {
     HASH_VERSION_SHA1
 }
 
+/// Whether a tip MIDX file exists under `pack_dir` (live filesystem probe).
+#[must_use]
+pub fn cached_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
+    resolve_tip_midx_path(pack_dir)
+}
+
+/// Drop cached MIDX bytes and tip resolution after pack-directory changes.
+pub fn evict_midx_read_cache_for_pack_dir(pack_dir: &Path) {
+    midx_cache::evict_pack_dir(pack_dir);
+}
+
 pub fn resolve_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
     let root = pack_dir.join("multi-pack-index");
     if root.exists() {

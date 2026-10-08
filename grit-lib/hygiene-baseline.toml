@@ -672,7 +672,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 5
+command_new = 1
 static_global = 0
 system_time_now = 1
 
