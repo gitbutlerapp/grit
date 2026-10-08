@@ -120,8 +120,12 @@ pub fn write_regular_file_replacing_symlink(path: &Path, contents: &[u8]) -> io:
 
 /// Remove now-empty directories from `dir` upward toward (but not including)
 /// `stop_at`, refusing to remove a directory that contains the process CWD.
-pub fn remove_empty_dirs(dir: &Path, stop_at: &Path) {
-    let cwd_rel = crate::worktree_cwd::process_cwd_repo_relative(stop_at);
+pub fn remove_empty_dirs(
+    dir: &Path,
+    stop_at: &Path,
+    environment: &crate::environment::Environment,
+) {
+    let cwd_rel = crate::worktree_cwd::process_cwd_repo_relative(stop_at, environment);
     let mut current = dir.to_path_buf();
     while current != stop_at {
         if fs::read_dir(&current)
@@ -402,7 +406,7 @@ pub fn apply_stash(
             let _ = fs::remove_file(&file_path);
         }
         if let Some(parent) = file_path.parent() {
-            remove_empty_dirs(parent, work_tree);
+            remove_empty_dirs(parent, work_tree, repo.environment());
         }
     }
 
@@ -547,7 +551,7 @@ pub fn apply_stash(
                 // Deleted in stash
                 let _ = fs::remove_file(&file_path);
                 if let Some(parent) = file_path.parent() {
-                    remove_empty_dirs(parent, work_tree);
+                    remove_empty_dirs(parent, work_tree, repo.environment());
                 }
             }
         }

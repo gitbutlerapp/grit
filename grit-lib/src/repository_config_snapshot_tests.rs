@@ -383,7 +383,12 @@ mod tests {
 
         let git_dir_thread = git_dir.clone();
         let probe = std::thread::spawn(move || is_reftable_repo(&git_dir_thread));
-        let cfg = ConfigSet::load(Some(&git_dir), true).expect("load cascade");
+        let cfg = ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(&git_dir),
+            true,
+        )
+        .expect("load cascade");
         assert_eq!(cfg.get("snapshotTest.key"), Some("onmain".to_string()));
         assert!(!probe.join().expect("probe thread panicked"));
     }

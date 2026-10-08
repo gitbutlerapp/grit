@@ -30,7 +30,12 @@ impl PathProtection {
     /// applying Git's platform defaults when unset.
     #[must_use]
     pub fn load(git_dir: &Path) -> Self {
-        let config = ConfigSet::load(Some(git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+        let config = ConfigSet::load(
+            &crate::environment::Environment::capture_process(),
+            Some(git_dir),
+            true,
+        )
+        .unwrap_or_else(|_| ConfigSet::new());
         Self::from_config(&config)
     }
 

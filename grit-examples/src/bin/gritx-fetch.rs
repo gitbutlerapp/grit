@@ -49,7 +49,11 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let repo = Repository::discover(None)?;
     let git_dir = repo.git_dir.clone();
-    let config = ConfigSet::load(Some(&git_dir), true)?;
+    let config = ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&git_dir),
+        true,
+    )?;
 
     let r = remote::resolve_remote(&config, &git_dir, cli.remote.as_deref(), false)?;
 

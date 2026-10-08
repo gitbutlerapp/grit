@@ -178,11 +178,15 @@ impl std::fmt::Debug for Odb {
 /// key names. Defaults to [`HashAlgo::Sha1`] when the extension is absent or unreadable.
 #[must_use]
 pub fn hash_algo_for_git_dir(git_dir: &Path) -> HashAlgo {
-    ConfigSet::load(Some(git_dir), true)
-        .ok()
-        .and_then(|cfg| cfg.get("extensions.objectformat"))
-        .and_then(|v| HashAlgo::from_name(&v))
-        .unwrap_or(HashAlgo::Sha1)
+    ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .ok()
+    .and_then(|cfg| cfg.get("extensions.objectformat"))
+    .and_then(|v| HashAlgo::from_name(&v))
+    .unwrap_or(HashAlgo::Sha1)
 }
 
 /// Like [`hash_algo_for_git_dir`] but takes an `objects/` directory path.
@@ -280,7 +284,11 @@ impl Odb {
                 .config_git_dir
                 .as_deref()
                 .or_else(|| self.objects_dir.parent());
-            let cfg = crate::repo::ensure_shared_config_snapshot(state, git_dir)?;
+            let cfg = crate::repo::ensure_shared_config_snapshot(
+                state,
+                &crate::environment::Environment::capture_process(),
+                git_dir,
+            )?;
             return Ok(cfg.as_ref().clone());
         }
         let git_dir = self
@@ -288,7 +296,11 @@ impl Odb {
             .as_deref()
             .or_else(|| self.objects_dir.parent());
         if let Some(git_dir) = git_dir {
-            ConfigSet::load(Some(git_dir), true)
+            ConfigSet::load(
+                &crate::environment::Environment::capture_process(),
+                Some(git_dir),
+                true,
+            )
         } else {
             Ok(ConfigSet::new())
         }
@@ -1385,10 +1397,12 @@ fn hash_bytes_with(algo: HashAlgo, data: &[u8]) -> ObjectId {
 }
 
 /// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).
+#[allow(dead_code)]
 pub(crate) fn blob_store_bytes(data: &[u8]) -> Vec<u8> {
     build_store_bytes(ObjectKind::Blob, data)
 }
 
+#[allow(dead_code)]
 pub(crate) fn zlib_compress_loose_store_from_bytes(
     store_bytes: &[u8],
     compression: flate2::Compression,

@@ -31,7 +31,12 @@ fn refresh_index_stat_only_timing() {
     let repo = Repository::open(&root.join(".git"), Some(root)).expect("open");
     let mut index = repo.load_index().expect("index");
     let index_mtime = index.source_mtime;
-    let config = grit_lib::config::ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_default();
+    let config = grit_lib::config::ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let start = Instant::now();
     let _ = refresh_index_stat_content_verified(
         &repo.odb,

@@ -81,7 +81,8 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
         ],
     )?;
 
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
     let refspecs = net::fetch_refspecs(&config, net::DEFAULT_REMOTE);
     let clone_message = format!("clone: from {url}");
     let identity = grit_lib::fetch::fetch_operation_identity(&repo.git_dir)

@@ -207,8 +207,8 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
     println!(&quot;tree_diff_end&quot;);
 
     if let Some(wt) = repo.work_tree.as_deref() {
-        let index = repo.load_index()?;
-        let wt_changes = diff_index_to_worktree(&amp;repo.odb, &amp;index, wt, false, false)?;
+        let mut index = repo.load_index()?;
+        let wt_changes = diff_index_to_worktree(&amp;repo.odb, &amp;mut index, wt, false, false)?;
         println!(&quot;index_worktree_dirty={}&quot;, !wt_changes.is_empty());
     }
 

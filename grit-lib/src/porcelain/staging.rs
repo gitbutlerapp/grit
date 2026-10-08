@@ -52,10 +52,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         ..Default::default()
     };
     let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
-        &repo.odb,
-        &mut index,
-        work_tree,
-        diff_opts,
+        &repo.odb, &mut index, work_tree, diff_opts,
     )?;
     let mut worktree_rules = rules_arc
         .lock()

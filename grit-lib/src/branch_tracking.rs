@@ -69,7 +69,12 @@ pub fn tracking_ref_for_remote_push_ref(
         return None;
     }
 
-    let config = ConfigSet::load(Some(git_dir), true).ok()?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )
+    .ok()?;
     let (positive, negative) = remote_fetch_refspecs(&config, remote_name);
     if ref_excluded(remote_ref, &negative) {
         return None;

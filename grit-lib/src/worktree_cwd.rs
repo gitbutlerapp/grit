@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-const GRIT_INVOCATION_CWD_ENV: &str = "GRIT_INVOCATION_CWD";
+use crate::environment::Environment;
 
 /// Normalize a repository-relative path to a POSIX-style string for comparisons.
 fn normalize_repo_rel(path: &str) -> String {
@@ -50,15 +50,15 @@ fn cwd_relative_to_work_tree(work_tree: &Path, cwd: &Path) -> Option<String> {
 /// `work_tree`, using canonical paths. Returns `None` when cwd is outside the
 /// work tree, equals the work tree root, or cannot be resolved.
 #[must_use]
-pub fn process_cwd_repo_relative(work_tree: &Path) -> Option<String> {
-    if let Ok(prefix) = std::env::var("GIT_PREFIX") {
-        let p = normalize_repo_rel(&prefix);
+pub fn process_cwd_repo_relative(work_tree: &Path, environment: &Environment) -> Option<String> {
+    if let Some(prefix) = environment.git_prefix.as_deref() {
+        let p = normalize_repo_rel(prefix);
         if !p.is_empty() {
             return Some(p);
         }
     }
 
-    if let Ok(inv) = std::env::var(GRIT_INVOCATION_CWD_ENV) {
+    if let Some(inv) = environment.grit_invocation_cwd.as_deref() {
         let inv_path = Path::new(inv.trim());
         if let Some(rel) = cwd_relative_to_work_tree(work_tree, inv_path) {
             let n = normalize_repo_rel(&rel);
@@ -68,7 +68,7 @@ pub fn process_cwd_repo_relative(work_tree: &Path) -> Option<String> {
         }
     }
 
-    let cwd = std::env::current_dir().ok()?;
+    let cwd = environment.discovery_cwd();
     cwd_relative_to_work_tree(work_tree, &cwd)
 }
 
@@ -76,8 +76,12 @@ pub fn process_cwd_repo_relative(work_tree: &Path) -> Option<String> {
 /// relative to the repository root) would delete the process cwd — i.e. the
 /// path equals cwd or cwd lies under `repo_rel_path/`.
 #[must_use]
-pub fn cwd_would_be_removed_with_repo_path(work_tree: &Path, repo_rel_path: &str) -> bool {
-    let Some(cwd_rel) = process_cwd_repo_relative(work_tree) else {
+pub fn cwd_would_be_removed_with_repo_path(
+    work_tree: &Path,
+    repo_rel_path: &str,
+    environment: &Environment,
+) -> bool {
+    let Some(cwd_rel) = process_cwd_repo_relative(work_tree, environment) else {
         return false;
     };
     removal_path_covers_cwd(&normalize_repo_rel(repo_rel_path), &cwd_rel)

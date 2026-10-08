@@ -32,7 +32,8 @@ pub fn run() -> Result<MergeOutcome> {
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     };
 
-    let config = ConfigSet::load(Some(&repo.git_dir), true).context("could not load config")?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
+        .context("could not load config")?;
     let remote = config
         .get(&format!("branch.{short_name}.remote"))
         .filter(|r| !r.trim().is_empty())

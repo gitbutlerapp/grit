@@ -97,7 +97,12 @@ fn isolate_global_config() {
 fn load_config(dir: &Path) -> ConfigSet {
     isolate_global_config();
     let git_dir = dir.join(".git");
-    ConfigSet::load(Some(&git_dir), false).expect("load config")
+    ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&git_dir),
+        false,
+    )
+    .expect("load config")
 }
 
 /// Apply `key=value` config via `git config --local`, then load the config.

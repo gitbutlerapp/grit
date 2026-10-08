@@ -191,7 +191,12 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
     {
         return None;
     }
-    let config = ConfigSet::load(Some(&repo.git_dir), true).ok()?;
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )
+    .ok()?;
     let url_key = format!("remote.{name}.url");
     config.get(&url_key)?;
     let head_ref = format!("refs/remotes/{name}/HEAD");
@@ -1921,7 +1926,12 @@ pub fn ambiguous_object_hint_lines(
 }
 
 fn read_core_disambiguate(repo: &Repository) -> Option<&'static str> {
-    let config = ConfigSet::load(Some(&repo.git_dir), true).unwrap_or_else(|_| ConfigSet::new());
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )
+    .unwrap_or_else(|_| ConfigSet::new());
     let v = config.get("core.disambiguate")?;
     match v.to_ascii_lowercase().as_str() {
         "committish" | "commit" => Some("commit"),

@@ -1487,7 +1487,11 @@ fn ingest_negotiated_pack(
 /// Identity string for fetch/clone reflog entries (`Name <email> epoch tz`).
 pub fn fetch_operation_identity(git_dir: &Path) -> Result<String> {
     use crate::ident_config::ident_default_name;
-    let cfg = crate::config::ConfigSet::load(Some(git_dir), true)?;
+    let cfg = crate::config::ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(git_dir),
+        true,
+    )?;
     let name = ident_default_name(&cfg);
     let email = cfg
         .get("user.email")

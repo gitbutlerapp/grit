@@ -43,6 +43,7 @@ pub mod progress;
 /// The types most callers need, re-exported for `use grit_lib::prelude::*;`.
 pub mod prelude {
     pub use crate::config::ConfigSet;
+    pub use crate::environment::{Environment, RepositoryOptions};
     pub use crate::error::{Error, Result};
     pub use crate::index::Index;
     pub use crate::objects::{Object, ObjectId, ObjectKind};
@@ -101,8 +102,8 @@ pub mod merging {
 /// Configuration and identity: config cascade, .gitmodules, author/committer idents.
 pub mod configuration {
     pub use crate::{
-        config, dotfile, gitmodules, ident, ident_config, ident_resolve, init_filesystem,
-        precompose_config, url_rewrite,
+        config, dotfile, environment, gitmodules, ident, ident_config, ident_resolve,
+        init_filesystem, precompose_config, url_rewrite,
     };
 }
 
@@ -131,6 +132,7 @@ pub mod diff_indent_heuristic;
 pub mod diff_moved;
 pub mod diffstat;
 pub mod dotfile;
+pub mod environment;
 pub mod error;
 mod ewah_bitmap;
 pub mod fetch;
