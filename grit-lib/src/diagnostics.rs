@@ -82,6 +82,8 @@ pub enum Warning {
     MidxBitmapMissingReverseIndex,
     /// A pack named by the MIDX has a present but unreadable `.idx` file.
     MidxPackIndexUnavailable { pack: String },
+    /// MIDX write could not match `preferred_pack_name` to any pack in the directory.
+    MidxUnknownPreferredPack { name: String },
 }
 
 /// Optional trace events (network debugging, etc.), separate from [`Warning`].

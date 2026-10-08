@@ -874,15 +874,35 @@ fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, u
     )))
 }
 
-/// A fatal MIDX parse failure (Git `die()` in `load_multi_pack_index`). The
-/// contained message is the exact text Git prints, without the `error:`/`fatal:`
-/// prefix.
-#[derive(Debug, Clone)]
-pub struct MidxLoadError(pub String);
+/// Fatal chunk-table failures from [`parse_midx_toc`] (Git `die()` in `load_multi_pack_index`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MidxChunkTableFatal {
+    FileTooSmall,
+    TableTruncated,
+    RequiredPackNameChunkMissing,
+}
 
-impl std::fmt::Display for MidxLoadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+impl From<MidxChunkTableFatal> for MidxError {
+    fn from(value: MidxChunkTableFatal) -> Self {
+        match value {
+            MidxChunkTableFatal::FileTooSmall => MidxError::InvalidChunkTable {
+                detail: "multi-pack-index file too small".to_owned(),
+            },
+            MidxChunkTableFatal::TableTruncated => MidxError::InvalidChunkTable {
+                detail: "multi-pack-index chunk table is truncated".to_owned(),
+            },
+            MidxChunkTableFatal::RequiredPackNameChunkMissing => {
+                MidxError::RequiredPackNameChunkMissing
+            }
+        }
+    }
+}
+
+fn midx_write_warn(opts: &WriteMultiPackIndexOptions, warning: Warning) {
+    if let Some(handle) = opts.diagnostics.as_ref() {
+        handle.warn(warning);
+    } else {
+        NullDiagnostics.warn(warning);
     }
 }
 
@@ -894,22 +914,20 @@ struct TocEntry {
 
 /// Walk the MIDX chunk table of contents, mirroring `read_table_of_contents`
 /// in `git/chunk-format.c`. Returns the chunk list plus any reported errors,
-/// or a fatal `MidxLoadError` for the conditions Git treats as `die()`-worthy.
+/// or a fatal [`MidxChunkTableFatal`] for the conditions Git treats as `die()`-worthy.
 fn parse_midx_toc(
     data: &[u8],
     hash_len: usize,
     errors: &mut Vec<String>,
-) -> std::result::Result<Vec<TocEntry>, MidxLoadError> {
+) -> std::result::Result<Vec<TocEntry>, MidxChunkTableFatal> {
     if data.len() < MIDX_HEADER_SIZE + hash_len {
-        return Err(MidxLoadError("multi-pack-index file too small".to_owned()));
+        return Err(MidxChunkTableFatal::FileTooSmall);
     }
     let num_chunks = data[6] as usize;
     let toc_off = MIDX_HEADER_SIZE;
     let needed = toc_off + (num_chunks + 1) * CHUNK_TOC_ENTRY_SIZE;
     if data.len() < needed {
-        return Err(MidxLoadError(
-            "multi-pack-index chunk table is truncated".to_owned(),
-        ));
+        return Err(MidxChunkTableFatal::TableTruncated);
     }
     let file_size = data.len();
     let mut chunks: Vec<TocEntry> = Vec::with_capacity(num_chunks);
@@ -932,17 +950,13 @@ fn parse_midx_toc(
 
         if chunk_id == 0 {
             errors.push("terminating chunk id appears earlier than expected".to_owned());
-            return Err(MidxLoadError(
-                "multi-pack-index required pack-name chunk missing or corrupted".to_owned(),
-            ));
+            return Err(MidxChunkTableFatal::RequiredPackNameChunkMissing);
         }
         if !(chunk_offset as usize).is_multiple_of(MIDX_CHUNK_ALIGNMENT) {
             errors.push(format!(
                 "chunk id {chunk_id:x} not {MIDX_CHUNK_ALIGNMENT}-byte aligned"
             ));
-            return Err(MidxLoadError(
-                "multi-pack-index required pack-name chunk missing or corrupted".to_owned(),
-            ));
+            return Err(MidxChunkTableFatal::RequiredPackNameChunkMissing);
         }
 
         let next_entry = toc_off + (i + 1) * CHUNK_TOC_ENTRY_SIZE;
@@ -954,16 +968,12 @@ fn parse_midx_toc(
             errors.push(format!(
                 "improper chunk offset(s) {chunk_offset:x} and {next_chunk_offset:x}"
             ));
-            return Err(MidxLoadError(
-                "multi-pack-index required pack-name chunk missing or corrupted".to_owned(),
-            ));
+            return Err(MidxChunkTableFatal::RequiredPackNameChunkMissing);
         }
 
         if chunks.iter().any(|c| c.id == chunk_id) {
             errors.push(format!("duplicate chunk ID {chunk_id:x} found"));
-            return Err(MidxLoadError(
-                "multi-pack-index required pack-name chunk missing or corrupted".to_owned(),
-            ));
+            return Err(MidxChunkTableFatal::RequiredPackNameChunkMissing);
         }
 
         chunks.push(TocEntry {
@@ -977,9 +987,7 @@ fn parse_midx_toc(
     let final_id = read_be32(term_entry);
     if final_id != 0 {
         errors.push(format!("final chunk has non-zero id {final_id:x}"));
-        return Err(MidxLoadError(
-            "multi-pack-index required pack-name chunk missing or corrupted".to_owned(),
-        ));
+        return Err(MidxChunkTableFatal::RequiredPackNameChunkMissing);
     }
 
     // Record the terminator offset as a sentinel (id 0) so the final real chunk's
@@ -1059,8 +1067,11 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
     // --- table of contents ---
     let chunks = match parse_midx_toc(&data, hash_len, &mut errors) {
         Ok(c) => c,
-        Err(e) => {
-            errors.push(e.0);
+        Err(fatal) => {
+            if !errors.is_empty() {
+                return Err(errors);
+            }
+            errors.push(MidxError::from(fatal).to_string());
             return Err(errors);
         }
     };
@@ -1862,14 +1873,14 @@ fn midx_load_for_read(
     let mut toc_errors: Vec<String> = Vec::new();
     let chunks = match parse_midx_toc(data, hash_len, &mut toc_errors) {
         Ok(c) => c,
-        Err(MidxLoadError(msg)) => {
+        Err(fatal) => {
             if !toc_errors.is_empty() {
                 for e in toc_errors {
                     diagnostics.warn(Warning::MidxChunkTableError { detail: e });
                 }
                 return Ok(MidxLoadResult::Skip);
             }
-            return Err(MidxError::from_load_message(&msg).into());
+            return Err(MidxError::from(fatal).into());
         }
     };
 
@@ -2223,10 +2234,9 @@ pub fn write_multi_pack_index_with_options(
                         for (i, name) in existing_names.iter().enumerate() {
                             let stem = name.strip_suffix(".idx").unwrap_or(name);
                             if !pack_dir.join(format!("{stem}.pack")).exists() {
-                                eprintln!("error: could not load pack {i}");
-                                return Err(Error::CorruptObject(format!(
-                                    "could not load pack {i}"
-                                )));
+                                return Err(
+                                    MidxError::ReferencedPackMissing { pack_index: i }.into()
+                                );
                             }
                         }
                     }
@@ -2288,15 +2298,18 @@ pub fn write_multi_pack_index_with_options(
                 .iter()
                 .any(|n| cmp_idx_or_pack_name(raw, n).is_eq())
         {
-            eprintln!("warning: unknown preferred pack: '{raw}'");
+            midx_write_warn(
+                opts,
+                Warning::MidxUnknownPreferredPack {
+                    name: raw.to_owned(),
+                },
+            );
             preferred_warned = true;
         }
     }
 
     if idx_names.is_empty() {
-        // Git `write_midx_internal`: `error("no pack files to index.")` then fail.
-        eprintln!("error: no pack files to index.");
-        return Err(Error::CorruptObject("no pack files to index.".to_owned()));
+        return Err(MidxError::NoPacksToIndex.into());
     }
 
     let (base_oids, base_pack_names) = if opts.incremental {
@@ -2362,10 +2375,10 @@ pub fn write_multi_pack_index_with_options(
         if indexes.get(p).map(|i| i.entries.len()).unwrap_or(0) == 0 {
             let name = work_names.get(p).cloned().unwrap_or_default();
             let pack_name = name.strip_suffix(".idx").unwrap_or(&name);
-            eprintln!("error: cannot select preferred pack {pack_name}.pack with no objects");
-            return Err(Error::CorruptObject(
-                "cannot select preferred pack with no objects".to_owned(),
-            ));
+            return Err(MidxError::PreferredPackEmpty {
+                pack: format!("{pack_name}.pack"),
+            }
+            .into());
         }
     }
 
@@ -2802,9 +2815,11 @@ mod tests {
     use crate::objects::{HashAlgo, ObjectId};
     use crate::odb::Odb;
     use crate::pack::{clear_pack_cache, read_object_from_packs};
+    use crate::repo::{Repository, RepositoryOptions};
     use std::fs;
     use std::path::Path;
     use std::process::Command;
+    use std::sync::Arc;
 
     fn git(dir: &Path, args: &[&str]) {
         let out = Command::new("git")

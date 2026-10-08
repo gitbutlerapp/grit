@@ -87,29 +87,8 @@ pub enum MidxError {
     /// Preferred pack name does not appear in the pack list.
     #[error("unknown preferred pack '{name}'")]
     UnknownPreferredPack { name: String },
-}
 
-impl MidxError {
-    /// Map a legacy [`crate::midx::MidxLoadError`] string to a typed variant when possible.
-    pub(crate) fn from_load_message(msg: &str) -> Self {
-        if msg == "multi-pack-index file too small" {
-            return Self::InvalidChunkTable {
-                detail: msg.to_owned(),
-            };
-        }
-        if msg.contains("chunk table")
-            || msg.contains("chunk offset")
-            || msg.contains("duplicate chunk")
-        {
-            return Self::InvalidChunkTable {
-                detail: msg.to_owned(),
-            };
-        }
-        if msg.contains("pack-name chunk missing") {
-            return Self::RequiredPackNameChunkMissing;
-        }
-        Self::InvalidChunkTable {
-            detail: msg.to_owned(),
-        }
-    }
+    /// An existing MIDX names a pack whose `.pack` file is missing during rewrite.
+    #[error("could not load pack {pack_index}")]
+    ReferencedPackMissing { pack_index: usize },
 }

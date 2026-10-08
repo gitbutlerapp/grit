@@ -160,6 +160,9 @@ pub fn format_warning_message(w: &Warning) -> String {
         Warning::MidxPackIndexUnavailable { pack } => {
             format!("packfile {pack} index unavailable")
         }
+        Warning::MidxUnknownPreferredPack { name } => {
+            format!("unknown preferred pack: '{name}'")
+        }
         _ => format!("{w:?}"),
     }
 }
@@ -200,6 +203,7 @@ fn warning_kind(w: &Warning) -> String {
         Warning::MidxRevIndexWrongSize => "midx_rev_index_wrong_size".into(),
         Warning::MidxBitmapMissingReverseIndex => "midx_bitmap_missing_reverse_index".into(),
         Warning::MidxPackIndexUnavailable { .. } => "midx_pack_index_unavailable".into(),
+        Warning::MidxUnknownPreferredPack { .. } => "midx_unknown_preferred_pack".into(),
         _ => "other".into(),
     }
 }
