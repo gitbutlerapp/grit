@@ -40,8 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Keep in step with rust-toolchain.toml: cargo builds with the pinned
+      # toolchain, so the cross targets must be installed for that version.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.target }}
 
@@ -103,8 +105,10 @@ jobs:
             !/logs/
           sparse-checkout-cone-mode: false
 
+      # Keep in step with rust-toolchain.toml: cargo builds with the pinned
+      # toolchain, so the cross targets must be installed for that version.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.target }}
 

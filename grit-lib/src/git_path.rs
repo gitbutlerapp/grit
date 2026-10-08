@@ -731,11 +731,9 @@ pub fn path_lexical_for_disk_compare(path: &Path) -> PathBuf {
     let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let normalized = lexical_normalize_path_buf(abs);
     #[cfg(windows)]
-    {
-        return PathBuf::from(
-            strip_verbatim_path_prefix_str(&normalized.display().to_string()).into_owned(),
-        );
-    }
+    let normalized = PathBuf::from(
+        strip_verbatim_path_prefix_str(&normalized.display().to_string()).into_owned(),
+    );
     normalized
 }
 
@@ -839,13 +837,8 @@ pub fn path_for_disk_compare(path: &Path) -> PathBuf {
         }
     }
     #[cfg(windows)]
-    {
-        return PathBuf::from(strip_verbatim_path_prefix_str(&canon.display().to_string()));
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        let _ = &canon;
-    }
+    let canon =
+        PathBuf::from(strip_verbatim_path_prefix_str(&canon.display().to_string()).into_owned());
     canon
 }
 
