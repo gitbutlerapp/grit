@@ -16,7 +16,8 @@ use std::path::Path;
 
 use crate::hash::verify_trailer;
 
-use crate::error::{Error, Result};
+use crate::diagnostics::{DiagnosticSink, NullDiagnostics, Warning};
+use crate::error::{Error, MidxError, Result};
 use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::hash_algo_for_objects_dir;
 use crate::pack::{read_pack_index_no_verify, PackIndex};
@@ -52,7 +53,7 @@ struct MidxEntry {
 }
 
 /// Options for writing a multi-pack index (extension of the simple writer).
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct WriteMultiPackIndexOptions {
     /// When set, objects also present in other packs are taken from this pack
     /// (`pack_names` index in the sorted name list).
@@ -73,6 +74,8 @@ pub struct WriteMultiPackIndexOptions {
     /// On-disk MIDX format version to write (`1` or `2`). `None` writes the default (v2).
     /// Set from `midx.version`.
     pub version: Option<u8>,
+    /// When set, non-fatal MIDX write warnings are reported here instead of being discarded.
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
 }
 
 fn normalize_pack_idx_basename(raw: &str) -> Result<String> {
@@ -1775,7 +1778,7 @@ pub fn midx_oid_listed_in_tip(
         oidl_off,
         num_objects,
         ..
-    } = match midx_load_for_read(&data, repo_algo) {
+    } = match midx_load_for_read(&data, repo_algo, &NullDiagnostics)? {
         MidxLoadResult::Ok(v) => v,
         MidxLoadResult::Skip => return Ok(None),
     };
@@ -1813,110 +1816,74 @@ struct MidxReadView {
 
 enum MidxLoadResult {
     Ok(MidxReadView),
-    /// The MIDX is unusable but not fatal (Git returns NULL and falls back to packs);
-    /// an `error:`/`warning:` line has already been printed.
+    /// The MIDX is unusable but not fatal (Git returns NULL and falls back to packs).
     Skip,
 }
 
-/// Print a recoverable MIDX `error:`/`warning:` line at most once per process.
-///
-/// Git loads the MIDX once and caches it, so a recoverable corruption is reported a
-/// single time. grit re-reads the MIDX per object lookup, so without deduping the same
-/// line would repeat; this guard restores the single-report behavior the tests expect.
-fn midx_warn_once(line: &str) {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    if let Ok(mut set) = seen.lock() {
-        if set.insert(line.to_string()) {
-            eprintln!("{line}");
-        }
-    } else {
-        eprintln!("{line}");
-    }
-}
-
-/// Print Git-style `error:`/`fatal:` lines and exit 128, mirroring `die()` after the
-/// preceding `error()` calls. `lines` are printed as `error:` except the last as `fatal:`.
-fn midx_die(lines: &[&str]) -> ! {
-    use std::io::Write;
-    let mut err = std::io::stderr().lock();
-    let n = lines.len();
-    for (i, l) in lines.iter().enumerate() {
-        if i + 1 == n {
-            let _ = writeln!(err, "fatal: {l}");
-        } else {
-            let _ = writeln!(err, "error: {l}");
-        }
-    }
-    let _ = err.flush();
-    std::process::exit(128);
-}
-
 /// Validate and load a MIDX image for object reads, mirroring `load_multi_pack_index`
-/// in git/midx.c. Fatal corruptions print `error:`/`fatal:` and exit (Git `die()`);
-/// recoverable corruptions print an `error:`/`warning:` and return [`MidxLoadResult::Skip`].
-fn midx_load_for_read(data: &[u8], expected: HashAlgo) -> MidxLoadResult {
+/// in git/midx.c. Fatal corruptions return [`Error::Midx`]; recoverable corruptions emit
+/// [`Warning`] values through `diagnostics` and return [`MidxLoadResult::Skip`].
+fn midx_load_for_read(
+    data: &[u8],
+    expected: HashAlgo,
+    diagnostics: &dyn DiagnosticSink,
+) -> Result<MidxLoadResult> {
     if data.len() < MIDX_HEADER_SIZE + 20 {
-        return MidxLoadResult::Skip;
+        return Ok(MidxLoadResult::Skip);
     }
     let sig = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
     if sig != MIDX_SIGNATURE {
-        midx_die(&[&format!(
-            "multi-pack-index signature 0x{sig:08x} does not match signature 0x{MIDX_SIGNATURE:08x}"
-        )]);
+        return Err(MidxError::SignatureMismatch {
+            found: sig,
+            expected: MIDX_SIGNATURE,
+        }
+        .into());
     }
     let version = data[4];
     if version != MIDX_VERSION_V1 && version != MIDX_VERSION_V2 {
-        midx_die(&[&format!(
-            "multi-pack-index version {version} not recognized"
-        )]);
+        return Err(MidxError::VersionNotRecognized { version }.into());
     }
     let hash_version = data[5];
     let expected_hash_version = u8::from(expected);
     if hash_version != expected_hash_version {
-        // `load_multi_pack_index` error()s then `goto cleanup_fail` (returns NULL),
-        // so this is recoverable, not fatal. The expected version is the repository's
-        // own `oid_version(hash_algo)` (SHA-1 → 1, SHA-256 → 2).
-        midx_warn_once(&format!(
-            "error: multi-pack-index hash version {hash_version} does not match version {expected_hash_version}"
-        ));
-        return MidxLoadResult::Skip;
+        return Err(MidxError::HashVersionMismatch {
+            found: hash_version,
+            expected: expected_hash_version,
+        }
+        .into());
+    }
+    if !midx_checksum_is_valid(data) {
+        diagnostics.warn(Warning::MidxChecksumMismatch);
+        return Ok(MidxLoadResult::Skip);
     }
     let hash_len = expected.len();
     let num_packs = u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize;
 
-    // Table of contents (chunk-format.c read_table_of_contents). Recoverable failures
-    // (unaligned / improper offset / duplicate / non-zero terminator) print error() and
-    // return NULL.
     let mut toc_errors: Vec<String> = Vec::new();
     let chunks = match parse_midx_toc(data, hash_len, &mut toc_errors) {
         Ok(c) => c,
-        Err(_) => {
-            for e in &toc_errors {
-                midx_warn_once(&format!("error: {e}"));
+        Err(MidxLoadError(msg)) => {
+            if !toc_errors.is_empty() {
+                for e in toc_errors {
+                    diagnostics.warn(Warning::MidxChunkTableError { detail: e });
+                }
+                return Ok(MidxLoadResult::Skip);
             }
-            return MidxLoadResult::Skip;
+            return Err(MidxError::from_load_message(&msg).into());
         }
     };
 
-    // Required pack-names chunk.
     let Some((pn_off, pn_len)) = toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_PACKNAMES)
     else {
-        midx_die(&["multi-pack-index required pack-name chunk missing or corrupted"]);
+        return Err(MidxError::RequiredPackNameChunkMissing.into());
     };
 
-    // Required oid-fanout chunk + size + ordering (midx_read_oid_fanout).
     let Some((oidf_off, oidf_len)) = toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_OIDFANOUT)
     else {
-        midx_die(&["multi-pack-index required OID fanout chunk missing or corrupted"]);
+        return Err(MidxError::RequiredOidFanoutChunkMissing.into());
     };
     if oidf_len != 256 * 4 {
-        midx_die(&[
-            "multi-pack-index OID fanout is of the wrong size",
-            "multi-pack-index required OID fanout chunk missing or corrupted",
-        ]);
+        return Err(MidxError::OidFanoutWrongSize.into());
     }
     let fanout = |i: usize| -> u32 {
         let b = oidf_off + i * 4;
@@ -1926,85 +1893,76 @@ fn midx_load_for_read(data: &[u8], expected: HashAlgo) -> MidxLoadResult {
         let f1 = fanout(i);
         let f2 = fanout(i + 1);
         if f1 > f2 {
-            midx_die(&[
-                &format!(
-                    "oid fanout out of order: fanout[{i}] = {f1:x} > {f2:x} = fanout[{}]",
-                    i + 1
-                ),
-                "multi-pack-index required OID fanout chunk missing or corrupted",
-            ]);
+            return Err(MidxError::OidFanoutOutOfOrder {
+                index: i,
+                first: f1,
+                second: f2,
+                next: i + 1,
+            }
+            .into());
         }
     }
     let num_objects = fanout(255) as usize;
 
-    // Required oid-lookup chunk + size (midx_read_oid_lookup).
     let Some((oidl_off, oidl_len)) = toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_OIDLOOKUP)
     else {
-        midx_die(&["multi-pack-index required OID lookup chunk missing or corrupted"]);
+        return Err(MidxError::RequiredOidLookupChunkMissing.into());
     };
     if oidl_len != hash_len * num_objects {
-        midx_die(&[
-            "multi-pack-index OID lookup chunk is the wrong size",
-            "multi-pack-index required OID lookup chunk missing or corrupted",
-        ]);
+        return Err(MidxError::OidLookupWrongSize.into());
     }
 
-    // Required object-offsets chunk + size (midx_read_object_offsets).
     let Some((ooff_off, ooff_len)) =
         toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_OBJECTOFFSETS)
     else {
-        midx_die(&["multi-pack-index required object offsets chunk missing or corrupted"]);
+        return Err(MidxError::RequiredObjectOffsetsChunkMissing.into());
     };
     if ooff_len != num_objects * 8 {
-        midx_die(&[
-            "multi-pack-index object offset chunk is the wrong size",
-            "multi-pack-index required object offsets chunk missing or corrupted",
-        ]);
+        return Err(MidxError::ObjectOffsetsWrongSize.into());
     }
 
     let loff = toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_LARGEOFFSETS);
 
-    // Optional revindex chunk — wrong size warns but does not fail the load.
     if let Some((_, rlen)) = toc_chunk_range(&chunks, data.len(), MIDX_CHUNKID_REVINDEX) {
         if rlen != num_objects * 4 {
-            midx_warn_once("error: multi-pack-index reverse-index chunk is the wrong size");
-            midx_warn_once("warning: multi-pack bitmap is missing required reverse index");
+            diagnostics.warn(Warning::MidxRevIndexWrongSize);
+            diagnostics.warn(Warning::MidxBitmapMissingReverseIndex);
         }
     }
 
-    // Pack-name parsing (die if a name is unterminated).
     let mut pack_names: Vec<String> = Vec::with_capacity(num_packs);
     let blob = &data[pn_off..pn_off + pn_len];
     let mut start = 0usize;
     for _ in 0..num_packs {
         let Some(rel) = blob[start..].iter().position(|&b| b == 0) else {
-            midx_die(&["multi-pack-index pack-name chunk is too short"]);
+            return Err(MidxError::PackNameChunkTooShort.into());
         };
         let name = match std::str::from_utf8(&blob[start..start + rel]) {
             Ok(s) => s.to_string(),
-            Err(_) => midx_die(&["multi-pack-index pack-name chunk is too short"]),
+            Err(_) => return Err(MidxError::PackNameChunkTooShort.into()),
         };
         if version == MIDX_VERSION_V1
             && !pack_names.is_empty()
             && name.as_str() <= pack_names.last().map(|s| s.as_str()).unwrap_or("")
         {
-            midx_die(&[&format!(
-                "multi-pack-index pack names out of order: '{}' before '{name}'",
-                pack_names.last().cloned().unwrap_or_default()
-            )]);
+            return Err(MidxError::PackNamesOutOfOrder {
+                previous: pack_names.last().cloned().unwrap_or_default(),
+                name,
+            }
+            .into());
         }
         pack_names.push(name);
         start += rel + 1;
     }
 
-    MidxLoadResult::Ok(MidxReadView {
+    Ok(MidxLoadResult::Ok(MidxReadView {
         oidf_off,
         oidl_off,
         ooff_off,
         loff,
         num_objects,
         pack_names,
-    })
+    }))
 }
 
 /// Eagerly validate that every pack named by the active MIDX has a readable `.idx`.
@@ -2016,6 +1974,14 @@ fn midx_load_for_read(data: &[u8], expected: HashAlgo) -> MidxLoadResult {
 /// object that triggered the read is found loose (so it never reaches the per-object MIDX
 /// lookup). Runs at most once per process per `objects_dir`.
 pub fn validate_midx_referenced_packs(objects_dir: &Path) {
+    validate_midx_referenced_packs_with_diagnostics(objects_dir, &NullDiagnostics);
+}
+
+/// Like [`validate_midx_referenced_packs`], emitting warnings through `diagnostics`.
+pub fn validate_midx_referenced_packs_with_diagnostics(
+    objects_dir: &Path,
+    diagnostics: &dyn DiagnosticSink,
+) {
     use std::sync::Mutex;
     use std::sync::OnceLock;
     static DONE: OnceLock<Mutex<HashSet<std::path::PathBuf>>> = OnceLock::new();
@@ -2034,30 +2000,21 @@ pub fn validate_midx_referenced_packs(objects_dir: &Path) {
         return;
     };
     let MidxReadView { pack_names, .. } =
-        match midx_load_for_read(&data, hash_algo_for_objects_dir(objects_dir)) {
-            MidxLoadResult::Ok(v) => v,
-            MidxLoadResult::Skip => return,
+        match midx_load_for_read(&data, hash_algo_for_objects_dir(objects_dir), diagnostics) {
+            Ok(MidxLoadResult::Ok(v)) => v,
+            Ok(MidxLoadResult::Skip) | Err(_) => return,
         };
     for idx_name in &pack_names {
         let idx_path = pack_dir.join(idx_name);
-        // A MIDX may name a pack whose files were later deleted; Git skips the missing
-        // pack silently (it is not "unavailable", just gone). Only a present-but-corrupt
-        // idx produces the "index unavailable" error.
         if !idx_path.exists() {
             continue;
         }
-        // Match Git's `open_pack_index`, which parses the idx header/tables but does
-        // not verify the trailing checksum: a structurally valid idx with a stale
-        // checksum (the 64-bit-offset tests corrupt one offset byte in place) loads
-        // fine and must NOT be reported "unavailable". Only an unparseable idx
-        // (e.g. truncated, as in `corrupt idx reports errors`) is unavailable.
         if crate::pack::read_pack_index_no_verify(&idx_path).is_err() {
             let mut pack_path = idx_path.clone();
             pack_path.set_extension("pack");
-            midx_warn_once(&format!(
-                "error: packfile {} index unavailable",
-                pack_path.display()
-            ));
+            diagnostics.warn(Warning::MidxPackIndexUnavailable {
+                pack: pack_path.display().to_string(),
+            });
         }
     }
 }
@@ -2070,6 +2027,16 @@ pub fn try_read_object_via_midx(
     objects_dir: &Path,
     oid: &ObjectId,
     repo_algo: HashAlgo,
+) -> Result<Option<crate::objects::Object>> {
+    try_read_object_via_midx_with_diagnostics(objects_dir, oid, repo_algo, &NullDiagnostics)
+}
+
+/// Like [`try_read_object_via_midx`], emitting recoverable MIDX warnings through `diagnostics`.
+pub fn try_read_object_via_midx_with_diagnostics(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    repo_algo: HashAlgo,
+    diagnostics: &dyn DiagnosticSink,
 ) -> Result<Option<crate::objects::Object>> {
     let pack_dir = objects_dir.join("pack");
     let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
@@ -2094,7 +2061,7 @@ pub fn try_read_object_via_midx(
         loff,
         num_objects,
         pack_names,
-    } = match midx_load_for_read(&data, repo_algo) {
+    } = match midx_load_for_read(&data, repo_algo, diagnostics)? {
         MidxLoadResult::Ok(v) => v,
         MidxLoadResult::Skip => return Ok(None),
     };
@@ -2137,10 +2104,7 @@ pub fn try_read_object_via_midx(
             Some((loff_off, loff_len)) if loff_len >= need => {
                 read_be_u64(&data, loff_off + idx * 8)?
             }
-            _ => {
-                // git/midx.c `nth_midxed_offset`: die on out-of-bounds large offset.
-                midx_die(&["multi-pack-index large offset out of bounds"]);
-            }
+            _ => return Err(MidxError::LargeOffsetOutOfBounds.into()),
         }
     } else {
         u64::from(raw_off)
@@ -2169,10 +2133,9 @@ pub fn try_read_object_via_midx(
         Err(_) => {
             let mut pack_path = idx_path.clone();
             pack_path.set_extension("pack");
-            midx_warn_once(&format!(
-                "error: packfile {} index unavailable",
-                pack_path.display()
-            ));
+            diagnostics.warn(Warning::MidxPackIndexUnavailable {
+                pack: pack_path.display().to_string(),
+            });
             return Ok(None);
         }
     };
@@ -2268,7 +2231,11 @@ pub fn write_multi_pack_index_with_options(
                         }
                     }
                 } else {
-                    eprintln!("warning: ignoring existing multi-pack-index; checksum mismatch");
+                    if let Some(handle) = opts.diagnostics.as_ref() {
+                        handle.warn(Warning::MidxIgnoringExistingChecksumMismatch);
+                    } else {
+                        NullDiagnostics.warn(Warning::MidxIgnoringExistingChecksumMismatch);
+                    }
                 }
             }
         }
@@ -2828,11 +2795,14 @@ fn scrub_root_midx_sidecars_except(pack_dir: &Path, keep_hex: Option<&str>) -> R
 mod tests {
     use super::{
         clear_pack_midx_state, resolve_tip_midx_path, try_read_object_via_midx,
-        write_multi_pack_index,
+        try_read_object_via_midx_with_diagnostics, write_multi_pack_index,
     };
+    use crate::diagnostics::{CollectingDiagnostics, Warning};
+    use crate::error::{Error, MidxError};
     use crate::objects::{HashAlgo, ObjectId};
     use crate::odb::Odb;
     use crate::pack::{clear_pack_cache, read_object_from_packs};
+    use std::fs;
     use std::path::Path;
     use std::process::Command;
 
@@ -2955,6 +2925,94 @@ mod tests {
                 .expect("read after rewrite")
                 .is_some(),
             "fresh MIDX must be visible after in-process rewrite"
+        );
+    }
+
+    #[test]
+    fn flipped_midx_checksum_warns_and_reads_from_pack() {
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        let mut bytes = fs::read(&midx_path).expect("read midx");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&midx_path, &bytes).expect("corrupt midx checksum");
+
+        let sink = CollectingDiagnostics::with_dedupe(true);
+        let via_midx =
+            try_read_object_via_midx_with_diagnostics(&objects, &oid, HashAlgo::Sha1, &sink)
+                .expect("checksum mismatch must not abort reads");
+        assert!(
+            via_midx.is_none(),
+            "corrupt MIDX must be skipped for direct midx lookup"
+        );
+        assert!(
+            sink.warnings()
+                .iter()
+                .any(|w| matches!(w, Warning::MidxChecksumMismatch)),
+            "expected checksum mismatch warning, got {:?}",
+            sink.warnings()
+        );
+
+        let git_dir = tmp.path().join(".git");
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+        let grit_obj = odb.read(&oid).expect("pack fallback read");
+        let via_pack = read_object_from_packs(&objects, &oid).expect("pack read");
+        assert_eq!(via_pack.data, grit_obj.data);
+
+        let hex = oid.to_hex();
+        let git_out = Command::new("git")
+            .current_dir(tmp.path())
+            .args([
+                "-c",
+                "core.multiPackIndex=false",
+                "cat-file",
+                "-p",
+                hex.as_str(),
+            ])
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git cat-file");
+        assert!(
+            git_out.status.success(),
+            "git cat-file failed: {}",
+            String::from_utf8_lossy(&git_out.stderr)
+        );
+        assert_eq!(git_out.stdout, grit_obj.data);
+    }
+
+    #[test]
+    fn wrong_midx_hash_version_returns_typed_error() {
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let midx_path = objects.join("pack/multi-pack-index");
+        let mut bytes = fs::read(&midx_path).expect("read midx");
+        bytes[5] = 2;
+        fs::write(&midx_path, &bytes).expect("write wrong hash version");
+
+        let err =
+            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1).expect_err("hash mismatch");
+        assert!(
+            matches!(
+                err,
+                Error::Midx(MidxError::HashVersionMismatch {
+                    found: 2,
+                    expected: 1
+                })
+            ),
+            "unexpected error: {err:?}"
         );
     }
 

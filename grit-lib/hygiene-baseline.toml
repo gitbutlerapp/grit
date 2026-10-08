@@ -532,22 +532,22 @@ system_time_now = 0
 [file.midx.rs]
 println = 0
 print = 0
-eprintln = 7
+eprintln = 4
 eprint = 0
 dbg = 0
-process_exit = 1
+process_exit = 0
 env_var = 0
 env_var_os = 0
 env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 0
-literal_fatal = 1
-literal_error = 9
+literal_fatal = 0
+literal_error = 3
 literal_hint = 0
-literal_warning = 3
+literal_warning = 1
 command_new = 0
-static_global = 3
+static_global = 2
 system_time_now = 0
 
 [file.notes.rs]
@@ -883,7 +883,7 @@ literal_error = 1
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 1
 system_time_now = 0
 
 [file.rerere.rs]

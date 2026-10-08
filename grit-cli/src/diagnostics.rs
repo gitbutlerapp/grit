@@ -144,6 +144,22 @@ pub fn format_warning_message(w: &Warning) -> String {
             "`index.version` is not a valid index format number (using format {fallback})"
         ),
         Warning::MailmapUnreadable { detail } => detail.clone(),
+        Warning::MidxChecksumMismatch => {
+            "multi-pack-index checksum mismatch; ignoring index for object reads".into()
+        }
+        Warning::MidxIgnoringExistingChecksumMismatch => {
+            "ignoring existing multi-pack-index because its checksum does not validate".into()
+        }
+        Warning::MidxChunkTableError { detail } => detail.clone(),
+        Warning::MidxRevIndexWrongSize => {
+            "multi-pack-index reverse-index chunk is the wrong size".into()
+        }
+        Warning::MidxBitmapMissingReverseIndex => {
+            "multi-pack bitmap is missing required reverse index".into()
+        }
+        Warning::MidxPackIndexUnavailable { pack } => {
+            format!("packfile {pack} index unavailable")
+        }
         _ => format!("{w:?}"),
     }
 }
@@ -176,6 +192,14 @@ fn warning_kind(w: &Warning) -> String {
         Warning::IndexVersionEnvInvalid { .. } => "index_version_env_invalid".into(),
         Warning::IndexVersionConfigInvalid { .. } => "index_version_config_invalid".into(),
         Warning::MailmapUnreadable { .. } => "mailmap_unreadable".into(),
+        Warning::MidxChecksumMismatch => "midx_checksum_mismatch".into(),
+        Warning::MidxIgnoringExistingChecksumMismatch => {
+            "midx_ignoring_existing_checksum_mismatch".into()
+        }
+        Warning::MidxChunkTableError { .. } => "midx_chunk_table_error".into(),
+        Warning::MidxRevIndexWrongSize => "midx_rev_index_wrong_size".into(),
+        Warning::MidxBitmapMissingReverseIndex => "midx_bitmap_missing_reverse_index".into(),
+        Warning::MidxPackIndexUnavailable { .. } => "midx_pack_index_unavailable".into(),
         _ => "other".into(),
     }
 }

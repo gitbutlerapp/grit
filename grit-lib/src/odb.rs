@@ -26,9 +26,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::diagnostics::NullDiagnostics;
+use crate::error::{Error, MidxError, Result};
 use crate::hash;
-use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
+use crate::midx::{
+    midx_oid_listed_in_tip, try_read_object_via_midx_with_diagnostics,
+    validate_midx_referenced_packs_with_diagnostics,
+};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 use crate::pack;
 use flate2::read::ZlibDecoder;
@@ -272,6 +276,13 @@ impl Odb {
     ) -> Self {
         self.shared_config_state = Some(state);
         self
+    }
+
+    fn diagnostics_handle(&self) -> crate::diagnostics::DiagnosticsHandle {
+        self.shared_config_state
+            .as_ref()
+            .map(|state| state.diagnostics_handle())
+            .unwrap_or_else(|| Arc::new(NullDiagnostics))
     }
 
     fn load_config_cascade(&self) -> Result<ConfigSet> {
@@ -860,7 +871,11 @@ impl Odb {
         // `packfile <pack> index unavailable` even when the requested object turns out to be
         // loose. Reproduce that once-per-process so `rev-list` over a corrupt idx still warns.
         if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+            let diagnostics = self.diagnostics_handle();
+            validate_midx_referenced_packs_with_diagnostics(
+                &self.objects_dir,
+                diagnostics.as_ref(),
+            );
         }
 
         let path = self.object_path(oid);
@@ -877,8 +892,17 @@ impl Odb {
         }
 
         if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            if let Some(obj) = try_read_object_via_midx(&self.objects_dir, oid, self.hash_algo())? {
-                return Ok(obj);
+            let diagnostics = self.diagnostics_handle();
+            match try_read_object_via_midx_with_diagnostics(
+                &self.objects_dir,
+                oid,
+                self.hash_algo(),
+                diagnostics.as_ref(),
+            ) {
+                Ok(Some(obj)) => return Ok(obj),
+                Ok(None) => {}
+                Err(Error::Midx(MidxError::HashVersionMismatch { .. })) => {}
+                Err(err) => return Err(err),
             }
         }
 
@@ -923,10 +947,16 @@ impl Odb {
             return parse_object_bytes(&raw);
         }
         if use_midx {
-            if let Some(obj) =
-                try_read_object_via_midx(objects_dir, oid, hash_algo_for_objects_dir(objects_dir))?
-            {
-                return Ok(obj);
+            match try_read_object_via_midx_with_diagnostics(
+                objects_dir,
+                oid,
+                hash_algo_for_objects_dir(objects_dir),
+                &NullDiagnostics,
+            ) {
+                Ok(Some(obj)) => return Ok(obj),
+                Ok(None) => {}
+                Err(Error::Midx(MidxError::HashVersionMismatch { .. })) => {}
+                Err(err) => return Err(err),
             }
         }
         pack::read_object_from_packs(objects_dir, oid)

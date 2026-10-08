@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 
+pub use crate::midx_error::MidxError;
+
 /// The top-level error type for all grit-lib operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -166,6 +168,10 @@ pub enum Error {
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]
     DetachedHead,
+
+    /// Multi-pack-index load or write failure.
+    #[error(transparent)]
+    Midx(#[from] MidxError),
 }
 
 /// Convenience alias for `Result<T, Error>`.

@@ -70,6 +70,18 @@ pub enum Warning {
     IndexVersionConfigInvalid { fallback: u32 },
     /// Mailmap blob/object could not be read as a blob.
     MailmapUnreadable { detail: String },
+    /// MIDX trailing checksum does not validate; reads fall back to pack lookup.
+    MidxChecksumMismatch,
+    /// Existing on-disk MIDX checksum failed while writing a replacement index.
+    MidxIgnoringExistingChecksumMismatch,
+    /// Recoverable MIDX chunk-table parse problem (Git `error:` before returning NULL).
+    MidxChunkTableError { detail: String },
+    /// Embedded MIDX reverse-index chunk size does not match object count.
+    MidxRevIndexWrongSize,
+    /// MIDX bitmap requires a reverse index that is missing or wrong-sized.
+    MidxBitmapMissingReverseIndex,
+    /// A pack named by the MIDX has a present but unreadable `.idx` file.
+    MidxPackIndexUnavailable { pack: String },
 }
 
 /// Optional trace events (network debugging, etc.), separate from [`Warning`].
