@@ -3038,7 +3038,6 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
     Ok(out)
 }
 
-#[cfg(test)]
 mod pack_cache_test_sync {
     use std::cell::Cell;
     use std::sync::Mutex;
@@ -3103,6 +3102,18 @@ mod pack_cache_test_sync {
 #[cfg(test)]
 pub(crate) fn pack_cache_test_guard() -> pack_cache_test_sync::PackCacheTestGuard {
     pack_cache_test_sync::acquire()
+}
+
+/// Serializes tests that mutate the process-global pack cache (integration tests).
+#[doc(hidden)]
+pub fn test_pack_cache_guard() -> pack_cache_test_sync::PackCacheTestGuard {
+    pack_cache_test_sync::acquire()
+}
+
+/// Re-read pack bytes when the on-disk file changed but the path is unchanged.
+#[doc(hidden)]
+pub fn revalidate_stale_pack_bytes(pack_path: &Path) -> Result<bool> {
+    pack_cache::revalidate_stale_pack_bytes(pack_path)
 }
 
 #[cfg(test)]

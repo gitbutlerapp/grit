@@ -11,12 +11,13 @@ use grit_lib::pack::{
     clear_pack_cache, collect_local_pack_info, pack_index_entry_matches_sha1_oid,
     parse_pack_index_bytes, read_idx_object_ids, read_local_pack_indexes,
     read_local_pack_indexes_cached, read_object_from_pack, read_object_from_packs,
-    read_pack_bytes_cached, read_pack_index, read_pack_index_no_verify, skip_one_pack_object,
-    verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
+    read_pack_bytes_cached, read_pack_index, read_pack_index_no_verify,
+    reprepare_pack_directory_on_miss, revalidate_stale_pack_bytes, skip_one_pack_object,
+    test_pack_cache_guard, verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
 };
 use grit_test_support::objects::{
     git_cat_file_batch_check, git_supports_sha256, write_pack_and_index, HashAlgo as FixtureAlgo,
-    IndexPackOptions, IndexVersion, ObjectKind as FixtureKind, PackBuilder, RepoFixture,
+    IndexPackOptions, IndexVersion, ObjectKind as FixtureKind, PackBuilder, PackBuilt, RepoFixture,
 };
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -384,6 +385,69 @@ fn assert_corrupt(result: Result<(), Error>) {
     }
 }
 
+fn assert_corrupt_contains(result: Result<(), Error>, needle: &str) {
+    match result {
+        Err(Error::CorruptObject(msg)) => {
+            assert!(
+                msg.contains(needle),
+                "expected CorruptObject containing {needle:?}, got {msg:?}"
+            );
+        }
+        other => panic!("expected CorruptObject, got {other:?}"),
+    }
+}
+
+fn recompute_idx_trailer(raw: &mut [u8], hash_bytes: usize) {
+    let algo = HashAlgo::from_len(hash_bytes).expect("hash width");
+    let body_len = raw.len().saturating_sub(hash_bytes);
+    let digest = algo.digest(&raw[..body_len]);
+    raw[body_len..].copy_from_slice(digest.as_bytes());
+}
+
+/// Route a v2 index row through the 64-bit offset table (for t5313 extended-table cases).
+fn force_v2_entry_large_table(
+    raw: &mut Vec<u8>,
+    hash_bytes: usize,
+    count: usize,
+    entry: usize,
+    offset: u64,
+) {
+    let off32_start = 8 + 256 * 4 + count * hash_bytes + count * 4;
+    let pack_trailer_start = raw.len() - 2 * hash_bytes;
+    raw.splice(
+        pack_trailer_start..pack_trailer_start,
+        offset.to_be_bytes().to_vec(),
+    );
+    raw[off32_start + entry * 4..off32_start + entry * 4 + 4]
+        .copy_from_slice(&0x8000_0000u32.to_be_bytes());
+    recompute_idx_trailer(raw, hash_bytes);
+}
+
+fn pack_entry_crc(pack_bytes: &[u8], offset: u64, hash_bytes: usize) -> u32 {
+    let mut end = offset as usize;
+    skip_one_pack_object(pack_bytes, &mut end, offset, hash_bytes).expect("walk pack entry");
+    crc32fast::hash(&pack_bytes[offset as usize..end])
+}
+
+fn install_grit_v2_index(
+    objects_dir: &Path,
+    stem: &str,
+    pack_bytes: &[u8],
+    entries: &[(ObjectId, u64)],
+    hash_bytes: usize,
+) -> PathBuf {
+    std::fs::create_dir_all(objects_dir.join("pack")).expect("pack dir");
+    let pack_path = objects_dir.join("pack").join(format!("{stem}.pack"));
+    let idx_path = pack_path.with_extension("idx");
+    std::fs::write(&pack_path, pack_bytes).expect("write pack");
+    let rows: Vec<(ObjectId, u64, u32)> = entries
+        .iter()
+        .map(|(oid, off)| (*oid, *off, pack_entry_crc(pack_bytes, *off, hash_bytes)))
+        .collect();
+    write_v2_pack_index(&idx_path, &pack_path, &rows, hash_bytes).expect("write idx");
+    idx_path
+}
+
 #[test]
 fn truncated_idx_bad_magic_version_and_trailer() {
     let scratch = tempfile::tempdir().expect("scratch");
@@ -457,6 +521,26 @@ fn pack_index_object_count_mismatch_errors() {
         !out.index_ok,
         "git must reject pack header/index count skew"
     );
+
+    let odb = Odb::new(repo.path());
+    let oid_a = odb.hash(ObjectKind::Blob, b"a");
+    let oid_b = odb.hash(ObjectKind::Blob, b"b");
+    let off_a = bogus_count.entry_offsets[0] as u64;
+    let off_b = bogus_count.entry_offsets[1] as u64;
+    let idx_path = install_grit_v2_index(
+        &repo.objects_dir(),
+        "bogus-count-grit",
+        &bogus_count.bytes,
+        &[(oid_a, off_a), (oid_b, off_b)],
+        20,
+    );
+    let idx = read_pack_index(&idx_path).expect("grit idx for skewed pack");
+    let err = read_object_from_pack(&idx, &oid_a).unwrap_err();
+    assert_corrupt_contains(Err(err), "object count mismatch");
+    assert_corrupt_contains(
+        verify_pack_and_collect(&idx_path).map(|_| ()),
+        "object count mismatch",
+    );
 }
 
 #[test]
@@ -504,55 +588,88 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     );
     let idx = read_pack_index(&idx_path).expect("v2 idx");
     let oid0 = ObjectId::from_bytes(idx.oid_at(0)).expect("oid0");
+    let oid1 = ObjectId::from_bytes(idx.oid_at(1)).expect("oid1");
 
     let mut raw = std::fs::read(&idx_path).expect("raw idx");
     let hb = idx.hash_bytes();
     let count = idx.len();
     let off32_start = 8 + 256 * 4 + count * hb + count * 4;
     // Bogus v2 offset without MSB set but value beyond pack (simulates t5313).
-    let second_off = idx.offset_at(1) as u32;
-    let bad32: u32 = second_off.saturating_add(8);
-    raw[off32_start..off32_start + 4].copy_from_slice(&bad32.to_be_bytes());
+    let pack_len = std::fs::metadata(&pack_path).expect("stat").len();
+    let bad32: u32 = (pack_len + 4096) as u32;
+    raw[off32_start + 4..off32_start + 8].copy_from_slice(&bad32.to_be_bytes());
+    recompute_idx_trailer(&mut raw, hb);
     let bad32_path = scratch.path().join("bad32.idx");
     std::fs::write(&bad32_path, &raw).expect("write bad32");
-    std::fs::copy(&pack_path, scratch.path().join("bad32.pack")).expect("pair pack");
+    let bad32_pack = scratch.path().join("bad32.pack");
+    std::fs::copy(&pack_path, &bad32_pack).expect("pair pack");
+    let mut bad32_idx = read_pack_index(&bad32_path).expect("parse idx with bad 32-bit offset");
+    bad32_idx.pack_path = bad32_pack.clone();
+    let bad32_read = read_object_from_pack(&bad32_idx, &oid1);
     assert!(
-        verify_pack_and_collect(&bad32_path).is_err(),
-        "bogus v2 32-bit offset must fail verify_pack_and_collect"
+        matches!(bad32_read, Err(Error::CorruptObject(_))),
+        "bogus 32-bit offset read: {bad32_read:?}"
     );
-    let _ = oid0;
+    let bad32_verify = verify_pack_and_collect(&bad32_path);
+    assert!(
+        matches!(bad32_verify, Err(Error::CorruptObject(_))),
+        "bogus 32-bit offset verify: {bad32_verify:?}"
+    );
 
-    let tiny_built = {
-        let mut b = PackBuilder::new(FixtureAlgo::Sha1);
-        b.add_full(FixtureKind::Blob, b"x");
-        b.build()
-    };
-    let ext_idx_path = index_pack_with_version(
-        &repo,
-        "ext64",
-        &tiny_built.bytes,
-        IndexVersion::V2LargeOffsetAt(1),
-    );
+    let ext_idx_path = idx_path.clone();
     let ext_idx = read_pack_index(&ext_idx_path).expect("64-bit idx");
-    let mut ext_raw = std::fs::read(&ext_idx_path).expect("raw ext");
+    let ext_pack_path = ext_idx_path.with_extension("pack");
+    let ext_row = 1usize;
     let ext_count = ext_idx.len();
+    let ext_pack_offset = ext_idx.offset_at(ext_row);
+    let ext_oid = ObjectId::from_bytes(ext_idx.oid_at(ext_row)).expect("ext oid");
+    let mut ext_raw = std::fs::read(&ext_idx_path).expect("raw ext");
+    force_v2_entry_large_table(&mut ext_raw, hb, ext_count, ext_row, ext_pack_offset);
+    let forced_path = scratch.path().join("ext64-forced.idx");
+    std::fs::write(&forced_path, &ext_raw).expect("write forced idx");
+    let forced_idx = read_pack_index(&forced_path).expect("parse forced large table");
+    assert_eq!(forced_idx.offset_at(ext_row), ext_pack_offset);
     let ext_off32 = 8 + 256 * 4 + ext_count * hb + ext_count * 4;
     let large_base = ext_off32 + ext_count * 4;
-    let ext_pack_len = std::fs::metadata(ext_idx_path.with_extension("pack"))
+    let ext_pack_len = std::fs::metadata(&ext_pack_path)
         .expect("stat ext pack")
         .len();
     let bogus64: u64 = ext_pack_len + 500;
     ext_raw[large_base..large_base + 8].copy_from_slice(&bogus64.to_be_bytes());
+    recompute_idx_trailer(&mut ext_raw, hb);
     let ext_bad = scratch.path().join("ext64-bad.idx");
     std::fs::write(&ext_bad, &ext_raw).expect("write ext bad");
-    std::fs::copy(
-        ext_idx_path.with_extension("pack"),
-        scratch.path().join("ext64-bad.pack"),
-    )
-    .expect("pair ext pack");
+    std::fs::copy(&ext_pack_path, scratch.path().join("ext64-bad.pack")).expect("pair ext pack");
+    let ext_bad_idx = read_pack_index(&ext_bad).expect("parse idx with bad 64-bit offset");
     assert!(
-        verify_pack_and_collect(&ext_bad).is_err(),
-        "bogus 64-bit extension offset must fail verify_pack_and_collect"
+        matches!(
+            read_object_from_pack(&ext_bad_idx, &ext_oid),
+            Err(Error::CorruptObject(_))
+        ),
+        "bogus 64-bit table offset must fail read"
+    );
+    assert!(
+        matches!(
+            verify_pack_and_collect(&ext_bad),
+            Err(Error::CorruptObject(_))
+        ),
+        "bogus 64-bit table offset must fail verify"
+    );
+
+    // Bogus 32-bit value pointing at the extended table region without the MSB (t5313).
+    let large_base = off32_start + count * 4;
+    let mut into_ext = std::fs::read(&idx_path).expect("raw v2 idx");
+    let bogus_into: u32 = (large_base + 4) as u32;
+    into_ext[off32_start + 4..off32_start + 8].copy_from_slice(&bogus_into.to_be_bytes());
+    recompute_idx_trailer(&mut into_ext, hb);
+    let into_path = scratch.path().join("into-ext.idx");
+    std::fs::write(&into_path, &into_ext).expect("write into-ext idx");
+    std::fs::copy(&pack_path, scratch.path().join("into-ext.pack")).expect("pair pack");
+    let into_idx = read_pack_index(&into_path).expect("parse into-ext idx");
+    let oid1 = ObjectId::from_bytes(into_idx.oid_at(1)).expect("oid1");
+    assert!(
+        read_object_from_pack(&into_idx, &oid1).is_err(),
+        "offset landing in idx extended table must not read as pack object"
     );
 
     // Bogus OFS_DELTA distance in pack stream (t5313).
@@ -574,52 +691,51 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     );
 }
 
+fn install_duplicate_pack_index(
+    repo: &RepoFixture,
+    _algo: HashAlgo,
+    stem: &str,
+    payload: &[u8],
+) -> (PackBuilt, PathBuf, ObjectId) {
+    let fixture = repo.algo();
+    let mut builder = PackBuilder::new(fixture);
+    let first = builder.add_full(FixtureKind::Blob, payload);
+    let second = builder
+        .duplicate_entry(first)
+        .expect("duplicate pack entry");
+    let built = builder.build();
+    assert_eq!(built.entry_offsets.len(), 2);
+    assert_ne!(built.entry_offsets[0], built.entry_offsets[1]);
+    assert_eq!(second, 1);
+    let hash_bytes = fixture.oid_len();
+    let odb = Odb::new(&repo.objects_dir());
+    let oid = odb.hash(ObjectKind::Blob, payload);
+    let off0 = built.entry_offsets[0] as u64;
+    let off1 = built.entry_offsets[1] as u64;
+    let idx_path = install_grit_v2_index(
+        &repo.objects_dir(),
+        stem,
+        &built.bytes,
+        &[(oid, off0), (oid, off1)],
+        hash_bytes,
+    );
+    let idx = read_pack_index(&idx_path).expect("dup idx");
+    assert_eq!(idx.len(), 2);
+    assert_eq!(idx.offset_at(0), off0);
+    assert_eq!(idx.offset_at(1), off1);
+    (built, idx_path, oid)
+}
+
 #[test]
 fn duplicate_index_entries_remain_readable() {
     run_both_algos(|algo| {
         let repo = RepoFixture::init(fixture_algo(algo)).expect("init");
-        std::fs::write(repo.path().join("dup.txt"), b"dup-me\n").expect("write");
-        assert!(repo.git(&["add", "dup.txt"]).ok);
-        assert!(repo.git(&["commit", "-qm", "c"]).ok);
-        let oid_hex = repo
-            .git(&["hash-object", "dup.txt"])
-            .stdout
-            .trim()
-            .to_string();
-        let stdin = format!("{oid_hex}\n{oid_hex}\n");
-        let mut child = Command::new("git")
-            .current_dir(repo.path())
-            .args(["pack-objects", "dup-pack"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .spawn()
-            .expect("pack-objects");
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(stdin.as_bytes())
-            .unwrap();
-        let pack_out = child.wait_with_output().unwrap();
-        assert!(
-            pack_out.status.success(),
-            "pack-objects: {}",
-            String::from_utf8_lossy(&pack_out.stderr)
-        );
-        let stem = String::from_utf8_lossy(&pack_out.stdout).trim().to_string();
-        let pack_path = repo.path().join(format!("dup-pack-{stem}.pack"));
-        let idx_path = pack_path.with_extension("idx");
-        assert!(
-            repo.git(&["index-pack", "-v", pack_path.to_str().unwrap()])
-                .ok
-        );
-        let idx = read_pack_index(&idx_path).expect("dup idx");
-        let oid = ObjectId::from_hex(&oid_hex).expect("oid");
-        assert!(idx.find_position(&oid).is_some());
-        read_object_from_pack(&idx, &oid).expect("read duplicate slot");
+        let payload = b"duplicate-pack-entry-payload";
+        let (_built, _idx_path, oid) =
+            install_duplicate_pack_index(&repo, algo, "dup-entries", payload);
+        let obj = read_object_from_packs(&repo.objects_dir(), &oid).expect("read duplicate");
+        assert_eq!(obj.data, payload);
+        assert_eq!(obj.kind, ObjectKind::Blob);
     });
 }
 
@@ -652,6 +768,7 @@ fn large_pack_uses_mmap_backing_for_reads() {
 
 #[test]
 fn collect_local_pack_info_and_cache_invalidation() {
+    let _guard = test_pack_cache_guard();
     clear_pack_cache();
     run_both_algos(|algo| {
         let (repo, _pack, oids) = rich_pack_fixture(algo);
@@ -663,28 +780,41 @@ fn collect_local_pack_info_and_cache_invalidation() {
 
         let listed = read_local_pack_indexes(&objects).expect("list");
         assert_eq!(listed.len(), info.pack_count);
-
-        read_local_pack_indexes_cached(&objects).expect("warm cache");
-        let pack_path = objects
-            .join("pack")
-            .read_dir()
-            .unwrap()
-            .find_map(|e| {
-                let p = e.ok()?.path();
-                if p.extension().is_some_and(|x| x == "pack") {
-                    Some(p)
-                } else {
-                    None
-                }
-            })
-            .expect("pack");
-        let idx_path = pack_path.with_extension("idx");
-        std::fs::remove_file(&pack_path).expect("remove pack");
-        std::fs::remove_file(&idx_path).expect("remove idx");
-        clear_pack_cache();
-        let info2 = collect_local_pack_info(&objects).expect("after remove");
-        assert_eq!(info2.pack_count, 0);
-        let cached = read_local_pack_indexes_cached(&objects).expect("rescan");
-        assert!(cached.is_empty());
     });
+}
+
+#[test]
+fn warmed_pack_cache_revalidates_after_same_path_replacement() {
+    let _guard = test_pack_cache_guard();
+    clear_pack_cache();
+    let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
+    let objects = repo.objects_dir();
+    let (_built_a, idx_path, oid_a) =
+        install_duplicate_pack_index(&repo, HashAlgo::Sha1, "repack-me", b"before-repack");
+    let pack_path = idx_path.with_extension("pack");
+    read_object_from_packs(&objects, &oid_a).expect("warm pack read path");
+    let _ = read_pack_bytes_cached(&pack_path).expect("warm pack bytes cache");
+    read_local_pack_indexes_cached(&objects).expect("warm index listing");
+
+    let mut builder = PackBuilder::new(FixtureAlgo::Sha1);
+    builder.add_full(FixtureKind::Blob, b"after-repack-content");
+    let built_b = builder.build();
+    let odb = Odb::new(repo.path());
+    let oid_b = odb.hash(ObjectKind::Blob, b"after-repack-content");
+    let off_b = built_b.entry_offsets[0] as u64;
+    std::fs::write(&pack_path, &built_b.bytes).expect("replace pack bytes");
+    let rows = [(oid_b, off_b, pack_entry_crc(&built_b.bytes, off_b, 20))];
+    write_v2_pack_index(&idx_path, &pack_path, &rows, 20).expect("replace idx");
+    filetime::set_file_mtime(objects.join("pack"), filetime::FileTime::now()).expect("touch pack");
+
+    assert!(
+        revalidate_stale_pack_bytes(&pack_path).expect("revalidate"),
+        "replacement must reload warmed pack bytes"
+    );
+    let _ = reprepare_pack_directory_on_miss(&objects).expect("reprepare");
+    let idx = read_pack_index(&idx_path).expect("reload idx");
+    let got = read_object_from_pack(&idx, &oid_b).expect("read from replaced pack");
+    assert_eq!(got.data, b"after-repack-content");
+    let via_packs = read_object_from_packs(&objects, &oid_b).expect("read via warmed store");
+    assert_eq!(via_packs.data, b"after-repack-content");
 }
