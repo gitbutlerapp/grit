@@ -23,6 +23,12 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTENT_DIR = ROOT / "content" / "blog"
 OUT_DIR = ROOT / "docs" / "blog"
 SITE_URL = "https://grit-scm.com"
+POST_MARKDOWN_LINK_RE = re.compile(
+    rf"^{re.escape(SITE_URL)}/blog/(?P<slug>[^/#]+)/?$"
+)
+DOCS_MARKDOWN_LINK_RE = re.compile(
+    rf"^{re.escape(SITE_URL)}/docs/(?P<slug>.*?)/?$"
+)
 # Fixed RSS timestamp when there are no posts (deterministic site generation).
 EMPTY_FEED_LAST_BUILD = datetime(1970, 1, 1, tzinfo=timezone.utc)
 SITE_TITLE = "the Grit project"
@@ -212,6 +218,47 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
     return "\n".join(output), toc
 
 
+def post_markdown_url(slug: str) -> str:
+    """Absolute URL of a blog post Markdown twin."""
+    return f"{SITE_URL}/blog/{slug}/index.md"
+
+
+def docs_markdown_url_from_web_path(slug: str) -> str:
+    """Map a docs web slug to the Markdown twin URL."""
+    slug = slug.strip("/") or "index"
+    return f"{SITE_URL}/docs/{slug}/index.md"
+
+
+def rewrite_blog_markdown_links(body: str) -> str:
+    """Rewrite grit-scm.com and relative docs links to Markdown twin URLs."""
+
+    def url_for_path(path: str) -> str | None:
+        blog_match = POST_MARKDOWN_LINK_RE.match(path)
+        if blog_match:
+            return post_markdown_url(blog_match.group("slug"))
+        docs_match = DOCS_MARKDOWN_LINK_RE.match(path)
+        if docs_match:
+            return docs_markdown_url_from_web_path(docs_match.group("slug"))
+        if path.startswith("/docs/"):
+            rel = path.removeprefix("/docs/").strip("/")
+            return docs_markdown_url_from_web_path(rel)
+        return None
+
+    return site_util.rewrite_markdown_links(body, url_for_path)
+
+
+def render_post_markdown_twin(post: Post) -> str:
+    """Render the Markdown twin for one blog post."""
+    _meta, body = parse_front_matter(post.source.read_text(encoding="utf-8"))
+    body = rewrite_blog_markdown_links(body)
+    return site_util.compose_markdown_twin(
+        post.title,
+        body,
+        summary=post.summary,
+        published=post.published,
+    )
+
+
 def load_posts() -> list[Post]:
     posts: list[Post] = []
     for path in sorted(CONTENT_DIR.glob("*.md")):
@@ -346,7 +393,11 @@ def render_post(post: Post) -> str:
 </section>
 </main>
 {footer(links)}"""
-    extra = f'<link rel="canonical" href="./" />\n<meta property="og:title" content="{html.escape(post.title, quote=True)}" />'
+    extra = (
+        '<link rel="canonical" href="./" />\n'
+        '<link rel="alternate" type="text/markdown" href="index.md" />\n'
+        f'<meta property="og:title" content="{html.escape(post.title, quote=True)}" />'
+    )
     return page_shell(f"{post.title} - {SITE_TITLE}", post.summary or BLOG_DESCRIPTION, body, "../..", "../", "../feed.xml", extra)
 
 
@@ -446,6 +497,7 @@ def generate(out_dir: Path) -> None:
         post_dir = out_dir / post.slug
         post_dir.mkdir(parents=True)
         (post_dir / "index.html").write_text(render_post(post), encoding="utf-8")
+        (post_dir / "index.md").write_text(render_post_markdown_twin(post), encoding="utf-8")
 
 
 def check_committed() -> int:

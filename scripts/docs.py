@@ -57,7 +57,6 @@ DOCS_RS_GRIT_LIB = "https://docs.rs/grit-lib"
 BLOG_INDEX_URL = f"{blog.SITE_URL}/blog/"
 TOC_MIN_HEADINGS = 2
 INCLUDE_RE = re.compile(r"<!--\s*include:\s*(\S+)\s*-->")
-MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 HTML_CHROME_MARKERS = (
     "<nav",
     'class="docnav"',
@@ -210,24 +209,16 @@ def relative_link_to_slug(from_slug: str, url_path: str) -> str:
 def rewrite_markdown_links(body: str, from_slug: str) -> str:
     """Rewrite internal relative links to absolute grit-scm.com Markdown URLs."""
 
-    def replace(match: re.Match[str]) -> str:
-        text, url = match.group(1), match.group(2).strip()
-        fragment = ""
-        path = url
-        if "#" in url:
-            path, frag = url.split("#", 1)
-            fragment = f"#{frag}" if frag else ""
-        if not path:
-            return match.group(0)
+    def url_for_path(path: str) -> str | None:
         lowered = path.lower()
         if lowered.startswith(("http://", "https://", "mailto:", "tel:")):
-            return match.group(0)
+            return None
         if path.startswith("#"):
-            return match.group(0)
+            return None
         target_slug = relative_link_to_slug(from_slug, path)
-        return f"[{text}]({markdown_canonical_url(target_slug)}{fragment})"
+        return markdown_canonical_url(target_slug)
 
-    return MARKDOWN_LINK_RE.sub(replace, body)
+    return site_util.rewrite_markdown_links(body, url_for_path)
 
 
 def load_manifest() -> list[SectionSpec]:
@@ -513,15 +504,19 @@ def render_llms_txt(site: Site) -> str:
                 lines.append(llms_link_line(label, slug, page.summary))
         lines.append("")
 
-    lines.extend(
-        [
-            "## Optional",
-            "",
-            f"- [grit-lib on docs.rs]({DOCS_RS_GRIT_LIB}): Rust API reference generated from crate rustdoc.",
-            f"- [Blog]({BLOG_INDEX_URL}): release notes and project updates.",
-            "",
-        ]
+    lines.extend(["## Optional", ""])
+    lines.append(
+        f"- [grit-lib on docs.rs]({DOCS_RS_GRIT_LIB}): Rust API reference generated from crate rustdoc."
     )
+    for post in blog.load_posts():
+        url = blog.post_markdown_url(post.slug)
+        detail = post.summary.strip()
+        if detail:
+            lines.append(f"- [{post.title}]({url}): {detail}")
+        else:
+            lines.append(f"- [{post.title}]({url})")
+    lines.append(f"- [Blog]({BLOG_INDEX_URL}): release notes and project updates.")
+    lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -741,13 +736,10 @@ def page_markdown_body(
     else:
         body = prepare_markdown_body(body)
     body = rewrite_markdown_links(body, page.slug)
-    parts = [f"# {page.title}"]
-    if page.summary:
-        parts.append(f"> {page.summary}")
-    parts.append(body.rstrip())
+    twin = site_util.compose_markdown_twin(page.title, body, summary=page.summary)
     if is_index:
-        parts.append(command_index_markdown(site).rstrip())
-    return "\n\n".join(parts) + "\n"
+        return twin.rstrip() + "\n\n" + command_index_markdown(site).rstrip() + "\n"
+    return twin
 
 
 def render_markdown_twin(

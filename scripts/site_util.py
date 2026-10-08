@@ -2,7 +2,57 @@
 from __future__ import annotations
 
 import filecmp
+import re
+from collections.abc import Callable
+from datetime import date
 from pathlib import Path
+
+MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+
+
+def compose_markdown_twin(
+    title: str,
+    body: str,
+    *,
+    summary: str = "",
+    published: date | None = None,
+) -> str:
+    """Build a Markdown twin document with title, optional date and summary, then body."""
+    parts = [f"# {title}"]
+    if published is not None:
+        parts.append(f"**Date:** {published.isoformat()}")
+    if summary.strip():
+        parts.append(f"> {summary.strip()}")
+    parts.append(body.rstrip())
+    return "\n\n".join(parts) + "\n"
+
+
+def rewrite_markdown_links(body: str, url_for_path: Callable[[str], str | None]) -> str:
+    """Rewrite ``[text](path)`` links when ``url_for_path`` returns an absolute URL."""
+
+    def replace(match: re.Match[str]) -> str:
+        text, url = match.group(1), match.group(2).strip()
+        fragment = ""
+        path = url
+        if "#" in url:
+            path, frag = url.split("#", 1)
+            fragment = f"#{frag}" if frag else ""
+        if not path:
+            return match.group(0)
+        lowered = path.lower()
+        if lowered.startswith(("http://", "https://", "mailto:", "tel:")):
+            absolute = url_for_path(path)
+            if absolute is None:
+                return match.group(0)
+            return f"[{text}]({absolute}{fragment})"
+        if path.startswith("#"):
+            return match.group(0)
+        absolute = url_for_path(path)
+        if absolute is None:
+            return match.group(0)
+        return f"[{text}]({absolute}{fragment})"
+
+    return MARKDOWN_LINK_RE.sub(replace, body)
 
 
 def file_equals(left: Path, right: Path) -> bool:

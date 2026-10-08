@@ -176,6 +176,20 @@ label = "Missing"
             self.assertIn("| Command | Summary |", index_md)
             self.assertIn(f"]({blog.SITE_URL}/docs/status/index.md)", index_md)
 
+    def test_llms_txt_optional_lists_blog_posts(self) -> None:
+        site = docs.load_site(content_dir=self.content)
+        llms = docs.render_llms_txt(site)
+        optional_start = llms.index("## Optional")
+        optional = llms[optional_start:]
+        posts = blog.load_posts()
+        self.assertGreater(len(posts), 0)
+        positions: list[int] = []
+        for post in posts:
+            url = blog.post_markdown_url(post.slug)
+            self.assertIn(url, optional)
+            positions.append(optional.index(url))
+        self.assertEqual(positions, sorted(positions))
+
     def test_llms_txt_lists_every_manifest_page(self) -> None:
         site = docs.load_site(content_dir=self.content)
         llms = docs.render_llms_txt(site)

@@ -73,4 +73,8 @@ Each docs page has a Markdown twin at the same URL with `index.md` instead of `i
 ## Optional
 
 - [grit-lib on docs.rs](https://docs.rs/grit-lib): Rust API reference generated from crate rustdoc.
+- [Goodbye grit-git](https://grit-scm.com/blog/goodbye-grit-git/index.md): We removed the Git-compatible grit-git CLI and the ported test harness. Grit is now two things: a complete Git library and a simpler CLI built on it.
+- [A new site, and a new focus](https://grit-scm.com/blog/a-new-site-and-a-new-focus/index.md): Grit got far enough on Git's own test suite that the next problem isn't compatibility. It's speed and a library worth linking. Here's what changes.
+- [grit is now the simple CLI](https://grit-scm.com/blog/grit-is-now-the-simple-cli/index.md): The grit binary you install is now the simple, library-first CLI. The fully git-compatible mirror moves to grit-git.
+- [Introducing Grit](https://grit-scm.com/blog/introducing-grit/index.md): A short note on rebuilding Git in Rust, as a library, with compatibility as the benchmark.
 - [Blog](https://grit-scm.com/blog/): release notes and project updates.
