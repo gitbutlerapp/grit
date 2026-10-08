@@ -5,6 +5,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use grit_lib::config::ConfigSet;
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::pack::{read_pack_index, PackIndex};
@@ -131,11 +132,20 @@ fn write_commit_patch(out: &mut impl Write, repo: &Repository, oid: &ObjectId) -
     let raw = repo.odb.read(oid).context("read commit")?;
     let commit = parse_commit(&raw.data).context("parse commit")?;
     writeln!(out, "commit {oid}")?;
+    if commit.parents.len() > 1 {
+        let p0 = abbreviate_oid(repo, &commit.parents[0])?;
+        let p1 = abbreviate_oid(repo, &commit.parents[1])?;
+        writeln!(out, "Merge: {p0} {p1}")?;
+    }
     writeln!(out, "Author: {}", format_author_display(&commit.author))?;
     writeln!(out, "Date:   {}", format_author_date(&commit.author))?;
     writeln!(out)?;
     for line in commit.message.lines() {
         writeln!(out, "    {line}")?;
+    }
+    // Default `git log -p` does not emit patches for merge commits.
+    if commit.parents.len() > 1 {
+        return Ok(());
     }
     writeln!(out)?;
     let parent_tree = if commit.parents.is_empty() {
@@ -171,8 +181,8 @@ fn write_diff_entry(
             writeln!(
                 out,
                 "index {}..{}",
-                abbreviated_oid(&grit_lib::diff::zero_oid()),
-                abbreviated_oid(&entry.new_oid)
+                abbreviate_oid(repo, &grit_lib::diff::zero_oid())?,
+                abbreviate_oid(repo, &entry.new_oid)?
             )?;
         }
         DiffStatus::Deleted => {
@@ -180,16 +190,16 @@ fn write_diff_entry(
             writeln!(
                 out,
                 "index {}..{}",
-                abbreviated_oid(&entry.old_oid),
-                abbreviated_oid(&grit_lib::diff::zero_oid())
+                abbreviate_oid(repo, &entry.old_oid)?,
+                abbreviate_oid(repo, &grit_lib::diff::zero_oid())?
             )?;
         }
         DiffStatus::Modified => {
             writeln!(
                 out,
                 "index {}..{} {}",
-                abbreviated_oid(&entry.old_oid),
-                abbreviated_oid(&entry.new_oid),
+                abbreviate_oid(repo, &entry.old_oid)?,
+                abbreviate_oid(repo, &entry.new_oid)?,
                 entry.new_mode
             )?;
         }
@@ -200,16 +210,16 @@ fn write_diff_entry(
             writeln!(
                 out,
                 "index {}..{}",
-                abbreviated_oid(&entry.old_oid),
-                abbreviated_oid(&entry.new_oid)
+                abbreviate_oid(repo, &entry.old_oid)?,
+                abbreviate_oid(repo, &entry.new_oid)?
             )?;
         }
         _ => {
             writeln!(
                 out,
                 "index {}..{}",
-                abbreviated_oid(&entry.old_oid),
-                abbreviated_oid(&entry.new_oid)
+                abbreviate_oid(repo, &entry.old_oid)?,
+                abbreviate_oid(repo, &entry.new_oid)?
             )?;
         }
     }
@@ -231,8 +241,85 @@ fn write_diff_entry(
     Ok(())
 }
 
-fn abbreviated_oid(oid: &ObjectId) -> String {
-    oid.to_hex()[..7].to_string()
+fn min_abbrev_len(repo: &Repository) -> usize {
+    ConfigSet::load(Some(&repo.git_dir), true)
+        .ok()
+        .and_then(|cfg| cfg.get("core.abbrev"))
+        .and_then(|v| v.parse::<i64>().ok())
+        .map(|n| n as usize)
+        .unwrap_or(7)
+        .clamp(4, 40)
+}
+
+fn collect_hex_ids_for_abbrev(repo: &Repository) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    let objects = repo.git_dir.join("objects");
+    collect_loose_hex_ids(&objects, &mut ids)?;
+    let pack_dir = objects.join("pack");
+    if pack_dir.is_dir() {
+        for entry in std::fs::read_dir(&pack_dir)? {
+            let path = entry?.path();
+            if path.extension().is_some_and(|e| e == "idx") {
+                let idx = read_pack_index(&path)?;
+                for ent in &idx.entries {
+                    ids.push(ObjectId::from_bytes(&ent.oid).context("pack oid")?.to_hex());
+                }
+            }
+        }
+    }
+    Ok(ids)
+}
+
+fn collect_loose_hex_ids(objects: &Path, ids: &mut Vec<String>) -> Result<()> {
+    let read = match std::fs::read_dir(objects) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    for dir_entry in read {
+        let dir_entry = dir_entry?;
+        let name = dir_entry.file_name();
+        let Some(prefix) = name.to_str() else {
+            continue;
+        };
+        if prefix.len() != 2 || !prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        if !dir_entry.file_type()?.is_dir() {
+            continue;
+        }
+        for file_entry in std::fs::read_dir(dir_entry.path())? {
+            let file_entry = file_entry?;
+            if !file_entry.file_type()?.is_file() {
+                continue;
+            }
+            let suffix_os = file_entry.file_name();
+            let Some(suffix) = suffix_os.to_str() else {
+                continue;
+            };
+            if suffix.len() >= 38 && suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+                ids.push(format!("{prefix}{suffix}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn abbreviate_oid(repo: &Repository, oid: &ObjectId) -> Result<String> {
+    let min_len = min_abbrev_len(repo);
+    let target = oid.to_hex();
+    if !repo.odb.exists(oid) {
+        return Ok(target[..min_len.min(target.len())].to_owned());
+    }
+    let all = collect_hex_ids_for_abbrev(repo)?;
+    for len in min_len..=40 {
+        let prefix = &target[..len];
+        let matches = all.iter().filter(|c| c.starts_with(prefix)).count();
+        if matches <= 1 {
+            return Ok(prefix.to_owned());
+        }
+    }
+    Ok(target)
 }
 
 fn format_author_display(ident: &str) -> String {
