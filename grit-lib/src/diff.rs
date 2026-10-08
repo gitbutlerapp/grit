@@ -3634,6 +3634,7 @@ pub fn refresh_index_stat_content_verified(
     config: Option<&ConfigSet>,
     _stat_parallel_threads: Option<usize>,
 ) -> Result<bool> {
+    let _ = _stat_parallel_threads;
     refresh_index_stat_content_verified_with_rules(
         odb,
         git_dir,
