@@ -430,7 +430,7 @@ mod tests {
             encoding: None,
             message: "init\n".into(),
             raw_message: None,
-            preserved_preamble: Vec::new(),
+            extra_headers: Vec::new(),
         };
         let co = repo
             .odb

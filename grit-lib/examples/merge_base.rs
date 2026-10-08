@@ -54,7 +54,7 @@ fn commit_tree(
         encoding: None,
         message: format!("{message}\n"),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     repo.odb
         .write(ObjectKind::Commit, &serialize_commit(&commit))

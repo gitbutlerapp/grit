@@ -66,7 +66,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         encoding: parent.encoding.clone(),
         message: "library guide network example\n".to_owned(),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let new_oid = repo
         .odb

@@ -47,7 +47,7 @@ fn write_linear_commits(repo: &Repository, count: usize) -> grit_lib::objects::O
             encoding: None,
             message: format!("c{i}\n"),
             raw_message: None,
-            preserved_preamble: Vec::new(),
+            extra_headers: Vec::new(),
         });
         tip = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
         parent = Some(tip);

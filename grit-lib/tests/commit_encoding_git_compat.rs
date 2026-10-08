@@ -71,7 +71,7 @@ fn grit_write_encoded_commit(
         encoding: enc_label,
         message,
         raw_message: raw_body,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     repo.odb
         .write(ObjectKind::Commit, &serialize_commit(&data))

@@ -47,7 +47,7 @@ fn make_initial_commit(repo: &Repository) -> grit_lib::error::Result<grit_lib::o
         encoding: None,
         message: "root\n".to_owned(),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let oid = repo
         .odb

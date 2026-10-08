@@ -98,7 +98,7 @@ fn grit_pick(repo: &Repository, source_hex: &str) -> grit_lib::error::Result<()>
         encoding: None,
         message: source.message.clone(),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let new_oid = repo
         .odb

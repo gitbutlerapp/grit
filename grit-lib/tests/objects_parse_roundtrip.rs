@@ -152,6 +152,25 @@ fn commit_encoding_and_gpgsig_continuation_roundtrip() {
 }
 
 #[test]
+fn serialize_commit_reflects_tree_edit_after_parse() {
+    let raw = concat!(
+        "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+        "author A <a@example.com> 1 +0000\n",
+        "committer C <c@example.com> 1 +0000\n",
+        "\n",
+        "msg\n",
+    );
+    let mut parsed = parse_commit(raw.as_bytes()).expect("parse");
+    let zero = ObjectId::from_hex("0000000000000000000000000000000000000000").unwrap();
+    parsed.tree = zero;
+    let out = serialize_commit(&parsed);
+    assert!(
+        out.starts_with(format!("tree {}\n", zero.to_hex()).as_bytes()),
+        "serialize_commit ignored the updated public tree field"
+    );
+}
+
+#[test]
 fn commit_message_without_trailing_newline_roundtrip() {
     let raw = b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
 author A <a@example.com> 1 +0000\n\
@@ -293,7 +312,7 @@ fn serialize_parse_commit_tag_tree_identity() {
         encoding: None,
         message: "hello\n".to_string(),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let bytes = serialize_commit(&commit);
     let back = parse_commit(&bytes).unwrap();
@@ -325,7 +344,7 @@ fn serialize_commit_with_encoding_and_raw_author_bytes() {
         encoding: Some("UTF-8".to_string()),
         message: String::new(),
         raw_message: Some(b"raw-body".to_vec()),
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let bytes = serialize_commit(&commit);
     let parsed = parse_commit(&bytes).expect("parse");

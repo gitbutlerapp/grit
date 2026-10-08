@@ -40,7 +40,7 @@ fn write_demo_objects(
         encoding: None,
         message: "Library guide objects example\n".to_owned(),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let commit_oid = repo
         .odb

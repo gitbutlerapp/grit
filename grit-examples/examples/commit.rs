@@ -13,7 +13,7 @@ fn main() -> grit_lib::error::Result<()> {
         encoding: None,
         message: "initial commit\n".into(),
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
 
     let bytes = serialize_commit(&commit);

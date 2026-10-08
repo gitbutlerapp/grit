@@ -195,7 +195,7 @@ fn write_notes_ref(
             format!("{message}\n")
         },
         raw_message: None,
-        preserved_preamble: Vec::new(),
+        extra_headers: Vec::new(),
     };
     let bytes = serialize_commit(&commit);
     let commit_oid = odb.write(ObjectKind::Commit, &bytes)?;

@@ -641,11 +641,12 @@ pub struct CommitData {
     /// When set, `serialize_commit` uses these bytes instead of `message`.
     #[doc = "Optional raw message bytes for non-UTF-8 messages."]
     pub raw_message: Option<Vec<u8>>,
-    /// Exact header bytes from the start of the object through the blank line before the message.
+    /// Raw bytes for headers not represented in the fields above (`gpgsig`, `mergetag`, …),
+    /// including each line's trailing `\n` and any continuation lines (leading space).
     ///
-    /// When non-empty, [`serialize_commit`] writes this prefix verbatim (preserving `gpgsig`,
-    /// `mergetag`, and other extra headers in original order) and then the message body.
-    pub preserved_preamble: Vec<u8>,
+    /// [`serialize_commit`] always emits `tree`, `parent`, `author`, `committer`, and `encoding`
+    /// from the structured fields, then appends these bytes before the blank line and message.
+    pub extra_headers: Vec<u8>,
 }
 
 /// Parse the raw data of a commit object.
@@ -671,6 +672,7 @@ pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
     let mut author_raw: Option<Vec<u8>> = None;
     let mut committer_raw: Option<Vec<u8>> = None;
     let mut encoding: Option<String> = None;
+    let mut extra_headers = Vec::new();
     let mut cont = Continuation::Ignore;
 
     while pos < data.len() {
@@ -718,7 +720,7 @@ pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
                 encoding,
                 message,
                 raw_message,
-                preserved_preamble: data[..after_nl].to_vec(),
+                extra_headers,
             });
         }
 
@@ -737,7 +739,10 @@ pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
                     })?;
                     c.extend_from_slice(rest);
                 }
-                Continuation::Multiline | Continuation::Ignore => {}
+                Continuation::Multiline => {
+                    extra_headers.extend_from_slice(&data[line_start..after_nl]);
+                }
+                Continuation::Ignore => {}
             }
             pos = after_nl;
             continue;
@@ -782,6 +787,7 @@ pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
             }
             _ => {
                 cont = Continuation::Multiline;
+                extra_headers.extend_from_slice(&data[line_start..after_nl]);
             }
         }
         pos = after_nl;
@@ -928,15 +934,6 @@ pub fn serialize_tag(t: &TagData) -> Vec<u8> {
 /// supply a trailing LF; `git commit-tree` reading from stdin or `-F` does not add one.
 #[must_use]
 pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
-    if !c.preserved_preamble.is_empty() {
-        let mut out = c.preserved_preamble.clone();
-        if let Some(raw) = &c.raw_message {
-            out.extend_from_slice(raw);
-        } else if !c.message.is_empty() {
-            out.extend_from_slice(c.message.as_bytes());
-        }
-        return out;
-    }
     let mut out = Vec::new();
     out.extend_from_slice(format!("tree {}\n", c.tree).as_bytes());
     for p in &c.parents {
@@ -959,6 +956,7 @@ pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
     if let Some(enc) = &c.encoding {
         out.extend_from_slice(format!("encoding {enc}\n").as_bytes());
     }
+    out.extend_from_slice(&c.extra_headers);
     out.push(b'\n');
     if let Some(raw) = &c.raw_message {
         out.extend_from_slice(raw);
@@ -988,6 +986,26 @@ mod commit_parse_tests {
         assert_eq!(c.tree.to_hex(), "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
         assert_eq!(c.message, "msg\n");
         assert_eq!(serialize_commit(&c), raw.as_bytes());
+    }
+
+    #[test]
+    fn serialize_commit_applies_public_field_edits_after_parse() {
+        let raw = concat!(
+            "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+            "author A <a@example.com> 1 +0000\n",
+            "committer C <c@example.com> 1 +0000\n",
+            "\n",
+            "msg\n",
+        );
+        let mut commit = parse_commit(raw.as_bytes()).expect("parse");
+        let zero = ObjectId::from_hex("0000000000000000000000000000000000000000").unwrap();
+        commit.tree = zero;
+        let serialized = serialize_commit(&commit);
+        let tree_line = format!("tree {}\n", zero.to_hex());
+        assert!(
+            serialized.starts_with(tree_line.as_bytes()),
+            "serialize_commit ignored the updated public tree field"
+        );
     }
 
     #[test]

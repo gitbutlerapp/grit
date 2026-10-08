@@ -208,7 +208,7 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
             encoding: None,
             message: format!("history {i}\n"),
             raw_message: None,
-            preserved_preamble: Vec::new(),
+            extra_headers: Vec::new(),
         });
         let oid = repo
             .odb
