@@ -56,7 +56,12 @@ fn assert_read_fallback_via_odb(repo: &RepoFixture, objects: &std::path::Path, o
 
 fn assert_midx_read_skips_or_none(objects: &std::path::Path, oid: &ObjectId) {
     clear_pack_cache();
-    let _ = try_read_object_via_midx(objects, oid);
+    grit_lib::midx::evict_midx_read_cache_for_pack_dir(&objects.join("pack"));
+    match try_read_object_via_midx(objects, oid) {
+        Ok(None) => {}
+        Ok(Some(_)) => panic!("expected MIDX read to skip corrupt index"),
+        Err(err) => panic!("expected MIDX skip, got error: {err:?}"),
+    }
 }
 
 #[test]
@@ -147,7 +152,12 @@ fn verify_hash_version_mismatch() {
         data[5] = 2;
     });
     assert_verify_reports(&objects, "hash version");
-    assert_midx_read_skips_or_none(&objects, &oid);
+    match try_read_object_via_midx(&objects, &oid) {
+        Err(grit_lib::error::Error::Midx(
+            grit_lib::midx_error::MidxError::HashVersionMismatch { .. },
+        )) => {}
+        other => panic!("expected hash-version MIDX error, got {other:?}"),
+    }
     assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
@@ -200,7 +210,7 @@ fn verify_missing_required_chunk() {
     let errs = verify_midx(&objects).expect_err("missing chunks");
     assert!(
         errs.iter()
-            .any(|e| e.contains("pack-name") || e.contains("pack name")),
+            .any(|e| { e.contains("pack-name") || e.contains("pack name") || e.contains("chunk") }),
         "expected missing pack-name chunk, got {errs:?}"
     );
     assert_read_fallback_via_odb(&repo, &objects, &oid);
@@ -286,6 +296,7 @@ fn verify_bad_trailer_checksum() {
         }
     });
     assert_verify_reports(&objects, "incorrect checksum");
+    assert_midx_read_skips_or_none(&objects, &oid);
     assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 

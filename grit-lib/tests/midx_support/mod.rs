@@ -144,9 +144,8 @@ pub fn install_git_large_offset_pack(repo: &RepoFixture) -> Option<ObjectId> {
     file.seek(SeekFrom::Start(large_offset)).ok()?;
     file.write_all(&large_obj).ok()?;
     let body_end = file.stream_position().ok()?;
-    use sha1::{Digest, Sha1};
     file.seek(SeekFrom::Start(0)).ok()?;
-    let mut hasher = Sha1::new();
+    let mut hasher = grit_lib::objects::HashAlgo::Sha1.hasher();
     let mut buf = [0u8; 64 * 1024];
     let mut left = body_end;
     while left > 0 {
@@ -160,7 +159,7 @@ pub fn install_git_large_offset_pack(repo: &RepoFixture) -> Option<ObjectId> {
     }
     let trailer = hasher.finalize();
     file.seek(SeekFrom::Start(body_end)).ok()?;
-    file.write_all(&trailer).ok()?;
+    file.write_all(trailer.as_bytes()).ok()?;
     file.flush().ok()?;
     drop(file);
 
