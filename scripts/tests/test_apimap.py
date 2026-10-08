@@ -37,6 +37,21 @@ class ApimapTest(unittest.TestCase):
             assert title_match is not None
             self.assertIn(title_match.group(1), mapped)
 
+    def test_api_map_lists_every_public_item(self) -> None:
+        crate_dir = docs.DOC_ROOT / "grit_lib"
+        expected = apimap.count_public_items(crate_dir)
+        self.assertGreater(expected, 100, "rustdoc fixture unexpectedly small")
+        rows, _ = apimap.build_rows(docs.DOC_ROOT)
+        item_rows = [row for row in rows if row.kind != "module"]
+        self.assertEqual(len(item_rows), expected)
+        qualified = {row.qualified for row in item_rows}
+        for name in (
+            "grit_lib::index::IndexEntry",
+            "grit_lib::config::ConfigEntry",
+            "grit_lib::config::LoadConfigOptions",
+        ):
+            self.assertIn(name, qualified, f"missing {name} in API map")
+
     def test_api_map_is_deterministic(self) -> None:
         first = apimap.api_map_markdown(docs.DOC_ROOT)
         second = apimap.api_map_markdown(docs.DOC_ROOT)
@@ -59,7 +74,7 @@ class ApimapTest(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaises(SystemExit) as ctx:
-            apimap.build_rows(tmp)
+            apimap.build_rows(tmp.resolve())
         msg = str(ctx.exception)
         self.assertIn("grit_lib::nodoc", msg)
         self.assertIn("summary", msg.lower())

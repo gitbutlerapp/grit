@@ -16,7 +16,7 @@ MOD_LINK_RE = re.compile(
 )
 ITEM_ROW_RE = re.compile(
     r'<a class="(struct|enum|trait)" href="([^"]+)" title="(?:struct|enum|trait) ([^"]+)">'
-    r"[^<]*</a></dt><dd>(.*?)</dd>",
+    r".*?</a></dt><dd>(.*?)</dd>",
     re.DOTALL,
 )
 TOP_DOC_FIRST_P_RE = re.compile(
@@ -57,6 +57,7 @@ def first_sentence(text: str) -> str:
 
 def module_index_paths(crate_dir: Path) -> list[Path]:
     """Return every public module ``index.html`` under ``grit_lib/`` (not the crate root)."""
+    crate_dir = crate_dir.resolve()
     discovered: set[Path] = set()
     pending: list[Path] = []
 
@@ -151,8 +152,17 @@ def parse_module_index(index_path: Path, crate_dir: Path) -> tuple[ApiRow, list[
     return module_row, items, missing
 
 
+def count_public_items(crate_dir: Path) -> int:
+    """Count struct/enum/trait item-table links across all module index pages."""
+    total = 0
+    for index_path in module_index_paths(crate_dir):
+        text = index_path.read_text(encoding="utf-8")
+        total += len(ITEM_ROW_RE.findall(text))
+    return total
+
+
 def build_rows(doc_root: Path) -> tuple[tuple[ApiRow, ...], list[str]]:
-    crate_dir = doc_root / "grit_lib"
+    crate_dir = (doc_root / "grit_lib").resolve()
     if not crate_dir.is_dir():
         raise SystemExit(
             f"grit-lib rustdoc not found at {crate_dir}; run: cargo doc -p grit-lib --no-deps"
@@ -165,6 +175,8 @@ def build_rows(doc_root: Path) -> tuple[tuple[ApiRow, ...], list[str]]:
         missing.extend(module_missing)
         rows.append(module_row)
         rows.extend(item_rows)
+
+    rows.sort(key=lambda row: (row.qualified, row.kind))
 
     if missing:
         missing_sorted = sorted(set(missing))
