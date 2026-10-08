@@ -23,6 +23,25 @@ pub enum RerereAutoupdate {
     No,
 }
 
+/// Outcome of rerere handling one path (replaces stderr status lines).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RerereEventKind {
+    RecordedPreimage,
+    RecordedResolution,
+    ResolvedFromPrevious,
+    StagedFromPrevious,
+    UpdatedPreimage,
+    Forgot,
+    NoRemembered,
+}
+
+/// One rerere status event for a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RerereEvent {
+    pub path: String,
+    pub kind: RerereEventKind,
+}
+
 #[derive(Debug, Clone)]
 struct RerereId {
     hex: String,
@@ -719,24 +738,25 @@ fn stage_resolved_path(repo: &Repository, index: &mut Index, path: &str) -> Resu
 }
 
 /// Invoked after mergy operations with conflicts (`merge`, `rebase`, …).
-pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()> {
+pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<Vec<RerereEvent>> {
     let config = ConfigSet::load(
         &crate::environment::Environment::capture_process(),
         Some(&repo.git_dir),
         true,
     )?;
     if !rerere_enabled(&config, &repo.git_dir) {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    let mut events = Vec::new();
     let autoupdate_on = autoupdate_flag(&config, autoupdate);
     let wt = match &repo.work_tree {
         Some(w) => w,
-        None => return Ok(()),
+        None => return Ok(events),
     };
 
     let index_path = repo.git_dir.join("index");
     if !index_path.exists() {
-        return Ok(());
+        return Ok(events);
     }
     let mut index = repo.load_index_at(&index_path)?;
     let mut merge_rr = read_merge_rr(&repo.git_dir)?;
@@ -824,7 +844,10 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
                     if autoupdate_on {
                         to_stage.push(path.clone());
                     } else {
-                        eprintln!("Resolved '{path}' using previous resolution.");
+                        events.push(RerereEvent {
+                            path: path.clone(),
+                            kind: RerereEventKind::ResolvedFromPrevious,
+                        });
                     }
                     replayed = true;
                     break;
@@ -837,13 +860,19 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
             id.variant = assign_variant(&repo.git_dir, &id.hex);
             write_preimage_normalized(&repo.git_dir, &id, &work_content, marker_size)?;
             ent.id = Some(id);
-            eprintln!("Recorded preimage for '{path}'");
+            events.push(RerereEvent {
+                path: path.clone(),
+                kind: RerereEventKind::RecordedPreimage,
+            });
             continue;
         }
 
         if handle_path(&work_content, marker_size, repo.odb.hash_algo(), None) == 0 {
             fs::copy(&file_path, postimage_path(&repo.git_dir, &id))?;
-            eprintln!("Recorded resolution for '{path}'.");
+            events.push(RerereEvent {
+                path: path.clone(),
+                kind: RerereEventKind::RecordedResolution,
+            });
             ent.id = None;
             continue;
         }
@@ -884,7 +913,10 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
                     if autoupdate_on {
                         to_stage.push(path.clone());
                     } else {
-                        eprintln!("Resolved '{path}' using previous resolution.");
+                        events.push(RerereEvent {
+                            path: path.clone(),
+                            kind: RerereEventKind::ResolvedFromPrevious,
+                        });
                     }
                     return true;
                 }
@@ -905,7 +937,10 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
         id.variant = assign_variant(&repo.git_dir, &id.hex);
         write_preimage_normalized(&repo.git_dir, &id, &work_content, marker_size)?;
         ent.id = Some(id);
-        eprintln!("Recorded preimage for '{path}'");
+        events.push(RerereEvent {
+            path: path.clone(),
+            kind: RerereEventKind::RecordedPreimage,
+        });
     }
 
     merge_rr.retain(|_, e| e.id.is_some());
@@ -917,34 +952,38 @@ pub fn repo_rerere(repo: &Repository, autoupdate: RerereAutoupdate) -> Result<()
         }
         repo.write_index(&mut index)?;
         for p in &to_stage {
-            eprintln!("Staged '{p}' using previous resolution.");
+            events.push(RerereEvent {
+                path: p.clone(),
+                kind: RerereEventKind::StagedFromPrevious,
+            });
         }
     }
 
-    Ok(())
+    Ok(events)
 }
 
 /// After successful commit: record postimages, clear `MERGE_RR` entries.
-pub fn rerere_post_commit(repo: &Repository) -> Result<()> {
+pub fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
     let config = ConfigSet::load(
         &crate::environment::Environment::capture_process(),
         Some(&repo.git_dir),
         true,
     )?;
     if !rerere_enabled(&config, &repo.git_dir) {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    let mut events = Vec::new();
     let wt = match &repo.work_tree {
         Some(w) => w,
-        None => return Ok(()),
+        None => return Ok(events),
     };
     let index_path = repo.git_dir.join("index");
     if !index_path.exists() {
-        return Ok(());
+        return Ok(events);
     }
     let mut merge_rr = read_merge_rr(&repo.git_dir)?;
     if merge_rr.is_empty() {
-        return Ok(());
+        return Ok(events);
     }
 
     let paths: Vec<String> = merge_rr.keys().cloned().collect();
@@ -973,13 +1012,16 @@ pub fn rerere_post_commit(repo: &Repository) -> Result<()> {
             continue;
         }
         fs::write(&post, content.as_bytes())?;
-        eprintln!("Recorded resolution for '{path}'.");
+        events.push(RerereEvent {
+            path: path.clone(),
+            kind: RerereEventKind::RecordedResolution,
+        });
         ent.id = None;
     }
 
     merge_rr.retain(|_, e| e.id.is_some());
     write_merge_rr(&repo.git_dir, &merge_rr)?;
-    Ok(())
+    Ok(events)
 }
 
 /// `git rerere clear` — drop unresolved preimages tracked in `MERGE_RR`, remove `MERGE_RR`.
@@ -1242,14 +1284,15 @@ pub fn rerere_remaining_lines(repo: &Repository) -> Result<Vec<String>> {
 }
 
 /// Drop recorded resolution for `path` (working tree must show conflict markers).
-pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<()> {
+pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<RerereEvent>> {
+    let mut events = Vec::new();
     let config = ConfigSet::load(
         &crate::environment::Environment::capture_process(),
         Some(&repo.git_dir),
         true,
     )?;
     if !rerere_enabled(&config, &repo.git_dir) {
-        return Ok(());
+        return Ok(events);
     }
     let wt = repo
         .work_tree
@@ -1288,8 +1331,11 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<()> {
             .and_then(|records| records.get(path.as_bytes()))
             .is_some_and(|record| record.modes[0] != 0);
     if !has_base_stage {
-        eprintln!("no remembered resolution for '{path}'");
-        return Ok(());
+        events.push(RerereEvent {
+            path: path.to_string(),
+            kind: RerereEventKind::NoRemembered,
+        });
+        return Ok(events);
     }
     let synth = match synthesize_conflict_from_index(repo, &index, path)? {
         Some(s) => s,
@@ -1324,21 +1370,30 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<()> {
         if try_replay_merge(repo, path, work.as_bytes(), &pre_b, &post_b).is_some() {
             let _ = fs::remove_file(postimage_path(&repo.git_dir, &id));
             write_preimage_normalized(&repo.git_dir, &id, &work, marker_size)?;
-            eprintln!("Updated preimage for '{path}'");
-            eprintln!("Forgot resolution for '{path}'");
+            events.push(RerereEvent {
+                path: path.to_string(),
+                kind: RerereEventKind::UpdatedPreimage,
+            });
+            events.push(RerereEvent {
+                path: path.to_string(),
+                kind: RerereEventKind::Forgot,
+            });
             forgot_id = Some(id);
             break;
         }
     }
     let Some(id) = forgot_id else {
         if work.as_bytes().contains(&0) {
-            return Ok(());
+            return Ok(events);
         }
-        eprintln!("no remembered resolution for '{path}'");
-        return Ok(());
+        events.push(RerereEvent {
+            path: path.to_string(),
+            kind: RerereEventKind::NoRemembered,
+        });
+        return Ok(events);
     };
     let mut merge_rr = read_merge_rr(&repo.git_dir)?;
     merge_rr.insert(path.to_string(), MergeRrEntry { id: Some(id) });
     write_merge_rr(&repo.git_dir, &merge_rr)?;
-    Ok(())
+    Ok(events)
 }

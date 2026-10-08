@@ -336,18 +336,9 @@ fn traditional_hook_candidate(
             .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "no" | "off" | "0"))
             .unwrap_or(true);
         if show_warning {
-            eprintln!(
-                "{}",
-                crate::diagnostics::hint_line(&format!(
-                    "The '{hook_name}' hook was ignored because it's not set as executable."
-                ))
-            );
-            eprintln!(
-                "{}",
-                crate::diagnostics::hint_line(
-                    "You can disable this warning with `git config set advice.ignoredHook false`."
-                )
-            );
+            repo.warn(crate::diagnostics::Warning::NonExecutableHookIgnored {
+                hook_name: hook_name.to_string(),
+            });
         }
         return None;
     }

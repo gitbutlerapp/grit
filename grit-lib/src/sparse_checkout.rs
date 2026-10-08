@@ -505,9 +505,9 @@ pub fn apply_sparse_checkout_skip_worktree(
     work_tree: Option<&std::path::Path>,
     index: &mut crate::index::Index,
     skip_sparse_checkout: bool,
-) {
+) -> Vec<String> {
     if skip_sparse_checkout {
-        return;
+        return Vec::new();
     }
 
     let config = crate::config::ConfigSet::load(
@@ -522,7 +522,7 @@ pub fn apply_sparse_checkout_skip_worktree(
         .unwrap_or(false);
 
     if !sparse_enabled {
-        return;
+        return Vec::new();
     }
 
     // Git default for core.sparseCheckoutCone is false (environment.c zero-init). When the key
@@ -537,9 +537,6 @@ pub fn apply_sparse_checkout_skip_worktree(
     let mut warnings = Vec::new();
     let (_cone_ok, _cone_loaded, non_cone) =
         load_sparse_checkout_with_warnings(git_dir, cone_config, &mut warnings);
-    for line in warnings {
-        eprintln!("{line}");
-    }
 
     let sparse_path = git_dir.join("info").join("sparse-checkout");
     let file_content = std::fs::read_to_string(&sparse_path).unwrap_or_default();
@@ -588,6 +585,7 @@ pub fn apply_sparse_checkout_skip_worktree(
     if any_skip && index.version < 3 {
         index.version = 3;
     }
+    warnings
 }
 
 /// Longest common prefix of `path1` and `path2` that ends at a `/` (Git `max_common_dir_prefix`).

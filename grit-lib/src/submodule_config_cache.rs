@@ -407,14 +407,14 @@ impl SubmoduleConfigCache {
         self.path_index.remove(&(blob, key));
     }
 
-    /// Prints all values for `key` (canonical submodule config key) from the nested
+    /// Returns all values for `key` (canonical submodule config key) from the nested
     /// submodule repository at `super_path` / `submodule_path`.
-    pub fn print_config_from_nested_gitmodules(
+    pub fn config_values_from_nested_gitmodules(
         _super_repo: &Repository,
         super_work_tree: &Path,
         submodule_path: &str,
         key: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         let wanted = canonical_key(key).map_err(|e| e.to_string())?;
         let sub_work = super_work_tree.join(submodule_path);
         let sub_git = if sub_work.join(".git").is_file() {
@@ -446,7 +446,7 @@ impl SubmoduleConfigCache {
             if let Some(ie) = index.get(b".gitmodules", 0) {
                 let obj = sub_repo.odb.read(&ie.oid).map_err(|e| e.to_string())?;
                 if obj.kind != ObjectKind::Blob {
-                    return Ok(());
+                    return Ok(Vec::new());
                 }
                 let c = String::from_utf8(obj.data).map_err(|e| e.to_string())?;
                 (c, gm_path)
@@ -455,20 +455,20 @@ impl SubmoduleConfigCache {
                     .ok()
                     .and_then(|h| h.oid().copied());
                 let Some(commit_oid) = head_oid else {
-                    return Ok(());
+                    return Ok(Vec::new());
                 };
                 let obj = sub_repo.odb.read(&commit_oid).map_err(|e| e.to_string())?;
                 if obj.kind != ObjectKind::Commit {
-                    return Ok(());
+                    return Ok(Vec::new());
                 }
                 let commit = parse_commit(&obj.data).map_err(|e| e.to_string())?;
                 let Some(blob_oid) = blob_oid_at_path(&sub_repo.odb, &commit.tree, ".gitmodules")
                 else {
-                    return Ok(());
+                    return Ok(Vec::new());
                 };
                 let blob = sub_repo.odb.read(&blob_oid).map_err(|e| e.to_string())?;
                 if blob.kind != ObjectKind::Blob {
-                    return Ok(());
+                    return Ok(Vec::new());
                 }
                 let c = String::from_utf8(blob.data).map_err(|e| e.to_string())?;
                 (c, gm_path)
@@ -477,14 +477,15 @@ impl SubmoduleConfigCache {
 
         let cfg = ConfigFile::parse(Path::new(".gitmodules"), &content, ConfigScope::Local)
             .map_err(|e| e.to_string())?;
+        let mut values = Vec::new();
         for e in &cfg.entries {
             if e.key == wanted {
                 if let Some(v) = &e.value {
-                    println!("{v}");
+                    values.push(v.clone());
                 }
             }
         }
-        Ok(())
+        Ok(values)
     }
 }
 

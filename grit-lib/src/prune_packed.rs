@@ -24,8 +24,8 @@ pub struct PrunePackedOptions {
 ///
 /// For each loose object under `objects_dir` whose [`ObjectId`] appears in
 /// at least one local pack index, the file is deleted (or, with
-/// [`PrunePackedOptions::dry_run`], the deletion command is printed to
-/// `stdout`).  Empty two-char prefix directories are removed afterwards.
+/// [`PrunePackedOptions::dry_run`], paths are listed in the return value only).
+/// Empty two-char prefix directories are removed afterwards.
 ///
 /// Returns the list of paths that were (or would be) removed.
 ///
@@ -90,9 +90,7 @@ pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Res
             }
 
             let obj_path = file.path();
-            if opts.dry_run {
-                println!("rm -f {}", obj_path.display());
-            } else {
+            if !opts.dry_run {
                 match fs::remove_file(&obj_path) {
                     Ok(()) => {}
                     Err(err) if err.kind() == io::ErrorKind::NotFound => {}

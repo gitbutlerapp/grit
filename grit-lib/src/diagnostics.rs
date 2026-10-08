@@ -91,6 +91,8 @@ pub enum Warning {
     IndexVersionConfigInvalid { fallback: u32 },
     /// Mailmap blob/object could not be read as a blob.
     MailmapUnreadable { detail: String },
+    /// A traditional hook script exists but is not executable.
+    NonExecutableHookIgnored { hook_name: String },
 }
 
 /// Optional trace events (network debugging, etc.), separate from [`Warning`].

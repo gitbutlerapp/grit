@@ -543,9 +543,8 @@ impl DelayedProcessCheckout {
     /// earlier" error (t0021 invalid file); any path still pending once every filter is done is the
     /// "was not filtered properly" error (t0021 missing file).
     ///
-    /// Like Git, every such error is reported to stderr in the `error: ...` format as it is found
-    /// (not bundled into one bubbled-up message), and the call returns
-    /// [`DelayedCheckoutError`] so the caller can exit non-zero without re-printing. Git's
+    /// Per-path problems are returned in [`DelayedCheckoutError::Reported`] so the caller can
+    /// render Git's `error: ...` lines and exit non-zero. Git's
     /// `error("external filter '%s' ...")` quotes the filter command, and a buggy filter that
     /// offers an undelayed path is dropped immediately (it is not queried again).
     ///
@@ -566,7 +565,7 @@ impl DelayedProcessCheckout {
             }
         }
 
-        let mut had_error = false;
+        let mut problems: Vec<DelayedCheckoutProblem> = Vec::new();
 
         while !active_cmds.is_empty() {
             let mut still_active: Vec<String> = Vec::new();
@@ -575,7 +574,6 @@ impl DelayedProcessCheckout {
                     Ok(paths) => paths,
                     Err(_) => {
                         // Filter reported an error: drop it and do not query it again.
-                        had_error = true;
                         continue;
                     }
                 };
@@ -591,15 +589,11 @@ impl DelayedProcessCheckout {
                         .position(|e| e.filter_cmd == cmd && e.path == path)
                     else {
                         // The filter offered a path we never delayed (or already wrote). Match
-                        // Git: report it and stop querying this (likely buggy) filter.
-                        eprintln!(
-                            "{}",
-                            crate::diagnostics::error_line(&format!(
-                                "external filter '{cmd}' signaled that '{path}' is now \
-available although it has not been delayed earlier"
-                            ))
-                        );
-                        had_error = true;
+                        // Git: record it and stop querying this (likely buggy) filter.
+                        problems.push(DelayedCheckoutProblem::FilterSignaledAvailable {
+                            filter_cmd: cmd.clone(),
+                            path: path.clone(),
+                        });
                         drop_filter = true;
                         continue;
                     };
@@ -619,30 +613,33 @@ available although it has not been delayed earlier"
 
         // Any path the filters never made available was not filtered properly.
         for entry in &self.entries {
-            eprintln!(
-                "{}",
-                crate::diagnostics::error_line(&format!(
-                    "'{}' was not filtered properly",
-                    entry.path
-                ))
-            );
-            had_error = true;
+            problems.push(DelayedCheckoutProblem::PathNotFilteredProperly {
+                path: entry.path.clone(),
+            });
         }
         self.entries.clear();
 
-        if had_error {
-            return Err(DelayedCheckoutError::Reported);
+        if !problems.is_empty() {
+            return Err(DelayedCheckoutError::Reported(problems));
         }
         Ok(())
     }
 }
 
+/// One delayed-checkout outcome that would have been printed as Git's `error: ...` line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DelayedCheckoutProblem {
+    /// Filter listed a path that was never delayed.
+    FilterSignaledAvailable { filter_cmd: String, path: String },
+    /// Filter never made a delayed path available.
+    PathNotFilteredProperly { path: String },
+}
+
 /// Failure from [`DelayedProcessCheckout::finish`].
 #[derive(Debug)]
 pub enum DelayedCheckoutError {
-    /// One or more per-path errors were already printed to stderr in Git's `error: ...` format;
-    /// the caller should exit non-zero without printing anything further.
-    Reported,
+    /// One or more per-path filter errors; the CLI should render them and exit non-zero.
+    Reported(Vec<DelayedCheckoutProblem>),
     /// A transport/conversion error (not a per-path filter error) with a message to bubble up.
     Transport(String),
 }
@@ -650,7 +647,9 @@ pub enum DelayedCheckoutError {
 impl std::fmt::Display for DelayedCheckoutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DelayedCheckoutError::Reported => f.write_str("delayed checkout failed"),
+            DelayedCheckoutError::Reported(problems) => {
+                write!(f, "delayed checkout failed ({} problem(s))", problems.len())
+            }
             DelayedCheckoutError::Transport(msg) => f.write_str(msg),
         }
     }

@@ -277,9 +277,24 @@ fn finish_delayed_checkouts(
     );
     match finish_result {
         Ok(()) => Ok(()),
-        Err(DelayedCheckoutError::Reported) => Err(Error::PathError(
-            "one or more paths were not filtered properly during checkout".into(),
-        )),
+        Err(DelayedCheckoutError::Reported(problems)) => {
+            let msg = problems
+                .iter()
+                .map(|p| match p {
+                    crate::filter_process::DelayedCheckoutProblem::FilterSignaledAvailable {
+                        filter_cmd,
+                        path,
+                    } => format!(
+                        "external filter '{filter_cmd}' signaled that '{path}' is now available although it has not been delayed earlier"
+                    ),
+                    crate::filter_process::DelayedCheckoutProblem::PathNotFilteredProperly {
+                        path,
+                    } => format!("'{path}' was not filtered properly"),
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            Err(Error::PathError(msg))
+        }
         Err(DelayedCheckoutError::Transport(msg)) => Err(Error::PathError(msg)),
     }
 }

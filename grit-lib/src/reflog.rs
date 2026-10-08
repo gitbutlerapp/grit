@@ -23,7 +23,7 @@ use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_PATHNAME};
 
 /// A single reflog entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReflogEntry {
     /// Previous object ID.
     pub old_oid: ObjectId,
@@ -529,6 +529,37 @@ pub struct ReflogExpireParams {
     pub verbose: bool,
 }
 
+/// What happened to one reflog entry during [`expire_reflog_git`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReflogExpireActionKind {
+    /// Entry was kept in the reflog.
+    Keep,
+    /// Entry was removed from the reflog.
+    Prune,
+    /// Entry would be removed when not in dry-run mode.
+    WouldPrune,
+}
+
+/// Per-entry report from [`expire_reflog_git`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflogExpireAction {
+    /// Ref whose reflog was processed.
+    pub refname: String,
+    /// The reflog entry that was considered.
+    pub entry: ReflogEntry,
+    /// Keep vs prune (or dry-run would-prune).
+    pub action: ReflogExpireActionKind,
+}
+
+/// Result of [`expire_reflog_git`]: prune count plus a per-entry action list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflogExpireResult {
+    /// Number of entries pruned (or that would be pruned in dry-run mode).
+    pub pruned: usize,
+    /// One action per reflog entry that was scanned.
+    pub actions: Vec<ReflogExpireAction>,
+}
+
 /// Per-ref `gc.<pattern>.reflogExpire*` rule from config.
 #[derive(Debug, Clone)]
 pub struct GcReflogPattern {
@@ -835,7 +866,7 @@ pub fn expire_reflog_git(
     gc_global_total: Option<i64>,
     gc_global_unreachable: Option<i64>,
     now: i64,
-) -> Result<usize> {
+) -> Result<ReflogExpireResult> {
     let is_reftable = crate::reftable::is_reftable_repo(git_dir);
     let base_total = gc_global_total.unwrap_or_else(|| default_expire_total(now));
     let base_unreachable = gc_global_unreachable.unwrap_or_else(|| default_expire_unreachable(now));
@@ -868,11 +899,15 @@ pub fn expire_reflog_git(
 
     let entries = read_reflog(git_dir, refname)?;
     if entries.is_empty() {
-        return Ok(0);
+        return Ok(ReflogExpireResult {
+            pruned: 0,
+            actions: Vec::new(),
+        });
     }
     let mut kept = Vec::new();
     let mut kept_entries = Vec::new();
     let mut pruned = 0usize;
+    let mut actions = Vec::with_capacity(entries.len());
 
     for entry in &entries {
         let drop = should_drop_reflog_entry(
@@ -884,22 +919,23 @@ pub fn expire_reflog_git(
             &reachable,
             params.stale_fix,
         );
-        if drop {
+        let action = if drop {
             pruned += 1;
-            if params.verbose {
-                if params.dry_run {
-                    println!("would prune {}", entry.message);
-                } else {
-                    println!("prune {}", entry.message);
-                }
+            if params.dry_run {
+                ReflogExpireActionKind::WouldPrune
+            } else {
+                ReflogExpireActionKind::Prune
             }
         } else {
-            if params.verbose {
-                println!("keep {}", entry.message);
-            }
             kept_entries.push(entry.clone());
             kept.push(format_reflog_entry(entry));
-        }
+            ReflogExpireActionKind::Keep
+        };
+        actions.push(ReflogExpireAction {
+            refname: refname.to_string(),
+            entry: entry.clone(),
+            action,
+        });
     }
 
     if !params.dry_run && pruned > 0 {
@@ -916,7 +952,7 @@ pub fn expire_reflog_git(
             adjust_reflog_shared_perm(git_dir, &path);
         }
     }
-    Ok(pruned)
+    Ok(ReflogExpireResult { pruned, actions })
 }
 
 /// Per-ref `gc.<pattern>.reflogExpire*` rules plus global `gc.reflogExpire` / `gc.reflogExpireUnreachable`.
