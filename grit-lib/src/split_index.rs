@@ -492,7 +492,7 @@ pub(crate) fn freshen_shared_index(path: &Path) {
 
 #[cfg(unix)]
 fn filetime_set_to_now(path: &Path) -> io::Result<()> {
-    let t = UNIX_EPOCH + Duration::from_secs(crate::git_date::tm::get_time_sec() as u64);
+    let t = UNIX_EPOCH + Duration::from_secs(crate::git_date::tm::process_wall_clock_sec() as u64);
     let ft = filetime::FileTime::from_system_time(t);
     filetime::set_file_mtime(path, ft)
 }

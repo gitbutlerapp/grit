@@ -210,12 +210,6 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
-        let wall_clock = options
-            .reference_unix_time
-            .or_else(|| environment.git_now_date_override())
-            .unwrap_or(0);
-        crate::git_date::tm::set_wall_clock_reference(wall_clock);
-
         Ok(Self {
             git_dir,
             work_tree,
@@ -262,10 +256,19 @@ impl Repository {
     /// Unix timestamp for rev-parse relative date selectors (`@{yesterday}`, etc.).
     #[must_use]
     pub fn reference_unix_time(&self) -> i64 {
+        self.wall_clock_epoch()
+    }
+
+    /// Wall clock used for commit dates, rerere GC, relative dates, and similar operations on this handle.
+    #[must_use]
+    pub fn wall_clock_epoch(&self) -> i64 {
         if let Some(ts) = self.reference_unix_time {
             return ts;
         }
-        self.environment.git_now_date_override().unwrap_or(0)
+        if let Some(ts) = self.environment.git_now_date_override() {
+            return ts;
+        }
+        crate::git_date::tm::process_wall_clock_sec()
     }
 
     /// Subprocess runner used for hooks, filters, and helpers.

@@ -2,7 +2,7 @@
 
 use super::compat::{self, time_t, tm};
 use super::parse::{match_multi_number, MONTH_NAMES, WEEKDAY_NAMES};
-use super::tm::{get_time_sec, match_string, parse_timestamp_prefix};
+use super::tm::{match_string, parse_timestamp_prefix, process_wall_clock_sec};
 use std::mem::MaybeUninit;
 
 fn update_tm(tm: &mut tm, now: &tm, sec: i64) -> time_t {
@@ -273,17 +273,21 @@ fn approxidate_digit(date: &[u8], tm: &mut tm, num: &mut i32, now_sec: i64) -> u
 
 /// Git `approxidate_careful` — returns Unix timestamp; on parse failure uses fuzzy parser.
 pub fn approxidate_careful(date: &str, error_ret: Option<&mut i32>) -> u64 {
+    approxidate_careful_at(date, process_wall_clock_sec(), error_ret)
+}
+
+/// Like [`approxidate_careful`] but uses `now_sec` for relative fields.
+pub fn approxidate_careful_at(date: &str, now_sec: i64, error_ret: Option<&mut i32>) -> u64 {
     let mut dummy = 0;
     let er: &mut i32 = match error_ret {
         Some(p) => p,
         None => &mut dummy,
     };
-    if let Ok((ts, _)) = super::parse::parse_date_basic(date) {
+    if let Ok((ts, _)) = super::parse::parse_date_basic_at(date, now_sec) {
         *er = 0;
         return ts;
     }
-    let tv_sec = get_time_sec();
-    approxidate_str(date, tv_sec, er)
+    approxidate_str(date, now_sec, er)
 }
 
 fn approxidate_str(date: &str, time_sec: i64, error_ret: &mut i32) -> u64 {

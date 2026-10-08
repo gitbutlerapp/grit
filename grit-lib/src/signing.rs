@@ -1432,7 +1432,7 @@ fn write_temp_file_named(data: &[u8], stem: &str) -> Result<PathBuf> {
 fn next_temp_counter() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = crate::git_date::tm::get_time_sec() as u64;
+    let now = crate::git_date::tm::process_wall_clock_sec() as u64;
     now ^ COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 

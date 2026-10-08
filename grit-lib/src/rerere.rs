@@ -1076,7 +1076,7 @@ fn parse_expiry_days_now(config: &ConfigSet, key: &str, now: i64) -> Option<i64>
 }
 
 /// `git rerere gc`
-pub fn rerere_gc(git_dir: &Path) -> Result<()> {
+pub fn rerere_gc(git_dir: &Path, now: i64) -> Result<()> {
     let config = ConfigSet::load(
         &crate::environment::Environment::capture_process(),
         Some(git_dir),
@@ -1085,7 +1085,6 @@ pub fn rerere_gc(git_dir: &Path) -> Result<()> {
     if !rerere_enabled(&config, git_dir) {
         return Ok(());
     }
-    let now: i64 = crate::git_date::tm::get_time_sec();
     let mut cutoff_resolve = now - 60 * 86400;
     let mut cutoff_unresolved = now - 15 * 86400;
     if let Some(c) = parse_expiry_days_now(&config, "gc.rerereresolved", now) {

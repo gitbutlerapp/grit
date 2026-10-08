@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 
-use crate::commit::{assemble_identity, now_for_identity};
+use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
@@ -244,7 +244,7 @@ pub fn write_notes_commit(
         Some(&repo.git_dir),
         true,
     )?;
-    let now = now_for_identity();
+    let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
     let author = build_ident_role(repo.environment(), &config, "AUTHOR", now);
     let committer = build_ident_role(repo.environment(), &config, "COMMITTER", now);
 
@@ -875,7 +875,7 @@ pub fn write_notes_commit_with_parents(
         Some(&repo.git_dir),
         true,
     )?;
-    let now = now_for_identity();
+    let now = identity_now_from_epoch(repo.wall_clock_epoch(), repo.environment().tz.as_deref());
     let author = build_ident_role(repo.environment(), &config, "AUTHOR", now);
     let committer = build_ident_role(repo.environment(), &config, "COMMITTER", now);
     let commit = CommitData {

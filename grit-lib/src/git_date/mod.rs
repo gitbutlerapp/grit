@@ -52,7 +52,7 @@ pub fn test_tool_date(args: &[String]) -> Result<TestToolDateResult, String> {
                 let t: u64 = a
                     .parse()
                     .map_err(|_| format!("test-tool date relative: bad integer {a}"))?;
-                let s = show::show_date_relative(t, tm::get_time_sec());
+                let s = show::show_date_relative(t, tm::process_wall_clock_sec());
                 lines.push(format!("{a} -> {s}"));
             }
             Ok(TestToolDateResult::Output(lines))

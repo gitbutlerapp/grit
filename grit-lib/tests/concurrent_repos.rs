@@ -7,24 +7,29 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use grit_lib::command_runner::RecordingRunner;
-use grit_lib::diagnostics::CollectingDiagnostics;
+use grit_lib::command_runner::{RecordingRunner, ShellInvocation};
+use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::environment::{Environment, RepositoryOptions};
+use grit_lib::hooks::{run_hook_opts, RunHookOptions};
+use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::merge_diff::blob_oid_at_path;
 use grit_lib::merge_file::MergeFavor;
 use grit_lib::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use grit_lib::notes::{write_notes_commit, NotesTreeEntry};
-use grit_lib::objects::parse_commit;
+use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{init_repository, Repository};
+use grit_lib::rerere::{repo_rerere, RerereAutoupdate, RerereEventKind};
 use grit_lib::transfer::{fetch_local, FetchOptions, TagMode};
 use tempfile::TempDir;
 
 const ITERS: usize = 8;
+const CONCURRENT_ITERS: usize = if cfg!(debug_assertions) { 8 } else { 20 };
 
 struct RepoFixture {
     root: PathBuf,
@@ -32,6 +37,11 @@ struct RepoFixture {
     author: String,
     diagnostics: Arc<CollectingDiagnostics>,
     command_runner: Arc<RecordingRunner>,
+    reference_unix_time: i64,
+    hook_marker: String,
+    hook_event: &'static str,
+    traditional_hook: &'static str,
+    rerere_enabled: bool,
 }
 
 fn prepare_repo(
@@ -70,6 +80,11 @@ fn prepare_repo(
         author: author.to_owned(),
         diagnostics: Arc::new(CollectingDiagnostics::new()),
         command_runner: RecordingRunner::always_success(),
+        reference_unix_time: 0,
+        hook_marker: String::new(),
+        hook_event: "pre-commit",
+        traditional_hook: "pre-commit",
+        rerere_enabled: false,
     }
 }
 
@@ -79,7 +94,69 @@ fn open_with_env(fx: &RepoFixture) -> Repository {
         .with_command_runner(fx.command_runner.clone());
     let mut opts = opts;
     opts.diagnostics = fx.diagnostics.clone();
+    opts.reference_unix_time = Some(fx.reference_unix_time);
     Repository::open_with(&opts, &git_dir, Some(&fx.root)).expect("open")
+}
+
+fn runner_records_marker(runner: &RecordingRunner, marker: &str) -> bool {
+    runner.specs().iter().any(|spec| {
+        let shell_has = spec.shell.as_ref().is_some_and(|shell| match shell {
+            ShellInvocation::DashC { script, .. } => script.contains(marker),
+            ShellInvocation::ScriptPath { .. } => false,
+        });
+        shell_has
+            || spec.program.to_string_lossy().contains(marker)
+            || spec
+                .args
+                .iter()
+                .any(|a| a.to_string_lossy().contains(marker))
+    })
+}
+
+fn index_conflict_entry(path: &str, stage: u16, oid: ObjectId) -> IndexEntry {
+    let path_b = path.as_bytes().to_vec();
+    IndexEntry {
+        ctime_sec: 0,
+        ctime_nsec: 0,
+        mtime_sec: 0,
+        mtime_nsec: 0,
+        dev: 0,
+        ino: 0,
+        mode: MODE_REGULAR,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid,
+        flags: (stage << 12) | (path_b.len().min(0x0fff) as u16),
+        flags_extended: None,
+        path: path_b,
+        base_index_pos: 0,
+    }
+}
+
+fn has_non_executable_hook_warning(diag: &CollectingDiagnostics, hook_name: &str) -> bool {
+    diag.warnings().iter().any(|w| {
+        matches!(
+            w,
+            Warning::NonExecutableHookIgnored {
+                hook_name: name
+            } if name == hook_name
+        )
+    })
+}
+
+#[cfg(unix)]
+fn write_non_executable_hook(hook_path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::write(hook_path, "#!/bin/sh\necho trad\n").expect("hook body");
+    let mut perms = fs::metadata(hook_path).expect("hook meta").permissions();
+    perms.set_mode(0o644);
+    fs::set_permissions(hook_path, perms).expect("hook perms");
+}
+
+#[cfg(not(unix))]
+fn write_non_executable_hook(hook_path: &Path) {
+    fs::write(hook_path, "#!/bin/sh\necho trad\n").expect("hook body");
 }
 
 fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
@@ -155,6 +232,11 @@ fn two_repos_on_two_threads() {
         author: a.author.clone(),
         diagnostics: Arc::clone(&a.diagnostics),
         command_runner: Arc::clone(&a.command_runner),
+        reference_unix_time: a.reference_unix_time,
+        hook_marker: a.hook_marker.clone(),
+        hook_event: a.hook_event,
+        traditional_hook: a.traditional_hook,
+        rerere_enabled: a.rerere_enabled,
     };
     let b2 = RepoFixture {
         root: b.root.clone(),
@@ -162,6 +244,11 @@ fn two_repos_on_two_threads() {
         author: b.author.clone(),
         diagnostics: Arc::clone(&b.diagnostics),
         command_runner: Arc::clone(&b.command_runner),
+        reference_unix_time: b.reference_unix_time,
+        hook_marker: b.hook_marker.clone(),
+        hook_event: b.hook_event,
+        traditional_hook: b.traditional_hook,
+        rerere_enabled: b.rerere_enabled,
     };
 
     let ha = thread::spawn(move || run_repo_loop(a2, tx_a));
@@ -191,6 +278,20 @@ fn two_repos_on_two_threads() {
 
 #[test]
 fn two_repos_fetch_merge_notes_no_crosstalk() {
+    for iter in 0..CONCURRENT_ITERS {
+        run_fetch_merge_notes_no_crosstalk_once(iter);
+    }
+}
+
+struct ThreadReport {
+    email: String,
+    wall_epoch: i64,
+    rerere_preimage: bool,
+    hook_marker: String,
+    traditional_hook: String,
+}
+
+fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
     let base = TempDir::new().expect("tempdir");
     let upstream = base.path().join("upstream.git");
     git_in(
@@ -204,40 +305,53 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
     );
     git_in(work.path(), &["config", "user.email", "u@example.com"]);
     git_in(work.path(), &["config", "user.name", "Upstream"]);
-    std::fs::write(work.path().join("base.txt"), "base\n").expect("write");
-    git_in(work.path(), &["add", "base.txt"]);
+    std::fs::write(work.path().join("shared.txt"), "base\n").expect("write shared");
+    git_in(work.path(), &["add", "shared.txt"]);
     git_in(work.path(), &["commit", "-m", "base"]);
     git_in(work.path(), &["branch", "topic"]);
-    std::fs::write(work.path().join("topic.txt"), "topic\n").expect("write");
-    git_in(work.path(), &["add", "topic.txt"]);
+    std::fs::write(work.path().join("shared.txt"), "topic\n").expect("topic shared");
+    git_in(work.path(), &["add", "shared.txt"]);
     git_in(work.path(), &["commit", "-m", "topic"]);
     let default_branch = git_in(work.path(), &["rev-parse", "--abbrev-ref", "HEAD"]);
     git_in(work.path(), &["checkout", &default_branch]);
-    std::fs::write(work.path().join("main.txt"), "main\n").expect("write");
-    git_in(work.path(), &["add", "main.txt"]);
+    std::fs::write(work.path().join("shared.txt"), "main\n").expect("main shared");
+    git_in(work.path(), &["add", "shared.txt"]);
     git_in(work.path(), &["commit", "-m", "main"]);
     git_in(work.path(), &["push", "origin", &default_branch, "topic"]);
 
-    let prepare = |name: &str, rerere: &str, email: &str| -> RepoFixture {
-        let root = base.path().join(name);
+    let prepare = |name: &str,
+                   email: &str,
+                   reference_unix_time: i64,
+                   hook_marker: &str,
+                   hook_event: &'static str,
+                   traditional_hook: &'static str,
+                   rerere_enabled: bool|
+     -> RepoFixture {
+        let root = base.path().join(format!("{name}-{iter}"));
         fs::create_dir_all(&root).expect("root");
         init_repository(&root, false, "main", None, "files").expect("init");
-        let home = base.path().join(format!("home-{name}"));
+        let home = base.path().join(format!("home-{name}-{iter}"));
         fs::create_dir_all(&home).expect("home");
         let global = home.join(".gitconfig");
         fs::write(
             &global,
-            format!("[user]\n\tname = {name}\n\temail = {email}\n[merge]\n\trerere = {rerere}\n"),
+            format!("[user]\n\tname = {name}\n\temail = {email}\n"),
         )
         .expect("global");
-        fs::write(
-            root.join(".git/config"),
-            format!(
-                "[remote \"origin\"]\n\turl = {}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
-                upstream.display()
-            ),
-        )
-        .expect("local config");
+        let mut local_cfg = format!(
+            "[remote \"origin\"]\n\turl = {}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
+            upstream.display()
+        );
+        if rerere_enabled {
+            local_cfg.push_str("\n[rerere]\n\tenabled = true\n");
+            fs::create_dir_all(root.join(".git/rr-cache")).expect("rr-cache");
+        }
+        local_cfg.push_str(&format!(
+            "\n[hook \"hc\"]\n\tcommand = {hook_marker}\n\tevent = {hook_event}\n"
+        ));
+        fs::write(root.join(".git/config"), local_cfg).expect("local config");
+        fs::create_dir_all(root.join(".git/hooks")).expect("hooks dir");
+        write_non_executable_hook(&root.join(".git/hooks").join(traditional_hook));
         std::fs::write(root.join("seed.txt"), "seed\n").expect("seed");
         let mut env = Environment::empty();
         env.cwd = root.clone();
@@ -253,6 +367,11 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
             author: name.to_owned(),
             diagnostics: Arc::clone(&diagnostics),
             command_runner: Arc::clone(&command_runner),
+            reference_unix_time,
+            hook_marker: hook_marker.to_owned(),
+            hook_event,
+            traditional_hook,
+            rerere_enabled,
         };
         let repo = open_with_env(&fx);
         status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
@@ -275,20 +394,46 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
             author: name.to_owned(),
             diagnostics,
             command_runner,
+            reference_unix_time,
+            hook_marker: hook_marker.to_owned(),
+            hook_event,
+            traditional_hook,
+            rerere_enabled,
         }
     };
 
-    let a = prepare("fetch-a", "true", "a@example.com");
-    let b = prepare("fetch-b", "false", "b@example.com");
+    let a = prepare(
+        "fetch-a",
+        "a@example.com",
+        1_111_111_111,
+        "hook-marker-a",
+        "pre-commit",
+        "pre-commit",
+        true,
+    );
+    let b = prepare(
+        "fetch-b",
+        "b@example.com",
+        2_222_222_222,
+        "hook-marker-b",
+        "commit-msg",
+        "commit-msg",
+        false,
+    );
+
     fn run_fetch_merge_notes(
         fx: RepoFixture,
         upstream: &Path,
         default_branch: &str,
-        ack: mpsc::Sender<(String, String, usize, usize)>,
+        ack: mpsc::Sender<ThreadReport>,
     ) {
         let repo = open_with_env(&fx);
+        assert_eq!(
+            repo.wall_clock_epoch(),
+            fx.reference_unix_time,
+            "wall clock must stay on the repository handle"
+        );
         let cfg = repo.config().expect("config");
-        let rerere = cfg.get("merge.rerere").unwrap_or_default();
         let email = cfg.get("user.email").unwrap_or_default();
         fetch_local(
             &repo.git_dir,
@@ -304,10 +449,6 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
         let main_tip = grit_lib::refs::resolve_ref(&repo.git_dir, &main_ref).expect("main tip");
         let topic_tip = grit_lib::refs::resolve_ref(&repo.git_dir, "refs/remotes/origin/topic")
             .expect("topic tip");
-        let head = grit_lib::refs::resolve_ref(&repo.git_dir, "HEAD").expect("head");
-        let _head_tree = parse_commit(&repo.odb.read(&head).expect("head obj").data)
-            .expect("parse head")
-            .tree;
         let main_tree = parse_commit(&repo.odb.read(&main_tip).expect("main obj").data)
             .expect("parse main")
             .tree;
@@ -331,6 +472,40 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
             TreeMergeConflictPresentation::default(),
         )
         .expect("merge");
+        let path = "shared.txt";
+        let base = blob_oid_at_path(&repo.odb, &base_tree, path).expect("base blob");
+        let ours = blob_oid_at_path(&repo.odb, &main_tree, path).expect("ours blob");
+        let theirs = blob_oid_at_path(&repo.odb, &topic_tree, path).expect("theirs blob");
+        let conflict_body =
+            "<<<<<<< ours\nmain\n=======\ntopic\n>>>>>>> theirs\n";
+        fs::write(fx.root.join(path), conflict_body).expect("wt conflict");
+        let mut index = Index::new();
+        index.add_or_replace(index_conflict_entry(path, 1, base));
+        index.add_or_replace(index_conflict_entry(path, 2, ours));
+        index.add_or_replace(index_conflict_entry(path, 3, theirs));
+        repo.write_index(&mut index).expect("write conflict index");
+        let rerere_events = repo_rerere(&repo, RerereAutoupdate::No).expect("rerere");
+        let rerere_preimage = rerere_events
+            .iter()
+            .any(|e| e.path == "shared.txt" && e.kind == RerereEventKind::RecordedPreimage);
+        run_hook_opts(
+            Some(&repo),
+            fx.hook_event,
+            &[],
+            cfg.as_ref(),
+            RunHookOptions::default(),
+            None,
+        )
+        .expect("configured hook");
+        run_hook_opts(
+            Some(&repo),
+            fx.traditional_hook,
+            &[],
+            cfg.as_ref(),
+            RunHookOptions::default(),
+            None,
+        )
+        .expect("traditional hook scan");
         write_notes_commit(
             &repo,
             "refs/notes/commits",
@@ -342,10 +517,14 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
             &format!("note for {email}"),
         )
         .expect("notes");
-        let hook_spawns = fx.command_runner.specs().len();
-        let warnings = fx.diagnostics.warnings().len();
-        ack.send((rerere, email, hook_spawns, warnings))
-            .expect("ack");
+        ack.send(ThreadReport {
+            email,
+            wall_epoch: repo.wall_clock_epoch(),
+            rerere_preimage,
+            hook_marker: fx.hook_marker.clone(),
+            traditional_hook: fx.traditional_hook.to_owned(),
+        })
+        .expect("ack");
     }
 
     let (tx_a, rx_a) = mpsc::channel();
@@ -361,6 +540,11 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
             author: a.author.clone(),
             diagnostics: Arc::clone(&a.diagnostics),
             command_runner: Arc::clone(&a.command_runner),
+            reference_unix_time: a.reference_unix_time,
+            hook_marker: a.hook_marker.clone(),
+            hook_event: a.hook_event,
+            traditional_hook: a.traditional_hook,
+            rerere_enabled: a.rerere_enabled,
         };
         move || run_fetch_merge_notes(fx, &upstream_a, &branch_a, tx_a)
     });
@@ -371,25 +555,68 @@ fn two_repos_fetch_merge_notes_no_crosstalk() {
             author: b.author.clone(),
             diagnostics: Arc::clone(&b.diagnostics),
             command_runner: Arc::clone(&b.command_runner),
+            reference_unix_time: b.reference_unix_time,
+            hook_marker: b.hook_marker.clone(),
+            hook_event: b.hook_event,
+            traditional_hook: b.traditional_hook,
+            rerere_enabled: b.rerere_enabled,
         };
         move || run_fetch_merge_notes(fx, &upstream_b, &branch_b, tx_b)
     });
 
-    let (rerere_a, email_a, hooks_a, warn_a) = rx_a
+    let report_a = rx_a
         .recv_timeout(std::time::Duration::from_secs(120))
         .expect("a");
-    let (rerere_b, email_b, hooks_b, warn_b) = rx_b
+    let report_b = rx_b
         .recv_timeout(std::time::Duration::from_secs(120))
         .expect("b");
     ha.join().expect("join a");
     hb.join().expect("join b");
 
-    assert_eq!(rerere_a, "true");
-    assert_eq!(email_a, "a@example.com");
-    assert_eq!(rerere_b, "false");
-    assert_eq!(email_b, "b@example.com");
-    assert_eq!(a.diagnostics.warnings().len(), warn_a);
-    assert_eq!(b.diagnostics.warnings().len(), warn_b);
-    assert_eq!(a.command_runner.specs().len(), hooks_a);
-    assert_eq!(b.command_runner.specs().len(), hooks_b);
+    assert_eq!(report_a.email, "a@example.com");
+    assert_eq!(report_b.email, "b@example.com");
+    assert_eq!(report_a.wall_epoch, 1_111_111_111);
+    assert_eq!(report_b.wall_epoch, 2_222_222_222);
+    assert!(
+        report_a.rerere_preimage,
+        "repo A should record rerere preimage"
+    );
+    assert!(
+        !report_b.rerere_preimage,
+        "repo B should not record rerere preimage"
+    );
+
+    assert!(
+        runner_records_marker(&a.command_runner, "hook-marker-a"),
+        "repo A runner must record configured hook argv"
+    );
+    assert!(
+        !runner_records_marker(&a.command_runner, "hook-marker-b"),
+        "repo B hook marker must not appear in repo A runner"
+    );
+    assert!(
+        runner_records_marker(&b.command_runner, "hook-marker-b"),
+        "repo B runner must record configured hook argv"
+    );
+    assert!(
+        !runner_records_marker(&b.command_runner, "hook-marker-a"),
+        "repo A hook marker must not appear in repo B runner"
+    );
+
+    assert!(has_non_executable_hook_warning(
+        &a.diagnostics,
+        "pre-commit"
+    ));
+    assert!(!has_non_executable_hook_warning(
+        &b.diagnostics,
+        "pre-commit"
+    ));
+    assert!(has_non_executable_hook_warning(
+        &b.diagnostics,
+        "commit-msg"
+    ));
+    assert!(!has_non_executable_hook_warning(
+        &a.diagnostics,
+        "commit-msg"
+    ));
 }

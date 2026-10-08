@@ -2624,7 +2624,7 @@ enum AtStep {
     Now,
 }
 
-fn try_parse_at_step_inner(inner: &str) -> Option<AtStep> {
+fn try_parse_at_step_inner(inner: &str, now_sec: i64) -> Option<AtStep> {
     if inner.eq_ignore_ascii_case("u") || inner.eq_ignore_ascii_case("upstream") {
         return Some(AtStep::Upstream);
     }
@@ -2637,7 +2637,7 @@ fn try_parse_at_step_inner(inner: &str) -> Option<AtStep> {
     if let Ok(n) = inner.parse::<usize>() {
         return Some(AtStep::Index(n));
     }
-    approxidate(inner).map(AtStep::Date)
+    approxidate_at(inner, now_sec).map(AtStep::Date)
 }
 
 fn next_reflog_at_open(spec: &str, mut from: usize) -> Option<usize> {
@@ -2657,7 +2657,7 @@ fn next_reflog_at_open(spec: &str, mut from: usize) -> Option<usize> {
 }
 
 /// Split `spec` into a ref prefix and a chain of `@{...}` steps (empty chain → not a reflog form).
-fn split_reflog_at_chain(spec: &str) -> Option<(String, Vec<AtStep>)> {
+fn split_reflog_at_chain(spec: &str, now_sec: i64) -> Option<(String, Vec<AtStep>)> {
     let at = next_reflog_at_open(spec, 0)?;
     let prefix = spec[..at].to_owned();
     let mut steps = Vec::new();
@@ -2673,7 +2673,7 @@ fn split_reflog_at_chain(spec: &str) -> Option<(String, Vec<AtStep>)> {
         let inner_start = pos + 2;
         let close = spec[inner_start..].find('}').map(|i| inner_start + i)?;
         let inner = &spec[inner_start..close];
-        let step = try_parse_at_step_inner(inner)?;
+        let step = try_parse_at_step_inner(inner, now_sec)?;
         steps.push(step);
         pos = close + 1;
     }
@@ -2817,7 +2817,8 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
 ///
 /// Returns `None` when `spec` is not a reflog-chain form (no `@{` step after the prefix).
 pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> Result<Option<String>> {
-    let Some((prefix, steps)) = split_reflog_at_chain(spec) else {
+    let now_sec = repo.wall_clock_epoch();
+    let Some((prefix, steps)) = split_reflog_at_chain(spec, now_sec) else {
         return Ok(None);
     };
 
@@ -2906,7 +2907,8 @@ pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> Result<String>
 
 /// Try to resolve `ref@{...}` with optional chained `@{...}` steps (e.g. `other@{u}@{1}`).
 fn try_resolve_reflog_index(repo: &Repository, spec: &str) -> Result<Option<ObjectId>> {
-    let Some((prefix, steps)) = split_reflog_at_chain(spec) else {
+    let now_sec = repo.wall_clock_epoch();
+    let Some((prefix, steps)) = split_reflog_at_chain(spec, now_sec) else {
         return Ok(None);
     };
 
@@ -3011,13 +3013,17 @@ fn parse_reflog_entry_timestamp(entry: &crate::reflog::ReflogEntry) -> Option<i6
 /// Used by `git log -g` display to match Git's `ref@{date}` formatting in tests.
 #[must_use]
 pub fn reflog_date_selector_timestamp(s: &str) -> Option<i64> {
-    approxidate(s)
+    reflog_date_selector_timestamp_at(s, crate::git_date::tm::process_wall_clock_sec())
+}
+
+/// Like [`reflog_date_selector_timestamp`] but uses `now_sec` for relative fields.
+pub fn reflog_date_selector_timestamp_at(s: &str, now_sec: i64) -> Option<i64> {
+    approxidate_at(s, now_sec)
 }
 
 /// Simple approximate date parser for reflog date lookups.
 /// Handles formats like "2001-09-17", "3.hot.dogs.on.2001-09-17", etc.
-fn approxidate(s: &str) -> Option<i64> {
-    let now_ts = crate::git_date::tm::get_time_sec();
+fn approxidate_at(s: &str, now_ts: i64) -> Option<i64> {
     let lower = s.trim().to_ascii_lowercase();
     if lower.split_whitespace().next() == Some("now") {
         // Match Git's test harness: `test_tick` sets GIT_COMMITTER_DATE; `@{now}` must use that

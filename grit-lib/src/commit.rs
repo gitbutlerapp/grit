@@ -16,9 +16,8 @@
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::environment::offset_from_epoch_and_tz;
 use crate::git_date::parse::parse_date;
-use crate::git_date::tm::{get_time_sec, local_tzoffset};
-use time::UtcOffset;
 
 /// Normalise a date string into Git's stored `<epoch> <offset>` timestamp.
 ///
@@ -98,25 +97,10 @@ pub fn parse_date_to_git_timestamp(date_str: &str) -> Option<String> {
     None
 }
 
-fn utc_offset_from_tz_hhmm(tz: i32) -> Option<UtcOffset> {
-    let sign: i32 = if tz < 0 { -1 } else { 1 };
-    let abs = tz.unsigned_abs();
-    let hours = (abs / 100) as i32;
-    let minutes = (abs % 100) as i32;
-    let seconds = sign * (hours * 3600 + minutes * 60);
-    UtcOffset::from_whole_seconds(seconds).ok()
-}
-
-/// [`OffsetDateTime`] for the current instant in the local timezone (for callers that pass
-/// `now` into [`assemble_identity`]).
+/// [`OffsetDateTime`] for a repository wall clock and optional `TZ`-style zone string.
 #[must_use]
-pub fn now_for_identity() -> OffsetDateTime {
-    let epoch = get_time_sec();
-    let tz = local_tzoffset(epoch as u64);
-    let offset = utc_offset_from_tz_hhmm(tz).unwrap_or(UtcOffset::UTC);
-    OffsetDateTime::from_unix_timestamp(epoch)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(offset)
+pub fn identity_now_from_epoch(epoch: i64, tz: Option<&str>) -> OffsetDateTime {
+    offset_from_epoch_and_tz(epoch, tz)
 }
 
 /// Format a timestamp in Git's format: `<epoch> <offset>`.

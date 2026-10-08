@@ -1797,6 +1797,7 @@ pub fn render_commit_with_color(
         }
         OutputMode::Format(fmt) => {
             let commit = load_commit(repo, oid)?;
+            let wall_now = repo.wall_clock_epoch();
             let subject = commit.message.lines().next().unwrap_or_default();
             let hex = oid.to_hex();
 
@@ -2362,8 +2363,7 @@ pub fn render_commit_with_color(
                                 let Some(p) = parse_signature_times(&commit.author) else {
                                     break;
                                 };
-                                let now = crate::git_date::tm::get_time_sec();
-                                target.push_str(&format_relative_date(now - p.unix_seconds));
+                                target.push_str(&format_relative_date(wall_now - p.unix_seconds));
                             }
                             Some(other) => {
                                 target.push('%');
@@ -2415,8 +2415,7 @@ pub fn render_commit_with_color(
                                 let Some(p) = parse_signature_times(&commit.committer) else {
                                     break;
                                 };
-                                let now = crate::git_date::tm::get_time_sec();
-                                target.push_str(&format_relative_date(now - p.unix_seconds));
+                                target.push_str(&format_relative_date(wall_now - p.unix_seconds));
                             }
                             Some(other) => {
                                 target.push('%');

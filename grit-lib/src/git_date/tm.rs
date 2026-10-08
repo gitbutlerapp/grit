@@ -1,10 +1,8 @@
 //! Time conversion helpers that produce Git-compatible timestamps.
 
-use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::compat::{self, time_t, tm};
-
-static EXPLICIT_TZ_LOCK: Mutex<()> = Mutex::new(());
 
 /// Unix timestamp as used by Git (`timestamp_t` is typically `uintmax_t`).
 pub type Timestamp = u64;
@@ -164,21 +162,21 @@ fn is_named_tz(tz: &str) -> bool {
 }
 
 fn local_tzoffset_with_named_zone(time: u64, tz: &str) -> TzHhmm {
-    let _guard = EXPLICIT_TZ_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let saved = std::env::var("TZ").ok();
-    std::env::set_var("TZ", tz);
-    refresh_process_tz();
-    let t = time as time_t;
-    let mut buf = std::mem::MaybeUninit::<tm>::uninit();
-    let offset = unsafe { local_time_tzoffset(t, buf.as_mut_ptr()) };
-    match saved {
-        Some(prev) => std::env::set_var("TZ", prev),
-        None => std::env::remove_var("TZ"),
-    }
-    refresh_process_tz();
-    offset
+    let Some(zone) = tzdb::tz_by_name(tz) else {
+        return 0;
+    };
+    let Ok(local) = zone.find_local_time_type(time as i64) else {
+        return 0;
+    };
+    utc_offset_secs_to_hhmm(local.ut_offset())
+}
+
+fn utc_offset_secs_to_hhmm(offset_secs: i32) -> TzHhmm {
+    let sign = if offset_secs >= 0 { 1 } else { -1 };
+    let abs = offset_secs.unsigned_abs();
+    let hours = (abs / 3600) as i32;
+    let minutes = ((abs % 3600) / 60) as i32;
+    sign * (hours * 100 + minutes)
 }
 
 /// Re-read the process timezone after `TZ` changes (scoped named zones and integration tests).
@@ -242,17 +240,11 @@ mod local_tz_tests {
     }
 }
 
-/// Current Unix time in seconds (no environment reads).
+/// Process wall clock in whole seconds (real time; not repository-scoped).
 #[must_use]
-pub fn get_time_sec() -> i64 {
-    system_now_sec()
-}
-
-/// Current Unix time in seconds (no environment reads).
-#[must_use]
-pub fn system_now_sec() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+pub fn process_wall_clock_sec() -> i64 {
+    let now = SystemTime::now(); // hygiene: process wall clock when no repository handle supplies reference time
+    now.duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
