@@ -13,5 +13,6 @@ These pages walk through opening a repository, the object database, refs, the in
 | [Diff](https://grit-scm.com/docs/library/diff/index.md) | Tree, index, and blob diffs |
 | [Revwalk](https://grit-scm.com/docs/library/revwalk/index.md) | Rev-parse, rev-list, ranges, merge base |
 | [Network](https://grit-scm.com/docs/library/network/index.md) | ls-remote, fetch, push, credentials |
+| [API map](https://grit-scm.com/docs/library/api-map/index.md) | Generated module and type index with docs.rs links |
 
 For exhaustive API detail see [grit-lib on docs.rs](https://docs.rs/grit-lib).

@@ -1,0 +1,44 @@
+# Grit documentation
+
+> How to use grit, a simple Git client built on grit-lib: a short tutorial and a man page for every command.
+
+- [Docs](https://grit-scm.com/docs/index.md): How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.
+- [Install grit](https://grit-scm.com/docs/install/index.md): Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.
+- [Tutorial](https://grit-scm.com/docs/tutorial/index.md): Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.
+- [Library quick start](https://grit-scm.com/docs/library-quickstart/index.md): Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.
+- [Global options](https://grit-scm.com/docs/global-options/index.md): Options that apply to every grit command.
+- [Scripting with grit](https://grit-scm.com/docs/scripting/index.md): Use --json and --filter to build scripts on top of grit.
+- [grit init](https://grit-scm.com/docs/init/index.md): Create a new, empty repository.
+- [grit clone](https://grit-scm.com/docs/clone/index.md): Copy a remote repository into a new directory.
+- [grit status](https://grit-scm.com/docs/status/index.md): Show where you are and what's changed. This is what plain grit runs.
+- [grit config](https://grit-scm.com/docs/config/index.md): Read, set, list or remove configuration values.
+- [grit add](https://grit-scm.com/docs/add/index.md): Stage changes. With no paths, stages everything.
+- [grit commit](https://grit-scm.com/docs/commit/index.md): Stage every change and record a new commit.
+- [grit diff](https://grit-scm.com/docs/diff/index.md): Show uncommitted changes, or the change a commit introduced.
+- [grit log](https://grit-scm.com/docs/log/index.md): Show recent commits, newest first, a page at a time.
+- [grit shortlog](https://grit-scm.com/docs/shortlog/index.md): List the commits on this branch that aren't on the target branch yet.
+- [grit show](https://grit-scm.com/docs/show/index.md): Show a commit, tag or branch, and a summary of what it changed.
+- [grit branch](https://grit-scm.com/docs/branch/index.md): List branches, or create or delete one.
+- [grit switch](https://grit-scm.com/docs/switch/index.md): Switch to another branch, or create one and switch to it.
+- [grit merge](https://grit-scm.com/docs/merge/index.md): Merge another branch into the current one.
+- [grit pick](https://grit-scm.com/docs/pick/index.md): Copy a single commit onto the current branch.
+- [grit tag](https://grit-scm.com/docs/tag/index.md): List tags, or create or delete one. A new tag points at the current commit.
+- [grit remote](https://grit-scm.com/docs/remote/index.md): List remotes, or add one.
+- [grit fetch](https://grit-scm.com/docs/fetch/index.md): Download new commits, branches and tags from a remote.
+- [grit pull](https://grit-scm.com/docs/pull/index.md): Fetch from the remote and bring the current branch up to date.
+- [grit push](https://grit-scm.com/docs/push/index.md): Publish the current branch, or your tags, to a remote.
+- [grit auth](https://grit-scm.com/docs/auth/index.md): Sign in to GitHub so HTTPS pushes and fetches just work.
+- [grit update](https://grit-scm.com/docs/update/index.md): Update grit to the latest release.
+- [grit upload-pack](https://grit-scm.com/docs/upload-pack/index.md): Serve a fetch or clone of a repository over stdin and stdout.
+- [grit receive-pack](https://grit-scm.com/docs/receive-pack/index.md): Accept a push to a repository over stdin and stdout.
+- [grit manager](https://grit-scm.com/docs/manager/index.md): A credential helper that stores passwords and tokens in the Windows Credential Manager.
+- [Library guide](https://grit-scm.com/docs/library/index.md): Use grit-lib from Rust — the same engine that powers the grit CLI.
+- [grit-lib API map](https://grit-scm.com/docs/library/api-map/index.md): Generated index of public grit-lib modules and key types with docs.rs links.
+- [Diff](https://grit-scm.com/docs/library/diff/index.md): Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.
+- [Network](https://grit-scm.com/docs/library/network/index.md): ls-remote, fetch and push over file:// and smart HTTP, credentials, and progress.
+- [Objects](https://grit-scm.com/docs/library/objects/index.md): ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.
+- [Refs](https://grit-scm.com/docs/library/refs/index.md): Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.
+- [Repository](https://grit-scm.com/docs/library/repository/index.md): Open and discover Git repositories, read git-dir vs work tree, load config, and handle grit_lib::Error.
+- [Revwalk](https://grit-scm.com/docs/library/revwalk/index.md): Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.
+- [Index](https://grit-scm.com/docs/library/staging/index.md): Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.
+- [Benchmarks](https://grit-scm.com/docs/benchmarks/index.md): Grit vs Git on realistic workloads, from the committed grit-bench baseline.
