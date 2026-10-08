@@ -75,6 +75,10 @@ fn init_sha256_repo(root: &Path) -> PathBuf {
         &["init", "-q", "--object-format=sha256", "-b", "main"],
     );
     git(root, &["config", "core.multiPackIndex", "true"]);
+    // Newer Git runs detached maintenance after commits; a background repack can delete a pack
+    // while grit writes the MIDX, leaving it naming a pack git then fails to load.
+    git(root, &["config", "gc.auto", "0"]);
+    git(root, &["config", "maintenance.auto", "false"]);
     root.join(".git")
 }
 

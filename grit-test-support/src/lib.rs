@@ -312,9 +312,27 @@ pub fn git_cmd(args: &[&str]) -> Cmd {
         program: Program::Path(OsString::from("git")),
         args: args.iter().map(|s| (*s).to_owned()).collect(),
         dir: None,
-        env: Vec::new(),
+        env: no_background_maintenance_env(),
         stdin: None,
     }
+}
+
+/// Config passed to every system `git` run by tests: no auto-gc and no background maintenance.
+///
+/// Newer Git starts detached maintenance after commits, which can repack and prune objects
+/// while a test is still inspecting the repository (missing loose objects, MIDX entries naming
+/// deleted packs). A test can still override these with its own `GIT_CONFIG_*` variables.
+fn no_background_maintenance_env() -> Vec<(OsString, Option<OsString>)> {
+    [
+        ("GIT_CONFIG_COUNT", "2"),
+        ("GIT_CONFIG_KEY_0", "gc.auto"),
+        ("GIT_CONFIG_VALUE_0", "0"),
+        ("GIT_CONFIG_KEY_1", "maintenance.auto"),
+        ("GIT_CONFIG_VALUE_1", "false"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (OsString::from(k), Some(OsString::from(v))))
+    .collect()
 }
 
 /// Run system `git`, assert success, and return stdout.
