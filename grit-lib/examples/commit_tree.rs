@@ -53,6 +53,7 @@ fn main() -> grit_lib::error::Result<()> {
         encoding: None,
         message: "initial example commit\n".to_owned(),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let raw = serialize_commit(&commit);
     let commit_oid = repo.odb.write(ObjectKind::Commit, &raw)?;

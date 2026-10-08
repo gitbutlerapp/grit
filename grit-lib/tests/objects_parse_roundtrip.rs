@@ -148,12 +148,7 @@ fn commit_encoding_and_gpgsig_continuation_roundtrip() {
     let parsed = parse_commit(raw.as_bytes()).expect("parse");
     assert_eq!(parsed.encoding.as_deref(), Some("ISO-8859-1"));
     assert_eq!(parsed.message, "msg-only\n");
-    // `gpgsig` / `mergetag` continuation headers are consumed when parsing; they are
-    // not re-emitted by `serialize_commit` (same as Git's normal commit editing path).
-    let round = serialize_commit(&parsed);
-    let reparsed = parse_commit(&round).expect("reparse stripped commit");
-    assert_eq!(reparsed.encoding, parsed.encoding);
-    assert_eq!(reparsed.message, parsed.message);
+    assert_eq!(serialize_commit(&parsed), raw.as_bytes());
 }
 
 #[test]
@@ -194,6 +189,19 @@ fn tag_roundtrip_all_target_types_and_missing_tagger() {
     let parsed = parse_tag(no_tagger.as_bytes()).expect("no tagger");
     assert!(parsed.tagger.is_none());
     assert_eq!(serialize_tag(&parsed), no_tagger.as_bytes());
+
+    let inner_body = format!(
+        "object {commit}\ntype commit\ntag inner\ntagger T <t@example.com> 1 +0000\n\ninner msg\n"
+    );
+    let inner_oid = git_hash_object_stdin(&repo, "tag", inner_body.as_bytes());
+    let outer_body = format!(
+        "object {inner_oid}\ntype tag\ntag outer\ntagger T <t@example.com> 1 +0000\n\nwraps inner tag\n"
+    );
+    let outer_oid = git_hash_object_stdin(&repo, "tag", outer_body.as_bytes());
+    let git_outer = git_cat_file_object(&repo, "tag", &outer_oid);
+    let parsed_outer = parse_tag(&git_outer).expect("parse tag-of-tag");
+    assert_eq!(parsed_outer.object_type, "tag");
+    assert_eq!(serialize_tag(&parsed_outer), git_outer);
 }
 
 #[test]
@@ -239,6 +247,21 @@ fn object_id_from_hex_errors_are_typed() {
         ObjectId::from_hex(&short),
         Err(Error::InvalidObjectId(_))
     ));
+    let valid_len_non_hex = "g".repeat(40);
+    assert!(matches!(
+        ObjectId::from_hex(&valid_len_non_hex),
+        Err(Error::InvalidObjectId(_))
+    ));
+}
+
+#[test]
+fn hash_algo_name_and_len_parse_failures() {
+    assert!(HashAlgo::from_name("sha3").is_none());
+    assert!(HashAlgo::from_name("").is_none());
+    assert!(HashAlgo::from_len(19).is_none());
+    assert!(HashAlgo::from_len(21).is_none());
+    assert_eq!(HashAlgo::from_name("SHA1"), Some(HashAlgo::Sha1));
+    assert_eq!(HashAlgo::from_len(32), Some(HashAlgo::Sha256));
 }
 
 #[test]
@@ -270,6 +293,7 @@ fn serialize_parse_commit_tag_tree_identity() {
         encoding: None,
         message: "hello\n".to_string(),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let bytes = serialize_commit(&commit);
     let back = parse_commit(&bytes).unwrap();
@@ -301,6 +325,7 @@ fn serialize_commit_with_encoding_and_raw_author_bytes() {
         encoding: Some("UTF-8".to_string()),
         message: String::new(),
         raw_message: Some(b"raw-body".to_vec()),
+        preserved_preamble: Vec::new(),
     };
     let bytes = serialize_commit(&commit);
     let parsed = parse_commit(&bytes).expect("parse");

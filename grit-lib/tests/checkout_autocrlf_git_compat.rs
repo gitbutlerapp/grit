@@ -53,6 +53,7 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
         encoding: None,
         message: format!("{message}\n"),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let bytes = serialize_commit(&commit_data);
     let commit_oid = repo.odb.write(ObjectKind::Commit, &bytes).expect("commit");

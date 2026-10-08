@@ -168,6 +168,7 @@ fn grit_record_commit(
         encoding: None,
         message: format!("{message}\n"),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let bytes = serialize_commit(&commit_data);
     let oid = repo.odb.write(ObjectKind::Commit, &bytes)?;

@@ -32,6 +32,7 @@ fn commit_from_tree(
         encoding: None,
         message: message.to_owned(),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     repo.odb
         .write(ObjectKind::Commit, &serialize_commit(&commit))

@@ -261,6 +261,7 @@ pub fn write_notes_commit(
             format!("{message}\n")
         },
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
 
     let commit_data = serialize_commit(&commit);
@@ -891,6 +892,7 @@ pub fn write_notes_commit_with_parents(
             format!("{message}\n")
         },
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let commit_data = serialize_commit(&commit);
     repo.odb.write(ObjectKind::Commit, &commit_data)

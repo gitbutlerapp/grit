@@ -44,6 +44,7 @@ fn run() -> Result<()> {
         encoding: None,
         message: format!("{}\n", cli.message),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let oid = repo
         .odb

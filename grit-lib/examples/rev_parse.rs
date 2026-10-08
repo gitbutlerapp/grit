@@ -47,6 +47,7 @@ fn main() -> grit_lib::error::Result<()> {
         encoding: None,
         message: "r\n".to_owned(),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let oid = repo
         .odb

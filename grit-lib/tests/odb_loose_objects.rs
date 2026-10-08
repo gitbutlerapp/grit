@@ -195,25 +195,37 @@ fn t1050_odb_hash_matches_git_hash_object() {
                 .to_hex(),
             commit_oid
         );
+        let tag_body = format!(
+            "object {commit_oid}\ntype commit\ntag v-test\ntagger T <t@example.com> 1 +0000\n\nannotated\n"
+        );
+        let tag_oid = git_hash_object_w(&repo, "tag", tag_body.as_bytes());
+        assert_eq!(
+            odb.hash(ObjectKind::Tag, tag_body.as_bytes()).to_hex(),
+            tag_oid
+        );
     }
 }
 
 #[test]
 fn large_blob_round_trip_grit_then_git_and_git_then_grit() {
     for algo in algos_to_run() {
-        let repo = init_repo(algo);
-        let odb = Odb::new(&repo.objects_dir());
         let big = vec![0xABu8; 6 * 1024 * 1024];
-        let oid = odb.write(ObjectKind::Blob, &big).expect("grit write big");
-        let fsck = git_fsck(repo.path(), true);
-        assert!(fsck.ok, "fsck big blob: {:?}", fsck.msg_ids);
-        let read_back = odb.read(&oid).expect("read big");
-        assert_eq!(read_back.data, big);
 
-        let hex = git_hash_object_w(&repo, "blob", &big);
+        let grit_repo = init_repo(algo);
+        let grit_odb = Odb::new(&grit_repo.objects_dir());
+        let oid = grit_odb
+            .write(ObjectKind::Blob, &big)
+            .expect("grit write big");
+        let fsck = git_fsck(grit_repo.path(), true);
+        assert!(fsck.ok, "fsck big blob: {:?}", fsck.msg_ids);
+        assert_eq!(grit_odb.read(&oid).expect("read big").data, big);
+
+        let git_repo = init_repo(algo);
+        let git_odb = Odb::new(&git_repo.objects_dir());
+        let hex = git_hash_object_w(&git_repo, "blob", &big);
         let git_oid = ObjectId::from_hex(&hex).expect("parse");
+        assert_eq!(git_odb.read(&git_oid).unwrap().data, big);
         assert_eq!(git_oid, oid);
-        assert_eq!(odb.read(&git_oid).unwrap().data, big);
     }
 }
 
@@ -269,6 +281,27 @@ fn t1060_loose_header_size_mismatch_returns_corrupt_object() {
     assert!(
         matches!(err, Error::CorruptObject(_)),
         "expected CorruptObject, got {err:?}"
+    );
+}
+
+#[test]
+fn t1060_loose_header_type_mismatch_returns_loose_hash_mismatch() {
+    let repo = init_repo(HashAlgo::Sha1);
+    let odb = Odb::new(&repo.objects_dir());
+    let body = b"type-mismatch";
+    let oid = odb.hash(ObjectKind::Blob, body);
+    let path = odb.object_path(&oid);
+    let mut raw = format!("tree {}\0", body.len()).into_bytes();
+    raw.extend_from_slice(body);
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(&raw).unwrap();
+    let zlib = enc.finish().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, zlib).unwrap();
+    let err = Odb::read_loose_verify_oid(&path, &oid).unwrap_err();
+    assert!(
+        matches!(err, Error::LooseHashMismatch { .. }),
+        "expected LooseHashMismatch, got {err:?}"
     );
 }
 

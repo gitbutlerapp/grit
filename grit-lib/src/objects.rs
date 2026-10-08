@@ -641,6 +641,11 @@ pub struct CommitData {
     /// When set, `serialize_commit` uses these bytes instead of `message`.
     #[doc = "Optional raw message bytes for non-UTF-8 messages."]
     pub raw_message: Option<Vec<u8>>,
+    /// Exact header bytes from the start of the object through the blank line before the message.
+    ///
+    /// When non-empty, [`serialize_commit`] writes this prefix verbatim (preserving `gpgsig`,
+    /// `mergetag`, and other extra headers in original order) and then the message body.
+    pub preserved_preamble: Vec<u8>,
 }
 
 /// Parse the raw data of a commit object.
@@ -713,6 +718,7 @@ pub fn parse_commit(data: &[u8]) -> Result<CommitData> {
                 encoding,
                 message,
                 raw_message,
+                preserved_preamble: data[..after_nl].to_vec(),
             });
         }
 
@@ -922,6 +928,15 @@ pub fn serialize_tag(t: &TagData) -> Vec<u8> {
 /// supply a trailing LF; `git commit-tree` reading from stdin or `-F` does not add one.
 #[must_use]
 pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
+    if !c.preserved_preamble.is_empty() {
+        let mut out = c.preserved_preamble.clone();
+        if let Some(raw) = &c.raw_message {
+            out.extend_from_slice(raw);
+        } else if !c.message.is_empty() {
+            out.extend_from_slice(c.message.as_bytes());
+        }
+        return out;
+    }
     let mut out = Vec::new();
     out.extend_from_slice(format!("tree {}\n", c.tree).as_bytes());
     for p in &c.parents {
@@ -972,6 +987,31 @@ mod commit_parse_tests {
         let c = parse_commit(raw.as_bytes()).expect("parse signed commit");
         assert_eq!(c.tree.to_hex(), "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
         assert_eq!(c.message, "msg\n");
+        assert_eq!(serialize_commit(&c), raw.as_bytes());
+    }
+
+    #[test]
+    fn parse_commit_preserves_gpgsig_mergetag_bytes_exactly() {
+        let raw = concat!(
+            "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+            "author A <a@example.com> 1 +0000\n",
+            "committer C <c@example.com> 1 +0000\n",
+            "encoding ISO-8859-1\n",
+            "gpgsig -----BEGIN PGP SIGNATURE-----\n",
+            " line2\n",
+            " -----END PGP SIGNATURE-----\n",
+            "mergetag object 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+            " type commit\n",
+            " tag merge-tag\n",
+            " tagger T <t@example.com> 1 +0000\n",
+            " -----BEGIN PGP SIGNATURE-----\n",
+            " inner\n",
+            " -----END PGP SIGNATURE-----\n",
+            "\n",
+            "msg-only\n",
+        );
+        let parsed = parse_commit(raw.as_bytes()).expect("parse");
+        assert_eq!(serialize_commit(&parsed), raw.as_bytes());
     }
 
     #[test]

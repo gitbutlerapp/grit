@@ -215,6 +215,7 @@ pub fn integrate(
         encoding: None,
         message: format!("Merge {label}\n"),
         raw_message: None,
+        preserved_preamble: Vec::new(),
     };
     let oid = repo
         .odb
