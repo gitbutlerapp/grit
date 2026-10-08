@@ -43,7 +43,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 6
 command_new = 0
-static_global = 6
+static_global = 3
 system_time_now = 0
 
 [file.blame.rs]
@@ -148,7 +148,7 @@ literal_error = 2
 literal_hint = 0
 literal_warning = 1
 command_new = 0
-static_global = 2
+static_global = 1
 system_time_now = 0
 
 [file.credentials.rs]
@@ -253,7 +253,7 @@ literal_error = 2
 literal_hint = 0
 literal_warning = 0
 command_new = 1
-static_global = 4
+static_global = 2
 system_time_now = 0
 
 [file.git_binary_base85.rs]
@@ -285,7 +285,7 @@ eprint = 0
 dbg = 0
 process_exit = 0
 env_var = 0
-env_var_os = 1
+env_var_os = 2
 env_vars = 0
 env_set_var = 1
 env_remove_var = 0
@@ -925,7 +925,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 3
+static_global = 2
 system_time_now = 0
 
 [file.repo.rs]
@@ -998,7 +998,7 @@ eprintln = 6
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 3
+env_var = 4
 env_var_os = 0
 env_vars = 0
 env_set_var = 0
@@ -1324,6 +1324,6 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 1
 system_time_now = 0
 

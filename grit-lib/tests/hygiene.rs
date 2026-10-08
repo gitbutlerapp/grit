@@ -481,6 +481,8 @@ fn count_patterns(stripped: &str, original: &str) -> (PatternCounts, Vec<String>
         }
     }
 
+    *counts.get_mut("static_global").unwrap() += count_static_global_items(stripped, &orig_lines);
+
     (counts, exempt_reasons)
 }
 
@@ -526,6 +528,189 @@ fn count_macro(code: &str, name: &str) -> u32 {
     n
 }
 
+fn count_substring_occurrences(code: &str, needle: &str) -> u32 {
+    let mut n = 0u32;
+    let mut start = 0usize;
+    while let Some(rel) = code[start..].find(needle) {
+        n += 1;
+        start = start + rel + needle.len();
+    }
+    n
+}
+
+fn count_std_env_call(code: &str, call: &str, exclude_longer: &str) -> u32 {
+    let mut n = 0u32;
+    let mut start = 0usize;
+    while let Some(rel) = code[start..].find(call) {
+        let abs = start + rel;
+        if code[abs..].starts_with(exclude_longer) {
+            start = abs + 1;
+            continue;
+        }
+        n += 1;
+        start = abs + call.len();
+    }
+    n
+}
+
+fn count_env_var(code: &str) -> u32 {
+    count_std_env_call(code, "std::env::var(", "std::env::var_os(")
+        + count_standalone_env_call(code, "env::var(", Some("env::var_os("))
+}
+
+fn count_standalone_env_call(code: &str, call: &str, exclude_longer: Option<&str>) -> u32 {
+    let mut n = 0u32;
+    let mut start = 0usize;
+    while let Some(rel) = code[start..].find(call) {
+        let abs = start + rel;
+        if exclude_longer.is_some_and(|ex| code[abs..].starts_with(ex)) {
+            start = abs + 1;
+            continue;
+        }
+        if code
+            .get(..abs)
+            .is_some_and(|before| before.ends_with("std::"))
+        {
+            start = abs + 1;
+            continue;
+        }
+        n += 1;
+        start = abs + call.len();
+    }
+    n
+}
+
+fn count_system_time_now(code: &str) -> u32 {
+    count_substring_occurrences(code, "std::time::SystemTime::now")
+        + count_system_time_now_short(code)
+}
+
+fn count_system_time_now_short(code: &str) -> u32 {
+    let mut n = 0u32;
+    let mut start = 0usize;
+    while let Some(rel) = code[start..].find("SystemTime::now") {
+        let abs = start + rel;
+        if code
+            .get(..abs)
+            .is_some_and(|before| before.ends_with("std::time::"))
+        {
+            start = abs + 1;
+            continue;
+        }
+        n += 1;
+        start = abs + "SystemTime::now".len();
+    }
+    n
+}
+
+fn count_static_global_items(stripped: &str, orig_lines: &[&str]) -> u32 {
+    let mut count = 0u32;
+    let bytes = stripped.as_bytes();
+    let mut search = 0usize;
+    while search < stripped.len() {
+        let tail = &stripped[search..];
+        let next_tl = tail.find("thread_local!");
+        let next_static = tail.find("static");
+        let advance = match (next_tl, next_static) {
+            (None, None) => break,
+            (Some(t), None) => (t, Some(true)),
+            (None, Some(s)) => (s, Some(false)),
+            (Some(t), Some(s)) => {
+                if t <= s {
+                    (t, Some(true))
+                } else {
+                    (s, Some(false))
+                }
+            }
+        };
+        let abs = search + advance.0;
+        if advance.1 == Some(true) {
+            let line = line_index_for_byte(stripped, abs);
+            if !line_is_exempt(line, orig_lines) {
+                count += 1;
+            }
+            search = abs + "thread_local!".len();
+            continue;
+        }
+        if is_static_item_start(stripped, abs) {
+            if let Some(end) = static_item_end(bytes, abs) {
+                let start_line = line_index_for_byte(stripped, abs);
+                let end_line = line_index_for_byte(stripped, end.saturating_sub(1));
+                if !lines_range_exempt(start_line, end_line, orig_lines) {
+                    let item = &stripped[abs..end];
+                    if item.contains("OnceLock")
+                        || item.contains("Mutex")
+                        || item.contains("RwLock")
+                    {
+                        count += 1;
+                    }
+                }
+                search = end;
+                continue;
+            }
+        }
+        search = abs + 1;
+    }
+    count
+}
+
+fn line_index_for_byte(source: &str, byte: usize) -> usize {
+    source[..byte.min(source.len())].matches('\n').count()
+}
+
+fn line_is_exempt(line_idx: usize, orig_lines: &[&str]) -> bool {
+    let orig = orig_lines.get(line_idx).copied().unwrap_or("");
+    let prev = line_idx
+        .checked_sub(1)
+        .and_then(|i| orig_lines.get(i).copied());
+    is_exempt(orig, prev)
+}
+
+fn lines_range_exempt(start: usize, end: usize, orig_lines: &[&str]) -> bool {
+    (start..=end).any(|line| line_is_exempt(line, orig_lines))
+}
+
+fn is_static_item_start(source: &str, abs: usize) -> bool {
+    if !source.is_char_boundary(abs) {
+        return false;
+    }
+    let bytes = source.as_bytes();
+    if !bytes[abs..].starts_with(b"static") {
+        return false;
+    }
+    let before_ok = abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric() && bytes[abs - 1] != b'_';
+    let after = abs + 6;
+    let after_ok =
+        after >= bytes.len() || bytes[after].is_ascii_whitespace() || bytes[after] == b'_';
+    before_ok && after_ok
+}
+
+fn static_item_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    let mut angle = 0i32;
+    let mut paren = 0i32;
+    let mut brace = 0i32;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' {
+            i = skip_string(bytes, i)? + 1;
+            continue;
+        }
+        match b {
+            b'<' => angle += 1,
+            b'>' => angle -= 1,
+            b'(' => paren += 1,
+            b')' => paren -= 1,
+            b'{' => brace += 1,
+            b'}' => brace -= 1,
+            b';' if angle == 0 && paren == 0 && brace == 0 => return Some(i + 1),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
 fn pattern_hits(line: &str) -> PatternCounts {
     let code = line.split("//").next().unwrap_or(line);
     let mut counts = empty_counts();
@@ -538,10 +723,11 @@ fn pattern_hits(line: &str) -> PatternCounts {
             }
         };
     }
-    macro_rules! bump_if {
-        ($key:expr, $cond:expr) => {
-            if $cond {
-                *counts.get_mut($key).unwrap() += 1;
+    macro_rules! bump_count {
+        ($key:expr, $expr:expr) => {
+            let hits = $expr;
+            if hits > 0 {
+                *counts.get_mut($key).unwrap() += hits;
             }
         };
     }
@@ -550,49 +736,58 @@ fn pattern_hits(line: &str) -> PatternCounts {
     bump_macro!("print", "print");
     bump_macro!("eprintln", "eprintln");
     bump_macro!("eprint", "eprint");
-    bump_if!("dbg", code.contains("dbg!("));
-    bump_if!("process_exit", code.contains("process::exit"));
-    bump_if!(
-        "env_var",
-        (code.contains("env::var(") || code.contains("std::env::var("))
-            && !code.contains("env::var_os(")
-            && !code.contains("std::env::var_os(")
+    bump_count!("dbg", count_macro(code, "dbg"));
+    bump_count!(
+        "process_exit",
+        count_substring_occurrences(code, "process::exit")
     );
-    bump_if!(
+    bump_count!("env_var", count_env_var(code));
+    bump_count!(
         "env_var_os",
-        code.contains("env::var_os(") || code.contains("std::env::var_os(")
+        count_substring_occurrences(code, "std::env::var_os(")
+            + count_standalone_env_call(code, "env::var_os(", None)
     );
-    bump_if!(
+    bump_count!(
         "env_vars",
-        code.contains("env::vars(") || code.contains("std::env::vars(")
+        count_substring_occurrences(code, "std::env::vars(")
+            + count_standalone_env_call(code, "env::vars(", None)
     );
-    bump_if!(
+    bump_count!(
         "env_set_var",
-        code.contains("env::set_var(") || code.contains("std::env::set_var(")
+        count_substring_occurrences(code, "std::env::set_var(")
+            + count_standalone_env_call(code, "env::set_var(", None)
     );
-    bump_if!(
+    bump_count!(
         "env_remove_var",
-        code.contains("env::remove_var(") || code.contains("std::env::remove_var(")
+        count_substring_occurrences(code, "std::env::remove_var(")
+            + count_standalone_env_call(code, "env::remove_var(", None)
     );
-    bump_if!(
+    bump_count!(
         "env_current_dir",
-        code.contains("env::current_dir(") || code.contains("std::env::current_dir(")
+        count_substring_occurrences(code, "std::env::current_dir(")
+            + count_standalone_env_call(code, "env::current_dir(", None)
     );
-    bump_if!("literal_fatal", code.contains("\"fatal: "));
-    bump_if!("literal_error", code.contains("\"error: "));
-    bump_if!("literal_hint", code.contains("\"hint: "));
-    bump_if!("literal_warning", code.contains("\"warning: "));
-    bump_if!("command_new", code.contains("Command::new"));
-    bump_if!(
-        "static_global",
-        (code.contains("static ")
-            && (code.contains("OnceLock") || code.contains("Mutex") || code.contains("RwLock")))
-            || code.contains("thread_local!")
+    bump_count!(
+        "literal_fatal",
+        count_substring_occurrences(code, "\"fatal: ")
     );
-    bump_if!(
-        "system_time_now",
-        code.contains("SystemTime::now") || code.contains("std::time::SystemTime::now")
+    bump_count!(
+        "literal_error",
+        count_substring_occurrences(code, "\"error: ")
     );
+    bump_count!(
+        "literal_hint",
+        count_substring_occurrences(code, "\"hint: ")
+    );
+    bump_count!(
+        "literal_warning",
+        count_substring_occurrences(code, "\"warning: ")
+    );
+    bump_count!(
+        "command_new",
+        count_substring_occurrences(code, "Command::new")
+    );
+    bump_count!("system_time_now", count_system_time_now(code));
 
     counts
 }
@@ -648,4 +843,21 @@ fn bad() { eprintln!("nope"); }
     let (counts, _) = count_patterns(&stripped, sample);
     assert_eq!(*counts.get("eprintln").unwrap_or(&0), 1);
     assert_eq!(*counts.get("println").unwrap_or(&0), 0);
+}
+
+#[test]
+fn hygiene_scanner_counts_repeated_command_new_on_one_line() {
+    let sample = r#"fn f() { Command::new("a"); Command::new("b"); }"#;
+    let (counts, _) = count_patterns(sample, sample);
+    assert_eq!(*counts.get("command_new").unwrap_or(&0), 2);
+}
+
+#[test]
+fn hygiene_scanner_counts_multiline_static_global() {
+    let sample = r"
+static STATE:
+    OnceLock<u8> = OnceLock::new();
+";
+    let (counts, _) = count_patterns(sample, sample);
+    assert_eq!(*counts.get("static_global").unwrap_or(&0), 1);
 }
