@@ -1,0 +1,63 @@
+# grit shortlog
+
+> List the commits on this branch that aren't on the target branch yet.
+
+## Synopsis
+
+```
+grit shortlog
+grit sl
+```
+
+## Description
+
+Shows the current branch, its target branch, and every commit on the current branch that the target doesn't have, newest first. It's the list of what you would be proposing if you opened a pull request now.
+
+The target branch is found the same way as for [`grit status`](https://grit-scm.com/docs/status/index.md#the-target-branch): the `target.branch` setting, then `origin/master`, `origin/main`, `master` and `main`. Unlike `grit status`, which shows at most ten commits, `grit shortlog` lists all of them.
+
+## Options
+
+`grit shortlog` takes no options beyond the [global ones](https://grit-scm.com/docs/global-options/index.md).
+
+## Examples
+
+```
+$ grit shortlog
+On feature
+Ahead of origin/main by 2 commits
+  cf18394  ada  2 hours ago  Say hi
+  9a1c2e0  ada  3 hours ago  Add a greeting test
+```
+
+Count the commits that aren't on the target yet:
+
+```
+$ grit sl --json --filter .ahead
+2
+```
+
+## JSON output
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | Current branch name. |
+| `target` | string or null | Target branch used for comparison, or `null` when none was found. |
+| `ahead` | number | How many commits are on the branch but not on the target. |
+| `commits` | array | Those commits, newest first, each with `oid` and `subject`. |
+
+Example:
+
+```json
+{
+  "branch": "feature",
+  "target": "main",
+  "ahead": 0,
+  "commits": []
+}
+```
+
+## See also
+
+[grit status](https://grit-scm.com/docs/status/index.md), [grit log](https://grit-scm.com/docs/log/index.md), [grit config](https://grit-scm.com/docs/config/index.md)
