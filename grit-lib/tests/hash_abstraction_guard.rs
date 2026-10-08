@@ -1,4 +1,5 @@
-//! Workspace guard: only `grit-lib/src/hash*.rs` may reference the `sha1` / `sha2` crates.
+//! Workspace guard: only `grit-lib/src/hash*.rs` and `grit-test-support/src/objects/`
+//! may reference the `sha1` / `sha2` crates (pack fixture hashing for tests).
 
 use std::path::{Path, PathBuf};
 
@@ -28,6 +29,8 @@ fn is_excluded(path: &Path) -> bool {
     }
     path_str.contains("/grit-lib/src/hash")
         || path_str.contains("\\grit-lib\\src\\hash")
+        || path_str.contains("/grit-test-support/src/objects/")
+        || path_str.contains("\\grit-test-support\\src\\objects\\")
         || path
             .file_name()
             .is_some_and(|n| n == "hash_abstraction_guard.rs")

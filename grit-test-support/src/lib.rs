@@ -4,6 +4,8 @@
 //! temporary workspace helpers, and cached filesystem fixtures used by
 //! integration tests in `grit` and `grit-lib`.
 
+pub mod objects;
+
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs;
