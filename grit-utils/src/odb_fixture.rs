@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use crate::bench_env::{empty_global_config_path, isolated_env_prefix};
-use crate::fixture::{remove_dir_robust, scratch_dir};
+use crate::fixture::remove_dir_robust;
 use crate::hot_path_fixture::{setup_switch_fixture_in, HotPathRepoSpec};
 
 const GIT_GIT_URL: &str = "https://github.com/git/git.git";
@@ -35,11 +35,12 @@ fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Root directory for cached benchmark clones (override with `GRIT_BENCH_SCRATCH`).
+/// Root directory for cached benchmark clones (override with `GRIT_BENCH_ODB_CACHE`).
 pub fn odb_scratch_root() -> PathBuf {
-    std::env::var("GRIT_BENCH_SCRATCH")
+    std::env::var("GRIT_BENCH_ODB_CACHE")
+        .or_else(|_| std::env::var("GRIT_BENCH_SCRATCH"))
         .map(PathBuf::from)
-        .unwrap_or_else(|_| scratch_dir())
+        .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-odb-cache"))
 }
 
 /// Path to cached bare `git.git` (override with `GRIT_BENCH_GIT_GIT`).

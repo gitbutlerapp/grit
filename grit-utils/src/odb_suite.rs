@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::binary::{grit_source_commit, tool_version};
-use crate::fixture::scratch_dir;
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::odb_fixture::{
     ensure_git_git_bare, ensure_hot_path_repacked, ensure_sorted_oid_list, odb_isolated_env,
@@ -291,7 +290,7 @@ pub fn run_odb_suite(
     Ok(BenchReport {
         schema_version: SCHEMA_VERSION,
         timestamp: format_timestamp(timestamp),
-        machine: collect_machine_info(&scratch_dir())?,
+        machine: collect_machine_info(&crate::odb_fixture::odb_scratch_root())?,
         tools: ToolVersions {
             git: tool_version(git),
             grit: tool_version(grit_cli),
