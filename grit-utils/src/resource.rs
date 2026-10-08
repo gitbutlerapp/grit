@@ -100,6 +100,7 @@ mod tests {
 }
 
 /// Run hyperfine for timing and sample peak RSS on the last timed run.
+#[allow(clippy::too_many_arguments)]
 pub fn bench_with_peak_rss(
     hyperfine: &std::path::Path,
     measure_helper: &std::path::Path,
