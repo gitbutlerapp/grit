@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import apimap  # noqa: E402
 import benchpage  # noqa: E402
 import blog  # noqa: E402
 import rustdoc_links  # noqa: E402
@@ -51,6 +52,7 @@ LLMS_USAGE = (
     "Use `grit --json` (and `--markdown` on many commands) for script- and agent-friendly CLI output."
 )
 LIBRARY_GUIDE_SLUG = "library"
+API_MAP_SLUG = "library/api-map"
 DOCS_RS_GRIT_LIB = "https://docs.rs/grit-lib"
 BLOG_INDEX_URL = f"{blog.SITE_URL}/blog/"
 TOC_MIN_HEADINGS = 2
@@ -340,6 +342,15 @@ def load_page(
         tables = benchpage.benchmark_html_for_manifest(manifest_path)
         body_html = before_html + tables + after_html
         toc = toc_before + toc_after
+    elif spec.slug == API_MAP_SLUG:
+        body = expand_includes(body)
+        before, after = apimap.split_api_map_markdown(body)
+        before_html, toc_before = blog.markdown_to_html(before)
+        after_html, toc_after = blog.markdown_to_html(after)
+        table_md = apimap.api_map_markdown(DOC_ROOT)
+        table_html, toc_table = blog.markdown_to_html(table_md)
+        body_html = before_html + table_html + after_html
+        toc = toc_before + toc_table + toc_after
     else:
         body = prepare_markdown_body(body)
         body_html, toc = blog.markdown_to_html(body)
@@ -720,6 +731,13 @@ def page_markdown_body(
         after = prepare_markdown_body(after)
         tables = benchpage.benchmark_markdown_for_manifest(manifest_path)
         body = before + "\n\n" + tables + "\n" + after
+    elif page.slug == API_MAP_SLUG:
+        body = expand_includes(body)
+        before, after = apimap.split_api_map_markdown(body)
+        before = prepare_markdown_body(before)
+        after = prepare_markdown_body(after)
+        table = apimap.api_map_markdown(DOC_ROOT)
+        body = before + "\n\n" + table + after
     else:
         body = prepare_markdown_body(body)
     body = rewrite_markdown_links(body, page.slug)

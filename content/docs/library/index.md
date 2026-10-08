@@ -14,5 +14,6 @@ These pages walk through opening a repository, the object database, refs, the in
 | [Diff](diff/) | Tree, index, and blob diffs |
 | [Revwalk](revwalk/) | Rev-parse, rev-list, ranges, merge base |
 | [Network](network/) | ls-remote, fetch, push, credentials |
+| [API map](api-map/) | Generated module and type index with docs.rs links |
 
 For exhaustive API detail see [grit-lib on docs.rs](https://docs.rs/grit-lib).
