@@ -281,7 +281,9 @@ impl SubmoduleConfigCache {
             if !check_submodule_name_ok(&name) {
                 eprintln!(
                     "{}",
-                    crate::diagnostics::warning_line("ignoring suspicious submodule name: {name}")
+                    crate::diagnostics::warning_line(&format!(
+                        "ignoring suspicious submodule name: {name}"
+                    ))
                 );
                 continue;
             }

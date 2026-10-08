@@ -455,7 +455,7 @@ fn report_spawn_error(path: &Path, err: &std::io::Error) {
     let p = path.display();
     eprintln!(
         "{}",
-        crate::diagnostics::error_line("cannot exec '{p}': {msg}")
+        crate::diagnostics::error_line(&format!("cannot exec '{p}': {msg}"))
     );
 }
 
@@ -602,7 +602,9 @@ pub fn run_hook_opts(
                     Err(e) => {
                         eprintln!(
                             "{}",
-                            crate::diagnostics::error_line("failed to run configured hook: {e}")
+                            crate::diagnostics::error_line(&format!(
+                                "failed to run configured hook: {e}"
+                            ))
                         );
                         return Ok(HookResult::Failed(1));
                     }
@@ -727,7 +729,7 @@ pub fn run_hook(
     ) {
         Ok(r) => r,
         Err(msg) => {
-            eprintln!("{}", crate::diagnostics::fatal_line(&format!("{msg}")));
+            eprintln!("{}", crate::diagnostics::fatal_line(&msg));
             HookResult::Failed(1)
         }
     }

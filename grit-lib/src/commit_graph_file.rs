@@ -880,7 +880,12 @@ impl CommitGraphChain {
                         // times within a single command (settings probe, commit set,
                         // filter reuse), so dedupe the warning per layer id to match.
                         if warn_once_for_disabled_bloom_layer(&id) {
-                            eprintln!("{}", crate::diagnostics::warning_line("disabling Bloom filters for commit-graph layer '{id}' due to incompatible settings"));
+                            eprintln!(
+                                "{}",
+                                crate::diagnostics::warning_line(&format!(
+                                    "disabling Bloom filters for commit-graph layer '{id}' due to incompatible settings"
+                                ))
+                            );
                         }
                         layer.disable_bloom();
                     }

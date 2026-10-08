@@ -1160,7 +1160,7 @@ fn validate_utf_bom(
         );
         let body = format!("BOM is prohibited in '{rel_path}' if encoded as {label}");
         if die_on_error {
-            return Err(crate::diagnostics::fatal_line(&body));
+            return Err(body);
         }
         eprintln!("{}", crate::diagnostics::error_line(&body));
         return Err(body);
@@ -1176,7 +1176,7 @@ fn validate_utf_bom(
         );
         let body = format!("BOM is required in '{rel_path}' if encoded as {label}");
         if die_on_error {
-            return Err(crate::diagnostics::fatal_line(&body));
+            return Err(body);
         }
         eprintln!("{}", crate::diagnostics::error_line(&body));
         return Err(body);

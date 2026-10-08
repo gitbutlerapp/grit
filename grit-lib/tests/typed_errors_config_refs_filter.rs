@@ -59,7 +59,8 @@ fn non_numeric_diff_context_is_bad_numeric_value() {
 #[test]
 fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     let dir = tempdir().unwrap();
-    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    let init = git_cmd(&["init"]).in_dir(dir.path()).exec();
+    assert!(init.ok(), "git init failed: {}", init.stderr);
     let git_dir = dir.path().join(".git");
     fs::create_dir_all(git_dir.join("refs/heads/feature")).unwrap();
     fs::write(
@@ -114,6 +115,59 @@ fn required_clean_filter_failure_is_typed_message() {
             phase: FilterPhase::Clean,
         }
     );
+}
+
+#[test]
+fn diagnostic_lines_interpolate_dynamic_values() {
+    let p = "hooks/pre-commit";
+    let msg = "Permission denied";
+    let line = grit_lib::diagnostics::error_line(&format!("cannot exec '{p}': {msg}"));
+    assert!(line.contains("hooks/pre-commit"));
+    assert!(line.contains("Permission denied"));
+    assert!(!line.contains("{p}"));
+    assert!(!line.contains("{msg}"));
+
+    let name = "foo/bar";
+    let warn =
+        grit_lib::diagnostics::warning_line(&format!("ignoring suspicious submodule name: {name}"));
+    assert!(warn.contains("foo/bar"));
+    assert!(!warn.contains("{name}"));
+}
+
+#[test]
+fn bom_filter_error_has_single_fatal_prefix_on_stderr() {
+    let conv = ConversionConfig::from_config(&ConfigSet::new());
+    let mut attrs = FileAttrs::default();
+    attrs.working_tree_encoding = Some("UTF-16LE".to_owned());
+    // Big-endian BOM is prohibited when the attribute requests UTF-16LE.
+    let data = [0xFE, 0xFF, 0x00, 0x41];
+    let filter_err = convert_to_git_with_opts(
+        &data,
+        "utf-bom.txt",
+        &conv,
+        &attrs,
+        ConvertToGitOpts {
+            check_safecrlf: true,
+            renormalize: false,
+            index_blob: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        filter_err,
+        FilterError::NotFilteredProperly { .. }
+    ));
+    let stderr = Error::Filter(filter_err).git_stderr_message();
+    assert_eq!(
+        stderr.matches("fatal:").count(),
+        1,
+        "expected one fatal prefix, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("fatal: utf-bom.txt: fatal:"),
+        "duplicated fatal prefix: {stderr}"
+    );
+    assert!(stderr.contains("BOM is prohibited"));
 }
 
 #[test]

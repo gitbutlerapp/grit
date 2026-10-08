@@ -2486,7 +2486,9 @@ pub fn write_multi_pack_index_with_options(
                             if !pack_dir.join(format!("{stem}.pack")).exists() {
                                 eprintln!(
                                     "{}",
-                                    crate::diagnostics::error_line("could not load pack {i}")
+                                    crate::diagnostics::error_line(&format!(
+                                        "could not load pack {i}"
+                                    ))
                                 );
                                 return Err(Error::CorruptObject(format!(
                                     "could not load pack {i}"
@@ -2555,7 +2557,7 @@ pub fn write_multi_pack_index_with_options(
         {
             eprintln!(
                 "{}",
-                crate::diagnostics::warning_line("unknown preferred pack: '{raw}'")
+                crate::diagnostics::warning_line(&format!("unknown preferred pack: '{raw}'"))
             );
             preferred_warned = true;
         }
@@ -2635,9 +2637,9 @@ pub fn write_multi_pack_index_with_options(
             let pack_name = name.strip_suffix(".idx").unwrap_or(&name);
             eprintln!(
                 "{}",
-                crate::diagnostics::error_line(
+                crate::diagnostics::error_line(&format!(
                     "cannot select preferred pack {pack_name}.pack with no objects"
-                )
+                ))
             );
             return Err(Error::CorruptObject(
                 "cannot select preferred pack with no objects".to_owned(),
