@@ -104,8 +104,9 @@ pub struct Repository {
     config_snapshot: RepositoryConfigSnapshot,
 }
 
-pub(crate) type RepositoryConfigSnapshot =
-    Arc<Mutex<Option<(Arc<ConfigSet>, Option<(SystemTime, u64)>)>>>;
+type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
+
+pub(crate) type RepositoryConfigSnapshot = Arc<Mutex<Option<ConfigSnapshotEntry>>>;
 
 fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
     let meta = fs::metadata(git_dir.join("config")).ok()?;
@@ -113,7 +114,7 @@ fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
 }
 
 pub(crate) fn ensure_shared_config_snapshot(
-    state: &Mutex<Option<(Arc<ConfigSet>, Option<(SystemTime, u64)>)>>,
+    state: &Mutex<Option<ConfigSnapshotEntry>>,
     git_dir: Option<&Path>,
 ) -> Result<Arc<ConfigSet>> {
     let mut guard = state
