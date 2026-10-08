@@ -9,7 +9,7 @@ use grit_lib::commit_graph_write::{
     build_commit_graph_bytes, collect_reachable_commit_oids, load_commit_graph_commit_info,
 };
 use grit_lib::error::Error;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions};
 use std::collections::HashMap;
@@ -122,6 +122,32 @@ fn mutate_byte(bytes: &mut [u8], pos: usize, value: u8) {
     bytes[pos] = value;
 }
 
+fn reseal_commit_graph(bytes: &mut Vec<u8>) {
+    let hash_len = if bytes[5] == 2 { 32 } else { 20 };
+    let algo = HashAlgo::try_from(bytes[5]).expect("hash algo");
+    let body_len = bytes.len().saturating_sub(hash_len);
+    let digest = algo.digest(&bytes[..body_len]);
+    bytes.truncate(body_len);
+    bytes.extend_from_slice(digest.as_bytes());
+}
+
+fn mutate_byte_resealed(bytes: &mut Vec<u8>, pos: usize, value: u8) {
+    mutate_byte(bytes, pos, value);
+    reseal_commit_graph(bytes);
+}
+
+fn toc_entry_offset(bytes: &[u8], chunk_id: u32) -> Option<usize> {
+    let num_chunks = bytes[6] as usize;
+    for i in 0..num_chunks {
+        let e = 8 + i * 12;
+        let id = u32::from_be_bytes(bytes[e..e + 4].try_into().ok()?);
+        if id == chunk_id {
+            return Some(e + 4);
+        }
+    }
+    None
+}
+
 #[test]
 fn corrupt_graph_signature_version_and_hash_version() {
     if !git_available() {
@@ -153,17 +179,26 @@ fn corrupt_graph_chunk_table_and_missing_chunks() {
     let objects = dir.path().join(".git/objects");
     let mut bytes = std::fs::read(&path).expect("read graph");
     let backup = bytes.clone();
-    mutate_byte(&mut bytes, 6, 1);
-    expect_corrupt_load(&objects, &path, bytes);
+    let mut b = bytes.clone();
+    mutate_byte_resealed(&mut b, 6, 1);
+    expect_corrupt_load(&objects, &path, b);
     bytes = backup.clone();
-    mutate_byte(&mut bytes, 8, 0);
-    expect_corrupt_parse(path.clone(), bytes);
+    let mut b = bytes.clone();
+    mutate_byte_resealed(&mut b, 8, 0);
+    expect_corrupt_parse(path.clone(), b);
     bytes = backup.clone();
-    mutate_byte(&mut bytes, 20, 0);
-    expect_corrupt_parse(path.clone(), bytes);
-    bytes = backup;
-    mutate_byte(&mut bytes, 32, 0);
-    expect_corrupt_parse(path, bytes);
+    let mut b = bytes.clone();
+    mutate_byte_resealed(&mut b, 20, 0);
+    expect_corrupt_parse(path.clone(), b);
+    bytes = backup.clone();
+    let mut b = bytes.clone();
+    mutate_byte_resealed(&mut b, 32, 0);
+    expect_corrupt_parse(path.clone(), b);
+    let oidf = toc_entry_offset(&bytes, 0x4f49_4446).expect("OIDF toc");
+    let mut b = bytes.clone();
+    b[oidf..oidf + 8].copy_from_slice(&u64::MAX.to_be_bytes());
+    reseal_commit_graph(&mut b);
+    expect_corrupt_parse(path, b);
 }
 
 #[test]
@@ -202,26 +237,34 @@ fn corrupt_graph_fanout_oid_order_and_parent_edges() {
     ) as usize;
 
     let mut b = bytes.clone();
-    mutate_byte(&mut b, fanout_off + 4, 1);
+    b[fanout_off..fanout_off + 4]
+        .copy_from_slice(&(num_commits as u32).to_be_bytes());
+    b[fanout_off + 4..fanout_off + 8].copy_from_slice(&0u32.to_be_bytes());
+    reseal_commit_graph(&mut b);
     expect_corrupt_load(&objects, &path, b);
 
     let mut b = bytes.clone();
-    let swap = oid_lookup_off + hash_len * 8;
-    b[swap] ^= 0xff;
-    expect_corrupt_parse(path.clone(), b);
+    if num_commits >= 2 {
+        let a = oid_lookup_off;
+        let b_off = oid_lookup_off + hash_len;
+        let (left, right) = b.split_at_mut(b_off);
+        left[a..a + hash_len].swap_with_slice(&mut right[..hash_len]);
+        reseal_commit_graph(&mut b);
+        expect_corrupt_parse(path.clone(), b);
+    }
 
     let mut b = bytes.clone();
     let parent_off = commit_data_off + hash_len;
-    b[parent_off] = 0xff;
-    b[parent_off + 1] = 0xff;
-    b[parent_off + 2] = 0xff;
-    b[parent_off + 3] = 0x01;
+    let invalid_parent = num_commits as u32;
+    b[parent_off..parent_off + 4].copy_from_slice(&invalid_parent.to_be_bytes());
+    reseal_commit_graph(&mut b);
     expect_corrupt_parse(path.clone(), b);
 
     let edge_off = commit_data_off + num_commits * (hash_len + 16);
     if edge_off + 4 < bytes.len() - hash_len {
         let mut b = bytes.clone();
         b[edge_off] = 0xff;
+        reseal_commit_graph(&mut b);
         expect_corrupt_parse(path, b);
     } else {
         let _ = num_chunks;
@@ -282,6 +325,7 @@ fn corrupt_graph_generation_inconsistency_and_trailer() {
         g[73] = 0x00;
         g[74] = 0x00;
         g[75] = 0x00;
+        reseal_commit_graph(&mut g);
         expect_corrupt_parse(path.clone(), g);
     }
 }

@@ -378,9 +378,30 @@ fn high_bit_paths_bloom_and_upgrade_detection() {
     std::fs::write(dir.path().join(high), b"high bit path\n").unwrap();
     git_cmd(dir.path(), &["add", "--", high]);
     git_cmd(dir.path(), &["commit", "-q", "-m", "high-bit"]);
+    git_cmd(
+        dir.path(),
+        &["commit-graph", "write", "--reachable", "--changed-paths"],
+    );
     let repo = Repository::discover(Some(dir.path())).expect("open");
     let tip = sorted_commit_set(&repo)[0];
     assert!(commit_tree_has_high_bit_paths(&repo.odb, tip));
+    let graph_path = repo.git_dir.join("objects/info/commit-graph");
+    let git_lines = dump_bloom_filters(&graph_path).expect("git bloom dump");
+    let chain = CommitGraphChain::load(repo.odb.objects_dir()).expect("chain");
+    let settings = chain.top_layer_bloom_settings().expect("bloom settings");
+    let info = load_commit_graph_commit_info(&repo.odb, tip).expect("info");
+    let (grit_bytes, _) =
+        bloom_filter_for_commit_write(&repo.odb, &info.parents, info.tree, &settings)
+            .expect("grit bloom");
+    let grit_hex: String = grit_bytes.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        git_lines[0], grit_hex,
+        "high-bit path bloom mismatch for tip {tip}"
+    );
+    let existing = chain
+        .existing_filter_bytes(&tip, &settings)
+        .expect("filter in git graph");
+    assert_eq!(existing, grit_bytes.as_slice());
     let sorted = sorted_commit_set(&repo);
     let infos = commit_infos(&repo, &sorted);
     write_grit_graph_file(&repo, &sorted, &infos, true, true);
@@ -549,16 +570,23 @@ fn existing_and_upgradable_filter_bytes_from_git_graph() {
     let repo = Repository::discover(Some(dir.path())).expect("open");
     let chain = CommitGraphChain::load(repo.odb.objects_dir()).expect("chain");
     let settings = BloomFilterSettings::default();
-    let sample = chain.all_oids_in_order().into_iter().next().expect("oid");
-    assert!(
-        chain.existing_filter_bytes(&sample, &settings).is_some()
-            || chain.existing_filter_bytes(&sample, &settings).is_none()
-    );
+    let tip = chain.all_oids_in_order().into_iter().last().expect("tip");
+    assert!(chain
+        .existing_filter_bytes(&tip, &settings)
+        .is_some_and(|b| !b.is_empty()));
+    assert!(chain.upgradable_filter_bytes(&tip, &settings).is_none());
+    let layer_settings = chain.top_layer_bloom_settings().expect("bloom header");
     let v2 = BloomFilterSettings {
         hash_version: 2,
         ..settings
     };
-    let _ = chain.upgradable_filter_bytes(&sample, &v2);
+    if layer_settings.hash_version == 1 {
+        assert!(chain
+            .upgradable_filter_bytes(&tip, &v2)
+            .is_some_and(|b| !b.is_empty()));
+    } else {
+        assert!(chain.upgradable_filter_bytes(&tip, &v2).is_none());
+    }
 }
 
 #[test]

@@ -95,6 +95,44 @@ fn commit_graph_chain_hash_is_valid(h: &str, algo: HashAlgo) -> bool {
     h.len() == algo.hex_len() && h.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+const OIDF_BUCKET_BYTES: usize = 256 * 4;
+
+fn commit_graph_chunk_oob() -> Error {
+    Error::CorruptObject("commit-graph chunk extends past end of file".to_owned())
+}
+
+fn commit_graph_offset_out_of_range() -> Error {
+    Error::CorruptObject("commit-graph chunk offset out of range".to_owned())
+}
+
+fn checked_add_end(start: usize, len: usize, bound: usize) -> Result<usize, Error> {
+    start
+        .checked_add(len)
+        .filter(|&end| end <= bound)
+        .ok_or_else(commit_graph_chunk_oob)
+}
+
+fn body_slice<'a>(body: &'a [u8], start: usize, len: usize) -> Result<&'a [u8], Error> {
+    let end = checked_add_end(start, len, body.len())?;
+    body.get(start..end).ok_or_else(commit_graph_chunk_oob)
+}
+
+fn parse_toc_offset(body_len: usize, raw: [u8; 8]) -> Result<usize, Error> {
+    let off = u64::from_be_bytes(raw);
+    if off > body_len as u64 {
+        return Err(commit_graph_offset_out_of_range());
+    }
+    usize::try_from(off).map_err(|_| commit_graph_offset_out_of_range())
+}
+
+fn fanout_num_commits(body: &[u8], fanout_off: usize) -> Result<u32, Error> {
+    let fanout = body_slice(body, fanout_off, OIDF_BUCKET_BYTES)?;
+    let word = fanout[255 * 4..256 * 4]
+        .try_into()
+        .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?;
+    Ok(u32::from_be_bytes(word))
+}
+
 fn validate_single_layer_parent_indices(
     body: &[u8],
     num_commits: u32,
@@ -230,8 +268,14 @@ impl CommitGraphLayer {
             )));
         }
         let num_chunks = body[6] as usize;
-        let toc_start = 8;
-        let toc_end = toc_start + (num_chunks + 1) * 12;
+        let toc_start: usize = 8;
+        let toc_end = num_chunks
+            .checked_add(1)
+            .and_then(|n| n.checked_mul(12))
+            .and_then(|n| toc_start.checked_add(n))
+            .ok_or_else(|| {
+                Error::CorruptObject("commit-graph truncated at chunk table".to_owned())
+            })?;
         if body.len() < toc_end {
             return Err(Error::CorruptObject(
                 "commit-graph truncated at chunk table".to_owned(),
@@ -257,11 +301,12 @@ impl CommitGraphLayer {
                     .try_into()
                     .map_err(|_| Error::CorruptObject("commit-graph bad TOC".to_owned()))?,
             );
-            let off = u64::from_be_bytes(
+            let off = parse_toc_offset(
+                body.len(),
                 body[e + 4..e + 12]
                     .try_into()
                     .map_err(|_| Error::CorruptObject("commit-graph bad TOC".to_owned()))?,
-            ) as usize;
+            )?;
             toc_entries.push((id, off));
             chunk_offsets.push(off);
             match id {
@@ -275,24 +320,59 @@ impl CommitGraphLayer {
                 CHUNK_BASE_GRAPHS => base_graphs_off = Some(off),
                 CHUNK_BLOOM_DATA => {
                     let end = if i + 1 < num_chunks {
-                        let e2 = toc_start + (i + 1) * 12;
-                        u64::from_be_bytes(body[e2 + 4..e2 + 12].try_into().unwrap_or([0u8; 8]))
-                            as usize
+                        let e2 = toc_start
+                            .checked_add((i + 1).checked_mul(12).ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?)
+                            .ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?;
+                        parse_toc_offset(
+                            body.len(),
+                            body[e2 + 4..e2 + 12].try_into().map_err(|_| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?,
+                        )?
                     } else {
-                        let term = toc_start + num_chunks * 12;
-                        u64::from_be_bytes(body[term + 4..term + 12].try_into().unwrap_or([0u8; 8]))
-                            as usize
+                        let term = toc_start
+                            .checked_add(num_chunks.checked_mul(12).ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?)
+                            .ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?;
+                        parse_toc_offset(
+                            body.len(),
+                            body[term + 4..term + 12].try_into().map_err(|_| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?,
+                        )?
                     };
-                    bloom_data_range = Some((off, end.saturating_sub(off)));
+                    let len = end.checked_sub(off).ok_or_else(|| {
+                        Error::CorruptObject("commit-graph chunk layout invalid".to_owned())
+                    })?;
+                    bloom_data_range = Some((off, len));
                 }
                 _ => {}
             }
         }
-        let file_end = u64::from_be_bytes(
-            body[toc_start + num_chunks * 12 + 4..toc_start + num_chunks * 12 + 12]
+        let file_end_pos = toc_start
+            .checked_add(
+                num_chunks
+                    .checked_mul(12)
+                    .ok_or_else(|| Error::CorruptObject("commit-graph bad file end".to_owned()))?,
+            )
+            .and_then(|t| t.checked_add(4))
+            .ok_or_else(|| Error::CorruptObject("commit-graph bad file end".to_owned()))?;
+        let file_end = parse_toc_offset(
+            body.len(),
+            body[file_end_pos..file_end_pos + 8]
                 .try_into()
                 .map_err(|_| Error::CorruptObject("commit-graph bad file end".to_owned()))?,
-        ) as usize;
+        )?;
+        if file_end > body.len() {
+            return Err(commit_graph_offset_out_of_range());
+        }
         chunk_offsets.push(file_end);
         chunk_offsets.sort_unstable();
         chunk_offsets.dedup();
@@ -320,12 +400,9 @@ impl CommitGraphLayer {
         if let Some(gda) = generation_off {
             let gda_end = chunk_byte_range(gda, &toc_entries, file_end)?;
             let gda_len = gda_end.saturating_sub(gda);
-            let num_commits = fanout_off
-                .and_then(|fo| {
-                    let slice = body.get(fo + 255 * 4..fo + 256 * 4)?;
-                    Some(u32::from_be_bytes(slice.try_into().ok()?))
-                })
+            let fo = fanout_off
                 .ok_or_else(|| Error::CorruptObject("commit-graph missing fanout".to_owned()))?;
+            let num_commits = fanout_num_commits(&body, fo)?;
             let expected = num_commits as usize * 4;
             if gda_len < expected {
                 return Err(Error::CorruptObject(
@@ -381,36 +458,38 @@ impl CommitGraphLayer {
         let commit_data_off = commit_data_off.ok_or_else(|| {
             Error::CorruptObject("commit-graph missing commit data chunk".to_owned())
         })?;
-        if fanout_off + 256 * 4 > body.len() || oid_lookup_off + 4 > body.len() {
-            return Err(Error::CorruptObject(
-                "commit-graph chunk extends past end of file".to_owned(),
-            ));
-        }
-        let num_commits = u32::from_be_bytes(
-            body[fanout_off + 255 * 4..fanout_off + 256 * 4]
-                .try_into()
-                .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
-        );
-        if oid_lookup_off + num_commits as usize * hash_len > body.len() {
-            return Err(Error::CorruptObject(
-                "commit-graph OID lookup extends past end of file".to_owned(),
-            ));
-        }
-        let graph_data_width = hash_len + 16;
-        if commit_data_off + num_commits as usize * graph_data_width > body.len() {
-            return Err(Error::CorruptObject(
-                "commit-graph commit data extends past end of file".to_owned(),
-            ));
-        }
+        checked_add_end(oid_lookup_off, 4, body.len())?;
+        let num_commits = fanout_num_commits(&body, fanout_off)?;
+        let oid_lookup_bytes = (num_commits as usize)
+            .checked_mul(hash_len)
+            .ok_or_else(commit_graph_chunk_oob)?;
+        checked_add_end(oid_lookup_off, oid_lookup_bytes, body.len())?;
+        let graph_data_width = hash_len
+            .checked_add(16)
+            .ok_or_else(commit_graph_chunk_oob)?;
+        let cdat_bytes = (num_commits as usize)
+            .checked_mul(graph_data_width)
+            .ok_or_else(commit_graph_chunk_oob)?;
+        checked_add_end(commit_data_off, cdat_bytes, body.len())?;
 
-        for bucket in 0..255 {
+        for bucket in 0usize..255 {
+            let a_off = fanout_off
+                .checked_add(bucket.checked_mul(4).ok_or_else(commit_graph_chunk_oob)?)
+                .ok_or_else(commit_graph_chunk_oob)?;
             let a = u32::from_be_bytes(
-                body[fanout_off + bucket * 4..fanout_off + bucket * 4 + 4]
+                body_slice(&body, a_off, 4)?
                     .try_into()
                     .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
             );
+            let b_off = fanout_off
+                .checked_add(
+                    (bucket + 1)
+                        .checked_mul(4)
+                        .ok_or_else(commit_graph_chunk_oob)?,
+                )
+                .ok_or_else(commit_graph_chunk_oob)?;
             let b = u32::from_be_bytes(
-                body[fanout_off + (bucket + 1) * 4..fanout_off + (bucket + 1) * 4 + 4]
+                body_slice(&body, b_off, 4)?
                     .try_into()
                     .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
             );
@@ -422,9 +501,23 @@ impl CommitGraphLayer {
         }
 
         for lex in 1..num_commits {
-            let off_a = oid_lookup_off + (lex as usize - 1) * hash_len;
-            let off_b = oid_lookup_off + lex as usize * hash_len;
-            if body[off_a..off_a + hash_len] >= body[off_b..off_b + hash_len] {
+            let off_a = oid_lookup_off
+                .checked_add(
+                    (lex as usize - 1)
+                        .checked_mul(hash_len)
+                        .ok_or_else(commit_graph_chunk_oob)?,
+                )
+                .ok_or_else(commit_graph_chunk_oob)?;
+            let off_b = oid_lookup_off
+                .checked_add(
+                    (lex as usize)
+                        .checked_mul(hash_len)
+                        .ok_or_else(commit_graph_chunk_oob)?,
+                )
+                .ok_or_else(commit_graph_chunk_oob)?;
+            let slice_a = body_slice(&body, off_a, hash_len)?;
+            let slice_b = body_slice(&body, off_b, hash_len)?;
+            if slice_a >= slice_b {
                 return Err(Error::CorruptObject(
                     "commit-graph incorrect OID order".to_owned(),
                 ));
@@ -1604,6 +1697,43 @@ mod tests {
             .expect("across")
             .expect("some");
         assert_eq!(chain.total_commits(), 1);
+    }
+
+    #[test]
+    fn try_parse_rejects_oidf_toc_offset_out_of_range() {
+        let (_dir, repo, commit) = one_commit_repo();
+        let info = load_commit_graph_commit_info(&repo.odb, commit).expect("info");
+        let mut infos = HashMap::new();
+        infos.insert(commit, info);
+        let bloom = BloomFilterSettings::default();
+        let (mut bytes, _) = build_commit_graph_bytes(
+            &[commit],
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        let algo = repo.odb.hash_algo();
+        let num_chunks = bytes[6] as usize;
+        for i in 0..num_chunks {
+            let e = 8 + i * 12;
+            let id = u32::from_be_bytes(bytes[e..e + 4].try_into().unwrap());
+            if id == 0x4f49_4446 {
+                bytes[e + 4..e + 12].copy_from_slice(&u64::MAX.to_be_bytes());
+                break;
+            }
+        }
+        reseal_graph(&mut bytes, algo);
+        let err =
+            super::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes).unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
     }
 
     #[test]
