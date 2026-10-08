@@ -8,6 +8,239 @@ use thiserror::Error;
 
 pub use crate::midx_error::MidxError;
 
+/// Why a Git config numeric value was rejected (`git config int` strict parsing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BadNumericSource {
+    /// Suffix unit letter is invalid or missing where required.
+    InvalidUnit,
+    /// Parsed value or scaled product does not fit.
+    OutOfRange,
+}
+
+impl BadNumericSource {
+    fn detail(self) -> &'static str {
+        match self {
+            Self::InvalidUnit => "invalid unit",
+            Self::OutOfRange => "out of range",
+        }
+    }
+}
+
+impl std::fmt::Display for BadNumericSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.detail())
+    }
+}
+
+/// Configuration parse and validation failures.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConfigError {
+    /// A line in a config file could not be parsed.
+    #[error("bad config line {line} in {location}")]
+    BadConfigLine { location: String, line: usize },
+
+    /// Same as [`Self::BadConfigLine`] with an explicit file path (Git file diagnostics).
+    #[error("bad config line {line} in file '{file}'")]
+    BadConfigLineInFile { file: String, line: usize },
+
+    /// A config key requires a value but none was given.
+    #[error("missing value for '{key}'")]
+    MissingValue { key: String },
+
+    /// `fetch.negotiationalgorithm` and similar keys with missing values.
+    #[error("bad config variable '{key}' in file '{file}' at line {line}")]
+    BadConfigVariable {
+        key: String,
+        file: String,
+        line: usize,
+    },
+
+    /// Integer config value could not be parsed or is out of range.
+    #[error("bad numeric config value '{value}' for '{key}': {reason}")]
+    BadNumericValue {
+        key: String,
+        value: String,
+        reason: BadNumericSource,
+    },
+
+    /// Same as [`Self::BadNumericValue`] with file context.
+    #[error("bad numeric config value '{value}' for '{key}' in file {file}: {reason}")]
+    BadNumericValueInFile {
+        key: String,
+        value: String,
+        file: String,
+        reason: BadNumericSource,
+    },
+
+    /// `diff.context` (or similar) failed variable validation.
+    #[error("bad config variable '{key}' in file '{file}' at line {line}")]
+    BadConfigVariableAtLine {
+        key: String,
+        file: String,
+        line: usize,
+    },
+
+    /// Command-line config could not supply a parseable value for a key.
+    #[error("unable to parse '{key}' from command-line config")]
+    UnableToParseFromCommandLine { key: String },
+
+    /// `includeIf.hasconfig:remote.*.url` cannot pull remote URLs from included files.
+    #[error(
+        "remote URLs cannot be configured in file directly or indirectly included by includeIf.hasconfig:remote.*.url"
+    )]
+    RemoteUrlInHasconfigInclude,
+
+    /// Generic config error with free-form detail (legacy call sites).
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for ConfigError {
+    fn from(value: String) -> Self {
+        Self::Other(value)
+    }
+}
+
+impl From<&str> for ConfigError {
+    fn from(value: &str) -> Self {
+        Self::Other(value.to_owned())
+    }
+}
+
+impl ConfigError {
+    /// Git stderr body for this error (without a `fatal:` prefix).
+    #[must_use]
+    pub fn message_body(&self) -> String {
+        self.to_string()
+    }
+}
+
+/// Reference lock failures while creating or updating a ref.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RefLockError {
+    /// A non-empty directory occupies the path where the ref file must be created.
+    #[error(
+        "cannot lock ref '{refname}': there is a non-empty directory '{path}' blocking reference '{refname}'"
+    )]
+    DirectoryInTheWay { refname: String, path: String },
+}
+
+/// Clean/smudge filter and EOL conversion failures.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FilterError {
+    /// External clean or smudge filter command failed.
+    #[error("{path}: {phase} filter '{driver}' failed")]
+    ExternalFilterFailed {
+        driver: String,
+        path: String,
+        phase: FilterPhase,
+    },
+
+    /// Filter output did not round-trip (clean/smudge mismatch).
+    #[error("{path}: {detail}")]
+    NotFilteredProperly { path: String, detail: String },
+
+    /// Invalid `working-tree-encoding` attribute value.
+    #[error("true/false are no valid working-tree-encodings")]
+    InvalidWorkingTreeEncoding,
+
+    /// Line-ending conversion would modify the worktree against user settings.
+    #[error("{detail}")]
+    LineEndingWouldChange { detail: String },
+
+    /// Shell filter subprocess exited non-zero.
+    #[error("filter command exited with status {status}")]
+    Failed { status: i32 },
+}
+
+/// Which filter hook failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterPhase {
+    /// Index → worktree (smudge).
+    Smudge,
+    /// Worktree → index (clean).
+    Clean,
+}
+
+impl std::fmt::Display for FilterPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Smudge => f.write_str("smudge"),
+            Self::Clean => f.write_str("clean"),
+        }
+    }
+}
+
+/// Sparse-checkout cone pattern parse warnings (non-fatal).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SparseCheckoutWarning {
+    UnrecognizedPattern { pattern: String },
+    UnrecognizedNegativePattern { pattern: String },
+    RepeatedPattern { pattern: String },
+    DisablingConePatternMatching,
+}
+
+impl SparseCheckoutWarning {
+    /// Human-readable body without a `warning:` prefix.
+    #[must_use]
+    pub fn body(&self) -> String {
+        match self {
+            Self::UnrecognizedPattern { pattern } => {
+                format!("unrecognized pattern: '{pattern}'")
+            }
+            Self::UnrecognizedNegativePattern { pattern } => {
+                format!("unrecognized negative pattern: '{pattern}'")
+            }
+            Self::RepeatedPattern { pattern } => format!(
+                "your sparse-checkout file may have issues: pattern '{pattern}' is repeated"
+            ),
+            Self::DisablingConePatternMatching => "disabling cone pattern matching".to_owned(),
+        }
+    }
+
+    /// Git-style `warning: …` line.
+    #[must_use]
+    pub fn format_line(&self) -> String {
+        crate::diagnostics::warning_line(&self.body())
+    }
+}
+
+/// Unified diff / patch application errors.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ApplyError {
+    /// Patch bytes are malformed at a known input location.
+    #[error("corrupt patch at {input}:{line}")]
+    CorruptPatch { input: String, line: usize },
+
+    /// Other apply parse failures.
+    #[error("{0}")]
+    Other(String),
+}
+
+/// Path lookup failures while formatting a diff.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DiffPathError {
+    #[error("No such path '{path}' in the diff")]
+    NoSuchPathInDiff { path: String },
+}
+
+/// Path outside the repository during pathspec or transport resolution.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PathOutsideRepoError {
+    #[error("{path}: '{subpath}' is outside repository at '{repo_root}'")]
+    OutsideRepository {
+        path: String,
+        subpath: String,
+        repo_root: String,
+    },
+}
+
 /// The top-level error type for all grit-lib operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -126,8 +359,28 @@ pub enum Error {
     InvalidPath(String),
 
     /// A configuration file parsing or access error.
-    #[error("config error: {0}")]
-    ConfigError(String),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+
+    /// Reference lock failure while updating refs.
+    #[error(transparent)]
+    RefLock(#[from] RefLockError),
+
+    /// Filter or EOL conversion failure.
+    #[error(transparent)]
+    Filter(#[from] FilterError),
+
+    /// Patch application failure.
+    #[error(transparent)]
+    Apply(#[from] ApplyError),
+
+    /// Diff path selection failure.
+    #[error(transparent)]
+    DiffPath(#[from] DiffPathError),
+
+    /// Path resolves outside the repository.
+    #[error(transparent)]
+    PathOutsideRepo(#[from] PathOutsideRepoError),
 
     /// A commit/tag signing or signature-verification error.
     #[error("{0}")]
@@ -172,6 +425,46 @@ pub enum Error {
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
     Midx(#[from] MidxError),
+
+    /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
+    #[error(transparent)]
+    RevParse(#[from] crate::rev_parse_error::RevParseError),
+
+    /// Revision walking / `rev-list` option parsing failed ([`crate::rev_list_error::RevListError`]).
+    #[error(transparent)]
+    RevList(#[from] crate::rev_list_error::RevListError),
+
+    /// A Git hook subprocess failed or could not be started.
+    #[error(transparent)]
+    Hook(#[from] crate::hooks::HookError),
+}
+
+impl Error {
+    /// When set, the CLI should prefix stderr with `fatal: ` for Git-compatible commands.
+    #[must_use]
+    pub fn wants_fatal_prefix(&self) -> bool {
+        matches!(
+            self,
+            Error::Config(_)
+                | Error::RefLock(_)
+                | Error::Filter(_)
+                | Error::PathOutsideRepo(_)
+                | Error::DiffPath(_)
+        )
+    }
+
+    /// Format for Git-style stderr (adds `fatal:` / `error:` when appropriate).
+    #[must_use]
+    pub fn git_stderr_message(&self) -> String {
+        match self {
+            Error::Apply(ApplyError::CorruptPatch { .. }) => {
+                crate::diagnostics::error_line(&self.to_string())
+            }
+            Error::Message(s) => s.clone(),
+            e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
+            other => other.to_string(),
+        }
+    }
 }
 
 /// Convenience alias for `Result<T, Error>`.

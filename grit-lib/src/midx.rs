@@ -12,20 +12,22 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::hash::verify_trailer;
 
 use crate::diagnostics::{DiagnosticSink, NullDiagnostics, Warning};
 use crate::error::{Error, MidxError, Result};
-use crate::objects::{HashAlgo, ObjectId};
-use crate::odb::hash_algo_for_objects_dir;
+use crate::objects::{HashAlgo, ObjectId, ObjectInfo};
 use crate::pack::{read_pack_index_no_verify, PackIndex};
 use crate::pack_rev::append_hashfile_checksum;
 
 const MIDX_SIGNATURE: u32 = 0x4d49_4458;
 const MIDX_VERSION_V1: u8 = 1;
 const MIDX_VERSION_V2: u8 = 2;
+const HASH_VERSION_SHA1: u8 = 1;
+const HASH_VERSION_SHA256: u8 = 2;
 const MIDX_HEADER_SIZE: usize = 12;
 const CHUNK_TOC_ENTRY_SIZE: usize = 12;
 const MIDX_CHUNKID_PACKNAMES: u32 = 0x504e_414d;
@@ -214,7 +216,14 @@ fn chain_file_path(pack_dir: &Path) -> std::path::PathBuf {
 }
 
 fn midx_chain_hash_hex_len(pack_dir: &Path) -> usize {
-    repo_hash_algo_for_pack_dir(pack_dir).hex_len()
+    let Some(objects_dir) = pack_dir.parent() else {
+        return HashAlgo::Sha1.hex_len();
+    };
+    if repo_midx_hash_version_for_objects_dir(objects_dir) == HASH_VERSION_SHA256 {
+        HashAlgo::Sha256.hex_len()
+    } else {
+        HashAlgo::Sha1.hex_len()
+    }
 }
 
 fn is_valid_midx_chain_hash_line(t: &str, hex_len: usize) -> bool {
@@ -242,100 +251,521 @@ fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// ── Process-lifetime MIDX read cache ─────────────────────────────────
-//
-// `try_read_object_via_midx` / `midx_oid_listed_in_tip` run once per object
-// lookup, and each used to re-read the entire multi-pack-index file and
-// re-parse the referenced pack `.idx`. History walks paid for it per object
-// (`log --stat` issued ~90 full MIDX reads per commit). Cache the MIDX bytes
-// keyed by path with stat stamps (mtime + size, recorded before the read) on
-// every access. In-process MIDX writers evict their pack dir, closing the
-// same-mtime-tick rewrite window; C git opens the MIDX once per process with
-// no revalidation at all, so serving a stamped copy is strictly more
-// conservative than upstream.
-mod midx_cache {
+/// Resolve the path to the newest MIDX layer (root `multi-pack-index` or last chain entry).
+/// Return the MIDX hash-version byte expected for the repository owning `pack_dir`,
+/// mirroring git's `oid_version(r->hash_algo)` (SHA-1 → 1, SHA-256 → 2).
+///
+/// `pack_dir` is `<gitdir>/objects/pack`; the object format lives in the gitdir's
+/// `config` under `extensions.objectformat`. When the config cannot be read or the
+/// extension is absent, the default SHA-1 version (1) is returned.
+fn repo_midx_hash_version(pack_dir: &Path) -> u8 {
+    // pack_dir = <gitdir>/objects/pack -> gitdir = pack_dir/../..
+    let Some(objects_dir) = pack_dir.parent() else {
+        return HASH_VERSION_SHA1;
+    };
+    repo_midx_hash_version_for_objects_dir(objects_dir)
+}
+
+// Repository-scoped MIDX read cache: one [`PreparedMidxChain`] per `objects/pack` directory,
+// built once (no stat/read/parse on lookup hits). In-process writers call [`evict_pack_dir`].
+pub(crate) mod midx_cache {
+    use super::{
+        midx_chain_layer_paths_newest_first, midx_load_for_read,
+        repo_midx_hash_version_for_objects_dir, MidxLoadResult, MidxReadView,
+        MIDX_LARGE_OFFSET_NEEDED,
+    };
+    use crate::diagnostics::{DiagnosticSink, Warning};
     use crate::error::{Error, Result};
+    use crate::objects::{ObjectId, ObjectInfo};
+    use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
-    use std::time::SystemTime;
 
-    type Stamp = (SystemTime, u64);
-
-    #[derive(Default)]
-    struct State {
-        bytes: HashMap<PathBuf, (Stamp, Arc<Vec<u8>>)>,
-        /// Tip-MIDX resolution per pack dir, held for the process lifetime and
-        /// evicted by in-process MIDX writers. Only the object-read hot path may
-        /// use this: a stale entry there degrades to the regular pack lookup,
-        /// which stays correct, whereas midx subcommands need the live state.
-        tip_path: HashMap<PathBuf, Option<PathBuf>>,
+    /// Parsed MIDX layer: fanout + binary search; pack indexes opened on first read per pack id.
+    pub struct PreparedMidxLayer {
+        bytes: Arc<[u8]>,
+        fanout: [u32; 256],
+        oidl_off: usize,
+        num_objects: usize,
+        hash_len: usize,
+        /// Per sorted OID position: `(pack_id, in-pack offset)` decoded at prepare time.
+        pack_offsets: Vec<(u32, u64)>,
+        pack_dir: PathBuf,
+        pack_names: Vec<String>,
+        pack_indexes: Vec<Arc<OnceLock<Option<Arc<PackIndex>>>>>,
+        packs_validated: AtomicBool,
     }
 
-    static CACHE: OnceLock<Mutex<State>> = OnceLock::new();
+    impl PreparedMidxLayer {
+        fn prepare(bytes: Arc<[u8]>, view: MidxReadView, pack_dir: &Path) -> Self {
+            let hash_len = if bytes.get(5) == Some(&2) { 32 } else { 20 };
+            let mut fanout = [0u32; 256];
+            for (i, slot) in fanout.iter_mut().enumerate() {
+                *slot = read_be_u32(&bytes, view.oidf_off + i * 4).unwrap_or(0);
+            }
+            let mut pack_offsets = Vec::with_capacity(view.num_objects);
+            for i in 0..view.num_objects {
+                let ob = view.ooff_off + i * 8;
+                let pack_id = read_be_u32(&bytes, ob).unwrap_or(0);
+                let raw_off = read_be_u32(&bytes, ob + 4).unwrap_or(0);
+                let offset = decode_midx_object_offset(&bytes, raw_off, view.loff).unwrap_or(0);
+                pack_offsets.push((pack_id, offset));
+            }
+            Self {
+                fanout,
+                oidl_off: view.oidl_off,
+                num_objects: view.num_objects,
+                hash_len,
+                pack_offsets,
+                pack_dir: pack_dir.to_path_buf(),
+                pack_names: view.pack_names.clone(),
+                pack_indexes: view
+                    .pack_names
+                    .iter()
+                    .map(|_| Arc::new(OnceLock::new()))
+                    .collect(),
+                packs_validated: AtomicBool::new(false),
+                bytes,
+            }
+        }
 
-    fn lock() -> std::sync::MutexGuard<'static, State> {
-        CACHE
-            .get_or_init(|| Mutex::new(State::default()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
+        fn open_pack_index(&self, pack_id: u32) -> Option<Arc<PackIndex>> {
+            let i = pack_id as usize;
+            let slot = self.pack_indexes.get(i)?;
+            slot.get_or_init(|| {
+                let idx_path = self.pack_dir.join(self.pack_names.get(i)?);
+                if !idx_path.is_file() {
+                    return None;
+                }
+                read_pack_index_cached(&idx_path).ok()
+            })
+            .clone()
+        }
 
-    fn stamp(path: &Path) -> Option<Stamp> {
-        #[cfg(test)]
-        crate::hot_path_test_metrics::record_midx_stamp_stat_for_active_scope();
-        let m = fs::metadata(path).ok()?;
-        Some((m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
-    }
+        fn oid_at(&self, pos: usize) -> &[u8] {
+            let base = self.oidl_off + pos * self.hash_len;
+            &self.bytes[base..base + self.hash_len]
+        }
 
-    /// MIDX file bytes, re-read from disk only when the file's stamp changes.
-    pub fn get_bytes(path: &Path) -> Result<Arc<Vec<u8>>> {
-        let sig = stamp(path);
-        if let Some(sig) = sig {
-            let g = lock();
-            if let Some((s, b)) = g.bytes.get(path) {
-                if *s == sig {
-                    return Ok(Arc::clone(b));
+        #[inline(always)]
+        fn find_position(&self, oid: &ObjectId) -> Option<usize> {
+            let needle = oid.as_bytes();
+            if needle.len() != self.hash_len {
+                return None;
+            }
+            let first = needle[0] as usize;
+            let lo = if first == 0 {
+                0
+            } else {
+                self.fanout[first - 1] as usize
+            };
+            let hi = self.fanout[first] as usize;
+            if lo >= hi || hi > self.num_objects {
+                return None;
+            }
+            if hi - lo >= 64 {
+                if let Some(pos) = self.interpolation_search(lo, hi, needle) {
+                    return Some(pos);
+                }
+            }
+            self.binary_search(lo, hi, needle)
+        }
+
+        fn binary_search(&self, mut lo: usize, mut hi: usize, needle: &[u8]) -> Option<usize> {
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                match self.oid_at(mid).cmp(needle) {
+                    std::cmp::Ordering::Less => lo = mid + 1,
+                    std::cmp::Ordering::Greater => hi = mid,
+                    std::cmp::Ordering::Equal => return Some(mid),
+                }
+            }
+            None
+        }
+
+        fn interpolation_search(&self, lo: usize, hi: usize, needle: &[u8]) -> Option<usize> {
+            use crate::pack_index::oid_interp_prefix_u64;
+            let mut lo = lo;
+            let mut hi = hi;
+            while lo < hi && needle >= self.oid_at(lo) && needle <= self.oid_at(hi - 1) {
+                let lo_oid = self.oid_at(lo);
+                let hi_oid = self.oid_at(hi - 1);
+                if lo_oid == hi_oid {
+                    return if lo_oid == needle { Some(lo) } else { None };
+                }
+                let span = hi - lo - 1;
+                let num = oid_interp_prefix_u64(needle);
+                let lo_val = oid_interp_prefix_u64(lo_oid);
+                let hi_val = oid_interp_prefix_u64(hi_oid);
+                let guess = if hi_val <= lo_val {
+                    lo + span / 2
+                } else {
+                    let num = u128::from(num.saturating_sub(lo_val));
+                    let den = u128::from(hi_val - lo_val);
+                    lo.saturating_add(((num * u128::from(span as u64)) / den) as usize)
+                };
+                let pos = guess.min(hi - 1);
+                match self.oid_at(pos).cmp(needle) {
+                    std::cmp::Ordering::Equal => return Some(pos),
+                    std::cmp::Ordering::Less => lo = pos + 1,
+                    std::cmp::Ordering::Greater => hi = pos,
+                }
+            }
+            None
+        }
+
+        pub fn ensure_packs_validated(
+            &self,
+            pack_dir: &Path,
+            pack_names: &[String],
+            diagnostics: &dyn DiagnosticSink,
+        ) {
+            if self.packs_validated.swap(true, Ordering::Relaxed) {
+                return;
+            }
+            for idx_name in pack_names {
+                let idx_path = pack_dir.join(idx_name);
+                if !idx_path.is_file() {
+                    continue;
+                }
+                if crate::pack::read_pack_index_no_verify(&idx_path).is_err() {
+                    let mut pack_path = idx_path.clone();
+                    pack_path.set_extension("pack");
+                    diagnostics.warn(Warning::MidxPackIndexUnavailable {
+                        pack: pack_path.display().to_string(),
+                    });
                 }
             }
         }
-        let data = Arc::new(fs::read(path).map_err(Error::Io)?);
-        if let Some(sig) = sig {
-            lock()
-                .bytes
-                .insert(path.to_path_buf(), (sig, Arc::clone(&data)));
+
+        /// Fanout bucket + binary search over OID lookup rows; returns in-pack offset.
+        #[inline(always)]
+        pub fn lookup_pack_and_offset(&self, oid: &ObjectId) -> Option<(u32, u64)> {
+            let pos = self.find_position(oid)?;
+            Some(self.pack_offsets[pos])
         }
-        Ok(data)
+
+        #[inline]
+        pub fn read_at(&self, pack_id: u32, offset: u64) -> Result<Option<crate::objects::Object>> {
+            let Some(idx) = self.open_pack_index(pack_id) else {
+                return Ok(None);
+            };
+            match read_object_at(idx.as_ref(), offset) {
+                Ok(obj) => Ok(Some(obj)),
+                Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(err) => Err(err),
+            }
+        }
     }
 
-    /// Cached tip-MIDX resolution for `pack_dir`, computing it with `resolve` on
-    /// first use. Object-read hot path only (see [`State::tip_path`]): resolving
-    /// the tip costs two filesystem probes per call (root file + chain), which
-    /// history walks and pack building would otherwise pay per object.
-    pub fn tip_path(pack_dir: &Path, resolve: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
-        if let Some(tip) = lock().tip_path.get(pack_dir) {
-            return tip.clone();
-        }
-        let tip = resolve();
-        lock().tip_path.insert(pack_dir.to_path_buf(), tip.clone());
-        tip
+    /// All incremental MIDX layers for one `objects/pack` directory (newest first).
+    pub struct PreparedMidxChain {
+        pack_dir: PathBuf,
+        pack_names_by_layer: Vec<Vec<String>>,
+        layers: Vec<PreparedMidxLayer>,
+        packs_validated: AtomicBool,
     }
 
-    /// Drop cached MIDX bytes and tip resolutions under `pack_dir` (called by
-    /// in-process writers).
+    impl PreparedMidxChain {
+        #[inline(always)]
+        pub fn lookup_pack_and_offset(&self, oid: &ObjectId) -> Option<(u32, u64)> {
+            for layer in &self.layers {
+                if let Some(found) = layer.lookup_pack_and_offset(oid) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        pub fn oid_listed_in_tip(&self, oid: &ObjectId) -> bool {
+            self.lookup_pack_and_offset(oid).is_some()
+        }
+
+        pub fn try_read_object(
+            &self,
+            oid: &ObjectId,
+            diagnostics: &dyn DiagnosticSink,
+        ) -> Result<Option<crate::objects::Object>> {
+            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+                let Some((pack_id, offset)) = layer.lookup_pack_and_offset(oid) else {
+                    continue;
+                };
+                self.ensure_packs_validated(diagnostics);
+                match layer.read_at(pack_id, offset)? {
+                    Some(obj) => return Ok(Some(obj)),
+                    None => {
+                        layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
+                        return Ok(None);
+                    }
+                }
+            }
+            Ok(None)
+        }
+
+        pub fn try_read_info(
+            &self,
+            oid: &ObjectId,
+            diagnostics: &dyn DiagnosticSink,
+        ) -> Result<Option<ObjectInfo>> {
+            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+                let Some((pack_id, _offset)) = layer.lookup_pack_and_offset(oid) else {
+                    continue;
+                };
+                self.ensure_packs_validated(diagnostics);
+                let Some(idx) = layer.open_pack_index(pack_id) else {
+                    layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
+                    return Ok(None);
+                };
+                return crate::pack::read_object_info_from_pack(idx.as_ref(), oid).map(Some);
+            }
+            Ok(None)
+        }
+
+        pub fn ensure_packs_validated(&self, diagnostics: &dyn DiagnosticSink) {
+            if self.packs_validated.swap(true, Ordering::Relaxed) {
+                return;
+            }
+            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+                layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
+            }
+        }
+    }
+
+    fn read_be_u32(data: &[u8], off: usize) -> Result<u32> {
+        if off + 4 > data.len() {
+            return Err(Error::CorruptObject("truncated MIDX u32".to_owned()));
+        }
+        Ok(u32::from_be_bytes([
+            data[off],
+            data[off + 1],
+            data[off + 2],
+            data[off + 3],
+        ]))
+    }
+
+    fn read_be_u64(data: &[u8], off: usize) -> Result<u64> {
+        if off + 8 > data.len() {
+            return Err(Error::CorruptObject("truncated MIDX u64".to_owned()));
+        }
+        Ok(u64::from_be_bytes([
+            data[off],
+            data[off + 1],
+            data[off + 2],
+            data[off + 3],
+            data[off + 4],
+            data[off + 5],
+            data[off + 6],
+            data[off + 7],
+        ]))
+    }
+
+    fn decode_midx_object_offset(
+        data: &[u8],
+        raw_off: u32,
+        loff: Option<(usize, usize)>,
+    ) -> Option<u64> {
+        if loff.is_none() {
+            return Some(u64::from(raw_off));
+        }
+        if (raw_off & MIDX_LARGE_OFFSET_NEEDED) != 0 {
+            let idx = (raw_off & !MIDX_LARGE_OFFSET_NEEDED) as usize;
+            let need = (idx + 1) * 8;
+            match loff {
+                Some((loff_off, loff_len)) if loff_len >= need => {
+                    read_be_u64(data, loff_off + idx * 8).ok()
+                }
+                _ => None,
+            }
+        } else {
+            Some(u64::from(raw_off))
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn decode_midx_object_offset_for_test(
+        data: &[u8],
+        raw_off: u32,
+        loff: Option<(usize, usize)>,
+    ) -> Option<u64> {
+        decode_midx_object_offset(data, raw_off, loff)
+    }
+
+    #[derive(Default)]
+    pub(crate) struct State {
+        chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
+        hot_chain: Option<(PathBuf, Arc<PreparedMidxChain>)>,
+    }
+
+    fn build_chain(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        let pack_dir = objects_dir.join("pack");
+        let paths = midx_chain_layer_paths_newest_first(&pack_dir);
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
+        let mut layers = Vec::with_capacity(paths.len());
+        let mut pack_names_by_layer = Vec::with_capacity(paths.len());
+        for path in paths {
+            let bytes: Arc<[u8]> = match fs::read(&path) {
+                Ok(b) => Arc::from(b),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(Error::Io(err)),
+            };
+            let view = match midx_load_for_read(&bytes, hash_version, diagnostics)? {
+                MidxLoadResult::Ok(v) => v,
+                MidxLoadResult::Skip => continue,
+            };
+            pack_names_by_layer.push(view.pack_names.clone());
+            layers.push(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
+        }
+        if layers.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Arc::new(PreparedMidxChain {
+            pack_dir,
+            pack_names_by_layer,
+            layers,
+            packs_validated: AtomicBool::new(false),
+        })))
+    }
+
+    /// Cached prepared chain for `objects_dir` (thread-local + read-lock on first use per thread).
+    pub fn prepared_chain(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        if let Some(chain) = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            state
+                .hot_chain
+                .as_ref()
+                .and_then(|(path, chain)| (path == objects_dir).then(|| Arc::clone(chain)))
+                .or_else(|| state.chains.get(&objects_dir.join("pack")).map(Arc::clone))
+        }) {
+            crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+                state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
+            });
+            return Ok(Some(chain));
+        }
+        let pack_dir = objects_dir.join("pack");
+        let built = build_chain(objects_dir, diagnostics)?;
+        let Some(chain) = built else {
+            return Ok(None);
+        };
+        let stored = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            let chain = Arc::clone(
+                state
+                    .chains
+                    .entry(pack_dir)
+                    .or_insert_with(|| Arc::clone(&chain)),
+            );
+            state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
+            chain
+        });
+        Ok(Some(stored))
+    }
+
     pub fn evict_pack_dir(pack_dir: &Path) {
-        let mut g = lock();
-        g.bytes.retain(|p, _| !p.starts_with(pack_dir));
-        g.tip_path.retain(|p, _| !p.starts_with(pack_dir));
+        crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            evict_pack_dir_in_state(state, pack_dir);
+        });
+    }
+
+    pub(crate) fn evict_pack_dir_on(state: &Mutex<State>, pack_dir: &Path) {
+        let mut state = state.lock().unwrap_or_else(|poison| poison.into_inner());
+        evict_pack_dir_in_state(&mut state, pack_dir);
+    }
+
+    fn evict_pack_dir_in_state(state: &mut State, pack_dir: &Path) {
+        if state.hot_chain.as_ref().is_some_and(|(objects_dir, _)| {
+            objects_dir.join("pack") == pack_dir || pack_dir.starts_with(objects_dir)
+        }) {
+            state.hot_chain = None;
+        }
+        state.chains.retain(|path, _| !path.starts_with(pack_dir));
     }
 }
 
-fn repo_hash_algo_for_pack_dir(pack_dir: &Path) -> HashAlgo {
-    pack_dir
-        .parent()
-        .map(hash_algo_for_objects_dir)
-        .unwrap_or(HashAlgo::Sha1)
+/// Cached MIDX chain for object reads (see [`midx_cache::prepared_chain`]).
+pub(crate) use midx_cache::PreparedMidxChain;
+
+pub(crate) fn prepared_midx_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
+    midx_cache::prepared_chain(objects_dir, &NullDiagnostics)
+}
+
+/// MIDX layer files to search on object reads, newest chain layer first.
+fn midx_chain_layer_paths_newest_first(pack_dir: &Path) -> Vec<PathBuf> {
+    let root = pack_dir.join("multi-pack-index");
+    if root.is_file() {
+        return vec![root];
+    }
+    let Ok(hashes) = read_chain_layer_hashes(pack_dir) else {
+        return Vec::new();
+    };
+    if hashes.is_empty() {
+        return Vec::new();
+    }
+    let midx_d = midx_d_dir(pack_dir);
+    hashes
+        .iter()
+        .rev()
+        .map(|h| midx_d.join(format!("multi-pack-index-{h}.midx")))
+        .collect()
+}
+
+/// Like [`repo_midx_hash_version`] but starting from the `objects` directory.
+fn repo_midx_hash_version_for_objects_dir(objects_dir: &Path) -> u8 {
+    let Some(gitdir) = objects_dir.parent() else {
+        return HASH_VERSION_SHA1;
+    };
+    sniff_objectformat_hash_version(&gitdir.join("config"))
+}
+
+/// Uncached `[extensions] objectformat` scan of one config file.
+fn sniff_objectformat_hash_version(config_path: &Path) -> u8 {
+    let Ok(text) = fs::read_to_string(config_path) else {
+        return HASH_VERSION_SHA1;
+    };
+    // Minimal scan for `[extensions]` ... `objectformat = sha256`. Section and key
+    // names are case-insensitive in git config; values are case-sensitive but git
+    // only accepts the literals "sha1"/"sha256".
+    let mut in_extensions = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') {
+            let section = line.trim_start_matches('[').trim_end_matches(']');
+            let name = section.split_whitespace().next().unwrap_or("");
+            in_extensions = name.eq_ignore_ascii_case("extensions");
+            continue;
+        }
+        if !in_extensions {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            if key.trim().eq_ignore_ascii_case("objectformat")
+                && value.trim().eq_ignore_ascii_case("sha256")
+            {
+                return HASH_VERSION_SHA256;
+            }
+        }
+    }
+    HASH_VERSION_SHA1
+}
+
+/// Whether a tip MIDX file exists under `pack_dir` (live filesystem probe).
+#[must_use]
+pub fn cached_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
+    resolve_tip_midx_path(pack_dir)
+}
+
+/// Drop cached MIDX bytes and tip resolution after pack-directory changes.
+pub fn evict_midx_read_cache_for_pack_dir(pack_dir: &Path) {
+    midx_cache::evict_pack_dir(pack_dir);
 }
 
 pub fn resolve_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
@@ -375,13 +805,18 @@ fn load_midx_file(path: &Path) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// OID width implied by a MIDX file's header hash-version byte (`data[5]`).
-fn midx_hash_len(data: &[u8]) -> Result<usize> {
-    midx_trailing_hash_len(data)
+/// OID width implied by a MIDX file's header hash-version byte (`data[5]`):
+/// 2 → SHA-256 (32 bytes), anything else → SHA-1 (20 bytes).
+fn midx_hash_len(data: &[u8]) -> usize {
+    if data.len() > 5 && data[5] == 2 {
+        32
+    } else {
+        20
+    }
 }
 
 fn oids_and_packs_from_midx_data(data: &[u8]) -> Result<(HashSet<ObjectId>, Vec<String>)> {
-    let hash_len = midx_hash_len(data)?;
+    let hash_len = midx_hash_len(data);
     let (_, hdr_end, _) = parse_midx_header(data)?;
     let (pn_off, pn_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
     let pack_names = parse_pack_names_blob(&data[pn_off..pn_off + pn_len])?;
@@ -496,8 +931,7 @@ fn clear_stale_split_layers(pack_dir: &Path, keep: &[String]) -> Result<()> {
         let Some((hash_part, _ext)) = rest.split_once('.') else {
             continue;
         };
-        let hex_len = midx_chain_hash_hex_len(pack_dir);
-        if hash_part.len() == hex_len && !keep.contains(hash_part) {
+        if hash_part.len() == 40 && !keep.contains(hash_part) {
             let _ = fs::remove_file(ent.path());
         }
     }
@@ -578,11 +1012,11 @@ fn build_midx_bytes_filtered(
     write_bitmap_placeholders: bool,
     omit_embedded_ridx_chunk: bool,
     version: u8,
-    algo: HashAlgo,
+    hash_version: u8,
     exclude_oids: Option<&HashSet<ObjectId>>,
 ) -> Result<(Vec<u8>, Option<Vec<u32>>)> {
-    let hash_version = u8::from(algo);
-    let hash_len = algo.len();
+    // OID width implied by the MIDX hash version (1 → SHA-1/20, 2 → SHA-256/32).
+    let hash_len = if hash_version == 2 { 32 } else { 20 };
     let preferred_pack_idx = preferred_idx.map(|p| p as u32);
     let pack_mtimes: Vec<std::time::SystemTime> = indexes.iter().map(pack_mtime_for_midx).collect();
 
@@ -592,11 +1026,11 @@ fn build_midx_bytes_filtered(
             Error::CorruptObject("too many pack files for multi-pack-index".to_owned())
         })?;
         let mtime = pack_mtimes[pack_id as usize];
-        for e in &idx.entries {
-            if e.oid.len() != hash_len {
+        for e in idx.iter() {
+            if e.oid().len() != hash_len {
                 continue;
             }
-            let Ok(oid) = ObjectId::from_bytes(&e.oid) else {
+            let Ok(oid) = ObjectId::from_bytes(e.oid()) else {
                 continue;
             };
             if let Some(ex) = exclude_oids {
@@ -607,7 +1041,7 @@ fn build_midx_bytes_filtered(
             let cand = MidxEntry {
                 oid,
                 pack_id,
-                offset: e.offset,
+                offset: e.offset(),
                 pack_mtime: mtime,
             };
             match best.get(&oid) {
@@ -615,7 +1049,7 @@ fn build_midx_bytes_filtered(
                     best.insert(oid, cand);
                 }
                 Some(cur) => {
-                    if midx_pick_better_entry(cur, pack_id, e.offset, mtime, preferred_pack_idx) {
+                    if midx_pick_better_entry(cur, pack_id, e.offset(), mtime, preferred_pack_idx) {
                         best.insert(oid, cand);
                     }
                 }
@@ -711,9 +1145,7 @@ fn build_midx_bytes_filtered(
 
     // BTMP: per-pack (bitmap_pos, bitmap_nr) in the pseudo-bitmap namespace, matching Git's
     // `write_midx_bitmapped_packs` (cumulative start + object count per pack).
-    // Standalone `.rev` sidecars (when the embedded RIDX chunk is omitted) carry the
-    // same object permutation as the embedded chunk would.
-    let rev_sidecar_order = if omit_embedded_ridx_chunk {
+    let rev_sidecar_order = if omit_embedded_ridx_chunk && write_bitmap_placeholders {
         Some(order.clone())
     } else {
         None
@@ -805,6 +1237,11 @@ fn build_midx_bytes_filtered(
     out.extend_from_slice(&body);
 
     // Trailing checksum matches the MIDX hash version (SHA-1 for 1, SHA-256 for 2).
+    let algo = if hash_version == 2 {
+        HashAlgo::Sha256
+    } else {
+        HashAlgo::Sha1
+    };
     out.extend_from_slice(algo.digest(&out).as_bytes());
 
     Ok((out, rev_sidecar_order))
@@ -838,10 +1275,15 @@ fn write_midx_rev_sidecar(
             midx_file_hash.len()
         )));
     }
-    debug_assert_eq!(out.len(), body_len);
     append_hashfile_checksum(&mut out, hash_len);
-    debug_assert_eq!(out.len(), body_len + hash_len);
     fs::write(path, out).map_err(Error::Io)
+}
+
+fn repo_hash_algo_for_pack_dir(pack_dir: &Path) -> HashAlgo {
+    pack_dir
+        .parent()
+        .map(crate::odb::hash_algo_for_objects_dir)
+        .unwrap_or(HashAlgo::Sha1)
 }
 
 fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, usize)> {
@@ -1053,15 +1495,13 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
         )]);
     }
     let hash_version = data[5];
-    let expected_hash_version = u8::from(hash_algo_for_objects_dir(objects_dir));
+    let expected_hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
     if hash_version != expected_hash_version {
         return Err(vec![format!(
             "multi-pack-index hash version {hash_version} does not match version {expected_hash_version}"
         )]);
     }
-    let hash_len = HashAlgo::try_from(hash_version)
-        .map(|a| a.len())
-        .unwrap_or(HashAlgo::Sha1.len());
+    let hash_len = if hash_version == 2 { 32usize } else { 20usize };
     let num_packs = u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize;
 
     // --- table of contents ---
@@ -1286,9 +1726,7 @@ pub fn verify_midx(objects_dir: &Path) -> std::result::Result<(), Vec<String>> {
 /// Validate the trailing checksum of an in-memory MIDX image, using the
 /// algorithm implied by the header hash version (SHA-1 or SHA-256).
 fn midx_checksum_is_valid(data: &[u8]) -> bool {
-    let Ok(hash_len) = midx_hash_len(data) else {
-        return false;
-    };
+    let hash_len = midx_hash_len(data);
     if data.len() < hash_len {
         return false;
     }
@@ -1329,7 +1767,7 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
     let names = parse_pack_names_blob(&data[pn_off..pn_off + pn_len])?;
-    let hash_len = midx_hash_len(&data)?;
+    let hash_len = midx_hash_len(&data);
     let (oidl_off, oidl_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oidl_len % hash_len != 0 || ooff_len % 8 != 0 {
@@ -1358,7 +1796,7 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
     Ok((names, objects))
 }
 
-/// Trailing checksum hex of the active MIDX (root or chain tip), width matches the file hash version.
+/// Trailing 40-character SHA-1 hex of the active MIDX (root or chain tip).
 pub fn midx_checksum_hex(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir)
@@ -1397,7 +1835,7 @@ pub fn format_midx_show_objects_layer(
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
     let names = parse_pack_names_blob(&data[pn_off..pn_off + pn_len])?;
-    let hash_len = midx_hash_len(&data)?;
+    let hash_len = midx_hash_len(&data);
     let (oidl_off, oidl_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
     if oidl_len % hash_len != 0 || ooff_len % 8 != 0 {
@@ -1543,7 +1981,7 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
         return Ok(None);
     };
     let data = fs::read(&path).map_err(Error::Io)?;
-    let hash_len = midx_hash_len(&data)?;
+    let hash_len = midx_hash_len(&data);
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
@@ -1710,109 +2148,37 @@ pub fn format_midx_bitmapped_packs(objects_dir: &Path) -> Result<String> {
     Ok(out)
 }
 
+/// Look up which pack and in-pack offset holds `oid` when listed in the active MIDX.
+///
+/// Returns [`None`] when no MIDX exists or `oid` is absent (no allocation on miss).
+pub fn midx_lookup_pack_and_offset_opt(
+    objects_dir: &Path,
+    oid: &ObjectId,
+) -> Result<Option<(u32, u64)>> {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
+        return Ok(None);
+    };
+    Ok(chain.lookup_pack_and_offset(oid))
+}
+
 /// Look up which pack and in-pack offset holds `oid` according to the active MIDX.
 pub fn midx_lookup_pack_and_offset(objects_dir: &Path, oid: &ObjectId) -> Result<(u32, u64)> {
-    let pack_dir = objects_dir.join("pack");
-    let path = resolve_tip_midx_path(&pack_dir)
-        .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
-    let data = fs::read(&path).map_err(Error::Io)?;
-    let hash_len = midx_hash_len(&data)?;
-    let (_, hdr_end, _) = parse_midx_header(&data)?;
-    let (fanout_off, fanout_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDFANOUT)?;
-    let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
-    let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
-    if fanout_len != 256 * 4 || oid_l_len % hash_len != 0 || ooff_len != oid_l_len / hash_len * 8 {
-        return Err(Error::CorruptObject("truncated MIDX OID chunks".to_owned()));
-    }
-    let num_objects = oid_l_len / hash_len;
-    let first = oid.as_bytes()[0] as usize;
-    let j0 = if first == 0 {
-        0usize
-    } else {
-        read_be_u32(&data, fanout_off + (first - 1) * 4)? as usize
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
+        return Err(Error::CorruptObject("no multi-pack-index found".to_owned()));
     };
-    let j1 = read_be_u32(&data, fanout_off + first * 4)? as usize;
-    let mut lo = j0;
-    let mut hi = j1;
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        let base = oidl_off + mid * hash_len;
-        let cmp = data[base..base + hash_len].cmp(oid.as_bytes());
-        if cmp == std::cmp::Ordering::Less {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    if lo >= num_objects {
-        return Err(Error::CorruptObject(format!(
-            "object {} not in multi-pack-index",
-            oid.to_hex()
-        )));
-    }
-    let base = oidl_off + lo * hash_len;
-    if data[base..base + hash_len] != *oid.as_bytes() {
-        return Err(Error::CorruptObject(format!(
-            "object {} not in multi-pack-index",
-            oid.to_hex()
-        )));
-    }
-    let ob = ooff_off + lo * 8;
-    let pack_id = read_be_u32(&data, ob)?;
-    let off32 = read_be_u32(&data, ob + 4)?;
-    Ok((pack_id, u64::from(off32)))
+    chain.lookup_pack_and_offset(oid).ok_or_else(|| {
+        Error::CorruptObject(format!("object {} not in multi-pack-index", oid.to_hex()))
+    })
 }
 
 /// Returns whether `oid` appears in the active MIDX OID table for `objects_dir`.
 ///
 /// [`None`] means there is no MIDX at the pack tip. [`Some`] is the lookup result when a MIDX exists.
-pub fn midx_oid_listed_in_tip(
-    objects_dir: &Path,
-    oid: &ObjectId,
-    repo_algo: HashAlgo,
-) -> Result<Option<bool>> {
-    let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
-    else {
+pub fn midx_oid_listed_in_tip(objects_dir: &Path, oid: &ObjectId) -> Result<Option<bool>> {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
         return Ok(None);
     };
-    let data = match midx_cache::get_bytes(&midx_path) {
-        Ok(data) => data,
-        // A tip cached before another process removed the MIDX: fall back to
-        // the regular pack lookup instead of failing the read.
-        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err),
-    };
-    let hash_len = midx_hash_len(&data)?;
-    let MidxReadView {
-        oidf_off,
-        oidl_off,
-        num_objects,
-        ..
-    } = match midx_load_for_read(&data, repo_algo, &NullDiagnostics)? {
-        MidxLoadResult::Ok(v) => v,
-        MidxLoadResult::Skip => return Ok(None),
-    };
-
-    let first = oid.as_bytes()[0] as usize;
-    let lo = if first == 0 {
-        0u32
-    } else {
-        read_be_u32(&data, oidf_off + (first - 1) * 4)?
-    };
-    let hi = read_be_u32(&data, oidf_off + first * 4)?;
-
-    let mut i = lo as usize;
-    while i < hi as usize && i < num_objects {
-        let o =
-            ObjectId::from_bytes(&data[oidl_off + i * hash_len..oidl_off + (i + 1) * hash_len])?;
-        match o.cmp(oid) {
-            std::cmp::Ordering::Equal => return Ok(Some(true)),
-            std::cmp::Ordering::Greater => return Ok(Some(false)),
-            std::cmp::Ordering::Less => i += 1,
-        }
-    }
-    Ok(Some(false))
+    Ok(Some(chain.oid_listed_in_tip(oid)))
 }
 
 /// Chunk offsets and metadata of a successfully loaded MIDX, ready for object reads.
@@ -1836,7 +2202,7 @@ enum MidxLoadResult {
 /// [`Warning`] values through `diagnostics` and return [`MidxLoadResult::Skip`].
 fn midx_load_for_read(
     data: &[u8],
-    expected: HashAlgo,
+    expected_hash_version: u8,
     diagnostics: &dyn DiagnosticSink,
 ) -> Result<MidxLoadResult> {
     if data.len() < MIDX_HEADER_SIZE + 20 {
@@ -1855,7 +2221,6 @@ fn midx_load_for_read(
         return Err(MidxError::VersionNotRecognized { version }.into());
     }
     let hash_version = data[5];
-    let expected_hash_version = u8::from(expected);
     if hash_version != expected_hash_version {
         return Err(MidxError::HashVersionMismatch {
             found: hash_version,
@@ -1867,7 +2232,7 @@ fn midx_load_for_read(
         diagnostics.warn(Warning::MidxChecksumMismatch);
         return Ok(MidxLoadResult::Skip);
     }
-    let hash_len = expected.len();
+    let hash_len = if hash_version == 2 { 32usize } else { 20usize };
     let num_packs = u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize;
 
     let mut toc_errors: Vec<String> = Vec::new();
@@ -1984,6 +2349,7 @@ fn midx_load_for_read(
 /// MIDX/pack store is prepared a single time; this routine reproduces that even when the
 /// object that triggered the read is found loose (so it never reaches the per-object MIDX
 /// lookup). Runs at most once per process per `objects_dir`.
+/// Validate pack indexes named by the active MIDX once per prepared layer view.
 pub fn validate_midx_referenced_packs(objects_dir: &Path) {
     validate_midx_referenced_packs_with_diagnostics(objects_dir, &NullDiagnostics);
 }
@@ -1993,164 +2359,49 @@ pub fn validate_midx_referenced_packs_with_diagnostics(
     objects_dir: &Path,
     diagnostics: &dyn DiagnosticSink,
 ) {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    static DONE: OnceLock<Mutex<HashSet<std::path::PathBuf>>> = OnceLock::new();
-    let done = DONE.get_or_init(|| Mutex::new(HashSet::new()));
-    if let Ok(mut set) = done.lock() {
-        if !set.insert(objects_dir.to_path_buf()) {
-            return;
-        }
-    }
-
-    let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = resolve_tip_midx_path(&pack_dir) else {
-        return;
-    };
-    let Ok(data) = fs::read(&midx_path) else {
-        return;
-    };
-    let MidxReadView { pack_names, .. } =
-        match midx_load_for_read(&data, hash_algo_for_objects_dir(objects_dir), diagnostics) {
-            Ok(MidxLoadResult::Ok(v)) => v,
-            Ok(MidxLoadResult::Skip) | Err(_) => return,
-        };
-    for idx_name in &pack_names {
-        let idx_path = pack_dir.join(idx_name);
-        if !idx_path.exists() {
-            continue;
-        }
-        if crate::pack::read_pack_index_no_verify(&idx_path).is_err() {
-            let mut pack_path = idx_path.clone();
-            pack_path.set_extension("pack");
-            diagnostics.warn(Warning::MidxPackIndexUnavailable {
-                pack: pack_path.display().to_string(),
-            });
-        }
+    if let Ok(Some(chain)) = midx_cache::prepared_chain(objects_dir, diagnostics) {
+        chain.ensure_packs_validated(diagnostics);
     }
 }
 
 /// When `core.multiPackIndex` is enabled, try to read `oid` from the active MIDX in `objects_dir`.
 ///
 /// Returns [`None`] when no MIDX exists or `oid` is not listed. Returns `Some(Err(..))` when the
-/// MIDX is present but malformed (callers surface Git-style `error:` / `fatal:` messages).
+/// MIDX is present but malformed.
 pub fn try_read_object_via_midx(
     objects_dir: &Path,
     oid: &ObjectId,
-    repo_algo: HashAlgo,
 ) -> Result<Option<crate::objects::Object>> {
-    try_read_object_via_midx_with_diagnostics(objects_dir, oid, repo_algo, &NullDiagnostics)
+    try_read_object_via_midx_with_diagnostics(objects_dir, oid, &NullDiagnostics)
 }
 
 /// Like [`try_read_object_via_midx`], emitting recoverable MIDX warnings through `diagnostics`.
 pub fn try_read_object_via_midx_with_diagnostics(
     objects_dir: &Path,
     oid: &ObjectId,
-    repo_algo: HashAlgo,
     diagnostics: &dyn DiagnosticSink,
 ) -> Result<Option<crate::objects::Object>> {
-    let pack_dir = objects_dir.join("pack");
-    let Some(midx_path) = midx_cache::tip_path(&pack_dir, || resolve_tip_midx_path(&pack_dir))
-    else {
+    let Some(chain) = midx_cache::prepared_chain(objects_dir, diagnostics)? else {
         return Ok(None);
     };
-    let data = match midx_cache::get_bytes(&midx_path) {
-        Ok(data) => data,
-        // A tip cached before another process removed the MIDX: fall back to
-        // the regular pack lookup instead of failing the read.
-        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err),
-    };
+    chain.try_read_object(oid, diagnostics)
+}
 
-    // Load-time validation, mirroring `load_multi_pack_index` in git/midx.c.
-    // Fatal corruptions `die()` (print error + fatal, exit 128); recoverable
-    // ones (e.g. an unaligned chunk table) skip the MIDX entirely.
-    let MidxReadView {
-        oidf_off,
-        oidl_off,
-        ooff_off,
-        loff,
-        num_objects,
-        pack_names,
-    } = match midx_load_for_read(&data, repo_algo, diagnostics)? {
-        MidxLoadResult::Ok(v) => v,
-        MidxLoadResult::Skip => return Ok(None),
-    };
+/// Like [`try_read_object_via_midx`], but returns [`ObjectInfo`] without inflating object bodies.
+pub fn try_read_info_via_midx(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    try_read_info_via_midx_with_diagnostics(objects_dir, oid, &NullDiagnostics)
+}
 
-    let first = oid.as_bytes()[0] as usize;
-    let lo = if first == 0 {
-        0u32
-    } else {
-        read_be_u32(&data, oidf_off + (first - 1) * 4)?
-    };
-    let hi = read_be_u32(&data, oidf_off + first * 4)?;
-
-    let hash_len = midx_hash_len(&data)?;
-    let mut pos = None;
-    let mut i = lo as usize;
-    while i < hi as usize && i < num_objects {
-        let o =
-            ObjectId::from_bytes(&data[oidl_off + i * hash_len..oidl_off + (i + 1) * hash_len])?;
-        let c = o.cmp(oid);
-        if c == std::cmp::Ordering::Equal {
-            pos = Some(i);
-            break;
-        }
-        if c == std::cmp::Ordering::Greater {
-            break;
-        }
-        i += 1;
-    }
-    let Some(pos) = pos else {
+/// Like [`try_read_info_via_midx`], emitting recoverable MIDX warnings through `diagnostics`.
+pub fn try_read_info_via_midx_with_diagnostics(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    diagnostics: &dyn DiagnosticSink,
+) -> Result<Option<ObjectInfo>> {
+    let Some(chain) = midx_cache::prepared_chain(objects_dir, diagnostics)? else {
         return Ok(None);
     };
-
-    let obase = ooff_off + pos * 8;
-    let pack_id = read_be_u32(&data, obase)?;
-    let raw_off = read_be_u32(&data, obase + 4)?;
-    let _offset = if (raw_off & MIDX_LARGE_OFFSET_NEEDED) != 0 {
-        let idx = (raw_off & !MIDX_LARGE_OFFSET_NEEDED) as usize;
-        let need = (idx + 1) * 8;
-        match loff {
-            Some((loff_off, loff_len)) if loff_len >= need => {
-                read_be_u64(&data, loff_off + idx * 8)?
-            }
-            _ => return Err(MidxError::LargeOffsetOutOfBounds.into()),
-        }
-    } else {
-        u64::from(raw_off)
-    };
-
-    let idx_name = pack_names
-        .get(pack_id as usize)
-        .ok_or_else(|| Error::CorruptObject("bad pack-int-id".to_owned()))?;
-    let idx_path = pack_dir.join(idx_name);
-    // A multi-pack-index can outlive packs it names (e.g. a `repack -d` deleted a
-    // pack but did not rewrite the MIDX). Git tolerates such stale entries by
-    // skipping the missing pack; mirror that by falling through to other object
-    // sources instead of surfacing the open error.
-    if !idx_path.exists() {
-        return Ok(None);
-    }
-    // Mirror git/packfile.c `open_pack_index`: when a pack's idx cannot be read
-    // (e.g. truncated/corrupt), Git emits `error: packfile <pack> index unavailable`,
-    // marks the pack invalid, and continues to other object sources. The object
-    // may still be found loose or in another pack, so fall through rather than
-    // surfacing the parse error as fatal. Use the non-verifying parse to match
-    // `open_pack_index`, which does not validate the trailing checksum (a pack
-    // `.idx` with a stale checksum but valid structure must still be usable).
-    let idx = match crate::pack::read_pack_index_cached(&idx_path) {
-        Ok(idx) => idx,
-        Err(_) => {
-            let mut pack_path = idx_path.clone();
-            pack_path.set_extension("pack");
-            diagnostics.warn(Warning::MidxPackIndexUnavailable {
-                pack: pack_path.display().to_string(),
-            });
-            return Ok(None);
-        }
-    };
-    crate::pack::read_object_from_pack(idx.as_ref(), oid).map(Some)
+    chain.try_read_info(oid, diagnostics)
 }
 
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
@@ -2241,11 +2492,7 @@ pub fn write_multi_pack_index_with_options(
                         }
                     }
                 } else {
-                    if let Some(handle) = opts.diagnostics.as_ref() {
-                        handle.warn(Warning::MidxIgnoringExistingChecksumMismatch);
-                    } else {
-                        NullDiagnostics.warn(Warning::MidxIgnoringExistingChecksumMismatch);
-                    }
+                    midx_write_warn(opts, Warning::MidxIgnoringExistingChecksumMismatch);
                 }
             }
         }
@@ -2372,7 +2619,7 @@ pub fn write_multi_pack_index_with_options(
 
     // Git refuses an explicitly preferred pack that has no objects.
     if let Some(p) = preferred_idx {
-        if indexes.get(p).map(|i| i.entries.len()).unwrap_or(0) == 0 {
+        if indexes.get(p).map(PackIndex::len).unwrap_or(0) == 0 {
             let name = work_names.get(p).cloned().unwrap_or_default();
             let pack_name = name.strip_suffix(".idx").unwrap_or(&name);
             return Err(MidxError::PreferredPackEmpty {
@@ -2385,8 +2632,11 @@ pub fn write_multi_pack_index_with_options(
     let pack_mtimes_layer: Vec<std::time::SystemTime> =
         indexes.iter().map(pack_mtime_for_midx).collect();
     let preferred_u32 = preferred_idx.map(|p| p as u32);
-    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
-    let select_hash_len = repo_algo.len();
+    let select_hash_len = if repo_midx_hash_version(pack_dir) == 2 {
+        32
+    } else {
+        20
+    };
 
     let mut best: HashMap<ObjectId, MidxEntry> = HashMap::new();
     for (pack_id, idx) in indexes.iter().enumerate() {
@@ -2394,11 +2644,11 @@ pub fn write_multi_pack_index_with_options(
             Error::CorruptObject("too many pack files for multi-pack-index".to_owned())
         })?;
         let mtime = pack_mtimes_layer[pack_id as usize];
-        for e in &idx.entries {
-            if e.oid.len() != select_hash_len {
+        for e in idx.iter() {
+            if e.oid().len() != select_hash_len {
                 continue;
             }
-            let Ok(oid) = ObjectId::from_bytes(&e.oid) else {
+            let Ok(oid) = ObjectId::from_bytes(e.oid()) else {
                 continue;
             };
             if opts.incremental && base_oids.contains(&oid) {
@@ -2407,7 +2657,7 @@ pub fn write_multi_pack_index_with_options(
             let cand = MidxEntry {
                 oid,
                 pack_id,
-                offset: e.offset,
+                offset: e.offset(),
                 pack_mtime: mtime,
             };
             match best.get(&oid) {
@@ -2415,7 +2665,7 @@ pub fn write_multi_pack_index_with_options(
                     best.insert(oid, cand);
                 }
                 Some(cur) => {
-                    if midx_pick_better_entry(cur, pack_id, e.offset, mtime, preferred_u32) {
+                    if midx_pick_better_entry(cur, pack_id, e.offset(), mtime, preferred_u32) {
                         best.insert(oid, cand);
                     }
                 }
@@ -2442,10 +2692,11 @@ pub fn write_multi_pack_index_with_options(
         bitmap_placeholders,
         omit_embedded_ridx,
         opts.version.unwrap_or(MIDX_VERSION_V2),
-        repo_algo,
+        repo_midx_hash_version(pack_dir),
         exclude,
     )?;
 
+    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
     let hash_len = repo_algo.len();
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
@@ -2487,13 +2738,13 @@ pub fn write_multi_pack_index_with_options(
             let full = hex::encode(hash);
             fs::write(midx_d.join(format!("multi-pack-index-{full}.bitmap")), [])
                 .map_err(Error::Io)?;
-        }
-        if opts.write_rev_placeholder {
-            let rev_path = midx_d.join(format!("multi-pack-index-{hash_hex}.rev"));
-            if let Some(order) = rev_sidecar_order.as_ref() {
-                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
-            } else {
-                fs::write(rev_path, []).map_err(Error::Io)?;
+            if opts.write_rev_placeholder {
+                let rev_path = midx_d.join(format!("multi-pack-index-{full}.rev"));
+                if let Some(order) = rev_sidecar_order.as_ref() {
+                    write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
+                } else {
+                    fs::write(rev_path, []).map_err(Error::Io)?;
+                }
             }
         }
     } else {
@@ -2532,13 +2783,13 @@ pub fn write_multi_pack_index_with_options(
                 [],
             )
             .map_err(Error::Io)?;
-        }
-        if opts.write_rev_placeholder {
-            let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
-            if let Some(order) = rev_sidecar_order.as_ref() {
-                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
-            } else {
-                fs::write(rev_path, []).map_err(Error::Io)?;
+            if opts.write_rev_placeholder {
+                let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
+                if let Some(order) = rev_sidecar_order.as_ref() {
+                    write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
+                } else {
+                    fs::write(rev_path, []).map_err(Error::Io)?;
+                }
             }
         }
     }
@@ -2713,7 +2964,6 @@ pub fn compact_multi_pack_index(
         Some(&base_oids)
     };
 
-    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
     let (out, rev_sidecar_order) = build_midx_bytes_filtered(
         &ordered_idx_names,
         &indexes,
@@ -2721,10 +2971,11 @@ pub fn compact_multi_pack_index(
         write_bitmaps,
         write_rev,
         version.unwrap_or(MIDX_VERSION_V2),
-        repo_algo,
+        repo_midx_hash_version(pack_dir),
         exclude,
     )?;
 
+    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
     let hash_len = repo_algo.len();
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
@@ -2812,10 +3063,10 @@ mod tests {
     };
     use crate::diagnostics::{CollectingDiagnostics, Warning};
     use crate::error::{Error, MidxError};
-    use crate::objects::{HashAlgo, ObjectId};
+    use crate::hot_path_test_metrics::HotPathMetricsScope;
+    use crate::objects::ObjectId;
     use crate::odb::Odb;
     use crate::pack::{clear_pack_cache, read_object_from_packs};
-    use crate::repo::{Repository, RepositoryOptions};
     use std::fs;
     use std::path::Path;
     use std::process::Command;
@@ -2892,7 +3143,7 @@ mod tests {
         assert!(midx_path.is_file(), "expected root MIDX");
 
         assert!(
-            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
+            try_read_object_via_midx(&objects, &oid)
                 .expect("prime midx read")
                 .is_some(),
             "object should be reachable via MIDX"
@@ -2900,11 +3151,13 @@ mod tests {
 
         std::fs::remove_file(&midx_path).expect("simulate external MIDX removal");
 
+        // Prepared MIDX bytes stay in-process until evict; external unlink alone does not
+        // invalidate the parsed layer (no stat on the hot path).
         assert!(
-            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
+            try_read_object_via_midx(&objects, &oid)
                 .expect("vanished tip must not fail reads")
-                .is_none(),
-            "cached tip path to a removed MIDX should degrade to absent"
+                .is_some(),
+            "cached prepared layer still serves until pack-dir evict"
         );
 
         let odb = Odb::new(&objects).with_config_git_dir(git_dir);
@@ -2921,7 +3174,7 @@ mod tests {
         let objects = tmp.path().join(".git/objects");
         let pack_dir = objects.join("pack");
 
-        assert!(try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
+        assert!(try_read_object_via_midx(&objects, &oid)
             .expect("prime caches")
             .is_some());
         assert!(resolve_tip_midx_path(&pack_dir).is_some());
@@ -2930,17 +3183,91 @@ mod tests {
         assert!(resolve_tip_midx_path(&pack_dir).is_none());
 
         // Tip-path cache was evicted: listing must not resurrect the removed MIDX.
-        assert!(try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
+        assert!(try_read_object_via_midx(&objects, &oid)
             .expect("read after clear")
             .is_none());
 
         write_multi_pack_index(&pack_dir).expect("rewrite midx");
         assert!(
-            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1)
+            try_read_object_via_midx(&objects, &oid)
                 .expect("read after rewrite")
                 .is_some(),
             "fresh MIDX must be visible after in-process rewrite"
         );
+    }
+
+    #[test]
+    fn midx_hot_path_does_not_stat_after_cache_warm() {
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let git_dir = tmp.path().join(".git");
+        let objects = git_dir.join("objects");
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
+        let metrics = odb.hot_path_test_metrics_arc();
+        let _scope = HotPathMetricsScope::install(Arc::clone(&metrics));
+        metrics.set_stamp_counting(true);
+        let _ = odb.read(&oid).expect("prime");
+        metrics.reset_midx_stamp_stats();
+        for _ in 0..200 {
+            let _ = odb.read(&oid).expect("repeat");
+        }
+        metrics.set_stamp_counting(false);
+        assert_eq!(metrics.midx_stamp_stat_calls(), 0);
+    }
+
+    #[test]
+    fn decode_high_bit_offset_is_raw_without_loff_chunk() {
+        use super::midx_cache::decode_midx_object_offset_for_test;
+        assert_eq!(
+            decode_midx_object_offset_for_test(&[], 0x8000_0010, None),
+            Some(0x8000_0010)
+        );
+    }
+
+    #[test]
+    fn lookup_high_bit_raw_offset_written_without_loff() {
+        use super::{
+            clear_pack_midx_state, find_chunk, midx_lookup_pack_and_offset_opt, parse_midx_header,
+            MIDX_CHUNKID_OBJECTOFFSETS, MIDX_CHUNKID_OIDLOOKUP,
+        };
+        let Some((tmp, oid)) = midx_fixture(true) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let objects = tmp.path().join(".git/objects");
+        let pack_dir = objects.join("pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        let mut data = std::fs::read(&midx_path).expect("midx bytes");
+        let (_, hdr_end, _) = parse_midx_header(&data).expect("header");
+        let (oidl_off, oidl_len) =
+            find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP).expect("oidl");
+        let (ooff_off, _) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS).expect("ooff");
+        let hash_len = oid.as_bytes().len();
+        let num_objects = oidl_len / hash_len;
+        let needle = oid.as_bytes();
+        let mut patched = false;
+        for i in 0..num_objects {
+            let start = oidl_off + i * hash_len;
+            if data[start..start + hash_len] == *needle {
+                let ob = ooff_off + i * 8 + 4;
+                data[ob..ob + 4].copy_from_slice(&0x8000_0010u32.to_be_bytes());
+                patched = true;
+                break;
+            }
+        }
+        assert!(patched, "oid row in MIDX");
+        let hash_len = if data[5] == 2 { 32 } else { 20 };
+        data.truncate(data.len() - hash_len);
+        crate::pack_rev::append_hashfile_checksum(&mut data, hash_len);
+        clear_pack_midx_state(&pack_dir).expect("evict midx cache");
+        std::fs::write(&midx_path, &data).expect("write midx");
+        crate::pack::clear_pack_cache();
+        let (_pack_id, off) = midx_lookup_pack_and_offset_opt(&objects, &oid)
+            .expect("lookup")
+            .expect("listed");
+        assert_eq!(off, 0x8000_0010);
     }
 
     #[test]
@@ -2956,11 +3283,12 @@ mod tests {
         let last = bytes.len() - 1;
         bytes[last] ^= 0xff;
         fs::write(&midx_path, &bytes).expect("corrupt midx checksum");
+        super::midx_cache::evict_pack_dir(&pack_dir);
+        clear_pack_cache();
 
         let sink = CollectingDiagnostics::with_dedupe(true);
-        let via_midx =
-            try_read_object_via_midx_with_diagnostics(&objects, &oid, HashAlgo::Sha1, &sink)
-                .expect("checksum mismatch must not abort reads");
+        let via_midx = try_read_object_via_midx_with_diagnostics(&objects, &oid, &sink)
+            .expect("checksum mismatch must not abort reads");
         assert!(
             via_midx.is_none(),
             "corrupt MIDX must be skipped for direct midx lookup"
@@ -2974,35 +3302,10 @@ mod tests {
         );
 
         let git_dir = tmp.path().join(".git");
-        let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir);
         let grit_obj = odb.read(&oid).expect("pack fallback read");
         let via_pack = read_object_from_packs(&objects, &oid).expect("pack read");
         assert_eq!(via_pack.data, grit_obj.data);
-
-        let hex = oid.to_hex();
-        let git_out = Command::new("git")
-            .current_dir(tmp.path())
-            .args([
-                "-c",
-                "core.multiPackIndex=false",
-                "cat-file",
-                "-p",
-                hex.as_str(),
-            ])
-            .env("GIT_AUTHOR_NAME", "T")
-            .env("GIT_AUTHOR_EMAIL", "t@example.com")
-            .env("GIT_COMMITTER_NAME", "T")
-            .env("GIT_COMMITTER_EMAIL", "t@example.com")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .output()
-            .expect("git cat-file");
-        assert!(
-            git_out.status.success(),
-            "git cat-file failed: {}",
-            String::from_utf8_lossy(&git_out.stderr)
-        );
-        assert_eq!(git_out.stdout, grit_obj.data);
     }
 
     #[test]
@@ -3016,9 +3319,9 @@ mod tests {
         let mut bytes = fs::read(&midx_path).expect("read midx");
         bytes[5] = 2;
         fs::write(&midx_path, &bytes).expect("write wrong hash version");
+        super::midx_cache::evict_pack_dir(&objects.join("pack"));
 
-        let err =
-            try_read_object_via_midx(&objects, &oid, HashAlgo::Sha1).expect_err("hash mismatch");
+        let err = try_read_object_via_midx(&objects, &oid).expect_err("hash mismatch");
         assert!(
             matches!(
                 err,

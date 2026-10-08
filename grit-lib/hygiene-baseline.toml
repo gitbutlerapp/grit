@@ -4,27 +4,6 @@
 [meta]
 updated = "2026-10-08"
 
-[file.apply.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 1
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
-system_time_now = 0
-
 [file.attributes.rs]
 println = 0
 print = 0
@@ -41,9 +20,9 @@ env_current_dir = 1
 literal_fatal = 0
 literal_error = 0
 literal_hint = 0
-literal_warning = 6
+literal_warning = 0
 command_new = 0
-static_global = 6
+static_global = 0
 system_time_now = 0
 
 [file.blame.rs]
@@ -63,8 +42,8 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 1
-static_global = 1
+command_new = 0
+static_global = 0
 system_time_now = 1
 
 [file.combined_tree_diff.rs]
@@ -85,6 +64,27 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
+static_global = 0
+system_time_now = 0
+
+[file.command_runner.rs]
+println = 0
+print = 0
+eprintln = 0
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 0
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 3
 static_global = 0
 system_time_now = 0
 
@@ -109,25 +109,46 @@ command_new = 0
 static_global = 1
 system_time_now = 0
 
-[file.config.rs]
+[file.commit_graph_file.rs]
 println = 0
 print = 0
-eprintln = 0
+eprintln = 8
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 20
-env_var_os = 5
+env_var = 0
+env_var_os = 0
 env_vars = 0
 env_set_var = 0
 env_remove_var = 0
-env_current_dir = 1
-literal_fatal = 6
-literal_error = 2
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 0
+system_time_now = 0
+
+[file.config.rs]
+println = 0
+print = 0
+eprintln = 2
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 0
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 0
+static_global = 0
 system_time_now = 0
 
 [file.credentials.rs]
@@ -147,7 +168,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 3
+command_new = 0
 static_global = 0
 system_time_now = 0
 
@@ -164,11 +185,11 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 0
-literal_fatal = 11
-literal_error = 4
+literal_fatal = 0
+literal_error = 0
 literal_hint = 0
-literal_warning = 2
-command_new = 2
+literal_warning = 0
+command_new = 0
 static_global = 0
 system_time_now = 0
 
@@ -185,7 +206,7 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 0
-literal_fatal = 5
+literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
@@ -210,8 +231,29 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 1
-static_global = 1
+command_new = 0
+static_global = 0
+system_time_now = 0
+
+[file.environment.rs]
+println = 0
+print = 0
+eprintln = 0
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 0
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 1
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 0
+static_global = 0
 system_time_now = 0
 
 [file.filter_process.rs]
@@ -228,32 +270,11 @@ env_set_var = 0
 env_remove_var = 0
 env_current_dir = 0
 literal_fatal = 0
-literal_error = 2
-literal_hint = 0
-literal_warning = 0
-command_new = 1
-static_global = 4
-system_time_now = 0
-
-[file.git_binary_base85.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
 system_time_now = 0
 
 [file.git_date/mod.rs]
@@ -264,7 +285,7 @@ eprint = 0
 dbg = 0
 process_exit = 0
 env_var = 0
-env_var_os = 1
+env_var_os = 2
 env_vars = 0
 env_set_var = 1
 env_remove_var = 0
@@ -319,27 +340,6 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
-[file.gitmodules.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 2
-command_new = 0
-static_global = 0
-system_time_now = 0
-
 [file.hooks.rs]
 println = 0
 print = 0
@@ -352,12 +352,12 @@ env_var_os = 0
 env_vars = 0
 env_set_var = 0
 env_remove_var = 0
-env_current_dir = 4
-literal_fatal = 1
-literal_error = 3
-literal_hint = 2
+env_current_dir = 1
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
 literal_warning = 0
-command_new = 3
+command_new = 0
 static_global = 0
 system_time_now = 0
 
@@ -440,7 +440,7 @@ env_current_dir = 0
 literal_fatal = 0
 literal_error = 0
 literal_hint = 0
-literal_warning = 2
+literal_warning = 0
 command_new = 0
 static_global = 0
 system_time_now = 0
@@ -448,7 +448,7 @@ system_time_now = 0
 [file.index.rs]
 println = 0
 print = 0
-eprintln = 0
+eprintln = 3
 eprint = 0
 dbg = 0
 process_exit = 0
@@ -462,29 +462,8 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 1
-static_global = 0
-system_time_now = 0
-
-[file.init_filesystem.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 2
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
 command_new = 0
-static_global = 0
+static_global = 1
 system_time_now = 0
 
 [file.interpret_trailers.rs]
@@ -504,28 +483,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 2
-static_global = 0
-system_time_now = 0
-
-[file.merge_diff.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 3
+command_new = 0
 static_global = 0
 system_time_now = 0
 
@@ -547,7 +505,28 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 0
+system_time_now = 0
+
+[file.net_trace.rs]
+println = 0
+print = 0
+eprintln = 1
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 1
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 0
+literal_hint = 0
+literal_warning = 0
+command_new = 0
+static_global = 0
 system_time_now = 0
 
 [file.notes.rs]
@@ -609,7 +588,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 5
+command_new = 1
 static_global = 0
 system_time_now = 1
 
@@ -630,8 +609,8 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 3
-static_global = 0
+command_new = 5
+static_global = 3
 system_time_now = 0
 
 [file.pathspec.rs]
@@ -647,7 +626,7 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 1
-literal_fatal = 1
+literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
@@ -695,48 +674,6 @@ literal_hint = 0
 literal_warning = 0
 command_new = 0
 static_global = 0
-system_time_now = 0
-
-[file.porcelain/stash.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 2
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
-
-[file.precompose_config.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 2
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 1
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
 system_time_now = 0
 
 [file.prune_packed.rs]
@@ -836,12 +773,12 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 1
-literal_fatal = 2
+literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 3
+static_global = 1
 system_time_now = 0
 
 [file.reftable.rs]
@@ -862,28 +799,28 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 3
+static_global = 0
 system_time_now = 0
 
 [file.repo.rs]
 println = 0
 print = 0
-eprintln = 0
+eprintln = 3
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 21
-env_var_os = 1
+env_var = 0
+env_var_os = 0
 env_vars = 0
-env_set_var = 1
+env_set_var = 0
 env_remove_var = 0
-env_current_dir = 15
+env_current_dir = 0
 literal_fatal = 0
-literal_error = 1
+literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
 system_time_now = 0
 
 [file.rerere.rs]
@@ -910,7 +847,7 @@ system_time_now = 1
 [file.rev_list.rs]
 println = 0
 print = 0
-eprintln = 1
+eprintln = 0
 eprint = 0
 dbg = 0
 process_exit = 0
@@ -920,8 +857,8 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 0
-literal_fatal = 7
-literal_error = 1
+literal_fatal = 0
+literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
@@ -935,15 +872,15 @@ eprintln = 0
 eprint = 0
 dbg = 0
 process_exit = 0
-env_var = 3
+env_var = 4
 env_var_os = 0
 env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 7
-literal_fatal = 40
+literal_fatal = 0
 literal_error = 0
-literal_hint = 2
+literal_hint = 0
 literal_warning = 0
 command_new = 0
 static_global = 0
@@ -966,7 +903,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 7
+command_new = 0
 static_global = 0
 system_time_now = 1
 
@@ -986,7 +923,7 @@ env_current_dir = 0
 literal_fatal = 0
 literal_error = 0
 literal_hint = 0
-literal_warning = 20
+literal_warning = 0
 command_new = 0
 static_global = 0
 system_time_now = 0
@@ -994,7 +931,7 @@ system_time_now = 0
 [file.split_index.rs]
 println = 0
 print = 0
-eprintln = 0
+eprintln = 2
 eprint = 0
 dbg = 0
 process_exit = 0
@@ -1011,27 +948,6 @@ literal_warning = 0
 command_new = 0
 static_global = 0
 system_time_now = 1
-
-[file.submodule_active.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 1
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 0
-system_time_now = 0
 
 [file.submodule_config_cache.rs]
 println = 1
@@ -1052,48 +968,6 @@ literal_hint = 0
 literal_warning = 0
 command_new = 0
 static_global = 0
-system_time_now = 0
-
-[file.submodule_gitdir.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 1
-static_global = 0
-system_time_now = 0
-
-[file.terminal.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 0
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 0
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
-command_new = 0
-static_global = 1
 system_time_now = 0
 
 [file.textconv_cache.rs]
@@ -1134,7 +1008,7 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 2
+command_new = 0
 static_global = 0
 system_time_now = 0
 
@@ -1172,7 +1046,7 @@ env_vars = 0
 env_set_var = 0
 env_remove_var = 0
 env_current_dir = 1
-literal_fatal = 1
+literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
@@ -1197,29 +1071,8 @@ literal_fatal = 0
 literal_error = 0
 literal_hint = 0
 literal_warning = 0
-command_new = 2
-static_global = 1
-system_time_now = 0
-
-[file.worktree_cwd.rs]
-println = 0
-print = 0
-eprintln = 0
-eprint = 0
-dbg = 0
-process_exit = 0
-env_var = 2
-env_var_os = 0
-env_vars = 0
-env_set_var = 0
-env_remove_var = 0
-env_current_dir = 1
-literal_fatal = 0
-literal_error = 0
-literal_hint = 0
-literal_warning = 0
 command_new = 0
-static_global = 0
+static_global = 1
 system_time_now = 0
 
 [file.worktree_rules.rs]
@@ -1240,6 +1093,6 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 0
 system_time_now = 0
 

@@ -42,13 +42,15 @@ pub mod progress;
 
 /// The types most callers need, re-exported for `use grit_lib::prelude::*;`.
 pub mod prelude {
+    pub use crate::command_runner::{CommandRunner, RecordingRunner, SystemCommandRunner};
     pub use crate::config::ConfigSet;
     pub use crate::diagnostics::{
         CollectingDiagnostics, DiagnosticSink, NullDiagnostics, Trace, Warning,
     };
+    pub use crate::environment::{Environment, RepositoryOptions};
     pub use crate::error::{Error, MidxError, Result};
     pub use crate::index::Index;
-    pub use crate::objects::{Object, ObjectId, ObjectKind};
+    pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
     pub use crate::odb::Odb;
     pub use crate::repo::Repository;
 }
@@ -62,7 +64,8 @@ pub mod prelude {
 pub mod object_store {
     pub use crate::{
         delta_encode, delta_islands, hash, index_pack, midx, objects, odb, pack, pack_geometry,
-        pack_name_hash, pack_rev, promisor, promisor_remote, prune_packed, unpack_objects,
+        pack_name_hash, pack_rev, pack_store, promisor, promisor_remote, prune_packed,
+        unpack_objects,
     };
 }
 
@@ -104,8 +107,8 @@ pub mod merging {
 /// Configuration and identity: config cascade, .gitmodules, author/committer idents.
 pub mod configuration {
     pub use crate::{
-        config, dotfile, gitmodules, ident, ident_config, ident_resolve, init_filesystem,
-        precompose_config, url_rewrite,
+        config, dotfile, environment, gitmodules, ident, ident_config, ident_resolve,
+        init_filesystem, precompose_config, url_rewrite,
     };
 }
 
@@ -117,6 +120,7 @@ pub mod branch_tracking;
 pub mod check_ref_format;
 pub mod combined_diff_patch;
 pub mod combined_tree_diff;
+pub mod command_runner;
 pub mod commit;
 pub mod commit_encoding;
 pub mod commit_graph_file;
@@ -135,6 +139,7 @@ pub mod diff_indent_heuristic;
 pub mod diff_moved;
 pub mod diffstat;
 pub mod dotfile;
+pub mod environment;
 pub mod error;
 mod ewah_bitmap;
 pub mod fetch;
@@ -177,9 +182,12 @@ pub mod objects;
 pub mod odb;
 pub mod pack;
 pub mod pack_geometry;
+mod pack_index;
 pub(crate) mod pack_index_build;
+mod pack_map;
 pub mod pack_name_hash;
 pub mod pack_rev;
+pub mod pack_store;
 pub(crate) mod pack_zlib;
 pub mod patch_ids;
 pub mod path;
@@ -207,10 +215,13 @@ pub mod refs_fsck;
 pub mod refspec;
 pub mod reftable;
 pub mod repo;
+pub mod repo_caches;
 pub mod rerere;
 pub mod resolve_undo;
 pub mod rev_list;
+pub mod rev_list_error;
 pub mod rev_parse;
+pub mod rev_parse_error;
 pub mod serve;
 pub mod shallow;
 pub mod shared_repo;
@@ -247,6 +258,8 @@ mod worktree_scan;
 pub use worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 pub mod write_tree;
 pub mod ws;
+#[doc(hidden)]
+pub mod zlib_inflate;
 
 #[cfg(test)]
 mod hot_path_test_metrics;
