@@ -351,7 +351,6 @@ fn process_cwd_fallback() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn from_vars_parses_config_count_pairs() {
