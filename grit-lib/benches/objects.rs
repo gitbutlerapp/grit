@@ -14,6 +14,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::hash::{hash_object, hash_objects_parallel};
 use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::unpack_objects::apply_delta;
 use grit_lib::zlib_inflate::ZlibInflateScratch;

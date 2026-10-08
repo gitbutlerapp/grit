@@ -19,6 +19,7 @@ const REMOVED_SOURCE_FILES: &[&str] = &[
     "simple_ipc.rs",
     "tab_expand.rs",
     "unix_process.rs",
+    "pack_geometry.rs",
     "instaweb/mod.rs",
     "porcelain/format_patch.rs",
 ];
@@ -39,6 +40,7 @@ const REMOVED_MODULE_NAMES: &[&str] = &[
     "tab_expand",
     "branch_ref_format",
     "unix_process",
+    "pack_geometry",
 ];
 
 #[test]
