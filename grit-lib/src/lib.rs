@@ -181,6 +181,7 @@ pub(crate) mod pack_index_build;
 mod pack_map;
 pub mod pack_name_hash;
 pub mod pack_rev;
+pub mod pack_store;
 pub(crate) mod pack_zlib;
 pub mod patch_ids;
 pub mod path;

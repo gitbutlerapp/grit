@@ -32,6 +32,7 @@ use crate::hash;
 use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::pack;
+use crate::pack_store::PackStore;
 use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -799,25 +800,12 @@ impl Odb {
 
     /// Check whether an object exists in a specific objects directory.
     fn exists_in_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
-        if object_in_local_packs(objects_dir, oid) {
-            return true;
-        }
-        if oid.loose_path_in(objects_dir).is_file() {
-            return true;
-        }
-        if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
-            && object_in_local_packs(objects_dir, oid)
-        {
-            return true;
-        }
-        if objects_dir == self.objects_dir.as_path()
-            && self.config_git_dir.is_some()
-            && self.core_multi_pack_index_enabled()
-        {
-            match midx_oid_listed_in_tip(objects_dir, oid) {
-                Ok(Some(true)) => return true,
-                Ok(Some(false)) | Ok(None) => {}
-                Err(_) => return false,
+        self.with_pack_store_for(objects_dir, || {
+            if object_in_local_packs(objects_dir, oid) {
+                return true;
+            }
+            if oid.loose_path_in(objects_dir).is_file() {
+                return true;
             }
             if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
                 && object_in_local_packs(objects_dir, oid)
@@ -888,18 +876,20 @@ impl Odb {
     }
 
     fn freshen_object_in_objects_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
-        let loose = objects_dir
-            .join(oid.loose_prefix())
-            .join(oid.loose_suffix());
-        if loose.is_file() {
-            return self.touch_object_mtime(&loose).is_some();
-        }
-        let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
-            return false;
-        };
-        for idx in &indexes {
-            if idx.contains(oid) {
-                return self.freshen_pack_once(&idx.pack_path, idx.is_cruft);
+        self.with_pack_store_for(objects_dir, || {
+            let loose = objects_dir
+                .join(oid.loose_prefix())
+                .join(oid.loose_suffix());
+            if loose.is_file() {
+                return self.touch_object_mtime(&loose).is_some();
+            }
+            let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
+                return false;
+            };
+            for idx in &indexes {
+                if idx.contains(oid) {
+                    return self.freshen_pack_once(&idx.pack_path, idx.is_cruft);
+                }
             }
             false
         })
@@ -1011,7 +1001,9 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
-        match Self::read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx) {
+        match self.with_pack_store_for(&self.objects_dir, || {
+            Self::read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
+        }) {
             Ok(obj) => return Ok(obj),
             Err(Error::ObjectNotFound(_)) => {}
             Err(err) => return Err(err),
@@ -1021,18 +1013,26 @@ impl Odb {
 
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
-            if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
+            if let Ok(obj) =
+                self.with_pack_store_for(alt_dir, || Self::read_from_dir(alt_dir, oid, midx_alt))
+            {
                 return Ok(obj);
             }
+        }
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
-            if let Ok(obj) = Self::read_from_dir(alt_dir, oid, midx_alt) {
+            if let Ok(obj) =
+                self.with_pack_store_for(alt_dir, || Self::read_from_dir(alt_dir, oid, midx_alt))
+            {
                 return Ok(obj);
             }
+        }
 
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
-                if let Ok(obj) = Self::read_from_dir(alt_dir, oid, false) {
+                if let Ok(obj) =
+                    self.with_pack_store_for(alt_dir, || Self::read_from_dir(alt_dir, oid, false))
+                {
                     return Ok(obj);
                 }
             }
@@ -1073,7 +1073,9 @@ impl Odb {
             self.ensure_midx_prepared();
         }
 
-        match Self::read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx) {
+        match self.with_pack_store_for(&self.objects_dir, || {
+            Self::read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
+        }) {
             Ok(info) => return Ok(info),
             Err(Error::ObjectNotFound(_)) => {}
             Err(err) => return Err(err),
@@ -1083,24 +1085,32 @@ impl Odb {
 
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
-            if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, midx_alt) {
+            if let Ok(info) = self
+                .with_pack_store_for(alt_dir, || Self::read_info_from_dir(alt_dir, oid, midx_alt))
+            {
                 return Ok(info);
             }
+        }
 
         for alt_dir in self.env_alternate_dirs_snapshot().iter() {
-            if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, midx_alt) {
+            if let Ok(info) = self
+                .with_pack_store_for(alt_dir, || Self::read_info_from_dir(alt_dir, oid, midx_alt))
+            {
                 return Ok(info);
             }
+        }
 
         if let Ok(guard) = self.submodule_alternate_dirs.lock() {
             for alt_dir in guard.iter() {
-                if let Ok(info) = Self::read_info_from_dir(alt_dir, oid, false) {
+                if let Ok(info) = self
+                    .with_pack_store_for(alt_dir, || Self::read_info_from_dir(alt_dir, oid, false))
+                {
                     return Ok(info);
                 }
             }
+        }
 
-            Err(Error::ObjectNotFound(oid.to_hex()))
-        })
+        Err(Error::ObjectNotFound(oid.to_hex()))
     }
 
     /// Try to read an object from a specific objects directory (pack-first, matching [`Self::read`]).

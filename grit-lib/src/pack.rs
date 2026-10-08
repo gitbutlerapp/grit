@@ -301,7 +301,7 @@ pub(crate) mod pack_cache {
     use std::io;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
     use std::time::SystemTime;
 
     static DELTA_CACHE_ENABLED: AtomicBool = AtomicBool::new(true);
@@ -507,6 +507,23 @@ pub(crate) mod pack_cache {
         clear_inner(&mut g);
     }
 
+    pub(crate) fn configure_delta_base_on(
+        state: &Mutex<State>,
+        cfg: Option<&crate::config::ConfigSet>,
+    ) {
+        let bytes = cfg
+            .and_then(|config| config.get("core.deltaBaseCacheLimit"))
+            .as_ref()
+            .and_then(|value| crate::config::parse_i64(value).ok())
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(DELTA_BASE_CACHE_DEFAULT);
+        state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .delta_lru
+            .set_byte_limit(bytes);
+    }
+
     #[cfg(test)]
     static TEST_MARKER_STAT_COUNT: std::sync::atomic::AtomicU64 =
         std::sync::atomic::AtomicU64::new(0);
@@ -534,21 +551,15 @@ pub(crate) mod pack_cache {
             return idx;
         }
         let updated = Arc::new(idx.with_sidecar_flags(is_promisor, is_cruft));
-        let mut g = lock();
-        g.by_idx.insert(
-            idx.idx_path.clone(),
-            CachedIdx {
-                idx: Arc::clone(&updated),
-            },
-        );
+        with_current(|g| {
+            g.by_idx.insert(
+                idx.idx_path.clone(),
+                CachedIdx {
+                    idx: Arc::clone(&updated),
+                },
+            );
+        });
         updated
-    }
-
-    fn lock() -> std::sync::MutexGuard<'static, State> {
-        CACHE
-            .get_or_init(|| Mutex::new(State::default()))
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
     }
 
     fn dir_mtime(path: &Path) -> SystemTime {
@@ -566,11 +577,13 @@ pub(crate) mod pack_cache {
     }
 
     pub fn pack_object_count_validated(pack_path: &Path) -> bool {
-        lock().validated_pack_counts.contains(pack_path)
+        with_current(|g| g.validated_pack_counts.contains(pack_path))
     }
 
     pub fn mark_pack_object_count_validated(pack_path: &Path) {
-        lock().validated_pack_counts.insert(pack_path.to_path_buf());
+        with_current(|g| {
+            g.validated_pack_counts.insert(pack_path.to_path_buf());
+        });
     }
 
     /// Get a parsed pack index from cache, parsing from disk only on cache miss.
@@ -597,16 +610,17 @@ pub(crate) mod pack_cache {
         let rd = match fs::read_dir(&pack_dir) {
             Ok(rd) => rd,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                let mut g = lock();
-                g.by_dir.insert(
-                    pack_dir.clone(),
-                    CachedDir {
-                        dir_mtime: dir_mt,
-                        indexes: Vec::new(),
-                        midx_mtime: SystemTime::UNIX_EPOCH,
-                        midx_pack_names: HashSet::new(),
-                    },
-                );
+                with_current(|g| {
+                    g.by_dir.insert(
+                        pack_dir.clone(),
+                        CachedDir {
+                            dir_mtime: dir_mt,
+                            indexes: Vec::new(),
+                            midx_mtime: SystemTime::UNIX_EPOCH,
+                            midx_pack_names: HashSet::new(),
+                        },
+                    );
+                });
                 return Ok(Vec::new());
             }
             Err(err) => return Err(Error::Io(err)),
@@ -628,23 +642,24 @@ pub(crate) mod pack_cache {
             out.push(refresh_pack_sidecar_flags(idx));
         }
 
-        let mut g = lock();
-        #[cfg(test)]
-        {
-            *g.test_dir_rescan_counts
-                .entry(pack_dir.clone())
-                .or_insert(0) += 1;
-        }
         let midx_pack_names = load_midx_pack_names(&pack_dir);
-        g.by_dir.insert(
-            pack_dir,
-            CachedDir {
-                dir_mtime: dir_mt,
-                indexes: out.clone(),
-                midx_mtime: midx_pack_names.0,
-                midx_pack_names: midx_pack_names.1,
-            },
-        );
+        with_current(|g| {
+            #[cfg(test)]
+            {
+                *g.test_dir_rescan_counts
+                    .entry(pack_dir.clone())
+                    .or_insert(0) += 1;
+            }
+            g.by_dir.insert(
+                pack_dir,
+                CachedDir {
+                    dir_mtime: dir_mt,
+                    indexes: out.clone(),
+                    midx_mtime: midx_pack_names.0,
+                    midx_pack_names: midx_pack_names.1,
+                },
+            );
+        });
         Ok(out)
     }
 
@@ -674,31 +689,35 @@ pub(crate) mod pack_cache {
     /// Move `idx_path` to the front of the MRU pack search order for `objects_dir`.
     pub fn promote_pack_index(objects_dir: &Path, idx_path: &Path) {
         let pack_dir = objects_dir.join("pack");
-        let mut g = lock();
-        let Some(cached) = g.by_dir.get_mut(&pack_dir) else {
-            return;
-        };
-        let Some(pos) = cached
-            .indexes
-            .iter()
-            .position(|idx| idx.idx_path == idx_path)
-        else {
-            return;
-        };
-        if pos == 0 {
-            return;
-        }
-        let hit = cached.indexes.remove(pos);
-        cached.indexes.insert(0, hit);
+        with_current(|g| {
+            let Some(cached) = g.by_dir.get_mut(&pack_dir) else {
+                return;
+            };
+            let Some(pos) = cached
+                .indexes
+                .iter()
+                .position(|idx| idx.idx_path == idx_path)
+            else {
+                return;
+            };
+            if pos == 0 {
+                return;
+            }
+            let hit = cached.indexes.remove(pos);
+            cached.indexes.insert(0, hit);
+        });
     }
 
     /// Pack index basenames listed in the active multi-pack-index, if any.
     pub fn midx_covered_pack_names(objects_dir: &Path) -> HashSet<String> {
         let pack_dir = objects_dir.join("pack");
-        let mut g = lock();
-        if let Some(cached) = g.by_dir.get_mut(&pack_dir) {
+        let cached = with_current(|g| {
+            let cached = g.by_dir.get_mut(&pack_dir)?;
             refresh_midx_pack_names_locked(&pack_dir, cached);
-            return cached.midx_pack_names.clone();
+            Some(cached.midx_pack_names.clone())
+        });
+        if let Some(names) = cached {
+            return names;
         }
         load_midx_pack_names(&pack_dir).1
     }
@@ -734,18 +753,19 @@ pub(crate) mod pack_cache {
         size: u64,
     ) -> Result<Arc<PackData>> {
         let bytes = PackData::open(pack_path)?;
-        let mut g = lock();
-        drop_delta_entries_locked(&mut g, pack_path);
-        g.by_idx.remove(&pack_path.with_extension("idx"));
-        g.validated_pack_counts.remove(pack_path);
-        g.by_pack.insert(
-            pack_path.to_path_buf(),
-            CachedPack {
-                mtime,
-                size,
-                bytes: Arc::clone(&bytes),
-            },
-        );
+        with_current(|g| {
+            drop_delta_entries_locked(g, pack_path);
+            g.by_idx.remove(&pack_path.with_extension("idx"));
+            g.validated_pack_counts.remove(pack_path);
+            g.by_pack.insert(
+                pack_path.to_path_buf(),
+                CachedPack {
+                    mtime,
+                    size,
+                    bytes: Arc::clone(&bytes),
+                },
+            );
+        });
         Ok(bytes)
     }
 
@@ -772,6 +792,7 @@ pub(crate) mod pack_cache {
     /// Cache hits skip `stat` for all pack basenames; in-process repack/gc clears the cache
     /// when packs change.
     pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<PackData>> {
+        if let Some(hit) = with_current(|g| g.by_pack.get(pack_path).map(|c| Arc::clone(&c.bytes)))
         {
             return Ok(hit);
         }
@@ -835,8 +856,10 @@ pub(crate) mod pack_cache {
         };
         let hash_bytes = hash_bytes_for_pack_file(pack_path)?;
         let disk_fp = fingerprint_from_file(pack_path, hash_bytes)?;
-        let needs_reload = lock().by_pack.get(pack_path).is_some_and(|c| {
-            pack_fingerprint_mismatch(&c.bytes, hash_bytes, &disk_fp).unwrap_or(true)
+        let needs_reload = with_current(|g| {
+            g.by_pack.get(pack_path).is_some_and(|c| {
+                pack_fingerprint_mismatch(&c.bytes, hash_bytes, &disk_fp).unwrap_or(true)
+            })
         });
         if !needs_reload {
             return Ok(false);
@@ -847,11 +870,10 @@ pub(crate) mod pack_cache {
 
     fn hash_bytes_for_pack_file(pack_path: &Path) -> Result<usize> {
         let idx_path = pack_path.with_extension("idx");
+        if let Some(hash_bytes) =
+            with_current(|g| g.by_idx.get(&idx_path).map(|c| c.idx.hash_bytes()))
         {
-            let g = lock();
-            if let Some(c) = g.by_idx.get(&idx_path) {
-                return Ok(c.idx.hash_bytes());
-            }
+            return Ok(hash_bytes);
         }
         Ok(read_pack_index_no_verify(&idx_path)?.hash_bytes())
     }
@@ -919,20 +941,21 @@ pub(crate) mod pack_cache {
     /// Replace cached pack bytes (tests simulating a stale in-memory mapping).
     #[cfg(test)]
     pub fn test_inject_stale_pack_bytes(pack_path: &Path, stale: Arc<PackData>) {
-        let mut g = lock();
-        let stamp = g
-            .by_pack
-            .get(pack_path)
-            .map(|c| (c.mtime, c.size))
-            .unwrap_or((SystemTime::UNIX_EPOCH, stale.len() as u64));
-        g.by_pack.insert(
-            pack_path.to_path_buf(),
-            CachedPack {
-                mtime: stamp.0,
-                size: stamp.1,
-                bytes: stale,
-            },
-        );
+        crate::pack_store::PackStore::legacy_for_pack_path(pack_path).with_pack(|g| {
+            let stamp = g
+                .by_pack
+                .get(pack_path)
+                .map(|c| (c.mtime, c.size))
+                .unwrap_or((SystemTime::UNIX_EPOCH, stale.len() as u64));
+            g.by_pack.insert(
+                pack_path.to_path_buf(),
+                CachedPack {
+                    mtime: stamp.0,
+                    size: stamp.1,
+                    bytes: stale,
+                },
+            );
+        });
     }
 
     fn clear_inner(g: &mut State) {
@@ -1023,14 +1046,15 @@ pub(crate) mod pack_cache {
         if items.is_empty() {
             return;
         }
-        let mut g = lock();
-        if g.delta_lru.byte_limit == 0 {
-            return;
-        }
-        for &(pack_id, offset, ref data) in items {
-            g.delta_lru
-                .put(DeltaCacheKey { pack_id, offset }, kind, Arc::clone(data));
-        }
+        with_current(|g| {
+            if g.delta_lru.byte_limit == 0 {
+                return;
+            }
+            for &(pack_id, offset, ref data) in items {
+                g.delta_lru
+                    .put(DeltaCacheKey { pack_id, offset }, kind, Arc::clone(data));
+            }
+        });
     }
 
     /// Drop only cached delta bases (pack indexes and bytes stay cached).
@@ -1081,6 +1105,16 @@ pub fn read_local_pack_indexes_cached(objects_dir: &Path) -> Result<Vec<Arc<Pack
 ///
 /// Returns [`Error::Io`] when the pack directory cannot be read.
 pub fn reprepare_pack_directory_on_miss(objects_dir: &Path) -> Result<bool> {
+    if crate::pack_store::PackStore::has_context() {
+        return reprepare_pack_directory_on_miss_in_context(objects_dir);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_objects_dir(objects_dir);
+    crate::pack_store::PackStore::with_context(store, || {
+        reprepare_pack_directory_on_miss_in_context(objects_dir)
+    })
+}
+
+fn reprepare_pack_directory_on_miss_in_context(objects_dir: &Path) -> Result<bool> {
     let refreshed = pack_cache::reprepare_dir_on_miss(objects_dir)?;
     if refreshed {
         crate::midx::evict_midx_read_cache_for_pack_dir(&objects_dir.join("pack"));
@@ -1110,7 +1144,11 @@ pub fn read_pack_index_cached(idx_path: &Path) -> Result<Arc<PackIndex>> {
 ///
 /// Returns [`Error::Io`] when the pack cannot be read.
 pub fn read_pack_bytes_cached(pack_path: &Path) -> Result<Arc<PackData>> {
-    pack_cache::get_pack_bytes(pack_path)
+    if crate::pack_store::PackStore::has_context() {
+        return pack_cache::get_pack_bytes(pack_path);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_pack_path(pack_path);
+    crate::pack_store::PackStore::with_context(store, || pack_cache::get_pack_bytes(pack_path))
 }
 
 /// Drop pack/MIDX caches on every registered [`PackStore`](crate::pack_store::PackStore).
@@ -1120,7 +1158,7 @@ pub fn read_pack_bytes_cached(pack_path: &Path) -> Result<Arc<PackData>> {
 pub fn clear_pack_cache() {
     #[cfg(test)]
     let _guard = pack_cache_test_guard();
-    pack_cache::clear();
+    crate::pack_store::PackStore::invalidate_all_legacy();
 }
 
 #[cfg(test)]
@@ -2426,6 +2464,28 @@ pub fn read_object_info_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Obj
     unreachable!("at most two read attempts")
 }
 
+fn read_object_from_packs_in_context(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
+    match try_read_object_from_packs_with_options(
+        objects_dir,
+        oid,
+        PackLookupOptions::ALL_LOCAL_PACKS,
+    ) {
+        Ok(obj) => Ok(obj),
+        Err(err @ Error::ObjectNotFound(_)) => {
+            if reprepare_pack_directory_on_miss_in_context(objects_dir)? {
+                try_read_object_from_packs_with_options(
+                    objects_dir,
+                    oid,
+                    PackLookupOptions::ALL_LOCAL_PACKS,
+                )
+            } else {
+                Err(err)
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
 /// Read and decompress the object stored at `offset` in `idx`'s pack file.
 ///
 /// The pack index is used for pack path, object count validation, and resolving ref-delta
@@ -2606,24 +2666,12 @@ fn pack_indexes_for_lookup(
 ///
 /// Returns [`Error::ObjectNotFound`] if no pack contains the OID.
 pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
-    match try_read_object_from_packs_with_options(
-        objects_dir,
-        oid,
-        PackLookupOptions::ALL_LOCAL_PACKS,
-    ) {
-        Ok(obj) => Ok(obj),
-        Err(err @ Error::ObjectNotFound(_)) => {
-            if reprepare_pack_directory_on_miss(objects_dir)? {
-                try_read_object_from_packs_with_options(
-                    objects_dir,
-                    oid,
-                    PackLookupOptions::ALL_LOCAL_PACKS,
-                )
-            } else {
-                Err(err)
-            }
-            Err(err) => Err(err),
-        }
+    if crate::pack_store::PackStore::has_context() {
+        return read_object_from_packs_in_context(objects_dir, oid);
+    }
+    let store = crate::pack_store::PackStore::legacy_for_objects_dir(objects_dir);
+    crate::pack_store::PackStore::with_context(store, || {
+        read_object_from_packs_in_context(objects_dir, oid)
     })
 }
 

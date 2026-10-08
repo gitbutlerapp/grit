@@ -263,9 +263,9 @@ fn repo_midx_hash_version(pack_dir: &Path) -> u8 {
     repo_midx_hash_version_for_objects_dir(objects_dir)
 }
 
-// Process-lifetime MIDX read cache: one [`PreparedMidxChain`] per `objects/pack` directory,
+// Repository-scoped MIDX read cache: one [`PreparedMidxChain`] per `objects/pack` directory,
 // built once (no stat/read/parse on lookup hits). In-process writers call [`evict_pack_dir`].
-mod midx_cache {
+pub(crate) mod midx_cache {
     use super::{
         midx_chain_layer_paths_newest_first, midx_load_for_read, midx_warn_once,
         repo_midx_hash_version_for_objects_dir, MidxLoadResult, MidxReadView,
@@ -278,7 +278,7 @@ mod midx_cache {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, OnceLock, RwLock};
+    use std::sync::{Arc, Mutex, OnceLock};
 
     /// Parsed MIDX layer: fanout + binary search; pack indexes opened on first read per pack id.
     pub struct PreparedMidxLayer {
@@ -577,27 +577,10 @@ mod midx_cache {
         decode_midx_object_offset(data, raw_off, loff)
     }
 
-    static CHAINS: OnceLock<RwLock<HashMap<PathBuf, Arc<PreparedMidxChain>>>> = OnceLock::new();
-
-    thread_local! {
-        static HOT_CHAIN: std::cell::RefCell<Option<(PathBuf, Arc<PreparedMidxChain>)>> =
-            const { std::cell::RefCell::new(None) };
-    }
-
-    fn chains() -> &'static RwLock<HashMap<PathBuf, Arc<PreparedMidxChain>>> {
-        CHAINS.get_or_init(|| RwLock::new(HashMap::new()))
-    }
-
-    fn hot_chain(objects_dir: &Path) -> Option<Arc<PreparedMidxChain>> {
-        HOT_CHAIN.with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .and_then(|(p, c)| (p == objects_dir).then(|| Arc::clone(c)))
-        })
-    }
-
-    fn set_hot_chain(objects_dir: PathBuf, chain: Arc<PreparedMidxChain>) {
-        HOT_CHAIN.with(|slot| *slot.borrow_mut() = Some((objects_dir, chain)));
+    #[derive(Default)]
+    pub(crate) struct State {
+        chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
+        hot_chain: Option<(PathBuf, Arc<PreparedMidxChain>)>,
     }
 
     fn build_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
@@ -635,46 +618,54 @@ mod midx_cache {
 
     /// Cached prepared chain for `objects_dir` (thread-local + read-lock on first use per thread).
     pub fn prepared_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
-        if let Some(chain) = hot_chain(objects_dir) {
+        if let Some(chain) = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            state
+                .hot_chain
+                .as_ref()
+                .and_then(|(path, chain)| (path == objects_dir).then(|| Arc::clone(chain)))
+                .or_else(|| state.chains.get(&objects_dir.join("pack")).map(Arc::clone))
+        }) {
+            crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+                state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
+            });
             return Ok(Some(chain));
         }
         let pack_dir = objects_dir.join("pack");
-        {
-            let guard = chains().read().unwrap_or_else(|poison| poison.into_inner());
-            if let Some(chain) = guard.get(&pack_dir) {
-                let chain = Arc::clone(chain);
-                set_hot_chain(objects_dir.to_path_buf(), Arc::clone(&chain));
-                return Ok(Some(chain));
-            }
-        }
         let built = build_chain(objects_dir)?;
         let Some(chain) = built else {
             return Ok(None);
         };
-        let mut guard = chains()
-            .write()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(existing) = guard.get(&pack_dir) {
-            set_hot_chain(objects_dir.to_path_buf(), Arc::clone(existing));
-            return Ok(Some(Arc::clone(existing)));
-        }
-        guard.insert(pack_dir.clone(), Arc::clone(&chain));
-        set_hot_chain(objects_dir.to_path_buf(), Arc::clone(&chain));
-        Ok(Some(chain))
+        let stored = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            let chain = Arc::clone(
+                state
+                    .chains
+                    .entry(pack_dir)
+                    .or_insert_with(|| Arc::clone(&chain)),
+            );
+            state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
+            chain
+        });
+        Ok(Some(stored))
     }
 
     pub fn evict_pack_dir(pack_dir: &Path) {
-        HOT_CHAIN.with(|slot| {
-            if slot.borrow().as_ref().is_some_and(|(objects_dir, _)| {
-                objects_dir.join("pack") == pack_dir || pack_dir.starts_with(objects_dir)
-            }) {
-                *slot.borrow_mut() = None;
-            }
+        crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            evict_pack_dir_in_state(state, pack_dir);
         });
-        let mut guard = chains()
-            .write()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.retain(|p, _| !p.starts_with(pack_dir));
+    }
+
+    pub(crate) fn evict_pack_dir_on(state: &Mutex<State>, pack_dir: &Path) {
+        let mut state = state.lock().unwrap_or_else(|poison| poison.into_inner());
+        evict_pack_dir_in_state(&mut state, pack_dir);
+    }
+
+    fn evict_pack_dir_in_state(state: &mut State, pack_dir: &Path) {
+        if state.hot_chain.as_ref().is_some_and(|(objects_dir, _)| {
+            objects_dir.join("pack") == pack_dir || pack_dir.starts_with(objects_dir)
+        }) {
+            state.hot_chain = None;
+        }
+        state.chains.retain(|path, _| !path.starts_with(pack_dir));
     }
 }
 
