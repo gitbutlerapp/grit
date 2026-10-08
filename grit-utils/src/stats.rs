@@ -18,6 +18,7 @@ pub fn timing_from_hyperfine(entry: &HyperfineResultEntry) -> TimingStats {
         min_ms: entry.min * 1000.0,
         max_ms: entry.max * 1000.0,
         runs_ms,
+        peak_rss_bytes: None,
     }
 }
 

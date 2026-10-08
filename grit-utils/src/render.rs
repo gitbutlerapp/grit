@@ -116,6 +116,7 @@ mod tests {
                     min_ms: 9.0,
                     max_ms: 11.0,
                     runs_ms: vec![9.0, 9.5, 10.0],
+                    peak_rss_bytes: None,
                 },
                 grit: TimingStats {
                     mean_ms: 5.0,
@@ -124,6 +125,7 @@ mod tests {
                     min_ms: 4.5,
                     max_ms: 5.5,
                     runs_ms: vec![4.5, 4.8, 5.5],
+                    peak_rss_bytes: None,
                 },
                 ratio: 0.505,
             }],

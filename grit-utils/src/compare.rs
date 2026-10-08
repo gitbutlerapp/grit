@@ -71,6 +71,7 @@ mod tests {
             min_ms: median,
             max_ms: median,
             runs_ms: vec![median],
+            peak_rss_bytes: None,
         }
     }
 

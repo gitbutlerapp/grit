@@ -5,6 +5,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
+use grit_utils::odb_driver::{self, open_repo};
+use grit_utils::odb_suite::{run_odb_suite, OdbRunConfig};
 use grit_utils::render::{render_markdown, render_text};
 use grit_utils::scenarios::{
     run_add_suite, run_commit_suite, run_hot_path_suite, run_prepare_add, run_prepare_commit,
@@ -73,6 +75,14 @@ enum Cmd {
         #[arg(long, value_delimiter = ',', default_values_t = vec![100, 1_000, 10_000, 50_000])]
         sizes: Vec<usize>,
     },
+    /// ODB read workloads (cat-file batch, rev-list --objects, log -p) vs system git
+    Odb,
+    /// Internal: library-backed workloads for ODB benchmarks
+    #[command(hide = true)]
+    Drive {
+        #[command(subcommand)]
+        workload: DriveCmd,
+    },
     /// Compare two JSON reports; exit non-zero when ratios differ beyond tolerance
     Compare {
         baseline: PathBuf,
@@ -110,6 +120,24 @@ enum Cmd {
     PrepareCommit {
         #[arg(long)]
         git: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum DriveCmd {
+    CatFileBatch {
+        repo: PathBuf,
+    },
+    CatFileBatchAllUnordered {
+        repo: PathBuf,
+    },
+    RevListObjects {
+        repo: PathBuf,
+    },
+    LogPatch {
+        repo: PathBuf,
+        #[arg(default_value = "2000")]
+        limit: usize,
     },
 }
 
@@ -163,10 +191,35 @@ fn render_report(format: &OutputFormat, report: &BenchReport) -> Result<String> 
     }
 }
 
+fn run_drive(workload: &DriveCmd) -> Result<()> {
+    match workload {
+        DriveCmd::CatFileBatch { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::cat_file_batch(&repo)?;
+        }
+        DriveCmd::CatFileBatchAllUnordered { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::cat_file_batch_all_unordered(&repo)?;
+        }
+        DriveCmd::RevListObjects { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_objects(&repo)?;
+        }
+        DriveCmd::LogPatch { repo, limit } => {
+            let repo = open_repo(repo)?;
+            odb_driver::log_patch(&repo, *limit)?;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
+        Cmd::Drive { workload } => {
+            return run_drive(workload);
+        }
         Cmd::PrepareAdd { git } => {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_add(&git);
@@ -249,6 +302,17 @@ fn main() -> Result<()> {
             let cfg = run_config(&cli, true);
             run_commit_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
         }
+        Cmd::Odb => {
+            eprintln!("Running ODB read benchmarks...");
+            let cfg = OdbRunConfig {
+                warmup: cli.warmup,
+                min_runs: cli.min_runs,
+                prepare_bin: std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("grit-bench")),
+            };
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            run_odb_suite(&hyperfine, &git, &grit, &bench_exe, &cfg, timestamp)?
+        }
         Cmd::HotPaths {
             sizes,
             fsmonitor_fixture,
@@ -274,6 +338,7 @@ fn main() -> Result<()> {
             status
         }
         Cmd::Compare { .. }
+        | Cmd::Drive { .. }
         | Cmd::PrepareAdd { .. }
         | Cmd::PrepareSwitch { .. }
         | Cmd::PreparePick { .. }
@@ -284,6 +349,8 @@ fn main() -> Result<()> {
 
     let rendered = render_report(&cli.format, &report)?;
     write_output(&cli, &rendered)?;
-    remove_dir_robust(&scratch_dir());
+    if !matches!(cli.command, Cmd::Odb) {
+        remove_dir_robust(&scratch_dir());
+    }
     Ok(())
 }

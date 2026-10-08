@@ -746,6 +746,8 @@ version = "0.5.3"
 dependencies = [
  "anyhow",
  "clap",
+ "grit-lib",
+ "nix",
  "serde",
  "serde_json",
  "shell-words",

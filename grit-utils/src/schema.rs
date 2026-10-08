@@ -15,6 +15,9 @@ pub struct TimingStats {
     pub max_ms: f64,
     /// Individual run times in milliseconds.
     pub runs_ms: Vec<f64>,
+    /// Peak resident set size of child processes (bytes), from `getrusage(RUSAGE_CHILDREN)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_rss_bytes: Option<u64>,
 }
 
 /// Host and toolchain description captured at benchmark time.

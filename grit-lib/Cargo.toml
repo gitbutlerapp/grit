@@ -99,6 +99,10 @@ harness = false
 name = "userdiff_hunk_header"
 harness = false
 
+[[bench]]
+name = "odb_read"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
