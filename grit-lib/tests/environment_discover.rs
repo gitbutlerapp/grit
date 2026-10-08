@@ -137,3 +137,50 @@ fn git_round_trip_same_git_dir_with_matching_env() {
     let git_dir = git_dir.canonicalize().unwrap_or(git_dir);
     assert_eq!(grit_git, git_dir);
 }
+
+#[test]
+fn safe_directory_from_environment_global_config() {
+    let td = TempDir::new().expect("tempdir");
+    let global = td.path().join("global.cfg");
+    fs::write(&global, "[safe]\n\tdirectory = *\n").expect("write global");
+
+    let repo_root = td.path().join("repo");
+    Command::new("git")
+        .args(["init", "-q", repo_root.to_str().expect("utf8")])
+        .output()
+        .expect("git init");
+
+    let mut env = Environment::empty();
+    env.cwd = repo_root.clone();
+    env.git_config_global = Some(global.to_string_lossy().into_owned());
+    env.git_config_nosystem = Some("true".into());
+    env.git_test_assume_different_owner = Some("1".into());
+
+    let git_status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo_root)
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env("GIT_CONFIG_NOSYSTEM", "true")
+        .env("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+        .output()
+        .expect("git status");
+    assert!(
+        git_status.status.success(),
+        "git status: {}",
+        String::from_utf8_lossy(&git_status.stderr)
+    );
+
+    assert!(
+        std::env::var("GIT_CONFIG_GLOBAL").is_err(),
+        "process env must stay untouched"
+    );
+    assert!(std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER").is_err());
+
+    let repo =
+        Repository::discover_with(&RepositoryOptions::with_environment(env), Some(&repo_root))
+            .expect("discover must honor safe.directory from Environment global config");
+    repo.enforce_safe_directory()
+        .expect("safe.directory allows");
+}

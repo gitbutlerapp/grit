@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 use filetime::{set_file_mtime, FileTime};
 use grit_lib::attributes::{load_gitattributes_stack, ParsedGitAttributes};
 use grit_lib::config::{ConfigSet, LoadConfigOptions};
+use grit_lib::environment::Environment;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::{init_repository, Repository};
@@ -341,8 +342,12 @@ impl WorktreeBenchFixtures {
 
     /// Load the layered config fixture (global + includes + local).
     pub fn load_config_cascade(&self) -> ConfigSet {
-        ConfigSet::load_with_options(Some(&self.config_git_dir), &self.config_load_opts)
-            .expect("config load")
+        ConfigSet::load_with_options(
+            &Environment::capture_process(),
+            Some(&self.config_git_dir),
+            &self.config_load_opts,
+        )
+        .expect("config load")
     }
 
     #[must_use]

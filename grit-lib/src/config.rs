@@ -3539,13 +3539,16 @@ pub(crate) fn system_config_path(env: &Environment) -> PathBuf {
                 return candidate;
             }
         }
-        for var in ["ProgramFiles", "ProgramFiles(x86)"] {
-            // hygiene: Windows-only ProgramFiles lookup for Git for Windows layout
-            if let Ok(pf) = std::env::var(var) {
-                let candidate = PathBuf::from(pf).join("Git").join("etc").join("gitconfig");
-                if candidate.is_file() {
-                    return candidate;
-                }
+        for pf in [
+            env.program_files.as_deref(),
+            env.program_files_x86.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let candidate = PathBuf::from(pf).join("Git").join("etc").join("gitconfig");
+            if candidate.is_file() {
+                return candidate;
             }
         }
     }

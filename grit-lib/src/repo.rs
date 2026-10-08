@@ -2038,13 +2038,9 @@ fn maybe_trace_implicit_bare_repository(dir: &Path, environment: &Environment) {
 
 /// Collect effective `safe.directory` values from protected config (system/global/command),
 /// applying empty-value resets like Git.
-fn safe_directory_effective_values(git_dir: &Path) -> Vec<String> {
-    let cfg = crate::config::ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(git_dir),
-        true,
-    )
-    .unwrap_or_else(|_| crate::config::ConfigSet::new());
+fn safe_directory_effective_values(git_dir: &Path, env: &Environment) -> Vec<String> {
+    let cfg = crate::config::ConfigSet::load(env, Some(git_dir), true)
+        .unwrap_or_else(|_| crate::config::ConfigSet::new());
     let mut values: Vec<String> = Vec::new();
     for e in cfg.entries() {
         if e.key == "safe.directory"
@@ -2070,7 +2066,7 @@ fn ensure_safe_directory_allows(
     checked: &Path,
     environment: &Environment,
 ) -> Result<()> {
-    let effective = safe_directory_effective_values(git_dir);
+    let effective = safe_directory_effective_values(git_dir, environment);
     let checked_s = checked.to_string_lossy().to_string();
     if environment.grit_debug_safe_dir {
         eprintln!("debug-safe-directory values={:?}", effective);
