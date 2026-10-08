@@ -16,6 +16,11 @@ fn git(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        // CI runners have no default identity once global config is masked.
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
         .output()
         .expect("spawn git");
     assert!(
