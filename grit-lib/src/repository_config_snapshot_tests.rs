@@ -77,7 +77,7 @@ mod tests {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();
         });
         // Index write, ref update, and object-format / MIDX config probes may each revalidate
-        // the process-global config cache once when using a shared repository snapshot.
+        // the repository config cache once when using a shared repository snapshot.
         assert_at_most_config_loads("create_commit", 4);
 
         let head = crate::refs::resolve_ref(&repo3.git_dir, "HEAD").unwrap();

@@ -172,6 +172,8 @@ pub struct Odb {
     shared_config_state: Option<crate::repo::RepositoryConfigSnapshot>,
     /// One-time sync of `core.deltaBaseCacheLimit` into the process-wide pack delta-base LRU.
     delta_base_cache_sync: Arc<OnceLock<()>>,
+    /// Environment paired with [`Self::shared_config_state`] for repository-scoped config cache.
+    shared_environment: Option<Arc<crate::environment::Environment>>,
     /// Pack files whose mtimes were already bumped for object freshening on this [`Odb`]
     /// (Git's `packed_git->freshened`: at most one `utimensat` per pack per process).
     freshened_packs: Arc<Mutex<HashSet<PathBuf>>>,
@@ -247,6 +249,7 @@ impl Odb {
             loose_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
+            shared_environment: None,
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
@@ -283,6 +286,7 @@ impl Odb {
             loose_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
+            shared_environment: None,
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
@@ -313,22 +317,20 @@ impl Odb {
     pub(crate) fn with_shared_config_state(
         mut self,
         state: crate::repo::RepositoryConfigSnapshot,
+        env: Arc<crate::environment::Environment>,
     ) -> Self {
         self.shared_config_state = Some(state);
+        self.shared_environment = Some(env);
         self
     }
 
     fn load_config_cascade(&self) -> Result<ConfigSet> {
-        if let Some(state) = &self.shared_config_state {
+        if let (Some(caches), Some(env)) = (&self.shared_config_state, &self.shared_environment) {
             let git_dir = self
                 .config_git_dir
                 .as_deref()
                 .or_else(|| self.objects_dir.parent());
-            let cfg = crate::repo::ensure_shared_config_snapshot(
-                state,
-                &crate::environment::Environment::capture_process(),
-                git_dir,
-            )?;
+            let cfg = caches.load_config(env.as_ref(), git_dir, true)?;
             return Ok(cfg.as_ref().clone());
         }
         let git_dir = self

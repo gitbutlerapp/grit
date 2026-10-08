@@ -43,7 +43,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 3
+static_global = 0
 system_time_now = 0
 
 [file.blame.rs]
@@ -64,7 +64,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 1
-static_global = 1
+static_global = 0
 system_time_now = 1
 
 [file.combined_tree_diff.rs]
@@ -148,7 +148,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 1
+static_global = 0
 system_time_now = 0
 
 [file.credentials.rs]
@@ -253,7 +253,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 1
-static_global = 2
+static_global = 0
 system_time_now = 0
 
 [file.git_binary_base85.rs]
@@ -718,6 +718,27 @@ command_new = 0
 static_global = 0
 system_time_now = 0
 
+[file.porcelain/stash.rs]
+println = 0
+print = 0
+eprintln = 0
+eprint = 0
+dbg = 0
+process_exit = 0
+env_var = 0
+env_var_os = 0
+env_vars = 0
+env_set_var = 0
+env_remove_var = 0
+env_current_dir = 0
+literal_fatal = 0
+literal_error = 2
+literal_hint = 0
+literal_warning = 0
+command_new = 0
+static_global = 0
+system_time_now = 0
+
 [file.precompose_config.rs]
 println = 0
 print = 0
@@ -841,7 +862,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 3
+static_global = 1
 system_time_now = 0
 
 [file.reftable.rs]
@@ -862,7 +883,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 0
 system_time_now = 0
 
 [file.repo.rs]
@@ -883,7 +904,7 @@ literal_error = 0
 literal_hint = 0
 literal_warning = 0
 command_new = 0
-static_global = 2
+static_global = 1
 system_time_now = 0
 
 [file.rerere.rs]

@@ -4042,6 +4042,7 @@ pub(crate) fn worktree_blob_bytes(
         index_blob: prior_blob.as_deref(),
         renormalize: false,
         check_safecrlf: false,
+        filter_process: None,
     };
     Ok(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)

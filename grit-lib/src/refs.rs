@@ -1469,7 +1469,7 @@ pub fn append_reflog_with_config(
 /// Test hook: when set to a ref name, the next [`append_reflog`] for that ref fails.
 ///
 /// Only active in debug builds; used by regression tests for commit ref/reflog atomicity.
-#[cfg(debug_assertions)]
+#[cfg(test)]
 mod reflog_fail_inject {
     use std::cell::RefCell;
 
@@ -1478,14 +1478,14 @@ mod reflog_fail_inject {
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 pub fn set_test_inject_reflog_fail(refname: Option<&str>) {
     reflog_fail_inject::INJECT.with(|c| {
         *c.borrow_mut() = refname.map(str::to_owned);
     });
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 fn test_inject_reflog_fail(refname: &str) -> Result<()> {
     reflog_fail_inject::INJECT.with(|c| {
         if c.borrow().as_deref() == Some(refname) {
@@ -1495,7 +1495,7 @@ fn test_inject_reflog_fail(refname: &str) -> Result<()> {
     })
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(test))]
 fn test_inject_reflog_fail(_refname: &str) -> Result<()> {
     Ok(())
 }
@@ -1572,7 +1572,7 @@ fn abort_loose_ref_lock(lock: &Path) {
     let _ = fs::remove_file(lock);
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 mod branch_ref_pause_inject {
     use std::sync::{Condvar, Mutex, OnceLock};
 
@@ -1590,18 +1590,18 @@ mod branch_ref_pause_inject {
 }
 
 /// Synchronization gate used with [`set_test_inject_branch_ref_pause_before_commit`].
-#[cfg(debug_assertions)]
+#[cfg(test)]
 pub type BranchRefPauseGate = std::sync::Arc<branch_ref_pause_inject::PauseGate>;
 
-/// Debug-only: pause [`update_branch_for_commit`] on the files backend after reflogs, before committing the ref.
-#[cfg(debug_assertions)]
+/// Test-only: pause [`update_branch_for_commit`] on the files backend after reflogs, before committing the ref.
+#[cfg(test)]
 pub fn set_test_inject_branch_ref_pause_before_commit(gate: Option<BranchRefPauseGate>) {
     *branch_ref_pause_inject::pause_slot()
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = gate;
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 fn test_branch_ref_pause_before_commit() {
     let gate = branch_ref_pause_inject::pause_slot()
         .lock()
@@ -1617,7 +1617,7 @@ fn test_branch_ref_pause_before_commit() {
     }
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(test))]
 fn test_branch_ref_pause_before_commit() {}
 
 fn update_branch_for_commit_files(

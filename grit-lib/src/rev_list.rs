@@ -4238,9 +4238,11 @@ fn commit_touches_paths(
         if sparse {
             return Ok(true);
         }
+        let precompose = repo.pathspec_precompose_enabled();
         let ctx = crate::pathspec::PathspecMatchContext {
             is_directory: false,
             is_git_submodule: false,
+            precompose_paths: precompose,
         };
         return Ok(commit_map
             .keys()
@@ -4610,9 +4612,11 @@ fn dense_path_limited_action(
             .collect();
 
     if parents.is_empty() {
+        let precompose = repo.pathspec_precompose_enabled();
         let ctx = crate::pathspec::PathspecMatchContext {
             is_directory: false,
             is_git_submodule: false,
+            precompose_paths: precompose,
         };
         let visible = sparse
             || commit_map
@@ -4686,6 +4690,7 @@ pub fn commit_visible_for_dense_pathspecs(
     let commit_map: HashMap<String, (ObjectId, u32)> = commit_entries.into_iter().collect();
 
     if parents.is_empty() {
+        let precompose = repo.pathspec_precompose_enabled();
         return Ok(commit_map.keys().any(|path| {
             paths.iter().any(|spec| {
                 crate::pathspec::matches_pathspec_with_context(
@@ -4694,6 +4699,7 @@ pub fn commit_visible_for_dense_pathspecs(
                     crate::pathspec::PathspecMatchContext {
                         is_directory: false,
                         is_git_submodule: false,
+                        precompose_paths: precompose,
                     },
                 )
             })

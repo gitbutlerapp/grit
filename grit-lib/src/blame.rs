@@ -460,7 +460,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ConfigSet;
@@ -483,21 +482,10 @@ type CopySourceBlameCache = (
 
 /// Hook the CLI installs so blame can lazily hydrate missing objects from a
 /// promisor remote (partial clone). The lib does no transport itself; the CLI
-/// supplies a function that performs the fetch.
-type PromisorHydrateHook = fn(&Repository, ObjectId);
+/// supplies a function that performs the fetch. Install with
+/// [`Repository::set_promisor_hydrate_hook`].
+pub type PromisorHydrateHook = fn(&Repository, ObjectId);
 
-static PROMISOR_HYDRATE_HOOK: OnceLock<PromisorHydrateHook> = OnceLock::new();
-
-/// Install the promisor-hydration hook used by [`read_object_for_blame`] when an
-/// object is missing locally. Called once by the CLI before running blame; later
-/// calls are ignored (the first installed hook wins).
-pub fn set_promisor_hydrate_hook(hook: PromisorHydrateHook) {
-    let _ = PROMISOR_HYDRATE_HOOK.set(hook);
-}
-
-fn promisor_hydrate_hook() -> Option<PromisorHydrateHook> {
-    PROMISOR_HYDRATE_HOOK.get().copied()
-}
 /// A single line attribution.
 #[derive(Debug, Clone)]
 pub struct BlameLine {
@@ -527,7 +515,7 @@ fn resolve_path_in_tree_entry(
     let mut current = *tree_oid;
 
     for (i, part) in parts.iter().enumerate() {
-        let obj = read_object_for_blame(odb, &current)?;
+        let obj = read_object_for_blame(odb, &current, None)?;
         let entries = parse_tree(&obj.data)?;
         match entries
             .iter()
@@ -581,12 +569,7 @@ pub struct BlameTextconvContext {
 
 impl BlameTextconvContext {
     pub fn new(repo: &Repository) -> Self {
-        let config = ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
-            Some(&repo.git_dir),
-            true,
-        )
-        .unwrap_or_default();
+        let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
         let attrs = load_attr_rules(repo);
         let diff_attrs = load_diff_attr_rules(repo);
@@ -651,13 +634,17 @@ fn load_diff_attr_rules(repo: &Repository) -> Vec<DiffAttrRule> {
     rules
 }
 
-pub fn read_object_for_blame(odb: &Odb, oid: &ObjectId) -> Result<Object> {
+pub fn read_object_for_blame(
+    odb: &Odb,
+    oid: &ObjectId,
+    repo: Option<&Repository>,
+) -> Result<Object> {
     match odb.read(oid) {
         Ok(obj) => Ok(obj),
         Err(LibError::ObjectNotFound(_)) => {
-            if let Some(hook) = promisor_hydrate_hook() {
-                if let Ok(repo) = Repository::discover(None) {
-                    hook(&repo, *oid);
+            if let Some(repo) = repo {
+                if let Some(hook) = repo.promisor_hydrate_hook() {
+                    hook(repo, *oid);
                     return odb.read(oid);
                 }
             }
@@ -791,7 +778,7 @@ fn read_blob_content_for_blame(
     textconv_ctx: Option<&BlameTextconvContext>,
     use_textconv: bool,
 ) -> Result<String> {
-    let obj = read_object_for_blame(odb, oid)?;
+    let obj = read_object_for_blame(odb, oid, None)?;
     if obj.kind != ObjectKind::Blob {
         return Err(LibError::Message("expected blob object".to_string()));
     }
@@ -838,7 +825,7 @@ pub fn compute_blame(
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
 ) -> Result<Vec<BlameLine>> {
     let start_commit = {
-        let obj = read_object_for_blame(odb, &start_oid)?;
+        let obj = read_object_for_blame(odb, &start_oid, None)?;
         parse_commit(&obj.data)?
     };
 
@@ -1649,7 +1636,7 @@ fn collect_tree_file_entries(
     prefix: &str,
     out: &mut Vec<(String, ObjectId, u32)>,
 ) -> Result<()> {
-    let obj = read_object_for_blame(odb, tree_oid)?;
+    let obj = read_object_for_blame(odb, tree_oid, None)?;
     if obj.kind != ObjectKind::Tree {
         return Err(LibError::Message("expected tree".to_string()));
     }
@@ -1678,7 +1665,7 @@ fn get_commit(
     if let Some(c) = cache.get(&oid) {
         return Ok(c.clone());
     }
-    let obj = read_object_for_blame(odb, &oid)?;
+    let obj = read_object_for_blame(odb, &oid, None)?;
     let c = parse_commit(&obj.data)?;
     cache.insert(oid, c.clone());
     Ok(c)
@@ -1726,7 +1713,7 @@ pub fn apply_annotate_huge_graft_fixup(
     let mut oid_01 = None;
     let mut oid_10 = None;
     for p in parents {
-        let obj = read_object_for_blame(odb, p)?;
+        let obj = read_object_for_blame(odb, p, None)?;
         let c = parse_commit(&obj.data)?;
         let msg = c.message.trim();
         if msg == "01" {
@@ -1788,7 +1775,7 @@ pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
 
 pub fn peel_to_commit_oid(odb: &Odb, mut oid: ObjectId) -> Result<Option<ObjectId>> {
     loop {
-        let obj = read_object_for_blame(odb, &oid)?;
+        let obj = read_object_for_blame(odb, &oid, None)?;
         match obj.kind {
             ObjectKind::Commit => return Ok(Some(oid)),
             ObjectKind::Tag => {
@@ -1819,7 +1806,7 @@ pub fn build_uncommitted_blame(
 
     let mut by_content_source: Option<CopySourceBlameCache> = None;
     if copy_depth >= 2 {
-        let head_obj = read_object_for_blame(odb, &start_oid)?;
+        let head_obj = read_object_for_blame(odb, &start_oid, None)?;
         let head_commit = parse_commit(&head_obj.data)?;
         if let Some((source_path, source_blame)) = find_copy_source_blame(
             odb,
@@ -2021,7 +2008,7 @@ pub fn apply_final_content_overlay(
     textconv_ctx: Option<&BlameTextconvContext>,
     use_textconv: bool,
 ) -> Result<Option<Vec<BlameLine>>> {
-    let head_commit_obj = read_object_for_blame(odb, &start_oid)?;
+    let head_commit_obj = read_object_for_blame(odb, &start_oid, None)?;
     let head_commit = parse_commit(&head_commit_obj.data)?;
     let Some((head_blob_oid, head_mode)) =
         resolve_path_in_tree_entry(odb, &head_commit.tree, file_path)?
@@ -2106,7 +2093,7 @@ pub fn apply_worktree_overlay(
     let raw_worktree = std::fs::read(&abs_path)?;
     let raw_worktree_text = String::from_utf8_lossy(&raw_worktree).into_owned();
 
-    let head_commit_obj = read_object_for_blame(odb, &start_oid)?;
+    let head_commit_obj = read_object_for_blame(odb, &start_oid, None)?;
     let head_commit = parse_commit(&head_commit_obj.data)?;
     let Some((head_blob_oid, head_mode)) =
         resolve_path_in_tree_entry(odb, &head_commit.tree, file_path)?

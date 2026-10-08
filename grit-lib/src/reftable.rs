@@ -25,11 +25,10 @@
 //! footer
 //! ```
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -2443,11 +2442,6 @@ impl ReftableStack {
 // Integration helpers — used by refs.rs and commands
 // ---------------------------------------------------------------------------
 
-pub(crate) fn reftable_backend_cache() -> &'static Mutex<HashMap<PathBuf, bool>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 /// Path to the repository-local `config` file (linked worktree common dir when needed).
 fn repository_config_file(git_dir: &Path) -> Option<PathBuf> {
     let local = git_dir.join("config");
@@ -2491,25 +2485,9 @@ pub(crate) fn reftable_declared_in_repository_config(git_dir: &Path) -> bool {
     false
 }
 
-/// Detect whether a git directory uses the reftable backend.
+/// Detect whether a git directory uses the reftable backend (uncached).
 pub fn is_reftable_repo(git_dir: &Path) -> bool {
-    let key = git_dir
-        .canonicalize()
-        .unwrap_or_else(|_| git_dir.to_path_buf());
-    {
-        let guard = reftable_backend_cache()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some(v) = guard.get(&key) {
-            return *v;
-        }
-    }
-    let v = reftable_declared_in_repository_config(git_dir);
-    let mut guard = reftable_backend_cache()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    guard.insert(key, v);
-    v
+    reftable_declared_in_repository_config(git_dir)
 }
 
 /// Resolve a ref in a reftable repo, following symbolic refs.
@@ -2726,7 +2704,7 @@ pub fn reftable_write_transaction(
     Ok(())
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 mod reftable_tx_fail_inject {
     use std::cell::RefCell;
 
@@ -2736,12 +2714,12 @@ mod reftable_tx_fail_inject {
 }
 
 /// When enabled (debug builds only), the next [`ReftableStack::write_transaction`] fails before writing.
-#[cfg(debug_assertions)]
+#[cfg(test)]
 pub fn set_test_inject_reftable_transaction_fail(enabled: bool) {
     reftable_tx_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 fn test_inject_reftable_transaction_fail() -> Result<()> {
     reftable_tx_fail_inject::INJECT.with(|c| {
         if *c.borrow() {
@@ -2753,7 +2731,7 @@ fn test_inject_reftable_transaction_fail() -> Result<()> {
     })
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(test))]
 fn test_inject_reftable_transaction_fail() -> Result<()> {
     Ok(())
 }

@@ -31,6 +31,7 @@ use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::parse_commit;
 use crate::odb::Odb;
+use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;
 use crate::split_index::{write_index_file_split, WriteSplitIndexRequest};
@@ -92,52 +93,24 @@ pub struct Repository {
     /// down instead of calling [`ConfigSet::load`] repeatedly. [`Repository::reload_config`]
     /// replaces the snapshot after in-process config writes so subsequent operations see updates
     /// without reopening the repository.
-    config_snapshot: RepositoryConfigSnapshot,
+    /// Repository-scoped caches (config, attributes, filters, precompose, …).
+    caches: Arc<RepoCaches>,
+    /// Primary config snapshot for this handle (revalidated via local `config` mtime/size).
+    config_memo: Mutex<Option<ConfigSnapshotEntry>>,
     /// Discovery and configuration environment used to open this repository.
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
     git_prefix: Option<String>,
 }
 
-type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
+/// Legacy alias kept for [`Odb`] wiring during the repository-cache migration.
+pub(crate) type RepositoryConfigSnapshot = Arc<RepoCaches>;
 
-pub(crate) type RepositoryConfigSnapshot = Arc<Mutex<Option<ConfigSnapshotEntry>>>;
+type ConfigSnapshotEntry = (Arc<ConfigSet>, Option<(SystemTime, u64)>);
 
 fn local_repo_config_identity(git_dir: &Path) -> Option<(SystemTime, u64)> {
     let meta = fs::metadata(git_dir.join("config")).ok()?;
     Some((meta.modified().ok()?, meta.len()))
-}
-
-pub(crate) fn ensure_shared_config_snapshot(
-    state: &Mutex<Option<ConfigSnapshotEntry>>,
-    env: &Environment,
-    git_dir: Option<&Path>,
-) -> Result<Arc<ConfigSet>> {
-    let mut guard = state
-        .lock()
-        .map_err(|e| Error::Message(format!("config snapshot lock poisoned: {e}")))?;
-    let disk_identity = git_dir.and_then(local_repo_config_identity);
-    let stale = match guard.as_ref() {
-        None => true,
-        Some((_, cached_identity)) => match (cached_identity, disk_identity) {
-            (Some(cached), Some(disk)) => *cached != disk,
-            _ => false,
-        },
-    };
-    if stale {
-        let config = if let Some(git_dir) = git_dir {
-            Arc::new(ConfigSet::load(env, Some(git_dir), true)?)
-        } else {
-            Arc::new(ConfigSet::new())
-        };
-        *guard = Some((config, disk_identity));
-    }
-    Ok(Arc::clone(
-        &guard
-            .as_ref()
-            .ok_or_else(|| Error::Message("config snapshot missing after init".into()))?
-            .0,
-    ))
 }
 
 /// Repository-level settings derived from config that are read on hot paths.
@@ -193,15 +166,15 @@ impl Repository {
             None => None,
         };
 
-        let config_snapshot = Arc::new(Mutex::new(None));
+        let caches = RepoCaches::new();
         let odb = if let Some(ref wt) = work_tree {
             Odb::with_work_tree(&objects_dir, wt)
                 .with_config_git_dir(git_dir.clone())
-                .with_shared_config_state(config_snapshot.clone())
+                .with_shared_config_state(caches.clone(), environment.clone())
         } else {
             Odb::new(&objects_dir)
                 .with_config_git_dir(git_dir.clone())
-                .with_shared_config_state(config_snapshot.clone())
+                .with_shared_config_state(caches.clone(), environment.clone())
         };
 
         let git_prefix = work_tree
@@ -216,10 +189,28 @@ impl Repository {
             discovery_root: None,
             work_tree_from_env: false,
             discovery_via_gitfile: false,
-            config_snapshot,
+            caches,
+            config_memo: Mutex::new(None),
             environment,
             git_prefix,
         })
+    }
+
+    /// Return this handle's shared cache arena.
+    #[must_use]
+    pub(crate) fn caches(&self) -> &Arc<RepoCaches> {
+        &self.caches
+    }
+
+    /// Install a promisor-object hydration hook for blame on partial clones.
+    pub fn set_promisor_hydrate_hook(&self, hook: Option<crate::blame::PromisorHydrateHook>) {
+        self.caches.set_promisor_hydrate_hook(hook);
+    }
+
+    /// Return the promisor hydration hook for this repository, if installed.
+    #[must_use]
+    pub fn promisor_hydrate_hook(&self) -> Option<crate::blame::PromisorHydrateHook> {
+        self.caches.promisor_hydrate_hook()
     }
 
     /// Return the [`Environment`] used to discover or open this repository.
@@ -259,11 +250,27 @@ impl Repository {
     }
 
     fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
-        ensure_shared_config_snapshot(
-            &self.config_snapshot,
-            self.environment.as_ref(),
-            Some(&self.git_dir),
-        )
+        let disk_identity = local_repo_config_identity(&self.git_dir);
+        {
+            let guard = self
+                .config_memo
+                .lock()
+                .map_err(|e| Error::Message(format!("config memo lock poisoned: {e}")))?;
+            if let Some((cfg, cached_identity)) = guard.as_ref() {
+                if *cached_identity == disk_identity {
+                    return Ok(Arc::clone(cfg));
+                }
+            }
+        }
+        let cfg = self
+            .caches
+            .load_config(self.environment.as_ref(), Some(&self.git_dir), true)?;
+        let mut guard = self
+            .config_memo
+            .lock()
+            .map_err(|e| Error::Message(format!("config memo lock poisoned: {e}")))?;
+        *guard = Some((Arc::clone(&cfg), disk_identity));
+        Ok(cfg)
     }
 
     /// Return the merged configuration cascade for this repository.
@@ -289,29 +296,24 @@ impl Repository {
     ///
     /// Propagates errors from [`ConfigSet::load`].
     pub fn reload_config(&self) -> Result<()> {
-        let config = Arc::new(ConfigSet::load(
-            self.environment.as_ref(),
-            Some(&self.git_dir),
-            true,
-        )?);
-        self.install_config_snapshot(config);
+        self.caches.invalidate_config_cache();
+        if let Ok(mut guard) = self.config_memo.lock() {
+            *guard = None;
+        }
+        let _ = self.config()?;
         Ok(())
     }
 
-    /// Install a pre-loaded config snapshot (used during discovery to avoid duplicate cascade loads).
-    pub(crate) fn install_config_snapshot(&self, config: Arc<ConfigSet>) {
-        let is_reftable = crate::reftable::reftable_declared_in_repository_config(&self.git_dir);
-        if let Ok(key) = self.git_dir.canonicalize() {
-            let mut guard = crate::reftable::reftable_backend_cache()
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.insert(key, is_reftable);
-        }
-        let mut guard = self
-            .config_snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *guard = Some((config, local_repo_config_identity(&self.git_dir)));
+    /// Warm repository caches after discovery (reftable backend flag, optional config arc).
+    pub(crate) fn install_config_snapshot(&self, _config: Arc<ConfigSet>) {
+        let _ = self.caches.is_reftable_repo(&self.git_dir);
+    }
+
+    /// Whether pathspec matching should NFC-normalize paths for this repository.
+    #[must_use]
+    pub fn pathspec_precompose_enabled(&self) -> bool {
+        self.caches
+            .pathspec_precompose_enabled(self.environment.as_ref(), &self.git_dir)
     }
 
     fn cached_settings(&self) -> RepoCachedSettings {
@@ -348,8 +350,10 @@ impl Repository {
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
 
         validate_repository_format(&git_dir)?;
-        let cfg = Arc::new(ConfigSet::load(environment.as_ref(), Some(&git_dir), true)?);
-        let repo = Self::from_canonical_git_dir(environment, git_dir, work_tree)?;
+        let repo = Self::from_canonical_git_dir(Arc::clone(&environment), git_dir, work_tree)?;
+        let cfg = repo
+            .caches
+            .load_config(environment.as_ref(), Some(&repo.git_dir), true)?;
         repo.install_config_snapshot(cfg);
         Ok(repo)
     }
@@ -2958,7 +2962,7 @@ pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), String
     Ok(())
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 mod index_write_fail_inject {
     use std::cell::RefCell;
 
@@ -2968,12 +2972,12 @@ mod index_write_fail_inject {
 }
 
 /// Debug-only: fail the next [`Repository::write_index`] call.
-#[cfg(debug_assertions)]
+#[cfg(test)]
 pub fn set_test_inject_index_write_fail(enabled: bool) {
     index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
 }
 
-#[cfg(debug_assertions)]
+#[cfg(test)]
 fn test_inject_index_write_fail() -> Result<()> {
     index_write_fail_inject::INJECT.with(|c| {
         if *c.borrow() {
@@ -2985,7 +2989,7 @@ fn test_inject_index_write_fail() -> Result<()> {
     })
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(test))]
 fn test_inject_index_write_fail() -> Result<()> {
     Ok(())
 }

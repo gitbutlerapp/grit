@@ -21,7 +21,9 @@ use encoding_rs::UTF_8;
 
 use crate::config::ConfigSet;
 use crate::error::{FilterError, FilterPhase};
-use crate::filter_process::{apply_process_clean, apply_process_smudge, FilterSmudgeMeta};
+use crate::filter_process::{
+    apply_process_clean, apply_process_smudge, FilterProcessState, FilterSmudgeMeta,
+};
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 
@@ -1061,6 +1063,8 @@ pub struct ConvertToGitOpts<'a> {
     pub renormalize: bool,
     /// When false, skip `core.safecrlf` simulation (used for internal diff/hashing — must not spam stderr).
     pub check_safecrlf: bool,
+    /// Long-running filter registry for this repository handle (see [`FilterProcessState`]).
+    pub filter_process: Option<&'a FilterProcessState>,
 }
 
 impl Default for ConvertToGitOpts<'_> {
@@ -1069,6 +1073,7 @@ impl Default for ConvertToGitOpts<'_> {
             index_blob: None,
             renormalize: false,
             check_safecrlf: true,
+            filter_process: None,
         }
     }
 }
@@ -1533,11 +1538,18 @@ pub fn convert_to_git_with_opts(
     opts: ConvertToGitOpts<'_>,
 ) -> Result<Vec<u8>, FilterError> {
     let mut buf = data.to_vec();
+    let owned_filter_state;
+    let filter_state = if let Some(s) = opts.filter_process {
+        s
+    } else {
+        owned_filter_state = FilterProcessState::new();
+        &owned_filter_state
+    };
 
     // 1. Run clean filter if configured (long-running `process` overrides clean command)
     if let Some(ref proc_cmd) = file_attrs.filter_process {
         let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
-        match apply_process_clean(proc_cmd, rel_path, &buf) {
+        match apply_process_clean(filter_state, proc_cmd, rel_path, &buf) {
             Ok(filtered) => buf = filtered,
             Err(e) => {
                 if file_attrs.filter_clean_required {
@@ -1551,7 +1563,7 @@ pub fn convert_to_git_with_opts(
                     });
                 }
                 if e.starts_with("filter status: abort") {
-                    crate::filter_process::disable_process_filter(proc_cmd);
+                    filter_state.disable_process_filter(proc_cmd);
                 }
                 eprintln!(
                     "{}",
@@ -1804,6 +1816,7 @@ pub fn lf_to_crlf(data: &[u8]) -> Vec<u8> {
 ///
 /// Returns `Ok(None)` when the process filter returned `status=delayed` and `delayed_checkout` was
 /// provided (Git `delayed_checkout`); the path is queued for [`crate::filter_process::DelayedProcessCheckout::finish`].
+#[allow(clippy::too_many_arguments)]
 pub fn convert_to_worktree(
     data: &[u8],
     rel_path: &str,
@@ -1812,8 +1825,16 @@ pub fn convert_to_worktree(
     oid_hex: Option<&str>,
     smudge_meta: Option<&FilterSmudgeMeta>,
     delayed_checkout: Option<&mut crate::filter_process::DelayedProcessCheckout>,
+    filter_process: Option<&FilterProcessState>,
 ) -> Result<Option<Vec<u8>>, FilterError> {
     let mut buf = data.to_vec();
+    let owned_filter_state;
+    let filter_state = if let Some(s) = filter_process {
+        s
+    } else {
+        owned_filter_state = FilterProcessState::new();
+        &owned_filter_state
+    };
 
     // 1. Ident expansion
     if file_attrs.ident {
@@ -1833,7 +1854,7 @@ pub fn convert_to_worktree(
         && file_attrs
             .filter_process
             .as_deref()
-            .is_some_and(crate::filter_process::process_filter_supports_delay);
+            .is_some_and(|c| crate::filter_process::process_filter_supports_delay(filter_state, c));
 
     // 2. LF→CRLF for working tree
     let should_convert = should_convert_to_crlf(conv, file_attrs, &buf);
@@ -1850,29 +1871,35 @@ pub fn convert_to_worktree(
     // 4. Smudge filter — process driver overrides shell smudge
     let driver = file_attrs.filter_driver_name.as_deref().unwrap_or("");
     if let Some(ref proc_cmd) = file_attrs.filter_process {
-        let smudge_out =
-            match apply_process_smudge(proc_cmd, rel_path, &buf, smudge_meta, can_delay_smudge) {
-                Ok(out) => out,
-                Err(e) => {
-                    if file_attrs.filter_smudge_required {
-                        return Err(external_filter_failed(
-                            rel_path,
-                            driver,
-                            FilterPhase::Smudge,
-                        ));
-                    }
-                    if e.starts_with("filter status: abort") {
-                        crate::filter_process::disable_process_filter(proc_cmd);
-                    }
-                    eprintln!(
-                        "{}",
-                        crate::diagnostics::error_line(&format!(
-                            "external filter '{driver}' failed"
-                        ))
-                    );
-                    return Ok(Some(buf));
+        let smudge_out = match apply_process_smudge(
+            filter_state,
+            proc_cmd,
+            rel_path,
+            &buf,
+            smudge_meta,
+            can_delay_smudge,
+        ) {
+            Ok(out) => out,
+            Err(e) => {
+                if file_attrs.filter_smudge_required {
+                    return Err(external_filter_failed(
+                        rel_path,
+                        driver,
+                        FilterPhase::Smudge,
+                    ));
                 }
-            };
+                if e.starts_with("filter status: abort") {
+                    filter_state.disable_process_filter(proc_cmd);
+                }
+                eprintln!(
+                    "{}",
+                    crate::diagnostics::error_line(&format!(
+                        "external filter '{driver}' failed"
+                    ))
+                );
+                return Ok(Some(buf));
+            }
+        };
         let Some(out) = smudge_out else {
             let Some(q) = delayed_checkout else {
                 return Err(filter_detail(
@@ -1925,8 +1952,18 @@ pub fn convert_to_worktree_eager(
     file_attrs: &FileAttrs,
     oid_hex: Option<&str>,
     smudge_meta: Option<&FilterSmudgeMeta>,
+    filter_process: Option<&FilterProcessState>,
 ) -> Result<Vec<u8>, FilterError> {
-    match convert_to_worktree(data, rel_path, conv, file_attrs, oid_hex, smudge_meta, None)? {
+    match convert_to_worktree(
+        data,
+        rel_path,
+        conv,
+        file_attrs,
+        oid_hex,
+        smudge_meta,
+        None,
+        filter_process,
+    )? {
         Some(v) => Ok(v),
         None => Err(filter_detail(
             rel_path,

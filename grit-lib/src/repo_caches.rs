@@ -1,0 +1,308 @@
+//! Repository-scoped caches shared by an open [`Repository`].
+//!
+//! Config cascade, gitattributes stacks, filter-process registries, precompose flags, and
+//! reftable-backend detection live here instead of process-global statics so concurrent
+//! repositories on different threads do not cross-contaminate.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::attributes::{
+    attr_file_stamp, attr_stamps_valid, collect_stack_stamps, load_gitattributes_bare_uncached,
+    load_gitattributes_stack_uncached, AttrStackCacheEntry, ParsedGitAttributes,
+};
+use crate::blame::PromisorHydrateHook;
+use crate::config::{
+    config_cache_lookup, config_cache_store, config_file_stamps, ConfigCacheKey, ConfigSet,
+    LoadConfigOptions,
+};
+use crate::environment::Environment;
+use crate::error::{Error, Result};
+use crate::filter_process::FilterProcessState;
+use crate::objects::ObjectId;
+use crate::precompose_config::{
+    effective_core_precomposeunicode_with_config, filesystem_nfd_nfc_aliases,
+};
+use crate::repo::Repository;
+
+/// Per-repository cache arena (held behind [`Arc`] on [`Repository`]).
+pub struct RepoCaches {
+    config_cache: Mutex<HashMap<ConfigCacheKey, crate::config::ConfigCacheEntry>>,
+    attr_stack: Mutex<HashMap<(PathBuf, PathBuf), AttrStackCacheEntry>>,
+    attr_bare: Mutex<HashMap<PathBuf, AttrStackCacheEntry>>,
+    attr_tree: Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>>,
+    pathspec_precompose: OnceLock<bool>,
+    reftable_backend: Mutex<HashMap<PathBuf, bool>>,
+    filters: FilterProcessState,
+    promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
+}
+
+impl std::fmt::Debug for RepoCaches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepoCaches").finish_non_exhaustive()
+    }
+}
+
+impl RepoCaches {
+    /// Create an empty cache arena for one repository handle.
+    #[must_use]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            config_cache: Mutex::new(HashMap::new()),
+            attr_stack: Mutex::new(HashMap::new()),
+            attr_bare: Mutex::new(HashMap::new()),
+            attr_tree: Mutex::new(HashMap::new()),
+            pathspec_precompose: OnceLock::new(),
+            reftable_backend: Mutex::new(HashMap::new()),
+            filters: FilterProcessState::new(),
+            promisor_hydrate: Mutex::new(None),
+        })
+    }
+
+    /// Load the standard configuration cascade with repository-scoped memoization.
+    ///
+    /// # Errors
+    ///
+    /// Propagates config parse and I/O errors from the uncached loader.
+    pub fn load_config(
+        &self,
+        env: &Environment,
+        git_dir: Option<&Path>,
+        include_system: bool,
+    ) -> Result<Arc<ConfigSet>> {
+        let opts = LoadConfigOptions {
+            include_system,
+            ..LoadConfigOptions::default()
+        };
+        self.load_config_with_options(env, git_dir, &opts)
+    }
+
+    /// Load a configuration cascade with explicit options and repository-scoped memoization.
+    ///
+    /// # Errors
+    ///
+    /// Propagates config parse and I/O errors from the uncached loader.
+    pub fn load_config_with_options(
+        &self,
+        env: &Environment,
+        git_dir: Option<&Path>,
+        opts: &LoadConfigOptions,
+    ) -> Result<Arc<ConfigSet>> {
+        let Some(env_fp) = env.config_fingerprint() else {
+            #[cfg(test)]
+            crate::config::cascade_load_counters::record_uncached();
+            let set = ConfigSet::load_with_options_uncached(env, git_dir, opts, &mut Vec::new())?;
+            return Ok(Arc::new(set));
+        };
+        let key = ConfigCacheKey::new(git_dir, opts);
+        let base_stamps = config_file_stamps(env, git_dir, opts);
+        {
+            let cache = self
+                .config_cache
+                .lock()
+                .map_err(|e| Error::Message(format!("config cache lock poisoned: {e}")))?;
+            if let Some(cached) = config_cache_lookup(&cache, &key, &env_fp, &base_stamps) {
+                return Ok(Arc::new(cached));
+            }
+        }
+        #[cfg(test)]
+        crate::config::cascade_load_counters::record_uncached();
+        let mut included_files = Vec::new();
+        let set = ConfigSet::load_with_options_uncached(env, git_dir, opts, &mut included_files)?;
+        included_files.sort_unstable();
+        included_files.dedup();
+        let extra_stamps = crate::config::stamp_paths(included_files);
+        let mut cache = self
+            .config_cache
+            .lock()
+            .map_err(|e| Error::Message(format!("config cache lock poisoned: {e}")))?;
+        config_cache_store(
+            &mut cache,
+            key,
+            env_fp,
+            base_stamps,
+            extra_stamps,
+            Arc::new(set.clone()),
+        );
+        Ok(Arc::new(set))
+    }
+
+    /// Drop all memoized configuration cascades for this repository handle.
+    pub fn invalidate_config_cache(&self) {
+        if let Ok(mut cache) = self.config_cache.lock() {
+            cache.clear();
+        }
+    }
+
+    /// Evict config cache entries whose stamp lists mention `path` (in-process config writes).
+    pub fn evict_config_for_path(&self, path: &Path) {
+        if let Ok(mut cache) = self.config_cache.lock() {
+            cache.retain(|_, entry| {
+                !entry
+                    .base_stamps
+                    .iter()
+                    .chain(&entry.extra_stamps)
+                    .any(|(p, _)| p == path)
+            });
+        }
+    }
+
+    /// Memoized work-tree gitattributes stack for this repository.
+    ///
+    /// # Errors
+    ///
+    /// Propagates attribute load and I/O errors.
+    pub fn load_gitattributes_stack(
+        &self,
+        repo: &Repository,
+        work_tree: &Path,
+    ) -> Result<ParsedGitAttributes> {
+        let key = (repo.git_dir.clone(), work_tree.to_path_buf());
+        {
+            let cache = self
+                .attr_stack
+                .lock()
+                .map_err(|e| Error::Message(format!("attr stack cache lock poisoned: {e}")))?;
+            if let Some(entry) = cache.get(&key) {
+                if attr_stamps_valid(entry) {
+                    return Ok((*entry.parsed).clone());
+                }
+            }
+        }
+        let (file_stamps, dir_stamps) = collect_stack_stamps(repo, work_tree)?;
+        let parsed = load_gitattributes_stack_uncached(repo, work_tree)?;
+        let mut cache = self
+            .attr_stack
+            .lock()
+            .map_err(|e| Error::Message(format!("attr stack cache lock poisoned: {e}")))?;
+        cache.insert(
+            key,
+            AttrStackCacheEntry {
+                file_stamps,
+                dir_stamps,
+                parsed: Arc::new(parsed.clone()),
+            },
+        );
+        Ok(parsed)
+    }
+
+    /// Memoized bare-repo gitattributes (info/attributes + global file).
+    ///
+    /// # Errors
+    ///
+    /// Propagates attribute load and I/O errors.
+    pub fn load_gitattributes_bare(&self, repo: &Repository) -> Result<ParsedGitAttributes> {
+        let key = repo.git_dir.clone();
+        {
+            let cache = self
+                .attr_bare
+                .lock()
+                .map_err(|e| Error::Message(format!("attr bare cache lock poisoned: {e}")))?;
+            if let Some(entry) = cache.get(&key) {
+                if attr_stamps_valid(entry) {
+                    return Ok((*entry.parsed).clone());
+                }
+            }
+        }
+        let mut file_stamps = Vec::new();
+        if let Some(g) = crate::attributes::global_attributes_path(repo)? {
+            file_stamps.push((g.clone(), attr_file_stamp(&g)));
+        }
+        let info = repo.git_dir.join("info/attributes");
+        file_stamps.push((info.clone(), attr_file_stamp(&info)));
+        let parsed = load_gitattributes_bare_uncached(repo)?;
+        let mut cache = self
+            .attr_bare
+            .lock()
+            .map_err(|e| Error::Message(format!("attr bare cache lock poisoned: {e}")))?;
+        cache.insert(
+            key,
+            AttrStackCacheEntry {
+                file_stamps,
+                dir_stamps: Vec::new(),
+                parsed: Arc::new(parsed.clone()),
+            },
+        );
+        Ok(parsed)
+    }
+
+    /// Memoized gitattributes parsed from an immutable tree object.
+    pub fn load_gitattributes_from_tree_cached(
+        &self,
+        odb: &crate::odb::Odb,
+        tree_oid: &ObjectId,
+        loader: impl FnOnce() -> Result<ParsedGitAttributes>,
+    ) -> Result<ParsedGitAttributes> {
+        let _ = odb;
+        if let Ok(cache) = self.attr_tree.lock() {
+            if let Some(parsed) = cache.get(tree_oid) {
+                return Ok((**parsed).clone());
+            }
+        }
+        let parsed = loader()?;
+        if let Ok(mut cache) = self.attr_tree.lock() {
+            cache.insert(*tree_oid, Arc::new(parsed.clone()));
+        }
+        Ok(parsed)
+    }
+
+    /// Whether pathspec comparisons should NFC-normalize paths for this repository.
+    #[must_use]
+    pub fn pathspec_precompose_enabled(&self, env: &Environment, git_dir: &Path) -> bool {
+        *self.pathspec_precompose.get_or_init(|| {
+            let cfg = self
+                .load_config(env, Some(git_dir), true)
+                .ok()
+                .map(|arc| (*arc).clone());
+            let enabled = cfg
+                .as_ref()
+                .map(|c| effective_core_precomposeunicode_with_config(Some(git_dir), Some(c)))
+                .unwrap_or(false);
+            enabled && filesystem_nfd_nfc_aliases(git_dir)
+        })
+    }
+
+    /// Cached reftable-backend flag for `git_dir`.
+    #[must_use]
+    pub fn is_reftable_repo(&self, git_dir: &Path) -> bool {
+        let key = git_dir
+            .canonicalize()
+            .unwrap_or_else(|_| git_dir.to_path_buf());
+        if let Ok(guard) = self.reftable_backend.lock() {
+            if let Some(v) = guard.get(&key) {
+                return *v;
+            }
+        }
+        let v = crate::reftable::reftable_declared_in_repository_config(git_dir);
+        if let Ok(mut guard) = self.reftable_backend.lock() {
+            guard.insert(key, v);
+        }
+        v
+    }
+
+    /// Filter-process registry and disabled-driver set for this repository.
+    #[must_use]
+    pub fn filters(&self) -> &FilterProcessState {
+        &self.filters
+    }
+
+    /// Optional promisor-object hydration hook for blame on partial clones.
+    pub fn set_promisor_hydrate_hook(&self, hook: Option<PromisorHydrateHook>) {
+        if let Ok(mut slot) = self.promisor_hydrate.lock() {
+            *slot = hook;
+        }
+    }
+
+    /// Return the promisor hydration hook installed on this repository, if any.
+    #[must_use]
+    pub fn promisor_hydrate_hook(&self) -> Option<PromisorHydrateHook> {
+        self.promisor_hydrate.lock().ok().and_then(|g| *g)
+    }
+}
+
+impl Drop for RepoCaches {
+    fn drop(&mut self) {
+        self.filters.shutdown_all();
+    }
+}

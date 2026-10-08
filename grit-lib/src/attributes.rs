@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Maximum length of a single `.gitattributes` line (bytes), matching Git (`ATTR_MAX_LINE_LENGTH`).
@@ -209,14 +209,10 @@ fn default_global_attributes_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/git/attributes"))
 }
 
-fn global_attributes_path(
+pub(crate) fn global_attributes_path(
     repo: &Repository,
 ) -> std::result::Result<Option<PathBuf>, crate::error::Error> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     if let Some(path) = config.get("core.attributesfile") {
         return Ok(Some(PathBuf::from(parse_path(&path))));
     }
@@ -905,44 +901,28 @@ fn walk_dirs(root: &Path, cur: &Path, dirs: &mut Vec<PathBuf>) {
 type AttrFileStamp = (PathBuf, Option<(SystemTime, u64)>);
 type AttrDirStamp = (PathBuf, Option<SystemTime>);
 
-struct AttrStackCacheEntry {
-    file_stamps: Vec<AttrFileStamp>,
-    dir_stamps: Vec<AttrDirStamp>,
-    parsed: Arc<ParsedGitAttributes>,
-}
-
-fn attr_stack_cache() -> &'static Mutex<HashMap<(PathBuf, PathBuf), AttrStackCacheEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, PathBuf), AttrStackCacheEntry>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn attr_bare_cache() -> &'static Mutex<HashMap<PathBuf, AttrStackCacheEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, AttrStackCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn attr_tree_cache() -> &'static Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>> {
-    static CACHE: OnceLock<Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+pub(crate) struct AttrStackCacheEntry {
+    pub(crate) file_stamps: Vec<AttrFileStamp>,
+    pub(crate) dir_stamps: Vec<AttrDirStamp>,
+    pub(crate) parsed: Arc<ParsedGitAttributes>,
 }
 
 /// `symlink_metadata`-based stamp, matching `read_gitattributes_maybe_symlink`
 /// (symlinked `.gitattributes` files are skipped by the parser, but stamping
 /// the link still detects replacement by a regular file).
-fn attr_file_stamp(path: &Path) -> Option<(SystemTime, u64)> {
+pub(crate) fn attr_file_stamp(path: &Path) -> Option<(SystemTime, u64)> {
     fs::symlink_metadata(path)
         .ok()
         .and_then(|m| Some((m.modified().ok()?, m.len())))
 }
 
-fn attr_dir_stamp(path: &Path) -> Option<SystemTime> {
+pub(crate) fn attr_dir_stamp(path: &Path) -> Option<SystemTime> {
     fs::symlink_metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())
 }
 
-fn attr_stamps_valid(entry: &AttrStackCacheEntry) -> bool {
+pub(crate) fn attr_stamps_valid(entry: &AttrStackCacheEntry) -> bool {
     entry
         .file_stamps
         .iter()
@@ -967,7 +947,7 @@ fn attr_stamps_valid(entry: &AttrStackCacheEntry) -> bool {
 /// `crlf::load_gitattributes_for_checkout` (index/odb-sourced), not this
 /// work-tree stack. Creating or deleting entries in the work-tree *root*
 /// still bumps its stamped mtime and forces a fresh walk.
-fn collect_stack_stamps(
+pub(crate) fn collect_stack_stamps(
     repo: &Repository,
     work_tree: &Path,
 ) -> std::result::Result<(Vec<AttrFileStamp>, Vec<AttrDirStamp>), crate::error::Error> {
@@ -994,34 +974,10 @@ pub fn load_gitattributes_stack(
     repo: &Repository,
     work_tree: &Path,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
-    let key = (repo.git_dir.clone(), work_tree.to_path_buf());
-    {
-        let cache = attr_stack_cache()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(entry) = cache.get(&key) {
-            if attr_stamps_valid(entry) {
-                return Ok((*entry.parsed).clone());
-            }
-        }
-    }
-    let (file_stamps, dir_stamps) = collect_stack_stamps(repo, work_tree)?;
-    let parsed = load_gitattributes_stack_uncached(repo, work_tree)?;
-    let mut cache = attr_stack_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.insert(
-        key,
-        AttrStackCacheEntry {
-            file_stamps,
-            dir_stamps,
-            parsed: Arc::new(parsed.clone()),
-        },
-    );
-    Ok(parsed)
+    repo.caches().load_gitattributes_stack(repo, work_tree)
 }
 
-fn load_gitattributes_stack_uncached(
+pub(crate) fn load_gitattributes_stack_uncached(
     repo: &Repository,
     work_tree: &Path,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
@@ -1113,41 +1069,10 @@ fn load_gitattributes_stack_uncached(
 pub fn load_gitattributes_bare(
     repo: &Repository,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
-    let key = repo.git_dir.clone();
-    {
-        let cache = attr_bare_cache()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(entry) = cache.get(&key) {
-            if attr_stamps_valid(entry) {
-                return Ok((*entry.parsed).clone());
-            }
-        }
-    }
-    let mut file_stamps = Vec::new();
-    if let Some(g) = global_attributes_path(repo)? {
-        let stamp = attr_file_stamp(&g);
-        file_stamps.push((g, stamp));
-    }
-    let info = repo.git_dir.join("info/attributes");
-    let stamp = attr_file_stamp(&info);
-    file_stamps.push((info, stamp));
-    let parsed = load_gitattributes_bare_uncached(repo)?;
-    let mut cache = attr_bare_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.insert(
-        key,
-        AttrStackCacheEntry {
-            file_stamps,
-            dir_stamps: Vec::new(),
-            parsed: Arc::new(parsed.clone()),
-        },
-    );
-    Ok(parsed)
+    repo.caches().load_gitattributes_bare(repo)
 }
 
-fn load_gitattributes_bare_uncached(
+pub(crate) fn load_gitattributes_bare_uncached(
     repo: &Repository,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
     let mut merged = ParsedGitAttributes::default();
@@ -1197,25 +1122,15 @@ fn load_gitattributes_bare_uncached(
 
 /// Read `.gitattributes` blob from a tree object at `tree_oid`, recursively.
 pub fn load_gitattributes_from_tree(
-    odb: &Odb,
+    repo: &Repository,
     tree_oid: &ObjectId,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
-    // Tree objects are content-addressed and immutable: no revalidation.
-    {
-        let cache = attr_tree_cache()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(parsed) = cache.get(tree_oid) {
-            return Ok((**parsed).clone());
-        }
-    }
-    let mut merged = ParsedGitAttributes::default();
-    walk_tree_attrs(odb, tree_oid, "", &mut merged)?;
-    let mut cache = attr_tree_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.insert(*tree_oid, Arc::new(merged.clone()));
-    Ok(merged)
+    repo.caches()
+        .load_gitattributes_from_tree_cached(&repo.odb, tree_oid, || {
+            let mut merged = ParsedGitAttributes::default();
+            walk_tree_attrs(&repo.odb, tree_oid, "", &mut merged)?;
+            Ok(merged)
+        })
 }
 
 fn walk_tree_attrs(
@@ -1287,7 +1202,7 @@ pub fn load_gitattributes_for_diff(
     let (treeish, ignore_bad_tree) = resolve_attr_treeish(repo, None)?;
     if let Some(spec) = treeish.filter(|s| !s.is_empty()) {
         match resolve_tree_oid(repo, &spec) {
-            Ok(oid) => return load_gitattributes_from_tree(&repo.odb, &oid),
+            Ok(oid) => return load_gitattributes_from_tree(repo, &oid),
             Err(_) if ignore_bad_tree => {}
             Err(_) => {
                 return Err(crate::error::Error::InvalidRef(format!(

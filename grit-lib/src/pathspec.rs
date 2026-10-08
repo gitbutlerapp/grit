@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use crate::crlf::path_gitattribute_value;
 use crate::crlf::AttrRule;
 use crate::error::{Error, Result as LibResult};
-use crate::precompose_config::pathspec_precompose_enabled;
 use crate::unicode_normalization::precompose_utf8_path;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
 
@@ -1113,6 +1112,8 @@ pub struct PathspecMatchContext {
     pub is_directory: bool,
     /// The entry is a git submodule / gitlink (`160000`).
     pub is_git_submodule: bool,
+    /// NFC-normalize pathspec and path when matching (per-repository `core.precomposeunicode`).
+    pub precompose_paths: bool,
 }
 
 /// Returns whether `path` matches the pathspec `spec` with default (file) context.
@@ -1130,12 +1131,12 @@ pub fn matches_pathspec(spec: &str, path: &str) -> bool {
 /// `matches_pathspec` + directory semantics).
 #[must_use]
 pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchContext) -> bool {
-    let spec_nfc: Cow<'_, str> = if pathspec_precompose_enabled() {
+    let spec_nfc: Cow<'_, str> = if ctx.precompose_paths {
         precompose_utf8_path(spec)
     } else {
         Cow::Borrowed(spec)
     };
-    let path_nfc: Cow<'_, str> = if pathspec_precompose_enabled() {
+    let path_nfc: Cow<'_, str> = if ctx.precompose_paths {
         precompose_utf8_path(path)
     } else {
         Cow::Borrowed(path)
@@ -1227,6 +1228,7 @@ pub fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
     PathspecMatchContext {
         is_directory: ty == 0o040000,
         is_git_submodule: ty == 0o160000,
+        precompose_paths: false,
     }
 }
 
@@ -1279,16 +1281,8 @@ pub fn matches_ls_tree_pathspec(
         return pathspec_matches_tail(pattern, path_for_match, magic);
     }
 
-    let spec_nfc: Cow<'_, str> = if pathspec_precompose_enabled() {
-        precompose_utf8_path(pattern)
-    } else {
-        Cow::Borrowed(pattern)
-    };
-    let path_nfc: Cow<'_, str> = if pathspec_precompose_enabled() {
-        precompose_utf8_path(path_for_match)
-    } else {
-        Cow::Borrowed(path_for_match)
-    };
+    let spec_nfc: Cow<'_, str> = Cow::Borrowed(pattern);
+    let path_nfc: Cow<'_, str> = Cow::Borrowed(path_for_match);
     let pattern = spec_nfc.as_ref();
     let path = path_nfc.as_ref();
 

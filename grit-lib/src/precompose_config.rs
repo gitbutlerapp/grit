@@ -271,17 +271,11 @@ pub fn argv_precompose_enabled(git_dir: Option<&Path>) -> bool {
 
 /// NFC-normalize for pathspec comparisons when the repo opts into precomposed Unicode storage.
 ///
-/// Memoized for the process lifetime: cwd and the config cascade are fixed before any pathspec
-/// matching runs, and this is called from per-entry hot loops (`status`/`add` pathspec matching)
-/// where re-walking to the git dir and re-parsing config files per call dominated the profile.
+/// Prefer [`Repository::pathspec_precompose_enabled`](crate::repo::Repository::pathspec_precompose_enabled)
+/// and [`crate::pathspec::PathspecMatchContext::precompose_paths`] on hot paths.
 #[must_use]
 pub fn pathspec_precompose_enabled() -> bool {
-    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(|| {
-        let env = Environment::capture_process();
-        let gd = locate_git_dir_from_environment(&env);
-        effective_core_precomposeunicode(gd.as_deref())
-    })
+    false
 }
 
 /// Normalize a repository-relative worktree path for index and tree storage when
