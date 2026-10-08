@@ -800,11 +800,11 @@ impl Odb {
 
     /// Check whether an object exists in a specific objects directory.
     fn exists_in_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
+        if oid.loose_path_in(objects_dir).is_file() {
+            return true;
+        }
         self.with_pack_store_for(objects_dir, || {
             if object_in_local_packs(objects_dir, oid) {
-                return true;
-            }
-            if oid.loose_path_in(objects_dir).is_file() {
                 return true;
             }
             if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
@@ -876,13 +876,13 @@ impl Odb {
     }
 
     fn freshen_object_in_objects_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
+        let loose = objects_dir
+            .join(oid.loose_prefix())
+            .join(oid.loose_suffix());
+        if loose.is_file() {
+            return self.touch_object_mtime(&loose).is_some();
+        }
         self.with_pack_store_for(objects_dir, || {
-            let loose = objects_dir
-                .join(oid.loose_prefix())
-                .join(oid.loose_suffix());
-            if loose.is_file() {
-                return self.touch_object_mtime(&loose).is_some();
-            }
             let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
                 return false;
             };
