@@ -2515,6 +2515,7 @@ fn push_index_blob_worktree_diff(
     meta: fs::Metadata,
     index_mtime: Option<(u32, u32)>,
     trust_filemode: bool,
+    stat_policy: crate::index::StatMatchPolicy,
     file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
     conv: &crate::crlf::ConversionConfig,
     materialize_dirty_blobs: bool,
@@ -2550,7 +2551,7 @@ fn push_index_blob_worktree_diff(
     }
 
     let worktree_mode = mode_from_metadata(&meta);
-    let stat_same = stat_matches(ie, &meta);
+    let stat_same = stat_matches_with_policy(ie, &meta, stat_policy);
     if trust_filemode && stat_same && worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
         result.push(DiffEntry {
@@ -2566,7 +2567,9 @@ fn push_index_blob_worktree_diff(
         return Ok(());
     }
 
-    if stat_same && (!trust_filemode || worktree_mode == ie.mode) && !entry_is_racy(ie, index_mtime)
+    if stat_same
+        && (!trust_filemode || worktree_mode == ie.mode)
+        && !entry_is_racy_with_policy(ie, index_mtime, stat_policy)
     {
         return Ok(());
     }
@@ -2721,6 +2724,7 @@ fn diff_index_to_worktree_inner(
         .get_bool("core.filemode")
         .and_then(|r| r.ok())
         .unwrap_or(true);
+    let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
     let ignorecase = config
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
@@ -3019,6 +3023,7 @@ fn diff_index_to_worktree_inner(
                             index_mtime,
                             &conv,
                             &file_attrs_for,
+                            stat_policy,
                         ) {
                             index_stat_refresh_changed = true;
                         }
@@ -3026,7 +3031,10 @@ fn diff_index_to_worktree_inner(
                     let ie = &index.entries[entry_index];
                     if parallel_blob_work {
                         let worktree_mode = mode_from_metadata(&meta);
-                        if trust_filemode && stat_matches(ie, &meta) && worktree_mode != ie.mode {
+                        if trust_filemode
+                            && stat_matches_with_policy(ie, &meta, stat_policy)
+                            && worktree_mode != ie.mode
+                        {
                             let path_owned = path_str_ref.to_owned();
                             result.push(DiffEntry {
                                 status: DiffStatus::Modified,
@@ -3038,9 +3046,9 @@ fn diff_index_to_worktree_inner(
                                 new_oid: ie.oid,
                                 score: None,
                             });
-                        } else if !(stat_matches(ie, &meta)
+                        } else if !(stat_matches_with_policy(ie, &meta, stat_policy)
                             && (!trust_filemode || worktree_mode == ie.mode)
-                            && !entry_is_racy(ie, index_mtime))
+                            && !entry_is_racy_with_policy(ie, index_mtime, stat_policy))
                         {
                             staging_hash_jobs.push(StagingHashJob {
                                 entry_index,
@@ -3061,6 +3069,7 @@ fn diff_index_to_worktree_inner(
                             meta,
                             index_mtime,
                             trust_filemode,
+                            stat_policy,
                             &file_attrs_for,
                             &conv,
                             materialize_dirty_blobs,
@@ -3224,14 +3233,28 @@ impl SymlinkDirCache {
 /// the index was read (before any rewrite). When `index_mtime` is `None`, returns `false`.
 #[must_use]
 pub fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
+    entry_is_racy_with_policy(ie, index_mtime, crate::index::StatMatchPolicy::default())
+}
+
+/// Like [`entry_is_racy`], honoring `core.usenanosec` for sub-second racy detection.
+#[must_use]
+pub fn entry_is_racy_with_policy(
+    ie: &IndexEntry,
+    index_mtime: Option<(u32, u32)>,
+    policy: crate::index::StatMatchPolicy,
+) -> bool {
     let Some((index_mtime_sec, index_mtime_nsec)) = index_mtime else {
         return false;
     };
     if index_mtime_sec == 0 {
         return false;
     }
-    index_mtime_sec < ie.mtime_sec
-        || (index_mtime_sec == ie.mtime_sec && index_mtime_nsec <= ie.mtime_nsec)
+    if policy.use_nanosec {
+        index_mtime_sec < ie.mtime_sec
+            || (index_mtime_sec == ie.mtime_sec && index_mtime_nsec <= ie.mtime_nsec)
+    } else {
+        index_mtime_sec <= ie.mtime_sec
+    }
 }
 
 /// Clear racily-clean cache lines on entries whose blob no longer matches the worktree.
@@ -3556,48 +3579,58 @@ fn worktree_effective_oid_matches_index(
     }
 }
 
+/// Whether worktree metadata matches cached index stat data (Git `ie_match_stat` / `match_stat_data`).
+#[must_use]
 pub fn stat_matches(ie: &IndexEntry, meta: &fs::Metadata) -> bool {
-    // Compare size
-    if meta.len() as u32 != ie.size {
+    stat_matches_with_policy(ie, meta, crate::index::StatMatchPolicy::default())
+}
+
+/// Like [`stat_matches`], honoring `core.trustctime`, `core.checkstat`, and `core.usenanosec`.
+#[must_use]
+pub fn stat_matches_with_policy(
+    ie: &IndexEntry,
+    meta: &fs::Metadata,
+    policy: crate::index::StatMatchPolicy,
+) -> bool {
+    if crate::index::munge_index_size(meta.len()) != ie.size {
         return false;
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        // Compare mtime (seconds + nanoseconds)
         if meta.mtime() as u32 != ie.mtime_sec {
             return false;
         }
-        if meta.mtime_nsec() as u32 != ie.mtime_nsec {
+        if policy.use_nanosec && policy.check_stat && meta.mtime_nsec() as u32 != ie.mtime_nsec {
             return false;
         }
-        // Compare ctime (seconds + nanoseconds)
-        if meta.ctime() as u32 != ie.ctime_sec {
-            return false;
+        if policy.trust_ctime && policy.check_stat {
+            if meta.ctime() as u32 != ie.ctime_sec {
+                return false;
+            }
+            if policy.use_nanosec && meta.ctime_nsec() as u32 != ie.ctime_nsec {
+                return false;
+            }
         }
-        if meta.ctime_nsec() as u32 != ie.ctime_nsec {
-            return false;
-        }
-        // Compare inode. Device (`st_dev`) is deliberately NOT compared: Git
-        // leaves `USE_STDEV` off by default because device numbers aren't stable
-        // (across remounts, and some index writers store 0), so comparing it
-        // forces a needless re-hash of the whole tree. Match Git and ignore it.
-        if meta.ino() as u32 != ie.ino {
+        if policy.check_stat && meta.ino() as u32 != ie.ino {
             return false;
         }
     }
     #[cfg(not(unix))]
     {
         use std::time::UNIX_EPOCH;
-        if let Ok(mtime) = meta.modified() {
-            if let Ok(dur) = mtime.duration_since(UNIX_EPOCH) {
-                if dur.as_secs() as u32 != ie.mtime_sec {
-                    return false;
-                }
-                if dur.subsec_nanos() != ie.mtime_nsec {
-                    return false;
-                }
-            }
+        let Some(dur) = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        else {
+            return false;
+        };
+        if dur.as_secs() as u32 != ie.mtime_sec {
+            return false;
+        }
+        if policy.use_nanosec && policy.check_stat && dur.subsec_nanos() != ie.mtime_nsec {
+            return false;
         }
     }
     true
@@ -3725,6 +3758,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
+    let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
 
     let blob_dirs = group_blob_entries_by_dir(index);
     let work_tree_owned = work_tree.to_path_buf();
@@ -3765,6 +3799,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
                 index_mtime,
                 &conv,
                 &file_attrs_for,
+                stat_policy,
             ) {
                 changed = true;
             }
@@ -3784,6 +3819,7 @@ fn refresh_index_blob_stat_from_metadata(
     index_mtime: Option<(u32, u32)>,
     conv: &crate::crlf::ConversionConfig,
     file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
+    stat_policy: crate::index::StatMatchPolicy,
 ) -> bool {
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 
@@ -3793,7 +3829,7 @@ fn refresh_index_blob_stat_from_metadata(
     if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
         return false;
     }
-    if !stat_matches(ie, meta) {
+    if !stat_matches_with_policy(ie, meta, stat_policy) {
         let file_attrs = file_attrs_for(path);
         let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
             .map(|oid| oid == ie.oid)
@@ -3802,7 +3838,7 @@ fn refresh_index_blob_stat_from_metadata(
             return false;
         }
         let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
-        if index_entry_stat_matches(ie, &refreshed) {
+        if index_entry_stat_matches(ie, &refreshed, stat_policy) {
             return false;
         }
         ie.ctime_sec = refreshed.ctime_sec;
@@ -3816,7 +3852,7 @@ fn refresh_index_blob_stat_from_metadata(
         ie.size = refreshed.size;
         return true;
     }
-    if entry_is_racy(ie, index_mtime) {
+    if entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
         let file_attrs = file_attrs_for(path);
         let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
             .map(|oid| oid == ie.oid)
@@ -3827,7 +3863,7 @@ fn refresh_index_blob_stat_from_metadata(
         }
     }
     let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
-    if index_entry_stat_matches(ie, &refreshed) {
+    if index_entry_stat_matches(ie, &refreshed, stat_policy) {
         return false;
     }
     ie.ctime_sec = refreshed.ctime_sec;
@@ -3842,16 +3878,12 @@ fn refresh_index_blob_stat_from_metadata(
     true
 }
 
-fn index_entry_stat_matches(a: &IndexEntry, b: &IndexEntry) -> bool {
-    a.ctime_sec == b.ctime_sec
-        && a.ctime_nsec == b.ctime_nsec
-        && a.mtime_sec == b.mtime_sec
-        && a.mtime_nsec == b.mtime_nsec
-        && a.dev == b.dev
-        && a.ino == b.ino
-        && a.uid == b.uid
-        && a.gid == b.gid
-        && a.size == b.size
+fn index_entry_stat_matches(
+    a: &IndexEntry,
+    b: &IndexEntry,
+    policy: crate::index::StatMatchPolicy,
+) -> bool {
+    crate::index::index_entries_stat_equivalent(a, b, policy)
 }
 
 /// Whether path-only checkout can skip writing a blob because the worktree is up to date.
@@ -4233,6 +4265,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
     all_paths.extend(index_paths.iter().cloned());
     all_paths.extend(unmerged_only_paths.iter().cloned());
 
+    let index_mtime = index_mtime_for_diff(index, None);
+    let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
     let mut result = Vec::new();
 
     for path in &all_paths {
@@ -4371,7 +4405,9 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                 let index_matches_tree = ie.oid == te.oid && ie.mode == te.mode;
 
                 // Fully clean: index matches `HEAD`, worktree matches index, stat cache fresh.
-                if index_matches_tree && wt_mode == te.mode && stat_matches(ie, meta) {
+                let stat_trusted = stat_matches_with_policy(ie, meta, stat_policy)
+                    && !entry_is_racy_with_policy(ie, index_mtime, stat_policy);
+                if index_matches_tree && wt_mode == te.mode && stat_trusted {
                     continue;
                 }
 
@@ -8388,6 +8424,18 @@ mod smudge_racily_clean_tests {
         assert!(!super::index_stat_cache_trustworthy(None));
         assert!(!super::index_stat_cache_trustworthy(Some((0, 0))));
         assert!(super::index_stat_cache_trustworthy(Some((1, 0))));
+    }
+
+    #[test]
+    fn stat_matches_ignores_subsecond_nsec_by_default() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        fs::write(wt.join("f.txt"), b"x\n").expect("write");
+        pin_mtime_and_sample(&wt.join("f.txt"), 100, 0);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let mut entry = entry_from_metadata(&meta, b"f.txt", zero_oid(), MODE_REGULAR);
+        entry.mtime_nsec = entry.mtime_nsec.wrapping_add(1_000_000);
+        assert!(stat_matches(&entry, &meta));
     }
 
     #[test]

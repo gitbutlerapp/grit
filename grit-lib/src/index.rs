@@ -44,6 +44,98 @@ pub const MODE_GITLINK: u32 = 0o160000;
 /// File mode for a directory (tree) entry — only used in tree objects, not index.
 pub const MODE_TREE: u32 = 0o040000;
 
+/// Git `match_stat_data` policy (`core.trustctime`, `core.checkstat`, `core.usenanosec`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatMatchPolicy {
+    /// When true, compare ctime fields when `check_stat` is enabled.
+    pub trust_ctime: bool,
+    /// When true, compare owner, inode, device, and nanoseconds (if `use_nanosec`).
+    pub check_stat: bool,
+    /// When true with `check_stat`, compare sub-second mtime/ctime fractions.
+    pub use_nanosec: bool,
+}
+
+impl Default for StatMatchPolicy {
+    fn default() -> Self {
+        Self {
+            trust_ctime: true,
+            check_stat: true,
+            use_nanosec: false,
+        }
+    }
+}
+
+impl StatMatchPolicy {
+    /// Load policy from repository config, using Git's defaults for unset keys.
+    #[must_use]
+    pub fn from_config(config: Option<&ConfigSet>) -> Self {
+        let mut policy = Self::default();
+        let Some(cfg) = config else {
+            return policy;
+        };
+        if let Some(trust) = cfg.get_bool("core.trustctime").and_then(|r| r.ok()) {
+            policy.trust_ctime = trust;
+        }
+        if let Some(raw) = cfg.get("core.checkstat") {
+            policy.check_stat = match raw.to_ascii_lowercase().as_str() {
+                "minimal" => false,
+                "default" => true,
+                other => cfg
+                    .get_bool("core.checkstat")
+                    .and_then(|r| r.ok())
+                    .unwrap_or(!other.eq_ignore_ascii_case("minimal")),
+            };
+        }
+        if let Some(use_ns) = cfg.get_bool("core.usenanosec").and_then(|r| r.ok()) {
+            policy.use_nanosec = use_ns;
+        }
+        policy
+    }
+}
+
+/// Map `st_size` into the 32-bit size stored in the index (Git `munge_st_size`).
+#[must_use]
+pub fn munge_index_size(st_size: u64) -> u32 {
+    let sd_size = st_size as u32;
+    if sd_size == 0 && st_size != 0 {
+        0x8000_0000
+    } else {
+        sd_size
+    }
+}
+
+/// Whether two index entries carry the same stat fields under `policy`.
+#[must_use]
+pub fn index_entries_stat_equivalent(
+    a: &IndexEntry,
+    b: &IndexEntry,
+    policy: StatMatchPolicy,
+) -> bool {
+    if a.size != b.size {
+        return false;
+    }
+    if a.mtime_sec != b.mtime_sec {
+        return false;
+    }
+    if policy.use_nanosec && policy.check_stat && a.mtime_nsec != b.mtime_nsec {
+        return false;
+    }
+    if policy.trust_ctime && policy.check_stat {
+        if a.ctime_sec != b.ctime_sec {
+            return false;
+        }
+        if policy.use_nanosec && a.ctime_nsec != b.ctime_nsec {
+            return false;
+        }
+    }
+    if policy.check_stat
+        && (a.dev != b.dev || a.ino != b.ino || a.uid != b.uid || a.gid != b.gid)
+    {
+        return false;
+    }
+    true
+}
+
 /// Git index extension signature `sdir` (sparse directory entries present).
 const INDEX_EXT_SPARSE_DIRECTORIES: u32 = u32::from_be_bytes(*b"sdir");
 /// Git index extension signature `UNTR` (untracked cache).
@@ -3085,7 +3177,7 @@ impl IndexStatFields {
                 ino: meta.ino() as u32,
                 uid: meta.uid(),
                 gid: meta.gid(),
-                size: meta.size() as u32,
+                size: munge_index_size(meta.size()),
             }
         }
         #[cfg(not(unix))]
@@ -3105,7 +3197,7 @@ impl IndexStatFields {
                 ino: 0,
                 uid: 0,
                 gid: 0,
-                size: meta.len() as u32,
+                size: munge_index_size(meta.len()),
             }
         }
     }
@@ -3163,7 +3255,7 @@ pub fn entry_from_metadata(
             mode,
             uid: meta.uid(),
             gid: meta.gid(),
-            size: meta.size() as u32,
+            size: munge_index_size(meta.size()),
             oid,
             flags: rel_path.len().min(0xFFF) as u16,
             flags_extended: None,
@@ -3189,7 +3281,7 @@ pub fn entry_from_metadata(
             mode,
             uid: 0,
             gid: 0,
-            size: meta.len() as u32,
+            size: munge_index_size(meta.len()),
             oid,
             flags: rel_path.len().min(0xFFF) as u16,
             flags_extended: None,

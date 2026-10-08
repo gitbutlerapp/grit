@@ -24,6 +24,58 @@ fn sparse_directory_placeholder_count(index: &Index) -> usize {
         .count()
 }
 
+#[test]
+fn status_trusts_git_refreshed_index_without_rehashing() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+
+    const FILE_COUNT: usize = 256;
+    for i in 0..FILE_COUNT {
+        let name = format!("file-{i:03}.txt");
+        fs::write(repo_root.join(&name), format!("content {i}\n")).expect("write");
+    }
+    git(repo_root, &["add", "."]);
+    git(repo_root, &["commit", "-qm", "initial"]);
+    git(repo_root, &["update-index", "--refresh"]);
+
+    let grit_repo =
+        Repository::open(&repo_root.join(".git"), Some(repo_root)).expect("open grit repo");
+    let index_path = grit_repo.index_path();
+    let index_mtime_before = fs::metadata(&index_path)
+        .expect("index metadata")
+        .modified()
+        .expect("index mtime");
+
+    let model = status(&grit_repo, &StatusOptions::default(), &mut NullProgress)
+        .expect("status on git-refreshed index");
+    assert!(
+        model.unstaged.is_empty(),
+        "git-refreshed index must be clean in grit status"
+    );
+
+    let index_mtime_after = fs::metadata(&index_path)
+        .expect("index metadata")
+        .modified()
+        .expect("index mtime");
+    assert_eq!(
+        index_mtime_after, index_mtime_before,
+        "grit status must not rewrite index when git stat cache already matches the worktree"
+    );
+
+    let second_start = Instant::now();
+    let _second =
+        status(&grit_repo, &StatusOptions::default(), &mut NullProgress).expect("second status");
+    let second_elapsed = second_start.elapsed();
+    assert!(
+        second_elapsed < Duration::from_millis(150),
+        "warm status on git-refreshed index should stay fast (got {:?})",
+        second_elapsed
+    );
+}
+
 fn touch_all_tracked(repo: &Path) {
     let out = git(repo, &["ls-files", "-z"]);
     for path in out.split('\0').filter(|p| !p.is_empty()) {
@@ -49,6 +101,9 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
     git(repo_root, &["add", "."]);
     git(repo_root, &["commit", "-qm", "initial"]);
 
+    // Git's default stat match uses whole seconds (`core.usenanosec` off); bump into a new second
+    // so mtime-only changes are visible.
+    std::thread::sleep(Duration::from_secs(1));
     touch_all_tracked(repo_root);
 
     let grit_repo =

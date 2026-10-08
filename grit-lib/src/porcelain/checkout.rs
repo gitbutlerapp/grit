@@ -75,6 +75,28 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
             continue;
         };
         let mode = parse_git_mode(&change.new_mode);
+        if let Some(existing) = index.get(path.as_bytes(), 0) {
+            if crate::diff::path_checkout_skip_blob_write_when_up_to_date(
+                &repo.odb,
+                &repo.git_dir,
+                &work_tree,
+                &index,
+                existing,
+                &change.new_oid,
+                mode,
+                path,
+            )? {
+                let abs = work_tree.join(path);
+                let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
+                new_entries.push(entry_from_metadata(
+                    &meta,
+                    path.as_bytes(),
+                    change.new_oid,
+                    mode,
+                ));
+                continue;
+            }
+        }
         let object = repo.odb.read(&change.new_oid)?;
         let entry = write_checkout_entry(
             &work_tree,

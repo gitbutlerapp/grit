@@ -5,6 +5,9 @@
 //! the index once, refreshes stat data when needed, and computes those slices without rename
 //! detection, ahead/behind, stash counts, or in-progress operation state.
 
+use std::sync::{Arc, Mutex};
+
+use crate::config::ConfigSet;
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffEntry, DiffStatus,
 };
@@ -14,6 +17,7 @@ use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
 use crate::repo::Repository;
 use crate::state::resolve_head;
+use crate::worktree_rules::WorktreeRules;
 
 /// Loaded index and HEAD tree for worktree mutation guards.
 pub struct WorktreeSnapshot {
@@ -23,13 +27,13 @@ pub struct WorktreeSnapshot {
     pub head_tree: Option<ObjectId>,
 }
 
-/// Load the index (with stat refresh) and resolve HEAD's tree OID.
+/// Load the index and resolve HEAD's tree OID (no worktree scan).
 ///
 /// # Errors
 ///
 /// Returns errors from index I/O, ODB reads, or when the repository has no work tree.
 pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
-    let work_tree = repo
+    let _work_tree = repo
         .work_tree
         .as_deref()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
@@ -40,19 +44,6 @@ pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
         Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Index::new(),
         Err(e) => return Err(e),
     };
-    let index_mtime = index.source_mtime;
-    if crate::diff::refresh_index_stat_content_verified(
-        &repo.odb,
-        &repo.git_dir,
-        &mut index,
-        work_tree,
-        index_mtime,
-        None,
-        None,
-    )? && repo.try_write_index(&mut index)?
-    {
-        index.source_mtime = crate::index::index_file_mtime(&index_path);
-    }
     let _ = index.expand_sparse_directory_placeholders(&repo.odb);
 
     let head = resolve_head(&repo.git_dir)?;
@@ -67,21 +58,37 @@ pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
     Ok(WorktreeSnapshot { index, head_tree })
 }
 
-/// Staged and unstaged diffs for the current worktree (no rename detection).
+/// Staged and unstaged diffs for the current worktree (no rename detection), with stat refresh
+/// in the same worktree pass as the unstaged diff.
 fn local_change_diffs(
     repo: &Repository,
     index: &mut Index,
     head_tree: Option<ObjectId>,
-) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>)> {
+) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
     let work_tree = repo
         .work_tree
         .as_deref()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
+    let config = ConfigSet::load(
+        &crate::environment::Environment::capture_process(),
+        Some(&repo.git_dir),
+        true,
+    )
+    .ok()
+    .map(Arc::new);
+    let worktree_rules = match config.as_ref() {
+        Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
+            repo,
+            index,
+            cfg.clone(),
+        )?))),
+        None => None,
+    };
 
     let staged = diff_index_to_tree(&repo.odb, index, head_tree.as_ref(), false)?;
-    let (unstaged, _index_changed) = diff_index_to_worktree_with_options(
+    let (unstaged, index_changed) = diff_index_to_worktree_with_options(
         &repo.odb,
         index,
         work_tree,
@@ -89,15 +96,23 @@ fn local_change_diffs(
             index_mtime: crate::diff::index_mtime_for_diff(index, index_mtime),
             ignore_submodule_untracked: true,
             repository_git_dir: Some(repo.git_dir.clone()),
+            refresh_index_stat_in_pass: true,
+            config,
+            worktree_rules,
             ..Default::default()
         },
     )?;
-    Ok((staged, unstaged))
+    Ok((staged, unstaged, index_changed))
 }
 
 fn ensure_worktree_clean_with_message(repo: &Repository, message: &str) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let (staged, unstaged) = local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
+    let index_path = repo.index_path();
+    let (staged, unstaged, index_changed) =
+        local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
+    if index_changed && repo.try_write_index(&mut snapshot.index)? {
+        snapshot.index.source_mtime = index_file_mtime(&index_path);
+    }
     if !staged.is_empty() || !unstaged.is_empty() {
         return Err(Error::Message(message.into()));
     }
@@ -147,7 +162,12 @@ pub fn prepare_tree_switch(
     to_tree: &ObjectId,
 ) -> Result<TreeSwitchPlan> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let (staged, unstaged) = local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
+    let index_path = repo.index_path();
+    let (staged, unstaged, index_changed) =
+        local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
+    if index_changed && repo.try_write_index(&mut snapshot.index)? {
+        snapshot.index.source_mtime = index_file_mtime(&index_path);
+    }
     if !staged.is_empty() || !unstaged.is_empty() {
         return Err(Error::Message(
             "you have uncommitted changes — commit them before switching".into(),
