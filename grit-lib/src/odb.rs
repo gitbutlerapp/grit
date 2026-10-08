@@ -634,8 +634,8 @@ impl Odb {
 
     fn sync_delta_base_cache_limit(&self) {
         self.delta_base_cache_sync.get_or_init(|| {
-            if let Some(git_dir) = &self.config_git_dir {
-                let cfg = crate::config::ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+            if self.config_git_dir.is_some() {
+                let cfg = self.load_config_cascade().unwrap_or_default();
                 pack::configure_delta_base_cache_from_config(Some(&cfg));
             }
         });
