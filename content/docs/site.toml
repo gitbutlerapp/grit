@@ -67,4 +67,8 @@ label = "Benchmarks"
 
 # Baseline JSON paths are repo-root-relative; add entries when roadmap item 2 commits them on main.
 [benchmarks]
-baseline = ["grit-utils/baselines/hot-paths-before.json"]
+baseline = [
+  "grit-utils/baselines/hot-paths-after.json",
+  "grit-utils/baselines/suite-after-LH.json",
+  "grit-utils/baselines/commit-after-LH.json",
+]

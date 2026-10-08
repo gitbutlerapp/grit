@@ -7,8 +7,9 @@ use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::render::{render_markdown, render_text};
 use grit_utils::scenarios::{
-    run_add_suite, run_hot_path_suite, run_prepare_add, run_prepare_merge, run_prepare_pick,
-    run_prepare_pick_series, run_prepare_switch, run_status_suite, RunConfig,
+    run_add_suite, run_commit_suite, run_hot_path_suite, run_prepare_add, run_prepare_commit,
+    run_prepare_merge, run_prepare_pick, run_prepare_pick_series, run_prepare_switch,
+    run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use time::OffsetDateTime;
@@ -54,6 +55,11 @@ enum Cmd {
         #[arg(long, value_delimiter = ',', default_values_t = vec![100, 1_000, 10_000, 50_000])]
         sizes: Vec<usize>,
     },
+    /// Benchmark `grit commit` (stage all + commit) at selected repo sizes
+    Commit {
+        #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
+        sizes: Vec<usize>,
+    },
     /// Switch / pick / merge hot-path scenarios (L/H sizes by default)
     HotPaths {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
@@ -97,6 +103,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PreparePickSeries {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareCommit {
         #[arg(long)]
         git: PathBuf,
     },
@@ -176,6 +187,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_pick_series(&git);
         }
+        Cmd::PrepareCommit { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_commit(&git);
+        }
         _ => {}
     }
 
@@ -229,6 +244,11 @@ fn main() -> Result<()> {
             let cfg = run_config(&cli, false);
             run_add_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
         }
+        Cmd::Commit { sizes } => {
+            eprintln!("Running commit benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_commit_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
         Cmd::HotPaths {
             sizes,
             fsmonitor_fixture,
@@ -258,7 +278,8 @@ fn main() -> Result<()> {
         | Cmd::PrepareSwitch { .. }
         | Cmd::PreparePick { .. }
         | Cmd::PrepareMerge { .. }
-        | Cmd::PreparePickSeries { .. } => unreachable!(),
+        | Cmd::PreparePickSeries { .. }
+        | Cmd::PrepareCommit { .. } => unreachable!(),
     };
 
     let rendered = render_report(&cli.format, &report)?;

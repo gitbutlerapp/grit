@@ -89,6 +89,48 @@ Compare a fresh run against the committed baseline (exit non-zero if any scenari
 ./target/release/grit-bench compare grit-utils/baselines/hot-paths-before.json /tmp/grit-bench-hot-paths.json --tolerance 0.10
 ```
 
+### Hot-path acceptance (maintenance plan step 386)
+
+Recorded on the factory VM after stacking pick/merge/stash perf work on `origin/main`. **Before** numbers are in `grit-utils/baselines/hot-paths-before.json` (2026-10-07); **after** in `grit-utils/baselines/hot-paths-after.json` (2026-10-08). Config isolation (`GIT_CONFIG_NOSYSTEM`, empty global config) applies to hot-path, suite `commit`, and related scenarios. FSMN variants: `grit-utils/baselines/hot-paths-after-fsmn.json`.
+
+**Machine (2026-10-08 acceptance):** Intel Xeon (factory VM), **4** physical / **4** logical CPUs, **16 GiB** RAM, Linux **6.12.94+**, scratch filesystem **ext4**, `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.1**, hyperfine **2.x** (see `machine` in each baseline JSON).
+
+| Scenario | L before × | L after × | H before × | H after × | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `add` | — | **2.52** | — | **4.51** | `suite-after-LH.json` (`add-{N}`) |
+| `commit` | — | **0.84** | — | **1.16** | `commit-after-LH.json` — `grit commit` vs `git add -A && git commit` |
+| `switch` | 3.29 | 3.44 | 4.89 | 5.63 | Still &gt;2× at L; H/L ≈ **1.64×** (&gt;1.25× bar) |
+| `switch-wide` | 3.70 | 2.29 | 26.5 | 2.98 | L still &gt;2×; H/L ≈ **1.30×** |
+| `pick` | 1.41 | 1.14 | 5.50 | 4.04 | L within 2×; H/L ≈ **3.54×** |
+| `merge` | 2.61 | 2.18 | 3.97 | 3.83 | L still above 2×; H/L ≈ **1.76×** |
+| `pick-series` | 12.9 | 11.2 | 21.7 | 17.7 | L &gt;2×; H/L ≈ **1.58×**; 20× sequential `grit pick` vs one `git cherry-pick` range |
+
+**Suite at L/H** (`grit-utils/baselines/suite-after-LH.json`): status scenarios remain far above 2× (dirty/clean at 10k and 100k files).
+
+**H/L acceptance (1.25× bar):** after-run medians fail the scaling check for **`switch`**, **`switch-wide`**, **`pick`**, **`merge`**, and **`pick-series`** (not only switch/pick/merge). **`commit`** and **`add`** at H are within 2× of Git but **`add`** at L/H both exceed 2× at 10k and 100k files.
+
+Two back-to-back hot-path after runs (`hot-paths-after-run1.json` vs `run2.json`) agree within **10% relative** on every scenario except `merge-100000` and `pick-100000` (~**13–14%** relative spread). The default `grit-bench compare` tolerance is an **absolute** 0.10 on the ratio, which is tighter than ±10% relative for large ratios (e.g. pick-series).
+
+### Follow-up tracking (step 386)
+
+No GitHub issues were filed from this factory run (`file_bug_report` is dogfooding-only). Track these against roadmap item 4:
+
+- **L &gt;2×:** `switch`, `switch-wide`, `merge`, `pick-series`, `add` (10k and 100k), status at L/H.
+- **H/L &gt;1.25×:** `switch`, `switch-wide`, `pick`, `merge`, `pick-series`.
+- **Repeatability:** second hot-path after-run drift on `merge-100000` and `pick-100000` (~13–14% relative).
+- **CLI gaps:** `grep`, `rebase`, `reset`, `stash push` (deferrals documented above).
+
+**Criterion** (`cargo bench -p grit-lib --bench hot_paths`, release): see factory run log — `apply_stash_L` ~52 ms median; `pick_2000_paths_L` ~621 ms (library merge/checkout path, not CLI).
+
+### Roadmap commands without a `grit` engine yet
+
+| Git command | Grit CLI | How the plan covers it |
+| --- | --- | --- |
+| `grep` | none | Deferred — no porcelain driver in scope |
+| `rebase` | none | `pick-series` grit-bench scenario (20× `grit pick`) as upper-bound proxy |
+| `reset` | none | Deferred |
+| `stash push` | none | Criterion `apply_stash` / library `apply_stash` bench; no `grit stash push` timing |
+
 ### Results
 
 <!-- grit:benchmark-tables -->

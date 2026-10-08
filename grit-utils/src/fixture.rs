@@ -88,6 +88,34 @@ pub fn dirty_repo(dir: &Path, count: usize) -> Result<()> {
     Ok(())
 }
 
+/// Modify ~20% of tracked files for a `commit` iteration (append line), then reset index with **git**.
+pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
+    use std::io::Write as _;
+
+    let files = walkdir(dir)?;
+    let modify_count = (files.len() / 5).max(1);
+    for f in files.iter().take(modify_count) {
+        if f.extension().is_some_and(|e| e == "txt") {
+            let mut file = std::fs::OpenOptions::new().append(true).open(f)?;
+            writeln!(file, "commit bench change")?;
+        }
+    }
+    let out = Command::new(git)
+        .args(["reset", "-q", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .context("run git reset")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!(
+            "git reset -q HEAD failed in {}: {}",
+            dir.display(),
+            stderr.trim()
+        );
+    }
+    Ok(())
+}
+
 /// Modify ~20% of tracked files and reset the index to HEAD with **git** (for `add` benchmarks).
 pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     let files = walkdir(dir)?;

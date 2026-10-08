@@ -19,6 +19,9 @@ cargo build --release -p grit-cli -p grit-utils
 # Add scenario
 ./target/release/grit-bench add --sizes 1000
 
+# Commit scenario (grit commit vs git add -A && git commit), config-isolated
+./target/release/grit-bench commit --sizes 10000,100000 --format json --output baselines/commit-after-LH.json
+
 # Hot-path scenarios (switch / pick / merge / pick-series) at L and H
 ./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output baselines/hot-paths-before.json
 

@@ -59,6 +59,8 @@
 ## 4. Fix super-linear hot paths
 *Workstream: Performance*
 
+**Status (2026-10-08, acceptance run step 386).** Config/attribute/ignore-once work and pick/merge/stash-apply perf stacks are on the mesh; committed **after** baselines (`grit-utils/baselines/hot-paths-after.json`, `suite-after-LH.json`, `commit-after-LH.json`) and the docs benchmarks page reflect L/H grit-bench + Criterion `hot_paths`. **L-tier gaps vs the 2× bar:** `switch`, `switch-wide`, `merge`, `pick-series`, suite `add`/`status`, and (see suite JSON) `commit` if above 2×. **`pick` at L** is ~1.14× (within 2×). **H/L scaling:** after-run medians still exceed the 1.25× bar for `switch`, `switch-wide`, `pick`, `merge`, and `pick-series` (e.g. switch-wide H/L ≈1.30×, pick-series H/L ≈1.58×). **`grep`, `rebase`, `reset`, and `stash push`** still have no `grit` CLI engine — covered by deferral or proxies (pick-series, Criterion `apply_stash`) as documented on the benchmarks page. **Follow-up perf work** from the acceptance profile is listed under **Follow-up tracking** on `content/docs/benchmarks.md` (no GitHub issues were opened from this factory run — `file_bug_report` is dogfooding-only).
+
 **Goal.** Remove the 100–1000× slowdowns found by the earlier optimization report (grep, stash, merge, rebase, reset, add). Their root cause is in `grit-lib`: reloading `.gitattributes` and the config cascade inside per-file loops.
 
 **Scope.**

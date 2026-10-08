@@ -6,7 +6,9 @@ use anyhow::{Context, Result};
 
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
-use crate::fixture::{create_repo, dirty_repo, prepare_add_iteration, scratch_dir};
+use crate::fixture::{
+    create_repo, dirty_repo, prepare_add_iteration, prepare_commit_iteration, scratch_dir,
+};
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_switch,
     setup_pick_merge_fixture, setup_pick_series_fixture, setup_switch_fixture,
@@ -58,6 +60,7 @@ pub enum PrepareKind {
     PickReset,
     MergeReset,
     PickSeriesReset,
+    CommitIteration,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -102,6 +105,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::PickReset => "prepare-pick",
         PrepareKind::MergeReset => "prepare-merge",
         PrepareKind::PickSeriesReset => "prepare-pick-series",
+        PrepareKind::CommitIteration => "prepare-commit",
     };
     shell_command(
         &cfg.prepare_bin,
@@ -270,6 +274,52 @@ pub fn run_add_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
+/// `grit commit` (stage all + commit) vs `git add -A && git commit` at each file count.
+pub fn run_commit_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    sizes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let mut scenarios = Vec::new();
+    for &size in sizes {
+        let repo = create_repo(git, size)?;
+        prepare_commit_iteration(&repo, git)
+            .with_context(|| format!("initial commit-bench setup for {size} files"))?;
+        let git_cmd = chain_shell(
+            git,
+            &[
+                vec!["add".into(), "-A".into()],
+                vec!["commit".into(), "-q".into(), "-m".into(), "bench".into()],
+            ],
+        );
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("commit-{size}"),
+                group: "commit".into(),
+                fixture: format!("synthetic-{size}"),
+                description:
+                    "stage all + commit after modifying ~20% of files (git reset between runs)"
+                        .into(),
+                grit_argv: vec!["commit".into(), "bench".into()],
+                git_argv: sh_script(git_cmd),
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::CommitIteration),
+                grit_via_shell: false,
+                git_via_shell: true,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
 fn build_report(
     git: &Path,
     grit: &Path,
@@ -307,6 +357,10 @@ fn build_report(
 /// Shared prepare hook for `add` scenarios (invoked by hyperfine `--prepare`).
 pub fn run_prepare_add(git: &Path) -> Result<()> {
     prepare_add_iteration(&scratch_dir(), git)
+}
+
+pub fn run_prepare_commit(git: &Path) -> Result<()> {
+    prepare_commit_iteration(&scratch_dir(), git)
 }
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {
