@@ -5,9 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# Every commit on main gets its own complete run: agents land on main every few minutes,
+# faster than the test job finishes, so cancelling in-progress main runs meant no commit
+# ever got a full result. PR runs still cancel superseded pushes.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   docs:
