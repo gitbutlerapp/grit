@@ -13,10 +13,10 @@ use grit_test_support::objects::HashAlgo;
 
 use grit_test_support::objects::RepoFixture;
 use midx_support::{
-    git_available, git_write_midx, head_oid, multi_pack_repo, odb_with_midx_config, patch_midx_file,
+    find_midx_chunk, git_write_midx, head_oid, multi_pack_repo, odb_with_midx_config,
+    patch_midx_file, remove_loose_object,
 };
 
-const MIDX_SIG: u32 = 0x4d49_4458;
 const CHUNK_PACKNAMES: u32 = 0x504e_414d;
 const CHUNK_OIDFANOUT: u32 = 0x4f49_4446;
 const CHUNK_OIDLOOKUP: u32 = 0x4f49_444c;
@@ -39,11 +39,19 @@ fn assert_verify_reports(objects: &std::path::Path, needle: &str) {
 
 fn assert_read_fallback_via_odb(repo: &RepoFixture, objects: &std::path::Path, oid: &ObjectId) {
     let git_dir = repo.path().join(".git");
+    remove_loose_object(objects, oid);
     clear_pack_cache();
-    // With a corrupt MIDX, reads must still succeed via pack indexes (MIDX disabled).
-    let odb = odb_with_midx_config(objects, &git_dir, false);
-    let obj = odb.read(oid).expect("Odb must read via pack indexes");
-    assert_eq!(obj.kind, grit_lib::objects::ObjectKind::Commit);
+    grit_lib::midx::evict_midx_read_cache_for_pack_dir(&objects.join("pack"));
+    let odb = odb_with_midx_config(objects, &git_dir, true);
+    let via_midx_on = odb
+        .read(oid)
+        .expect("Odb must read via pack indexes with core.multiPackIndex=true");
+    assert_eq!(via_midx_on.kind, grit_lib::objects::ObjectKind::Commit);
+    let odb_off = odb_with_midx_config(objects, &git_dir, false);
+    let via_packs = odb_off
+        .read(oid)
+        .expect("Odb must read via pack indexes with MIDX off");
+    assert_eq!(via_midx_on.data, via_packs.data);
 }
 
 fn assert_midx_read_skips_or_none(objects: &std::path::Path, oid: &ObjectId) {
@@ -52,29 +60,52 @@ fn assert_midx_read_skips_or_none(objects: &std::path::Path, oid: &ObjectId) {
 }
 
 #[test]
-fn verify_no_objects_midx_from_git_fixture() {
-    if !git_available() {
-        eprintln!("SKIP: git unavailable");
-        return;
-    }
-    let Some((repo, objects, _)) = multi_pack_repo(HashAlgo::Sha1, 1) else {
+fn verify_reports_no_objects_in_midx() {
+    let Some((repo, objects, oid)) = corrupt_fixture() else {
         eprintln!("SKIP: fixture");
         return;
     };
     let pack_dir = objects.join("pack");
-    let fixture_path = std::path::Path::new("/tmp/git-upstream/t/t5319/no-objects.midx");
-    let Ok(fixture) = std::fs::read(fixture_path) else {
-        eprintln!("SKIP: no-objects.midx fixture missing");
-        return;
-    };
-    std::fs::write(pack_dir.join("multi-pack-index"), &fixture).expect("write fixture");
-    grit_lib::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
+    patch_midx_file(&pack_dir, |data| {
+        if let Some((fanout_off, _)) = find_chunk(data, CHUNK_OIDFANOUT) {
+            for i in 0..256 {
+                data[fanout_off + i * 4..fanout_off + i * 4 + 4]
+                    .copy_from_slice(&0u32.to_be_bytes());
+            }
+        }
+        let num_chunks = data[6] as usize;
+        let toc_off = 12usize;
+        let mut oidl_off_bytes = None;
+        let mut ooff_entry = None;
+        for i in 0..num_chunks {
+            let entry = toc_off + i * 12;
+            let chunk_id = u32::from_be_bytes([
+                data[entry],
+                data[entry + 1],
+                data[entry + 2],
+                data[entry + 3],
+            ]);
+            if chunk_id == CHUNK_OIDLOOKUP {
+                oidl_off_bytes = Some(data[entry + 4..entry + 12].to_vec());
+            }
+            if chunk_id == CHUNK_OBJECTOFFSETS {
+                ooff_entry = Some(entry);
+            }
+        }
+        if let (Some(oidl_off), Some(ooff_entry)) = (oidl_off_bytes, ooff_entry) {
+            data[ooff_entry + 4..ooff_entry + 12].copy_from_slice(&oidl_off);
+            let next_entry = ooff_entry + 12;
+            if next_entry + 12 <= data.len() {
+                data[next_entry + 4..next_entry + 12].copy_from_slice(&oidl_off);
+            }
+        }
+    });
     let errs = verify_midx(&objects).expect_err("verify should fail");
     assert!(
         errs.iter().any(|e| e.contains("no oid")),
         "expected no oid error, got {errs:?}"
     );
-    let _ = repo;
+    assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
 #[test]
@@ -88,8 +119,7 @@ fn verify_bad_signature() {
         data[0..4].copy_from_slice(&[0, 0, 0, 0]);
     });
     assert_verify_reports(&objects, "signature");
-    // Loading a bad signature is fatal in Git's MIDX reader; only verify here.
-    let _ = (repo, oid);
+    assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
 #[test]
@@ -103,7 +133,7 @@ fn verify_bad_version() {
         data[4] = 99;
     });
     assert_verify_reports(&objects, "version");
-    let _ = (repo, oid);
+    assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
 #[test]
@@ -143,13 +173,17 @@ fn verify_duplicate_chunk_id() {
     };
     let pack_dir = objects.join("pack");
     patch_midx_file(&pack_dir, |data| {
-        if data.len() > 24 {
+        if data.len() > 28 {
             let dup = data[12..16].to_vec();
-            data[20..24].copy_from_slice(&dup);
+            data[24..28].copy_from_slice(&dup);
         }
     });
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| verify_midx(&objects)));
-    let _ = (repo, oid);
+    let errs = verify_midx(&objects).expect_err("duplicate chunk id");
+    assert!(
+        errs.iter().any(|e| e.contains("duplicate chunk ID")),
+        "expected duplicate chunk diagnostic, got {errs:?}"
+    );
+    assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
 #[test]
@@ -163,7 +197,12 @@ fn verify_missing_required_chunk() {
         data[6] = 0;
         data.truncate(64);
     });
-    let _ = verify_midx(&objects);
+    let errs = verify_midx(&objects).expect_err("missing chunks");
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("pack-name") || e.contains("pack name")),
+        "expected missing pack-name chunk, got {errs:?}"
+    );
     assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
@@ -181,7 +220,7 @@ fn verify_oid_fanout_out_of_order() {
         }
     });
     assert_verify_reports(&objects, "fanout");
-    let _ = (repo, oid);
+    assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
 #[test]
@@ -275,7 +314,11 @@ fn verify_v1_pack_names_out_of_order() {
             }
         }
     });
-    let _ = verify_midx(&objects);
+    let errs = verify_midx(&objects).expect_err("v1 pack name order");
+    assert!(
+        errs.iter().any(|e| e.contains("pack names out of order")),
+        "expected pack name order error, got {errs:?}"
+    );
     assert_read_fallback_via_odb(&repo, &objects, &oid);
 }
 
@@ -521,102 +564,6 @@ fn load_reuse_tables_rejects_bad_ridx_entry() {
     let _ = repo;
 }
 
-#[test]
-fn large_offset_loff_chunk_roundtrip() {
-    if !git_available() {
-        eprintln!("SKIP: git unavailable");
-        return;
-    }
-    use grit_test_support::objects::{
-        write_pack_and_index, IndexPackOptions, IndexVersion, ObjectKind, PackBuilder,
-    };
-
-    let repo = RepoFixture::init(HashAlgo::Sha1).expect("init");
-    midx_support::configure_repo_no_gc(&repo);
-    let objects = repo.objects_dir();
-    let pack_dir = objects.join("pack");
-
-    let mut builder = PackBuilder::new(HashAlgo::Sha1);
-    builder.add_full(ObjectKind::Blob, b"x");
-    let built = builder.build();
-    let outcome = write_pack_and_index(
-        &objects,
-        "large-off",
-        &built.bytes,
-        HashAlgo::Sha1,
-        &IndexPackOptions {
-            index_version: Some(IndexVersion::V2LargeOffsetAt(1)),
-            ..Default::default()
-        },
-    );
-    assert!(outcome.index_ok, "index-pack: {}", outcome.index_stderr);
-
-    midx_support::grit_write_midx(
-        &pack_dir,
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..Default::default()
-        },
-    );
-    verify_midx(&objects).expect("grit verify clean");
-    let git_v = repo.git(&["multi-pack-index", "verify"]);
-    if !git_v.ok {
-        eprintln!(
-            "SKIP git verify for PackBuilder large-offset idx: {}",
-            git_v.stderr
-        );
-    }
-}
-
 fn find_chunk(data: &[u8], id: u32) -> Option<(usize, usize)> {
-    if data.len() < 12 {
-        return None;
-    }
-    let sig = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-    if sig != MIDX_SIG {
-        return None;
-    }
-    let hdr_end = 12usize;
-    let num_chunks = data[6] as usize;
-    let toc_off = hdr_end;
-    for i in 0..num_chunks {
-        let entry = toc_off + i * 12;
-        if entry + 12 > data.len() {
-            return None;
-        }
-        let chunk_id = u32::from_be_bytes([
-            data[entry],
-            data[entry + 1],
-            data[entry + 2],
-            data[entry + 3],
-        ]);
-        let off = u64::from_be_bytes([
-            data[entry + 4],
-            data[entry + 5],
-            data[entry + 6],
-            data[entry + 7],
-            data[entry + 8],
-            data[entry + 9],
-            data[entry + 10],
-            data[entry + 11],
-        ]) as usize;
-        let next_entry = toc_off + (i + 1) * 12;
-        if next_entry + 12 > data.len() {
-            return None;
-        }
-        let next_off = u64::from_be_bytes([
-            data[next_entry + 4],
-            data[next_entry + 5],
-            data[next_entry + 6],
-            data[next_entry + 7],
-            data[next_entry + 8],
-            data[next_entry + 9],
-            data[next_entry + 10],
-            data[next_entry + 11],
-        ]) as usize;
-        if chunk_id == id {
-            return Some((off, next_off.saturating_sub(off)));
-        }
-    }
-    None
+    find_midx_chunk(data, id)
 }

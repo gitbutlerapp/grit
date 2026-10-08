@@ -19,9 +19,10 @@ use std::collections::HashSet;
 
 use midx_support::{
     all_packed_oids, assert_git_midx_verify, assert_grit_midx_reads_match_git,
-    assert_lookup_matches_idx, git_available, git_cat_file_batch, git_write_midx,
-    git_write_midx_incremental, grit_write_midx, head_oid, multi_pack_repo, odb_with_midx_config,
-    pack_idx_paths, read_chain_hashes, tip_midx_path,
+    assert_lookup_matches_idx, duplicate_oid_two_pack_repo, git_available, git_cat_file_batch,
+    git_write_midx, git_write_midx_incremental, grit_write_midx, head_oid,
+    install_git_large_offset_pack, multi_pack_repo, odb_with_midx_config, pack_idx_paths,
+    read_chain_hashes, tip_midx_path,
 };
 
 #[test]
@@ -171,28 +172,13 @@ fn odb_read_same_with_midx_on_and_off() {
 
 #[test]
 fn duplicate_oid_respects_preferred_pack() {
-    let Some((repo, objects, _)) = multi_pack_repo(HashAlgo::Sha1, 1) else {
-        eprintln!("SKIP: fixture");
-        return;
+    let Some((repo, objects, dup_oid)) = duplicate_oid_two_pack_repo() else {
+        panic!("duplicate-oid two-pack fixture setup failed");
     };
     let pack_dir = objects.join("pack");
-    let idx0 = pack_idx_paths(&objects)[0]
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-
-    // Add a second pack that still contains historical objects (no -d on pack-objects).
-    std::fs::write(repo.path().join("extra.txt"), b"extra\n").unwrap();
-    repo.git(&["add", "extra.txt"]);
-    repo.git(&["commit", "-q", "-m", "extra"]);
-    let pack_out = repo.git(&["pack-objects", "--all", ".git/objects/pack/extra"]);
-    assert!(pack_out.ok, "pack-objects: {}", pack_out.stderr);
-    assert!(pack_idx_paths(&objects).len() >= 2);
-
-    let dup_oid = head_oid(&repo);
     let opts_old = WriteMultiPackIndexOptions {
         preferred_pack_idx: Some(0),
+        version: Some(1),
         ..Default::default()
     };
     grit_write_midx(&pack_dir, &opts_old);
@@ -201,21 +187,21 @@ fn duplicate_oid_respects_preferred_pack() {
         .expect("listed");
 
     grit_lib::midx::clear_pack_midx_state(&pack_dir).expect("clear");
-    let names = read_midx_pack_idx_names(&objects).unwrap_or_default();
-    let preferred_new = if names.len() > 1 { 1 } else { 0 };
     let opts_new = WriteMultiPackIndexOptions {
-        preferred_pack_idx: Some(preferred_new),
+        preferred_pack_idx: Some(1),
+        version: Some(1),
         ..Default::default()
     };
     grit_write_midx(&pack_dir, &opts_new);
     let (pack_id_new, _) = midx_lookup_pack_and_offset_opt(&objects, &dup_oid)
         .expect("lookup")
         .expect("listed");
-    if pack_id_old == pack_id_new {
-        eprintln!("SKIP: no duplicate oid across packs in fixture");
-        return;
-    }
-    let _ = idx0;
+    assert_ne!(
+        pack_id_old, pack_id_new,
+        "preferred pack must change which physical pack wins duplicate OID selection"
+    );
+    assert_git_midx_verify(&repo);
+    let _ = repo;
 }
 
 #[test]
@@ -227,16 +213,15 @@ fn reuse_tables_and_preferred_pack_with_ridx() {
     let pack_dir = objects.join("pack");
     let opts = WriteMultiPackIndexOptions {
         write_bitmap_placeholders: true,
-        write_rev_placeholder: true,
+        write_rev_placeholder: false,
         version: Some(1),
         ..Default::default()
     };
     grit_lib::midx::clear_pack_midx_state(&pack_dir).expect("clear");
     grit_write_midx(&pack_dir, &opts);
-    let Some(tables) = load_midx_reuse_tables(&objects).expect("load tables") else {
-        eprintln!("SKIP: embedded RIDX chunk not present in this Git/grit combination");
-        return;
-    };
+    let tables = load_midx_reuse_tables(&objects)
+        .expect("load tables")
+        .expect("embedded RIDX chunk required when write_rev_placeholder is false");
     assert!(!tables.oids.is_empty());
     for oid in &oids {
         if let Some(bit) = tables.global_bitmap_bit(oid) {
@@ -620,6 +605,46 @@ fn grit_incremental_write_layer() {
             .expect("read")
             .is_some());
     }
+}
+
+#[test]
+fn large_offset_loff_chunk_passes_git_verify() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    use grit_test_support::objects::RepoFixture;
+    use midx_support::configure_repo_no_gc;
+
+    const CHUNK_LARGEOFFSETS: u32 = 0x4c4f_4646;
+
+    let repo = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    configure_repo_no_gc(&repo);
+    let oid = install_git_large_offset_pack(&repo)
+        .expect("large-offset pack + git-compatible idx (2 objects, LOFF offset >= 2^32)");
+    let objects = repo.objects_dir();
+    let pack_dir = objects.join("pack");
+    grit_write_midx(
+        &pack_dir,
+        &WriteMultiPackIndexOptions {
+            version: Some(1),
+            ..Default::default()
+        },
+    );
+    let midx_bytes = std::fs::read(tip_midx_path(&pack_dir)).expect("midx");
+    assert!(
+        midx_support::find_midx_chunk(&midx_bytes, CHUNK_LARGEOFFSETS).is_some(),
+        "grit MIDX must emit LOFF for large pack offsets"
+    );
+    verify_midx(&objects).expect("grit verify_midx");
+    assert_git_midx_verify(&repo);
+    assert!(
+        try_read_object_via_midx(&objects, &oid)
+            .expect("read")
+            .is_some(),
+        "object at large offset must be readable via MIDX"
+    );
+    let _ = repo;
 }
 
 fn build_incremental_layers(repo: &midx_support::RepoFixture, extra_layers: usize) {

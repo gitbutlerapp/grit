@@ -1203,6 +1203,12 @@ impl Odb {
         }
     }
 
+    /// When MIDX lookup points at a corrupt pack slice, fall back to per-pack indexes
+    /// (Git reads around a broken MIDX offset the same way).
+    fn midx_read_should_fallback_to_packs(err: &Error) -> bool {
+        matches!(err, Error::CorruptObject(_) | Error::Zlib(_))
+    }
+
     fn try_read_in_objects_dir(
         &self,
         objects_dir: &Path,
@@ -1226,7 +1232,8 @@ impl Odb {
             {
                 Ok(Some(obj)) => return Ok(obj),
                 Ok(None) => {}
-                Err(Error::Midx(MidxError::HashVersionMismatch { .. })) => {}
+                Err(Error::Midx(_)) => {}
+                Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
         }
@@ -1306,7 +1313,8 @@ impl Odb {
             match try_read_info_via_midx_with_diagnostics(objects_dir, oid, diagnostics.as_ref()) {
                 Ok(Some(info)) => return Ok(info),
                 Ok(None) => {}
-                Err(Error::Midx(MidxError::HashVersionMismatch { .. })) => {}
+                Err(Error::Midx(_)) => {}
+                Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
                 Err(err) => return Err(err),
             }
         }

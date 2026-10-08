@@ -20,6 +20,178 @@ use grit_test_support::objects::{
 
 pub use grit_test_support::objects::RepoFixture;
 
+/// Write a new pack containing every reachable object (keeps existing packs).
+pub fn pack_all_objects(repo: &RepoFixture, basename: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let rev = match Command::new("git")
+        .current_dir(repo.path())
+        .args(["rev-list", "--objects", "--all"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return false,
+    };
+    let out_path = format!(".git/objects/pack/{basename}");
+    let mut child = match Command::new("git")
+        .current_dir(repo.path())
+        .args(["pack-objects", &out_path])
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if let Some(stdin) = child.stdin.as_mut() {
+        if stdin.write_all(&rev.stdout).is_err() {
+            return false;
+        }
+    }
+    child.wait().ok().is_some_and(|s| s.success())
+}
+
+/// Repo with one commit whose HEAD oid appears in at least two `.idx` files.
+pub fn duplicate_oid_two_pack_repo() -> Option<(RepoFixture, PathBuf, ObjectId)> {
+    let repo = RepoFixture::init(HashAlgo::Sha1).ok()?;
+    configure_repo_no_gc(&repo);
+    repo.git(&["checkout", "-b", "main"]);
+    std::fs::write(repo.path().join("dup.txt"), b"duplicate oid fixture\n").ok()?;
+    repo.git(&["add", "dup.txt"]);
+    repo.git(&["commit", "-q", "-m", "dup seed"]);
+    let oid = head_oid(&repo);
+    if !pack_all_objects(&repo, "dup-a") || !pack_all_objects(&repo, "dup-b") {
+        return None;
+    }
+    let objects = repo.objects_dir();
+    let mut idx_hits = 0usize;
+    for idx in pack_idx_paths(&objects) {
+        if read_idx_object_ids(&idx)
+            .ok()
+            .is_some_and(|ids| ids.contains(&oid))
+        {
+            idx_hits += 1;
+        }
+    }
+    if idx_hits < 2 {
+        return None;
+    }
+    Some((repo, objects, oid))
+}
+
+fn append_pack_blob(body: &mut Vec<u8>, data: &[u8]) {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write as _;
+    let compressed = {
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(data).expect("zlib");
+        enc.finish().expect("zlib finish")
+    };
+    let type_code = 3u8;
+    let mut size = data.len();
+    let first = ((type_code & 0x7) << 4) | (size & 0x0f) as u8;
+    size >>= 4;
+    if size > 0 {
+        body.push(first | 0x80);
+        while size > 0 {
+            let b = (size & 0x7f) as u8;
+            size >>= 7;
+            body.push(if size > 0 { b | 0x80 } else { b });
+        }
+    } else {
+        body.push(first);
+    }
+    body.extend_from_slice(&compressed);
+}
+
+/// Sparse pack with two blobs (Git requires ≥2 objects for a 64-bit idx extension slot).
+/// The large blob lives at offset `1 << 32`; grit writes a v2 `.idx` Git accepts.
+pub fn install_git_large_offset_pack(repo: &RepoFixture) -> Option<ObjectId> {
+    use grit_lib::objects::ObjectKind;
+    use grit_lib::odb::Odb;
+    use grit_lib::pack::{skip_one_pack_object, write_v2_pack_index};
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let objects = repo.objects_dir();
+    let odb = Odb::new(&objects);
+    let small = b"lo";
+    let large_data = b"large-loff-midx-fixture";
+    let oid_small = odb.hash(ObjectKind::Blob, small);
+    let oid_large = odb.hash(ObjectKind::Blob, large_data);
+    let pack_path = objects.join("pack/large-loff.pack");
+    let idx_path = pack_path.with_extension("idx");
+    let large_offset: u64 = 1 << 32;
+    let small_offset: u64 = 12;
+
+    let mut small_obj = Vec::new();
+    append_pack_blob(&mut small_obj, small);
+    let mut large_obj = Vec::new();
+    append_pack_blob(&mut large_obj, large_data);
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .read(true)
+        .open(&pack_path)
+        .ok()?;
+    file.write_all(b"PACK").ok()?;
+    file.write_all(&2u32.to_be_bytes()).ok()?;
+    file.write_all(&2u32.to_be_bytes()).ok()?;
+    file.write_all(&small_obj).ok()?;
+    file.seek(SeekFrom::Start(large_offset)).ok()?;
+    file.write_all(&large_obj).ok()?;
+    let body_end = file.stream_position().ok()?;
+    use sha1::{Digest, Sha1};
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let mut hasher = Sha1::new();
+    let mut buf = [0u8; 64 * 1024];
+    let mut left = body_end;
+    while left > 0 {
+        let chunk = left.min(buf.len() as u64) as usize;
+        let n = file.read(&mut buf[..chunk]).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        left -= n as u64;
+    }
+    let trailer = hasher.finalize();
+    file.seek(SeekFrom::Start(body_end)).ok()?;
+    file.write_all(&trailer).ok()?;
+    file.flush().ok()?;
+    drop(file);
+
+    let pack_bytes = std::fs::read(&pack_path).ok()?;
+    let mut end = small_offset as usize;
+    skip_one_pack_object(&pack_bytes, &mut end, small_offset, 20).ok()?;
+    let crc_small = crc32fast::hash(&pack_bytes[small_offset as usize..end]);
+    let mut end_large = large_offset as usize;
+    skip_one_pack_object(&pack_bytes, &mut end_large, large_offset, 20).ok()?;
+    let crc_large = crc32fast::hash(&pack_bytes[large_offset as usize..end_large]);
+    write_v2_pack_index(
+        &idx_path,
+        &pack_path,
+        &[
+            (oid_small, small_offset, crc_small),
+            (oid_large, large_offset, crc_large),
+        ],
+        20,
+    )
+    .ok()?;
+    let idx_len = std::fs::metadata(&idx_path).ok()?.len();
+    // Git v2 idx with one 64-bit extension slot (2 objects, 1 large offset) is 1136 bytes.
+    if idx_len != 1136 {
+        return None;
+    }
+    read_idx_object_ids(&idx_path)
+        .ok()
+        .filter(|ids| ids.contains(&oid_large))
+        .map(|_| oid_large)
+}
+
 pub fn pack_objects_layer(dir: &Path, layer: usize) -> bool {
     use std::io::Write;
     use std::process::{Command, Stdio};
@@ -306,6 +478,68 @@ pub fn tip_midx_path(pack_dir: &Path) -> PathBuf {
             .join(format!("multi-pack-index-{tip}.midx"));
     }
     pack_dir.join("multi-pack-index")
+}
+
+pub fn remove_loose_object(objects: &Path, oid: &ObjectId) {
+    let hex = oid.to_hex();
+    let loose = objects.join(&hex[..2]).join(&hex[2..]);
+    let _ = std::fs::remove_file(loose);
+}
+
+const MIDX_SIG: u32 = 0x4d49_4458;
+
+/// Locate a MIDX chunk by id in an on-disk image (`offset`, `length`).
+pub fn find_midx_chunk(data: &[u8], id: u32) -> Option<(usize, usize)> {
+    if data.len() < 12 {
+        return None;
+    }
+    let sig = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    if sig != MIDX_SIG {
+        return None;
+    }
+    let hdr_end = 12usize;
+    let num_chunks = data[6] as usize;
+    let toc_off = hdr_end;
+    for i in 0..num_chunks {
+        let entry = toc_off + i * 12;
+        if entry + 12 > data.len() {
+            return None;
+        }
+        let chunk_id = u32::from_be_bytes([
+            data[entry],
+            data[entry + 1],
+            data[entry + 2],
+            data[entry + 3],
+        ]);
+        let off = u64::from_be_bytes([
+            data[entry + 4],
+            data[entry + 5],
+            data[entry + 6],
+            data[entry + 7],
+            data[entry + 8],
+            data[entry + 9],
+            data[entry + 10],
+            data[entry + 11],
+        ]) as usize;
+        let next_entry = toc_off + (i + 1) * 12;
+        if next_entry + 12 > data.len() {
+            return None;
+        }
+        let next_off = u64::from_be_bytes([
+            data[next_entry + 4],
+            data[next_entry + 5],
+            data[next_entry + 6],
+            data[next_entry + 7],
+            data[next_entry + 8],
+            data[next_entry + 9],
+            data[next_entry + 10],
+            data[next_entry + 11],
+        ]) as usize;
+        if chunk_id == id {
+            return Some((off, next_off.saturating_sub(off)));
+        }
+    }
+    None
 }
 
 pub fn patch_midx_file(pack_dir: &Path, patch: impl FnOnce(&mut Vec<u8>)) {
