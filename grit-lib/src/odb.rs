@@ -172,6 +172,8 @@ pub struct Odb {
     loose_zlib_cache: Arc<OnceLock<Compression>>,
     /// Shared with [`crate::repo::Repository`] so config is loaded once per open handle.
     shared_config_state: Option<crate::repo::RepositoryConfigSnapshot>,
+    /// One-time sync of `core.deltaBaseCacheLimit` into the process-wide pack delta-base LRU.
+    delta_base_cache_sync: Arc<OnceLock<()>>,
     /// Pack files whose mtimes were already bumped for object freshening on this [`Odb`]
     /// (Git's `packed_git->freshened`: at most one `utimensat` per pack per process).
     freshened_packs: Arc<Mutex<HashSet<PathBuf>>>,
@@ -238,6 +240,7 @@ impl Odb {
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
+            delta_base_cache_sync: Arc::new(OnceLock::new()),
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
@@ -271,6 +274,7 @@ impl Odb {
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
+            delta_base_cache_sync: Arc::new(OnceLock::new()),
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
@@ -616,6 +620,15 @@ impl Odb {
         Ok(compression)
     }
 
+    fn sync_delta_base_cache_limit(&self) {
+        self.delta_base_cache_sync.get_or_init(|| {
+            if let Some(git_dir) = &self.config_git_dir {
+                let cfg = crate::config::ConfigSet::load(Some(git_dir), true).unwrap_or_default();
+                pack::configure_delta_base_cache_from_config(Some(&cfg));
+            }
+        });
+    }
+
     fn core_multi_pack_index_enabled(&self) -> bool {
         // The system/global/local config cascade is expensive to load (the parser walks every
         // file from `/etc/gitconfig` through `.git/config`); calling it once per object lookup
@@ -916,6 +929,8 @@ impl Odb {
         if use_midx {
             self.ensure_midx_prepared();
         }
+
+        self.sync_delta_base_cache_limit();
 
         match Self::read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx) {
             Ok(obj) => return Ok(obj),
