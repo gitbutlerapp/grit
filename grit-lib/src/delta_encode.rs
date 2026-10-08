@@ -149,4 +149,21 @@ mod tests {
         let got = apply_delta(base, &delta).unwrap();
         assert_eq!(got, target);
     }
+
+    #[test]
+    fn prefix_extension_requires_strict_suffix() {
+        let base = b"same";
+        let err = encode_prefix_extension_delta(base, base).unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)));
+    }
+
+    #[test]
+    fn prefix_extension_splits_large_copy_runs() {
+        let base = vec![0xABu8; 70_000];
+        let mut target = base.clone();
+        target.push(b'!');
+        let delta = encode_prefix_extension_delta(&base, &target).unwrap();
+        let got = apply_delta(&base, &delta).unwrap();
+        assert_eq!(got, target);
+    }
 }

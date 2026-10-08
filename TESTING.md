@@ -118,6 +118,10 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
+| t5303-pack-corruption-resilience.sh | apply_delta accept/reject vs git index-pack; pack corruption recovery | `grit-lib/tests/pack_deltas.rs` (`t5303_apply_delta_*`), `grit-lib/tests/pack_corruption.rs` | covered |
+| t5309-pack-delta-cycles.sh | ref-delta cycles and cross-pack cycles (timeout guard) | `grit-lib/tests/pack_deltas.rs` (`ref_delta_*cycle*`) | covered |
+| t5314-pack-cycle-detection.sh | self-referencing and two-object ref-delta cycles | `grit-lib/tests/pack_deltas.rs` (`ref_delta_self_reference*`, `ref_delta_two_object_cycle*`) | covered |
+| t5316-pack-delta-depth.sh | deep OFS chains (50+) vs verify-pack depth | `grit-lib/tests/pack_deltas.rs` (`t5316_deep_ofs_chain*`) | covered |
 
 ### Documentation site and rustdoc jobs
 

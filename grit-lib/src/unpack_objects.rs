@@ -1644,4 +1644,277 @@ mod tests {
             elapsed
         );
     }
+
+    fn pack_with_ref_delta(base: &[u8], target: &[u8]) -> (Vec<u8>, ObjectId, ObjectId) {
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
+
+        let delta = crate::delta_encode::encode_lcp_delta(base, target).expect("delta");
+        let base_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, base);
+        let target_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, target);
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        pb.add_full(PK::Blob, base);
+        pb.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
+        (pb.build().bytes, base_oid, target_oid)
+    }
+
+    #[test]
+    fn test_unpack_objects_resolves_ref_and_ofs_deltas() {
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
+
+        let base = b"base payload";
+        let target = b"base payload-extended";
+        let delta = crate::delta_encode::encode_lcp_delta(base, target).unwrap();
+        let base_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, base);
+
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        let base_idx = pb.add_full(PK::Blob, base);
+        pb.add_ofs_delta(base_idx, &delta, delta.len());
+        let ofs_pack = pb.build().bytes;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let opts = UnpackOptions::default();
+        assert_eq!(
+            unpack_objects(&mut ofs_pack.as_slice(), &odb, &opts).unwrap(),
+            2
+        );
+        let target_oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, target);
+        assert_eq!(odb.read(&target_oid).unwrap().data, target);
+
+        let (ref_pack, _, ref_target_oid) = pack_with_ref_delta(base, target);
+        let tmp2 = tempfile::tempdir().unwrap();
+        let odb2 = Odb::new(tmp2.path());
+        assert_eq!(
+            unpack_objects(&mut ref_pack.as_slice(), &odb2, &opts).unwrap(),
+            2
+        );
+        assert_eq!(odb2.read(&ref_target_oid).unwrap().data, target);
+        assert!(odb2.exists(&base_oid));
+    }
+
+    #[test]
+    fn test_unpack_objects_ref_delta_base_from_loose() {
+        let base = b"loose-base";
+        let target = b"loose-base-v2";
+        let (mut pack, base_oid, target_oid) = pack_with_ref_delta(base, target);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        odb.write_local(ObjectKind::Blob, base).unwrap();
+        // Pack only contains the delta slot (thin pack).
+        let delta_only = {
+            use grit_test_support::objects::{HashAlgo as FixtureAlgo, PackBuilder};
+            let delta = crate::delta_encode::encode_lcp_delta(base, target).unwrap();
+            let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+            pb.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
+            pb.build().bytes
+        };
+        pack = delta_only;
+
+        let opts = UnpackOptions::default();
+        assert_eq!(
+            unpack_objects(&mut pack.as_slice(), &odb, &opts).unwrap(),
+            1
+        );
+        assert_eq!(odb.read(&target_oid).unwrap().data, target);
+    }
+
+    #[test]
+    fn test_unpack_objects_strict_commit_tree_tag() {
+        use crate::objects::{serialize_commit, serialize_tag, CommitData, TagData};
+
+        let tree_data = b"";
+        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, tree_data);
+        let commit = CommitData {
+            tree: tree_oid,
+            parents: vec![],
+            author: "A <a@b.com>".into(),
+            committer: "A <a@b.com>".into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "msg".into(),
+            raw_message: None,
+        };
+        let commit_data = serialize_commit(&commit);
+        let commit_oid = HashAlgo::Sha1.hash_object(ObjectKind::Commit, &commit_data);
+        let tag = TagData {
+            object: commit_oid,
+            object_type: "commit".into(),
+            tag: "v1".into(),
+            tagger: Some("T <t@e.com>".into()),
+            message: "annotated".into(),
+        };
+        let tag_data = serialize_tag(&tag);
+        let pack = make_pack(&[
+            (ObjectKind::Tree, tree_data),
+            (ObjectKind::Commit, &commit_data),
+            (ObjectKind::Tag, &tag_data),
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let opts = UnpackOptions {
+            strict: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            unpack_objects(&mut pack.as_slice(), &odb, &opts).unwrap(),
+            3
+        );
+        assert!(odb.exists(&commit_oid));
+    }
+
+    #[test]
+    fn test_unpack_objects_strict_shallow_skips_missing_parent() {
+        use crate::objects::{serialize_commit, CommitData};
+
+        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, b"");
+        let missing_parent = ObjectId::from_hex(&"cc".repeat(20)).unwrap();
+        let commit = CommitData {
+            tree: tree_oid,
+            parents: vec![missing_parent],
+            author: "A <a@b.com>".into(),
+            committer: "A <a@b.com>".into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "msg".into(),
+            raw_message: None,
+        };
+        let commit_data = serialize_commit(&commit);
+        let commit_oid = HashAlgo::Sha1.hash_object(ObjectKind::Commit, &commit_data);
+        let pack = make_pack(&[(ObjectKind::Tree, b""), (ObjectKind::Commit, &commit_data)]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let mut shallow = HashSet::new();
+        shallow.insert(commit_oid);
+        let opts = UnpackOptions {
+            strict: true,
+            shallow_boundaries: shallow,
+            ..Default::default()
+        };
+        assert_eq!(
+            unpack_objects(&mut pack.as_slice(), &odb, &opts).unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn test_unpack_objects_max_input_bytes() {
+        let pack = make_pack(&[(ObjectKind::Blob, b"small")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let opts = UnpackOptions {
+            max_input_bytes: Some(4),
+            ..Default::default()
+        };
+        let err = unpack_objects(&mut pack.as_slice(), &odb, &opts).unwrap_err();
+        assert!(err.to_string().contains("maximum allowed size"));
+    }
+
+    #[test]
+    fn test_unpack_objects_unresolved_ref_delta() {
+        let missing = ObjectId::from_hex(&"dd".repeat(20)).unwrap();
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, PackBuilder};
+        let delta = [0u8, 1u8, 1u8, b'x'];
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        pb.add_ref_delta(missing.as_bytes(), &delta, delta.len());
+        let pack = pb.build().bytes;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let err =
+            unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).unwrap_err();
+        assert!(err.to_string().contains("could not be resolved"));
+    }
+
+    #[test]
+    fn test_apply_delta_into_matches_apply_delta() {
+        let base = b"abcdef";
+        let mut delta = Vec::new();
+        delta.push(6u8);
+        delta.push(3u8);
+        delta.push(0x91u8);
+        delta.push(2u8);
+        delta.push(3u8);
+
+        let expected = apply_delta(base, &delta).unwrap();
+        let mut out = Vec::new();
+        apply_delta_into(&mut out, base, &delta).unwrap();
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn test_pack_bytes_to_object_map_ref_delta() {
+        let base = b"map-base";
+        let target = b"map-base-2";
+        let (pack, _, target_oid) = pack_with_ref_delta(base, target);
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        let map = pack_bytes_to_object_map(&pack, &odb).unwrap();
+        assert_eq!(map.get(&target_oid).unwrap().data, target);
+    }
+
+    #[test]
+    fn test_pack_is_thin_and_non_thin() {
+        let base = b"thin";
+        let target = b"thin-pack";
+        let (full, base_oid, _) = pack_with_ref_delta(base, target);
+        assert!(!pack_is_thin(&full, HashAlgo::Sha1));
+
+        let delta = crate::delta_encode::encode_lcp_delta(base, target).unwrap();
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, PackBuilder};
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        pb.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
+        let thin = pb.build().bytes;
+        assert!(pack_is_thin(&thin, HashAlgo::Sha1));
+    }
+
+    #[test]
+    fn test_unpack_zero_byte_blob_via_pack_builder() {
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        pb.add_full(PK::Blob, b"");
+        let pack = pb.build().bytes;
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        assert_eq!(
+            unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).unwrap(),
+            1
+        );
+        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, b"");
+        assert!(odb.exists(&oid));
+    }
+
+    #[test]
+    fn test_strict_verify_rejects_missing_tree_reference() {
+        let tree_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, b"");
+        let missing = ObjectId::from_hex(&"ee".repeat(20)).unwrap();
+        let bad_tree = crate::objects::serialize_tree(&[crate::objects::TreeEntry {
+            mode: crate::index::MODE_REGULAR,
+            name: b"f".to_vec(),
+            oid: missing,
+        }]);
+        let bad_oid = HashAlgo::Sha1.hash_object(ObjectKind::Tree, &bad_tree);
+        let mut pack = HashMap::new();
+        pack.insert(tree_oid, (ObjectKind::Tree, b"".to_vec()));
+        pack.insert(bad_oid, (ObjectKind::Tree, bad_tree));
+        assert!(strict_verify_packed_references(None, &pack).is_err());
+    }
+
+    #[test]
+    fn test_unpack_large_blob_materializes_on_disk() {
+        let big: Vec<u8> = vec![b'x'; 2 * 1024 * 1024 + 1];
+        let pack = make_pack(&[(ObjectKind::Blob, &big)]);
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+        assert_eq!(
+            unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).unwrap(),
+            1
+        );
+        let oid = HashAlgo::Sha1.hash_object(ObjectKind::Blob, &big);
+        assert_eq!(odb.read(&oid).unwrap().data, big);
+    }
 }
