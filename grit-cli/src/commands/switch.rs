@@ -8,9 +8,9 @@
 use std::collections::HashSet;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::diff::{diff_trees, DiffStatus};
-use grit_lib::porcelain::status::{status, StatusModel, StatusOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::diff::DiffStatus;
+use grit_lib::porcelain::checkout::checkout_tree_changes;
+use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::refs;
 use grit_lib::state::resolve_head;
 use serde::Serialize;
@@ -39,12 +39,6 @@ impl HumanRender for SwitchOutcome {
 pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
     let repo = context::discover()?;
 
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress)
-        .context("could not compute status")?;
-    if !model.staged.is_empty() || !model.unstaged.is_empty() {
-        bail!("you have uncommitted changes — commit them before switching");
-    }
-
     let head_oid = resolve_head(&repo.git_dir)
         .context("could not resolve HEAD")?
         .oid()
@@ -70,9 +64,11 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
         None => None,
     };
 
-    let changes = diff_trees(&repo.odb, head_tree.as_ref(), Some(&target_tree), "")?;
-    guard_untracked_changes(&model, &changes)?;
-    grit_lib::porcelain::checkout::checkout_tree_changes(&repo, &changes)
+    let plan = prepare_tree_switch(&repo, head_tree.as_ref(), &target_tree)
+        .map_err(anyhow::Error::new)
+        .context("could not prepare branch switch")?;
+    guard_untracked_changes(&plan.untracked, &plan.tree_changes)?;
+    checkout_tree_changes(&repo, &plan.tree_changes)
         .context("could not update the working tree")?;
     refs::write_symbolic_ref(&repo.git_dir, "HEAD", &branch_ref).context("could not move HEAD")?;
 
@@ -85,13 +81,13 @@ pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
 /// Refuse the switch if it would overwrite an untracked working-tree file with a
 /// path the destination branch newly introduces.
 fn guard_untracked_changes(
-    model: &StatusModel,
+    untracked_paths: &[String],
     changes: &[grit_lib::diff::DiffEntry],
 ) -> Result<()> {
-    if model.untracked.is_empty() {
+    if untracked_paths.is_empty() {
         return Ok(());
     }
-    let untracked: HashSet<&str> = model.untracked.iter().map(String::as_str).collect();
+    let untracked: HashSet<&str> = untracked_paths.iter().map(String::as_str).collect();
 
     for change in changes {
         if change.status != DiffStatus::Added {

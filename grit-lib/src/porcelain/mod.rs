@@ -36,3 +36,4 @@ pub mod staging;
 pub mod stash;
 pub mod status;
 pub mod tag;
+pub mod worktree_guard;
