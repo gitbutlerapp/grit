@@ -237,8 +237,7 @@ fn corrupt_graph_fanout_oid_order_and_parent_edges() {
     ) as usize;
 
     let mut b = bytes.clone();
-    b[fanout_off..fanout_off + 4]
-        .copy_from_slice(&(num_commits as u32).to_be_bytes());
+    b[fanout_off..fanout_off + 4].copy_from_slice(&(num_commits as u32).to_be_bytes());
     b[fanout_off + 4..fanout_off + 8].copy_from_slice(&0u32.to_be_bytes());
     reseal_commit_graph(&mut b);
     expect_corrupt_load(&objects, &path, b);

@@ -17,7 +17,7 @@ Brings the commits from `<branch>` into the current branch:
 
 - If the current branch already has everything, nothing changes.
 - If the current branch has no commits of its own since they diverged, it's moved forward to `<branch>` (a fast-forward). No new commit is made.
-- Otherwise both sides are merged and a merge commit is recorded, with the message `Merge <branch>`.
+- Otherwise both sides are merged and a merge commit is recorded, with the message `Merge <branch>`. When `commit.gpgsign` is enabled, that merge commit is signed like [`grit commit`](../commit/).
 
 `<branch>` can be a local branch or a remote-tracking branch such as `origin/main`. Local branches are looked up first.
 

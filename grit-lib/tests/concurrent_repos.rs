@@ -102,6 +102,7 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
                 author: ident.clone(),
                 committer: ident,
                 allow_empty: false,
+                sign_override: None,
             },
             &mut NullProgress,
         )

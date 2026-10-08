@@ -17,8 +17,9 @@ use grit_lib::merge_file::MergeFavor;
 use grit_lib::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::objects::{CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::porcelain::commit::write_commit_object;
 use grit_lib::porcelain::worktree_guard::{ensure_worktree_clean_for_pick, prepare_tree_checkout};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -180,10 +181,8 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    let new_oid = repo
-        .odb
-        .write(ObjectKind::Commit, &serialize_commit(&commit_data))
-        .context("could not store picked commit")?;
+    let new_oid =
+        write_commit_object(&repo, &commit_data, None).context("could not store picked commit")?;
 
     move_branch(
         &repo,

@@ -14,8 +14,9 @@ use grit_lib::merge_file::MergeFavor;
 use grit_lib::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::objects::{CommitData, ObjectId};
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::porcelain::commit::write_commit_object;
 use grit_lib::porcelain::worktree_guard::{ensure_worktree_clean_for_merge, prepare_tree_checkout};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
@@ -217,10 +218,7 @@ pub fn integrate(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    let oid = repo
-        .odb
-        .write(ObjectKind::Commit, &serialize_commit(&commit))
-        .context("could not store merge commit")?;
+    let oid = write_commit_object(&repo, &commit, None).context("could not store merge commit")?;
 
     move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))?;
     Ok(MergeOutcome::merged(label, oid))

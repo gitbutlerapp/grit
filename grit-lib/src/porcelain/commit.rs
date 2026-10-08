@@ -4,6 +4,7 @@
 //! object, persists the index with a valid cache-tree, then updates the branch and `HEAD`
 //! reflogs through [`crate::refs::update_branch_for_commit`].
 
+use crate::config::ConfigSet;
 use crate::diff::{diff_trees, zero_oid};
 use crate::error::{Error, Result};
 use crate::hooks::{run_commit_hook_checked, CommitHookEnv};
@@ -11,6 +12,7 @@ use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, Objec
 use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
+use crate::signing::{should_sign_commit, sign_serialized_commit, GpgConfig};
 use crate::state::{resolve_head, HeadState};
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 use std::fs;
@@ -27,6 +29,8 @@ pub struct CommitRequest {
     pub committer: String,
     /// When false (default), reject commits whose tree equals the parent's tree or is the empty tree on an unborn branch.
     pub allow_empty: bool,
+    /// When `Some(true)`, sign even if `commit.gpgsign` is false; when `Some(false)`, skip signing even when config requests it. When `None`, honor `commit.gpgsign`.
+    pub sign_override: Option<bool>,
 }
 
 /// Result of [`create_commit`].
@@ -143,7 +147,8 @@ pub fn create_commit(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    let bytes = serialize_commit(&commit_data);
+    let config = repo.config()?;
+    let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
     let oid = repo.odb.write(ObjectKind::Commit, &bytes)?;
 
     let reflog_old = parent.unwrap_or_else(zero_oid);
@@ -166,7 +171,6 @@ pub fn create_commit(
 
     let changes = diff_trees(&repo.odb, parent_tree.as_ref(), Some(&tree), "")?.len();
 
-    let config = repo.config()?;
     update_branch_for_commit_with_config(
         &repo.git_dir,
         &BranchCommitRefUpdate {
@@ -188,6 +192,41 @@ pub fn create_commit(
         parent,
         changes,
     })
+}
+
+/// Serialize `data` and sign the bytes when [`should_sign_commit`] says so.
+///
+/// # Errors
+///
+/// Propagates signing and config errors from [`GpgConfig::from_config`] and
+/// [`sign_serialized_commit`].
+pub fn prepare_commit_bytes(
+    repo: &Repository,
+    config: &ConfigSet,
+    data: &CommitData,
+    sign_override: Option<bool>,
+) -> Result<Vec<u8>> {
+    let unsigned = serialize_commit(data);
+    if !should_sign_commit(config, sign_override)? {
+        return Ok(unsigned);
+    }
+    let gpg = GpgConfig::from_config(config)?.with_command_runner(repo.command_runner());
+    sign_serialized_commit(&gpg, &unsigned, &data.committer, None, repo.odb.hash_algo())
+}
+
+/// Write a commit object to the ODB, honoring `commit.gpgsign` and `sign_override`.
+///
+/// # Errors
+///
+/// Same as [`prepare_commit_bytes`], plus object-database write failures.
+pub fn write_commit_object(
+    repo: &Repository,
+    data: &CommitData,
+    sign_override: Option<bool>,
+) -> Result<ObjectId> {
+    let config = repo.config()?;
+    let bytes = prepare_commit_bytes(repo, config.as_ref(), data, sign_override)?;
+    repo.odb.write(ObjectKind::Commit, &bytes)
 }
 
 fn commit_tree_oid(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
@@ -276,6 +315,7 @@ mod tests {
             author: ident.clone(),
             committer: ident,
             allow_empty: false,
+            sign_override: None,
         }
     }
 

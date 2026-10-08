@@ -103,6 +103,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
             author,
             committer,
             allow_empty: false,
+            sign_override: None,
         },
         &mut NullProgress,
     )

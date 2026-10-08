@@ -73,6 +73,7 @@ mod tests {
             author: ident(),
             committer: ident(),
             allow_empty: false,
+            sign_override: None,
         };
         cascade_load_counters::measure(|| {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();

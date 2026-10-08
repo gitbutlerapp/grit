@@ -73,6 +73,7 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
             author,
             committer,
             allow_empty: false,
+            sign_override: None,
         },
         &mut NullProgress,
     )

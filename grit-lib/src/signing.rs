@@ -15,10 +15,8 @@
 //!   to rebuild the signed payload and run `<program> --verify` over it,
 //!   parsing the `[GNUPG:]` status lines into a [`SignatureCheck`].
 //!
-//! Only the gpg-based formats (`openpgp` -> `gpg`, `x509` -> `gpgsm`) implement
-//! signing/verification here; `ssh` is recognized for `gpg.format` validation
-//! but its sign/verify paths are not exercised by the commit/verify-commit
-//! tests and return an explanatory error.
+//! OpenPGP, X.509 (`gpgsm`), and SSH (`ssh-keygen -Y sign`) commit signing are
+//! supported when porcelain commit creation honors `commit.gpgsign`.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -31,6 +29,7 @@ use crate::command_runner::{
 };
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::objects::HashAlgo;
 
 /// The hash header label for a sha1 repository.
 pub const GPG_SIG_HEADER_SHA1: &str = "gpgsig";
@@ -432,6 +431,61 @@ fn expand_tilde(path: &str) -> String {
 ///
 /// Returns [`Error::Signing`] when the program cannot be spawned, exits
 /// non-zero, or fails to produce a signature.
+/// Whether a new commit object should be signed.
+///
+/// Honors `commit.gpgsign` (and `commit.gpgSign`) when `sign_override` is `None`.
+/// When `sign_override` is `Some(true)` or `Some(false)`, that choice wins over config.
+///
+/// # Errors
+///
+/// Returns [`Error::Config`] when `commit.gpgsign` holds a non-boolean value.
+pub fn should_sign_commit(config: &ConfigSet, sign_override: Option<bool>) -> Result<bool> {
+    if let Some(force) = sign_override {
+        return Ok(force);
+    }
+    match config
+        .get_bool("commit.gpgsign")
+        .or_else(|| config.get_bool("commit.gpgSign"))
+    {
+        Some(Ok(v)) => Ok(v),
+        Some(Err(e)) => Err(Error::Config(format!("commit.gpgsign: {e}").into())),
+        None => Ok(false),
+    }
+}
+
+/// Header name for an embedded commit signature for `hash_algo`.
+#[must_use]
+pub fn commit_gpg_sig_header(hash_algo: HashAlgo) -> &'static str {
+    match hash_algo {
+        HashAlgo::Sha256 => GPG_SIG_HEADER_SHA256,
+        HashAlgo::Sha1 => GPG_SIG_HEADER_SHA1,
+    }
+}
+
+/// Sign a serialized commit object (without `gpgsig`) and splice the signature header.
+///
+/// Uses [`sign_buffer`] on `unsigned_bytes` and [`add_header_signature`] with the
+/// header from [`commit_gpg_sig_header`]. The signing key comes from
+/// `signing_key_override`, else `user.signingkey`, else `committer_ident`.
+///
+/// # Errors
+///
+/// Returns [`Error::Signing`] when the signing program fails, and [`Error::Config`]
+/// when `GpgConfig` cannot be built from the repository config (callers typically
+/// construct [`GpgConfig`] first).
+pub fn sign_serialized_commit(
+    cfg: &GpgConfig,
+    unsigned_bytes: &[u8],
+    committer_ident: &str,
+    signing_key_override: Option<&str>,
+    hash_algo: HashAlgo,
+) -> Result<Vec<u8>> {
+    let signing_key = cfg.resolve_signing_key(signing_key_override, committer_ident);
+    let sig = sign_buffer(cfg, unsigned_bytes, &signing_key)?;
+    let header = commit_gpg_sig_header(hash_algo);
+    Ok(add_header_signature(unsigned_bytes, &sig, header))
+}
+
 pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result<Vec<u8>> {
     if cfg.format == GpgFormat::Ssh {
         return sign_buffer_ssh(cfg, payload, signing_key);
@@ -772,16 +826,14 @@ pub fn extract_signed_payload(raw_commit: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
             .unwrap_or(header.len());
         let line = &header[idx..line_end];
 
-        let is_sig_header = line.starts_with(GPG_SIG_HEADER_SHA1.as_bytes())
-            && line
-                .get(GPG_SIG_HEADER_SHA1.len())
-                .map(|&b| b == b' ')
-                .unwrap_or(false);
+        let Some((_, prefix_len)) = gpg_sig_header_line(line) else {
+            payload.extend_from_slice(line);
+            idx = line_end;
+            continue;
+        };
 
-        if is_sig_header && !found {
+        if !found {
             found = true;
-            // First signature line: text after "gpgsig ".
-            let prefix_len = GPG_SIG_HEADER_SHA1.len() + 1;
             signature.extend_from_slice(&line[prefix_len..]);
             idx = line_end;
             // Subsequent continuation lines (leading space) belong to the sig.
@@ -810,6 +862,17 @@ pub fn extract_signed_payload(raw_commit: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
 
     payload.extend_from_slice(body);
     Some((payload, signature))
+}
+
+/// If `line` begins a `gpgsig` / `gpgsig-sha256` header, return the header name and
+/// the byte offset after `"<header> "`.
+fn gpg_sig_header_line(line: &[u8]) -> Option<(&'static str, usize)> {
+    for header in [GPG_SIG_HEADER_SHA256, GPG_SIG_HEADER_SHA1] {
+        if line.starts_with(header.as_bytes()) && line.get(header.len()) == Some(&b' ') {
+            return Some((header, header.len() + 1));
+        }
+    }
+    None
 }
 
 /// Verify a raw commit object's embedded signature.
@@ -1676,6 +1739,18 @@ mod tests {
     }
 
     #[test]
+    fn should_sign_commit_honors_override_and_config() {
+        let mut cfg = ConfigSet::default();
+        assert!(!should_sign_commit(&cfg, None).unwrap());
+        assert!(should_sign_commit(&cfg, Some(true)).unwrap());
+        assert!(!should_sign_commit(&cfg, Some(false)).unwrap());
+
+        cfg.add_command_override("commit.gpgsign", "true")
+            .unwrap();
+        assert!(should_sign_commit(&cfg, None).unwrap());
+        assert!(!should_sign_commit(&cfg, Some(false)).unwrap());
+    }
+
     fn literal_ssh_key_detection() {
         assert_eq!(
             is_literal_ssh_key("key::ssh-ed25519 AAAA"),
