@@ -48,7 +48,7 @@ struct FileAlternatesCache {
 pub struct WriteOptions {
     /// When set, do not touch mtimes on existing objects (Git `WRITE_OBJECT_SILENT`).
     pub silent: bool,
-    /// When set, skip the full [`Self::exists`] scan (packs/alternates) and only
+    /// When set, skip the full `Odb::exists` scan (packs/alternates) and only
     /// test for a loose file in this repository's object directory before writing.
     ///
     /// Bulk staging of new worktree blobs uses this so each insert does not walk
@@ -1015,7 +1015,7 @@ impl Odb {
 
     /// Write a loose object from precomputed id and zlib-compressed store bytes.
     ///
-    /// The caller must supply bytes that [`read_zlib_loose_payload`] would expand to
+    /// The caller must supply bytes that the internal zlib loose reader would expand to
     /// valid canonical store form (`"<kind> <len>\\0<payload>"`). Hashing and
     /// compression are skipped; use after parallel batch preparation.
     ///

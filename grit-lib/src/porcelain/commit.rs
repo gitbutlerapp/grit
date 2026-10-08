@@ -43,7 +43,7 @@ pub struct CommitOutcome {
 ///
 /// Loads the index from disk, builds the commit tree with an incremental cache-tree
 /// write-tree, writes the commit object, writes the index back with an updated cache-tree,
-/// then atomically updates the branch ref and reflogs (see [`update_branch_for_commit`]).
+/// then atomically updates the branch ref and reflogs (see [`update_branch_for_commit_with_config`]).
 ///
 /// # Parameters
 ///
@@ -57,7 +57,7 @@ pub struct CommitOutcome {
 /// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false.
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
 /// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
-/// - Ref/reflog failures from [`update_branch_for_commit`]; the branch tip is not left advanced without reflogs when logging is enabled.
+/// - Ref/reflog failures from [`update_branch_for_commit_with_config`]; the branch tip is not left advanced without reflogs when logging is enabled.
 pub fn create_commit(
     repo: &Repository,
     req: &CommitRequest,
