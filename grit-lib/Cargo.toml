@@ -54,6 +54,7 @@ shell-words.workspace = true
 ureq = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 crc32fast.workspace = true
+memmap2.workspace = true
 
 # `nix` (uid lookup, uname) is only used behind `#[cfg(unix)]`, so it is not
 # pulled in on Windows.

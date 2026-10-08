@@ -11,8 +11,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
 use crate::hash::verify_trailer;
 
@@ -251,7 +251,8 @@ fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
 // no revalidation at all, so serving a stamped copy is strictly more
 // conservative than upstream.
 mod midx_cache {
-    use crate::error::{Error, Result};
+    use crate::error::Result;
+    use crate::pack_map::PackData;
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -262,7 +263,7 @@ mod midx_cache {
 
     #[derive(Default)]
     struct State {
-        bytes: HashMap<PathBuf, (Stamp, Arc<Vec<u8>>)>,
+        bytes: HashMap<PathBuf, (Stamp, Arc<PackData>)>,
         /// Tip-MIDX resolution per pack dir, held for the process lifetime and
         /// evicted by in-process MIDX writers. Only the object-read hot path may
         /// use this: a stale entry there degrades to the regular pack lookup,
@@ -287,7 +288,7 @@ mod midx_cache {
     }
 
     /// MIDX file bytes, re-read from disk only when the file's stamp changes.
-    pub fn get_bytes(path: &Path) -> Result<Arc<Vec<u8>>> {
+    pub fn get_bytes(path: &Path) -> Result<Arc<PackData>> {
         let sig = stamp(path);
         if let Some(sig) = sig {
             let g = lock();
@@ -297,7 +298,7 @@ mod midx_cache {
                 }
             }
         }
-        let data = Arc::new(fs::read(path).map_err(Error::Io)?);
+        let data = PackData::open(path)?;
         if let Some(sig) = sig {
             lock()
                 .bytes
@@ -333,6 +334,39 @@ fn repo_hash_algo_for_pack_dir(pack_dir: &Path) -> HashAlgo {
         .parent()
         .map(hash_algo_for_objects_dir)
         .unwrap_or(HashAlgo::Sha1)
+}
+
+/// Drop cached MIDX mappings, then replace `path` via a same-directory temp file and
+/// `rename` so readers with an older mapping never see an in-place truncation.
+fn publish_midx_file(pack_dir: &Path, path: &Path, bytes: &[u8]) -> Result<()> {
+    midx_cache::evict_pack_dir(pack_dir);
+    atomic_write_same_dir(path, bytes)
+}
+
+/// Write `bytes` to `path` atomically (temp file in the same directory, then `rename`).
+fn atomic_write_same_dir(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot publish MIDX without parent directory: {}",
+                path.display()
+            ),
+        ))
+    })?;
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("multi-pack-index");
+    let tmp: PathBuf = parent.join(format!(".{name}.{}-tmp", std::process::id()));
+    fs::write(&tmp, bytes).map_err(Error::Io)?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(Error::Io(e))
+        }
+    }
 }
 
 pub fn resolve_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
@@ -838,7 +872,7 @@ fn write_midx_rev_sidecar(
     debug_assert_eq!(out.len(), body_len);
     append_hashfile_checksum(&mut out, hash_len);
     debug_assert_eq!(out.len(), body_len + hash_len);
-    fs::write(path, out).map_err(Error::Io)
+    atomic_write_same_dir(path, &out)
 }
 
 fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, usize)> {
@@ -2489,15 +2523,17 @@ pub fn write_multi_pack_index_with_options(
         let midx_d = midx_d_dir(pack_dir);
         fs::create_dir_all(&midx_d).map_err(Error::Io)?;
 
+        midx_cache::evict_pack_dir(pack_dir);
+
         let layer_path = midx_d.join(format!("multi-pack-index-{hash_hex}.midx"));
-        fs::write(&layer_path, &out).map_err(Error::Io)?;
+        atomic_write_same_dir(&layer_path, &out)?;
 
         let mut chain_data = String::new();
         for h in &chain {
             chain_data.push_str(h);
             chain_data.push('\n');
         }
-        fs::write(chain_file_path(pack_dir), chain_data.as_bytes()).map_err(Error::Io)?;
+        atomic_write_same_dir(&chain_file_path(pack_dir), chain_data.as_bytes())?;
 
         clear_stale_split_layers(pack_dir, &chain)?;
 
@@ -2542,7 +2578,7 @@ pub fn write_multi_pack_index_with_options(
 
         clear_incremental_midx_files(pack_dir)?;
 
-        fs::write(&dest, &out).map_err(Error::Io)?;
+        publish_midx_file(pack_dir, &dest, &out)?;
 
         scrub_root_midx_sidecars_except(pack_dir, Some(&hash_hex))?;
 
@@ -2753,8 +2789,10 @@ pub fn compact_multi_pack_index(
     let midx_d = midx_d_dir(pack_dir);
     fs::create_dir_all(&midx_d).map_err(Error::Io)?;
 
+    midx_cache::evict_pack_dir(pack_dir);
+
     let layer_path = midx_d.join(format!("multi-pack-index-{hash_hex}.midx"));
-    fs::write(&layer_path, &out).map_err(Error::Io)?;
+    atomic_write_same_dir(&layer_path, &out)?;
 
     // New chain: base layers, the compacted layer, then the untouched upper layers.
     let mut new_chain: Vec<String> = Vec::new();
@@ -2767,7 +2805,7 @@ pub fn compact_multi_pack_index(
         chain_data.push_str(h);
         chain_data.push('\n');
     }
-    fs::write(chain_file_path(pack_dir), chain_data.as_bytes()).map_err(Error::Io)?;
+    atomic_write_same_dir(&chain_file_path(pack_dir), chain_data.as_bytes())?;
 
     if write_bitmaps {
         fs::write(

@@ -6,6 +6,7 @@
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
+pub use crate::pack_map::PackData;
 use crate::unpack_objects::apply_delta;
 use flate2::read::ZlibDecoder;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -325,6 +326,7 @@ pub fn read_local_pack_indexes(objects_dir: &Path) -> Result<Vec<PackIndex>> {
 /// [`read_pack_index`] when verification is required.
 mod pack_cache {
     use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
+    use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
     use std::collections::{HashMap, VecDeque};
     use std::fs;
     use std::io;
@@ -344,7 +346,7 @@ mod pack_cache {
     struct CachedPack {
         mtime: SystemTime,
         size: u64,
-        bytes: Arc<Vec<u8>>,
+        bytes: Arc<PackData>,
     }
 
     /// Upper bound on retained delta-base bytes, matching git's default
@@ -542,10 +544,11 @@ mod pack_cache {
         pack_path: &Path,
         mtime: SystemTime,
         size: u64,
-    ) -> Result<Arc<Vec<u8>>> {
-        let bytes = Arc::new(fs::read(pack_path).map_err(Error::Io)?);
+    ) -> Result<Arc<PackData>> {
+        let bytes = PackData::open(pack_path)?;
         let mut g = lock();
         drop_delta_entries_locked(&mut g, pack_path);
+        g.by_idx.remove(&pack_path.with_extension("idx"));
         g.by_pack.insert(
             pack_path.to_path_buf(),
             CachedPack {
@@ -579,7 +582,7 @@ mod pack_cache {
     ///
     /// Cache hits skip `stat` for all pack basenames; in-process repack/gc clears the cache
     /// when packs change.
-    pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
+    pub fn get_pack_bytes(pack_path: &Path) -> Result<Arc<PackData>> {
         {
             let g = lock();
             if let Some(c) = g.by_pack.get(pack_path) {
@@ -624,7 +627,8 @@ mod pack_cache {
     /// After a pack parse/decompress failure, reload from disk when cached bytes differ.
     ///
     /// Signature-only checks miss in-memory stale entries (tests) and same-second replacements
-    /// with unchanged size; a byte comparison against the on-disk file catches those.
+    /// with unchanged size; comparing the pack header and trailer fingerprint catches those
+    /// without reading the whole file.
     ///
     /// Returns true when the cache was refreshed with disk contents.
     pub fn reload_pack_bytes_after_parse_failure(pack_path: &Path) -> Result<bool> {
@@ -634,16 +638,35 @@ mod pack_cache {
         let Some((mtime, size)) = file_signature(pack_path) else {
             return Ok(false);
         };
-        let disk = fs::read(pack_path).map_err(Error::Io)?;
-        let needs_reload = lock()
-            .by_pack
-            .get(pack_path)
-            .is_some_and(|c| c.bytes.as_slice() != disk.as_slice());
+        let hash_bytes = hash_bytes_for_pack_file(pack_path)?;
+        let disk_fp = fingerprint_from_file(pack_path, hash_bytes)?;
+        let needs_reload = lock().by_pack.get(pack_path).is_some_and(|c| {
+            pack_fingerprint_mismatch(&c.bytes, hash_bytes, &disk_fp).unwrap_or(true)
+        });
         if !needs_reload {
             return Ok(false);
         }
         load_pack_bytes_from_disk(pack_path, mtime, size)?;
         Ok(true)
+    }
+
+    fn hash_bytes_for_pack_file(pack_path: &Path) -> Result<usize> {
+        let idx_path = pack_path.with_extension("idx");
+        {
+            let g = lock();
+            if let Some(c) = g.by_idx.get(&idx_path) {
+                return Ok(c.idx.hash_bytes);
+            }
+        }
+        Ok(read_pack_index_no_verify(&idx_path)?.hash_bytes)
+    }
+
+    fn pack_fingerprint_mismatch(
+        cached: &PackData,
+        hash_bytes: usize,
+        disk: &PackFingerprint,
+    ) -> Result<bool> {
+        Ok(cached.fingerprint(hash_bytes)? != *disk)
     }
 
     #[cfg(test)]
@@ -678,7 +701,7 @@ mod pack_cache {
 
     /// Replace cached pack bytes (tests simulating a stale in-memory mapping).
     #[cfg(test)]
-    pub fn test_inject_stale_pack_bytes(pack_path: &Path, stale: Arc<Vec<u8>>) {
+    pub fn test_inject_stale_pack_bytes(pack_path: &Path, stale: Arc<PackData>) {
         let mut g = lock();
         let stamp = g
             .by_pack
@@ -820,12 +843,14 @@ pub fn read_pack_index_cached(idx_path: &Path) -> Result<Arc<PackIndex>> {
 /// # Errors
 ///
 /// Returns [`Error::Io`] when the pack cannot be read.
-pub fn read_pack_bytes_cached(pack_path: &Path) -> Result<Arc<Vec<u8>>> {
+pub fn read_pack_bytes_cached(pack_path: &Path) -> Result<Arc<PackData>> {
     pack_cache::get_pack_bytes(pack_path)
 }
 
 /// Drop all cached pack indexes and pack bytes (call after `repack`/`gc`).
 pub fn clear_pack_cache() {
+    #[cfg(test)]
+    let _guard = pack_cache_test_guard();
     pack_cache::clear();
 }
 
@@ -2715,13 +2740,70 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
 }
 
 #[cfg(test)]
-static PACK_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+mod pack_cache_test_sync {
+    use std::cell::Cell;
+    use std::sync::Mutex;
+    use std::sync::MutexGuard;
+
+    /// Process-global pack cache test lock state (guards real synchronization state).
+    struct PackCacheTestCoordinator {
+        top_level_guards: u32,
+    }
+
+    static COORD: Mutex<PackCacheTestCoordinator> = Mutex::new(PackCacheTestCoordinator {
+        top_level_guards: 0,
+    });
+
+    thread_local! {
+        static DEPTH: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// Serializes tests that share the process-global pack cache (including `clear_pack_cache`).
+    pub struct PackCacheTestGuard {
+        _inner: Option<MutexGuard<'static, PackCacheTestCoordinator>>,
+    }
+
+    pub fn acquire() -> PackCacheTestGuard {
+        let depth = DEPTH.with(|d| {
+            let n = d.get();
+            d.set(n + 1);
+            n
+        });
+        PackCacheTestGuard {
+            _inner: if depth == 0 {
+                let mut g = COORD.lock().unwrap_or_else(|e| e.into_inner());
+                assert_eq!(
+                    g.top_level_guards, 0,
+                    "pack cache test coordinator already held"
+                );
+                g.top_level_guards = 1;
+                Some(g)
+            } else {
+                None
+            },
+        }
+    }
+
+    impl Drop for PackCacheTestGuard {
+        fn drop(&mut self) {
+            DEPTH.with(|d| {
+                let n = d.get();
+                assert!(n > 0, "pack cache test guard depth underflow");
+                d.set(n - 1);
+                if n == 1 {
+                    if let Some(mut g) = self._inner.take() {
+                        assert_eq!(g.top_level_guards, 1);
+                        g.top_level_guards = 0;
+                    }
+                }
+            });
+        }
+    }
+}
 
 #[cfg(test)]
-pub(crate) fn pack_cache_test_guard() -> std::sync::MutexGuard<'static, ()> {
-    PACK_CACHE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+pub(crate) fn pack_cache_test_guard() -> pack_cache_test_sync::PackCacheTestGuard {
+    pack_cache_test_sync::acquire()
 }
 
 #[cfg(test)]
@@ -2729,6 +2811,7 @@ mod tests {
     use super::*;
     use crate::delta_encode::encode_lcp_delta;
     use crate::odb::Odb;
+    use crate::pack_map::PackData;
     use crate::transfer::{build_pack, PackBuildOptions};
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
@@ -2844,6 +2927,40 @@ mod tests {
         let off = append_whole_blob(&mut pack, data);
         append_sha1_pack_trailer(&mut pack);
         (pack, oid, off)
+    }
+
+    /// Write a valid pack with one blob placed at `object_offset` so the on-disk file
+    /// length exceeds the mmap owned-buffer threshold without storing huge compressed payloads.
+    fn write_sparse_single_blob_pack(
+        repo_root: &Path,
+        pack_path: &Path,
+        data: &[u8],
+        object_offset: u64,
+    ) -> Result<(ObjectId, u64)> {
+        use std::fs::OpenOptions;
+        use std::io::{Seek, SeekFrom, Write};
+
+        let odb = Odb::new(repo_root);
+        let oid = odb.hash(ObjectKind::Blob, data);
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .truncate(true)
+            .open(pack_path)
+            .map_err(Error::Io)?;
+        file.write_all(b"PACK").map_err(Error::Io)?;
+        file.write_all(&2u32.to_be_bytes()).map_err(Error::Io)?;
+        file.write_all(&1u32.to_be_bytes()).map_err(Error::Io)?;
+        file.seek(SeekFrom::Start(object_offset))
+            .map_err(Error::Io)?;
+        let mut tail = Vec::new();
+        append_whole_blob(&mut tail, data);
+        file.write_all(&tail).map_err(Error::Io)?;
+        let trailer = sha1_trailer_for_open_file(&mut file)?;
+        file.write_all(trailer.as_bytes()).map_err(Error::Io)?;
+        file.flush().map_err(Error::Io)?;
+        Ok((oid, object_offset))
     }
 
     fn install_synthetic_pack(
@@ -3090,6 +3207,7 @@ mod tests {
 
     #[test]
     fn resolve_cross_pack_delta_without_index_clone() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
         let base = b"cross-pack-base-payload".as_slice();
@@ -3387,10 +3505,125 @@ mod tests {
         read_object_from_pack(&idx, &oid).expect("prime pack bytes cache");
 
         let good_on_disk = std::fs::read(&idx.pack_path).expect("read pack");
-        pack_cache::test_inject_stale_pack_bytes(&idx.pack_path, Arc::new(b"BAD".to_vec()));
+        pack_cache::test_inject_stale_pack_bytes(
+            &idx.pack_path,
+            PackData::from_owned(b"BAD".to_vec()),
+        );
         std::fs::write(&idx.pack_path, &good_on_disk).expect("refresh on-disk pack");
         let got = read_object_from_pack(&idx, &oid).expect("revalidate from disk");
         assert_eq!(got.data, b"revalidate-me");
+    }
+
+    #[test]
+    fn replaced_pack_same_path_reread_after_invalidation() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        std::fs::create_dir_all(objects.join("pack")).expect("pack dir");
+        let pack_path = objects.join("pack/repack-me.pack");
+        let idx_path = objects.join("pack/repack-me.idx");
+        const OBJECT_OFFSET: u64 = 9000;
+        let (oid_a, off_a) =
+            write_sparse_single_blob_pack(tmp.path(), &pack_path, b"before-repack", OBJECT_OFFSET)
+                .expect("sparse pack a");
+        assert!(
+            std::fs::metadata(&pack_path).expect("stat").len() > 8192,
+            "fixture pack must exceed mmap owned-buffer threshold"
+        );
+        write_v2_idx_for_test(&idx_path, &pack_path, &[(oid_a, off_a)]).expect("idx a");
+        let idx = read_pack_index(&idx_path).expect("parse idx a");
+        read_object_from_pack(&idx, &oid_a).expect("prime cache");
+
+        let (oid_b, off_b) = write_sparse_single_blob_pack(
+            tmp.path(),
+            &pack_path,
+            b"after-repack-content",
+            OBJECT_OFFSET,
+        )
+        .expect("sparse pack b");
+        write_v2_idx_for_test(&idx_path, &pack_path, &[(oid_b, off_b)]).expect("idx b");
+
+        assert!(
+            pack_cache::revalidate_stale_pack_bytes(&pack_path).expect("revalidate"),
+            "replacement must invalidate cached bytes"
+        );
+        let idx = read_pack_index(&idx_path).expect("reload idx after pack swap");
+        let got = read_object_from_pack(&idx, &oid_b).expect("read from replaced pack");
+        assert_eq!(got.data, b"after-repack-content");
+    }
+
+    #[test]
+    fn read_object_at_large_pack_offset_via_mmap() {
+        use std::fs::OpenOptions;
+        use std::io::{Seek, SeekFrom, Write};
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let objects = tmp.path().join("objects");
+        std::fs::create_dir_all(objects.join("pack")).expect("pack dir");
+
+        let data = b"large-offset-blob";
+        let odb = Odb::new(tmp.path());
+        let oid = odb.hash(ObjectKind::Blob, data);
+
+        let pack_path = objects.join("pack/large-off.pack");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(&pack_path)
+            .expect("create sparse pack");
+        file.write_all(b"PACK").expect("sig");
+        file.write_all(&2u32.to_be_bytes()).expect("ver");
+        file.write_all(&1u32.to_be_bytes()).expect("count");
+        let object_offset: u64 = 1 << 32;
+        file.seek(SeekFrom::Start(object_offset))
+            .expect("seek past 4GiB");
+        let mut tail = Vec::new();
+        append_whole_blob(&mut tail, data);
+        file.write_all(&tail).expect("object at huge offset");
+        let trailer = sha1_trailer_for_open_file(&mut file).expect("trailer hash");
+        file.write_all(trailer.as_bytes()).expect("append trailer");
+        file.flush().expect("flush");
+        let file_len = file.metadata().expect("meta").len();
+        drop(file);
+        assert!(file_len > object_offset);
+
+        let idx_path = pack_path.with_extension("idx");
+        write_v2_pack_index_with_trailer(
+            &idx_path,
+            &[(oid, object_offset, 0)],
+            trailer.as_bytes(),
+            20,
+        )
+        .expect("idx");
+
+        let idx = read_pack_index(&idx_path).expect("parse idx");
+        assert_eq!(idx.entries[0].offset, object_offset);
+        let got = read_object_from_pack(&idx, &oid).expect("read at large offset");
+        assert_eq!(got.data, data);
+    }
+
+    /// Hash pack bytes already written to `file` (from offset 0 through current EOF) for a SHA-1 trailer.
+    fn sha1_trailer_for_open_file(file: &mut std::fs::File) -> Result<ObjectId> {
+        use std::io::{Seek, SeekFrom};
+        let len = file.metadata().map_err(Error::Io)?.len();
+        file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
+        let mut hasher = HashAlgo::Sha1.hasher();
+        let mut buf = [0u8; 64 * 1024];
+        let mut left = len;
+        while left > 0 {
+            let chunk = left.min(buf.len() as u64) as usize;
+            let n = file.read(&mut buf[..chunk]).map_err(Error::Io)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            left -= n as u64;
+        }
+        Ok(hasher.finalize())
     }
 
     #[test]
@@ -3709,13 +3942,14 @@ mod cached_lookup_tests {
         let v1 = b"PACK\x00\x00\x00\x02\x00\x00\x00\x00";
         std::fs::write(&pack_path, v1).expect("write v1");
         let cached = read_pack_bytes_cached(&pack_path).expect("prime cache");
-        assert_eq!(&*cached, v1);
+        assert_eq!(&cached[..], v1);
 
         let v2 = b"PACK-replaced-by-repack";
         std::fs::write(&pack_path, v2).expect("overwrite on disk");
         let again = read_pack_bytes_cached(&pack_path).expect("cached without stat");
         assert_eq!(
-            &*again, v1,
+            &again[..],
+            v1,
             "content-addressed name pins cached bytes in-process"
         );
     }
@@ -3738,7 +3972,7 @@ mod cached_lookup_tests {
             std::fs::write(&pack_path, v2).expect("overwrite pack");
             let stale = read_pack_bytes_cached(&pack_path).expect("cache hit");
             assert_eq!(
-                &*stale,
+                &stale[..],
                 v1,
                 "{} serves cached bytes without stat on hit",
                 pack_path.display()
@@ -3746,7 +3980,7 @@ mod cached_lookup_tests {
             clear_pack_cache();
             let fresh = read_pack_bytes_cached(&pack_path).expect("after clear");
             assert_eq!(
-                &*fresh,
+                &fresh[..],
                 v2,
                 "{} reloads from disk after clear",
                 pack_path.display()
@@ -3881,6 +4115,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn v2_idx_crc_matches_crc32fast_over_entry_bytes() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         let tree = init_repo_with_pack(dir.path());
@@ -3900,6 +4135,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn packed_full_object_slice_returns_on_disk_bytes() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         let tree = init_repo_with_pack(dir.path());
@@ -3922,6 +4158,7 @@ mod cached_lookup_tests {
 
     #[test]
     fn packed_full_object_slice_crc_mismatch_falls_back_to_redundant_pack() {
+        let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let dir = TempDir::new().unwrap();
         let tree = init_repo_with_pack(dir.path());
