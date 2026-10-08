@@ -2401,6 +2401,7 @@ fn parallel_process_blob_worktree_jobs(
     trust_filemode: bool,
     materialize_dirty_blobs: bool,
     conv: &crate::crlf::ConversionConfig,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     use std::sync::{Arc, Mutex};
@@ -2439,6 +2440,7 @@ fn parallel_process_blob_worktree_jobs(
                         &job.file_attrs,
                         &job.rel_path,
                         Some(&job.entry),
+                        filter_process,
                     )?;
                     let worktree_oid = if materialize_dirty_blobs {
                         odb.write_with_options(
@@ -2519,6 +2521,7 @@ fn push_index_blob_worktree_diff(
     file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
     conv: &crate::crlf::ConversionConfig,
     materialize_dirty_blobs: bool,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     if meta.is_dir() {
@@ -2583,6 +2586,7 @@ fn push_index_blob_worktree_diff(
         &file_attrs,
         path_str_ref,
         Some(ie),
+        filter_process,
     )?;
     let worktree_oid = if materialize_dirty_blobs {
         odb.write_with_options(
@@ -2716,6 +2720,7 @@ fn diff_index_to_worktree_inner(
             crlf::get_file_attrs(legacy_attrs.as_deref().unwrap_or(&[]), path, false, &config)
         }
     };
+    let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
     let precompose_unicode = config
         .get_bool("core.precomposeunicode")
         .and_then(|r| r.ok())
@@ -2812,6 +2817,7 @@ fn diff_index_to_worktree_inner(
                         path_str_ref,
                         None,
                         materialize_dirty_blobs,
+                        filter_fp,
                     )?;
                     let path_owned = path_str_ref.to_owned();
                     result.push(DiffEntry {
@@ -2911,6 +2917,7 @@ fn diff_index_to_worktree_inner(
                         path_str_ref,
                         None,
                         materialize_dirty_blobs,
+                        filter_fp,
                     )?;
                     let worktree_mode = mode_from_metadata(&meta);
                     result.push(DiffEntry {
@@ -3024,6 +3031,7 @@ fn diff_index_to_worktree_inner(
                             &conv,
                             &file_attrs_for,
                             stat_policy,
+                            filter_fp,
                         ) {
                             index_stat_refresh_changed = true;
                         }
@@ -3073,6 +3081,7 @@ fn diff_index_to_worktree_inner(
                             &file_attrs_for,
                             &conv,
                             materialize_dirty_blobs,
+                            filter_fp,
                             &mut result,
                         )?;
                     }
@@ -3089,6 +3098,7 @@ fn diff_index_to_worktree_inner(
             trust_filemode,
             materialize_dirty_blobs,
             &conv,
+            filter_fp,
             &mut result,
         )?;
     }
@@ -3132,6 +3142,7 @@ fn diff_index_to_worktree_inner(
                 &path,
                 Some(&base_entry),
                 materialize_dirty_blobs,
+                filter_fp,
             )?;
             let wt_mode = mode_from_metadata(&meta);
             if wt_oid != base_entry.oid || wt_mode != base_entry.mode {
@@ -3278,6 +3289,7 @@ pub fn smudge_racily_clean_entries(
     work_tree: &Path,
     index_mtime: Option<(u32, u32)>,
     config: Option<&ConfigSet>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> bool {
     use crate::crlf;
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
@@ -3322,10 +3334,18 @@ pub fn smudge_racily_clean_entries(
             continue;
         }
         let file_attrs = crlf::get_file_attrs(&attrs, path, false, &config);
-        let content_matches =
-            hash_worktree_file(odb, &abs, &meta, &conv, &file_attrs, path, Some(ie))
-                .map(|oid| oid == ie.oid)
-                .unwrap_or(false);
+        let content_matches = hash_worktree_file(
+            odb,
+            &abs,
+            &meta,
+            &conv,
+            &file_attrs,
+            path,
+            Some(ie),
+            filter_process,
+        )
+        .map(|oid| oid == ie.oid)
+        .unwrap_or(false);
         if content_matches {
             continue;
         }
@@ -3347,6 +3367,7 @@ pub fn worktree_differs_from_index_entry(
     work_tree: &Path,
     ie: &IndexEntry,
     ignore_submodule_untracked: bool,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<bool> {
     use crate::config::ConfigSet;
     use crate::crlf;
@@ -3417,6 +3438,7 @@ pub fn worktree_differs_from_index_entry(
         &file_attrs,
         path_str_ref,
         Some(ie),
+        filter_process,
     )?;
 
     let mut eff_oid = worktree_oid;
@@ -3452,6 +3474,8 @@ pub struct WorktreeAddRefreshParams<'a> {
     pub index_mtime: Option<(u32, u32)>,
     /// Mode that would be written (after `core.filemode` / `--chmod`).
     pub staged_mode: u32,
+    /// Repository-scoped filter-process registry (when staging through a [`Repository`]).
+    pub filter_process: Option<&'a crate::filter_process::FilterProcessState>,
 }
 
 /// Outcome of comparing a tracked index entry to its worktree path for staging refresh.
@@ -3555,8 +3579,16 @@ fn worktree_effective_oid_matches_index(
         staged_mode,
         ..
     } = params;
-    let worktree_oid =
-        hash_worktree_file(odb, abs_path, meta, conv, file_attrs, rel_path, Some(ie))?;
+    let worktree_oid = hash_worktree_file(
+        odb,
+        abs_path,
+        meta,
+        conv,
+        file_attrs,
+        rel_path,
+        Some(ie),
+        params.filter_process,
+    )?;
     let mut eff_oid = worktree_oid;
     if eff_oid != ie.oid {
         if let Ok(raw) = fs::read(abs_path) {
@@ -3687,7 +3719,6 @@ pub fn refresh_index_stat_content_verified(
 /// # Errors
 ///
 /// Propagates I/O errors from the directory-grouped worktree scan.
-#[allow(clippy::too_many_arguments)]
 pub fn refresh_index_stat_content_verified_with_rules(
     odb: &Odb,
     git_dir: &Path,
@@ -3775,6 +3806,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
     };
     let mut dir_symlinks = SymlinkDirCache::default();
     let mut changed = false;
+    let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
     for_each_blob_by_directory_parallel(
         &blob_dirs,
         blob_scan,
@@ -3800,6 +3832,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
                 &conv,
                 &file_attrs_for,
                 stat_policy,
+                filter_fp,
             ) {
                 changed = true;
             }
@@ -3820,6 +3853,7 @@ fn refresh_index_blob_stat_from_metadata(
     conv: &crate::crlf::ConversionConfig,
     file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
     stat_policy: crate::index::StatMatchPolicy,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> bool {
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 
@@ -3831,9 +3865,18 @@ fn refresh_index_blob_stat_from_metadata(
     }
     if !stat_matches_with_policy(ie, meta, stat_policy) {
         let file_attrs = file_attrs_for(path);
-        let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
-            .map(|oid| oid == ie.oid)
-            .unwrap_or(false);
+        let content_matches = hash_worktree_file(
+            odb,
+            abs,
+            meta,
+            conv,
+            &file_attrs,
+            path,
+            Some(ie),
+            filter_process,
+        )
+        .map(|oid| oid == ie.oid)
+        .unwrap_or(false);
         if !content_matches {
             return false;
         }
@@ -3854,9 +3897,18 @@ fn refresh_index_blob_stat_from_metadata(
     }
     if entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
         let file_attrs = file_attrs_for(path);
-        let content_matches = hash_worktree_file(odb, abs, meta, conv, &file_attrs, path, Some(ie))
-            .map(|oid| oid == ie.oid)
-            .unwrap_or(false);
+        let content_matches = hash_worktree_file(
+            odb,
+            abs,
+            meta,
+            conv,
+            &file_attrs,
+            path,
+            Some(ie),
+            filter_process,
+        )
+        .map(|oid| oid == ie.oid)
+        .unwrap_or(false);
         if !content_matches {
             invalidate_index_stat_cache(ie);
             return true;
@@ -3907,6 +3959,7 @@ pub fn path_checkout_skip_blob_write_when_up_to_date(
     expected_oid: &ObjectId,
     expected_mode: u32,
     rel_path: &str,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<bool> {
     use crate::config::ConfigSet;
     use crate::crlf;
@@ -3947,6 +4000,7 @@ pub fn path_checkout_skip_blob_write_when_up_to_date(
         &file_attrs,
         rel_path,
         Some(entry),
+        filter_process,
     )?;
     Ok(wt_oid == *expected_oid)
 }
@@ -3986,6 +4040,7 @@ fn read_regular_worktree_blob_bytes(
     file_attrs: &crate::crlf::FileAttrs,
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<Vec<u8>> {
     let needs_index_blob =
         index_entry.is_some_and(|_| crate::crlf::clean_uses_autocrlf_index_guard(file_attrs, conv));
@@ -4003,6 +4058,7 @@ fn read_regular_worktree_blob_bytes(
         index_blob: prior_blob.as_deref(),
         renormalize: false,
         check_safecrlf: false,
+        filter_process,
     };
     Ok(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
@@ -4018,6 +4074,7 @@ pub(crate) fn worktree_blob_bytes(
     file_attrs: &crate::crlf::FileAttrs,
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<Vec<u8>> {
     let needs_index_blob =
         index_entry.is_some_and(|_| crate::crlf::clean_uses_autocrlf_index_guard(file_attrs, conv));
@@ -4042,6 +4099,7 @@ pub(crate) fn worktree_blob_bytes(
         index_blob: prior_blob.as_deref(),
         renormalize: false,
         check_safecrlf: false,
+        filter_process,
     };
     Ok(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
@@ -4059,8 +4117,18 @@ fn worktree_file_oid(
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
     materialize: bool,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    let data = worktree_blob_bytes(odb, path, meta, conv, file_attrs, rel_path, index_entry)?;
+    let data = worktree_blob_bytes(
+        odb,
+        path,
+        meta,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        filter_process,
+    )?;
     if materialize {
         odb.write_with_options(
             ObjectKind::Blob,
@@ -4085,8 +4153,18 @@ pub fn hash_worktree_file(
     file_attrs: &crate::crlf::FileAttrs,
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    let data = worktree_blob_bytes(odb, path, meta, conv, file_attrs, rel_path, index_entry)?;
+    let data = worktree_blob_bytes(
+        odb,
+        path,
+        meta,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        filter_process,
+    )?;
     Ok(odb.hash(ObjectKind::Blob, &data))
 }
 
@@ -4099,6 +4177,7 @@ pub fn materialize_worktree_blob(
     file_attrs: &crate::crlf::FileAttrs,
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
     worktree_file_oid(
         odb,
@@ -4109,6 +4188,7 @@ pub fn materialize_worktree_blob(
         rel_path,
         index_entry,
         true,
+        filter_process,
     )
 }
 
@@ -4221,6 +4301,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
             crlf::get_file_attrs(legacy_attrs.as_deref().unwrap_or(&[]), path, false, &config)
         }
     };
+    let filter_fp = worktree_rules.map(|r| r.filter_process());
 
     // Flatten the tree into a BTreeMap keyed by path
     let tree_flat = match tree_oid {
@@ -4376,8 +4457,16 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
         if unmerged_only_paths.contains(path) {
             if let (Some(te), Some(meta)) = (tree_entry, wt_meta.as_ref()) {
                 let file_attrs = file_attrs_for(path);
-                let wt_oid =
-                    hash_worktree_file(odb, &file_path, meta, &conv, &file_attrs, path, None)?;
+                let wt_oid = hash_worktree_file(
+                    odb,
+                    &file_path,
+                    meta,
+                    &conv,
+                    &file_attrs,
+                    path,
+                    None,
+                    filter_fp,
+                )?;
                 let wt_mode = mode_from_metadata(meta);
                 if wt_oid != te.oid || wt_mode != te.mode {
                     result.push(DiffEntry {
@@ -4440,6 +4529,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                         &file_attrs,
                         path,
                         idx_ent,
+                        filter_fp,
                     )?;
                     let mut eff_oid = wt_oid;
                     if eff_oid != te.oid {
@@ -4477,8 +4567,16 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                 }
 
                 // Staged content (and possibly mode): `git diff <rev>` is tree vs working tree.
-                let wt_oid =
-                    hash_worktree_file(odb, &file_path, meta, &conv, &file_attrs, path, idx_ent)?;
+                let wt_oid = hash_worktree_file(
+                    odb,
+                    &file_path,
+                    meta,
+                    &conv,
+                    &file_attrs,
+                    path,
+                    idx_ent,
+                    filter_fp,
+                )?;
                 let mut eff_oid = wt_oid;
                 if eff_oid != te.oid {
                     if let Ok(raw) = fs::read(&file_path) {
@@ -4525,6 +4623,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     &file_attrs,
                     path,
                     index_entries.get(path.as_bytes()).copied(),
+                    filter_fp,
                 )?;
                 let wt_mode = mode_from_metadata(meta);
                 result.push(DiffEntry {
@@ -8471,6 +8570,7 @@ mod smudge_racily_clean_tests {
             file_attrs: &attrs,
             index_mtime: Some((200, 0)),
             staged_mode: MODE_REGULAR,
+            filter_process: None,
         };
         let refresh = classify_worktree_entry_for_add(&params).expect("classify");
         assert_eq!(refresh, WorktreeAddRefresh::UpToDate);
@@ -8497,6 +8597,7 @@ mod smudge_racily_clean_tests {
             file_attrs: &attrs,
             index_mtime: None,
             staged_mode: MODE_REGULAR,
+            filter_process: None,
         };
         let refresh = classify_worktree_entry_for_add(&params).expect("classify");
         assert_eq!(refresh, WorktreeAddRefresh::NeedsRestage);
@@ -8523,6 +8624,7 @@ mod smudge_racily_clean_tests {
             file_attrs: &attrs,
             index_mtime: Some((200, 0)),
             staged_mode: MODE_REGULAR,
+            filter_process: None,
         };
         let refresh = classify_worktree_entry_for_add(&params).expect("classify");
         assert_eq!(refresh, WorktreeAddRefresh::NeedsRestage);
@@ -8552,8 +8654,15 @@ mod smudge_racily_clean_tests {
         assert!(stat_matches(&entry, &meta));
         assert!(entry_is_racy(&entry, Some(index_mtime)));
 
-        let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
+        let smudged = smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(index_mtime),
+            None,
+            None,
+        );
         assert!(smudged);
         assert_eq!(index.entries[0].size, 0);
 
@@ -8580,8 +8689,15 @@ mod smudge_racily_clean_tests {
         pin_mtime_and_sample(&wt.join("f.txt"), entry_mtime.0, entry_mtime.1);
 
         assert!(!entry_is_racy(&entry, Some(index_mtime)));
-        let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
+        let smudged = smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(index_mtime),
+            None,
+            None,
+        );
         assert!(!smudged);
         assert_eq!(index.entries[0].size, entry.size);
     }
@@ -8599,8 +8715,15 @@ mod smudge_racily_clean_tests {
         index.entries.push(entry.clone());
 
         assert!(entry_is_racy(&entry, Some(index_mtime)));
-        let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
+        let smudged = smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(index_mtime),
+            None,
+            None,
+        );
         assert!(!smudged);
         assert_eq!(index.entries[0].size, entry.size);
     }
@@ -8620,8 +8743,15 @@ mod smudge_racily_clean_tests {
         index.entries.push(entry.clone());
 
         assert!(entry_is_racy(&entry, Some(index_mtime)));
-        let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
+        let smudged = smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(index_mtime),
+            None,
+            None,
+        );
         assert!(!smudged, "matching SHA-256 blob must not be smudged");
         assert_eq!(index.entries[0].size, entry.size);
     }
@@ -8641,8 +8771,15 @@ mod smudge_racily_clean_tests {
         index.entries.push(entry.clone());
 
         assert!(entry_is_racy(&entry, Some(index_mtime)));
-        let smudged =
-            smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, Some(index_mtime), None);
+        let smudged = smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(index_mtime),
+            None,
+            None,
+        );
         assert!(
             !smudged,
             "CRLF worktree matching clean index OID must not be smudged"
@@ -8672,6 +8809,7 @@ mod smudge_racily_clean_tests {
             wt,
             Some(index_mtime),
             None,
+            None,
         ));
         assert_ne!(index.entries[0].size, 0);
 
@@ -8687,6 +8825,7 @@ mod smudge_racily_clean_tests {
             &mut index,
             wt,
             Some(index_mtime),
+            None,
             None,
         ));
         assert_ne!(index.entries[0].size, 0);
@@ -8705,7 +8844,7 @@ mod smudge_racily_clean_tests {
         fs::write(wt.join("f.txt"), b"same length??").expect("rewrite");
         pin_mtime_and_sample(&wt.join("f.txt"), index_mtime.0, index_mtime.1);
 
-        let smudged = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None, None);
+        let smudged = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None, None, None);
         assert!(!smudged);
         assert_ne!(index.entries[0].size, 0);
     }

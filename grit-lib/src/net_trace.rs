@@ -9,6 +9,7 @@
 
 use std::sync::OnceLock;
 
+// hygiene: immutable env flag cache (set once from GritNetDebug)
 static ENABLED: OnceLock<bool> = OnceLock::new();
 
 /// Whether networking trace output is enabled (`GRIT_NET_DEBUG` set to something

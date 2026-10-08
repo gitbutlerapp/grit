@@ -95,6 +95,7 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
                 &change.new_oid,
                 mode,
                 path,
+                Some(rules.filter_process()),
             )? {
                 let abs = work_tree.join(path);
                 let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
@@ -236,6 +237,7 @@ pub(crate) fn worktree_bytes_from_index_blob(
         Some(&oid_hex),
         Some(&smudge_meta),
         delayed_checkout,
+        Some(rules.filter_process()),
     )
     .map_err(Error::from)
 }
@@ -253,6 +255,7 @@ fn finish_delayed_checkouts(
         return Ok(());
     }
     let finish_result = delayed.finish(
+        rules.filter_process(),
         |path, meta| smudge_retry_after_delay(repo, rules, path, meta),
         |path, data| {
             let target = pending.iter().find(|t| t.path == path).ok_or_else(|| {
@@ -305,6 +308,7 @@ fn smudge_retry_after_delay(
         &rules.file_attrs(rel_path, false),
         Some(blob_hex),
         Some(meta),
+        Some(rules.filter_process()),
     )
     .map_err(|e| e.to_string())
 }

@@ -44,6 +44,7 @@ imara-diff.workspace = true
 regex.workspace = true
 libc.workspace = true
 unicode-width.workspace = true
+terminal_size.workspace = true
 encoding_rs = "0.8.35"
 icu_normalizer.workspace = true
 url.workspace = true

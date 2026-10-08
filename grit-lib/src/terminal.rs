@@ -62,6 +62,7 @@ mod windows_impl {
     /// understands ANSI. Enabling on either standard stream proves the console is
     /// VT-capable, but we try both so colored stdout *and* stderr render.
     pub fn ansi_supported() -> bool {
+        // hygiene: immutable Windows VT capability probe, cached once
         static ENABLED: OnceLock<bool> = OnceLock::new();
         *ENABLED.get_or_init(|| {
             let out = enable_vt(STD_OUTPUT_HANDLE);

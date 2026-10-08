@@ -104,6 +104,7 @@ fn required_clean_filter_failure_is_typed_message() {
             check_safecrlf: false,
             renormalize: false,
             index_blob: None,
+            filter_process: None,
         },
     )
     .unwrap_err();
@@ -150,6 +151,7 @@ fn bom_filter_error_has_single_fatal_prefix_on_stderr() {
             check_safecrlf: true,
             renormalize: false,
             index_blob: None,
+            filter_process: None,
         },
     )
     .unwrap_err();

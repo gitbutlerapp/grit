@@ -469,8 +469,13 @@ fn stage_untracked_paths_parallel(
         });
     }
 
-    let prepared =
-        prepare_worktree_blobs_parallel(&repo.odb, &batch_inputs, rules.conversion(), parallelism)?;
+    let prepared = prepare_worktree_blobs_parallel(
+        &repo.odb,
+        &batch_inputs,
+        rules.conversion(),
+        parallelism,
+        Some(rules.filter_process()),
+    )?;
 
     if !prepared.is_empty() {
         repo.odb.ensure_all_loose_prefix_dirs()?;
@@ -580,6 +585,7 @@ fn stage_untracked_path(
         &file_attrs,
         &index_relpath,
         None,
+        Some(rules.filter_process()),
     )
     .map_err(|e| Error::Message(format!("could not store {index_relpath}: {e}")))?;
 

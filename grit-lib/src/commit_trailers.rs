@@ -8,6 +8,7 @@ use crate::config::ConfigSet;
 const CHERRY_PICKED_PREFIX: &str = "(cherry picked from commit ";
 const SIGN_OFF_HEADER: &str = "Signed-off-by: ";
 
+// hygiene: immutable trailer prefix table (Git keyword list)
 static GIT_GENERATED_PREFIXES: &[&str] = &["Signed-off-by: ", "(cherry picked from commit "];
 
 const RESERVED_TRAILER_SUBSECTIONS: &[&str] = &["where", "ifexists", "ifmissing", "separators"];

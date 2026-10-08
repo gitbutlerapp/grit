@@ -683,6 +683,7 @@ dependencies = [
  "shell-words",
  "similar",
  "tempfile",
+ "terminal_size",
  "thiserror",
  "time",
  "unicode-width",

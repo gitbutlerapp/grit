@@ -17,16 +17,19 @@ use crate::config::parse_path;
 use crate::config::ConfigSet;
 use crate::crlf::{self, AttrRule, ConversionConfig, FileAttrs};
 use crate::error::{Error, Result};
+use crate::filter_process::FilterProcessState;
 use crate::ignore::IgnoreMatcher;
 use crate::index::Index;
 use crate::odb::Odb;
 use crate::repo::Repository;
+use crate::repo_caches::RepoCaches;
 
 /// Counts disk reads of attribute/ignore pattern files (tests only).
 ///
 /// Counts are per thread so tests running concurrently in one process do not see each other's
 /// reads. Attribute files are always read on the calling thread ([`WorktreeRules`] is not
 /// `Sync`), so an operation's reads land in its caller's counts.
+#[cfg(test)]
 pub mod file_load_counters {
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -68,11 +71,15 @@ pub mod file_load_counters {
 }
 
 fn record_attr_read(path: &Path) {
+    #[cfg(test)]
     file_load_counters::record(path);
+    let _ = path;
 }
 
 fn record_ignore_read(path: &Path) {
+    #[cfg(test)]
     file_load_counters::record(path);
+    let _ = path;
 }
 
 /// Attribute/ignore/conversion state shared across one porcelain operation.
@@ -81,6 +88,7 @@ pub struct WorktreeRules {
     conversion: ConversionConfig,
     ignore: RefCell<IgnoreMatcher>,
     attrs: AttributeState,
+    caches: Arc<RepoCaches>,
 }
 
 struct AttributeState {
@@ -140,6 +148,7 @@ impl WorktreeRules {
             conversion,
             ignore,
             attrs,
+            caches: Arc::clone(repo.caches()),
         })
     }
 
@@ -187,7 +196,14 @@ impl WorktreeRules {
             conversion,
             ignore,
             attrs,
+            caches: Arc::clone(repo.caches()),
         })
+    }
+
+    /// Long-running filter-process registry for this repository handle.
+    #[must_use]
+    pub fn filter_process(&self) -> &FilterProcessState {
+        self.caches.filters()
     }
 
     /// Repository config snapshot used to build this context.

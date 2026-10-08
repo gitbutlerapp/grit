@@ -113,7 +113,14 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         if !matches(&path) {
             continue;
         }
-        stage_new_worktree_path(repo, work_tree, &path, &mut index, precompose_unicode)?;
+        stage_new_worktree_path(
+            repo,
+            work_tree,
+            &path,
+            &mut index,
+            precompose_unicode,
+            &worktree_rules,
+        )?;
         staged += 1;
     }
 
@@ -142,8 +149,15 @@ fn stage_tracked_worktree_path(
     };
     let staged_mode = mode_from_metadata(&meta);
     let Some(ie) = index.get(rel_path.as_bytes(), 0).cloned() else {
-        return stage_new_worktree_path(repo, work_tree, rel_path, index, precompose_unicode)
-            .map(|_| true);
+        return stage_new_worktree_path(
+            repo,
+            work_tree,
+            rel_path,
+            index,
+            precompose_unicode,
+            rules,
+        )
+        .map(|_| true);
     };
 
     let file_attrs = rules.file_attrs(rel_path, false);
@@ -157,6 +171,7 @@ fn stage_tracked_worktree_path(
         file_attrs: &file_attrs,
         index_mtime,
         staged_mode,
+        filter_process: Some(rules.filter_process()),
     })?;
 
     match refresh {
@@ -174,7 +189,7 @@ fn stage_tracked_worktree_path(
             Ok(true)
         }
         WorktreeAddRefresh::NeedsRestage => {
-            stage_new_worktree_path(repo, work_tree, rel_path, index, precompose_unicode)?;
+            stage_new_worktree_path(repo, work_tree, rel_path, index, precompose_unicode, rules)?;
             Ok(true)
         }
     }
@@ -186,6 +201,7 @@ fn stage_new_worktree_path(
     rel_path: &str,
     index: &mut Index,
     precompose_unicode: bool,
+    rules: &crate::worktree_rules::WorktreeRules,
 ) -> Result<()> {
     if rel_path.ends_with('/') {
         return Ok(());
@@ -202,17 +218,28 @@ fn stage_new_worktree_path(
         return Ok(());
     }
 
-    let data = if meta.file_type().is_symlink() {
-        std::fs::read_link(&abs)
-            .map_err(crate::error::Error::Io)?
-            .to_string_lossy()
-            .into_owned()
-            .into_bytes()
+    let file_attrs = rules.file_attrs(&index_relpath, false);
+    let conv = rules.conversion();
+    let filter_fp = Some(rules.filter_process());
+    let oid = if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(&abs).map_err(crate::error::Error::Io)?;
+        let data = crate::diff::symlink_target_bytes(&target);
+        repo.odb.write(ObjectKind::Blob, &data)?
     } else {
-        std::fs::read(&abs).map_err(crate::error::Error::Io)?
+        crate::diff::materialize_worktree_blob(
+            &repo.odb,
+            &abs,
+            &meta,
+            conv,
+            &file_attrs,
+            &index_relpath,
+            None,
+            filter_fp,
+        )
+        .map_err(|e| {
+            crate::error::Error::Message(format!("could not store {index_relpath}: {e}"))
+        })?
     };
-
-    let oid = repo.odb.write(ObjectKind::Blob, &data)?;
     let entry = crate::index::entry_from_stat(&abs, index_relpath.as_bytes(), oid, mode)?;
     index.add_or_replace(entry);
     if index.fsmonitor_last_update.is_some() {

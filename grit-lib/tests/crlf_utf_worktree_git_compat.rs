@@ -39,7 +39,7 @@ fn attrs_utf32() -> FileAttrs {
 fn bare_utf16_smudge_matches_git_bytes() {
     let conv = default_conv();
     let out =
-        convert_to_worktree_eager(b"wide\n", "f.txt", &conv, &attrs_utf16(), None, None).unwrap();
+        convert_to_worktree_eager(b"wide\n", "f.txt", &conv, &attrs_utf16(), None, None, None).unwrap();
     assert_eq!(out, GIT_UTF16_WIDE, "UTF-16 smudge must match git checkout");
 }
 
@@ -47,7 +47,7 @@ fn bare_utf16_smudge_matches_git_bytes() {
 fn bare_utf32_smudge_matches_git_bytes() {
     let conv = default_conv();
     let out =
-        convert_to_worktree_eager(b"wide\n", "g.txt", &conv, &attrs_utf32(), None, None).unwrap();
+        convert_to_worktree_eager(b"wide\n", "g.txt", &conv, &attrs_utf32(), None, None, None).unwrap();
     assert_eq!(out, GIT_UTF32_WIDE, "UTF-32 smudge must match git checkout");
 }
 
@@ -69,7 +69,7 @@ fn unknown_working_tree_encoding_is_typed_unsupported_on_smudge() {
     let conv = default_conv();
     let mut attrs = FileAttrs::default();
     attrs.working_tree_encoding = Some("not-a-real-encoding".to_owned());
-    let err = convert_to_worktree_eager(b"hi\n", "f.txt", &conv, &attrs, None, None).unwrap_err();
+    let err = convert_to_worktree_eager(b"hi\n", "f.txt", &conv, &attrs, None, None, None).unwrap_err();
     assert!(matches!(
         err,
         FilterError::NotFilteredProperly { detail, .. }
@@ -146,7 +146,7 @@ fn bare_utf16_smudge_matches_system_git_checkout() {
 
     let conv = default_conv();
     let grit_bytes =
-        convert_to_worktree_eager(b"wide\n", "f.txt", &conv, &attrs_utf16(), None, None).unwrap();
+        convert_to_worktree_eager(b"wide\n", "f.txt", &conv, &attrs_utf16(), None, None, None).unwrap();
     assert_eq!(grit_bytes, git_bytes);
 }
 
@@ -163,6 +163,6 @@ fn bare_utf32_smudge_matches_system_git_checkout() {
 
     let conv = default_conv();
     let grit_bytes =
-        convert_to_worktree_eager(b"wide\n", "g.txt", &conv, &attrs_utf32(), None, None).unwrap();
+        convert_to_worktree_eager(b"wide\n", "g.txt", &conv, &attrs_utf32(), None, None, None).unwrap();
     assert_eq!(grit_bytes, git_bytes);
 }

@@ -560,6 +560,12 @@ fn compile_matcher(
     Ok(FuncnameMatcher { rules })
 }
 
+fn builtin_patterns() -> &'static BTreeMap<String, BuiltinPattern> {
+    // hygiene: immutable built-in diff funcname patterns, initialized once
+    static BUILTIN_PATTERNS: OnceLock<BTreeMap<String, BuiltinPattern>> = OnceLock::new();
+    BUILTIN_PATTERNS.get_or_init(parse_builtin_patterns)
+}
+
 fn parse_builtin_patterns() -> BTreeMap<String, BuiltinPattern> {
     BUILTIN_PATTERN_DEFS
         .iter()

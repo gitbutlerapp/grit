@@ -209,6 +209,7 @@ pub mod refs_fsck;
 pub mod refspec;
 pub mod reftable;
 pub mod repo;
+pub mod repo_caches;
 pub mod rerere;
 pub mod resolve_undo;
 pub mod rev_list;

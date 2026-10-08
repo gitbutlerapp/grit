@@ -33,7 +33,7 @@ use crate::environment::Environment;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[cfg(test)]
@@ -1551,7 +1551,6 @@ impl ConfigFile {
             };
             fs::write(&self.path, content)?;
         }
-        evict_config_cache_for_path(&self.path);
         Ok(())
     }
 
@@ -2018,49 +2017,17 @@ impl ConfigSet {
     ///
     /// See [`LoadConfigOptions`] for `GIT_CONFIG_PARAMETERS` / `-c` include behaviour.
     ///
-    /// Results are memoized for the process lifetime and revalidated against
-    /// the cascade files' stat stamps on every call (see the cache notes near the internal
-    /// `ConfigCacheKey` type).
+    /// Uncached load: parses the cascade from disk every call. Repository-scoped memoization
+    /// lives on [`crate::repo_caches::RepoCaches::load_config_with_options`].
     pub fn load_with_options(
         env: &Environment,
         git_dir: Option<&Path>,
         opts: &LoadConfigOptions,
     ) -> Result<Self> {
-        let Some(env_fp) = env.config_fingerprint() else {
-            #[cfg(test)]
-            cascade_load_counters::record_uncached();
-            return Self::load_with_options_uncached(env, git_dir, opts, &mut Vec::new());
-        };
-        let key = ConfigCacheKey::new(git_dir, opts);
-        let base_stamps = config_file_stamps(env, git_dir, opts);
-        if let Some(cached) = config_cache_lookup(&key, &env_fp, &base_stamps) {
-            #[cfg(test)]
-            cascade_load_counters::record_cache_validated();
-            return Ok(cached);
-        }
-        #[cfg(test)]
-        cascade_load_counters::record_uncached();
-        let mut included_files = Vec::new();
-        let set = Self::load_with_options_uncached(env, git_dir, opts, &mut included_files)?;
-        included_files.sort_unstable();
-        included_files.dedup();
-        let extra_stamps = stamp_paths(included_files);
-        let mut cache = config_cache()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        cache.insert(
-            key,
-            ConfigCacheEntry {
-                env_fingerprint: env_fp,
-                base_stamps,
-                extra_stamps,
-                set: Arc::new(set.clone()),
-            },
-        );
-        Ok(set)
+        Self::load_with_options_uncached(env, git_dir, opts, &mut Vec::new())
     }
 
-    fn load_with_options_uncached(
+    pub(crate) fn load_with_options_uncached(
         env: &Environment,
         git_dir: Option<&Path>,
         opts: &LoadConfigOptions,
@@ -2474,7 +2441,7 @@ fn include_directive_for_entry(entry: &ConfigEntry) -> Option<(String, Option<St
 type ConfigFileStamp = (PathBuf, Option<(SystemTime, u64)>);
 
 #[derive(PartialEq, Eq, Hash)]
-struct ConfigCacheKey {
+pub(crate) struct ConfigCacheKey {
     git_dir: Option<PathBuf>,
     include_system: bool,
     process_includes: bool,
@@ -2484,7 +2451,7 @@ struct ConfigCacheKey {
 }
 
 impl ConfigCacheKey {
-    fn new(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Self {
+    pub(crate) fn new(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Self {
         Self {
             git_dir: git_dir.map(Path::to_path_buf),
             include_system: opts.include_system,
@@ -2496,19 +2463,14 @@ impl ConfigCacheKey {
     }
 }
 
-struct ConfigCacheEntry {
-    env_fingerprint: Vec<(String, Option<String>)>,
+pub(crate) struct ConfigCacheEntry {
+    pub(crate) env_fingerprint: Vec<(String, Option<String>)>,
     /// Stamps of the fixed cascade files (recomputable from key + env).
-    base_stamps: Vec<ConfigFileStamp>,
+    pub(crate) base_stamps: Vec<ConfigFileStamp>,
     /// Stamps of the include targets this parse resolved (revalidated by
     /// re-statting each stored path).
-    extra_stamps: Vec<ConfigFileStamp>,
-    set: Arc<ConfigSet>,
-}
-
-fn config_cache() -> &'static Mutex<HashMap<ConfigCacheKey, ConfigCacheEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<ConfigCacheKey, ConfigCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+    pub(crate) extra_stamps: Vec<ConfigFileStamp>,
+    pub(crate) set: Arc<ConfigSet>,
 }
 
 /// The on-disk files [`ConfigSet::load_with_options_uncached`] would consult,
@@ -2550,7 +2512,7 @@ fn stamp_for_path(path: &Path) -> Option<(SystemTime, u64)> {
         .and_then(|m| Some((m.modified().ok()?, m.len())))
 }
 
-fn stamp_paths(paths: Vec<PathBuf>) -> Vec<ConfigFileStamp> {
+pub(crate) fn stamp_paths(paths: Vec<PathBuf>) -> Vec<ConfigFileStamp> {
     paths
         .into_iter()
         .map(|path| {
@@ -2560,7 +2522,7 @@ fn stamp_paths(paths: Vec<PathBuf>) -> Vec<ConfigFileStamp> {
         .collect()
 }
 
-fn config_file_stamps(
+pub(crate) fn config_file_stamps(
     env: &Environment,
     git_dir: Option<&Path>,
     opts: &LoadConfigOptions,
@@ -2568,14 +2530,12 @@ fn config_file_stamps(
     stamp_paths(config_cascade_file_paths(env, git_dir, opts))
 }
 
-fn config_cache_lookup(
+pub(crate) fn config_cache_lookup(
+    cache: &HashMap<ConfigCacheKey, ConfigCacheEntry>,
     key: &ConfigCacheKey,
     env_fp: &[(String, Option<String>)],
     base_stamps: &[ConfigFileStamp],
 ) -> Option<ConfigSet> {
-    let cache = config_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let entry = cache.get(key)?;
     if entry.env_fingerprint.as_slice() != env_fp || entry.base_stamps.as_slice() != base_stamps {
         return None;
@@ -2588,18 +2548,23 @@ fn config_cache_lookup(
     Some((*entry.set).clone())
 }
 
-/// Drop every cached cascade that read `path` (called on in-process writes).
-fn evict_config_cache_for_path(path: &Path) {
-    let mut cache = config_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    cache.retain(|_, entry| {
-        !entry
-            .base_stamps
-            .iter()
-            .chain(&entry.extra_stamps)
-            .any(|(p, _)| p == path)
-    });
+pub(crate) fn config_cache_store(
+    cache: &mut HashMap<ConfigCacheKey, ConfigCacheEntry>,
+    key: ConfigCacheKey,
+    env_fingerprint: Vec<(String, Option<String>)>,
+    base_stamps: Vec<ConfigFileStamp>,
+    extra_stamps: Vec<ConfigFileStamp>,
+    set: Arc<ConfigSet>,
+) {
+    cache.insert(
+        key,
+        ConfigCacheEntry {
+            env_fingerprint,
+            base_stamps,
+            extra_stamps,
+            set,
+        },
+    );
 }
 
 fn git_config_nosystem_enabled(env: &Environment) -> bool {
@@ -4284,9 +4249,10 @@ mod config_cache_tests {
         }
     }
 
-    fn load_value(git_dir: &Path) -> Option<String> {
+    fn load_value(caches: &crate::repo_caches::RepoCaches, git_dir: &Path) -> Option<String> {
         let opts = local_opts(git_dir);
-        let set = ConfigSet::load_with_options(&Environment::empty(), Some(git_dir), &opts)
+        let set = caches
+            .load_config_with_options(&Environment::empty(), Some(git_dir), &opts)
             .expect("load cascade");
         set.get("gritcachetest.value")
     }
@@ -4301,56 +4267,59 @@ mod config_cache_tests {
 
     #[test]
     fn cache_serves_same_stamp_and_config_write_evicts() {
+        let caches = crate::repo_caches::RepoCaches::new();
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         let cfg = gd.join("config");
         fs::write(&cfg, "[gritcachetest]\n\tvalue = aaa\n").expect("write v1");
         let t0 = mtime_of(&cfg);
-        assert_eq!(load_value(gd).as_deref(), Some("aaa"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("aaa"));
 
         // Same size + restored mtime: indistinguishable by stat, so the cache
-        // serves the old parse. (This is the window `ConfigFile::write`
-        // eviction closes for in-process writers; C git would not re-read at
-        // all.) This assertion is what proves the cache is actually used.
+        // serves the old parse. (This is the window explicit eviction closes
+        // for in-process writers; C git would not re-read at all.)
         fs::write(&cfg, "[gritcachetest]\n\tvalue = bbb\n").expect("write v2");
         restore_mtime(&cfg, t0);
-        assert_eq!(load_value(gd).as_deref(), Some("aaa"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("aaa"));
 
-        // An in-process `ConfigFile::write` evicts even with identical stamps.
+        // An in-process `ConfigFile::write` plus eviction sees new content even with identical stamps.
         let mut file = ConfigFile::from_path(&cfg, ConfigScope::Local)
             .expect("read config")
             .expect("config exists");
         file.set("gritcachetest.value", "ccc").expect("set value");
         file.write().expect("persist");
+        caches.evict_config_for_path(&cfg);
         restore_mtime(&cfg, t0);
-        assert_eq!(load_value(gd).as_deref(), Some("ccc"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("ccc"));
     }
 
     #[test]
     fn cache_invalidates_on_size_or_existence_change() {
+        let caches = crate::repo_caches::RepoCaches::new();
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         let cfg = gd.join("config");
         // Absent local config is cached as "absent"...
-        assert_eq!(load_value(gd), None);
+        assert_eq!(load_value(&caches, gd), None);
         // ...and creating the file is a stamp change (None -> Some).
         fs::write(&cfg, "[gritcachetest]\n\tvalue = first\n").expect("create");
-        assert_eq!(load_value(gd).as_deref(), Some("first"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("first"));
         // A size change invalidates even with a restored mtime.
         let t0 = mtime_of(&cfg);
         fs::write(&cfg, "[gritcachetest]\n\tvalue = second-longer\n").expect("rewrite");
         restore_mtime(&cfg, t0);
-        assert_eq!(load_value(gd).as_deref(), Some("second-longer"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("second-longer"));
     }
 
     #[test]
     fn include_targets_are_stamped_and_invalidate() {
+        let caches = crate::repo_caches::RepoCaches::new();
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         fs::write(gd.join("config"), "[include]\n\tpath = extra.conf\n").expect("write parent");
         let inc = gd.join("extra.conf");
         fs::write(&inc, "[gritcachetest]\n\tvalue = one\n").expect("write include v1");
-        assert_eq!(load_value(gd).as_deref(), Some("one"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("one"));
 
         // Same-size + restored-mtime rewrite of only the included file: the
         // parse result is served from cache (proving the include target is
@@ -4358,28 +4327,30 @@ mod config_cache_tests {
         let t0 = mtime_of(&inc);
         fs::write(&inc, "[gritcachetest]\n\tvalue = two\n").expect("write include v2");
         restore_mtime(&inc, t0);
-        assert_eq!(load_value(gd).as_deref(), Some("one"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("one"));
 
         // ...while a stat-visible change to the included file invalidates.
         fs::write(&inc, "[gritcachetest]\n\tvalue = two-longer\n").expect("write include v3");
-        assert_eq!(load_value(gd).as_deref(), Some("two-longer"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("two-longer"));
     }
 
     #[test]
     fn missing_include_target_is_watched() {
+        let caches = crate::repo_caches::RepoCaches::new();
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         fs::write(gd.join("config"), "[include]\n\tpath = extra.conf\n").expect("write parent");
-        assert_eq!(load_value(gd), None);
+        assert_eq!(load_value(&caches, gd), None);
 
         // The resolved-but-missing target was stamped as absent; creating it
         // must invalidate the cached parse.
         fs::write(gd.join("extra.conf"), "[gritcachetest]\n\tvalue = born\n").expect("create");
-        assert_eq!(load_value(gd).as_deref(), Some("born"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("born"));
     }
 
     #[test]
     fn onbranch_condition_follows_head() {
+        let caches = crate::repo_caches::RepoCaches::new();
         let td = tempfile::tempdir().expect("tempdir");
         let gd = td.path();
         fs::write(gd.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");
@@ -4393,11 +4364,11 @@ mod config_cache_tests {
             "[gritcachetest]\n\tvalue = onmain\n",
         )
         .expect("write branch config");
-        assert_eq!(load_value(gd).as_deref(), Some("onmain"));
+        assert_eq!(load_value(&caches, gd).as_deref(), Some("onmain"));
 
         // Switching branches rewrites HEAD; the stamped HEAD must invalidate
         // the cached cascade so the condition is re-evaluated.
         fs::write(gd.join("HEAD"), "ref: refs/heads/dev\n").expect("rewrite HEAD");
-        assert_eq!(load_value(gd), None);
+        assert_eq!(load_value(&caches, gd), None);
     }
 }

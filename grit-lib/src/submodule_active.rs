@@ -158,7 +158,11 @@ fn parse_pathspec_exclude(spec: &str) -> (bool, &str) {
     (false, s)
 }
 
-fn index_gitlink_match_for_path(index: &Index, path: &str) -> Option<PathspecMatchContext> {
+fn index_gitlink_match_for_path(
+    index: &Index,
+    path: &str,
+    precompose_paths: bool,
+) -> Option<PathspecMatchContext> {
     for e in &index.entries {
         if e.stage() != 0 {
             continue;
@@ -172,6 +176,7 @@ fn index_gitlink_match_for_path(index: &Index, path: &str) -> Option<PathspecMat
             return Some(PathspecMatchContext {
                 is_directory: false,
                 is_git_submodule: true,
+                precompose_paths,
             });
         }
     }
@@ -199,6 +204,7 @@ pub fn submodule_active_pathspec_match(
     index: &Index,
     specs: &[String],
     path: &str,
+    precompose_paths: bool,
 ) -> std::result::Result<bool, String> {
     for v in specs {
         if v.is_empty() {
@@ -207,10 +213,13 @@ pub fn submodule_active_pathspec_match(
             ));
         }
     }
-    let ctx = index_gitlink_match_for_path(index, path).unwrap_or(PathspecMatchContext {
-        is_directory: false,
-        is_git_submodule: true,
-    });
+    let ctx = index_gitlink_match_for_path(index, path, precompose_paths).unwrap_or(
+        PathspecMatchContext {
+            is_directory: false,
+            is_git_submodule: true,
+            precompose_paths,
+        },
+    );
 
     let positive = specs
         .iter()
@@ -234,12 +243,10 @@ pub fn is_submodule_active(repo: &Repository, path: &str) -> std::result::Result
         return Ok(false);
     };
 
-    let cfg = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )
-    .map_err(|e| e.to_string())?;
+    let cfg = repo
+        .config()
+        .map(|c| (*c).clone())
+        .map_err(|e| e.to_string())?;
     let per_key = format!("submodule.{name}.active");
     if let Some(res) = cfg.get_bool(&per_key) {
         let b = res.map_err(|_| format!("invalid boolean for '{per_key}'"))?;
@@ -249,7 +256,12 @@ pub fn is_submodule_active(repo: &Repository, path: &str) -> std::result::Result
     if config_has_submodule_active_key(&cfg) {
         let values = cfg.get_all("submodule.active");
         let index = repo.load_index().map_err(|e| e.to_string())?;
-        return submodule_active_pathspec_match(&index, &values, &path_norm);
+        return submodule_active_pathspec_match(
+            &index,
+            &values,
+            &path_norm,
+            repo.pathspec_precompose_enabled(),
+        );
     }
 
     let url_key = format!("submodule.{name}.url");

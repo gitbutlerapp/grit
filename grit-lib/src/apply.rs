@@ -609,6 +609,7 @@ fn guess_p_value_from_nameline(line: &[u8], setup_prefix: Option<&str>) -> Optio
 }
 
 fn epoch_stamp_regex() -> &'static Regex {
+    // hygiene: immutable compiled regex for patch epoch stamps
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Provably infallible: the pattern is a fixed string literal that is a valid regex.

@@ -13,7 +13,7 @@ The `grit` CLI builds an environment from the process in `grit-cli` and passes i
 
 [`Repository::discover`](rustdoc:grit_lib::repo::Repository) and [`Repository::open`](rustdoc:grit_lib::repo::Repository) remain convenience entry points that use `Environment::empty()` (no overrides beyond `cwd = "."`).
 
-[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) takes `&Environment` as its first argument so config caching and global/system file resolution match the same snapshot as discovery.
+[`ConfigSet::load`](rustdoc:grit_lib::config::ConfigSet) takes `&Environment` as its first argument and always parses the cascade from disk (no process-global cache). Repository-scoped memoization lives on each open handle: [`Repository::config`](rustdoc:grit_lib::repo::Repository) returns `Arc<ConfigSet>` backed by [`RepoCaches`](rustdoc:grit_lib::repo_caches::RepoCaches) (config cascade, gitattributes stacks, filter-process drivers, precompose flags, and related state).
 
 ## Discover vs open
 

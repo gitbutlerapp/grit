@@ -1001,7 +1001,12 @@ pub fn rev_list(
             && crate::pathspec::pathspecs_allow_bloom(&options.paths);
         let read_changed = read_paths && options.commit_graph_read_changed_paths;
         let chain = if use_bloom {
-            CommitGraphChain::load(&repo.git_dir.join("objects"))
+            CommitGraphChain::try_load_with_caches(
+                &repo.git_dir.join("objects"),
+                Some(repo.caches().as_ref()),
+            )
+            .ok()
+            .flatten()
         } else {
             None
         };
@@ -4238,9 +4243,11 @@ fn commit_touches_paths(
         if sparse {
             return Ok(true);
         }
+        let precompose = repo.pathspec_precompose_enabled();
         let ctx = crate::pathspec::PathspecMatchContext {
             is_directory: false,
             is_git_submodule: false,
+            precompose_paths: precompose,
         };
         return Ok(commit_map
             .keys()
@@ -4610,9 +4617,11 @@ fn dense_path_limited_action(
             .collect();
 
     if parents.is_empty() {
+        let precompose = repo.pathspec_precompose_enabled();
         let ctx = crate::pathspec::PathspecMatchContext {
             is_directory: false,
             is_git_submodule: false,
+            precompose_paths: precompose,
         };
         let visible = sparse
             || commit_map
@@ -4686,6 +4695,7 @@ pub fn commit_visible_for_dense_pathspecs(
     let commit_map: HashMap<String, (ObjectId, u32)> = commit_entries.into_iter().collect();
 
     if parents.is_empty() {
+        let precompose = repo.pathspec_precompose_enabled();
         return Ok(commit_map.keys().any(|path| {
             paths.iter().any(|spec| {
                 crate::pathspec::matches_pathspec_with_context(
@@ -4694,6 +4704,7 @@ pub fn commit_visible_for_dense_pathspecs(
                     crate::pathspec::PathspecMatchContext {
                         is_directory: false,
                         is_git_submodule: false,
+                        precompose_paths: precompose,
                     },
                 )
             })
@@ -5193,7 +5204,12 @@ impl<'r> CommitGraph<'r> {
         let shallow_boundaries = load_shallow_boundaries(&repo.git_dir);
         let graft_parents = crate::rev_parse::load_graft_parents(&repo.git_dir);
         let graph_chain = if use_commit_graph {
-            CommitGraphChain::load(&repo.git_dir.join("objects"))
+            CommitGraphChain::try_load_with_caches(
+                &repo.git_dir.join("objects"),
+                Some(repo.caches().as_ref()),
+            )
+            .ok()
+            .flatten()
         } else {
             None
         };

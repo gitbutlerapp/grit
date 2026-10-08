@@ -65,24 +65,12 @@ pub fn should_drop_tail_match_for_myers(
     parent_lines.iter().filter(|line| **line == tail).count() >= 2
 }
 
-/// Whether the indent heuristic is enabled for this blame run
-/// (`--indent-heuristic` / `--no-indent-heuristic` / `diff.indentHeuristic`).
-static BLAME_INDENT_HEURISTIC: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-fn blame_indent_heuristic_enabled() -> bool {
-    BLAME_INDENT_HEURISTIC.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-pub fn set_blame_indent_heuristic(enabled: bool) {
-    BLAME_INDENT_HEURISTIC.store(enabled, std::sync::atomic::Ordering::Relaxed);
-}
-
 /// Map each line in `new` to its origin in `old` (if any).
 pub fn build_line_map(
     old: &[&str],
     new: &[&str],
     diff_algorithm: BlameDiffAlgorithm,
+    indent_heuristic: bool,
 ) -> Vec<Option<usize>> {
     // Ensure trailing newlines so `from_lines` splits consistently
     let mut old_joined = old.join("\n");
@@ -96,7 +84,7 @@ pub fn build_line_map(
         &old_joined,
         &new_joined,
         diff_algorithm.to_similar(),
-        blame_indent_heuristic_enabled(),
+        indent_heuristic,
     );
 
     let mut result = vec![None; new.len()];
@@ -460,7 +448,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ConfigSet;
@@ -483,21 +470,10 @@ type CopySourceBlameCache = (
 
 /// Hook the CLI installs so blame can lazily hydrate missing objects from a
 /// promisor remote (partial clone). The lib does no transport itself; the CLI
-/// supplies a function that performs the fetch.
-type PromisorHydrateHook = fn(&Repository, ObjectId);
+/// supplies a function that performs the fetch. Install with
+/// [`Repository::set_promisor_hydrate_hook`].
+pub type PromisorHydrateHook = fn(&Repository, ObjectId);
 
-static PROMISOR_HYDRATE_HOOK: OnceLock<PromisorHydrateHook> = OnceLock::new();
-
-/// Install the promisor-hydration hook used by [`read_object_for_blame`] when an
-/// object is missing locally. Called once by the CLI before running blame; later
-/// calls are ignored (the first installed hook wins).
-pub fn set_promisor_hydrate_hook(hook: PromisorHydrateHook) {
-    let _ = PROMISOR_HYDRATE_HOOK.set(hook);
-}
-
-fn promisor_hydrate_hook() -> Option<PromisorHydrateHook> {
-    PROMISOR_HYDRATE_HOOK.get().copied()
-}
 /// A single line attribution.
 #[derive(Debug, Clone)]
 pub struct BlameLine {
@@ -527,7 +503,7 @@ fn resolve_path_in_tree_entry(
     let mut current = *tree_oid;
 
     for (i, part) in parts.iter().enumerate() {
-        let obj = read_object_for_blame(odb, &current)?;
+        let obj = read_object_for_blame(odb, &current, None)?;
         let entries = parse_tree(&obj.data)?;
         match entries
             .iter()
@@ -577,16 +553,12 @@ pub struct BlameTextconvContext {
     conversion: ConversionConfig,
     pub attrs: GitAttributes,
     diff_attrs: Vec<DiffAttrRule>,
+    filter_process: std::sync::Arc<crate::repo_caches::RepoCaches>,
 }
 
 impl BlameTextconvContext {
     pub fn new(repo: &Repository) -> Self {
-        let config = ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
-            Some(&repo.git_dir),
-            true,
-        )
-        .unwrap_or_default();
+        let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
         let attrs = load_attr_rules(repo);
         let diff_attrs = load_diff_attr_rules(repo);
@@ -595,7 +567,12 @@ impl BlameTextconvContext {
             conversion,
             attrs,
             diff_attrs,
+            filter_process: std::sync::Arc::clone(repo.caches()),
         }
+    }
+
+    fn filters(&self) -> &crate::filter_process::FilterProcessState {
+        self.filter_process.filters()
     }
 }
 
@@ -651,13 +628,17 @@ fn load_diff_attr_rules(repo: &Repository) -> Vec<DiffAttrRule> {
     rules
 }
 
-pub fn read_object_for_blame(odb: &Odb, oid: &ObjectId) -> Result<Object> {
+pub fn read_object_for_blame(
+    odb: &Odb,
+    oid: &ObjectId,
+    repo: Option<&Repository>,
+) -> Result<Object> {
     match odb.read(oid) {
         Ok(obj) => Ok(obj),
         Err(LibError::ObjectNotFound(_)) => {
-            if let Some(hook) = promisor_hydrate_hook() {
-                if let Ok(repo) = Repository::discover(None) {
-                    hook(&repo, *oid);
+            if let Some(repo) = repo {
+                if let Some(hook) = repo.promisor_hydrate_hook() {
+                    hook(repo, *oid);
                     return odb.read(oid);
                 }
             }
@@ -791,7 +772,7 @@ fn read_blob_content_for_blame(
     textconv_ctx: Option<&BlameTextconvContext>,
     use_textconv: bool,
 ) -> Result<String> {
-    let obj = read_object_for_blame(odb, oid)?;
+    let obj = read_object_for_blame(odb, oid, None)?;
     if obj.kind != ObjectKind::Blob {
         return Err(LibError::Message("expected blob object".to_string()));
     }
@@ -816,6 +797,7 @@ fn read_blob_content_for_blame(
         &attrs,
         Some(&oid_hex),
         None,
+        Some(ctx.filters()),
     )
     .map_err(LibError::Filter)?;
     let converted = run_textconv_command(&command, &worktree_data)
@@ -836,9 +818,10 @@ pub fn compute_blame(
     copy_depth: usize,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
 ) -> Result<Vec<BlameLine>> {
     let start_commit = {
-        let obj = read_object_for_blame(odb, &start_oid)?;
+        let obj = read_object_for_blame(odb, &start_oid, None)?;
         parse_commit(&obj.data)?
     };
 
@@ -943,6 +926,7 @@ pub fn compute_blame(
                         copy_depth,
                         first_parent_only,
                         grafts,
+                        indent_heuristic,
                     )?;
                     parent_lines.push(Some(p_lines));
                     parent_blames.push(Some(p_blame));
@@ -1091,7 +1075,7 @@ pub fn compute_blame(
                 } else {
                     diff_algorithm
                 };
-                let map = build_line_map(&pl_refs, &cur_lines, map_algo);
+                let map = build_line_map(&pl_refs, &cur_lines, map_algo, indent_heuristic);
                 parent_blobs.push((p, blob, mode));
                 par_lines_vec.push(pl);
                 maps.push(map);
@@ -1255,6 +1239,7 @@ pub fn compute_blame(
                             copy_depth.saturating_sub(1),
                             first_parent_only,
                             grafts,
+                            indent_heuristic,
                         )?;
                         for line in source_blame {
                             by_content
@@ -1374,7 +1359,8 @@ pub fn compute_blame(
                 let par_lines = content_lines(&par_content);
 
                 // Build mapping: cur_line_idx → Option<parent_line_idx>
-                let mut line_map = build_line_map(&par_lines, &cur_lines, diff_algorithm);
+                let mut line_map =
+                    build_line_map(&par_lines, &cur_lines, diff_algorithm, indent_heuristic);
                 if is_ignored {
                     line_map = build_fuzzy_line_map(&par_lines, &cur_lines, &line_map);
                 }
@@ -1394,6 +1380,7 @@ pub fn compute_blame(
                         false,
                         first_parent_only,
                         grafts,
+                        indent_heuristic,
                     )? {
                         let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
                         for line in source_blame {
@@ -1598,6 +1585,7 @@ fn find_copy_source_blame(
     include_current_path: bool,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
 ) -> Result<Option<(String, Vec<BlameLine>)>> {
     let mut entries = Vec::new();
     collect_tree_file_entries(odb, parent_tree_oid, "", &mut entries)?;
@@ -1639,6 +1627,7 @@ fn find_copy_source_blame(
         copy_depth,
         first_parent_only,
         grafts,
+        indent_heuristic,
     )?;
     Ok(Some((source_path, source_blame)))
 }
@@ -1649,7 +1638,7 @@ fn collect_tree_file_entries(
     prefix: &str,
     out: &mut Vec<(String, ObjectId, u32)>,
 ) -> Result<()> {
-    let obj = read_object_for_blame(odb, tree_oid)?;
+    let obj = read_object_for_blame(odb, tree_oid, None)?;
     if obj.kind != ObjectKind::Tree {
         return Err(LibError::Message("expected tree".to_string()));
     }
@@ -1678,7 +1667,7 @@ fn get_commit(
     if let Some(c) = cache.get(&oid) {
         return Ok(c.clone());
     }
-    let obj = read_object_for_blame(odb, &oid)?;
+    let obj = read_object_for_blame(odb, &oid, None)?;
     let c = parse_commit(&obj.data)?;
     cache.insert(oid, c.clone());
     Ok(c)
@@ -1726,7 +1715,7 @@ pub fn apply_annotate_huge_graft_fixup(
     let mut oid_01 = None;
     let mut oid_10 = None;
     for p in parents {
-        let obj = read_object_for_blame(odb, p)?;
+        let obj = read_object_for_blame(odb, p, None)?;
         let c = parse_commit(&obj.data)?;
         let msg = c.message.trim();
         if msg == "01" {
@@ -1788,7 +1777,7 @@ pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
 
 pub fn peel_to_commit_oid(odb: &Odb, mut oid: ObjectId) -> Result<Option<ObjectId>> {
     loop {
-        let obj = read_object_for_blame(odb, &oid)?;
+        let obj = read_object_for_blame(odb, &oid, None)?;
         match obj.kind {
             ObjectKind::Commit => return Ok(Some(oid)),
             ObjectKind::Tag => {
@@ -1813,13 +1802,14 @@ pub fn build_uncommitted_blame(
     copy_depth: usize,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
+    indent_heuristic: bool,
 ) -> Result<Vec<BlameLine>> {
     let zero = crate::diff::zero_oid();
     let final_lines = content_lines(content);
 
     let mut by_content_source: Option<CopySourceBlameCache> = None;
     if copy_depth >= 2 {
-        let head_obj = read_object_for_blame(odb, &start_oid)?;
+        let head_obj = read_object_for_blame(odb, &start_oid, None)?;
         let head_commit = parse_commit(&head_obj.data)?;
         if let Some((source_path, source_blame)) = find_copy_source_blame(
             odb,
@@ -1835,6 +1825,7 @@ pub fn build_uncommitted_blame(
             true,
             first_parent_only,
             grafts,
+            indent_heuristic,
         )? {
             let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
             for line in source_blame {
@@ -1960,7 +1951,7 @@ pub fn compute_reverse_blame(
 
         let old_refs: Vec<&str> = prev_lines.iter().map(|s| s.as_str()).collect();
         let new_refs: Vec<&str> = cur_lines.iter().map(|s| s.as_str()).collect();
-        let new_to_old = build_line_map(&old_refs, &new_refs, diff_algorithm);
+        let new_to_old = build_line_map(&old_refs, &new_refs, diff_algorithm, false);
         let mut old_to_new = vec![None; prev_lines.len()];
         for (new_idx, old_idx_opt) in new_to_old.iter().enumerate() {
             if let Some(old_idx) = *old_idx_opt {
@@ -2021,7 +2012,7 @@ pub fn apply_final_content_overlay(
     textconv_ctx: Option<&BlameTextconvContext>,
     use_textconv: bool,
 ) -> Result<Option<Vec<BlameLine>>> {
-    let head_commit_obj = read_object_for_blame(odb, &start_oid)?;
+    let head_commit_obj = read_object_for_blame(odb, &start_oid, None)?;
     let head_commit = parse_commit(&head_commit_obj.data)?;
     let Some((head_blob_oid, head_mode)) =
         resolve_path_in_tree_entry(odb, &head_commit.tree, file_path)?
@@ -2046,7 +2037,7 @@ pub fn apply_final_content_overlay(
         return Ok(None);
     }
 
-    let map = build_line_map(&head_lines, &final_lines, BlameDiffAlgorithm::Myers);
+    let map = build_line_map(&head_lines, &final_lines, BlameDiffAlgorithm::Myers, false);
     let zero = crate::diff::zero_oid();
 
     let mut by_head_line: HashMap<usize, &BlameLine> = HashMap::new();
@@ -2106,7 +2097,7 @@ pub fn apply_worktree_overlay(
     let raw_worktree = std::fs::read(&abs_path)?;
     let raw_worktree_text = String::from_utf8_lossy(&raw_worktree).into_owned();
 
-    let head_commit_obj = read_object_for_blame(odb, &start_oid)?;
+    let head_commit_obj = read_object_for_blame(odb, &start_oid, None)?;
     let head_commit = parse_commit(&head_commit_obj.data)?;
     let Some((head_blob_oid, head_mode)) =
         resolve_path_in_tree_entry(odb, &head_commit.tree, file_path)?
@@ -2141,7 +2132,7 @@ pub fn apply_worktree_overlay(
 
     let head_lines = content_lines(&head_content);
     let wt_lines = content_lines(&worktree_content);
-    let map = build_line_map(&head_lines, &wt_lines, BlameDiffAlgorithm::Myers);
+    let map = build_line_map(&head_lines, &wt_lines, BlameDiffAlgorithm::Myers, false);
     let zero = crate::diff::zero_oid();
 
     let mut by_head_line: HashMap<usize, &BlameLine> = HashMap::new();
@@ -2222,7 +2213,7 @@ mod tests {
     fn build_line_map_maps_unchanged_lines_and_drops_replaced() {
         let old = ["alpha", "beta", "gamma"];
         let new = ["alpha", "BETA", "gamma"];
-        let map = build_line_map(&old, &new, BlameDiffAlgorithm::Myers);
+        let map = build_line_map(&old, &new, BlameDiffAlgorithm::Myers, false);
         // unchanged lines map back to their old index; the replaced line is None.
         assert_eq!(map, vec![Some(0), None, Some(2)]);
     }
@@ -2230,7 +2221,7 @@ mod tests {
     #[test]
     fn build_line_map_identity_for_equal_files() {
         let lines = ["one", "two", "three"];
-        let map = build_line_map(&lines, &lines, BlameDiffAlgorithm::Histogram);
+        let map = build_line_map(&lines, &lines, BlameDiffAlgorithm::Histogram, false);
         assert_eq!(map, vec![Some(0), Some(1), Some(2)]);
     }
 

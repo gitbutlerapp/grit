@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use crate::objects::ObjectId;
 use crate::refs;
@@ -107,7 +107,7 @@ pub fn smudge_meta_for_checkout(repo: &Repository, blob_hex: &str) -> FilterSmud
     meta
 }
 
-struct RunningFilter {
+pub(crate) struct RunningFilter {
     #[allow(dead_code)]
     child: Child,
     stdin: Option<ChildStdin>,
@@ -115,38 +115,79 @@ struct RunningFilter {
     caps: u32,
 }
 
-fn process_registry() -> &'static Mutex<HashMap<String, Arc<Mutex<RunningFilter>>>> {
-    static REG: OnceLock<Mutex<HashMap<String, Arc<Mutex<RunningFilter>>>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
+/// Per-repository filter-process registry (long-running `filter.*.process` drivers).
+pub struct FilterProcessState {
+    registry: Mutex<HashMap<String, Arc<Mutex<RunningFilter>>>>,
+    disabled: Mutex<HashSet<String>>,
 }
 
-fn disabled_process_filters() -> &'static Mutex<HashSet<String>> {
-    static DISABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    DISABLED.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-/// Stop using a process filter for the rest of this process.
-///
-/// Git treats `status=abort` from a long-running filter as a request to skip all later paths for
-/// that filter driver.
-pub fn disable_process_filter(cmd: &str) {
-    if let Ok(mut disabled) = disabled_process_filters().lock() {
-        disabled.insert(cmd.to_string());
+impl std::fmt::Debug for FilterProcessState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilterProcessState").finish_non_exhaustive()
     }
-    remove_process_filter(cmd);
 }
 
-fn process_filter_is_disabled(cmd: &str) -> bool {
-    disabled_process_filters()
-        .lock()
-        .ok()
-        .is_some_and(|disabled| disabled.contains(cmd))
-}
-
-fn remove_process_filter(cmd: &str) {
-    if let Ok(mut reg) = process_registry().lock() {
-        reg.remove(cmd);
+impl FilterProcessState {
+    pub(crate) fn new() -> Self {
+        Self {
+            registry: Mutex::new(HashMap::new()),
+            disabled: Mutex::new(HashSet::new()),
+        }
     }
+
+    pub(crate) fn shutdown_all(&self) {
+        let entries = match self.registry.lock() {
+            Ok(mut reg) => reg.drain().map(|(_, v)| v).collect::<Vec<_>>(),
+            Err(_) => return,
+        };
+        for arc in entries {
+            terminate_shared_filter(&arc);
+        }
+    }
+
+    /// Stop using a process filter for the rest of this repository handle.
+    pub fn disable_process_filter(&self, cmd: &str) {
+        if let Ok(mut disabled) = self.disabled.lock() {
+            disabled.insert(cmd.to_string());
+        }
+        self.remove_process_filter(cmd);
+    }
+
+    pub(crate) fn process_filter_is_disabled(&self, cmd: &str) -> bool {
+        self.disabled
+            .lock()
+            .ok()
+            .is_some_and(|disabled| disabled.contains(cmd))
+    }
+
+    pub(crate) fn remove_process_filter(&self, cmd: &str) {
+        let arc = match self.registry.lock() {
+            Ok(mut reg) => reg.remove(cmd),
+            Err(_) => return,
+        };
+        if let Some(arc) = arc {
+            terminate_shared_filter(&arc);
+        }
+    }
+
+    pub(crate) fn registry(&self) -> &Mutex<HashMap<String, Arc<Mutex<RunningFilter>>>> {
+        &self.registry
+    }
+}
+
+/// Stop using a process filter for the rest of this repository handle.
+pub fn disable_process_filter(state: &FilterProcessState, cmd: &str) {
+    state.disable_process_filter(cmd);
+}
+
+fn terminate_shared_filter(arc: &Arc<Mutex<RunningFilter>>) {
+    let Ok(mut rf) = arc.lock() else {
+        return;
+    };
+    rf.stdin.take();
+    rf.stdout.take();
+    let _ = rf.child.kill();
+    let _ = rf.child.wait();
 }
 
 fn process_transport_error(err: &str) -> bool {
@@ -362,12 +403,13 @@ fn spawn_running(cmd: &str) -> std::io::Result<RunningFilter> {
 }
 
 /// Ensure the long-running filter for `cmd` is running (handshake complete).
-pub fn ensure_process_filter_started(cmd: &str) -> Result<(), String> {
-    ensure_started(cmd)
+pub fn ensure_process_filter_started(state: &FilterProcessState, cmd: &str) -> Result<(), String> {
+    ensure_started(state, cmd)
 }
 
-fn ensure_started(cmd: &str) -> Result<(), String> {
-    let mut reg = process_registry()
+fn ensure_started(state: &FilterProcessState, cmd: &str) -> Result<(), String> {
+    let mut reg = state
+        .registry()
         .lock()
         .map_err(|_| "filter registry poisoned".to_string())?;
     use std::collections::hash_map::Entry;
@@ -392,13 +434,19 @@ fn write_packetized(stdin: &mut ChildStdin, data: &[u8]) -> std::io::Result<()> 
 }
 
 /// Run clean via long-running filter `cmd` for `path` and `input`.
-pub fn apply_process_clean(cmd: &str, path: &str, input: &[u8]) -> Result<Vec<u8>, String> {
-    if process_filter_is_disabled(cmd) {
+pub fn apply_process_clean(
+    state: &FilterProcessState,
+    cmd: &str,
+    path: &str,
+    input: &[u8],
+) -> Result<Vec<u8>, String> {
+    if state.process_filter_is_disabled(cmd) {
         return Ok(input.to_vec());
     }
-    ensure_started(cmd)?;
+    ensure_started(state, cmd)?;
     let arc = {
-        let reg = process_registry()
+        let reg = state
+            .registry()
             .lock()
             .map_err(|_| "filter registry poisoned".to_string())?;
         reg.get(cmd)
@@ -494,24 +542,25 @@ impl DelayedProcessCheckout {
     /// second smudge without `can-delay` (filter returns cached output).
     pub fn finish(
         &mut self,
+        filter_state: &FilterProcessState,
         mut convert_retry: impl FnMut(&str, &FilterSmudgeMeta) -> Result<Vec<u8>, String>,
         mut write_out: impl FnMut(&str, &[u8]) -> Result<(), String>,
     ) -> Result<(), DelayedCheckoutError> {
         // Active filters: every distinct filter command that delayed at least one path. Filters are
         // removed once they report no more available blobs (matching Git `dco->filters`).
-        let mut filters: Vec<String> = Vec::new();
+        let mut active_cmds: Vec<String> = Vec::new();
         for e in &self.entries {
-            if !filters.contains(&e.filter_cmd) {
-                filters.push(e.filter_cmd.clone());
+            if !active_cmds.contains(&e.filter_cmd) {
+                active_cmds.push(e.filter_cmd.clone());
             }
         }
 
         let mut had_error = false;
 
-        while !filters.is_empty() {
+        while !active_cmds.is_empty() {
             let mut still_active: Vec<String> = Vec::new();
-            for cmd in std::mem::take(&mut filters) {
-                let available = match list_available_blobs(&cmd) {
+            for cmd in std::mem::take(&mut active_cmds) {
+                let available = match list_available_blobs(filter_state, &cmd) {
                     Ok(paths) => paths,
                     Err(_) => {
                         // Filter reported an error: drop it and do not query it again.
@@ -554,7 +603,7 @@ available although it has not been delayed earlier"
                     still_active.push(cmd);
                 }
             }
-            filters = still_active;
+            active_cmds = still_active;
         }
 
         // Any path the filters never made available was not filtered properly.
@@ -599,17 +648,17 @@ impl std::fmt::Display for DelayedCheckoutError {
 impl std::error::Error for DelayedCheckoutError {}
 
 /// True when `cmd` is running (or can be started) and advertises the `delay` capability.
-pub fn process_filter_supports_delay(cmd: &str) -> bool {
+pub fn process_filter_supports_delay(state: &FilterProcessState, cmd: &str) -> bool {
     if cmd.is_empty() {
         return false;
     }
-    if process_filter_is_disabled(cmd) {
+    if state.process_filter_is_disabled(cmd) {
         return false;
     }
-    if ensure_process_filter_started(cmd).is_err() {
+    if ensure_process_filter_started(state, cmd).is_err() {
         return false;
     }
-    let Ok(reg) = process_registry().lock() else {
+    let Ok(reg) = state.registry().lock() else {
         return false;
     };
     let Some(arc) = reg.get(cmd) else {
@@ -621,10 +670,11 @@ pub fn process_filter_supports_delay(cmd: &str) -> bool {
     (rf.caps & CAP_DELAY) != 0
 }
 
-fn list_available_blobs(cmd: &str) -> Result<Vec<String>, String> {
-    ensure_started(cmd)?;
+fn list_available_blobs(state: &FilterProcessState, cmd: &str) -> Result<Vec<String>, String> {
+    ensure_started(state, cmd)?;
     let arc = {
-        let reg = process_registry()
+        let reg = state
+            .registry()
             .lock()
             .map_err(|_| "filter registry poisoned".to_string())?;
         reg.get(cmd)
@@ -677,18 +727,20 @@ fn list_available_blobs(cmd: &str) -> Result<Vec<String>, String> {
 /// When `can_delay` is true and the filter returns `status=delayed`, returns `Ok(None)` after
 /// recording is left to the caller ([`DelayedProcessCheckout`]).
 pub fn apply_process_smudge(
+    state: &FilterProcessState,
     cmd: &str,
     path: &str,
     input: &[u8],
     meta: Option<&FilterSmudgeMeta>,
     can_delay: bool,
 ) -> Result<Option<Vec<u8>>, String> {
-    if process_filter_is_disabled(cmd) {
+    if state.process_filter_is_disabled(cmd) {
         return Ok(Some(input.to_vec()));
     }
-    ensure_started(cmd)?;
+    ensure_started(state, cmd)?;
     let arc = {
-        let reg = process_registry()
+        let reg = state
+            .registry()
             .lock()
             .map_err(|_| "filter registry poisoned".to_string())?;
         reg.get(cmd)
@@ -760,7 +812,7 @@ pub fn apply_process_smudge(
         drop(stdin);
         drop(stdout);
         drop(rf);
-        remove_process_filter(cmd);
+        state.remove_process_filter(cmd);
         return result;
     }
 

@@ -41,6 +41,7 @@ const fn cq_lookup_table() -> [i8; 256] {
     t
 }
 
+// hygiene: immutable quote-path lookup table (facts, not mutable process state)
 static CQ_LOOKUP: [i8; 256] = cq_lookup_table();
 
 #[inline]

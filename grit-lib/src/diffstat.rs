@@ -28,6 +28,29 @@ pub fn display_width_minus_ansi(s: &str) -> usize {
     w
 }
 
+/// `term_columns()` approximation: `COLUMNS` env, then TTY width, then 80.
+#[must_use]
+pub fn terminal_columns() -> usize {
+    if let Ok(cols) = std::env::var("COLUMNS") {
+        if let Ok(w) = cols.parse::<usize>() {
+            if w > 0 {
+                return w;
+            }
+        }
+    }
+    // The terminal size is constant for the life of the process (matching
+    // C git, which caches `term_columns()` after the first call). The `COLUMNS`
+    // check above stays uncached so per-call env overrides keep working.
+    // hygiene: immutable terminal width cache (process tty geometry, set once)
+    static TERMINAL_COLS: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    if let Some(w) = *TERMINAL_COLS.get_or_init(|| {
+        terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
+    }) {
+        return w;
+    }
+    80
+}
+
 /// Default total width for `format-patch` diffstat (`MAIL_DEFAULT_WRAP` in Git).
 pub const FORMAT_PATCH_STAT_WIDTH: usize = 72;
 
