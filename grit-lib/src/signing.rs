@@ -203,13 +203,22 @@ fn signing_spawn(
         .spawn(&spec)
         .map_err(|e| Error::Signing(format!("could not run signing program: {e}")))?;
     if let Some(data) = payload {
-        if let Some(stdin) = running.stdin_mut() {
-            let _ = stdin.write_all(data);
-        }
+        let Some(stdin) = running.stdin_mut() else {
+            return Err(Error::Signing(
+                "could not write payload to signing program stdin".into(),
+            ));
+        };
+        stdin.write_all(data).map_err(|e| {
+            Error::Signing(format!("could not write payload to signing program: {e}"))
+        })?;
     }
     running
         .wait_with_output()
         .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))
+}
+
+fn stdin_pipe(data: &[u8]) -> CommandStdin {
+    CommandStdin::Pipe(data.to_vec())
 }
 
 impl GpgConfig {
@@ -505,11 +514,11 @@ pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         shell: None,
         cwd: None,
         env: CommandEnvironment::inherit_process_only(),
-        stdin: CommandStdin::Null,
+        stdin: stdin_pipe(payload),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
     };
-    let output = signing_spawn(cfg, spec, Some(payload))?;
+    let output = signing_spawn(cfg, spec, None)?;
 
     let status_text = String::from_utf8_lossy(&output.stderr);
 
@@ -916,12 +925,12 @@ pub fn verify_commit(cfg: &GpgConfig, raw_commit: &[u8]) -> Result<SignatureChec
         shell: None,
         cwd: None,
         env: CommandEnvironment::inherit_process_only(),
-        stdin: CommandStdin::Null,
+        stdin: stdin_pipe(&payload),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
     };
 
-    let output = match signing_spawn(cfg, spec, Some(&payload)) {
+    let output = match signing_spawn(cfg, spec, None) {
         Ok(o) => o,
         Err(e) => {
             let _ = std::fs::remove_file(&sig_path);
@@ -1244,11 +1253,11 @@ fn run_with_stdin_status(
         shell: None,
         cwd: None,
         env: CommandEnvironment::inherit_process_only(),
-        stdin: CommandStdin::Null,
+        stdin: stdin_pipe(input),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
     };
-    match signing_spawn(cfg, spec, Some(input)) {
+    match signing_spawn(cfg, spec, None) {
         Ok(o) => (
             String::from_utf8_lossy(&o.stdout).into_owned(),
             String::from_utf8_lossy(&o.stderr).into_owned(),
@@ -1579,12 +1588,12 @@ pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> Result<SignatureCheck> {
         shell: None,
         cwd: None,
         env: CommandEnvironment::inherit_process_only(),
-        stdin: CommandStdin::Null,
+        stdin: stdin_pipe(&payload),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
     };
 
-    let output = match signing_spawn(cfg, spec, Some(&payload)) {
+    let output = match signing_spawn(cfg, spec, None) {
         Ok(o) => o,
         Err(e) => {
             let _ = std::fs::remove_file(&sig_path);

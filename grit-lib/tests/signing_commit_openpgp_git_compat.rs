@@ -155,5 +155,24 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
         "OpenPGP signature should verify (grit verify_commit)"
     );
 
+    let sig_status = git_out(root, gnupg_home, &["log", "-1", "--format=%G?"]);
+    assert_eq!(
+        sig_status, "G",
+        "system git should report a good OpenPGP signature (%G? = G)"
+    );
+    let verify = Command::new("git")
+        .current_dir(root)
+        .args(["verify-commit", "HEAD"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GNUPGHOME", gnupg_home)
+        .output()
+        .expect("git verify-commit");
+    assert!(
+        verify.status.success(),
+        "git verify-commit failed: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+
     git_out(root, gnupg_home, &["fsck", "--strict"]);
 }
