@@ -133,6 +133,21 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 | t5325-reverse-index.sh | RIDX `.rev` verify, corruption cases, `try_rev_positions_in_pack_order`, hashfile checksum | `grit-lib/tests/pack_ingest_roundtrip.rs` (`verify_pack_rev_*`, `try_rev_positions_*`, `hashfile_checksum_*`) | ported |
 | t5328-commit-graph-64bit-time.sh | 64-bit commit times, generation overflow (GDO2) | `grit-lib/tests/commit_graph_roundtrip.rs` | ported (skip when platform git lacks 64-bit times) |
 | t5351-unpack-large.sh | `unpack-objects` large blobs vs system git; strict missing reference | `grit-lib/tests/pack_ingest_roundtrip.rs` (`unpack_large_blob_*`, `unpack_strict_*`) | ported |
+| t1450-fsck.sh | blob (always valid) | `grit-lib/tests/fsck_objects.rs` (`blob always ok`) | covered |
+| t1450-fsck.sh | commit missing tree / author / committer | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | commit bad tree / parent oid | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | commit multiple authors | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | commit ident: missing email, bad name/email, spacing, date, timezone, overflow, zero-padded date | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | commit NUL in header / body | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | tree sort order, duplicate entries, modes, names (dot, dotdot, dotgit, HFS/NTFS, backslash), full path, null oid, truncation | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | tree large pathname | `fsck_objects.rs` (`tree large pathname`) | covered |
+| t1450-fsck.sh | tag object/type/name/tagger headers and extra header after tagger | `fsck_objects.rs` | covered |
+| t1450-fsck.sh | tag gpgsig / gpgsig-sha256 continuation | `fsck_objects.rs`, `fsck_standalone` unit tests | covered |
+| t1450-fsck.sh | `.gitmodules` blob via dot-special fsck | `fsck_objects.rs` (`gitmodules_blob_fsck_*`) | covered |
+| t1450-fsck.sh | `FsckError::report_line` formatting | `fsck_objects.rs`, `fsck_standalone::tests::fsck_error_report_line_format` | covered |
+| t1450-fsck.sh | repository connectivity / missing objects | — | not applicable: no repository-level fsck API yet |
+| t1450-fsck.sh | reflog entries | — | not applicable: no repository-level fsck API yet |
+| t1450-fsck.sh | dangling / unreachable object reporting | — | not applicable: no repository-level fsck API yet |
 
 ### Documentation site and rustdoc jobs
 

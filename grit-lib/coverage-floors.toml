@@ -65,7 +65,7 @@ minimum = 85.0
 minimum = 93.3
 
 [file."fsck_standalone.rs"]
-minimum = 16.3
+minimum = 85.0
 
 [file."index_pack.rs"]
 minimum = 90.7

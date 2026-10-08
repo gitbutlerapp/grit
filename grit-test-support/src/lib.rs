@@ -6,6 +6,13 @@
 
 pub mod objects;
 
+pub use objects::{
+    git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,
+    git_midx_verify, git_supports_sha256, git_verify_pack, hash_loose_object, loose_object_path,
+    write_loose_object, BatchCheckOutcome, FsckOutcome, GitToolOutcome, HashAlgo, ObjectKind,
+    PackBuilder, RepoFixture,
+};
+
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs;

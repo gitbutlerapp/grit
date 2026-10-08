@@ -42,6 +42,18 @@ fn is_hfs_dot_generic(path: &str, needle: &str) -> bool {
     }
 }
 
+/// Whether `path` matches `.git` under Git's HFS+ equivalence rules (`is_hfs_dotgit`).
+#[must_use]
+pub fn is_hfs_dotgit(path: &str) -> bool {
+    is_hfs_dot_generic(path, "git")
+}
+
+/// Whether `name` matches `.git` under Git's NTFS equivalence rules (`is_ntfs_dotgit`).
+#[must_use]
+pub fn is_ntfs_dotgit(name: &str) -> bool {
+    is_ntfs_dot_generic(name, "git", "g7c29")
+}
+
 /// Whether `path` matches `.gitmodules` under Git's HFS+ equivalence rules.
 #[must_use]
 pub fn is_hfs_dot_gitmodules(path: &str) -> bool {
@@ -92,12 +104,14 @@ fn is_ntfs_dot_generic(name: &str, dotgit_name: &str, short_prefix: &str) -> boo
         return only_spaces_and_periods(name, i);
     }
 
-    if b.len() >= 8
-        && name[..6].eq_ignore_ascii_case(&dotgit_name[..6])
-        && b[6] == b'~'
-        && (b'1'..=b'4').contains(&b[7])
+    let after_dotgit = 1 + len;
+    if b.len() > after_dotgit + 1
+        && b[0] == b'.'
+        && name[1..after_dotgit].eq_ignore_ascii_case(dotgit_name)
+        && b[after_dotgit] == b'~'
+        && (b'1'..=b'4').contains(&b[after_dotgit + 1])
     {
-        return only_spaces_and_periods(name, 8);
+        return only_spaces_and_periods(name, after_dotgit + 2);
     }
 
     let mut i = 0usize;

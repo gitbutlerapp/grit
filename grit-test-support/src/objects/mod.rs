@@ -20,7 +20,9 @@ pub use git_check::{
 };
 pub use hash::HashAlgo;
 pub use install::{write_pack_and_index, IndexPackOptions, IndexVersion, PackInstallOutcome};
-pub use loose::{hash_loose_object, write_loose_object};
+pub use loose::{
+    git_hash_object_literally, hash_loose_object, loose_object_path, write_loose_object,
+};
 pub use pack_builder::{ObjectKind, PackBuilder, PackBuilt, PackOffsetLabel};
 pub use repo_fixture::RepoFixture;
 
