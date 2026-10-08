@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::environment::{Environment, RepositoryOptions};
+use grit_lib::environment::Environment;
 use grit_lib::ident_resolve::{
     resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
     IdentityError, SystemIdentityEnv,
@@ -12,6 +12,8 @@ use grit_lib::refs;
 use grit_lib::repo::Repository;
 use std::path::PathBuf;
 use time::OffsetDateTime;
+
+use crate::diagnostics;
 
 /// Build the process [`Environment`] for repository discovery and config loading.
 pub fn environment() -> Environment {
@@ -40,8 +42,16 @@ pub struct CommitSummary {
 
 /// Discover the repository containing the current directory.
 pub fn discover() -> Result<Repository> {
-    Repository::discover_with(&RepositoryOptions::with_environment(environment()), None)
-        .context("not in a repository")
+    let (options, _sink) = diagnostics::repository_options(false);
+    Repository::discover_with_options(None, options).context("not in a repository")
+}
+
+/// Like [`discover`], but returns the diagnostic sink used for warnings.
+pub fn discover_with_warnings(
+) -> Result<(Repository, std::sync::Arc<diagnostics::CliDiagnosticSink>)> {
+    let (options, sink) = diagnostics::repository_options(false);
+    let repo = Repository::discover_with_options(None, options).context("not in a repository")?;
+    Ok((repo, sink))
 }
 
 /// Find the branch `grit` should measure the current branch against, trying

@@ -1,13 +1,11 @@
-//! Lightweight, env-gated tracing for the networking paths (transport connect,
-//! fetch/push negotiation, pack transfer).
+//! Network operation tracing through [`crate::diagnostics::Trace::Network`].
 //!
-//! Set `GRIT_NET_DEBUG=1` to print one-line `[grit-net] …` markers to stderr
-//! before, during, and after each remote operation. Off by default and
-//! essentially free when disabled (the gate is read once and the format args are
-//! not evaluated). Embedders can consult [`enabled`] to interleave their own
-//! before/after markers with the library's.
+//! Enable tracing on a [`crate::repo::Repository`] with [`RepositoryOptions::network_trace`]
+//! and wire the same diagnostic sink into fetch/push [`FetchOptions`](crate::transfer::FetchOptions).
 
 use std::sync::OnceLock;
+
+use crate::diagnostics::{DiagnosticsHandle, Trace};
 
 // hygiene: immutable env flag cache (set once from GritNetDebug)
 static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -29,12 +27,24 @@ pub fn line(msg: &str) {
     eprintln!("[grit-net] {msg}");
 }
 
-/// Emit an env-gated `[grit-net]` trace line. No-op (and no formatting) unless
-/// `GRIT_NET_DEBUG` is set.
+/// Emit a network trace line when `enabled` and `sink` are both set.
+pub fn trace_optional(enabled: bool, sink: Option<&DiagnosticsHandle>, message: String) {
+    if enabled {
+        if let Some(s) = sink {
+            s.trace(Trace::Network { message });
+        }
+    }
+}
+
+/// Emit a network trace when `enabled` and `sink` are both set. Skips formatting when off.
 macro_rules! net_trace {
-    ($($arg:tt)*) => {
-        if $crate::net_trace::enabled() {
-            $crate::net_trace::line(&format!($($arg)*));
+    ($enabled:expr, $sink:expr, $($arg:tt)*) => {
+        if $enabled {
+            if let Some(s) = $sink {
+                s.trace($crate::diagnostics::Trace::Network {
+                    message: format!($($arg)*),
+                });
+            }
         }
     };
 }

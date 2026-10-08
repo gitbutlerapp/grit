@@ -17,6 +17,7 @@ use crate::config::{
     config_cache_lookup, config_cache_store, config_file_stamps, ConfigCacheKey, ConfigSet,
     LoadConfigOptions,
 };
+use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics, Warning};
 use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
@@ -38,6 +39,7 @@ pub struct RepoCaches {
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
     bare_worktree_warn_seen: Mutex<HashSet<String>>,
     commit_graph_warn_seen: Mutex<HashSet<String>>,
+    diagnostics: Mutex<DiagnosticsHandle>,
 }
 
 impl std::fmt::Debug for RepoCaches {
@@ -50,6 +52,15 @@ impl RepoCaches {
     /// Create an empty cache arena for one repository handle.
     #[must_use]
     pub fn new(command_runner: Arc<dyn crate::command_runner::CommandRunner>) -> Arc<Self> {
+        Self::with_diagnostics(command_runner, Arc::new(NullDiagnostics))
+    }
+
+    /// Create a cache arena wired to the given diagnostic sink.
+    #[must_use]
+    pub fn with_diagnostics(
+        command_runner: Arc<dyn crate::command_runner::CommandRunner>,
+        diagnostics: DiagnosticsHandle,
+    ) -> Arc<Self> {
         Arc::new(Self {
             config_cache: Mutex::new(HashMap::new()),
             attr_stack: Mutex::new(HashMap::new()),
@@ -61,7 +72,21 @@ impl RepoCaches {
             promisor_hydrate: Mutex::new(None),
             bare_worktree_warn_seen: Mutex::new(HashSet::new()),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
+            diagnostics: Mutex::new(diagnostics),
         })
+    }
+
+    /// Return the diagnostic sink for this cache arena.
+    pub(crate) fn diagnostics_handle(&self) -> DiagnosticsHandle {
+        self.diagnostics
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Replace the diagnostic sink (kept in sync with [`Repository::set_diagnostics`]).
+    pub(crate) fn set_diagnostics(&self, sink: DiagnosticsHandle) {
+        *self.diagnostics.lock().unwrap_or_else(|e| e.into_inner()) = sink;
     }
 
     /// Emit `core.bare` / `core.worktree` conflict warning at most once per git dir on this repo.
@@ -75,7 +100,8 @@ impl RepoCaches {
             return;
         };
         if guard.insert(key) {
-            eprintln!("warning: core.bare and core.worktree do not make sense");
+            self.diagnostics_handle()
+                .warn(Warning::CoreBareWithWorktree);
         }
     }
 
@@ -116,6 +142,11 @@ impl RepoCaches {
         git_dir: Option<&Path>,
         opts: &LoadConfigOptions,
     ) -> Result<Arc<ConfigSet>> {
+        let mut effective = opts.clone();
+        if effective.diagnostics.is_none() {
+            effective.diagnostics = Some(self.diagnostics_handle());
+        }
+        let opts = &effective;
         let Some(env_fp) = env.config_fingerprint() else {
             #[cfg(test)]
             crate::config::cascade_load_counters::record_uncached();

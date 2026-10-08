@@ -88,7 +88,7 @@ pub enum TagMode {
 }
 
 /// Options controlling a fetch.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct FetchOptions {
     /// Positive refspecs selecting what to fetch.
     pub refspecs: Vec<String>,
@@ -125,6 +125,10 @@ pub struct FetchOptions {
     pub remote_name: Option<String>,
     /// Clone-only reflog entries for `refs/remotes/{remote}/HEAD` (not remote branches).
     pub clone_reflog: Option<CloneReflog>,
+    /// Diagnostic sink for [`crate::diagnostics::Trace::Network`] events.
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When true with [`Self::diagnostics`], fetch paths may emit network trace events.
+    pub network_trace: bool,
 }
 
 /// Identity and message for clone reflog entries written by the library.
@@ -193,7 +197,7 @@ pub struct PushRefSpec {
 }
 
 /// Options controlling a push.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct PushOptions {
     /// Apply all updates atomically (all-or-nothing).
     pub atomic: bool,
@@ -213,6 +217,10 @@ pub struct PushOptions {
     /// the `push-options` capability, the push fails with
     /// [`crate::error::Error::PushOptionsUnsupported`] (matching Git).
     pub push_options: Vec<String>,
+    /// Diagnostic sink for [`crate::diagnostics::Trace::Network`] events.
+    pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    /// When true with [`Self::diagnostics`], push paths may emit network trace events.
+    pub network_trace: bool,
 }
 
 /// The structured result of a push. Reuses [`PushRefResult`] for per-ref status.
@@ -971,12 +979,8 @@ fn load_islands_for_pack(
     let Ok(repo) = crate::repo::Repository::open(git_dir, None) else {
         return crate::delta_islands::DeltaIslands::default();
     };
-    let cfg = crate::config::ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(git_dir),
-        true,
-    )
-    .unwrap_or_default();
+    let env = crate::environment::Environment::capture_process();
+    let cfg = crate::config::ConfigSet::load(&env, Some(git_dir), true).unwrap_or_default();
     crate::delta_islands::load_delta_islands(&repo, &cfg, in_pack)
 }
 

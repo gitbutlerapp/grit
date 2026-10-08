@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::command_runner::{system_command_runner, CommandRunner};
+use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics};
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 #[derive(Debug, Clone)]
@@ -449,6 +450,10 @@ pub struct RepositoryOptions {
     pub environment: Environment,
     /// Subprocess runner for hooks, filters, and helpers.
     pub command_runner: Arc<dyn CommandRunner>,
+    /// Where non-fatal warnings and trace events are delivered.
+    pub diagnostics: DiagnosticsHandle,
+    /// When true, network operations may emit [`crate::diagnostics::Trace::Network`] events.
+    pub network_trace: bool,
 }
 
 impl std::fmt::Debug for RepositoryOptions {
@@ -456,7 +461,8 @@ impl std::fmt::Debug for RepositoryOptions {
         f.debug_struct("RepositoryOptions")
             .field("environment", &self.environment)
             .field("command_runner", &"<CommandRunner>")
-            .finish()
+            .field("network_trace", &self.network_trace)
+            .finish_non_exhaustive()
     }
 }
 
@@ -465,6 +471,8 @@ impl Default for RepositoryOptions {
         Self {
             environment: Environment::empty(),
             command_runner: system_command_runner(),
+            diagnostics: Arc::new(NullDiagnostics),
+            network_trace: false,
         }
     }
 }
@@ -480,7 +488,7 @@ impl RepositoryOptions {
     pub fn with_environment(environment: Environment) -> Self {
         Self {
             environment,
-            command_runner: system_command_runner(),
+            ..Self::default()
         }
     }
 
