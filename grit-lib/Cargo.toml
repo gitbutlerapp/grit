@@ -66,7 +66,7 @@ rustix = { version = "1.1", default-features = false, features = ["process"] }
 # used by the built-in `gs manager` credential helper, and enabling ANSI virtual
 # terminal processing for colored output (`terminal`). Windows-only.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_Console", "Win32_System_Threading"] }
 
 [[bench]]
 name = "objects"

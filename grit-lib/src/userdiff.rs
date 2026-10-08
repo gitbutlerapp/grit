@@ -553,15 +553,7 @@ fn compile_matcher(
             bre_to_ere(line)
         };
 
-        validate_posix_ere(&posix_pattern, ignore_case)
-            .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))?;
-
-        let rust_pattern = posix_ere_to_rust_regex(&posix_pattern);
-        let matcher = RegexBuilder::new(&rust_pattern)
-            .case_insensitive(ignore_case)
-            .build()
-            .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))
-            .map(RuleMatcher::Rust)?;
+        let matcher = compile_posix_ere_rule(&posix_pattern, ignore_case, line)?;
         rules.push(FuncRule { matcher, negate });
     }
 
@@ -661,13 +653,15 @@ fn bre_to_ere(pattern: &str) -> String {
 }
 
 /// Translate a validated POSIX ERE (as Git uses for `xfuncname`) into Rust `regex` syntax.
-fn posix_ere_to_rust_regex(pattern: &str) -> String {
+///
+/// Returns `None` when the pattern is not valid POSIX ERE (e.g. an unterminated `[` class).
+fn posix_ere_to_rust_regex(pattern: &str) -> Option<String> {
     let mut out = String::with_capacity(pattern.len() + 16);
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0usize;
     while i < chars.len() {
         if chars[i] == '[' {
-            let (translated, consumed) = translate_posix_bracket(&chars[i..]);
+            let (translated, consumed) = translate_posix_bracket(&chars[i..])?;
             out.push_str(&translated);
             i += consumed;
         } else if chars[i] == '\\' && i + 1 < chars.len() {
@@ -679,11 +673,11 @@ fn posix_ere_to_rust_regex(pattern: &str) -> String {
             i += 1;
         }
     }
-    out
+    Some(out)
 }
 
 /// Translate one POSIX bracket expression starting at `[`; returns Rust class + bytes consumed.
-fn translate_posix_bracket(src: &[char]) -> (String, usize) {
+fn translate_posix_bracket(src: &[char]) -> Option<(String, usize)> {
     debug_assert!(src.first() == Some(&'['));
     let mut out = String::from("[");
     let mut i = 1usize;
@@ -698,7 +692,7 @@ fn translate_posix_bracket(src: &[char]) -> (String, usize) {
     while i < src.len() {
         if src[i] == ']' {
             out.push(']');
-            return (out, i + 1);
+            return Some((out, i + 1));
         }
         if src[i] == '[' && i + 2 < src.len() && src[i + 1] == ':' {
             let start = i;
@@ -728,22 +722,67 @@ fn translate_posix_bracket(src: &[char]) -> (String, usize) {
         out.push(ch);
         i += 1;
     }
-    out.push(']');
-    (out, src.len())
+    None
 }
 
 /// Compile-check a POSIX ERE without shelling out to `grep`.
 fn validate_posix_ere(pattern: &str, ignore_case: bool) -> Result<(), regex::Error> {
-    RegexBuilder::new(&posix_ere_to_rust_regex(pattern))
+    let Some(rust_pattern) = posix_ere_to_rust_regex(pattern) else {
+        return Err(regex::Error::Syntax(
+            "unterminated bracket expression".into(),
+        ));
+    };
+    RegexBuilder::new(&rust_pattern)
         .case_insensitive(ignore_case)
         .build()
         .map(|_| ())
 }
 
+/// Compile a POSIX ERE matcher rule after validation.
+fn compile_posix_ere_rule(
+    pattern: &str,
+    ignore_case: bool,
+    line: &str,
+) -> Result<RuleMatcher, String> {
+    validate_posix_ere(pattern, ignore_case)
+        .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))?;
+    let rust_pattern = posix_ere_to_rust_regex(pattern)
+        .ok_or_else(|| format!("Invalid regexp to look for hunk header: {line}"))?;
+    RegexBuilder::new(&rust_pattern)
+        .case_insensitive(ignore_case)
+        .build()
+        .map_err(|_| format!("Invalid regexp to look for hunk header: {line}"))
+        .map(RuleMatcher::Rust)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ConfigSet;
+    use std::path::Path;
+
+    use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+    fn config_with_xfuncname(driver: &str, pattern: &str) -> ConfigSet {
+        let snippet = format!("[diff \"{driver}\"]\n\txfuncname = {pattern}\n");
+        let file = ConfigFile::parse(
+            Path::new(".git/config"),
+            &snippet,
+            ConfigScope::Local,
+        )
+        .expect("parse config snippet");
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn unterminated_posix_bracket_class_is_rejected() {
+        let err = compile_matcher("[a", true, false).unwrap_err();
+        assert!(err.contains("Invalid regexp"), "unexpected error: {err}");
+        let cfg = config_with_xfuncname("probe", "[a");
+        let err = matcher_for_driver(&cfg, "probe").unwrap_err();
+        assert!(err.contains("Invalid regexp"), "unexpected error: {err}");
+    }
 
     #[test]
     fn all_builtin_userdiff_drivers_compile_and_cache() {
