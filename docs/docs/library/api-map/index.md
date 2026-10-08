@@ -234,6 +234,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack::PackIndex` | struct | Parsed pack index with fanout-accelerated OID lookup and in-place table reads. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndex.html) |
 | `grit_lib::pack::PackIndexEntry` | struct | Owned pack index row (collect from PackIndex::iter when needed). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndexEntry.html) |
 | `grit_lib::pack::PackIndexEntryRef` | struct | Borrowed view of one row in a pack index. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndexEntryRef.html) |
+| `grit_lib::pack::PackLookupOptions` | struct | Options controlling which local packs participate in a lookup pass. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackLookupOptions.html) |
 | `grit_lib::pack::PackedDeltaDependency` | enum | Dependency of a packed delta object at object_offset within pack_bytes. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedDeltaDependency.html) |
 | `grit_lib::pack::PackedType` | enum | A pack object type as encoded in the packed stream header. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedType.html) |
 | `grit_lib::pack::ShowIndexEntry` | struct | A single entry produced by show-index, with an optional CRC32. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.ShowIndexEntry.html) |

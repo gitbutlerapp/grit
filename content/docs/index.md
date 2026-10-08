@@ -13,7 +13,7 @@ Grit is two things:
 | Section | What you'll find |
 | --- | --- |
 | **Getting started** | [Install](install/) grit, follow the [tutorial](tutorial/), or try the [library quick start](library-quickstart/). |
-| **The grit CLI** | [Global options](global-options/), [scripting with `--json`](scripting/), and a man page for every command. |
+| **The grit CLI** | [Global options](global-options/), [scripting with `--json`](scripting/), [agent guide](agents/), and a man page for every command. |
 | **Library guide** | Rust-oriented guides for `grit-lib` (growing over time), plus the [API reference on docs.rs](https://docs.rs/grit-lib). |
 | **Benchmarks** | How `grit` and `grit-lib` compare to system Git on core operations. |
 
@@ -25,4 +25,4 @@ Use **`grit`** when you want a day-to-day Git client from the terminal or in scr
 
 On-disk formats and the wire protocol stay compatible with Git; the CLI's argv and messages are deliberately *not* a Git mirror.
 
-See [Install](install/) for download options, [Global options](global-options/) for flags shared by every command, and [Scripting with grit](scripting/) for `--json` and `--filter`.
+See [Install](install/) for download options, [Global options](global-options/) for flags shared by every command, [Scripting with grit](scripting/) for `--json` and `--filter`, and the [Agent guide](agents/) for automation-focused details.

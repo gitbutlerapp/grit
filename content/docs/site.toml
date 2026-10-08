@@ -37,6 +37,11 @@ file = "scripting.md"
 slug = "scripting"
 label = "Scripting"
 
+[[section.page]]
+file = "agents.md"
+slug = "agents"
+label = "Agent guide"
+
 [section.commands]
 groups = [
   "Getting started",

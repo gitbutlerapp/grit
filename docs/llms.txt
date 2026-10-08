@@ -15,6 +15,7 @@ Each docs page has a Markdown twin at the same URL with `index.md` instead of `i
 
 - [Global options](https://grit-scm.com/docs/global-options/index.md): Options that apply to every grit command.
 - [Scripting with grit](https://grit-scm.com/docs/scripting/index.md): Use --json and --filter to build scripts on top of grit.
+- [Agent guide](https://grit-scm.com/docs/agents/index.md): Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.
 ### Getting started
 
 - [grit init](https://grit-scm.com/docs/init/index.md): Create a new, empty repository.

@@ -22,3 +22,5 @@ $ grit log --json --filter '.commits[].subject'
 `grit` exits with status `0` on success and `1` when a command fails (including a push with a rejected ref). A mistake on the command line, such as an unknown option, exits with `2`.
 
 Color is used only when stdout is a terminal. Set `NO_COLOR` to turn it off.
+
+For autonomous agents — non-interactive auth, where to find `llms.txt`, and a fuller JSON contract — see the [Agent guide](../agents/).

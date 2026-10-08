@@ -14,7 +14,7 @@ Grit is two things:
 | Section | What you'll find |
 | --- | --- |
 | **Getting started** | [Install](https://grit-scm.com/docs/install/index.md) grit, follow the [tutorial](https://grit-scm.com/docs/tutorial/index.md), or try the [library quick start](https://grit-scm.com/docs/library-quickstart/index.md). |
-| **The grit CLI** | [Global options](https://grit-scm.com/docs/global-options/index.md), [scripting with `--json`](https://grit-scm.com/docs/scripting/index.md), and a man page for every command. |
+| **The grit CLI** | [Global options](https://grit-scm.com/docs/global-options/index.md), [scripting with `--json`](https://grit-scm.com/docs/scripting/index.md), [agent guide](https://grit-scm.com/docs/agents/index.md), and a man page for every command. |
 | **Library guide** | Rust-oriented guides for `grit-lib` (growing over time), plus the [API reference on docs.rs](https://docs.rs/grit-lib). |
 | **Benchmarks** | How `grit` and `grit-lib` compare to system Git on core operations. |
 
@@ -26,7 +26,7 @@ Use **`grit`** when you want a day-to-day Git client from the terminal or in scr
 
 On-disk formats and the wire protocol stay compatible with Git; the CLI's argv and messages are deliberately *not* a Git mirror.
 
-See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, and [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`.
+See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`, and the [Agent guide](https://grit-scm.com/docs/agents/index.md) for automation-focused details.
 
 ## Commands
 
@@ -481,6 +481,170 @@ $ grit log --json --filter '.commits[].subject'
 `grit` exits with status `0` on success and `1` when a command fails (including a push with a rejected ref). A mistake on the command line, such as an unknown option, exits with `2`.
 
 Color is used only when stdout is a terminal. Set `NO_COLOR` to turn it off.
+
+For autonomous agents — non-interactive auth, where to find `llms.txt`, and a fuller JSON contract — see the [Agent guide](https://grit-scm.com/docs/agents/index.md).
+
+# https://grit-scm.com/docs/agents/index.md
+
+# Agent guide
+
+> Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.
+
+This page is for programs and agents that drive [`grit`](https://grit-scm.com/docs/install/index.md) in automation. It describes **existing** CLI behavior only. For field-level JSON schemas, use each command's docs page; this guide covers the shared contract.
+
+Examples below were captured on 2026-10-08 with `grit` built from this repository (`cargo build --release -p grit-cli`), in a temporary repository on branch `main`, unless noted.
+
+## Prefer `--json` (and `--filter`)
+
+Pass **`--json`** on every command when something other than a human reads the result. In that mode:
+
+- **stdout** carries exactly **one** JSON value: the command's outcome object on success, or `{"error": "…"}` on failure.
+- **stderr** carries progress lines, auth prompts, and human-style `error: …` diagnostics. Parsers should read **stdout only** for the outcome.
+- The process still exits non-zero on failure, so you can branch on the exit code **or** the presence of an `error` key.
+
+Use **`--filter`** with a [jq](https://jqlang.org)-like expression to narrow the JSON without piping through `jq`. It requires `--json`. Multiple filter results become one JSON array.
+
+```console
+$ grit status --json --filter '{branch, clean}'
+{
+  "branch": "main",
+  "clean": false
+}
+
+$ grit log --json --filter '.commits[].subject'
+[
+  "Say hi",
+  "Start the project"
+]
+```
+
+Plain `grit` with no subcommand is the same as [`grit status`](https://grit-scm.com/docs/status/index.md); `--json` works there too:
+
+```console
+$ grit --json --filter '{branch, clean}'
+{
+  "branch": "main",
+  "clean": false
+}
+```
+
+See [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for more `--filter` patterns. Per-command keys are documented under [The grit CLI](https://grit-scm.com/docs/global-options/index.md) command pages.
+
+## Error object shape
+
+On failure with `--json`, stdout is a single object with an **`error`** string (the same message a human sees after `error:` on stderr):
+
+```console
+$ grit commit --json
+{"error":"provide a commit message, e.g. grit commit \"what changed\""}
+```
+
+If `--filter` is set, it runs on `{"error": "…"}` like any other JSON value. A bad filter expression also yields `{"error": "…"}` on stdout:
+
+```console
+$ grit status --json --filter 'invalid!!!'
+{"error":"invalid filter \"invalid!!!\": [(File { code: \"invalid!!!\", path: () }, Parse([(Nothing, \"!!!\")]))]"}
+```
+
+In **human** mode, errors print to **stderr** and stdout stays empty:
+
+```console
+$ grit commit
+error: provide a commit message, e.g. grit commit "what changed"
+```
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| **0** | Success (including some jq filters that evaluate to `null` when a path is missing). |
+| **1** | Command failed (missing repo, rejected push, validation error, and similar). With `--json`, stdout still contains `{"error": "…"}`. |
+| **2** | Usage error (unknown option or subcommand). Clap prints help to stderr; there is no JSON error object on stdout. |
+
+```console
+$ grit --nope
+error: unexpected argument '--nope' found
+
+Usage: grit [OPTIONS] [COMMAND]
+
+For more information, try '--help'.
+```
+
+```console
+$ grit status --filter '.branch'
+error: --filter requires --json
+```
+
+[`grit push`](https://grit-scm.com/docs/push/index.md) can exit **1** even after printing a full JSON outcome when a ref was rejected (same idea as Git: the outcome is reported, but the operation failed).
+
+## Color and terminal detection
+
+Human output uses ANSI color only when **stdout is a terminal**, the environment supports ANSI (`grit_lib::terminal::ansi_supported()`), and **`NO_COLOR` is unset** ([no-color.org](https://no-color.org)). Piped or redirected stdout is plain text; set `NO_COLOR=1` to force plain text on a TTY.
+
+JSON mode never depends on color; always pass `--json` for machines.
+
+## Stay non-interactive
+
+`grit` does **not** open an external editor for commit messages. [`grit commit`](https://grit-scm.com/docs/commit/index.md) requires a message on the command line (positional or `-m`); there is no `$GIT_EDITOR` path.
+
+Commands and flows that can **block on a person**:
+
+| Area | Behavior | How to avoid blocking |
+| --- | --- | --- |
+| [`grit auth`](https://grit-scm.com/docs/auth/index.md) | OAuth device flow: instructions on stderr, then polls GitHub until you authorize in a browser. | Run `grit auth` once in an interactive session before automation. Store the token via `credential.helper` (see below). |
+| [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) / [`grit push`](https://grit-scm.com/docs/push/index.md) / [`grit pull`](https://grit-scm.com/docs/pull/index.md) | On HTTPS `github.com` auth failure, if **stdin is a TTY**, grit may ask `Sign in to GitHub now? [Y/n]` and run the device flow. | Use a stored token from `grit auth`, or ensure stdin is not a TTY so grit prints a hint and exits without prompting. |
+| [`grit clone`](https://grit-scm.com/docs/clone/index.md) / [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) / [`grit pull`](https://grit-scm.com/docs/pull/index.md) / [`grit push`](https://grit-scm.com/docs/push/index.md) over **SSH** | Grit runs `ssh` with protocol stdin/stdout piped but **stderr inherited**, so the SSH child can still talk to `/dev/tty` (host-key confirmation, passphrase prompts, `ssh-askpass`, and similar). `--json` does not disable this. | Preconfigure keys and known hosts; for unattended jobs set `GIT_SSH_COMMAND='ssh -o BatchMode=yes'` so SSH fails fast instead of prompting (grit resolves SSH from `GIT_SSH_COMMAND`, then `GIT_SSH`, then `ssh` on `PATH` — not `core.sshCommand`). |
+| [`grit update`](https://grit-scm.com/docs/update/index.md) | Runs the release installer (`curl \| sh` on Unix). | Do not invoke in unattended jobs unless you intend to upgrade the binary. |
+
+There is no global `--yes` flag. For commits, always pass `-m` / a message argument.
+
+[`grit auth logout`](https://grit-scm.com/docs/auth/index.md) is non-interactive and reports whether a helper had a token to erase:
+
+```console
+$ grit auth logout --json
+{
+  "logged_out": false,
+  "host": "github.com"
+}
+```
+
+### Plumbing commands (not JSON)
+
+These speak binary or line protocols on stdin/stdout and have **no** `--json` mode: [`grit manager`](https://grit-scm.com/docs/manager/index.md), [`grit upload-pack`](https://grit-scm.com/docs/upload-pack/index.md), [`grit receive-pack`](https://grit-scm.com/docs/receive-pack/index.md). Agents should not wrap them as JSON commands.
+
+`-V` / `--version` prints a version string and does not emit JSON even if `--json` is passed:
+
+```console
+$ grit --json --version
+grit 0.5.1
+```
+
+## Credentials (HTTPS GitHub)
+
+For `https://github.com` remotes, sign in once with [`grit auth`](https://grit-scm.com/docs/auth/index.md). Grit uses GitHub's device flow, then stores an access token through your configured **`credential.helper`** (same mechanism as Git). Override the OAuth app id with `GRIT_GITHUB_CLIENT_ID` or `grit config --global grit.githubClientId …`.
+
+Sign out with `grit auth logout`. You need a credential helper configured (for example `grit config --global credential.helper store` on Linux — see the [`grit auth`](https://grit-scm.com/docs/auth/index.md) page).
+
+SSH remotes do not use the GitHub device-flow token; they can still block on SSH prompts (see the SSH row above).
+
+## Documentation for agents
+
+| Resource | URL / path | Use |
+| --- | --- | --- |
+| **llms.txt** | [grit-scm.com/llms.txt](https://grit-scm.com/llms.txt) | Curated index of every docs page (llmstxt.org format). |
+| **llms-full.txt** | [grit-scm.com/llms-full.txt](https://grit-scm.com/llms-full.txt) | Full text of all docs Markdown twins in site order. |
+| **Markdown twin** | Same URL as HTML but `index.md` instead of `index.html` (e.g. [status/index.md](https://grit-scm.com/docs/status/index.md)) | One page per command or guide; linked from HTML as "Markdown". |
+| **Command JSON fields** | Under [The grit CLI](https://grit-scm.com/docs/global-options/index.md) | Each command page lists real `--json` examples and field tables. |
+| **grit-lib API** | [docs.rs/grit-lib](https://docs.rs/grit-lib) | Rust library reference when embedding grit in your own binary. |
+| **Library guide** | [Library guide](https://grit-scm.com/docs/library/index.md) | Narrative Rust workflows on top of `grit-lib`. |
+
+Site generation keeps `docs/llms.txt` and `docs/llms-full.txt` in the repository in sync with [site.toml](https://github.com/gitbutlerapp/grit/blob/main/content/docs/site.toml); after local doc edits, run `make docs`.
+
+## See also
+
+- [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) — `--json`, `--filter`, and exit codes in brief
+- [Global options](https://grit-scm.com/docs/global-options/index.md) — flags shared by every command
+- [Docs overview](https://grit-scm.com/docs/index.md) — how the site is organized
 
 # https://grit-scm.com/docs/init/index.md
 
@@ -2635,6 +2799,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack::PackIndex` | struct | Parsed pack index with fanout-accelerated OID lookup and in-place table reads. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndex.html) |
 | `grit_lib::pack::PackIndexEntry` | struct | Owned pack index row (collect from PackIndex::iter when needed). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndexEntry.html) |
 | `grit_lib::pack::PackIndexEntryRef` | struct | Borrowed view of one row in a pack index. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndexEntryRef.html) |
+| `grit_lib::pack::PackLookupOptions` | struct | Options controlling which local packs participate in a lookup pass. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackLookupOptions.html) |
 | `grit_lib::pack::PackedDeltaDependency` | enum | Dependency of a packed delta object at object_offset within pack_bytes. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedDeltaDependency.html) |
 | `grit_lib::pack::PackedType` | enum | A pack object type as encoded in the packed stream header. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedType.html) |
 | `grit_lib::pack::ShowIndexEntry` | struct | A single entry produced by show-index, with an optional CRC32. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.ShowIndexEntry.html) |

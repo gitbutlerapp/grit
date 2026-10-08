@@ -12,7 +12,7 @@ Grit is two things:
 | Section | What you'll find |
 | --- | --- |
 | **Getting started** | [Install](https://grit-scm.com/docs/install/index.md) grit, follow the [tutorial](https://grit-scm.com/docs/tutorial/index.md), or try the [library quick start](https://grit-scm.com/docs/library-quickstart/index.md). |
-| **The grit CLI** | [Global options](https://grit-scm.com/docs/global-options/index.md), [scripting with `--json`](https://grit-scm.com/docs/scripting/index.md), and a man page for every command. |
+| **The grit CLI** | [Global options](https://grit-scm.com/docs/global-options/index.md), [scripting with `--json`](https://grit-scm.com/docs/scripting/index.md), [agent guide](https://grit-scm.com/docs/agents/index.md), and a man page for every command. |
 | **Library guide** | Rust-oriented guides for `grit-lib` (growing over time), plus the [API reference on docs.rs](https://docs.rs/grit-lib). |
 | **Benchmarks** | How `grit` and `grit-lib` compare to system Git on core operations. |
 
@@ -24,7 +24,7 @@ Use **`grit`** when you want a day-to-day Git client from the terminal or in scr
 
 On-disk formats and the wire protocol stay compatible with Git; the CLI's argv and messages are deliberately *not* a Git mirror.
 
-See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, and [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`.
+See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`, and the [Agent guide](https://grit-scm.com/docs/agents/index.md) for automation-focused details.
 
 ## Commands
 
