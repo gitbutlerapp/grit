@@ -128,7 +128,10 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 | t5309-pack-delta-cycles.sh | ref-delta cycles and cross-pack cycles (timeout guard) | `grit-lib/tests/pack_deltas.rs` (`ref_delta_*cycle*`) | covered |
 | t5314-pack-cycle-detection.sh | self-referencing and two-object ref-delta cycles | `grit-lib/tests/pack_deltas.rs` (`ref_delta_self_reference*`, `ref_delta_two_object_cycle*`) | covered |
 | t5316-pack-delta-depth.sh | deep OFS chains (50+) vs verify-pack depth | `grit-lib/tests/pack_deltas.rs` (`t5316_deep_ofs_chain*`) | covered |
+| t5318-commit-graph.sh | write/verify, Bloom/changed-paths, merge/octopus EDGE, corruption | `grit-lib/tests/commit_graph_roundtrip.rs`, `grit-lib/tests/commit_graph_corruption.rs` | ported (skip progress/option UX) |
+| t5324-split-commit-graph.sh | split chain write/verify, layer load, alternates | `grit-lib/tests/commit_graph_roundtrip.rs`, `grit-lib/tests/commit_graph_corruption.rs` | ported (skip progress/option UX) |
 | t5325-reverse-index.sh | RIDX `.rev` verify, corruption cases, `try_rev_positions_in_pack_order`, hashfile checksum | `grit-lib/tests/pack_ingest_roundtrip.rs` (`verify_pack_rev_*`, `try_rev_positions_*`, `hashfile_checksum_*`) | ported |
+| t5328-commit-graph-64bit-time.sh | 64-bit commit times, generation overflow (GDO2) | `grit-lib/tests/commit_graph_roundtrip.rs` | ported (skip when platform git lacks 64-bit times) |
 | t5351-unpack-large.sh | `unpack-objects` large blobs vs system git; strict missing reference | `grit-lib/tests/pack_ingest_roundtrip.rs` (`unpack_large_blob_*`, `unpack_strict_*`) | ported |
 
 ### Documentation site and rustdoc jobs

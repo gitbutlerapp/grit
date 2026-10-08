@@ -302,3 +302,55 @@ pub fn build_bloom_filter_data(
     }
     (data, outcome)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bloom_v1_and_v2_differ_on_high_bit_path_bytes() {
+        let path = "\u{0080}name";
+        let v1 = BloomFilterSettings {
+            hash_version: 1,
+            ..BloomFilterSettings::default()
+        };
+        let v2 = BloomFilterSettings {
+            hash_version: 2,
+            ..BloomFilterSettings::default()
+        };
+        let h1 = bloom_key_hashes(path.as_bytes(), &v1);
+        let h2 = bloom_key_hashes(path.as_bytes(), &v2);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn bloom_build_truncated_and_contains_roundtrip() {
+        let settings = BloomFilterSettings::default();
+        let mut paths = BTreeSet::new();
+        paths.insert("a.txt".to_owned());
+        paths.insert("dir/b.txt".to_owned());
+        let (data, outcome) = build_bloom_filter_data(&paths, 2, &settings);
+        assert_eq!(outcome, BloomBuildOutcome::Normal);
+        assert!(!data.is_empty());
+        let keys = bloom_keyvec_for_path("a.txt", &settings);
+        assert!(!keys.is_empty());
+        for key in &keys {
+            assert!(bloom_filter_contains(key, &data, &settings).unwrap());
+        }
+        let (empty, empty_out) = build_bloom_filter_data(&BTreeSet::new(), 0, &settings);
+        assert_eq!(empty_out, BloomBuildOutcome::TruncatedEmpty);
+        assert_eq!(empty.len(), 1);
+        let (large, large_out) =
+            build_bloom_filter_data(&paths, settings.max_changed_paths as usize + 1, &settings);
+        assert_eq!(large_out, BloomBuildOutcome::TruncatedLarge);
+        assert_eq!(large, vec![0xff]);
+    }
+
+    #[test]
+    fn collect_changed_paths_includes_parent_directories() {
+        let set = collect_changed_paths_for_bloom(&["deep/nested/file.txt".to_owned()]);
+        assert!(set.contains("deep"));
+        assert!(set.contains("deep/nested"));
+        assert!(set.contains("deep/nested/file.txt"));
+    }
+}

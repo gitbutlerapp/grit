@@ -636,3 +636,160 @@ fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Option<ObjectId> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::bloom::BloomFilterSettings;
+    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::repo::{init_repository, Repository};
+    use crate::write_tree::write_tree_from_index;
+
+    fn empty_commit(repo: &Repository, parents: Vec<ObjectId>, committer: &str) -> ObjectId {
+        let raw = serialize_commit(&CommitData {
+            tree: repo.odb.write(ObjectKind::Tree, b"").expect("tree"),
+            parents,
+            author: committer.into(),
+            committer: committer.into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "m\n".into(),
+            raw_message: None,
+        });
+        repo.odb.write(ObjectKind::Commit, &raw).expect("commit")
+    }
+
+    #[test]
+    fn load_commit_graph_commit_info_rejects_non_commit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let blob = repo.odb.write(ObjectKind::Blob, b"x").expect("blob");
+        let err = super::load_commit_graph_commit_info(&repo.odb, blob).unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+    }
+
+    #[test]
+    fn build_octopus_merge_includes_extra_edges_chunk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let p1 = empty_commit(&repo, vec![], "T <t@example.com> 1 +0000");
+        let p2 = empty_commit(&repo, vec![], "T <t@example.com> 2 +0000");
+        let p3 = empty_commit(&repo, vec![], "T <t@example.com> 3 +0000");
+        let merge = empty_commit(&repo, vec![p1, p2, p3], "T <t@example.com> 4 +0000");
+        let mut sorted = vec![p1, p2, p3, merge];
+        sorted.sort();
+        let mut infos = HashMap::new();
+        for oid in &sorted {
+            infos.insert(
+                *oid,
+                super::load_commit_graph_commit_info(&repo.odb, *oid).expect("info"),
+            );
+        }
+        let bloom = BloomFilterSettings::default();
+        let (bytes, _) = super::build_commit_graph_bytes(
+            &sorted,
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        assert!(bytes.windows(4).any(|w| w == b"EDGE"));
+        crate::commit_graph_file::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes)
+            .expect("parse octopus graph");
+    }
+
+    #[test]
+    fn build_respects_max_new_filters_budget() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let mut index = Index::new();
+        index.hash_algo = repo.odb.hash_algo();
+        let blob = repo.odb.write(ObjectKind::Blob, b"a\n").expect("blob");
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 2,
+            oid: blob,
+            flags: 4,
+            flags_extended: None,
+            path: b"a.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let tree = write_tree_from_index(&repo.odb, &index, "").expect("tree");
+        let mut sorted = Vec::new();
+        let mut infos = HashMap::new();
+        for t in [1i64, 2, 3] {
+            let raw = serialize_commit(&CommitData {
+                tree,
+                parents: sorted.last().copied().map(|p| vec![p]).unwrap_or_default(),
+                author: format!("T <t@example.com> {t} +0000"),
+                committer: format!("T <t@example.com> {t} +0000"),
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: "m\n".into(),
+                raw_message: None,
+            });
+            let c = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
+            infos.insert(
+                c,
+                super::load_commit_graph_commit_info(&repo.odb, c).expect("info"),
+            );
+            sorted.push(c);
+        }
+        let bloom = BloomFilterSettings::default();
+        let (_, stats) = super::build_commit_graph_bytes(
+            &sorted,
+            &infos,
+            &repo.odb,
+            true,
+            &bloom,
+            None,
+            &[],
+            Some(1),
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        assert!(stats.filter_computed <= 1);
+        assert!(stats.filter_not_computed >= 1);
+    }
+
+    #[test]
+    fn collect_reachable_follows_annotated_tag_to_commit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let commit = empty_commit(&repo, vec![], "T <t@example.com> 1 +0000");
+        let tag_body = format!(
+            "object {}\ntype commit\ntag v1\ntagger T <t@example.com> 1 +0000\n\n",
+            commit
+        );
+        let tag = repo
+            .odb
+            .write(ObjectKind::Tag, tag_body.as_bytes())
+            .expect("tag");
+        crate::refs::write_ref(&repo.git_dir, "refs/tags/v1", &tag).expect("ref");
+        let set = super::collect_reachable_commit_oids(&repo.git_dir, &repo.odb).expect("walk");
+        assert!(set.contains(&commit));
+        let tips = super::count_referenced_commit_tips(&repo.git_dir, &repo.odb).expect("tips");
+        assert_eq!(tips, 1);
+    }
+}

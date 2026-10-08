@@ -7,6 +7,7 @@ use crate::bloom::{
     bloom_filter_contains, bloom_keyvec_for_path, BloomBuildOutcome, BloomFilterSettings,
 };
 use crate::error::Error;
+use crate::hash::verify_trailer;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::odb::{hash_algo_for_objects_dir, Odb};
 
@@ -44,6 +45,7 @@ const GRAPH_PARENT_NONE: u32 = 0x7000_0000;
 /// CDAT parent-2 high bit meaning "remaining parents live in the EXTRA_EDGES
 /// chunk" (octopus merge; Git `GRAPH_EXTRA_EDGES_NEEDED`).
 const GRAPH_EXTRA_EDGES_NEEDED: u32 = 0x8000_0000;
+const GRAPH_LAST_EDGE: u32 = 0x8000_0000;
 const CHUNK_BLOOM_INDEXES: u32 = 0x4249_4458; // BIDX
 const CHUNK_BLOOM_DATA: u32 = 0x4244_4154; // BDAT
 const CHUNK_BASE_GRAPHS: u32 = 0x4241_5345; // BASE
@@ -93,6 +95,101 @@ fn commit_graph_chain_hash_is_valid(h: &str, algo: HashAlgo) -> bool {
     h.len() == algo.hex_len() && h.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+fn validate_single_layer_parent_indices(
+    body: &[u8],
+    num_commits: u32,
+    commit_data_off: usize,
+    graph_data_width: usize,
+    hash_len: usize,
+    extra_edges_off: Option<usize>,
+    toc_entries: &[(u32, usize)],
+    file_end: usize,
+) -> Result<(), Error> {
+    fn chunk_byte_range(
+        start: usize,
+        toc_entries: &[(u32, usize)],
+        file_end: usize,
+    ) -> Result<usize, Error> {
+        let mut ends: Vec<usize> = toc_entries
+            .iter()
+            .map(|&(_, o)| o)
+            .filter(|&o| o > start)
+            .collect();
+        ends.sort_unstable();
+        Ok(ends.first().copied().unwrap_or(file_end))
+    }
+
+    for lex in 0..num_commits {
+        let base = commit_data_off + lex as usize * graph_data_width;
+        let p1_off = base + hash_len;
+        let p1 =
+            u32::from_be_bytes(body[p1_off..p1_off + 4].try_into().map_err(|_| {
+                Error::CorruptObject("commit-graph commit data corrupt".to_owned())
+            })?);
+        let p2 =
+            u32::from_be_bytes(body[p1_off + 4..p1_off + 8].try_into().map_err(|_| {
+                Error::CorruptObject("commit-graph commit data corrupt".to_owned())
+            })?);
+        if p1 != GRAPH_PARENT_NONE
+            && p1 & GRAPH_EXTRA_EDGES_NEEDED == 0
+            && p1 as usize >= num_commits as usize
+        {
+            return Err(Error::CorruptObject(
+                "commit-graph invalid parent index".to_owned(),
+            ));
+        }
+        if p2 != GRAPH_PARENT_NONE {
+            if p2 & GRAPH_EXTRA_EDGES_NEEDED != 0 {
+                let start = (p2 & !GRAPH_EXTRA_EDGES_NEEDED) as usize;
+                if let Some(edge_off) = extra_edges_off {
+                    let edge_end = chunk_byte_range(edge_off, toc_entries, file_end)?;
+                    let edge_len = edge_end.saturating_sub(edge_off);
+                    if start * 4 >= edge_len {
+                        return Err(Error::CorruptObject(
+                            "commit-graph extra edge list out of range".to_owned(),
+                        ));
+                    }
+                    let mut idx = start;
+                    loop {
+                        if idx * 4 + 4 > edge_len {
+                            return Err(Error::CorruptObject(
+                                "commit-graph extra edge list corrupt".to_owned(),
+                            ));
+                        }
+                        let ev = u32::from_be_bytes(
+                            body[edge_off + idx * 4..edge_off + idx * 4 + 4]
+                                .try_into()
+                                .map_err(|_| {
+                                    Error::CorruptObject(
+                                        "commit-graph extra edge list corrupt".to_owned(),
+                                    )
+                                })?,
+                        );
+                        let parent = ev & !GRAPH_LAST_EDGE;
+                        if parent != GRAPH_PARENT_NONE
+                            && parent & GRAPH_EXTRA_EDGES_NEEDED == 0
+                            && parent as usize >= num_commits as usize
+                        {
+                            return Err(Error::CorruptObject(
+                                "commit-graph invalid parent index".to_owned(),
+                            ));
+                        }
+                        if ev & GRAPH_LAST_EDGE != 0 {
+                            break;
+                        }
+                        idx += 1;
+                    }
+                }
+            } else if p2 as usize >= num_commits as usize {
+                return Err(Error::CorruptObject(
+                    "commit-graph invalid parent index".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl CommitGraphLayer {
     /// Parse a commit-graph layer; fails if generation overflow chunk is inconsistent with GDA2.
     pub fn try_parse(path: PathBuf, raw: Vec<u8>) -> Result<Self, Error> {
@@ -112,6 +209,14 @@ impl CommitGraphLayer {
                 )))
             }
         };
+        let algo = HashAlgo::try_from(raw[5]).map_err(|_| {
+            Error::CorruptObject(format!(
+                "commit-graph version/hash not supported (version {} hash {})",
+                raw[4], raw[5]
+            ))
+        })?;
+        verify_trailer(algo, &raw)
+            .map_err(|_| Error::CorruptObject("commit-graph incorrect checksum".to_owned()))?;
         let body = raw[..raw.len() - hash_len].to_vec();
         if body.len() < 8 || &body[0..4] != SIGNATURE {
             return Err(Error::CorruptObject(
@@ -141,6 +246,7 @@ impl CommitGraphLayer {
         let mut bloom_idx_off = None;
         let mut bloom_data_range = None;
         let mut base_graphs_off = None;
+        let mut extra_edges_off = None;
         let mut chunk_offsets: Vec<usize> = Vec::new();
         let mut toc_entries: Vec<(u32, usize)> = Vec::with_capacity(num_chunks);
 
@@ -165,6 +271,7 @@ impl CommitGraphLayer {
                 CHUNK_GENERATION_DATA => generation_off = Some(off),
                 CHUNK_GENERATION_DATA_OVERFLOW => generation_overflow_off = Some(off),
                 CHUNK_BLOOM_INDEXES => bloom_idx_off = Some(off),
+                CHUNK_EXTRA_EDGES => extra_edges_off = Some(off),
                 CHUNK_BASE_GRAPHS => base_graphs_off = Some(off),
                 CHUNK_BLOOM_DATA => {
                     let end = if i + 1 < num_chunks {
@@ -296,6 +403,48 @@ impl CommitGraphLayer {
             ));
         }
 
+        for bucket in 0..255 {
+            let a = u32::from_be_bytes(
+                body[fanout_off + bucket * 4..fanout_off + bucket * 4 + 4]
+                    .try_into()
+                    .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
+            );
+            let b = u32::from_be_bytes(
+                body[fanout_off + (bucket + 1) * 4..fanout_off + (bucket + 1) * 4 + 4]
+                    .try_into()
+                    .map_err(|_| Error::CorruptObject("commit-graph fanout corrupt".to_owned()))?,
+            );
+            if a > b {
+                return Err(Error::CorruptObject(
+                    "commit-graph fanout value non-monotonic".to_owned(),
+                ));
+            }
+        }
+
+        for lex in 1..num_commits {
+            let off_a = oid_lookup_off + (lex as usize - 1) * hash_len;
+            let off_b = oid_lookup_off + lex as usize * hash_len;
+            if body[off_a..off_a + hash_len] >= body[off_b..off_b + hash_len] {
+                return Err(Error::CorruptObject(
+                    "commit-graph incorrect OID order".to_owned(),
+                ));
+            }
+        }
+
+        if base_graphs_off.is_none() {
+            validate_single_layer_parent_indices(
+                &body,
+                num_commits,
+                commit_data_off,
+                graph_data_width,
+                hash_len,
+                extra_edges_off,
+                &toc_entries,
+                file_end,
+            )?;
+        }
+
+        let read_generation_data = generation_off.is_some();
         let mut bloom_settings = None;
         let mut chunk_bloom_data = None;
         if let (Some(_bidx), Some((bdat_off, bdat_len))) = (bloom_idx_off, bloom_data_range) {
@@ -1183,5 +1332,375 @@ pub fn commit_tree_has_high_bit_paths(odb: &Odb, commit_oid: ObjectId) -> bool {
     match load_commit_tree(odb, commit_oid) {
         Ok(tree) => tree_has_high_bit_paths(odb, tree),
         Err(_) => true,
+    }
+}
+
+/// Parse all chunks for `test-tool read-graph` / debugging.
+pub fn parse_graph_file(path: &Path) -> Option<ParsedGraphDump> {
+    let raw = std::fs::read(path).ok()?;
+    if raw.len() < 28 {
+        return None;
+    }
+    let hash_len = commit_graph_hash_len(raw[5])?;
+    let body = &raw[..raw.len() - hash_len];
+    if body.len() < 8 || &body[0..4] != SIGNATURE {
+        return None;
+    }
+    let header_word = u32::from_be_bytes(body[0..4].try_into().ok()?);
+    let num_chunks = body[6] as usize;
+    let toc_start = 8;
+    let mut present: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for i in 0..num_chunks {
+        let e = toc_start + i * 12;
+        let id = u32::from_be_bytes(body[e..e + 4].try_into().ok()?);
+        present.insert(id);
+    }
+    // `git/t/helper/test-read-graph.c` prints a fixed set of recognized chunks in
+    // a fixed order, omitting the BASE chunk and any unknown chunk.
+    let mut chunk_names: Vec<String> = Vec::new();
+    for (id, label) in [
+        (CHUNK_OID_FANOUT, "oid_fanout"),
+        (CHUNK_OID_LOOKUP, "oid_lookup"),
+        (CHUNK_COMMIT_DATA, "commit_metadata"),
+        (CHUNK_GENERATION_DATA, "generation_data"),
+        (CHUNK_GENERATION_DATA_OVERFLOW, "generation_data_overflow"),
+        (CHUNK_EXTRA_EDGES, "extra_edges"),
+        (CHUNK_BLOOM_INDEXES, "bloom_indexes"),
+        (CHUNK_BLOOM_DATA, "bloom_data"),
+    ] {
+        if present.contains(&id) {
+            chunk_names.push(label.to_string());
+        }
+    }
+    let layer = CommitGraphLayer::parse(path.to_path_buf(), raw.clone())?;
+    let bloom_opt = layer.bloom_settings.map(|s| {
+        format!(
+            " bloom({},{},{})",
+            s.hash_version, s.bits_per_entry, s.num_hashes
+        )
+    });
+    let mut options = String::new();
+    if let Some(b) = bloom_opt {
+        options.push_str(&b);
+    }
+    if layer.read_generation_data {
+        options.push_str(" read_generation_data");
+    }
+    Some(ParsedGraphDump {
+        header_word,
+        version: body[4],
+        hash_ver: body[5],
+        num_chunks: body[6],
+        reserved: body[7],
+        num_commits: layer.num_commits,
+        chunks: chunk_names.join(" "),
+        options,
+    })
+}
+
+pub struct ParsedGraphDump {
+    pub header_word: u32,
+    pub version: u8,
+    pub hash_ver: u8,
+    pub num_chunks: u8,
+    pub reserved: u8,
+    pub num_commits: u32,
+    pub chunks: String,
+    pub options: String,
+}
+
+/// Dump hex lines of Bloom filters (one per commit, empty line for empty filter).
+pub fn dump_bloom_filters(path: &Path) -> Option<Vec<String>> {
+    let raw = std::fs::read(path).ok()?;
+    let layer = CommitGraphLayer::parse(path.to_path_buf(), raw)?;
+    let mut out = Vec::new();
+    for i in 0..layer.num_commits {
+        let slice = layer.bloom_filter_slice(i).unwrap_or(&[]);
+        if slice.is_empty() {
+            out.push(String::new());
+        } else {
+            let hex: String = slice.iter().map(|b| format!("{b:02x}")).collect();
+            out.push(hex);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::bloom::BloomFilterSettings;
+    use crate::commit_graph_write::{build_commit_graph_bytes, load_commit_graph_commit_info};
+    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::repo::{init_repository, Repository};
+    use crate::write_tree::write_tree_from_index;
+
+    fn one_commit_repo() -> (tempfile::TempDir, Repository, ObjectId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let mut index = Index::new();
+        index.hash_algo = repo.odb.hash_algo();
+        let blob = repo.odb.write(ObjectKind::Blob, b"x\n").expect("blob");
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 2,
+            oid: blob,
+            flags: 4,
+            flags_extended: None,
+            path: b"f.txt".to_vec(),
+            base_index_pos: 0,
+        });
+        let tree = write_tree_from_index(&repo.odb, &index, "").expect("tree");
+        let raw = serialize_commit(&CommitData {
+            tree,
+            parents: vec![],
+            author: "T <t@example.com> 100 +0000".into(),
+            committer: "T <t@example.com> 100 +0000".into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: "m\n".into(),
+            raw_message: None,
+        });
+        let commit = repo.odb.write(ObjectKind::Commit, &raw).expect("commit");
+        crate::refs::write_ref(&repo.git_dir, "refs/heads/main", &commit).expect("ref");
+        (dir, repo, commit)
+    }
+
+    fn reseal_graph(bytes: &mut Vec<u8>, algo: crate::objects::HashAlgo) {
+        let hash_len = algo.len();
+        let body_len = bytes.len().saturating_sub(hash_len);
+        let digest = algo.digest(&bytes[..body_len]);
+        bytes.truncate(body_len);
+        bytes.extend_from_slice(digest.as_bytes());
+    }
+
+    #[test]
+    fn try_parse_rejects_bad_signature_and_truncated_toc() {
+        let (_dir, repo, commit) = one_commit_repo();
+        let info = load_commit_graph_commit_info(&repo.odb, commit).expect("info");
+        let mut infos = HashMap::new();
+        infos.insert(commit, info);
+        let bloom = BloomFilterSettings::default();
+        let (mut bytes, _) = build_commit_graph_bytes(
+            &[commit],
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        let algo = repo.odb.hash_algo();
+        bytes[0] = 0;
+        reseal_graph(&mut bytes, algo);
+        let err = super::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes.clone())
+            .unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+        bytes.truncate(40);
+        let err =
+            super::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes).unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+        let (mut good, _) = build_commit_graph_bytes(
+            &[commit],
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        good[4] = 2;
+        reseal_graph(&mut good, algo);
+        let err =
+            super::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), good).unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+        let (mut checksum_bad, _) = build_commit_graph_bytes(
+            &[commit],
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        let last = checksum_bad.len() - 1;
+        checksum_bad[last] ^= 0xff;
+        let err = super::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), checksum_bad)
+            .unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+    }
+
+    #[test]
+    fn parse_graph_file_returns_none_for_invalid_inputs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("nope.graph");
+        assert!(super::parse_graph_file(&missing).is_none());
+        std::fs::write(dir.path().join("tiny.graph"), b"CGPH").expect("write");
+        assert!(super::parse_graph_file(&dir.path().join("tiny.graph")).is_none());
+        assert!(super::dump_bloom_filters(&missing).is_none());
+    }
+
+    #[test]
+    fn try_load_missing_graph_is_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let objects = dir.path().join("objects");
+        std::fs::create_dir_all(objects.join("info")).expect("info");
+        assert!(super::CommitGraphChain::try_load(&objects)
+            .expect("ok")
+            .is_none());
+    }
+
+    #[test]
+    fn try_load_across_finds_single_graph() {
+        let (_dir, repo, _commit) = one_commit_repo();
+        let objects = repo.odb.objects_dir();
+        let sorted = vec![_commit];
+        let info = load_commit_graph_commit_info(&repo.odb, _commit).expect("info");
+        let mut infos = HashMap::new();
+        infos.insert(_commit, info);
+        let bloom = BloomFilterSettings::default();
+        let (bytes, _) = build_commit_graph_bytes(
+            &sorted,
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        std::fs::write(objects.join("info/commit-graph"), bytes).expect("write");
+        let chain = super::CommitGraphChain::try_load_across(objects, &[])
+            .expect("across")
+            .expect("some");
+        assert_eq!(chain.total_commits(), 1);
+    }
+
+    #[test]
+    fn generation_overflow_without_gdo2_fails_parse() {
+        let (_dir, repo, commit) = one_commit_repo();
+        let info = load_commit_graph_commit_info(&repo.odb, commit).expect("info");
+        let mut infos = HashMap::new();
+        infos.insert(commit, info);
+        let bloom = BloomFilterSettings::default();
+        let (mut bytes, _) = build_commit_graph_bytes(
+            &[commit],
+            &infos,
+            &repo.odb,
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        if bytes.len() > 100 {
+            for i in 80..120 {
+                if i + 4 <= bytes.len() - 20 {
+                    bytes[i] = 0x80;
+                    bytes[i + 1] = 0x00;
+                    bytes[i + 2] = 0x00;
+                    bytes[i + 3] = 0x00;
+                    break;
+                }
+            }
+        }
+        let err =
+            super::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes).unwrap_err();
+        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+    }
+
+    #[test]
+    fn bloom_precheck_not_in_graph_for_missing_oid() {
+        let (_dir, repo, commit) = one_commit_repo();
+        let info = load_commit_graph_commit_info(&repo.odb, commit).expect("info");
+        let mut infos = HashMap::new();
+        infos.insert(commit, info);
+        let bloom = BloomFilterSettings::default();
+        let (bytes, _) = build_commit_graph_bytes(
+            &[commit],
+            &infos,
+            &repo.odb,
+            true,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        std::fs::write(repo.odb.objects_dir().join("info/commit-graph"), bytes).expect("write");
+        let chain = super::CommitGraphChain::load(repo.odb.objects_dir()).expect("chain");
+        let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").expect("oid");
+        let pre = chain
+            .bloom_precheck_for_paths(&repo.odb, missing, &[], None, -1, true)
+            .expect("precheck");
+        assert_eq!(pre, super::BloomPrecheck::NotInGraph);
+    }
+
+    #[test]
+    fn bloom_precheck_respects_read_changed_paths_flag() {
+        let (_dir, repo, commit) = one_commit_repo();
+        let mut sorted = vec![commit];
+        let info = load_commit_graph_commit_info(&repo.odb, commit).expect("info");
+        let mut infos = HashMap::new();
+        infos.insert(commit, info);
+        let bloom = BloomFilterSettings::default();
+        let (bytes, _) = build_commit_graph_bytes(
+            &sorted,
+            &infos,
+            &repo.odb,
+            true,
+            &bloom,
+            None,
+            &[],
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            true,
+        )
+        .expect("write");
+        std::fs::write(repo.odb.objects_dir().join("info/commit-graph"), bytes).expect("write");
+        let chain = super::CommitGraphChain::load(repo.odb.objects_dir()).expect("chain");
+        let pre = chain
+            .bloom_precheck_for_paths(&repo.odb, commit, &["f.txt".to_owned()], None, -1, false)
+            .expect("precheck");
+        assert_eq!(pre, super::BloomPrecheck::Inapplicable);
+        sorted.clear();
     }
 }

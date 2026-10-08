@@ -15,7 +15,7 @@ files = [
     "commit_graph_write.rs",
     "bloom.rs",
 ]
-minimum = 44.4
+minimum = 85.0
 
 [group.midx]
 files = [
@@ -53,13 +53,13 @@ files = [
 minimum = 66.6
 
 [file."bloom.rs"]
-minimum = 50.0
+minimum = 80.0
 
 [file."commit_graph_file.rs"]
-minimum = 30.8
+minimum = 85.0
 
 [file."commit_graph_write.rs"]
-minimum = 65.5
+minimum = 85.0
 
 [file."delta_encode.rs"]
 minimum = 93.3
