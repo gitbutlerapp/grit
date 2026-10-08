@@ -51,6 +51,10 @@ pub struct Environment {
     pub sudo_uid: Option<String>,
     pub git_test_utf8_nfd_to_nfc: Option<String>,
     pub git_test_no_write_rev_index: Option<String>,
+    /// Windows `%ProgramFiles%` (for Git for Windows system config discovery).
+    pub program_files: Option<String>,
+    /// Windows `%ProgramFiles(x86)%`.
+    pub program_files_x86: Option<String>,
 }
 
 impl Environment {
@@ -92,6 +96,8 @@ impl Environment {
             sudo_uid: None,
             git_test_utf8_nfd_to_nfc: None,
             git_test_no_write_rev_index: None,
+            program_files: None,
+            program_files_x86: None,
         }
     }
 
@@ -156,6 +162,8 @@ impl Environment {
             sudo_uid: get("SUDO_UID"),
             git_test_utf8_nfd_to_nfc: get("GIT_TEST_UTF8_NFD_TO_NFC"),
             git_test_no_write_rev_index: get("GIT_TEST_NO_WRITE_REV_INDEX"),
+            program_files: get("ProgramFiles"),
+            program_files_x86: get("ProgramFiles(x86)"),
         }
     }
 
@@ -229,6 +237,11 @@ impl Environment {
                 Err(_) => {}
             }
         }
+        fp.push((
+            "GRIT_ENV_CWD".to_owned(),
+            self.cwd.to_str().map(str::to_owned),
+        ));
+        fp.push(("GRIT_ENV_PWD".to_owned(), self.pwd.clone()));
         Some(fp)
     }
 
