@@ -2744,13 +2744,8 @@ mod tests {
 
         let idx_path = pack_path.with_extension("idx");
         let trailer = &pack[pack.len() - 32..];
-        write_v2_pack_index_with_trailer(
-            &idx_path,
-            &[(wrong_oid, off, 0)],
-            trailer,
-            32,
-        )
-        .expect("write idx");
+        write_v2_pack_index_with_trailer(&idx_path, &[(wrong_oid, off, 0)], trailer, 32)
+            .expect("write idx");
         let idx = read_pack_index(&idx_path).expect("read idx");
 
         let err = read_object_from_pack_bytes(&pack, &idx, wrong_oid.as_bytes()).unwrap_err();
