@@ -703,7 +703,7 @@ impl Odb {
             && self.config_git_dir.is_some()
             && self.core_multi_pack_index_enabled()
         {
-            match midx_oid_listed_in_tip(objects_dir, oid, self.hash_algo()) {
+            match midx_oid_listed_in_tip(objects_dir, oid) {
                 Ok(Some(true)) => return true,
                 Ok(Some(false)) | Ok(None) => {}
                 Err(_) => return false,
@@ -951,19 +951,20 @@ impl Odb {
             });
         }
 
-        if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+        let midx_reads_enabled =
+            self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
+        if midx_reads_enabled {
+            let _ = self.midx_packs_validated.get_or_init(|| {
+                crate::midx::validate_midx_referenced_packs(&self.objects_dir);
+            });
+            if let Some(info) = crate::midx::try_read_info_via_midx(&self.objects_dir, oid)? {
+                return Ok(info);
+            }
         }
 
         let path = self.object_path(oid);
         if path.is_file() {
             return read_loose_object_info(&path);
-        }
-
-        if self.config_git_dir.is_some() && self.core_multi_pack_index_enabled() {
-            if let Some(info) = crate::midx::try_read_info_via_midx(&self.objects_dir, oid)? {
-                return Ok(info);
-            }
         }
 
         match pack::read_object_info_from_packs(&self.objects_dir, oid) {
@@ -972,7 +973,7 @@ impl Odb {
             Err(err) => return Err(err),
         }
 
-        let midx_alt = self.config_git_dir.is_some() && self.core_multi_pack_index_enabled();
+        let midx_alt = midx_reads_enabled;
 
         let file_alts = self.file_alternate_dirs_snapshot();
         for alt_dir in file_alts.iter() {
@@ -1007,7 +1008,7 @@ impl Odb {
         }
         if use_midx {
             if let Some(obj) =
-                try_read_object_via_midx(objects_dir, oid, hash_algo_for_objects_dir(objects_dir))?
+                try_read_object_via_midx(objects_dir, oid)?
             {
                 return Ok(obj);
             }

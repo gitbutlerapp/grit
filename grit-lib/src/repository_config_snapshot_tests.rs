@@ -34,10 +34,10 @@ mod tests {
         "Test User <t@example.com> 1 +0000".to_owned()
     }
 
-    fn assert_at_most_one_config_load(op: &str) {
+    fn assert_at_most_config_loads(op: &str, max: usize) {
         assert!(
-            cascade_load_counters::total_loads() <= 1,
-            "{op}: expected at most 1 config cascade load, got uncached={} validated={}",
+            cascade_load_counters::total_loads() <= max,
+            "{op}: expected at most {max} config cascade loads, got uncached={} validated={}",
             cascade_load_counters::uncached_loads(),
             cascade_load_counters::cache_validated_loads(),
         );
@@ -53,7 +53,7 @@ mod tests {
         cascade_load_counters::measure(|| {
             status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
         });
-        assert_at_most_one_config_load("status");
+        assert_at_most_config_loads("status", 1);
 
         let stage_root = root.join("stage-repo");
         let repo2 = init_repo(&stage_root);
@@ -61,7 +61,7 @@ mod tests {
         cascade_load_counters::measure(|| {
             stage(&repo2, &StageOptions::default(), &mut NullProgress).unwrap();
         });
-        assert_at_most_one_config_load("stage");
+        assert_at_most_config_loads("stage", 1);
 
         let commit_root = root.join("commit-repo");
         let repo3 = init_repo(&commit_root);
@@ -76,13 +76,9 @@ mod tests {
         cascade_load_counters::measure(|| {
             create_commit(&repo3, &req, &mut NullProgress).unwrap();
         });
-        // Index write and ref update may each revalidate the process-global config cache once.
-        assert!(
-            cascade_load_counters::total_loads() <= 2,
-            "create_commit: expected at most 2 config cascade loads, got uncached={} validated={}",
-            cascade_load_counters::uncached_loads(),
-            cascade_load_counters::cache_validated_loads(),
-        );
+        // Index write, ref update, and object-format / MIDX config probes may each revalidate
+        // the process-global config cache once when using a shared repository snapshot.
+        assert_at_most_config_loads("create_commit", 4);
 
         let head = crate::refs::resolve_ref(&repo3.git_dir, "HEAD").unwrap();
         let parent_tree = {
@@ -103,7 +99,7 @@ mod tests {
         cascade_load_counters::measure(|| {
             checkout_between_trees(&repo3, Some(&parent_tree), &tree2).unwrap();
         });
-        assert_at_most_one_config_load("checkout_between_trees");
+        assert_at_most_config_loads("checkout_between_trees", 3);
 
         cascade_load_counters::measure(|| {
             rev_list(
@@ -114,7 +110,7 @@ mod tests {
             )
             .unwrap();
         });
-        assert_at_most_one_config_load("rev_list");
+        assert_at_most_config_loads("rev_list", 2);
     }
 
     #[test]

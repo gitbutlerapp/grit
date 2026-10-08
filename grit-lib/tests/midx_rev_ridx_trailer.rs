@@ -38,6 +38,7 @@ fn git_available() -> bool {
 
 fn grit_write_midx_rev(pack_dir: &Path) {
     let opts = WriteMultiPackIndexOptions {
+        write_bitmap_placeholders: true,
         write_rev_placeholder: true,
         version: Some(1),
         ..WriteMultiPackIndexOptions::default()
@@ -46,15 +47,22 @@ fn grit_write_midx_rev(pack_dir: &Path) {
 }
 
 fn find_midx_rev_sidecar(pack_dir: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(pack_dir).ok()?.find_map(|e| {
-        let e = e.ok()?;
-        let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with("multi-pack-index-") && name.ends_with(".rev") {
-            Some(e.path())
-        } else {
-            None
+    let midx_d = pack_dir.join("multi-pack-index.d");
+    for dir in [pack_dir, &midx_d] {
+        let found = std::fs::read_dir(dir).ok()?.find_map(|e| {
+            let e = e.ok()?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("multi-pack-index-") && name.ends_with(".rev") {
+                Some(e.path())
+            } else {
+                None
+            }
+        });
+        if found.is_some() {
+            return found;
         }
-    })
+    }
+    None
 }
 
 fn assert_ridx_hashfile(rev_path: &Path, algo: HashAlgo) {

@@ -18,8 +18,9 @@ use std::sync::Arc;
 use crate::hash::verify_trailer;
 
 use crate::error::{Error, Result};
-use crate::objects::{HashAlgo, ObjectId};
+use crate::objects::{HashAlgo, ObjectId, ObjectInfo};
 use crate::pack::{read_pack_index_no_verify, PackIndex};
+use crate::pack_rev::append_hashfile_checksum;
 
 const MIDX_SIGNATURE: u32 = 0x4d49_4458;
 const MIDX_VERSION_V1: u8 = 1;
@@ -211,7 +212,23 @@ fn chain_file_path(pack_dir: &Path) -> std::path::PathBuf {
     midx_d_dir(pack_dir).join("multi-pack-index-chain")
 }
 
+fn midx_chain_hash_hex_len(pack_dir: &Path) -> usize {
+    let Some(objects_dir) = pack_dir.parent() else {
+        return HashAlgo::Sha1.hex_len();
+    };
+    if repo_midx_hash_version_for_objects_dir(objects_dir) == HASH_VERSION_SHA256 {
+        HashAlgo::Sha256.hex_len()
+    } else {
+        HashAlgo::Sha1.hex_len()
+    }
+}
+
+fn is_valid_midx_chain_hash_line(t: &str, hex_len: usize) -> bool {
+    t.len() == hex_len && t.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
+    let hex_len = midx_chain_hash_hex_len(pack_dir);
     let path = chain_file_path(pack_dir);
     let f = fs::File::open(&path).map_err(Error::Io)?;
     let mut out = Vec::new();
@@ -221,7 +238,7 @@ fn read_chain_layer_hashes(pack_dir: &Path) -> Result<Vec<String>> {
         if t.is_empty() {
             continue;
         }
-        if t.len() != 40 || !t.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !is_valid_midx_chain_hash_line(t, hex_len) {
             return Err(Error::CorruptObject(format!(
                 "invalid multi-pack-index chain line: {t}"
             )));
@@ -255,7 +272,7 @@ mod midx_cache {
         MIDX_LARGE_OFFSET_NEEDED,
     };
     use crate::error::{Error, Result};
-    use crate::objects::ObjectId;
+    use crate::objects::{ObjectId, ObjectInfo};
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
     use std::collections::HashMap;
     use std::fs;
@@ -472,6 +489,21 @@ mod midx_cache {
                         return Ok(None);
                     }
                 }
+            }
+            Ok(None)
+        }
+
+        pub fn try_read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+                let Some((pack_id, _offset)) = layer.lookup_pack_and_offset(oid) else {
+                    continue;
+                };
+                self.ensure_packs_validated();
+                let Some(idx) = layer.open_pack_index(pack_id) else {
+                    layer.ensure_packs_validated(&self.pack_dir, names);
+                    return Ok(None);
+                };
+                return crate::pack::read_object_info_from_pack(idx.as_ref(), oid).map(Some);
             }
             Ok(None)
         }
@@ -809,14 +841,29 @@ fn collect_incremental_base(pack_dir: &Path) -> Result<(HashSet<ObjectId>, HashS
     Ok((oids, packs))
 }
 
+fn midx_trailing_hash_len(data: &[u8]) -> Result<usize> {
+    if data.len() < MIDX_HEADER_SIZE {
+        return Err(Error::CorruptObject(
+            "midx file too small for header".to_owned(),
+        ));
+    }
+    HashAlgo::try_from(data[5]).map(|a| a.len()).map_err(|e| {
+        Error::CorruptObject(format!(
+            "multi-pack-index hash version {} not recognized",
+            e.0
+        ))
+    })
+}
+
 fn midx_checksum_hex_from_path(path: &Path) -> Result<String> {
     let data = fs::read(path).map_err(Error::Io)?;
-    if data.len() < 20 {
+    let hash_len = midx_trailing_hash_len(&data)?;
+    if data.len() < hash_len {
         return Err(Error::CorruptObject(
             "midx too small for checksum".to_owned(),
         ));
     }
-    let hash = &data[data.len() - 20..];
+    let hash = &data[data.len() - hash_len..];
     Ok(hex::encode(hash))
 }
 
@@ -1180,18 +1227,39 @@ fn build_midx_bytes_filtered(
 ///
 /// `midx_file_hash` is the MIDX's own trailing checksum (20 bytes for SHA-1, 32
 /// for SHA-256); its width selects the RIDX hash-id (1 or 2).
-fn write_midx_rev_sidecar(path: &Path, pack_order: &[u32], midx_file_hash: &[u8]) -> Result<()> {
-    let hash_id: u32 = if midx_file_hash.len() == 32 { 2 } else { 1 };
-    let mut body =
-        Vec::with_capacity(RIDX_HEADER_SIZE + pack_order.len() * 4 + midx_file_hash.len());
-    body.extend_from_slice(&RIDX_SIGNATURE.to_be_bytes());
-    body.extend_from_slice(&RIDX_VERSION.to_be_bytes());
-    body.extend_from_slice(&hash_id.to_be_bytes());
+fn write_midx_rev_sidecar(
+    path: &Path,
+    pack_order: &[u32],
+    midx_file_hash: &[u8],
+    algo: HashAlgo,
+) -> Result<()> {
+    let hash_len = algo.len();
+    let hash_id = u32::from(u8::from(algo));
+    let body_len = RIDX_HEADER_SIZE + pack_order.len() * 4 + hash_len;
+    let mut out = Vec::with_capacity(body_len + hash_len);
+    out.extend_from_slice(&RIDX_SIGNATURE.to_be_bytes());
+    out.extend_from_slice(&RIDX_VERSION.to_be_bytes());
+    out.extend_from_slice(&hash_id.to_be_bytes());
     for idx in pack_order {
-        body.extend_from_slice(&idx.to_be_bytes());
+        out.extend_from_slice(&idx.to_be_bytes());
     }
-    body.extend_from_slice(midx_file_hash);
-    fs::write(path, body).map_err(Error::Io)
+    if midx_file_hash.len() >= hash_len {
+        out.extend_from_slice(&midx_file_hash[..hash_len]);
+    } else {
+        return Err(Error::CorruptObject(format!(
+            "MIDX checksum length {} does not match hash algorithm width {hash_len}",
+            midx_file_hash.len()
+        )));
+    }
+    append_hashfile_checksum(&mut out, hash_len);
+    fs::write(path, out).map_err(Error::Io)
+}
+
+fn repo_hash_algo_for_pack_dir(pack_dir: &Path) -> HashAlgo {
+    pack_dir
+        .parent()
+        .map(crate::odb::hash_algo_for_objects_dir)
+        .unwrap_or(HashAlgo::Sha1)
 }
 
 fn find_chunk(data: &[u8], header_end: usize, chunk_id: u32) -> Result<(usize, usize)> {
@@ -2312,6 +2380,14 @@ pub fn try_read_object_via_midx(
     chain.try_read_object(oid)
 }
 
+/// Like [`try_read_object_via_midx`], but returns [`ObjectInfo`] without inflating object bodies.
+pub fn try_read_info_via_midx(objects_dir: &Path, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    let Some(chain) = prepared_midx_chain(objects_dir)? else {
+        return Ok(None);
+    };
+    chain.try_read_info(oid)
+}
+
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir)
@@ -2602,11 +2678,8 @@ pub fn write_multi_pack_index_with_options(
         exclude,
     )?;
 
-    let hash_len = if repo_midx_hash_version(pack_dir) == 2 {
-        32
-    } else {
-        20
-    };
+    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
+    let hash_len = repo_algo.len();
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
     let hash_arr: Vec<u8> = hash.to_vec();
@@ -2650,7 +2723,7 @@ pub fn write_multi_pack_index_with_options(
             if opts.write_rev_placeholder {
                 let rev_path = midx_d.join(format!("multi-pack-index-{full}.rev"));
                 if let Some(order) = rev_sidecar_order.as_ref() {
-                    write_midx_rev_sidecar(&rev_path, order, &hash_arr)?;
+                    write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
                 } else {
                     fs::write(rev_path, []).map_err(Error::Io)?;
                 }
@@ -2695,7 +2768,7 @@ pub fn write_multi_pack_index_with_options(
             if opts.write_rev_placeholder {
                 let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
                 if let Some(order) = rev_sidecar_order.as_ref() {
-                    write_midx_rev_sidecar(&rev_path, order, &hash_arr)?;
+                    write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
                 } else {
                     fs::write(rev_path, []).map_err(Error::Io)?;
                 }
@@ -2884,11 +2957,8 @@ pub fn compact_multi_pack_index(
         exclude,
     )?;
 
-    let hash_len = if repo_midx_hash_version(pack_dir) == 2 {
-        32
-    } else {
-        20
-    };
+    let repo_algo = repo_hash_algo_for_pack_dir(pack_dir);
+    let hash_len = repo_algo.len();
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
     let hash_arr: Vec<u8> = hash.to_vec();
@@ -2921,7 +2991,7 @@ pub fn compact_multi_pack_index(
         let rev_path = midx_d.join(format!("multi-pack-index-{hash_hex}.rev"));
         if write_rev {
             if let Some(order) = rev_sidecar_order.as_ref() {
-                write_midx_rev_sidecar(&rev_path, order, &hash_arr)?;
+                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
             } else {
                 fs::write(rev_path, []).map_err(Error::Io)?;
             }
