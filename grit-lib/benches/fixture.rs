@@ -344,6 +344,14 @@ pub struct ObjectBenchFixtures {
     pub tree_store: Vec<u8>,
     pub blob_zlib: Vec<u8>,
     pub tree_zlib: Vec<u8>,
+    pub tree_small_store: Vec<u8>,
+    pub tree_small_zlib: Vec<u8>,
+    pub blob_4k_store: Vec<u8>,
+    pub blob_4k_zlib: Vec<u8>,
+    pub blob_1m_store: Vec<u8>,
+    pub blob_1m_zlib: Vec<u8>,
+    pub delta_store: Vec<u8>,
+    pub delta_zlib: Vec<u8>,
     pub loose_blob_oid: ObjectId,
     pub packed_whole_oid: ObjectId,
     pub packed_whole_idx: PackIndex,
@@ -403,6 +411,28 @@ impl ObjectBenchFixtures {
             t
         };
         let delta_bytes = encode_lcp_delta(&delta_base, &delta_target).expect("encode delta");
+        let delta_store = delta_bytes.clone();
+        let delta_zlib = deflate_store_bytes(&delta_store);
+
+        let tree_small_body = {
+            let leaf = odb.hash(ObjectKind::Blob, b"x");
+            let mut t = Vec::with_capacity(200);
+            for i in 0..8 {
+                t.extend_from_slice(format!("100644 f{i}.txt\0").as_bytes());
+                t.extend_from_slice(leaf.as_bytes());
+            }
+            t
+        };
+        let tree_small_store = store_bytes(ObjectKind::Tree, &tree_small_body);
+        let tree_small_zlib = deflate_store_bytes(&tree_small_store);
+
+        let blob_4k_body = vec![0x42_u8; 4 * 1024];
+        let blob_4k_store = store_bytes(ObjectKind::Blob, &blob_4k_body);
+        let blob_4k_zlib = deflate_store_bytes(&blob_4k_store);
+
+        let blob_1m_body = vec![0x43_u8; 1024 * 1024];
+        let blob_1m_store = store_bytes(ObjectKind::Blob, &blob_1m_body);
+        let blob_1m_zlib = deflate_store_bytes(&blob_1m_store);
 
         Self {
             _root: root,
@@ -414,6 +444,14 @@ impl ObjectBenchFixtures {
             tree_store,
             blob_zlib,
             tree_zlib,
+            tree_small_store,
+            tree_small_zlib,
+            blob_4k_store,
+            blob_4k_zlib,
+            blob_1m_store,
+            blob_1m_zlib,
+            delta_store,
+            delta_zlib,
             loose_blob_oid,
             packed_whole_oid,
             packed_whole_idx,

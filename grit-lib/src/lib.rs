@@ -243,6 +243,8 @@ mod worktree_scan;
 pub use worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 pub mod write_tree;
 pub mod ws;
+#[doc(hidden)]
+pub mod zlib_inflate;
 
 #[cfg(test)]
 mod hot_path_test_metrics;

@@ -16,7 +16,7 @@ clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 terminal_size = "0.4"
-flate2 = "1"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 hex = "0.4"
 tempfile = "3"

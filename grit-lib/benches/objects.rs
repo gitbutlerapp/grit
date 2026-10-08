@@ -5,12 +5,10 @@
 mod fixture;
 
 use std::hint::black_box;
-use std::io::Read;
 use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use fixture::ObjectBenchFixtures;
-use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::hash::{hash_object, hash_objects_parallel};
@@ -18,6 +16,7 @@ use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::pack::{clear_pack_cache, read_object_from_pack, PackIndex};
 use grit_lib::unpack_objects::apply_delta;
+use grit_lib::zlib_inflate::ZlibInflateScratch;
 
 fn bench_sha1_throughput(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
@@ -84,21 +83,43 @@ fn bench_zlib(c: &mut Criterion) {
     group.finish();
 
     let mut group = c.benchmark_group("zlib_inflate");
-    for (label, compressed) in [
-        ("blob", fx.blob_zlib.as_slice()),
-        ("tree", fx.tree_zlib.as_slice()),
+    for (label, compressed, plain_len) in [
+        (
+            "tree_200b",
+            fx.tree_small_zlib.as_slice(),
+            fx.tree_small_store.len(),
+        ),
+        (
+            "blob_4kib",
+            fx.blob_4k_zlib.as_slice(),
+            fx.blob_4k_store.len(),
+        ),
+        (
+            "blob_1mib",
+            fx.blob_1m_zlib.as_slice(),
+            fx.blob_1m_store.len(),
+        ),
+        (
+            "delta_payload",
+            fx.delta_zlib.as_slice(),
+            fx.delta_store.len(),
+        ),
+        ("blob_typical", fx.blob_zlib.as_slice(), fx.blob_store.len()),
+        ("tree_typical", fx.tree_zlib.as_slice(), fx.tree_store.len()),
     ] {
         group.throughput(Throughput::Bytes(compressed.len() as u64));
         group.bench_with_input(
             BenchmarkId::from_parameter(label),
-            compressed,
-            |b, input| {
+            &(compressed, plain_len),
+            |b, (input, len)| {
+                let mut scratch = ZlibInflateScratch::default();
                 b.iter(|| {
-                    let mut out = Vec::new();
-                    ZlibDecoder::new(black_box(input))
-                        .read_to_end(&mut out)
-                        .expect("inflate");
-                    out
+                    let mut pos = 0usize;
+                    black_box(
+                        scratch
+                            .decompress_fixed(black_box(input), &mut pos, *len as u64)
+                            .expect("inflate"),
+                    )
                 });
             },
         );

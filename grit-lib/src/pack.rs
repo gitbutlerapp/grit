@@ -8,7 +8,7 @@ use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 pub use crate::pack_map::PackData;
 use crate::unpack_objects::apply_delta;
-use flate2::read::ZlibDecoder;
+use crate::zlib_inflate::{inflate_prefix, ZlibInflateScratch};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -1719,21 +1719,13 @@ fn packed_type_to_kind(pt: PackedType) -> Result<ObjectKind> {
 ///
 /// Returns the decompressed data and advances `pos` past the consumed
 /// compressed bytes.
-fn decompress_pack_data(bytes: &[u8], pos: &mut usize, expected_size: u64) -> Result<Vec<u8>> {
-    let slice = &bytes[*pos..];
-    let mut decoder = ZlibDecoder::new(slice);
-    let mut out = Vec::with_capacity(expected_size as usize);
-    decoder
-        .read_to_end(&mut out)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    *pos += decoder.total_in() as usize;
-    if out.len() as u64 != expected_size {
-        return Err(Error::CorruptObject(format!(
-            "pack object size mismatch: expected {expected_size}, got {}",
-            out.len()
-        )));
-    }
-    Ok(out)
+fn decompress_pack_data(
+    bytes: &[u8],
+    pos: &mut usize,
+    expected_size: u64,
+    scratch: &mut ZlibInflateScratch,
+) -> Result<Vec<u8>> {
+    scratch.decompress_fixed(bytes, pos, expected_size)
 }
 
 /// Read and fully resolve one object from a pack file given its offset.
@@ -1936,6 +1928,7 @@ fn resolve_pack_object_at_body(
     let cur_bytes = read_pack_bytes_cached(&cur_idx.get().pack_path)?;
     let mut cur_offset = start_offset;
     let mut pending: Vec<PendingDeltaFrame> = Vec::new();
+    let mut inflate = ZlibInflateScratch::default();
 
     loop {
         let idx_ref = cur_idx.get();
@@ -1964,7 +1957,7 @@ fn resolve_pack_object_at_body(
 
         match packed_type {
             PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
-                let data = match decompress_pack_data(&cur_bytes, &mut pos, size) {
+                let data = match decompress_pack_data(&cur_bytes, &mut pos, size, &mut inflate) {
                     Ok(d) => d,
                     Err(err) => {
                         if let Some((kind, rescued)) =
@@ -1995,7 +1988,7 @@ fn resolve_pack_object_at_body(
             PackedType::OfsDelta => {
                 state.next_hop()?;
                 let base_offset = parse_ofs_delta_base(&cur_bytes, &mut pos, object_start)?;
-                let delta_data = decompress_pack_data(&cur_bytes, &mut pos, size)?;
+                let delta_data = decompress_pack_data(&cur_bytes, &mut pos, size, &mut inflate)?;
                 pending.push(PendingDeltaFrame {
                     pack: idx_ref.pack_path.clone(),
                     offset: object_start,
@@ -2025,7 +2018,7 @@ fn resolve_pack_object_at_body(
                 }
                 let base_raw = cur_bytes[pos..pos + hb].to_vec();
                 pos += hb;
-                let delta_data = decompress_pack_data(&cur_bytes, &mut pos, size)?;
+                let delta_data = decompress_pack_data(&cur_bytes, &mut pos, size, &mut inflate)?;
                 pending.push(PendingDeltaFrame {
                     pack: idx_ref.pack_path.clone(),
                     offset: object_start,
@@ -2385,11 +2378,12 @@ pub fn packed_ref_delta_reuse_slice(
             continue;
         }
         let compressed = &pack_bytes[zlib_start..end_pos];
-        let mut dec = ZlibDecoder::new(compressed);
-        let mut delta = Vec::new();
-        if dec.read_to_end(&mut delta).is_err() {
-            continue;
-        }
+        let mut zpos = 0usize;
+        let mut scratch = ZlibInflateScratch::default();
+        let delta = match scratch.decompress_fixed(compressed, &mut zpos, _size) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
         return Ok(Some((base, delta)));
     }
     Ok(None)
@@ -2548,6 +2542,12 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
     Ok(None)
 }
 
+/// Inflate the first bytes of a pack object's zlib payload (after the type/size header).
+#[allow(dead_code)]
+fn peek_pack_zlib_prefix(bytes: &[u8], zlib_start: usize) -> Result<(Vec<u8>, usize)> {
+    inflate_prefix(&bytes[zlib_start..], 64)
+}
+
 fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
     let first = *bytes.get(*pos).ok_or_else(|| {
         Error::CorruptObject("unexpected end of pack header while decoding object".to_owned())
@@ -2665,32 +2665,21 @@ pub fn skip_one_pack_object(
     hash_bytes: usize,
 ) -> Result<()> {
     let (packed_type, size) = parse_pack_object_header(bytes, pos)?;
+    let mut scratch = ZlibInflateScratch::default();
     match packed_type {
         PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
-            let mut dec = ZlibDecoder::new(&bytes[*pos..]);
-            let mut tmp = Vec::with_capacity(size as usize);
-            dec.read_to_end(&mut tmp)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            *pos += dec.total_in() as usize;
+            scratch.skip_zlib_stream(bytes, pos, size)?;
         }
         PackedType::RefDelta => {
             if *pos + hash_bytes > bytes.len() {
                 return Err(Error::CorruptObject("truncated ref-delta base oid".into()));
             }
             *pos += hash_bytes;
-            let mut dec = ZlibDecoder::new(&bytes[*pos..]);
-            let mut tmp = Vec::with_capacity(size as usize);
-            dec.read_to_end(&mut tmp)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            *pos += dec.total_in() as usize;
+            scratch.skip_zlib_stream(bytes, pos, size)?;
         }
         PackedType::OfsDelta => {
             let _base_off = parse_ofs_delta_base(bytes, pos, object_start_offset)?;
-            let mut dec = ZlibDecoder::new(&bytes[*pos..]);
-            let mut tmp = Vec::with_capacity(size as usize);
-            dec.read_to_end(&mut tmp)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            *pos += dec.total_in() as usize;
+            scratch.skip_zlib_stream(bytes, pos, size)?;
         }
     }
     Ok(())

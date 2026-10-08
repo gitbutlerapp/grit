@@ -31,6 +31,7 @@ use crate::hash;
 use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectKind};
 use crate::pack;
+use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -64,24 +65,15 @@ pub struct WriteOptions {
 /// When the zlib wrapper advertises a preset dictionary (FDICT), `flate2` typically fails with a
 /// generic corrupt-stream error; map that to `"needs dictionary"` so callers match Git's messages
 /// (`t1006-cat-file` zlib-dictionary test).
-fn read_zlib_loose_payload(mut file: fs::File) -> Result<Vec<u8>> {
+fn read_zlib_loose_payload(file: fs::File) -> Result<Vec<u8>> {
     let mut hdr = [0u8; 2];
-    file.read_exact(&mut hdr).map_err(Error::Io)?;
+    let mut read_file = file;
+    read_file.read_exact(&mut hdr).map_err(Error::Io)?;
     let cmf_flg = u16::from(hdr[0]) << 8 | u16::from(hdr[1]);
     let looks_like_zlib_header = cmf_flg != 0 && cmf_flg % 31 == 0;
     let preset_dictionary = looks_like_zlib_header && (hdr[1] & 0x20) != 0;
-    let mut decoder = ZlibDecoder::new(hdr.as_slice().chain(file));
-    let mut raw = Vec::new();
-    match decoder.read_to_end(&mut raw) {
-        Ok(_) => Ok(raw),
-        Err(e) => {
-            if preset_dictionary {
-                Err(Error::Zlib("needs dictionary".to_owned()))
-            } else {
-                Err(Error::Zlib(e.to_string()))
-            }
-        }
-    }
+    let mut scratch = ZlibInflateScratch::default();
+    scratch.decompress_loose_payload(&hdr, read_file, preset_dictionary)
 }
 
 /// True when `oid` is stored as a loose object or in a **non-promisor** local pack.
