@@ -1,6 +1,6 @@
 //! Integration tests for the diagnostics sink wiring.
 
-use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticSink, Warning};
+use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::repo::{Repository, RepositoryOptions};
 use grit_lib::rev_parse::resolve_revision;
 use std::process::Command;
@@ -65,5 +65,65 @@ fn ambiguous_refname_reaches_collecting_sink() {
         )),
         "expected AmbiguousRefname for {prefix}, got {:?}",
         sink.warnings()
+    );
+}
+
+#[test]
+fn core_bare_with_worktree_reaches_each_fresh_sink() {
+    let tmp = TempDir::new().expect("tempdir");
+    let bare = tmp.path().join("repo.git");
+    git(&tmp, &["init", "--bare", bare.to_str().expect("utf8")]);
+    let wt = tmp.path().join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    git(
+        &tmp,
+        &[
+            "config",
+            "-f",
+            bare.join("config").to_str().expect("utf8"),
+            "core.bare",
+            "true",
+        ],
+    );
+    git(
+        &tmp,
+        &[
+            "config",
+            "-f",
+            bare.join("config").to_str().expect("utf8"),
+            "core.worktree",
+            wt.to_str().expect("utf8"),
+        ],
+    );
+
+    let open = |sink: Arc<CollectingDiagnostics>| {
+        let options = RepositoryOptions {
+            diagnostics: sink.clone(),
+            network_trace: false,
+        };
+        Repository::open_with_options(&bare, None, options).expect("open");
+        sink
+    };
+
+    let sink_a = Arc::new(CollectingDiagnostics::new());
+    open(sink_a.clone());
+    assert!(
+        sink_a
+            .warnings()
+            .iter()
+            .any(|w| matches!(w, Warning::CoreBareWithWorktree)),
+        "first sink: {:?}",
+        sink_a.warnings()
+    );
+
+    let sink_b = Arc::new(CollectingDiagnostics::new());
+    open(sink_b.clone());
+    assert!(
+        sink_b
+            .warnings()
+            .iter()
+            .any(|w| matches!(w, Warning::CoreBareWithWorktree)),
+        "second sink should also receive warning, got {:?}",
+        sink_b.warnings()
     );
 }

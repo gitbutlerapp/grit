@@ -55,7 +55,7 @@ fn show_emits_ambiguous_ref_warning_on_stderr() {
 
     let (_code, _stdout, stderr) = grit(&["show", &prefix], &tmp);
     assert!(
-        stderr.contains("ambiguous"),
+        stderr.contains("matches more than one"),
         "expected ambiguous ref warning on stderr, got:\n{stderr}"
     );
 }

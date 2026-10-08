@@ -3,9 +3,11 @@
 //! Library code reports [`Warning`] values through a [`DiagnosticSink`] instead of
 //! printing to stderr. The default [`NullDiagnostics`] discards them; tests and
 //! the CLI use [`CollectingDiagnostics`] or a custom sink.
+//!
+//! [`Warning`] carries structured data only; human-readable text is formatted by
+//! embedders (for example `grit-cli`'s warning renderer), not by `grit-lib`.
 
 use std::collections::HashSet;
-use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -204,98 +206,6 @@ pub fn warn(handle: &DiagnosticsHandle, warning: Warning) {
 pub fn trace_network(handle: &DiagnosticsHandle, enabled: bool, message: String) {
     if enabled {
         handle.trace(Trace::Network { message });
-    }
-}
-
-impl fmt::Display for Warning {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Warning::AmbiguousRefname { spec } => {
-                write!(f, "refname '{spec}' is ambiguous")
-            }
-            Warning::DanglingSymref { name } => {
-                write!(f, "ignoring dangling symref {name}")
-            }
-            Warning::CommitGraphChunkTooSmall { layer, chunk } => {
-                write!(
-                    f,
-                    "commit-graph layer '{layer}': {chunk} chunk is too small"
-                )
-            }
-            Warning::CommitGraphBloomDisabled { layer } => write!(
-                f,
-                "disabling Bloom filters for commit-graph layer '{layer}' due to incompatible settings"
-            ),
-            Warning::CommitGraphChangedPathIndexTooSmall => {
-                write!(f, "commit-graph changed-path index chunk is too small")
-            }
-            Warning::CommitGraphChangedPathChunkTooSmall { actual, minimum } => write!(
-                f,
-                "ignoring too-small changed-path chunk ({actual} < {minimum}) in commit-graph file"
-            ),
-            Warning::CommitGraphChangedPathOffsetOutOfRange {
-                offset,
-                position,
-                graph,
-                chunk_size,
-            } => write!(
-                f,
-                "ignoring out-of-range offset ({offset}) for changed-path filter at pos {position} of {graph} (chunk size: {chunk_size})"
-            ),
-            Warning::CommitGraphChangedPathOffsetsDecreasing {
-                start,
-                end,
-                position_start,
-                position_end,
-                graph,
-            } => write!(
-                f,
-                "ignoring decreasing changed-path index offsets ({start} > {end}) for positions {position_start} and {position_end} of {graph}"
-            ),
-            Warning::IgnoredGitDir { path, reason } => {
-                write!(f, "ignoring git dir '{}': {reason}", path.display())
-            }
-            Warning::CoreBareWithWorktree => {
-                write!(f, "core.bare and core.worktree do not make sense together")
-            }
-            Warning::BadBooleanConfig { key, value } => write!(
-                f,
-                "bad boolean config value '{value}' for option '{key}'"
-            ),
-            Warning::SuspiciousSubmoduleName { name } => {
-                write!(f, "ignoring suspicious submodule name: {name}")
-            }
-            Warning::SubmoduleConfigLooksLikeOption { key, value } => write!(
-                f,
-                "ignoring '{key}' which may be interpreted as a command-line option: {value}"
-            ),
-            Warning::SubmoduleMultipleConfigs {
-                commit,
-                name,
-                option,
-            } => write!(
-                f,
-                "{commit}:.gitmodules, multiple configurations found for 'submodule.{name}.{option}'. Skipping second one!"
-            ),
-            Warning::GitmodulesBadConfig { message } => f.write_str(message),
-            Warning::SplitIndexDisabledWhileConfigEnabled => write!(
-                f,
-                "core.splitIndex is set to true; remove or change it if you really want to disable split index"
-            ),
-            Warning::SplitIndexEnabledWhileConfigDisabled => write!(
-                f,
-                "core.splitIndex is set to false; remove or change it if you really want to enable split index"
-            ),
-            Warning::IndexVersionEnvInvalid { fallback } => write!(
-                f,
-                "GIT_INDEX_VERSION set, but the value is invalid (using version {fallback})"
-            ),
-            Warning::IndexVersionConfigInvalid { fallback } => write!(
-                f,
-                "index.version set, but the value is invalid (using version {fallback})"
-            ),
-            Warning::MailmapUnreadable { detail } => f.write_str(detail),
-        }
     }
 }
 

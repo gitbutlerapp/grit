@@ -51,7 +51,7 @@ impl DiagnosticSink for CliDiagnosticSink {
         if !dedupe.insert(warning.clone()) {
             return;
         }
-        let message = warning.to_string();
+        let message = format_warning_message(&warning);
         eprintln!("warning: {message}");
         self.warnings
             .lock()
@@ -66,6 +66,85 @@ impl DiagnosticSink for CliDiagnosticSink {
         if let Trace::Network { message } = event {
             eprintln!("[grit-net] {message}");
         }
+    }
+}
+
+/// Human-readable warning text for stderr and JSON (not used inside `grit-lib`).
+#[must_use]
+pub fn format_warning_message(w: &Warning) -> String {
+    match w {
+        Warning::AmbiguousRefname { spec } => {
+            format!("'{spec}' matches more than one ref or object id")
+        }
+        Warning::DanglingSymref { name } => {
+            format!("symbolic ref `{name}` has no valid target; skipping")
+        }
+        Warning::CommitGraphChunkTooSmall { layer, chunk } => format!(
+            "commit-graph layer '{layer}': {chunk} chunk is smaller than required"
+        ),
+        Warning::CommitGraphBloomDisabled { layer } => format!(
+            "Bloom filters disabled for commit-graph layer '{layer}' (incompatible settings)"
+        ),
+        Warning::CommitGraphChangedPathIndexTooSmall => {
+            "commit-graph changed-path index chunk is smaller than required".into()
+        }
+        Warning::CommitGraphChangedPathChunkTooSmall { actual, minimum } => format!(
+            "commit-graph changed-path chunk too small ({actual} bytes; need at least {minimum})"
+        ),
+        Warning::CommitGraphChangedPathOffsetOutOfRange {
+            offset,
+            position,
+            graph,
+            chunk_size,
+        } => format!(
+            "changed-path filter offset {offset} out of range at index {position} in {graph} (chunk size {chunk_size})"
+        ),
+        Warning::CommitGraphChangedPathOffsetsDecreasing {
+            start,
+            end,
+            position_start,
+            position_end,
+            graph,
+        } => format!(
+            "changed-path index offsets decrease ({start} > {end}) between positions {position_start} and {position_end} in {graph}"
+        ),
+        Warning::IgnoredGitDir { path, reason } => {
+            format!("skipped config from git dir '{}': {reason}", path.display())
+        }
+        Warning::CoreBareWithWorktree => {
+            "`core.bare` is true while `core.worktree` is set; these options conflict".into()
+        }
+        Warning::BadBooleanConfig { key, value } => {
+            format!("cannot parse `{value}` as a boolean for config key `{key}`")
+        }
+        Warning::SuspiciousSubmoduleName { name } => {
+            format!("submodule name `{name}` looks invalid; skipping")
+        }
+        Warning::SubmoduleConfigLooksLikeOption { key, value } => format!(
+            "submodule config `{key}` value `{value}` looks like a command-line flag; skipping"
+        ),
+        Warning::SubmoduleMultipleConfigs {
+            commit,
+            name,
+            option,
+        } => format!(
+            "{commit}: duplicate submodule.{name}.{option} in .gitmodules; keeping the first value"
+        ),
+        Warning::GitmodulesBadConfig { message } => message.clone(),
+        Warning::SplitIndexDisabledWhileConfigEnabled => {
+            "split index disabled on the command line but `core.splitIndex` is true in config".into()
+        }
+        Warning::SplitIndexEnabledWhileConfigDisabled => {
+            "split index enabled on the command line but `core.splitIndex` is false in config".into()
+        }
+        Warning::IndexVersionEnvInvalid { fallback } => format!(
+            "`GIT_INDEX_VERSION` is not a valid index format number (using format {fallback})"
+        ),
+        Warning::IndexVersionConfigInvalid { fallback } => format!(
+            "`index.version` is not a valid index format number (using format {fallback})"
+        ),
+        Warning::MailmapUnreadable { detail } => detail.clone(),
+        _ => format!("{w:?}"),
     }
 }
 

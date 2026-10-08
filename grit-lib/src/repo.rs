@@ -15,7 +15,7 @@
 //! - `work_tree` — `Some(path)` for non-bare repos, `None` for bare.
 //! - [`Odb`] — the loose object database.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::fs::OpenOptions;
@@ -426,6 +426,7 @@ impl Repository {
         let cfg = Arc::new(ConfigSet::load_with_options(Some(&git_dir), &load_opts)?);
         let repo = Self::from_canonical_git_dir(git_dir, work_tree, &options)?;
         repo.install_config_snapshot(cfg);
+        warn_core_bare_worktree_conflict(&options.diagnostics, &repo.git_dir);
         Ok(repo)
     }
 
@@ -507,9 +508,6 @@ impl Repository {
             }
             // `GIT_DIR` without `GIT_WORK_TREE`: honour `core.bare` / `core.worktree` like Git.
             let (is_bare, core_wt) = read_core_bare_and_worktree(&git_dir)?;
-            if is_bare && core_wt.is_some() {
-                warn_core_bare_worktree_conflict(&options.diagnostics, &git_dir);
-            }
             let resolved_wt = if is_bare {
                 None
             } else if let Some(raw) = core_wt {
@@ -2049,7 +2047,6 @@ fn try_open_at(dir: &Path, options: &RepositoryOptions) -> Result<Option<Discove
         };
         repo.discovery_root = Some(root.canonicalize().unwrap_or(root));
         repo.discovery_via_gitfile = true;
-        warn_core_bare_worktree_conflict(&options.diagnostics, &git_dir);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: Some(dot_git.clone()),
@@ -2107,7 +2104,6 @@ fn try_open_at(dir: &Path, options: &RepositoryOptions) -> Result<Option<Discove
     if dir.join("HEAD").is_file() && dir.join("commondir").is_file() {
         maybe_trace_implicit_bare_repository(dir);
         let repo = Repository::open_with_options(dir, None, options.clone())?;
-        warn_core_bare_worktree_conflict(&options.diagnostics, dir);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -2130,7 +2126,6 @@ fn try_open_at(dir: &Path, options: &RepositoryOptions) -> Result<Option<Discove
             }
         }
         let repo = Repository::open_with_options(dir, None, options.clone())?;
-        warn_core_bare_worktree_conflict(&options.diagnostics, dir);
         return Ok(Some(DiscoveredAt {
             repo,
             gitfile: None,
@@ -2479,19 +2474,9 @@ fn warn_core_bare_worktree_conflict(diagnostics: &DiagnosticsHandle, git_dir: &P
     {
         return;
     }
-    static WARNED_DIRS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
     if let Ok((bare, wt)) = read_core_bare_and_worktree(git_dir) {
         if bare && wt.is_some() {
-            let key = git_dir
-                .canonicalize()
-                .unwrap_or_else(|_| git_dir.to_path_buf())
-                .to_string_lossy()
-                .to_string();
-            let mut guard = WARNED_DIRS.lock().unwrap_or_else(|e| e.into_inner());
-            let set = guard.get_or_insert_with(HashSet::new);
-            if set.insert(key) {
-                diagnostics.warn(diagnostics::Warning::CoreBareWithWorktree);
-            }
+            diagnostics.warn(diagnostics::Warning::CoreBareWithWorktree);
         }
     }
 }
