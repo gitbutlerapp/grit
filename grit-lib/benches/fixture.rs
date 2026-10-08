@@ -135,8 +135,18 @@ pub fn build_deep_repack_read_sample() -> (TempDir, PackIndex, ObjectId) {
         .find(|p| p.extension().is_some_and(|x| x == "idx"))
         .expect("idx after deep repack");
     let idx = read_pack_index(&idx_path).expect("read idx");
-    let mid = idx.entries.len() / 2;
-    let sample_oid = ObjectId::from_bytes(&idx.entries[mid].oid).expect("oid");
+    let records = verify_pack_and_collect(&idx_path).expect("verify-pack metadata");
+    let best = records
+        .iter()
+        .filter(|r| matches!(r.packed_type, PackedType::RefDelta | PackedType::OfsDelta))
+        .max_by_key(|r| r.depth.unwrap_or(0))
+        .expect("deep repack pack must contain deltified objects");
+    let depth = best.depth.unwrap_or(0);
+    assert!(
+        depth >= MIN_DEEP_DELTA_DEPTH,
+        "deepest delta depth {depth} below minimum {MIN_DEEP_DELTA_DEPTH}"
+    );
+    let sample_oid = ObjectId::from_bytes(&best.oid).expect("oid");
     (tmp, idx, sample_oid)
 }
 
@@ -387,6 +397,7 @@ fn build_large_pack_index(objects_dir: &Path, object_count: usize) -> (PackIndex
 }
 
 /// Shared, lazily-built fixtures for object micro-benchmarks.
+#[allow(dead_code)]
 pub struct ObjectBenchFixtures {
     pub _root: TempDir,
     pub _objects_dir: PathBuf,
