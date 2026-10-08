@@ -579,6 +579,9 @@ pub fn blob_text_for_diff_with_oid(
 ///
 /// `index` is used to pick up `.gitattributes` from the index when the worktree file is
 /// missing; pass `None` to use only on-disk `.gitattributes` under `work_tree`.
+///
+/// Prefer [`crate::porcelain::checkout::worktree_bytes_from_index_blob`] when a
+/// [`crate::repo::Repository`] handle is available (shared attribute loading and filter smudge meta).
 pub fn convert_blob_to_worktree_for_path(
     git_dir: &Path,
     work_tree: &Path,

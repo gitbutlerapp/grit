@@ -17,11 +17,14 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::crlf;
 use crate::diff::{diff_trees, DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
+use crate::filter_process::{DelayedCheckoutError, DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{entry_from_metadata, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
+use crate::worktree_rules::WorktreeRules;
 
 /// Apply the change from tree `from` to tree `to` onto the working tree and
 /// index, then write the index.
@@ -55,6 +58,10 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
     let mut index = repo.load_index()?;
+    let config = repo.config()?;
+    let rules = WorktreeRules::from_parts(repo, &index, config)?;
+    let mut delayed = DelayedProcessCheckout::default();
+    let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
     let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len() / 8);
     let mut new_entries: Vec<IndexEntry> = Vec::with_capacity(changes.len());
     let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
@@ -98,10 +105,28 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
             }
         }
         let object = repo.odb.read(&change.new_oid)?;
+        let worktree_bytes = worktree_bytes_from_index_blob(
+            repo,
+            &rules,
+            path,
+            mode,
+            &object.data,
+            &change.new_oid,
+            Some(&mut delayed),
+        )?;
+        let Some(worktree_bytes) = worktree_bytes else {
+            pending_delayed.push(DelayedCheckoutTarget {
+                path: path.to_string(),
+                mode,
+                oid: change.new_oid,
+                change: change.clone(),
+            });
+            continue;
+        };
         let entry = write_checkout_entry(
             &work_tree,
             path,
-            &object.data,
+            &worktree_bytes,
             mode,
             change,
             &mut dir_cache,
@@ -110,11 +135,128 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
         new_entries.push(entry);
     }
 
+    finish_delayed_checkouts(
+        repo,
+        &rules,
+        &work_tree,
+        &mut delayed,
+        &pending_delayed,
+        &mut dir_cache,
+        &mut new_entries,
+    )?;
+
     remove_empty_parent_dirs_batch(&work_tree, &deleted_abs_paths);
 
     index.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), new_entries);
     repo.write_index(&mut index)?;
     Ok(())
+}
+
+struct DelayedCheckoutTarget {
+    path: String,
+    mode: u32,
+    oid: ObjectId,
+    change: DiffEntry,
+}
+
+/// Index blob bytes after checkout smudge (EOL, encoding, ident, filters).
+///
+/// Symlink targets are returned unchanged. When a process filter returns `status=delayed`,
+/// returns `Ok(None)` and records the path in `delayed_checkout` for [`finish_delayed_checkouts`].
+pub fn worktree_bytes_from_index_blob(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    rel_path: &str,
+    mode: u32,
+    blob: &[u8],
+    oid: &ObjectId,
+    delayed_checkout: Option<&mut DelayedProcessCheckout>,
+) -> Result<Option<Vec<u8>>> {
+    if mode == MODE_SYMLINK {
+        return Ok(Some(blob.to_vec()));
+    }
+    let oid_hex = oid.to_string();
+    let smudge_meta = crate::filter_process::smudge_meta_for_checkout(repo, &oid_hex);
+    let conv = rules.conversion();
+    let file_attrs = rules.file_attrs(rel_path, false);
+    crlf::convert_to_worktree(
+        blob,
+        rel_path,
+        conv,
+        &file_attrs,
+        Some(&oid_hex),
+        Some(&smudge_meta),
+        delayed_checkout,
+    )
+    .map_err(Error::PathError)
+}
+
+fn finish_delayed_checkouts(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    delayed: &mut DelayedProcessCheckout,
+    pending: &[DelayedCheckoutTarget],
+    dir_cache: &mut LeadingDirCache,
+    new_entries: &mut Vec<IndexEntry>,
+) -> Result<()> {
+    if delayed.entries.is_empty() {
+        return Ok(());
+    }
+    let finish_result = delayed.finish(
+        |path, meta| smudge_retry_after_delay(repo, rules, path, meta),
+        |path, data| {
+            let target = pending.iter().find(|t| t.path == path).ok_or_else(|| {
+                format!("internal error: delayed checkout for unknown path '{path}'")
+            })?;
+            let entry = write_checkout_entry(
+                work_tree,
+                path,
+                data,
+                target.mode,
+                &target.change,
+                dir_cache,
+                target.oid,
+            )
+            .map_err(|e| e.to_string())?;
+            new_entries.push(entry);
+            Ok(())
+        },
+    );
+    match finish_result {
+        Ok(()) => Ok(()),
+        Err(DelayedCheckoutError::Reported) => Err(Error::PathError(
+            "one or more paths were not filtered properly during checkout".into(),
+        )),
+        Err(DelayedCheckoutError::Transport(msg)) => Err(Error::PathError(msg)),
+    }
+}
+
+fn smudge_retry_after_delay(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    rel_path: &str,
+    meta: &FilterSmudgeMeta,
+) -> std::result::Result<Vec<u8>, String> {
+    let blob_hex = meta
+        .blob_hex
+        .as_deref()
+        .ok_or_else(|| format!("missing blob id for delayed checkout of '{rel_path}'"))?;
+    let oid = ObjectId::from_hex(blob_hex)
+        .map_err(|e| format!("invalid blob id for delayed checkout of '{rel_path}': {e}"))?;
+    let obj = repo
+        .odb
+        .read(&oid)
+        .map_err(|e| format!("reading blob for delayed checkout of '{rel_path}': {e}"))?;
+    // Git `CE_RETRY`: run smudge again without allowing delay (filter serves cached output).
+    crlf::convert_to_worktree_eager(
+        &obj.data,
+        rel_path,
+        rules.conversion(),
+        &rules.file_attrs(rel_path, false),
+        Some(blob_hex),
+        Some(meta),
+    )
 }
 
 fn parse_git_mode(mode: &str) -> u32 {
