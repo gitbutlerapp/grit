@@ -45,6 +45,7 @@ fn run_odb_scenario(
 
     let (mut git_stats, git_rss) = bench_with_peak_rss(
         hyperfine,
+        bench_exe,
         &git_cmd,
         repo,
         cfg.warmup,
@@ -54,6 +55,7 @@ fn run_odb_scenario(
     )?;
     let (mut grit_stats, grit_rss) = bench_with_peak_rss(
         hyperfine,
+        bench_exe,
         &grit_cmd,
         repo,
         cfg.warmup,

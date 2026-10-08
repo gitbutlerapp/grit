@@ -24,9 +24,8 @@ pub fn run_measure_rss_cli(cwd: &Path) -> Result<()> {
 }
 
 /// Peak RSS for `command`, measured in a fresh `grit-bench measure-rss` process.
-pub fn peak_rss_for_command(command: &str, cwd: &Path) -> Result<u64> {
-    let exe = std::env::current_exe().context("current exe for measure-rss")?;
-    let out = Command::new(exe)
+pub fn peak_rss_for_command(command: &str, cwd: &Path, measure_helper: &Path) -> Result<u64> {
+    let out = Command::new(measure_helper)
         .arg("measure-rss")
         .arg("--cwd")
         .arg(cwd)
@@ -103,6 +102,7 @@ mod tests {
 /// Run hyperfine for timing and sample peak RSS on the last timed run.
 pub fn bench_with_peak_rss(
     hyperfine: &std::path::Path,
+    measure_helper: &std::path::Path,
     command: &str,
     cwd: &std::path::Path,
     warmup: u32,
@@ -123,7 +123,7 @@ pub fn bench_with_peak_rss(
         },
     )?;
     let stats = timing_from_hyperfine(&entry);
-    let peak = peak_rss_for_command(&wrap_env(command, env_prefix), cwd)?;
+    let peak = peak_rss_for_command(&wrap_env(command, env_prefix), cwd, measure_helper)?;
     Ok((stats, peak))
 }
 
@@ -135,11 +135,16 @@ fn wrap_env(command: &str, env_prefix: Option<&str>) -> String {
 }
 
 /// Median wall time in milliseconds for a single command (no hyperfine).
-pub fn median_wall_ms(command: &str, cwd: &std::path::Path, runs: u32) -> Result<f64> {
+pub fn median_wall_ms(
+    command: &str,
+    cwd: &std::path::Path,
+    measure_helper: &std::path::Path,
+    runs: u32,
+) -> Result<f64> {
     let mut samples = Vec::new();
     for _ in 0..runs.max(1) {
         let start = Instant::now();
-        peak_rss_for_command(command, cwd)?;
+        peak_rss_for_command(command, cwd, measure_helper)?;
         samples.push(start.elapsed().as_secs_f64() * 1000.0);
     }
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
