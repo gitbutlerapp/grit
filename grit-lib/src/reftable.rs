@@ -1622,6 +1622,8 @@ pub struct ReftableStack {
     reftable_dir: PathBuf,
     /// Ordered list of table file names (oldest first).
     table_names: Vec<String>,
+    /// When false, skip automatic compaction (`GIT_TEST_REFTABLE_AUTOCOMPACTION=false`).
+    autocompaction: bool,
 }
 
 /// RAII guard for `tables.list.lock`. Removes the lock file on drop unless it was
@@ -1664,8 +1666,16 @@ impl ReftableStack {
         }
     }
 
-    /// Open an existing reftable stack.
+    /// Open an existing reftable stack (default autocompaction policy).
     pub fn open(git_dir: &Path) -> Result<Self> {
+        Self::open_with_environment(git_dir, &crate::environment::Environment::empty())
+    }
+
+    /// Open an existing reftable stack using transport/write knobs from `env`.
+    pub fn open_with_environment(
+        git_dir: &Path,
+        env: &crate::environment::Environment,
+    ) -> Result<Self> {
         let reftable_dir = git_dir.join("reftable");
         let tables_list = reftable_dir.join("tables.list");
         let content = fs::read_to_string(&tables_list).map_err(Error::Io)?;
@@ -1677,6 +1687,7 @@ impl ReftableStack {
         Ok(Self {
             reftable_dir,
             table_names,
+            autocompaction: env.reftable.autocompaction,
         })
     }
 
@@ -1971,11 +1982,7 @@ impl ReftableStack {
         // second table until explicit `pack-refs`.
         if table_has_deletion && self.table_names.len() > 2 {
             self.compact_prefix_preserving_newest()?;
-        } else if self.table_names.len() > 3
-            && std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        {
+        } else if self.table_names.len() > 3 && self.autocompaction {
             if self
                 .table_names
                 .iter()
@@ -1991,10 +1998,7 @@ impl ReftableStack {
     }
 
     fn compact_prefix_preserving_newest(&mut self) -> Result<()> {
-        if std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-            .map(|value| value == "false")
-            .unwrap_or(false)
-        {
+        if !self.autocompaction {
             return Ok(());
         }
         let guard = self.acquire_tables_list_lock()?;
@@ -2010,6 +2014,7 @@ impl ReftableStack {
         let prefix_stack = Self {
             reftable_dir: self.reftable_dir.clone(),
             table_names: old_names.clone(),
+            autocompaction: self.autocompaction,
         };
         let refs = prefix_stack.read_refs()?;
         let logs = prefix_stack.read_all_logs()?;
@@ -2073,6 +2078,7 @@ impl ReftableStack {
         let suffix_stack = Self {
             reftable_dir: self.reftable_dir.clone(),
             table_names: old_suffix.clone(),
+            autocompaction: self.autocompaction,
         };
         let refs = suffix_stack.read_refs()?;
         let logs = suffix_stack.read_all_logs()?;
@@ -2235,11 +2241,7 @@ impl ReftableStack {
             .table_names
             .iter()
             .any(|name| self.table_is_locked(name));
-        if self.table_names.len() > 3
-            && std::env::var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        {
+        if self.table_names.len() > 3 && self.autocompaction {
             if has_locked {
                 self.compact_unlocked_suffix()?;
             } else {

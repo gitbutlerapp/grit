@@ -377,29 +377,9 @@ pub fn url_encode_object_filter_subspec(raw: &str) -> String {
     out
 }
 
-/// Emit `Add to combine filter-spec: …` when `GIT_TRACE` is enabled (Git `list-objects-filter-options.c`).
-pub fn trace_combine_filter_append(encoded_segment: &str) {
-    let Ok(trace_val) = std::env::var("GIT_TRACE") else {
-        return;
-    };
-    if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
-        return;
-    }
-    let line = format!("Add to combine filter-spec: {encoded_segment}\n");
-    match trace_val.as_str() {
-        "1" | "true" | "2" => {
-            let _ = std::io::stderr().write_all(line.as_bytes());
-        }
-        path => {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                let _ = f.write_all(line.as_bytes());
-            }
-        }
-    }
+/// Emit `Add to combine filter-spec: …` when tracing is enabled (Git `list-objects-filter-options.c`).
+pub fn trace_combine_filter_append(sink: &crate::trace::TraceSink, encoded_segment: &str) {
+    sink.trace(&format!("Add to combine filter-spec: {encoded_segment}"));
 }
 
 /// Simple URL percent-decoding.
@@ -814,8 +794,9 @@ pub fn rev_list(
     let repo_config = repo
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let use_commit_graph = options.use_commit_graph && !repo.options().disable_commit_graph;
     let mut graph =
-        CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
+        CommitGraph::with_commit_graph(repo, options.first_parent, use_commit_graph);
 
     let (mut include, mut object_roots, tip_annotated_tag_by_commit) = if options.objects {
         resolve_specs_for_objects_with_options(
@@ -983,7 +964,7 @@ pub fn rev_list(
             Some(Ok(b)) => b,
             _ => true,
         };
-        if std::env::var("GIT_TEST_COMMIT_GRAPH").ok().as_deref() == Some("0") {
+        if repo.options().disable_commit_graph {
             core_cg = false;
         }
         let read_paths = cfg
@@ -5304,7 +5285,7 @@ fn commit_tips_from_ref_pairs(
     pairs: &[(String, ObjectId)],
     exclusions: &RefExclusions,
 ) -> Result<Vec<ObjectId>> {
-    let namespace_prefix = git_namespace_prefix();
+    let namespace_prefix = git_namespace_prefix(repo.environment());
     let mut raw = Vec::new();
     for (refname, oid) in pairs {
         if exclusions.ref_excluded(strip_git_namespace(refname, &namespace_prefix), refname) {
@@ -6330,33 +6311,13 @@ fn walk_needs_top_tree_omit_set(filter: Option<&ObjectFilter>, collect_omits: bo
     collect_omits && matches!(filter, Some(ObjectFilter::TreeDepth(_)))
 }
 
-fn trace_skip_tree_contents(prefix: &str) {
-    let Ok(trace_val) = std::env::var("GIT_TRACE") else {
-        return;
-    };
-    if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
-        return;
-    }
+fn trace_skip_tree_contents(sink: &crate::trace::TraceSink, prefix: &str) {
     let path = if prefix.is_empty() {
         String::new()
     } else {
         format!("{prefix}/")
     };
-    let line = format!("Skipping contents of tree {path}...\n");
-    match trace_val.as_str() {
-        "1" | "true" | "2" => {
-            let _ = std::io::stderr().write_all(line.as_bytes());
-        }
-        path_dest => {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path_dest)
-            {
-                let _ = f.write_all(line.as_bytes());
-            }
-        }
-    }
+    sink.trace(&format!("Skipping contents of tree {path}..."));
 }
 
 fn tree_depth_begin_tree(
@@ -6713,7 +6674,10 @@ fn collect_tree_objects_filtered(
     }
 
     if bits.skip_tree {
-        trace_skip_tree_contents(prefix);
+        let sink = crate::trace::TraceSink::from_git_trace(
+            repo.environment().git_trace.as_deref(),
+        );
+        trace_skip_tree_contents(&sink, prefix);
     }
 
     if skip_trees_for_type_filter && depth == 0 && !explicit_root {

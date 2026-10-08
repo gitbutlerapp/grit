@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
+use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::{midx_oid_listed_in_tip, try_read_object_via_midx};
@@ -311,20 +312,22 @@ impl Odb {
             return Arc::new(self.env_alternate_dirs.clone());
         }
         Arc::clone(
-            self.env_alternate_lazy.get_or_init(|| {
-                Arc::new(Self::env_alternate_dirs_from_var(self.work_tree.as_deref()))
-            }),
+            self.env_alternate_lazy
+                .get_or_init(|| Arc::new(Vec::new())),
         )
     }
 
-    /// Parse `GIT_ALTERNATE_OBJECT_DIRECTORIES` once for [`Self::with_env_alternate_dirs`].
+    /// Parse `GIT_ALTERNATE_OBJECT_DIRECTORIES` from an [`Environment`].
     ///
     /// Relative entries are resolved against `resolve_base` (typically the work tree root).
     #[must_use]
-    pub fn env_alternate_dirs_from_var(resolve_base: Option<&Path>) -> Vec<PathBuf> {
-        match std::env::var("GIT_ALTERNATE_OBJECT_DIRECTORIES") {
-            Ok(val) if !val.is_empty() => {
-                let mut dirs = parse_alternate_env(&val);
+    pub fn alternate_dirs_from_environment(
+        env: &Environment,
+        resolve_base: Option<&Path>,
+    ) -> Vec<PathBuf> {
+        match env.git_alternate_object_directories.as_deref() {
+            Some(val) if !val.is_empty() => {
+                let mut dirs = parse_alternate_env(val);
                 if let Some(base) = resolve_base {
                     for dir in &mut dirs {
                         if dir.is_relative() {
@@ -336,6 +339,17 @@ impl Odb {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// Parse `GIT_ALTERNATE_OBJECT_DIRECTORIES` once for [`Self::with_env_alternate_dirs`].
+    ///
+    /// Relative entries are resolved against `resolve_base` (typically the work tree root).
+    #[must_use]
+    pub fn env_alternate_dirs_from_var(
+        env: &Environment,
+        resolve_base: Option<&Path>,
+    ) -> Vec<PathBuf> {
+        Self::alternate_dirs_from_environment(env, resolve_base)
     }
 
     /// Attach env-derived alternate object directories (see [`Self::env_alternate_dirs_from_var`]).

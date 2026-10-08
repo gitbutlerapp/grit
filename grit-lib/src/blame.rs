@@ -764,7 +764,10 @@ fn create_temp_textconv_file(data: &[u8]) -> Result<std::path::PathBuf> {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("grit-blame-textconv-{pid}-{now}-{attempt}"));
+        let path = tempfile::tempdir()
+            .expect("tempdir")
+            .into_path()
+            .join(format!("grit-blame-textconv-{pid}-{now}-{attempt}"));
         match OpenOptions::new().create_new(true).write(true).open(&path) {
             Ok(mut file) => {
                 file.write_all(data)?;

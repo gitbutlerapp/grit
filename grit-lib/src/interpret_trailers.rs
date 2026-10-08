@@ -1101,8 +1101,8 @@ pub fn process_trailers(
             &conf_list,
             &separators,
         ));
-        let cwd = std::env::current_dir().ok();
-        process_trailers_lists(&mut head, arg_queue, cwd.as_deref());
+        let cwd = crate::environment::Environment::empty().cwd;
+        process_trailers_lists(&mut head, arg_queue, Some(cwd.as_path()));
     }
 
     let mut out = String::new();

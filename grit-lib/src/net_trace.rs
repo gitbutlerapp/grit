@@ -4,20 +4,30 @@
 //! Set `GRIT_NET_DEBUG=1` to print one-line `[grit-net] …` markers to stderr
 //! before, during, and after each remote operation. Off by default and
 //! essentially free when disabled (the gate is read once and the format args are
-//! not evaluated). Embedders can consult [`enabled`] to interleave their own
+//! not evaluated). Embedders can consult [`enabled_for`] to interleave their own
 //! before/after markers with the library's.
 
 use std::sync::OnceLock;
 
+use crate::environment::Environment;
+
 static ENABLED: OnceLock<bool> = OnceLock::new();
 
-/// Whether networking trace output is enabled (`GRIT_NET_DEBUG` set to something
-/// other than empty / `0` / `false`). Read once and cached.
+/// Install the global net-trace gate from an [`Environment`] (typically at fetch/push entry).
+pub fn configure_from_environment(env: &Environment) {
+    let _ = ENABLED.set(env.grit_net_debug_enabled());
+}
+
+/// Whether networking trace output is enabled for `env`.
+#[must_use]
+pub fn enabled_for(env: &Environment) -> bool {
+    env.grit_net_debug_enabled()
+}
+
+/// Whether networking trace output is enabled. Requires prior [`configure_from_environment`].
+#[must_use]
 pub fn enabled() -> bool {
-    *ENABLED.get_or_init(|| match std::env::var("GRIT_NET_DEBUG") {
-        Ok(v) => !v.is_empty() && v != "0" && v != "false",
-        Err(_) => false,
-    })
+    *ENABLED.get().unwrap_or(&false)
 }
 
 /// Emit one `[grit-net] …` trace line to stderr (only when [`enabled`]).
@@ -29,7 +39,7 @@ pub fn line(msg: &str) {
 }
 
 /// Emit an env-gated `[grit-net]` trace line. No-op (and no formatting) unless
-/// `GRIT_NET_DEBUG` is set.
+/// networking trace is enabled.
 macro_rules! net_trace {
     ($($arg:tt)*) => {
         if $crate::net_trace::enabled() {

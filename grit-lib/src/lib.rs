@@ -224,6 +224,7 @@ pub mod terminal;
 pub mod textconv_cache;
 pub mod transfer;
 pub mod transport;
+pub mod trace;
 pub mod transport_path;
 pub mod tree_path_follow;
 pub mod unicode_normalization;

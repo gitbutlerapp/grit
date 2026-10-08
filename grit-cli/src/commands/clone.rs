@@ -185,7 +185,10 @@ fn cleanup_failed_clone(path: &Path, keep_toplevel: bool) {
 /// fetch/push resolve against the repository, not the process cwd.
 fn stored_clone_remote_url(url: &str) -> String {
     if should_store_absolute_local_clone_url(url) {
-        absolute_local_clone_source_url(Path::new(url.trim()))
+        absolute_local_clone_source_url(
+            Path::new(url.trim()),
+            &crate::context::environment().cwd,
+        )
     } else {
         url.to_owned()
     }

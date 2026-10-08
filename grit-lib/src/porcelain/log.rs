@@ -132,9 +132,12 @@ fn decoration_pattern_matches(pattern: &str, refname: &str) -> bool {
     }
 }
 
-fn replace_ref_base() -> String {
-    let mut base =
-        std::env::var("GIT_REPLACE_REF_BASE").unwrap_or_else(|_| "refs/replace/".to_owned());
+fn replace_ref_base(env: &crate::environment::Environment) -> String {
+    let mut base = env
+        .git_replace_ref_base
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "refs/replace/".to_owned());
     if !base.ends_with('/') {
         base.push('/');
     }
@@ -175,7 +178,7 @@ pub fn collect_decorations_inner(
         .as_deref()
         .and_then(|value| parse_bool(value).ok())
         .unwrap_or(false);
-    let rep_base = replace_ref_base();
+    let rep_base = replace_ref_base(repo.environment());
 
     let mut all_refs = crate::refs::list_refs(git_dir, "refs/")?;
     all_refs.sort_by(|a, b| a.0.cmp(&b.0));

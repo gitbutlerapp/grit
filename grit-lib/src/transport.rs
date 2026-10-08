@@ -25,6 +25,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
+use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
@@ -55,13 +56,25 @@ impl Service {
 ///
 /// The default requests protocol version 0 (the classic advertisement) with no
 /// server options.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ConnectOptions {
     /// Requested protocol version (`0`, `1`, or `2`). The server may downgrade.
     pub protocol_version: u8,
     /// `server-option`s to send (protocol v2 `command` arguments / daemon
     /// extra parameters). Ignored by servers that do not support them.
     pub server_options: Vec<String>,
+    /// Transport-related environment (`GIT_SSH`, `GIT_SSH_COMMAND`, …).
+    pub environment: Environment,
+}
+
+impl Default for ConnectOptions {
+    fn default() -> Self {
+        Self {
+            protocol_version: 0,
+            server_options: Vec::new(),
+            environment: Environment::empty(),
+        }
+    }
 }
 
 /// A live, bidirectional pkt-line connection to a Git service, with the
@@ -817,12 +830,16 @@ pub enum SshCommand {
 
 impl SshCommand {
     /// Resolve `Auto` against the current environment to a concrete variant.
-    fn resolve(&self) -> SshCommand {
+    fn resolve(&self, env: &Environment) -> SshCommand {
         match self {
             SshCommand::Auto => {
-                if let Some(c) = std::env::var_os("GIT_SSH_COMMAND").filter(|v| !v.is_empty()) {
+                if let Some(c) = env
+                    .git_ssh_command
+                    .clone()
+                    .filter(|v| !v.is_empty())
+                {
                     SshCommand::ShellCommand(c)
-                } else if let Some(p) = std::env::var_os("GIT_SSH").filter(|v| !v.is_empty()) {
+                } else if let Some(p) = env.git_ssh.clone().filter(|v| !v.is_empty()) {
                     SshCommand::Program(p)
                 } else {
                     SshCommand::Program(OsString::from("ssh"))
@@ -948,7 +965,7 @@ impl SshTransport {
         let remote_cmd = remote_service_cmd(service, &quoted_path);
         let port = spec.port.as_deref();
 
-        let mut command = match self.ssh_command.resolve() {
+        let mut command = match self.ssh_command.resolve(&opts.environment) {
             SshCommand::ShellCommand(cmd) => {
                 // Reproduce Git's `GIT_SSH_COMMAND`: run the command line through
                 // a shell, appending the (shell-quoted) host and remote command.

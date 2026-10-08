@@ -2,7 +2,7 @@
 
 use super::compat::{self, time_t, tm};
 use super::parse::{match_multi_number, MONTH_NAMES, WEEKDAY_NAMES};
-use super::tm::{get_time_sec, match_string, parse_timestamp_prefix};
+use super::tm::{match_string, parse_timestamp_prefix, system_now_sec};
 use std::mem::MaybeUninit;
 
 fn update_tm(tm: &mut tm, now: &tm, sec: i64) -> time_t {
@@ -282,7 +282,7 @@ pub fn approxidate_careful(date: &str, error_ret: Option<&mut i32>) -> u64 {
         *er = 0;
         return ts;
     }
-    let tv_sec = get_time_sec();
+    let tv_sec = system_now_sec();
     approxidate_str(date, tv_sec, er)
 }
 

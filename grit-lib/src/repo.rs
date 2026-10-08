@@ -93,6 +93,8 @@ pub struct Repository {
     /// replaces the snapshot after in-process config writes so subsequent operations see updates
     /// without reopening the repository.
     config_snapshot: RepositoryConfigSnapshot,
+    /// Open/discover options (environment and test knobs).
+    options: Arc<RepositoryOptions>,
     /// Discovery and configuration environment used to open this repository.
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
@@ -151,6 +153,7 @@ struct RepoCachedSettings {
 
 impl Repository {
     fn from_canonical_git_dir(
+        options: Arc<RepositoryOptions>,
         environment: Arc<Environment>,
         git_dir: PathBuf,
         work_tree: Option<&Path>,
@@ -194,12 +197,18 @@ impl Repository {
         };
 
         let config_snapshot = Arc::new(Mutex::new(None));
+        let env_alts = Odb::alternate_dirs_from_environment(
+            environment.as_ref(),
+            work_tree.as_deref(),
+        );
         let odb = if let Some(ref wt) = work_tree {
             Odb::with_work_tree(&objects_dir, wt)
+                .with_env_alternate_dirs(env_alts)
                 .with_config_git_dir(git_dir.clone())
                 .with_shared_config_state(config_snapshot.clone())
         } else {
             Odb::new(&objects_dir)
+                .with_env_alternate_dirs(env_alts)
                 .with_config_git_dir(git_dir.clone())
                 .with_shared_config_state(config_snapshot.clone())
         };
@@ -217,6 +226,7 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             config_snapshot,
+            options,
             environment,
             git_prefix,
         })
@@ -342,6 +352,7 @@ impl Repository {
         git_dir: &Path,
         work_tree: Option<&Path>,
     ) -> Result<Self> {
+        let options = Arc::new(options.clone());
         let environment = Arc::new(options.environment.clone());
         let git_dir = git_dir
             .canonicalize()
@@ -349,9 +360,15 @@ impl Repository {
 
         validate_repository_format(&git_dir)?;
         let cfg = Arc::new(ConfigSet::load(environment.as_ref(), Some(&git_dir), true)?);
-        let repo = Self::from_canonical_git_dir(environment, git_dir, work_tree)?;
+        let repo = Self::from_canonical_git_dir(options, environment, git_dir, work_tree)?;
         repo.install_config_snapshot(cfg);
         Ok(repo)
+    }
+
+    /// Repository open/discover options (environment and embedder knobs).
+    #[must_use]
+    pub fn options(&self) -> &RepositoryOptions {
+        &self.options
     }
 
     /// Like [`Self::open`] but skips repository format validation (`validate_repository_format`).
@@ -365,7 +382,12 @@ impl Repository {
         let git_dir = git_dir
             .canonicalize()
             .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
-        Self::from_canonical_git_dir(Arc::new(Environment::empty()), git_dir, work_tree)
+        Self::from_canonical_git_dir(
+            Arc::new(RepositoryOptions::empty()),
+            Arc::new(Environment::empty()),
+            git_dir,
+            work_tree,
+        )
     }
 
     /// Discover the repository starting from `start` (defaults to [`Environment::cwd`] if `None`).
@@ -500,6 +522,7 @@ impl Repository {
                 // validation skipped so an empty `.git/` is walked past, but a *found* repository
                 // must satisfy the format check.
                 validate_repository_format(&repo.git_dir)?;
+                repo.options = Arc::new(options.clone());
                 repo.environment = Arc::new(env.clone());
                 let cfg = Arc::new(ConfigSet::load(env, Some(&repo.git_dir), true)?);
                 repo.install_config_snapshot(Arc::clone(&cfg));
@@ -523,12 +546,12 @@ impl Repository {
                         }
                     }
                 }
-                let assume_different = env.test_assume_different_owner();
-                if assume_different {
+                if options.test_assume_different_owner {
                     repo.enforce_safe_directory()?;
                 } else {
                     ensure_valid_ownership(
                         env,
+                        false,
                         gitfile.as_deref(),
                         repo.work_tree.as_deref(),
                         &repo.git_dir,
@@ -635,7 +658,12 @@ impl Repository {
             res.map_err(Error::ConfigError)?;
         }
         let mut idx = Index::load_expand_sparse_optional(path, &self.odb)?;
-        crate::split_index::resolve_split_index_if_needed(&mut idx, &self.git_dir, path)?;
+        crate::split_index::resolve_split_index_if_needed(
+            &mut idx,
+            &self.git_dir,
+            path,
+            &self.environment.cwd,
+        )?;
         if idx.source_mtime.is_none() {
             idx.source_mtime = crate::index::index_file_mtime(path);
         }
@@ -738,7 +766,7 @@ impl Repository {
         matches!(
             crate::split_index::split_index_config(cfg.as_ref()),
             crate::split_index::SplitIndexConfig::Enabled
-        ) || crate::split_index::git_test_split_index_env()
+        ) || self.environment.git_test_split_index
     }
 
     /// Like [`Repository::write_index_at`], but passes explicit `post-index-change` hook flags.
@@ -818,7 +846,16 @@ impl Repository {
             );
         }
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
-        write_index_file_split(path, &self.git_dir, index, cfg.as_ref(), split, skip_hash)?;
+        write_index_file_split(
+            path,
+            &self.git_dir,
+            index,
+            cfg.as_ref(),
+            split,
+            skip_hash,
+            self.options().verify_cache_tree(),
+            self.environment.as_ref(),
+        )?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
         let updated_skipworktree_arg = if updated_skipworktree { "1" } else { "0" };
@@ -2092,6 +2129,7 @@ fn path_lstat_uid(path: &Path) -> std::io::Result<u32> {
 #[cfg(unix)]
 fn ensure_valid_ownership(
     environment: &Environment,
+    assume_different_owner: bool,
     gitfile: Option<&Path>,
     worktree: Option<&Path>,
     gitdir: &Path,
@@ -2116,8 +2154,7 @@ fn ensure_valid_ownership(
         Ok(st_uid == euid)
     }
 
-    let assume_different = environment.test_assume_different_owner();
-    if !assume_different {
+    if !assume_different_owner {
         let gitfile_ok = gitfile
             .map(|p| owned_by_effective_user(p, sudo_euid))
             .transpose()?
@@ -2164,8 +2201,7 @@ impl Repository {
     /// unless a matching `safe.directory` value is configured in system/global/
     /// command scopes (repository-local config is ignored).
     pub fn enforce_safe_directory(&self) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
-        if !assume_different {
+        if !self.options.test_assume_different_owner {
             return Ok(());
         }
 
@@ -2216,8 +2252,7 @@ impl Repository {
     /// Used by operations that explicitly open another repository by path
     /// (e.g. local clone source).
     pub fn enforce_safe_directory_git_dir(&self) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
-        if !assume_different {
+        if !self.options.test_assume_different_owner {
             return Ok(());
         }
         let checked = self
@@ -2237,8 +2272,7 @@ impl Repository {
 
     /// Enforce safe.directory checks against an explicit checked path.
     pub fn enforce_safe_directory_git_dir_with_path(&self, checked: &Path) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
-        if !assume_different {
+        if !self.options.test_assume_different_owner {
             return Ok(());
         }
         self.enforce_safe_directory_checked(checked)
@@ -2254,13 +2288,18 @@ impl Repository {
     /// rules as discovery. Otherwise checks filesystem ownership of the git directory
     /// only (matching Git's `die_upon_dubious_ownership` for clone).
     pub fn verify_safe_for_clone_source(&self) -> Result<()> {
-        let assume_different = self.environment.test_assume_different_owner();
-        if assume_different {
+        if self.options.test_assume_different_owner {
             self.enforce_safe_directory_git_dir()
         } else {
             #[cfg(unix)]
             {
-                ensure_valid_ownership(self.environment.as_ref(), None, None, &self.git_dir)
+                ensure_valid_ownership(
+                    self.environment.as_ref(),
+                    false,
+                    None,
+                    None,
+                    &self.git_dir,
+                )
             }
             #[cfg(not(unix))]
             {
@@ -2517,6 +2556,26 @@ fn write_fresh_git_directory(
     ref_storage: &str,
     skip_hooks_and_info: bool,
 ) -> Result<()> {
+    write_fresh_git_directory_with_precompose(
+        git_dir,
+        bare,
+        initial_branch,
+        template_dir,
+        ref_storage,
+        skip_hooks_and_info,
+        false,
+    )
+}
+
+fn write_fresh_git_directory_with_precompose(
+    git_dir: &Path,
+    bare: bool,
+    initial_branch: &str,
+    template_dir: Option<&Path>,
+    ref_storage: &str,
+    skip_hooks_and_info: bool,
+    force_precompose_probe: bool,
+) -> Result<()> {
     let mut subs = vec![
         "objects",
         "objects/info",
@@ -2600,6 +2659,7 @@ fn write_fresh_git_directory(
         git_dir,
         InitFilesystemConfigOptions::default(),
         &Environment::capture_process(),
+        force_precompose_probe,
     )?;
 
     fs::write(
@@ -2726,6 +2786,7 @@ pub fn init_bare_clone_minimal(
         git_dir,
         InitFilesystemConfigOptions::default(),
         &Environment::capture_process(),
+        false,
     )?;
 
     fs::write(
@@ -2742,6 +2803,18 @@ pub fn init_repository(
     template_dir: Option<&Path>,
     ref_storage: &str,
 ) -> Result<Repository> {
+    init_repository_with_options(path, bare, initial_branch, template_dir, ref_storage, false)
+}
+
+/// Like [`init_repository`], with an explicit precompose probe override for tests.
+pub fn init_repository_with_options(
+    path: &Path,
+    bare: bool,
+    initial_branch: &str,
+    template_dir: Option<&Path>,
+    ref_storage: &str,
+    force_precompose_probe: bool,
+) -> Result<Repository> {
     let skip_hooks_info = !bare && template_dir.is_some_and(|p| p.as_os_str().is_empty());
     let git_dir = if bare {
         path.to_path_buf()
@@ -2753,13 +2826,14 @@ pub fn init_repository(
         fs::create_dir_all(path)?;
     }
     fs::create_dir_all(&git_dir)?;
-    write_fresh_git_directory(
+    write_fresh_git_directory_with_precompose(
         &git_dir,
         bare,
         initial_branch,
         template_dir,
         ref_storage,
         skip_hooks_info,
+        force_precompose_probe,
     )?;
 
     let work_tree = if bare { None } else { Some(path) };
@@ -2855,6 +2929,7 @@ pub fn init_repository_separate(
         git_dir,
         InitFilesystemConfigOptions::default(),
         &Environment::capture_process(),
+        false,
     )?;
     fs::write(
         git_dir.join("description"),

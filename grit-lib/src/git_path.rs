@@ -600,11 +600,10 @@ pub fn is_common_git_path(rel: &str) -> bool {
 /// walking path components (so symlink targets are interpreted at each step), then if the
 /// leaf is missing, resolve the longest existing prefix and append the remainder.
 #[must_use]
-pub fn real_path_resolving(path: &str) -> PathBuf {
+pub fn real_path_resolving(path: &str, cwd: &std::path::Path) -> PathBuf {
     let abs = if path.starts_with('/') {
         path.to_string()
     } else {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let joined = format!("{}/{}", cwd.display(), path);
         normalize_path_copy(&joined).unwrap_or(joined)
     };

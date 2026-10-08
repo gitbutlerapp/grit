@@ -16,8 +16,8 @@
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 
+use crate::environment::Environment;
 use crate::git_date::parse::parse_date;
-use crate::git_date::tm::{get_time_sec, local_tzoffset, TzHhmm};
 
 /// Normalise a date string into Git's stored `<epoch> <offset>` timestamp.
 ///
@@ -106,30 +106,6 @@ pub fn format_git_timestamp(dt: OffsetDateTime) -> String {
     format!("{epoch} {hours:+03}{minutes:02}")
 }
 
-fn utc_offset_from_tz_hhmm(tz: TzHhmm) -> Option<UtcOffset> {
-    let sign: i32 = if tz < 0 { -1 } else { 1 };
-    let abs = tz.unsigned_abs();
-    let hours = (abs / 100) as i32;
-    let minutes = (abs % 100) as i32;
-    let seconds = sign * (hours * 3600 + minutes * 60);
-    UtcOffset::from_whole_seconds(seconds).ok()
-}
-
-/// [`OffsetDateTime`] for the current instant in the local timezone (for callers that pass
-/// `now` into [`assemble_identity`]).
-///
-/// Uses [`get_time_sec`] (respects `GIT_TEST_DATE_NOW`) and [`local_tzoffset`] (respects
-/// `TZ`), matching `git var GIT_AUTHOR_IDENT` / `git commit-tree` without overrides.
-#[must_use]
-pub fn now_for_identity() -> OffsetDateTime {
-    let epoch = get_time_sec();
-    let tz = local_tzoffset(epoch as u64);
-    let offset = utc_offset_from_tz_hhmm(tz).unwrap_or(UtcOffset::UTC);
-    OffsetDateTime::from_unix_timestamp(epoch)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .to_offset(offset)
-}
-
 /// Assemble a commit identity line (`Name <email> <epoch> <offset>`) from an
 /// already-resolved name and email plus a timestamp.
 ///
@@ -151,82 +127,35 @@ pub fn assemble_identity(
     format!("{name} <{email}> {timestamp}")
 }
 
+/// Current instant for commit/reflog identity from an explicit [`Environment`].
+#[must_use]
+pub fn now_from_environment(env: &Environment) -> OffsetDateTime {
+    env.now()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use std::ffi::OsString;
     use time::OffsetDateTime;
-
-    /// Process-global env snapshot guarded for test serialization and restoration.
-    struct EnvTestState {
-        saved_tz: Option<String>,
-        saved_git_test_date_now: Option<String>,
-    }
-
-    static ENV_TEST_STATE: Mutex<Option<EnvTestState>> = Mutex::new(None);
-
-    /// Serialize tests that mutate `TZ` / `GIT_TEST_DATE_NOW` (process-global).
-    struct EnvTestGuard {
-        _lock: MutexGuard<'static, Option<EnvTestState>>,
-    }
-
-    impl EnvTestGuard {
-        fn new() -> Self {
-            let mut lock = ENV_TEST_STATE.lock().unwrap_or_else(|e| e.into_inner());
-            assert!(
-                lock.is_none(),
-                "nested or concurrent EnvTestGuard without releasing the prior guard"
-            );
-            *lock = Some(EnvTestState {
-                saved_tz: std::env::var("TZ").ok(),
-                saved_git_test_date_now: std::env::var("GIT_TEST_DATE_NOW").ok(),
-            });
-            Self { _lock: lock }
-        }
-
-        fn set_tz(&self, tz: &str) {
-            std::env::set_var("TZ", tz);
-            crate::git_date::compat::refresh_tz_after_env_change();
-        }
-
-        fn set_git_test_date_now(&self, epoch: &str) {
-            std::env::set_var("GIT_TEST_DATE_NOW", epoch);
-        }
-    }
-
-    impl Drop for EnvTestGuard {
-        fn drop(&mut self) {
-            let Some(snapshot) = self._lock.take() else {
-                return;
-            };
-            match &snapshot.saved_tz {
-                Some(v) => std::env::set_var("TZ", v),
-                None => std::env::remove_var("TZ"),
-            }
-            match &snapshot.saved_git_test_date_now {
-                Some(v) => std::env::set_var("GIT_TEST_DATE_NOW", v),
-                None => std::env::remove_var("GIT_TEST_DATE_NOW"),
-            }
-            crate::git_date::compat::refresh_tz_after_env_change();
-        }
-    }
 
     #[test]
     fn assemble_identity_formats_supplied_now_without_override() {
-        // 2005-04-07T22:13:13Z — deterministic regardless of GIT_TEST_DATE_NOW.
-        let _env = EnvTestGuard::new();
-        _env.set_git_test_date_now("9999999999");
         let now = OffsetDateTime::from_unix_timestamp(1_112_911_993).unwrap();
         let line = assemble_identity("A U Thor", "author@example.com", None, now);
         assert_eq!(line, "A U Thor <author@example.com> 1112911993 +0000");
     }
 
     #[test]
-    fn now_for_identity_respects_local_tz_and_test_now() {
-        let _env = EnvTestGuard::new();
-        _env.set_git_test_date_now("1112911993");
-        _env.set_tz("Europe/Berlin");
-        let now = now_for_identity();
+    fn now_from_environment_respects_fixed_epoch_and_tz_offset() {
+        let vars = [
+            ("GIT_TEST_DATE_NOW", "1112911993"),
+            ("TZ", "+0200"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let env = Environment::from_vars(vars, std::path::PathBuf::from("/tmp"));
+        let now = now_from_environment(&env);
         let line = assemble_identity("A U Thor", "author@example.com", None, now);
         assert_eq!(line, "A U Thor <author@example.com> 1112911993 +0200");
     }

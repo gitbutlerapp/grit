@@ -1753,17 +1753,10 @@ impl ConfigSet {
 
     /// Default for `pack.writeReverseIndex` / `pack.writereverseindex` (Git default: true).
     ///
-    /// Tests set `GIT_TEST_NO_WRITE_REV_INDEX` to force no `.rev` output.
+    /// When `env.writer.no_write_rev_index` is set, skip `.rev` sidecar output.
     #[must_use]
-    pub fn pack_write_reverse_index_default(&self) -> bool {
-        if Environment::capture_process()
-            .git_test_no_write_rev_index
-            .as_deref()
-            .is_some_and(|v| {
-                let s = v.trim().to_ascii_lowercase();
-                matches!(s.as_str(), "1" | "true" | "yes" | "on")
-            })
-        {
+    pub fn pack_write_reverse_index_default(&self, env: &Environment) -> bool {
+        if env.writer.no_write_rev_index {
             return false;
         }
         if self

@@ -4,8 +4,11 @@
 //! without mutating process-wide state.
 
 use std::ffi::OsString;
+use std::sync::OnceLock;
 
 use thiserror::Error;
+
+use crate::environment::Environment;
 
 #[cfg(unix)]
 use crate::commit_encoding::decode_bytes;
@@ -27,11 +30,13 @@ pub struct SystemIdentityEnv;
 
 impl IdentityEnv for SystemIdentityEnv {
     fn var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
+        static ENV: OnceLock<Environment> = OnceLock::new();
+        ENV.get_or_init(Environment::capture_process).var(key)
     }
 
     fn var_os(&self, key: &str) -> Option<OsString> {
-        std::env::var_os(key)
+        static ENV: OnceLock<Environment> = OnceLock::new();
+        ENV.get_or_init(Environment::capture_process).var_os(key)
     }
 }
 
@@ -287,7 +292,7 @@ pub fn peek_name_with<E: IdentityEnv>(
                     return Some(t.to_owned());
                 }
             }
-            let d = ident_default_name(config);
+            let d = ident_default_name(config, env);
             if d.is_empty() {
                 None
             } else {
@@ -313,10 +318,10 @@ pub fn resolve_name_with<E: IdentityEnv>(
                 if !t.is_empty() {
                     t.to_owned()
                 } else {
-                    ident_default_name(config)
+                    ident_default_name(config, env)
                 }
             } else {
-                ident_default_name(config)
+                ident_default_name(config, env)
             }
         }
     };
@@ -361,7 +366,7 @@ pub fn resolve_loose_committer_parts_with<E: IdentityEnv>(
             .filter(|s| !s.is_empty())
     })
     .or_else(|| {
-        let d = ident_default_name(config);
+        let d = ident_default_name(config, env);
         if d.is_empty() {
             None
         } else {

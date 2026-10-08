@@ -5,7 +5,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::environment::{Environment, RepositoryOptions};
 use grit_lib::ident_resolve::{
     resolve_email_with, resolve_loose_committer_parts_with, resolve_name_with, IdentRole,
-    IdentityError, SystemIdentityEnv,
+    IdentityError,
 };
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::refs;
@@ -222,15 +222,15 @@ pub fn subject_line(message: &str) -> String {
 /// role, honoring the matching `GIT_*_DATE` override. Errors if no identity is
 /// configured — used when creating a commit.
 pub fn identity(
+    env: &Environment,
     config: &ConfigSet,
     role: IdentRole,
     date_var: &str,
     now: OffsetDateTime,
 ) -> Result<String> {
-    let env = SystemIdentityEnv;
-    let name = resolve_name_with(&env, config, role).map_err(identity_error)?;
-    let email = resolve_email_with(&env, config, role).map_err(identity_error)?;
-    let date = std::env::var(date_var).ok();
+    let name = resolve_name_with(env, config, role).map_err(identity_error)?;
+    let email = resolve_email_with(env, config, role).map_err(identity_error)?;
+    let date = env.var(date_var);
     Ok(grit_lib::commit::assemble_identity(
         &name,
         &email,
@@ -241,8 +241,8 @@ pub fn identity(
 
 /// A best-effort committer identity for reflog entries: never fails, even when
 /// no identity is configured.
-pub fn reflog_identity(config: &ConfigSet, now: OffsetDateTime) -> String {
-    let (name, email) = resolve_loose_committer_parts_with(&SystemIdentityEnv, config);
+pub fn reflog_identity(env: &Environment, config: &ConfigSet, now: OffsetDateTime) -> String {
+    let (name, email) = resolve_loose_committer_parts_with(env, config);
     grit_lib::commit::assemble_identity(&name, &email, None, now)
 }
 

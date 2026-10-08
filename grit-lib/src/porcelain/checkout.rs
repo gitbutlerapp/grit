@@ -51,7 +51,11 @@ pub fn checkout_between_trees(
             if let Some(path) = &change.old_path {
                 let abs = work_tree.join(path);
                 let _ = std::fs::remove_file(&abs);
-                remove_empty_parent_dirs(&work_tree, &abs);
+                remove_empty_parent_dirs(
+                    &work_tree,
+                    &abs,
+                    Some(&repo.environment().cwd),
+                );
                 paths_to_remove.push(path.as_bytes().to_vec());
             }
             continue;
@@ -178,8 +182,7 @@ pub fn write_to_worktree(work_tree: &Path, rel_path: &str, data: &[u8], mode: u3
 }
 
 /// Remove empty parent directories up to (but not including) `work_tree`.
-pub fn remove_empty_parent_dirs(work_tree: &Path, path: &Path) {
-    let cwd = std::env::current_dir().ok();
+pub fn remove_empty_parent_dirs(work_tree: &Path, path: &Path, cwd: Option<&Path>) {
     let mut current = path.parent();
     while let Some(dir) = current {
         if dir == work_tree {
@@ -187,7 +190,7 @@ pub fn remove_empty_parent_dirs(work_tree: &Path, path: &Path) {
         }
         if cwd
             .as_ref()
-            .is_some_and(|cwd| cwd == dir || cwd.starts_with(dir))
+            .is_some_and(|cwd| *cwd == dir || cwd.starts_with(dir))
         {
             break;
         }

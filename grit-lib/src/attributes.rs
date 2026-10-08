@@ -199,28 +199,14 @@ pub fn builtin_warnings_for_rules(rules: &[AttrRule], display_path: &str) -> Vec
     w
 }
 
-fn default_global_attributes_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return Some(PathBuf::from(xdg).join("git/attributes"));
-        }
-    }
-    Some(PathBuf::from(home).join(".config/git/attributes"))
-}
-
 fn global_attributes_path(
     repo: &Repository,
 ) -> std::result::Result<Option<PathBuf>, crate::error::Error> {
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
-    if let Some(path) = config.get("core.attributesfile") {
+    let config = repo.config()?;
+    if let Some(path) = config.as_ref().get("core.attributesfile") {
         return Ok(Some(PathBuf::from(parse_path(&path))));
     }
-    Ok(default_global_attributes_path())
+    Ok(repo.environment().default_global_attributes_path())
 }
 
 /// Read a `.gitattributes` path; if it is a symlink, record an error and skip (in-tree rules).
@@ -827,7 +813,7 @@ pub fn path_relative_to_worktree(
         .work_tree
         .as_ref()
         .ok_or_else(|| "bare repository — no work tree".to_string())?;
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let cwd = repo.environment().cwd.clone();
     let p = Path::new(path_str);
     let combined = if p.is_absolute() {
         p.to_path_buf()
@@ -1308,14 +1294,12 @@ pub fn resolve_attr_treeish(
     repo: &Repository,
     source_arg: Option<&str>,
 ) -> std::result::Result<(Option<String>, bool), crate::error::Error> {
-    let env_src = std::env::var("GIT_ATTR_SOURCE")
-        .ok()
+    let env_src = repo
+        .environment()
+        .git_attr_source
+        .clone()
         .filter(|s| !s.is_empty());
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let config = repo.config()?;
     let cfg_tree = config.get("attr.tree");
     if let Some(s) = source_arg.map(|s| s.to_string()) {
         return Ok((Some(s), false));

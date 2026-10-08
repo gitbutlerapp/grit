@@ -270,12 +270,27 @@ pub trait CredentialProvider {
 /// [`NON_INTERACTIVE_MESSAGE`].
 pub struct HelperCredentialProvider {
     config: ConfigSet,
+    environment: crate::environment::Environment,
 }
 
 impl HelperCredentialProvider {
-    /// Build a provider from a loaded [`ConfigSet`].
+    /// Build a provider from a loaded [`ConfigSet`] (no process environment overrides).
     pub fn new(config: ConfigSet) -> Self {
-        Self { config }
+        Self {
+            config,
+            environment: crate::environment::Environment::empty(),
+        }
+    }
+
+    /// Build a provider with explicit discovery/config environment.
+    pub fn with_environment(
+        config: ConfigSet,
+        environment: crate::environment::Environment,
+    ) -> Self {
+        Self {
+            config,
+            environment,
+        }
     }
 
     /// The ordered helper list applicable to `target_url`.
@@ -292,7 +307,7 @@ impl CredentialProvider for HelperCredentialProvider {
         }
         let target_url = filled.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            let response = invoke_helper(&helper, "get", &filled)?;
+            let response = invoke_helper(&helper, "get", &filled, &self.environment)?;
             if response.wants_quit() {
                 return Err(Error::Message(format!(
                     "credential helper '{helper}' told us to quit"
@@ -311,7 +326,7 @@ impl CredentialProvider for HelperCredentialProvider {
     fn approve(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            invoke_helper(&helper, "store", cred)?;
+            invoke_helper(&helper, "store", cred, &self.environment)?;
         }
         Ok(())
     }
@@ -319,7 +334,7 @@ impl CredentialProvider for HelperCredentialProvider {
     fn reject(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
         for helper in self.helpers(target_url.as_deref()) {
-            invoke_helper(&helper, "erase", cred)?;
+            invoke_helper(&helper, "erase", cred, &self.environment)?;
         }
         Ok(())
     }
@@ -487,10 +502,16 @@ fn hex_value(byte: u8) -> Option<u8> {
 /// Directories to search for `git-credential-*` the way Git does
 /// (exec-path before `PATH`). Git installs helpers under e.g.
 /// `/usr/libexec/git-core`, which is not on `PATH`.
-fn credential_helper_exec_path_candidates() -> Vec<PathBuf> {
+fn credential_helper_exec_path_candidates(env: &crate::environment::Environment) -> Vec<PathBuf> {
     let mut v = Vec::new();
-    if let Ok(ep) = std::env::var("GIT_EXEC_PATH") {
-        let p = PathBuf::from(ep.trim());
+    if let Some(ep) = env
+        .git_exec_path
+        .as_ref()
+        .and_then(|p| p.to_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let p = PathBuf::from(ep);
         if p.is_dir() {
             v.push(p);
         }
@@ -514,13 +535,16 @@ fn credential_helper_exec_path_candidates() -> Vec<PathBuf> {
 /// Resolve a helper program name to an executable path. A bare
 /// `git-credential-<name>` is looked up across Git's exec-path candidates
 /// before falling back to `PATH`.
-fn resolve_credential_helper_executable(helper_program: &str) -> PathBuf {
+fn resolve_credential_helper_executable(
+    helper_program: &str,
+    env: &crate::environment::Environment,
+) -> PathBuf {
     if helper_program.contains('/') {
         return PathBuf::from(helper_program);
     }
     if let Some(suffix) = helper_program.strip_prefix("git-credential-") {
         let exe_name = format!("git-credential-{suffix}");
-        for ep in credential_helper_exec_path_candidates() {
+        for ep in credential_helper_exec_path_candidates(env) {
             let candidate = ep.join(&exe_name);
             if candidate.is_file() {
                 return candidate;
@@ -546,7 +570,16 @@ fn resolve_credential_helper_executable(helper_program: &str) -> PathBuf {
 /// after any arguments from the configured helper string. Credential fields are
 /// written to stdin as `key=value` lines followed by a blank line; stdout is
 /// parsed back into a [`Credential`].
-fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Credential> {
+fn current_process_exe() -> std::io::Result<std::path::PathBuf> {
+    std::fs::read_link("/proc/self/exe")
+}
+
+fn invoke_helper(
+    helper: &str,
+    action: &str,
+    creds: &Credential,
+    env: &crate::environment::Environment,
+) -> Result<Credential> {
     let helper_words = shell_words::split(helper)
         .map_err(|e| Error::Message(format!("invalid credential.helper '{helper}': {e}")))?;
     let (first_word, extra_args) = match helper_words.split_first() {
@@ -576,7 +609,7 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
         } else {
             "credential-cache"
         };
-        let exe = std::env::current_exe()
+        let exe = current_process_exe()
             .map_err(|e| Error::Message(format!("resolve current executable: {e}")))?;
         let mut cmd = Command::new(exe);
         cmd.arg(subcmd);
@@ -602,7 +635,7 @@ fn invoke_helper(helper: &str, action: &str, creds: &Credential) -> Result<Crede
                 // Bare helper name (e.g. `osxkeychain`) -> `git-credential-osxkeychain`.
                 format!("git-credential-{first_word}")
             };
-        let resolved = resolve_credential_helper_executable(&helper_program);
+        let resolved = resolve_credential_helper_executable(&helper_program, env);
         let mut cmd = Command::new(&resolved);
         for arg in extra_args {
             cmd.arg(arg);

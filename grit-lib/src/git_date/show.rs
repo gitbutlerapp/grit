@@ -2,7 +2,7 @@
 
 use super::compat::{self, time_t, tm};
 use super::tm::{
-    empty_tm, get_time_sec, init_tm_unknown, local_time_tzoffset, local_tzoffset, time_to_tm,
+    empty_tm, init_tm_unknown, local_time_tzoffset, local_tzoffset, system_now_sec, time_to_tm,
     time_to_tm_local, tm_to_time_t, TzHhmm,
 };
 use std::ffi::CString;
@@ -271,7 +271,7 @@ fn show_date_normal(
     }
 
     if hide.wday {
-        return show_date_relative(time, get_time_sec());
+        return show_date_relative(time, system_now_sec());
     }
 
     if human_tm.tm_year != 0 {
@@ -397,7 +397,7 @@ pub fn show_date(time: u64, mut tz: TzHhmm, mode: &mut DateMode) -> String {
     let mut human_tz: TzHhmm = -1;
 
     if mode.ty == DateModeType::Human {
-        let now = get_time_sec();
+        let now = system_now_sec();
         unsafe {
             human_tz = local_time_tzoffset(now as time_t, &mut human_tm);
         }
@@ -412,7 +412,7 @@ pub fn show_date(time: u64, mut tz: TzHhmm, mode: &mut DateMode) -> String {
     }
 
     if mode.ty == DateModeType::Relative {
-        return show_date_relative(time, get_time_sec());
+        return show_date_relative(time, system_now_sec());
     }
 
     let mut tz = tz;

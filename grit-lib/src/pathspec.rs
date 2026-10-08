@@ -176,43 +176,53 @@ fn parse_maybe_bool(v: &str) -> Option<bool> {
     }
 }
 
-fn git_env_bool(key: &str, default: bool) -> bool {
-    match std::env::var(key) {
-        Ok(v) => parse_maybe_bool(&v).unwrap_or(default),
-        Err(_) => default,
-    }
+fn git_env_bool(env: &crate::environment::Environment, key: &str, default: bool) -> bool {
+    env.var(key)
+        .and_then(|v| parse_maybe_bool(&v))
+        .unwrap_or(default)
 }
 
-fn literal_global() -> bool {
-    git_env_bool("GIT_LITERAL_PATHSPECS", false)
+fn literal_global(env: &crate::environment::Environment) -> bool {
+    git_env_bool(env, "GIT_LITERAL_PATHSPECS", false)
 }
 
 /// Whether `GIT_LITERAL_PATHSPECS` is enabled (shell `*` and `?` are literal, not globs).
 #[must_use]
 pub fn literal_pathspecs_enabled() -> bool {
-    literal_global()
+    literal_global(&crate::environment::Environment::empty())
 }
 
-fn glob_global() -> bool {
-    git_env_bool("GIT_GLOB_PATHSPECS", false)
+#[must_use]
+pub fn literal_pathspecs_enabled_for(env: &crate::environment::Environment) -> bool {
+    literal_global(env)
 }
 
-fn noglob_global() -> bool {
-    git_env_bool("GIT_NOGLOB_PATHSPECS", false)
+fn glob_global(env: &crate::environment::Environment) -> bool {
+    git_env_bool(env, "GIT_GLOB_PATHSPECS", false)
 }
 
-fn icase_global() -> bool {
-    git_env_bool("GIT_ICASE_PATHSPECS", false)
+fn noglob_global(env: &crate::environment::Environment) -> bool {
+    git_env_bool(env, "GIT_NOGLOB_PATHSPECS", false)
+}
+
+fn icase_global(env: &crate::environment::Environment) -> bool {
+    git_env_bool(env, "GIT_ICASE_PATHSPECS", false)
 }
 
 /// Validates global pathspec environment flags the same way Git does.
 ///
 /// Returns an error message suitable for `bail!` when flags are incompatible.
 pub fn validate_global_pathspec_flags() -> Result<(), String> {
-    let lit = literal_global();
-    let glob = glob_global();
-    let noglob = noglob_global();
-    let icase = icase_global();
+    validate_global_pathspec_flags_for(&crate::environment::Environment::empty())
+}
+
+pub fn validate_global_pathspec_flags_for(
+    env: &crate::environment::Environment,
+) -> Result<(), String> {
+    let lit = literal_global(env);
+    let glob = glob_global(env);
+    let noglob = noglob_global(env);
+    let icase = icase_global(env);
 
     if glob && noglob {
         return Err("global 'glob' and 'noglob' pathspec settings are incompatible".to_string());
@@ -333,7 +343,7 @@ fn parse_attr_requirements(expr: &str) -> Result<Vec<AttrRequirement>, String> {
 /// unsupported or malformed attribute magic.
 pub fn validate_attr_pathspecs(specs: &[String]) -> Result<(), String> {
     for spec in specs {
-        if literal_global() || !spec.starts_with(":(") {
+        if literal_global(&crate::environment::Environment::empty()) || !spec.starts_with(":(") {
             continue;
         }
         let Some(rest) = spec.strip_prefix(":(") else {
@@ -459,7 +469,7 @@ fn parse_short_magic(elem: &str) -> (PathspecMagic, &str) {
 
 /// Strip `:(magic)` / `:magic` prefix when not in literal-global mode.
 fn parse_element_magic(elem: &str) -> (PathspecMagic, &str) {
-    if !elem.starts_with(':') || literal_global() {
+    if !elem.starts_with(':') || literal_global(&crate::environment::Environment::empty()) {
         return (PathspecMagic::default(), elem);
     }
     if let Some(rest) = elem.strip_prefix(":(") {
@@ -468,18 +478,21 @@ fn parse_element_magic(elem: &str) -> (PathspecMagic, &str) {
     parse_short_magic(elem)
 }
 
-fn combine_magic(element: PathspecMagic) -> PathspecMagic {
+fn combine_magic(
+    element: PathspecMagic,
+    env: &crate::environment::Environment,
+) -> PathspecMagic {
     let mut m = element;
-    if literal_global() {
+    if literal_global(env) {
         m.literal = true;
     }
-    if glob_global() && !m.literal {
+    if glob_global(env) && !m.literal {
         m.glob = true;
     }
-    if icase_global() {
+    if icase_global(env) {
         m.icase = true;
     }
-    if noglob_global() && !m.glob {
+    if noglob_global(env) && !m.glob {
         m.literal = true;
     }
     m
@@ -502,7 +515,7 @@ pub fn bloom_lookup_prefix_with_cwd(
     cwd_from_repo_root: Option<&str>,
 ) -> Option<String> {
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     if magic.exclude || magic.icase {
         return None;
     }
@@ -559,7 +572,7 @@ pub fn path_allowed_by_pathspec_list(specs: &[String], path: &str) -> bool {
     let mut positive_match = false;
     for s in specs {
         let (elem, raw_pattern) = parse_element_magic(s);
-        let magic = combine_magic(elem);
+        let magic = combine_magic(elem, &crate::environment::Environment::empty());
         if magic.exclude {
             if path_matches_pathspec_tail(raw_pattern, path, magic) {
                 return false;
@@ -609,7 +622,7 @@ pub fn pathspec_matches(spec: &str, path: &str) -> bool {
 #[must_use]
 pub fn pathspec_is_exclude(spec: &str) -> bool {
     let (elem_magic, _) = parse_element_magic(spec);
-    combine_magic(elem_magic).exclude
+    combine_magic(elem_magic, &crate::environment::Environment::empty()).exclude
 }
 
 /// Whether tree-walking should recurse into directory `full_name` for pathspec `spec` without
@@ -622,7 +635,7 @@ pub fn pathspec_wants_descent_into_tree(spec: &str, full_name: &str) -> bool {
         return false;
     }
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     if magic.exclude {
         return false;
     }
@@ -721,7 +734,7 @@ pub fn matches_pathspec_set_for_object(
 #[must_use]
 pub fn pathspec_has_top(spec: &str) -> bool {
     let (elem_magic, _) = parse_element_magic(spec);
-    combine_magic(elem_magic).top
+    combine_magic(elem_magic, &crate::environment::Environment::empty()).top
 }
 
 fn pathspec_match_one_positive(path: &str, magic: PathspecMagic, raw_pattern: &str) -> bool {
@@ -772,7 +785,7 @@ fn matches_pathspec_element_with_context(
     ctx: PathspecMatchContext,
 ) -> bool {
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let magic = combine_magic(elem_magic);
+    let magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     if magic.exclude {
         return false;
     }
@@ -803,7 +816,7 @@ fn pathspec_exclude_element_matches_with_context(
     ctx: PathspecMatchContext,
 ) -> bool {
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let mut magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     if !magic.exclude {
         return false;
     }
@@ -948,7 +961,7 @@ fn matches_pathspec_exclude_for_object(
     attr_rules: &[AttrRule],
 ) -> bool {
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let mut magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     if !magic.exclude {
         return false;
     }
@@ -1149,7 +1162,7 @@ pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchC
     }
 
     let (elem_magic, raw_pattern) = parse_element_magic(trimmed);
-    let magic = combine_magic(elem_magic);
+    let magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
 
     if magic.literal && magic.glob {
         return false;
@@ -1243,7 +1256,7 @@ pub fn matches_ls_tree_pathspec(
     attr_rules: &[AttrRule],
 ) -> bool {
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let mut magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     magic.exclude = false;
 
     if magic.literal && magic.glob {
@@ -1331,7 +1344,7 @@ pub fn matches_pathspec_for_object(
     attr_rules: &[AttrRule],
 ) -> bool {
     let (elem_magic, raw_pattern) = parse_element_magic(spec);
-    let mut magic = combine_magic(elem_magic);
+    let mut magic = combine_magic(elem_magic, &crate::environment::Environment::empty());
     magic.exclude = false;
 
     if magic.literal && magic.glob {
@@ -1603,7 +1616,7 @@ pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) 
         };
     }
     if pathspec.contains("../") || pathspec.starts_with("../") {
-        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd = crate::environment::Environment::empty().cwd;
         let abs = cwd.join(pathspec);
         let mut parts: Vec<std::ffi::OsString> = Vec::new();
         for component in abs.components() {

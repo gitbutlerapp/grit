@@ -280,7 +280,12 @@ pub(crate) fn serialize_link_extension_payload(
 
 /// Resolve path to shared index file (Git `read_index_from`), with fallbacks when `git_dir` does
 /// not match the repo that owns the index (nested trash repo + `GIT_INDEX_FILE`).
-fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &ObjectId) -> PathBuf {
+fn resolve_shared_index_file(
+    git_dir: &Path,
+    index_path: &Path,
+    base_oid: &ObjectId,
+    cwd: &Path,
+) -> PathBuf {
     let name = format!("sharedindex.{}", base_oid.to_hex());
     let primary = git_dir.join(&name);
 
@@ -300,8 +305,8 @@ fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &Objec
             return p;
         }
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut dir = cwd.as_path();
+    {
+        let mut dir = cwd;
         loop {
             if let Some(p) = try_path(dir.join(".git").join(&name)) {
                 return p;
@@ -389,40 +394,11 @@ pub(crate) fn should_rebuild_shared_index(index: &Index, cfg: &ConfigSet) -> boo
     total * (max_split as u64) < not_shared * 100
 }
 
-pub(crate) fn git_test_split_index_env() -> bool {
-    std::env::var("GIT_TEST_SPLIT_INDEX")
-        .ok()
-        .map(|v| {
-            let t = v.trim();
-            t == "1" || t.eq_ignore_ascii_case("true") || t.eq_ignore_ascii_case("yes")
-        })
-        .unwrap_or(false)
-}
-
-/// Whether cache-tree verification should run on index write.
-///
-/// Upstream's `write_locked_index` gates this on `git_env_bool("GIT_TEST_CHECK_CACHE_TREE", 0)`, but
-/// the upstream test harness (`test-lib.sh`) exports the variable as `true` by default — so in
-/// practice the check is *on* unless a test explicitly sets it to a falsy value. Grit mirrors that
-/// effective default: verification runs unless `GIT_TEST_CHECK_CACHE_TREE` is explicitly falsy
-/// (`0`/`false`/`no`/empty). This only ever rejects a genuinely corrupt cache-tree (e.g. one primed
-/// from a tree with duplicate path entries — `t4058-diff-duplicates`); well-formed trees always
-/// verify cleanly.
-pub(crate) fn git_test_check_cache_tree() -> bool {
-    match std::env::var("GIT_TEST_CHECK_CACHE_TREE") {
-        Ok(v) => {
-            let t = v.trim();
-            !(t.is_empty()
-                || t == "0"
-                || t.eq_ignore_ascii_case("false")
-                || t.eq_ignore_ascii_case("no"))
-        }
-        Err(_) => true,
-    }
-}
-
-pub(crate) fn git_test_split_index_force_reorder(base_oid: &ObjectId) -> bool {
-    git_test_split_index_env() && (base_oid.as_bytes()[0] & 15) < 6
+pub(crate) fn git_test_split_index_force_reorder(
+    git_test_split_index: bool,
+    base_oid: &ObjectId,
+) -> bool {
+    git_test_split_index && (base_oid.as_bytes()[0] & 15) < 6
 }
 
 pub(crate) fn shared_index_expire_threshold(cfg: &ConfigSet) -> u64 {
@@ -514,7 +490,12 @@ impl WriteSplitIndexRequest {
     ///
     /// When `explicit` is `None`, an index that was already split (`split_link` set after load)
     /// stays split until `--no-split-index` (Git keeps `istate->split_index` across commands).
-    pub fn want_write_split(self, cfg: &ConfigSet, index: &Index) -> bool {
+    pub fn want_write_split(
+        self,
+        cfg: &ConfigSet,
+        index: &Index,
+        git_test_split_index: bool,
+    ) -> bool {
         match self.explicit {
             Some(false) => {
                 if matches!(split_index_config(cfg), SplitIndexConfig::Enabled) {
@@ -538,7 +519,7 @@ impl WriteSplitIndexRequest {
                 }
                 index.split_link.is_some()
                     || matches!(split_index_config(cfg), SplitIndexConfig::Enabled)
-                    || git_test_split_index_env()
+                    || git_test_split_index
             }
         }
     }
@@ -559,8 +540,9 @@ fn load_shared_entries(
     git_dir: &Path,
     index_path: &Path,
     base_oid: &ObjectId,
+    cwd: &Path,
 ) -> Result<Vec<IndexEntry>> {
-    let p = resolve_shared_index_file(git_dir, index_path, base_oid);
+    let p = resolve_shared_index_file(git_dir, index_path, base_oid, cwd);
     let data = fs::read(&p).map_err(Error::Io)?;
     let mut shared = Index::parse(&data)?;
     for (i, e) in shared.entries.iter_mut().enumerate() {
@@ -577,16 +559,19 @@ pub(crate) fn write_index_file_split(
     cfg: &ConfigSet,
     request: WriteSplitIndexRequest,
     skip_hash: bool,
+    verify_cache_tree: bool,
+    env: &crate::environment::Environment,
 ) -> Result<()> {
     // Mirror upstream `write_locked_index`: under GIT_TEST_CHECK_CACHE_TREE, verify the cache-tree
     // against the index before persisting. A duplicate-entry tree (t4058) produces a cache-tree
     // whose entry counts exceed the deduplicated index, which must abort the write with the
     // canonical "corrupted cache-tree" error rather than silently writing a broken index.
-    if git_test_check_cache_tree() {
+    if verify_cache_tree {
         crate::write_tree::verify_cache_tree(index)?;
     }
 
-    let want_split = request.want_write_split(cfg, index);
+    let git_test_split_index = env.git_test_split_index;
+    let want_split = request.want_write_split(cfg, index, git_test_split_index);
 
     let shared_repo = parse_shared_repository_perm(cfg.get("core.sharedRepository").as_deref());
 
@@ -633,9 +618,9 @@ pub(crate) fn write_index_file_split(
 
     let mut rebuild = index.split_link.is_none()
         || should_rebuild_shared_index(index, cfg)
-        || git_test_split_index_force_reorder(&prev_base);
+        || git_test_split_index_force_reorder(git_test_split_index, &prev_base);
 
-    if git_test_split_index_env() && index.split_link.is_none() {
+    if git_test_split_index && index.split_link.is_none() {
         rebuild = true;
     }
 
@@ -650,7 +635,7 @@ pub(crate) fn write_index_file_split(
         let link = index.split_link.as_ref().ok_or_else(|| {
             Error::IndexError("split index missing base link during reuse".to_owned())
         })?;
-        load_shared_entries(git_dir, path, &link.base_oid)?
+        load_shared_entries(git_dir, path, &link.base_oid, &env.cwd)?
     };
 
     // After a shared-index rebuild, `base_snapshot` matches the merged index exactly; align indices
@@ -735,7 +720,7 @@ pub(crate) fn write_index_file_split(
                 Error::IndexError("split index missing base link during reuse".to_owned())
             })?
             .base_oid;
-        freshen_shared_index(&resolve_shared_index_file(git_dir, path, &oid));
+        freshen_shared_index(&resolve_shared_index_file(git_dir, path, &oid, &env.cwd));
         oid
     };
 
@@ -852,6 +837,7 @@ pub fn resolve_split_index_if_needed(
     index: &mut Index,
     git_dir: &Path,
     index_path: &Path,
+    cwd: &Path,
 ) -> Result<()> {
     let Some(link) = index.split_link.clone() else {
         return Ok(());
@@ -860,7 +846,7 @@ pub fn resolve_split_index_if_needed(
         return Ok(());
     }
     let base_oid = link.base_oid;
-    let shared_path = resolve_shared_index_file(git_dir, index_path, &base_oid);
+    let shared_path = resolve_shared_index_file(git_dir, index_path, &base_oid, cwd);
     let data = fs::read(&shared_path).map_err(|e| {
         Error::IndexError(format!(
             "split index: cannot read shared index {}: {e}",

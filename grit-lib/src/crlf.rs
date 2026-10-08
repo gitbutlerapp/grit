@@ -997,7 +997,7 @@ pub fn clean_uses_autocrlf_index_guard(attrs: &FileAttrs, conv: &ConversionConfi
 }
 
 /// Optional inputs for [`convert_to_git_with_opts`] (Git `CONV_EOL_RENORMALIZE` / index blob).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ConvertToGitOpts<'a> {
     /// Stage-0 blob bytes for this path before the current add (for safer-autocrlf).
     pub index_blob: Option<&'a [u8]>,
@@ -1005,6 +1005,8 @@ pub struct ConvertToGitOpts<'a> {
     pub renormalize: bool,
     /// When false, skip `core.safecrlf` simulation (used for internal diff/hashing — must not spam stderr).
     pub check_safecrlf: bool,
+    /// Git trace output (`GIT_TRACE`), when enabled.
+    pub trace: crate::trace::TraceSink,
 }
 
 impl Default for ConvertToGitOpts<'_> {
@@ -1013,6 +1015,7 @@ impl Default for ConvertToGitOpts<'_> {
             index_blob: None,
             renormalize: false,
             check_safecrlf: true,
+            trace: crate::trace::TraceSink::default(),
         }
     }
 }
@@ -1143,29 +1146,8 @@ fn encoding_needs_roundtrip_check(enc_name: &str, conv: &ConversionConfig) -> bo
 }
 
 /// Git `trace_printf("Checking roundtrip encoding for %s...\n", enc)`.
-fn trace_roundtrip_encoding(enc_name: &str) {
-    use std::io::Write;
-    let Ok(trace_val) = std::env::var("GIT_TRACE") else {
-        return;
-    };
-    if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
-        return;
-    }
-    let line = format!("Checking roundtrip encoding for {enc_name}...\n");
-    match trace_val.as_str() {
-        "1" | "true" | "2" => {
-            let _ = std::io::stderr().write_all(line.as_bytes());
-        }
-        path_dest => {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path_dest)
-            {
-                let _ = f.write_all(line.as_bytes());
-            }
-        }
-    }
+fn trace_roundtrip_encoding(sink: &crate::trace::TraceSink, enc_name: &str) {
+    sink.trace(&format!("Checking roundtrip encoding for {enc_name}..."));
 }
 
 /// Re-encode `data` from `from` to `to` via the system `iconv`, matching Git's `reencode_string_len`
@@ -1549,7 +1531,7 @@ pub fn convert_to_git_with_opts(
         // Git `encode_to_git`: when writing to the object DB, verify the round trip for encodings
         // listed in `core.checkRoundtripEncoding` (default `SHIFT-JIS`); emit the GIT_TRACE line.
         if writing_object && encoding_needs_roundtrip_check(enc, conv) {
-            trace_roundtrip_encoding(enc);
+            trace_roundtrip_encoding(&opts.trace, enc);
         }
     }
 

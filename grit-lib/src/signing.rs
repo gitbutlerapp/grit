@@ -222,11 +222,11 @@ impl GpgConfig {
         let ssh_allowed_signers = config
             .get("gpg.ssh.allowedsignersfile")
             .filter(|p| !p.is_empty())
-            .map(|p| expand_tilde(&p));
+            .map(|p| expand_tilde(&p, &crate::environment::Environment::empty()));
         let ssh_revocation_file = config
             .get("gpg.ssh.revocationfile")
             .filter(|p| !p.is_empty())
-            .map(|p| expand_tilde(&p));
+            .map(|p| expand_tilde(&p, &crate::environment::Environment::empty()));
 
         Ok(GpgConfig {
             format,
@@ -278,8 +278,8 @@ impl GpgConfig {
     ///
     /// Mirrors Git's program resolution: a leading `~/` expands to `$HOME`, an
     /// absolute path is used verbatim, and a bare name is searched on `$PATH`.
-    pub fn resolve_program_path(&self) -> Result<PathBuf> {
-        resolve_program(&self.program)
+    pub fn resolve_program_path(&self, env: &crate::environment::Environment) -> Result<PathBuf> {
+        resolve_program(&self.program, env)
     }
 }
 
@@ -298,15 +298,15 @@ fn resolve_program_for_format(
 }
 
 /// Resolve a program string to an executable path.
-fn resolve_program(program: &str) -> Result<PathBuf> {
+fn resolve_program(program: &str, env: &crate::environment::Environment) -> Result<PathBuf> {
     // `~` / `~/...` expansion relative to $HOME.
     if program == "~" {
-        if let Some(home) = home_dir() {
+        if let Some(home) = home_dir(env) {
             return Ok(home);
         }
     }
     if let Some(rest) = program.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
+        if let Some(home) = home_dir(env) {
             return Ok(home.join(rest));
         }
     }
@@ -318,7 +318,7 @@ fn resolve_program(program: &str) -> Result<PathBuf> {
     }
 
     // Bare name: search $PATH.
-    if let Some(found) = search_path(program) {
+    if let Some(found) = search_path(program, env) {
         return Ok(found);
     }
 
@@ -328,9 +328,14 @@ fn resolve_program(program: &str) -> Result<PathBuf> {
 }
 
 /// Look up a bare program name on `$PATH`.
-fn search_path(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&paths) {
+fn search_path(name: &str, env: &crate::environment::Environment) -> Option<PathBuf> {
+    let paths = env.path.as_ref()?;
+    for dir in paths
+        .to_string_lossy()
+        .split(':')
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+    {
         if dir.as_os_str().is_empty() {
             continue;
         }
@@ -357,20 +362,20 @@ fn is_executable_file(path: &Path) -> bool {
 }
 
 /// The user's home directory (`$HOME`).
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+fn home_dir(env: &crate::environment::Environment) -> Option<PathBuf> {
+    env.home.as_ref().map(|h| PathBuf::from(h))
 }
 
 /// Expand a leading `~/` (and a bare `~`) relative to `$HOME`, like Git's
 /// `interpolate_path` / `git_config_pathname` for the simple home case.
-fn expand_tilde(path: &str) -> String {
+fn expand_tilde(path: &str, env: &crate::environment::Environment) -> String {
     if path == "~" {
-        if let Some(home) = home_dir() {
+        if let Some(home) = home_dir(env) {
             return home.to_string_lossy().into_owned();
         }
     }
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
+        if let Some(home) = home_dir(env) {
             return home.join(rest).to_string_lossy().into_owned();
         }
     }
@@ -389,12 +394,17 @@ fn expand_tilde(path: &str) -> String {
 ///
 /// Returns [`Error::Signing`] when the program cannot be spawned, exits
 /// non-zero, or fails to produce a signature.
-pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result<Vec<u8>> {
+pub fn sign_buffer(
+    cfg: &GpgConfig,
+    payload: &[u8],
+    signing_key: &str,
+    env: &crate::environment::Environment,
+) -> Result<Vec<u8>> {
     if cfg.format == GpgFormat::Ssh {
-        return sign_buffer_ssh(cfg, payload, signing_key);
+        return sign_buffer_ssh(cfg, payload, signing_key, env);
     }
 
-    let program = cfg.resolve_program_path()?;
+    let program = cfg.resolve_program_path(env)?;
 
     let mut child = Command::new(&program)
         .arg("--status-fd=2")
@@ -471,14 +481,19 @@ fn is_literal_ssh_key(s: &str) -> Option<&str> {
 /// Returns [`Error::Signing`] when `signing_key` is empty, a temp file cannot be
 /// written, `ssh-keygen` cannot be run or exits non-zero, or the `.sig` output
 /// cannot be read.
-fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result<Vec<u8>> {
+fn sign_buffer_ssh(
+    cfg: &GpgConfig,
+    payload: &[u8],
+    signing_key: &str,
+    env: &crate::environment::Environment,
+) -> Result<Vec<u8>> {
     if signing_key.is_empty() {
         return Err(Error::Signing(
             "user.signingKey needs to be set for ssh signing".to_owned(),
         ));
     }
 
-    let program = cfg.resolve_program_path()?;
+    let program = cfg.resolve_program_path(env)?;
 
     // Resolve the key file: either a literal key written to a temp file (with
     // the `-U` flag), or a path on disk.
@@ -490,7 +505,7 @@ fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
             literal_key_tmp = Some(path);
             (p, true)
         }
-        None => (expand_tilde(signing_key), false),
+        None => (expand_tilde(signing_key, env), false),
     };
 
     // Write the payload to a temp buffer file; ssh-keygen reads it as the file
@@ -795,7 +810,10 @@ pub fn verify_commit(cfg: &GpgConfig, raw_commit: &[u8]) -> Result<SignatureChec
         return verify_ssh_signed_buffer(cfg, payload, signature);
     }
 
-    let program = resolve_program(&cfg.program_for(detected_format))?;
+    let program = resolve_program(
+        &cfg.program_for(detected_format),
+        &crate::environment::Environment::empty(),
+    )?;
 
     // Write the detached signature to a temp file.
     let sig_path = write_temp_file(&signature)?;
@@ -990,7 +1008,10 @@ fn verify_ssh_signed_buffer(
     // The format here is detected from the signature armor, which may differ
     // from `cfg.format`; always resolve the ssh program (`gpg.ssh.program` /
     // `gpg.program` / `ssh-keygen`).
-    let program = resolve_program(&cfg.program_for(GpgFormat::Ssh))?;
+    let program = resolve_program(
+        &cfg.program_for(GpgFormat::Ssh),
+        &crate::environment::Environment::empty(),
+    )?;
 
     // Write the detached signature to a temp `.git_vtag` file.
     let sig_path = write_temp_file_named(&signature, "git_vtag")?;
@@ -1366,7 +1387,7 @@ fn write_temp_file(data: &[u8]) -> Result<PathBuf> {
 /// Build a fresh, reasonably unique temp path with the given name stem (without
 /// creating the file).
 fn temp_file_path(stem: &str) -> PathBuf {
-    let dir = std::env::temp_dir();
+    let dir = tempfile::tempdir().expect("tempdir").into_path();
     let unique = format!("{stem}_{}_{}", std::process::id(), next_temp_counter());
     dir.join(unique)
 }
@@ -1452,7 +1473,10 @@ pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> Result<SignatureCheck> {
         return verify_ssh_signed_buffer(cfg, payload, signature);
     }
 
-    let program = resolve_program(&cfg.program_for(detected_format))?;
+    let program = resolve_program(
+        &cfg.program_for(detected_format),
+        &crate::environment::Environment::empty(),
+    )?;
 
     let sig_path = write_temp_file(&signature)?;
 

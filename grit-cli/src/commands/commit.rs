@@ -1,7 +1,7 @@
 //! `grit commit` — stage every change and record a new commit.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::commit::now_for_identity;
+use grit_lib::commit::now_from_environment;
 use grit_lib::error::Error;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -48,9 +48,11 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
     };
 
     let config = repo.config().context("could not load config")?;
-    let now = now_for_identity();
-    let author = context::identity(config.as_ref(), IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
+    let env = repo.environment();
+    let now = now_from_environment(env);
+    let author = context::identity(env, config.as_ref(), IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
     let committer = context::identity(
+        env,
         config.as_ref(),
         IdentRole::Committer,
         "GIT_COMMITTER_DATE",

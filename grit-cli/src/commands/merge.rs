@@ -189,11 +189,12 @@ pub fn integrate(
     checkout_between_trees(repo, Some(&into_tree), &merged_tree)
         .context("could not update the working tree")?;
 
-    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
-        .context("could not load config")?;
-    let now = grit_lib::commit::now_for_identity();
-    let author = context::identity(&config, IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
-    let committer = context::identity(&config, IdentRole::Committer, "GIT_COMMITTER_DATE", now)?;
+    let config = repo.config().context("could not load config")?;
+    let env = repo.environment();
+    let now = grit_lib::commit::now_from_environment(env);
+    let author = context::identity(env, config.as_ref(), IdentRole::Author, "GIT_AUTHOR_DATE", now)?;
+    let committer =
+        context::identity(env, config.as_ref(), IdentRole::Committer, "GIT_COMMITTER_DATE", now)?;
 
     let commit = CommitData {
         tree: merged_tree,
@@ -224,9 +225,10 @@ fn move_branch(
     reason: &str,
 ) -> Result<()> {
     refs::write_ref(&repo.git_dir, refname, &new).context("could not update branch")?;
-    let config = ConfigSet::load(&crate::context::environment(), Some(&repo.git_dir), true)
-        .unwrap_or_default();
-    let who = context::reflog_identity(&config, grit_lib::commit::now_for_identity());
+    let config = repo.config().unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let env = repo.environment();
+    let now = grit_lib::commit::now_from_environment(env);
+    let who = context::reflog_identity(env, config.as_ref(), now);
     let _ = refs::append_reflog(&repo.git_dir, refname, &old, &new, &who, reason, false);
     let _ = refs::append_reflog(&repo.git_dir, "HEAD", &old, &new, &who, reason, false);
     Ok(())

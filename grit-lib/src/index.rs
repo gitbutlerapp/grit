@@ -509,8 +509,8 @@ fn dump_cache_tree_pair(
 /// If the environment variable is unset, returns `None`.
 /// If it is set but invalid (non-numeric or out of range 2..=4), prints a
 /// warning to stderr and returns the default version.
-pub fn get_index_format_from_env() -> Option<u32> {
-    let val = std::env::var("GIT_INDEX_VERSION").ok()?;
+pub fn get_index_format_from_environment(env: &crate::environment::Environment) -> Option<u32> {
+    let val = env.git_index_version.as_deref()?;
     if val.is_empty() {
         return None;
     }
@@ -603,7 +603,9 @@ impl Index {
     /// Respects `GIT_INDEX_VERSION` if set, otherwise defaults to version 2.
     #[must_use]
     pub fn new() -> Self {
-        let version = get_index_format_from_env().unwrap_or(2);
+        let version =
+            get_index_format_from_environment(&crate::environment::Environment::empty())
+                .unwrap_or(2);
         Self {
             version,
             entries: Vec::new(),
@@ -657,7 +659,8 @@ impl Index {
         config_index_version: Option<&str>,
         config_many_files: Option<&str>,
     ) -> Self {
-        if let Some(v) = get_index_format_from_env() {
+        if let Some(v) = get_index_format_from_environment(&crate::environment::Environment::empty())
+        {
             return Self {
                 version: v,
                 entries: Vec::new(),
@@ -721,7 +724,8 @@ impl Index {
     /// `index.version` from `config`.
     #[must_use]
     pub fn new_from_config(config: &ConfigSet) -> Self {
-        if let Some(v) = get_index_format_from_env() {
+        if let Some(v) = get_index_format_from_environment(&crate::environment::Environment::empty())
+        {
             return Self {
                 version: v,
                 entries: Vec::new(),

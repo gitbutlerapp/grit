@@ -160,6 +160,7 @@ pub fn apply_init_filesystem_config(
     git_dir: &Path,
     opts: InitFilesystemConfigOptions,
     environment: &Environment,
+    force_precompose_probe: bool,
 ) -> Result<()> {
     if opts.is_reinit {
         return Ok(());
@@ -169,11 +170,6 @@ pub fn apply_init_filesystem_config(
     let ignorecase_from_cmdline = ignorecase_from_git_config_parameters(environment).is_some();
     let filemode_from_cmdline = filemode_from_git_config_parameters(environment).is_some();
     let symlinks_from_cmdline = symlinks_from_git_config_parameters(environment).is_some();
-
-    let force_precompose_probe = environment
-        .git_test_utf8_nfd_to_nfc
-        .as_deref()
-        .is_some_and(|v| v == "true" || v == "1");
 
     let filemode = probe_trust_filemode(git_dir).unwrap_or(true);
     let symlinks = probe_symlinks_supported(git_dir).unwrap_or(false);
@@ -247,6 +243,7 @@ mod tests {
             &git_dir,
             InitFilesystemConfigOptions::default(),
             &Environment::capture_process(),
+            false,
         )
         .expect("apply");
         let probed = probe_trust_filemode(&git_dir).expect("probe");
@@ -269,14 +266,13 @@ mod tests {
             "[core]\n\trepositoryformatversion = 0\n",
         )
         .expect("config");
-        std::env::set_var("GIT_TEST_UTF8_NFD_TO_NFC", "1");
         apply_init_filesystem_config(
             &git_dir,
             InitFilesystemConfigOptions::default(),
             &Environment::capture_process(),
+            true,
         )
         .expect("apply");
-        std::env::remove_var("GIT_TEST_UTF8_NFD_TO_NFC");
         let text = fs::read_to_string(git_dir.join("config")).expect("read");
         assert!(text.contains("precomposeunicode = true"));
     }
@@ -291,10 +287,15 @@ mod tests {
         .expect("template config");
 
         let root = TempDir::new().expect("worktree");
-        std::env::set_var("GIT_TEST_UTF8_NFD_TO_NFC", "1");
-        crate::repo::init_repository(root.path(), false, "main", Some(tmpl.path()), "files")
-            .expect("init");
-        std::env::remove_var("GIT_TEST_UTF8_NFD_TO_NFC");
+        crate::repo::init_repository_with_options(
+            root.path(),
+            false,
+            "main",
+            Some(tmpl.path()),
+            "files",
+            true,
+        )
+        .expect("init");
 
         let text = fs::read_to_string(root.path().join(".git/config")).expect("read");
         assert!(

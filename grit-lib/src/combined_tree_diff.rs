@@ -36,7 +36,7 @@ pub fn format_combined_raw_line_all_paths(
     }
     // Emit metadata (modes/oids/status) followed by one source name per parent and the merge path.
     // We can't string-split the single-path line on `\t` because funny names contain tabs.
-    let mut line = combined_raw_meta(p, abbrev_len);
+    let mut line = combined_raw_meta(p, abbrev_len, false);
     for side in &p.parents {
         let name = side.rename_from.as_deref().unwrap_or(&p.path);
         line.push('\t');
@@ -50,12 +50,16 @@ pub fn format_combined_raw_line_all_paths(
 /// Git raw combined line (`::::modes... oids... MM\tpath`).
 #[must_use]
 pub fn format_combined_raw_line(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> String {
-    format!("{}\t{}", combined_raw_meta(p, abbrev_len), p.path)
+    format!("{}\t{}", combined_raw_meta(p, abbrev_len, false), p.path)
 }
 
 /// Metadata portion of a combined raw line: `::::modes... oids... <status>` (no trailing tab/path).
 #[must_use]
-pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> String {
+pub fn combined_raw_meta(
+    p: &CombinedDiffPath,
+    abbrev_len: Option<usize>,
+    print_sha1_ellipsis: bool,
+) -> String {
     let n = p.parents.len();
     let mut colons = String::with_capacity(n);
     for _ in 0..n {
@@ -68,9 +72,7 @@ pub fn combined_raw_meta(p: &CombinedDiffPath, abbrev_len: Option<usize>) -> Str
     modes.push_str(&format!("{:06o}", p.merge_mode));
     // When OIDs are abbreviated, Git appends `...` if `GIT_PRINT_SHA1_ELLIPSIS=yes`
     // (matches the non-combined raw format).
-    let ellipsis = if abbrev_len.is_some()
-        && std::env::var("GIT_PRINT_SHA1_ELLIPSIS").ok().as_deref() == Some("yes")
-    {
+    let ellipsis = if abbrev_len.is_some() && print_sha1_ellipsis {
         "..."
     } else {
         ""

@@ -119,10 +119,24 @@ pub unsafe fn local_time_tzoffset(t: time_t, tm_out: *mut tm) -> TzHhmm {
     offset_min * eastwest
 }
 
-/// Git's `local_tzoffset` for a UTC instant.
+/// Git's `local_tzoffset` for a UTC instant (uses the process timezone).
 pub fn local_tzoffset(time: u64) -> TzHhmm {
+    local_tzoffset_with_tz(time, None)
+}
+
+/// Like [`local_tzoffset`] but uses an explicit `TZ`-style string when provided.
+///
+/// Fixed numeric offsets (`+0200`, `-0500`, `+02:00`) are parsed without touching the
+/// process environment. Named zones fall back to the process timezone when unset or unknown.
+#[must_use]
+pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
     if date_overflows(time) {
         return 0;
+    }
+    if let Some(tz) = tz.filter(|t| !t.is_empty()) {
+        if let Some(hhmm) = parse_fixed_tz_hhmm(tz) {
+            return hhmm;
+        }
     }
     let t = time as time_t;
     let mut buf = std::mem::MaybeUninit::<tm>::uninit();
@@ -132,13 +146,33 @@ pub fn local_tzoffset(time: u64) -> TzHhmm {
     }
 }
 
-/// Read `GIT_TEST_DATE_NOW` if set, else current time (seconds).
-pub fn get_time_sec() -> i64 {
-    if let Ok(s) = std::env::var("GIT_TEST_DATE_NOW") {
-        if let Ok(v) = s.parse::<i64>() {
-            return v;
-        }
+fn parse_fixed_tz_hhmm(tz: &str) -> Option<TzHhmm> {
+    let t = tz.trim();
+    if t.eq_ignore_ascii_case("utc") || t.eq_ignore_ascii_case("gmt") {
+        return Some(0);
     }
+    let (sign, rest) = if let Some(r) = t.strip_prefix('-') {
+        (-1, r)
+    } else if let Some(r) = t.strip_prefix('+') {
+        (1, r)
+    } else {
+        return None;
+    };
+    let digits: String = rest.chars().filter(|c| c.is_ascii_digit()).collect();
+    let (h, m) = match digits.len() {
+        4 => (
+            digits[..2].parse::<i32>().ok()?,
+            digits[2..].parse::<i32>().ok()?,
+        ),
+        2 => (digits.parse::<i32>().ok()?, 0),
+        _ => return None,
+    };
+    Some(sign * (h * 100 + m))
+}
+
+/// Current Unix time in seconds (no environment reads).
+#[must_use]
+pub fn system_now_sec() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

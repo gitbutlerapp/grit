@@ -9,7 +9,7 @@ pub struct DateParseError;
 
 use super::compat::{self, time_t, tm};
 use super::tm::{
-    empty_tm, get_time_sec, init_tm_unknown, is_date_known, match_string, maybeiso8601, nodate,
+    empty_tm, init_tm_unknown, is_date_known, match_string, maybeiso8601, nodate, system_now_sec,
     parse_timestamp_prefix, skip_alpha, tm_to_time_t, TIMESTAMP_MAX,
 };
 
@@ -563,7 +563,7 @@ pub(crate) fn match_multi_number(
             }
         }
         b'-' | b'/' | b'.' => {
-            let now = if now_in == 0 { get_time_sec() } else { now_in };
+            let now = if now_in == 0 { system_now_sec() } else { now_in };
             let mut now_tm = empty_tm();
             let refuse_future: Option<&tm> = if compat::gmtime(now as time_t, &mut now_tm) {
                 Some(&now_tm)
@@ -685,7 +685,7 @@ fn match_digit(date: &[u8], tm: &mut tm, offset: &mut i32, tm_gmt: &mut i32) -> 
         let num2 = ((num % 10000) / 100) as i32;
         let num3 = (num % 100) as i32;
         if n_digits == 8 {
-            let _ = set_date(num1, num2, num3, None, get_time_sec(), tm);
+            let _ = set_date(num1, num2, num3, None, system_now_sec(), tm);
         } else if set_time(num1 as i64, num2 as i64, num3 as i64, tm) == 0
             && date.get(end) == Some(&b'.')
             && date.get(end + 1).is_some_and(|b| b.is_ascii_digit())

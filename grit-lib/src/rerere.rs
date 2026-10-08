@@ -1255,16 +1255,13 @@ pub fn rerere_forget_path(repo: &Repository, path: &str) -> Result<()> {
         .work_tree
         .as_ref()
         .ok_or_else(|| crate::error::Error::PathError("no work tree".to_string()))?;
-    let path = if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(prefix) = cwd.strip_prefix(wt) {
-            let prefix = prefix.to_string_lossy().replace('\\', "/");
-            if prefix.is_empty() {
-                path.to_string()
-            } else {
-                format!("{prefix}/{path}")
-            }
-        } else {
+    let cwd = repo.environment().cwd.clone();
+    let path = if let Ok(prefix) = cwd.strip_prefix(wt) {
+        let prefix = prefix.to_string_lossy().replace('\\', "/");
+        if prefix.is_empty() {
             path.to_string()
+        } else {
+            format!("{prefix}/{path}")
         }
     } else {
         path.to_string()

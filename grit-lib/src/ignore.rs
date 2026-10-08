@@ -355,7 +355,7 @@ fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
     let config = repo.config()?;
     let Some(raw_path) = config
         .get("core.excludesfile")
-        .or_else(default_global_ignore_path)
+        .or_else(|| default_global_ignore_path(repo.environment()))
     else {
         return Ok(Vec::new());
     };
@@ -373,16 +373,8 @@ fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
     load_rules_from_file(&resolved, raw_path, String::new(), false, &mut sink)
 }
 
-fn default_global_ignore_path() -> Option<String> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return Some(format!("{xdg}/git/ignore"));
-        }
-    }
-
-    std::env::var("HOME")
-        .ok()
-        .map(|home| format!("{home}/.config/git/ignore"))
+fn default_global_ignore_path(env: &crate::environment::Environment) -> Option<String> {
+    env.default_global_ignore_path()
 }
 
 fn load_info_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
@@ -1080,7 +1072,7 @@ mod sparse_checkout_tests {
         let lines = vec!["/*".into(), "!/*/".into()];
         assert!(path_in_sparse_checkout("a", &lines, None));
         assert!(!path_in_sparse_checkout("folder1/a", &lines, None));
-        let wt = std::env::temp_dir().join("grit-sparse-wt-test");
+        let wt = tempfile::tempdir().expect("tempdir").into_path().join("grit-sparse-wt-test");
         let _ = std::fs::create_dir_all(wt.join("folder1"));
         let _ = std::fs::write(wt.join("a"), b"x");
         assert!(!path_in_sparse_checkout("folder1/a", &lines, Some(&wt)));

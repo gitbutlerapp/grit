@@ -21,6 +21,7 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::pack;
 use crate::reflog::read_reflog;
 use crate::refs;
+use crate::environment::Environment;
 use crate::repo::Repository;
 
 /// Return `Some(repo)` when a repository can be discovered at `start`.
@@ -50,10 +51,8 @@ pub fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
             if let Some(start) = start {
                 let start = if start.is_absolute() {
                     start.to_path_buf()
-                } else if let Ok(cwd) = std::env::current_dir() {
-                    cwd.join(start)
                 } else {
-                    start.to_path_buf()
+                    Environment::empty().cwd.join(start)
                 };
                 let dot_git = start.join(".git");
                 if dot_git.is_file() || dot_git.is_symlink() {
@@ -1449,7 +1448,7 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
         return normalize_colon_path_for_bare_tree(raw_path);
     };
 
-    let cwd = std::env::current_dir().map_err(Error::Io)?;
+    let cwd = repo.environment().cwd.clone();
     let wt_canon = work_tree.canonicalize().map_err(Error::Io)?;
 
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
@@ -2589,7 +2588,7 @@ enum AtStep {
     Now,
 }
 
-fn try_parse_at_step_inner(inner: &str) -> Option<AtStep> {
+fn try_parse_at_step_inner(inner: &str, env: &Environment) -> Option<AtStep> {
     if inner.eq_ignore_ascii_case("u") || inner.eq_ignore_ascii_case("upstream") {
         return Some(AtStep::Upstream);
     }
@@ -2602,7 +2601,7 @@ fn try_parse_at_step_inner(inner: &str) -> Option<AtStep> {
     if let Ok(n) = inner.parse::<usize>() {
         return Some(AtStep::Index(n));
     }
-    approxidate(inner).map(AtStep::Date)
+    approxidate(inner, env).map(AtStep::Date)
 }
 
 fn next_reflog_at_open(spec: &str, mut from: usize) -> Option<usize> {
@@ -2622,7 +2621,7 @@ fn next_reflog_at_open(spec: &str, mut from: usize) -> Option<usize> {
 }
 
 /// Split `spec` into a ref prefix and a chain of `@{...}` steps (empty chain → not a reflog form).
-fn split_reflog_at_chain(spec: &str) -> Option<(String, Vec<AtStep>)> {
+fn split_reflog_at_chain(spec: &str, env: &Environment) -> Option<(String, Vec<AtStep>)> {
     let at = next_reflog_at_open(spec, 0)?;
     let prefix = spec[..at].to_owned();
     let mut steps = Vec::new();
@@ -2638,7 +2637,7 @@ fn split_reflog_at_chain(spec: &str) -> Option<(String, Vec<AtStep>)> {
         let inner_start = pos + 2;
         let close = spec[inner_start..].find('}').map(|i| inner_start + i)?;
         let inner = &spec[inner_start..close];
-        let step = try_parse_at_step_inner(inner)?;
+        let step = try_parse_at_step_inner(inner, env)?;
         steps.push(step);
         pos = close + 1;
     }
@@ -2772,7 +2771,7 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
 ///
 /// Returns `None` when `spec` is not a reflog-chain form (no `@{` step after the prefix).
 pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> Result<Option<String>> {
-    let Some((prefix, steps)) = split_reflog_at_chain(spec) else {
+    let Some((prefix, steps)) = split_reflog_at_chain(spec, repo.environment()) else {
         return Ok(None);
     };
 
@@ -2861,7 +2860,7 @@ pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> Result<String>
 
 /// Try to resolve `ref@{...}` with optional chained `@{...}` steps (e.g. `other@{u}@{1}`).
 fn try_resolve_reflog_index(repo: &Repository, spec: &str) -> Result<Option<ObjectId>> {
-    let Some((prefix, steps)) = split_reflog_at_chain(spec) else {
+    let Some((prefix, steps)) = split_reflog_at_chain(spec, repo.environment()) else {
         return Ok(None);
     };
 
@@ -2966,28 +2965,25 @@ fn parse_reflog_entry_timestamp(entry: &crate::reflog::ReflogEntry) -> Option<i6
 /// Used by `git log -g` display to match Git's `ref@{date}` formatting in tests.
 #[must_use]
 pub fn reflog_date_selector_timestamp(s: &str) -> Option<i64> {
-    approxidate(s)
+    approxidate(s, &Environment::empty())
+}
+
+/// Parse a reflog date selector with an explicit [`Environment`] (for `GIT_*_DATE` / test clocks).
+#[must_use]
+pub fn reflog_date_selector_timestamp_with(env: &Environment, s: &str) -> Option<i64> {
+    approxidate(s, env)
 }
 
 /// Simple approximate date parser for reflog date lookups.
 /// Handles formats like "2001-09-17", "3.hot.dogs.on.2001-09-17", etc.
-fn approxidate(s: &str) -> Option<i64> {
-    let now_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+fn approxidate(s: &str, env: &Environment) -> Option<i64> {
+    let now_ts = env.now_epoch();
     let lower = s.trim().to_ascii_lowercase();
     if lower.split_whitespace().next() == Some("now") {
         // Match Git's test harness: `test_tick` sets GIT_COMMITTER_DATE; `@{now}` must use that
         // clock, not wall time (t1507 `log -g other@{u}@{now}`).
-        if let Ok(raw) =
-            std::env::var("GIT_COMMITTER_DATE").or_else(|_| std::env::var("GIT_AUTHOR_DATE"))
-        {
-            let mut it = raw.split_whitespace();
-            if let Some(ts) = it.next().and_then(|p| p.parse::<i64>().ok()) {
-                return Some(ts);
-            }
+        if let Some(ts) = env.git_now_date_override() {
+            return Some(ts);
         }
         return Some(now_ts);
     }
@@ -3096,7 +3092,8 @@ fn diagnose_tree_path_error(
                 "fatal: path '{rel_display}' exists on disk, but not in '{rev_label}'."
             ));
         }
-        if let Ok(cwd) = std::env::current_dir() {
+        {
+            let cwd = repo.environment().cwd.clone();
             let prefix = show_prefix(repo, &cwd);
             let pfx = prefix.trim_end_matches('/');
             if !pfx.is_empty() {
@@ -3147,7 +3144,8 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
     let at_stage = path_in_index(repo, path, stage);
 
     if stage > 0 && !in_index {
-        if let Ok(cwd) = std::env::current_dir() {
+        {
+            let cwd = repo.environment().cwd.clone();
             let prefix = show_prefix(repo, &cwd);
             let pfx = prefix.trim_end_matches('/');
             if !pfx.is_empty() {
@@ -3178,7 +3176,8 @@ hint: Did you mean ':0:{path}'?"
 
     if stage == 0 {
         if !on_disk && !in_index {
-            if let Ok(cwd) = std::env::current_dir() {
+            {
+                let cwd = repo.environment().cwd.clone();
                 let prefix = show_prefix(repo, &cwd);
                 let pfx = prefix.trim_end_matches('/');
                 if !pfx.is_empty() {
@@ -3290,18 +3289,9 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
         }
         Err(e) => return Err(e),
     };
-    let index_path = if let Ok(raw) = std::env::var("GIT_INDEX_FILE") {
-        let p = std::path::PathBuf::from(raw);
-        if p.is_absolute() {
-            p
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(p)
-        } else {
-            p
-        }
-    } else {
-        repo.index_path()
-    };
+    let index_path = repo
+        .index_path_for_env()
+        .map_err(|e| Error::ObjectNotFound(e.to_string()))?;
     use crate::index::Index;
     let index = Index::load_expand_sparse(&index_path, &repo.odb)
         .map_err(|_| Error::ObjectNotFound(format!(":{}:{}", colon.stage, path)))?;
@@ -3318,18 +3308,7 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
 /// Look up a path in the index at a given stage and return its OID.
 fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Result<ObjectId> {
     use crate::index::Index;
-    let index_path = if let Ok(raw) = std::env::var("GIT_INDEX_FILE") {
-        let p = std::path::PathBuf::from(raw);
-        if p.is_absolute() {
-            p
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(p)
-        } else {
-            p
-        }
-    } else {
-        repo.index_path()
-    };
+    let index_path = repo.index_path_for_env()?;
     let index = Index::load_expand_sparse(&index_path, &repo.odb)
         .map_err(|_| Error::ObjectNotFound(format!(":{stage}:{path}")))?;
     match index.get(path.as_bytes(), stage) {

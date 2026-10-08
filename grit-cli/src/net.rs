@@ -62,7 +62,10 @@ fn is_http(url: &str) -> bool {
 /// credential store (e.g. a token saved by `grit auth`). Falls back to a plain
 /// credentialed client if the config-driven build fails.
 fn http_client(config: &ConfigSet) -> Result<UreqHttpClient> {
-    let provider = Box::new(HelperCredentialProvider::new(config.clone()));
+    let provider = Box::new(HelperCredentialProvider::with_environment(
+        config.clone(),
+        crate::context::environment(),
+    ));
     let client = UreqHttpClient::from_config(config)
         .context("could not set up HTTP client")?
         .with_credential_provider(provider);
@@ -70,7 +73,10 @@ fn http_client(config: &ConfigSet) -> Result<UreqHttpClient> {
 }
 
 fn connect(url: &str, service: Service) -> Result<Box<dyn Connection>> {
-    let opts = ConnectOptions::default();
+    let opts = ConnectOptions {
+        environment: crate::context::environment(),
+        ..ConnectOptions::default()
+    };
     let conn = if url.starts_with("git://") {
         GitDaemonTransport::new().connect(url, service, &opts)?
     } else if is_ssh_url(url) {

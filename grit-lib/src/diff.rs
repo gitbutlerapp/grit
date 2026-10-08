@@ -3722,6 +3722,7 @@ pub(crate) fn worktree_blob_bytes(
         index_blob: prior_blob.as_deref(),
         renormalize: false,
         check_safecrlf: false,
+        trace: crate::trace::TraceSink::default(),
     };
     Ok(
         crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
@@ -4954,12 +4955,8 @@ fn raw_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, String) {
 }
 
 /// Format a diff entry with abbreviated OIDs.
-pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize) -> String {
-    let ellipsis = if std::env::var("GIT_PRINT_SHA1_ELLIPSIS").ok().as_deref() == Some("yes") {
-        "..."
-    } else {
-        ""
-    };
+pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize, print_sha1_ellipsis: bool) -> String {
+    let ellipsis = if print_sha1_ellipsis { "..." } else { "" };
     let old_hex = format!("{}", entry.old_oid);
     let new_hex = format!("{}", entry.new_oid);
     let old_abbrev = &old_hex[..abbrev_len.min(old_hex.len())];

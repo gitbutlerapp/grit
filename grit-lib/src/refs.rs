@@ -138,9 +138,9 @@ fn resolve_ref_depth(
     }
 
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
+    let storage_owned = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), &stor_name);
     let try_names: Vec<&str> =
-        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix().is_some() {
+        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix(&crate::environment::Environment::empty()).is_some() {
             vec![storage_owned.as_str()]
         } else if storage_owned != stor_name {
             vec![storage_owned.as_str(), stor_name.as_str()]
@@ -206,7 +206,7 @@ pub fn read_raw_ref(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
 
 fn read_raw_ref_files(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
+    let storage_owned = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), &stor_name);
     let (names, n): ([&str; 2], usize) = if storage_owned != stor_name {
         ([storage_owned.as_str(), stor_name.as_str()], 2)
     } else {
@@ -662,7 +662,7 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
             "cannot update ref '{refname}': reference namespace conflict"
         )));
     }
-    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let stor = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), refname);
     let path = storage_dir.join(stor);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -715,7 +715,7 @@ pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
 /// Write a loose ref file under `storage_dir`: the body shared by [`write_ref`]
 /// and [`write_ref_cached`], run after the packed-refs namespace-conflict check.
 fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
-    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let stor = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), refname);
     let path = storage_dir.join(stor);
     // An empty directory left over from a previously deleted nested ref can sit exactly where
     // this ref file must go (e.g. `refs/e-create/foo` after `refs/e-create/foo/bar` was pruned).
@@ -734,7 +734,7 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
         .map(|m| m.file_type().is_dir())
         .unwrap_or(false)
     {
-        let display = ref_path_for_display(&path);
+        let display = ref_path_for_display(&path, &crate::environment::Environment::empty().cwd);
         return Err(Error::Message(format!(
             "fatal: cannot lock ref '{refname}': there is a non-empty directory '{display}' blocking reference '{refname}'"
         )));
@@ -854,7 +854,7 @@ pub fn resolve_ref_cached(
     }
 
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
+    let storage_owned = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), &stor_name);
     let try_names: Vec<&str> = if storage_owned != stor_name {
         vec![storage_owned.as_str(), stor_name.as_str()]
     } else {
@@ -910,18 +910,16 @@ pub fn write_ref_cached(
 /// current working directory when possible (e.g. `.git/refs/foo/bar`), otherwise the full
 /// path. Git builds these paths relative to the worktree root, so under the normal in-tree
 /// case this yields the `.git/...` form that the upstream tests expect.
-fn ref_path_for_display(path: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(rel) = path.strip_prefix(&cwd) {
+fn ref_path_for_display(path: &Path, cwd: &Path) -> String {
+    if let Ok(rel) = path.strip_prefix(cwd) {
+        return rel.to_string_lossy().into_owned();
+    }
+    // On platforms where the cwd and the (canonicalized) ref path disagree only by a
+    // symlinked prefix (e.g. macOS `/tmp` -> `/private/tmp`), retry with both sides
+    // canonicalized so the relative form is still recovered.
+    if let (Ok(cwd_c), Ok(path_c)) = (cwd.canonicalize(), path.canonicalize()) {
+        if let Ok(rel) = path_c.strip_prefix(&cwd_c) {
             return rel.to_string_lossy().into_owned();
-        }
-        // On platforms where the cwd and the (canonicalized) ref path disagree only by a
-        // symlinked prefix (e.g. macOS `/tmp` -> `/private/tmp`), retry with both sides
-        // canonicalized so the relative form is still recovered.
-        if let (Ok(cwd_c), Ok(path_c)) = (cwd.canonicalize(), path.canonicalize()) {
-            if let Ok(rel) = path_c.strip_prefix(&cwd_c) {
-                return rel.to_string_lossy().into_owned();
-            }
         }
     }
     path.to_string_lossy().into_owned()
@@ -990,7 +988,7 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
         return crate::reftable::reftable_delete_ref(git_dir, refname);
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
-    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let stor = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), refname);
     let path = storage_dir.join(&stor);
 
     // Remove the packed-refs entry *first* (acquiring the packed-refs lock). Git deletes the
@@ -1202,9 +1200,9 @@ pub fn read_symbolic_ref(git_dir: &Path, refname: &str) -> Result<Option<String>
         return crate::reftable::reftable_read_symbolic_ref(git_dir, refname);
     }
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
+    let storage_owned = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), &stor_name);
     let try_names: Vec<&str> =
-        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix().is_some() {
+        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix(&crate::environment::Environment::empty()).is_some() {
             vec![storage_owned.as_str()]
         } else if storage_owned != stor_name {
             vec![storage_owned.as_str(), stor_name.as_str()]
@@ -1426,7 +1424,7 @@ pub fn append_reflog_with_config(
         );
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
-    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let stor = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), refname);
     let log_path = storage_dir.join("logs").join(&stor);
     let may_create = force_create
         || match config {
@@ -1548,7 +1546,7 @@ fn verify_branch_cas(
 
 fn read_loose_or_packed_oid(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
+    let storage_owned = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), &stor_name);
     let try_names: Vec<&str> = if storage_owned != stor_name {
         vec![storage_owned.as_str(), stor_name.as_str()]
     } else {
@@ -1632,14 +1630,14 @@ fn update_branch_for_commit_files(
             update.branch_ref
         )));
     }
-    let stor = crate::ref_namespace::storage_ref_name(update.branch_ref);
+    let stor = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), update.branch_ref);
     let path = storage_dir.join(&stor);
     remove_empty_ref_directory(&path);
     if fs::symlink_metadata(&path)
         .map(|m| m.file_type().is_dir())
         .unwrap_or(false)
     {
-        let display = ref_path_for_display(&path);
+        let display = ref_path_for_display(&path, &crate::environment::Environment::empty().cwd);
         return Err(Error::Message(format!(
             "fatal: cannot lock ref '{}': there is a non-empty directory '{display}' blocking reference '{}'",
             update.branch_ref, update.branch_ref
@@ -1925,7 +1923,7 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
 
     for (name, _) in &entries {
         let storage_dir = ref_storage_dir(git_dir, name);
-        let stor = crate::ref_namespace::storage_ref_name(name);
+        let stor = crate::ref_namespace::storage_ref_name(&crate::environment::Environment::empty(), name);
         let path = storage_dir.join(&stor);
         if path.is_file() {
             let _ = fs::remove_file(&path);
@@ -2013,7 +2011,7 @@ pub fn list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>
     // main git dir case, so `pack-refs` could leave stale packed lines that shadowed updates.
     let mut by_name: HashMap<String, ObjectId> = HashMap::new();
 
-    let stored_prefixes: Vec<String> = if let Some(ns) = crate::ref_namespace::ref_storage_prefix()
+    let stored_prefixes: Vec<String> = if let Some(ns) = crate::ref_namespace::ref_storage_prefix(&crate::environment::Environment::empty())
     {
         if prefix.starts_with("refs/namespaces/") {
             vec![prefix.to_owned()]
@@ -2260,7 +2258,7 @@ fn collect_loose_refs_into_map(
                     }
                 }
             } else {
-                let logical = crate::ref_namespace::logical_ref_name_from_storage(&refname)
+                let logical = crate::ref_namespace::logical_ref_name_from_storage(&crate::environment::Environment::empty(), &refname)
                     .unwrap_or_else(|| refname.clone());
                 if let Ok(oid) = resolve_ref(resolve_git_dir, &logical) {
                     out.insert(logical, oid);
@@ -2343,7 +2341,7 @@ fn collect_packed_refs_into_map(
         let key = if physical_keys {
             refname.to_owned()
         } else {
-            crate::ref_namespace::logical_ref_name_from_storage(refname)
+            crate::ref_namespace::logical_ref_name_from_storage(&crate::environment::Environment::empty(), refname)
                 .unwrap_or_else(|| refname.to_owned())
         };
         out.insert(key, oid);

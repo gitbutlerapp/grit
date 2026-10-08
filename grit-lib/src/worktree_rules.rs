@@ -276,7 +276,7 @@ fn load_attribute_stack_prefix_and_info(
     odb: &Odb,
 ) -> Result<(Vec<AttrRule>, Vec<AttrRule>)> {
     let mut stack_prefix = Vec::new();
-    if let Some(g) = global_attributes_path(config)? {
+    if let Some(g) = global_attributes_path(config, repo.environment())? {
         if let Some(content) = read_worktree_gitattributes(&g) {
             stack_prefix.extend(crlf::parse_gitattributes_content(&content));
         }
@@ -299,20 +299,14 @@ fn load_attribute_stack_prefix_and_info(
     Ok((stack_prefix, info_rules))
 }
 
-fn global_attributes_path(config: &ConfigSet) -> Result<Option<PathBuf>> {
+fn global_attributes_path(
+    config: &ConfigSet,
+    env: &crate::environment::Environment,
+) -> Result<Option<PathBuf>> {
     if let Some(path) = config.get("core.attributesfile") {
         return Ok(Some(PathBuf::from(parse_path(&path))));
     }
-    let home = std::env::var("HOME").ok();
-    let Some(home) = home else {
-        return Ok(None);
-    };
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return Ok(Some(PathBuf::from(xdg).join("git/attributes")));
-        }
-    }
-    Ok(Some(PathBuf::from(home).join(".config/git/attributes")))
+    Ok(env.default_global_attributes_path())
 }
 
 fn read_worktree_gitattributes(path: &Path) -> Option<String> {

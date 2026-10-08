@@ -44,13 +44,11 @@ pub struct CommitHookEnv<'a> {
     pub extra_env: &'a [(&'a str, &'a str)],
 }
 
-fn absolute_index_path(index_file: &Path) -> PathBuf {
+fn absolute_index_path(index_file: &Path, cwd: &Path) -> PathBuf {
     if index_file.is_absolute() {
         index_file.to_path_buf()
-    } else if let Ok(cwd) = std::env::current_dir() {
-        cwd.join(index_file)
     } else {
-        index_file.to_path_buf()
+        cwd.join(index_file)
     }
 }
 
@@ -90,13 +88,16 @@ fn build_commit_hook_env(
     opts: &CommitHookEnv<'_>,
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = Vec::new();
+    let repo_env = repo.environment();
     if let Some(p) = opts.index_file {
         env.push((
             "GIT_INDEX_FILE".to_string(),
-            absolute_index_path(p).to_string_lossy().into_owned(),
+            absolute_index_path(p, &repo_env.cwd)
+                .to_string_lossy()
+                .into_owned(),
         ));
     }
-    let invocation_cwd = std::env::current_dir().unwrap_or_else(|_| work_dir.to_path_buf());
+    let invocation_cwd = repo_env.invocation_cwd();
     let prefix = opts
         .git_prefix
         .map(|s| s.to_string())
@@ -220,10 +221,18 @@ enum ResolvedHook {
 
 /// Resolve the hooks directory from config or fall back to `$GIT_DIR/hooks`.
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
-    resolve_hooks_dir_for_config(Some(&repo.git_dir), repo.config().ok().as_deref())
+    resolve_hooks_dir_for_config(
+        Some(&repo.git_dir),
+        repo.config().ok().as_deref(),
+        &repo.environment().cwd,
+    )
 }
 
-fn resolve_hooks_dir_for_config(git_dir: Option<&Path>, config: Option<&ConfigSet>) -> PathBuf {
+fn resolve_hooks_dir_for_config(
+    git_dir: Option<&Path>,
+    config: Option<&ConfigSet>,
+    cwd: &Path,
+) -> PathBuf {
     if let Some(cfg) = config {
         if let Some(hooks_path) = cfg.get("core.hooksPath") {
             let expanded = parse_path(&hooks_path);
@@ -231,9 +240,7 @@ fn resolve_hooks_dir_for_config(git_dir: Option<&Path>, config: Option<&ConfigSe
             if p.is_absolute() {
                 return p;
             }
-            if let Ok(cwd) = std::env::current_dir() {
-                return cwd.join(p);
-            }
+            return cwd.join(p);
         }
     }
     git_dir
@@ -333,7 +340,11 @@ fn resolve_hook_sequence(
     for (_friendly, command) in tables.hooks_for_event(hook_name)? {
         seq.push(ResolvedHook::Configured { command });
     }
-    let hooks_dir = resolve_hooks_dir_for_config(Some(&repo.git_dir), Some(config));
+    let hooks_dir = resolve_hooks_dir_for_config(
+        Some(&repo.git_dir),
+        Some(config),
+        &repo.environment().cwd,
+    );
     if let Some(path) = traditional_hook_candidate(repo, &hooks_dir, hook_name) {
         let work_dir = repo.work_tree.as_deref().unwrap_or(&repo.git_dir);
         let argv0 = hook_argv0(repo, &hooks_dir, hook_name, work_dir);
@@ -355,7 +366,11 @@ pub fn list_hooks_display_lines(
         lines.push(friendly);
     }
     if let Some(r) = repo {
-        let hooks_dir = resolve_hooks_dir_for_config(git_dir, Some(config));
+        let hooks_dir = resolve_hooks_dir_for_config(
+            git_dir,
+            Some(config),
+            &r.environment().cwd,
+        );
         if traditional_hook_candidate(r, &hooks_dir, hook_name).is_some() {
             lines.push("hook from hookdir".to_owned());
         }
@@ -518,7 +533,7 @@ pub fn run_hook_opts(
     let work_dir: PathBuf = opts.cwd.map_or_else(
         || match repo {
             Some(r) => r.work_tree.clone().unwrap_or_else(|| r.git_dir.clone()),
-            None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            None => crate::environment::Environment::empty().cwd,
         },
         Path::to_path_buf,
     );
