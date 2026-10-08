@@ -15,18 +15,14 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 [`Odb::read`](rustdoc:grit_lib::odb::Odb) returns an [`Object`](rustdoc:grit_lib::objects::Object) with `kind` and uncompressed `data`. Packed and loose objects share the same API.
 
-<<<<<<< New base: lib: repository-scoped PackStore for pack and MIDX read caches
 When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](rustdoc:grit_lib::odb::Odb) (see `read_info` on [`Odb`](rustdoc:grit_lib::odb::Odb)). It returns [`ObjectInfo`](rustdoc:grit_lib::objects::ObjectInfo) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
 
-||||||| Common ancestor
-=======
 ## Pack read caching
 
 [`Odb`](rustdoc:grit_lib::odb::Odb) owns a repository-scoped [`PackStore`](rustdoc:grit_lib::pack_store::PackStore): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](rustdoc:grit_lib::odb::Odb) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](rustdoc:grit_lib::odb::Odb).
 
 After repack, garbage collection, or installing a pack with [`install_pack_bytes`](rustdoc:grit_lib::index_pack::install_pack_bytes), call [`Odb::invalidate_packs`](rustdoc:grit_lib::odb::Odb) so the next read rescans `objects/pack/`. If another [`Odb`](rustdoc:grit_lib::odb::Odb) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
 
->>>>>>> Current commit: docs: pack read caching section on objects library page
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:

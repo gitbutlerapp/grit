@@ -2838,7 +2838,9 @@ mod tests {
         filetime::set_file_mtime(objects.join("pack"), filetime::FileTime::now()).unwrap();
 
         assert!(
-            reprepare_pack_directory_on_miss(&objects).unwrap(),
+            odb.with_pack_store_for(&objects, || {
+                reprepare_pack_directory_on_miss(&objects).unwrap()
+            }),
             "pack directory change must require reprepare"
         );
         assert!(

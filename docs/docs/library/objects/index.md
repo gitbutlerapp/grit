@@ -16,6 +16,12 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](https://docs.rs/
 
 When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (see `read_info` on [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html)). It returns [`ObjectInfo`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectInfo.html) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
 
+## Pack read caching
+
+[`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) owns a repository-scoped [`PackStore`](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html).
+
+After repack, garbage collection, or installing a pack with [`install_pack_bytes`](https://docs.rs/grit-lib/latest/grit_lib/index_pack/fn.install_pack_bytes.html), call [`Odb::invalidate_packs`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so the next read rescans `objects/pack/`. If another [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:

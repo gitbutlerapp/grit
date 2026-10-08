@@ -2650,6 +2650,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::AttrRule` | struct | A parsed .gitattributes rule. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.AttrRule.html) |
 | `grit_lib::crlf::AutoCrlf` | enum | What core.autocrlf is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.AutoCrlf.html) |
 | `grit_lib::crlf::ConversionConfig` | struct | Global conversion settings derived from config. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.ConversionConfig.html) |
+| `grit_lib::crlf::ConversionError` | enum | Error from convert_to_git, convert_to_worktree, and related CRLF/encoding helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.ConversionError.html) |
 | `grit_lib::crlf::ConvertToGitOpts` | struct | Optional inputs for convert_to_git_with_opts (Git CONV_EOL_RENORMALIZE / index blob). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.ConvertToGitOpts.html) |
 | `grit_lib::crlf::CoreEol` | enum | What core.eol is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.CoreEol.html) |
 | `grit_lib::crlf::CrlfLegacyAttr` | enum | Legacy crlf gitattribute (deprecated in Git; still honored for EOL conversion). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.CrlfLegacyAttr.html) |
@@ -2659,6 +2660,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::MergeAttr` | enum | Per-file merge attribute from .gitattributes. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.MergeAttr.html) |
 | `grit_lib::crlf::SafeCrlf` | enum | What core.safecrlf is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.SafeCrlf.html) |
 | `grit_lib::crlf::TextAttr` | enum | Per-file text attribute from .gitattributes. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.TextAttr.html) |
+| `grit_lib::crlf::WorkTreeEncodingError` | enum | Working-tree encoding conversion failure (Git reencode_string_len returning NULL). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.WorkTreeEncodingError.html) |
 | `grit_lib::delta_encode` | module | Encode Git pack binary deltas (format decoded by crate::unpack_objects::apply_delta). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/index.html) |
 | `grit_lib::delta_islands` | module | Delta islands — restrict cross-island deltas in pack-objects (--delta-islands). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/index.html) |
 | `grit_lib::delta_islands::DeltaIslands` | struct | Computed island marks for a pack-objects run. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.DeltaIslands.html) |
@@ -2826,6 +2828,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack_geometry::GeometricPack` | struct | One local pack considered for geometric repacking. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_geometry/struct.GeometricPack.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
 | `grit_lib::pack_rev` | module | On-disk pack reverse index (.rev) — RIDX format matching Git’s pack-write.c. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_rev/index.html) |
+| `grit_lib::pack_store` | module | Repository-scoped pack and MIDX read caches. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/index.html) |
+| `grit_lib::pack_store::PackStore` | struct | Per-objects/ cache of pack indexes, bytes, MIDX views, and delta-base LRU state. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) |
 | `grit_lib::patch_ids` | module | Patch-ID computation for commit equivalence detection. | [API](https://docs.rs/grit-lib/latest/grit_lib/patch_ids/index.html) |
 | `grit_lib::patch_ids::PatchIdMode` | enum | How to compute a patch-ID from unified diff text. | [API](https://docs.rs/grit-lib/latest/grit_lib/patch_ids/enum.PatchIdMode.html) |
 | `grit_lib::path` | module | Git-compatible verification of tree/index path components. | [API](https://docs.rs/grit-lib/latest/grit_lib/path/index.html) |
@@ -3363,6 +3367,12 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](https://docs.rs/
 
 When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (see `read_info` on [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html)). It returns [`ObjectInfo`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectInfo.html) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
 
+## Pack read caching
+
+[`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) owns a repository-scoped [`PackStore`](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html).
+
+After repack, garbage collection, or installing a pack with [`install_pack_bytes`](https://docs.rs/grit-lib/latest/grit_lib/index_pack/fn.install_pack_bytes.html), call [`Odb::invalidate_packs`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so the next read rescans `objects/pack/`. If another [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
@@ -3653,16 +3663,20 @@ The program below discovers a repository (or opens `.git` in the current directo
 //! Source for the library guide "Repository" page (included in the docs site).
 
 use grit_lib::config::ConfigSet;
+use grit_lib::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::Repository;
 
 fn main() -> Result<(), Error> {
-    let repo = match Repository::discover(None) {
+    let cwd = std::env::current_dir().map_err(Error::Io)?;
+    let env = Environment::from_vars(std::env::vars_os(), cwd.clone());
+    let options = RepositoryOptions::with_environment(env.clone());
+
+    let repo = match Repository::discover_with(&options, None) {
         Ok(r) => r,
         Err(Error::NotARepository(_)) => {
-            let here = std::env::current_dir().map_err(Error::Io)?;
-            let git_dir = here.join(".git");
-            Repository::open(&git_dir, Some(&here))?
+            let git_dir = cwd.join(".git");
+            Repository::open_with(&options, &git_dir, Some(&cwd))?
         }
         Err(err) => return Err(err),
     };
@@ -3674,11 +3688,7 @@ fn main() -> Result<(), Error> {
         println!("work_tree=<bare>");
     }
 
-    let cfg = ConfigSet::load(
-        &grit_lib::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )?;
+    let cfg = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true)?;
     let name = cfg.get("user.name").unwrap_or_default();
     if !name.is_empty() {
         println!("user.name={name}");
@@ -3979,7 +3989,7 @@ cargo bench -p grit-lib --bench hash
 
 - **Fixtures** use synthetic repos at large file counts and deep history, built deterministically in a scratch directory.
 - **Drivers** are CLI invocations of `grit` and `git` with equivalent semantics (not argv-for-argv compatibility).
-- **Ratios** are **Grit mean ÷ Git mean**. Values below `1.00×` mean Grit is faster; values above `2.00×` are highlighted as regressions worth investigating.
+- **Ratios** are **Grit median ÷ Git median** (stored in each scenario’s `ratio` field; hyperfine also records mean and spread). Values below `1.00×` mean Grit is faster; values above `2.00×` are highlighted as regressions worth investigating.
 - **Spread** shows Grit’s standard deviation across timed runs (hyperfine `--min-runs` / warmup settings from the baseline capture).
 
 ### Reproduce locally
@@ -4001,6 +4011,48 @@ Compare a fresh run against the committed baseline (exit non-zero if any scenari
 ./target/release/grit-bench compare grit-utils/baselines/hot-paths-before.json /tmp/grit-bench-hot-paths.json --tolerance 0.10
 ```
 
+### Hot-path acceptance (maintenance plan step 386)
+
+Recorded on the factory VM after stacking pick/merge/stash perf work on `origin/main`. **Before** numbers are in `grit-utils/baselines/hot-paths-before.json` (2026-10-07); **after** in `grit-utils/baselines/hot-paths-after.json` (2026-10-08). Config isolation (`GIT_CONFIG_NOSYSTEM`, empty global config) applies to hot-path, suite `commit`, and related scenarios. FSMN variants: `grit-utils/baselines/hot-paths-after-fsmn.json`.
+
+**Machine (2026-10-08 acceptance):** Intel Xeon (factory VM), **4** physical / **4** logical CPUs, **16 GiB** RAM, Linux **6.12.94+**, scratch filesystem **ext4**, `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.1**, hyperfine **2.x** (see `machine` in each baseline JSON).
+
+| Scenario | L before × | L after × | H before × | H after × | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `add` | — | **2.52** | — | **4.51** | `suite-after-LH.json` (`add-{N}`) |
+| `commit` | — | **0.84** | — | **1.16** | `commit-after-LH.json` — `grit commit` vs `git add -A && git commit` |
+| `switch` | 3.29 | 3.44 | 4.89 | 5.63 | Still &gt;2× at L; H/L ≈ **1.64×** (&gt;1.25× bar) |
+| `switch-wide` | 3.70 | 2.29 | 26.5 | 2.98 | L still &gt;2×; H/L ≈ **1.30×** |
+| `pick` | 1.41 | 1.14 | 5.50 | 4.04 | L within 2×; H/L ≈ **3.54×** |
+| `merge` | 2.61 | 2.18 | 3.97 | 3.83 | L still above 2×; H/L ≈ **1.76×** |
+| `pick-series` | 12.9 | 11.2 | 21.7 | 17.7 | L &gt;2×; H/L ≈ **1.58×**; 20× sequential `grit pick` vs one `git cherry-pick` range |
+
+**Suite at L/H** (`grit-utils/baselines/suite-after-LH.json`): status scenarios remain far above 2× (dirty/clean at 10k and 100k files).
+
+**H/L acceptance (1.25× bar):** after-run medians fail the scaling check for **`switch`**, **`switch-wide`**, **`pick`**, **`merge`**, and **`pick-series`** (not only switch/pick/merge). **`commit`** and **`add`** at H are within 2× of Git but **`add`** at L/H both exceed 2× at 10k and 100k files.
+
+Two back-to-back hot-path after runs (`hot-paths-after-run1.json` vs `run2.json`) agree within **10% relative** on every scenario except `merge-100000` and `pick-100000` (~**13–14%** relative spread). The default `grit-bench compare` tolerance is an **absolute** 0.10 on the ratio, which is tighter than ±10% relative for large ratios (e.g. pick-series).
+
+### Follow-up tracking (step 386)
+
+No GitHub issues were filed from this factory run (`file_bug_report` is dogfooding-only). Track these against roadmap item 4:
+
+- **L &gt;2×:** `switch`, `switch-wide`, `merge`, `pick-series`, `add` (10k and 100k), status at L/H.
+- **H/L &gt;1.25×:** `switch`, `switch-wide`, `pick`, `merge`, `pick-series`.
+- **Repeatability:** second hot-path after-run drift on `merge-100000` and `pick-100000` (~13–14% relative).
+- **CLI gaps:** `grep`, `rebase`, `reset`, `stash push` (deferrals documented above).
+
+**Criterion** (`cargo bench -p grit-lib --bench hot_paths`, release): see factory run log — `apply_stash_L` ~52 ms median; `pick_2000_paths_L` ~621 ms (library merge/checkout path, not CLI).
+
+### Roadmap commands without a `grit` engine yet
+
+| Git command | Grit CLI | How the plan covers it |
+| --- | --- | --- |
+| `grep` | none | Deferred — no porcelain driver in scope |
+| `rebase` | none | `pick-series` grit-bench scenario (20× `grit pick`) as upper-bound proxy |
+| `reset` | none | Deferred |
+| `stash push` | none | Criterion `apply_stash` / library `apply_stash` bench; no `grit stash push` timing |
+
 ### Results
 
 
@@ -4008,43 +4060,69 @@ Compare a fresh run against the committed baseline (exit non-zero if any scenari
 | | |
 | --- | --- |
 | Git | git version 2.43.0 |
-| Grit | grit 0.5.0 |
+| Grit | grit 0.5.1 |
 | CPU | Intel(R) Xeon(R) Processor |
 | OS | linux (Linux 6.12.94+) |
-| Recorded | 2026-10-07 15:15:12.204218776 |
+| Recorded | 2026-10-08 06:51:40.138623969 |
 
 ## Summary by operation
 
 | Operation | Scenarios | Median Grit / Git | Worst Grit / Git |
 | --- | ---: | ---: | ---: |
-| merge | 2 | 3.29× | 3.96× |
-| pick | 4 | 9.10× | 19.51× |
-| switch | 4 | 4.28× | 27.42× |
+| add | 2 | 3.49× | 4.50× |
+| commit | 2 | 1.00× | 1.16× |
+| merge | 2 | 3.00× | 3.80× |
+| pick | 4 | 6.96× | 16.49× |
+| status | 4 | 9.02× | 46.96× |
+| switch | 4 | 3.25× | 5.36× |
+
+### add
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `add-10000` | synthetic-10000 | 19.7 | 49.0 | 2.49× | ±2.49 ms |
+| `add-100000` | synthetic-100000 | 198 | 891 | 4.50× | ±65.8 ms |
+
+### commit
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `commit-10000` | synthetic-10000 | 176 | 148 | 0.84× | ±7.32 ms |
+| `commit-100000` | synthetic-100000 | 1,929 | 2,243 | 1.16× | ±93.4 ms |
 
 ### merge
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `merge-10000` | synthetic-10000 | 104 | 272 | 2.61× | ±11.6 ms |
-| `merge-100000` | synthetic-100000 | 307 | 1,215 | 3.96× | ±4.44 ms |
+| `merge-10000` | synthetic-10000 | 116 | 256 | 2.21× | ±38.0 ms |
+| `merge-100000` | synthetic-100000 | 246 | 934 | 3.80× | ±26.5 ms |
 
 ### pick
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `pick-10000` | synthetic-10000 | 114 | 162 | 1.42× | ±3.24 ms |
-| `pick-series-10000` | synthetic-10000 | 126 | 1,604 | 12.72× | ±40.4 ms |
-| `pick-100000` | synthetic-100000 | 208 | 1,139 | 5.47× | ±18.5 ms |
-| `pick-series-100000` | synthetic-100000 | 1,052 | 20,538 | 19.51× | ±299 ms |
+| `pick-10000` | synthetic-10000 | 126 | 170 | 1.35× | ±53.6 ms |
+| `pick-series-10000` | synthetic-10000 | 137 | 1,354 | 9.86× | ±53.6 ms |
+| `pick-100000` | synthetic-100000 | 204 | 828 | 4.06× | ±25.0 ms |
+| `pick-series-100000` | synthetic-100000 | 996 | 16,428 | 16.49× | ±315 ms |
+
+### status
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `status-clean-10000` | synthetic-10000 | 8.25 | 37.8 | 4.58× | ±2.78 ms |
+| `status-dirty-10000` | synthetic-10000 | 10.3 | 103 | 10.03× | ±5.66 ms |
+| `status-clean-100000` | synthetic-100000 | 89.0 | 712 | 8.01× | ±13.3 ms |
+| `status-dirty-100000` | synthetic-100000 | 113 | 5,328 | 46.96× | ±95.1 ms |
 
 ### switch
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `switch-10000` | synthetic-10000 | 22.9 | 83.6 | 3.64× | ±31.0 ms |
-| `switch-wide-10000` | synthetic-10000 | 46.2 | 163 | 3.53× | ±1.55 ms |
-| `switch-100000` | synthetic-100000 | 159 | 778 | 4.91× | ±23.2 ms |
-| `switch-wide-100000` | synthetic-100000 | 397 | 10,875 | 27.42× | ±756 ms |
+| `switch-10000` | synthetic-10000 | 25.4 | 90.3 | 3.55× | ±15.4 ms |
+| `switch-wide-10000` | synthetic-10000 | 49.8 | 111 | 2.24× | ±17.3 ms |
+| `switch-100000` | synthetic-100000 | 183 | 979 | 5.36× | ±88.7 ms |
+| `switch-wide-100000` | synthetic-100000 | 418 | 1,235 | 2.96× | ±30.3 ms |
 
 
 To refresh this page after updating a baseline JSON file, regenerate the static site:

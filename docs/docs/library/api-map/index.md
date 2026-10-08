@@ -70,6 +70,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::AttrRule` | struct | A parsed .gitattributes rule. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.AttrRule.html) |
 | `grit_lib::crlf::AutoCrlf` | enum | What core.autocrlf is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.AutoCrlf.html) |
 | `grit_lib::crlf::ConversionConfig` | struct | Global conversion settings derived from config. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.ConversionConfig.html) |
+| `grit_lib::crlf::ConversionError` | enum | Error from convert_to_git, convert_to_worktree, and related CRLF/encoding helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.ConversionError.html) |
 | `grit_lib::crlf::ConvertToGitOpts` | struct | Optional inputs for convert_to_git_with_opts (Git CONV_EOL_RENORMALIZE / index blob). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/struct.ConvertToGitOpts.html) |
 | `grit_lib::crlf::CoreEol` | enum | What core.eol is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.CoreEol.html) |
 | `grit_lib::crlf::CrlfLegacyAttr` | enum | Legacy crlf gitattribute (deprecated in Git; still honored for EOL conversion). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.CrlfLegacyAttr.html) |
@@ -79,6 +80,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::MergeAttr` | enum | Per-file merge attribute from .gitattributes. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.MergeAttr.html) |
 | `grit_lib::crlf::SafeCrlf` | enum | What core.safecrlf is set to. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.SafeCrlf.html) |
 | `grit_lib::crlf::TextAttr` | enum | Per-file text attribute from .gitattributes. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.TextAttr.html) |
+| `grit_lib::crlf::WorkTreeEncodingError` | enum | Working-tree encoding conversion failure (Git reencode_string_len returning NULL). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.WorkTreeEncodingError.html) |
 | `grit_lib::delta_encode` | module | Encode Git pack binary deltas (format decoded by crate::unpack_objects::apply_delta). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/index.html) |
 | `grit_lib::delta_islands` | module | Delta islands — restrict cross-island deltas in pack-objects (--delta-islands). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/index.html) |
 | `grit_lib::delta_islands::DeltaIslands` | struct | Computed island marks for a pack-objects run. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.DeltaIslands.html) |
@@ -246,6 +248,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack_geometry::GeometricPack` | struct | One local pack considered for geometric repacking. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_geometry/struct.GeometricPack.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
 | `grit_lib::pack_rev` | module | On-disk pack reverse index (.rev) — RIDX format matching Git’s pack-write.c. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_rev/index.html) |
+| `grit_lib::pack_store` | module | Repository-scoped pack and MIDX read caches. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/index.html) |
+| `grit_lib::pack_store::PackStore` | struct | Per-objects/ cache of pack indexes, bytes, MIDX views, and delta-base LRU state. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) |
 | `grit_lib::patch_ids` | module | Patch-ID computation for commit equivalence detection. | [API](https://docs.rs/grit-lib/latest/grit_lib/patch_ids/index.html) |
 | `grit_lib::patch_ids::PatchIdMode` | enum | How to compute a patch-ID from unified diff text. | [API](https://docs.rs/grit-lib/latest/grit_lib/patch_ids/enum.PatchIdMode.html) |
 | `grit_lib::path` | module | Git-compatible verification of tree/index path components. | [API](https://docs.rs/grit-lib/latest/grit_lib/path/index.html) |
