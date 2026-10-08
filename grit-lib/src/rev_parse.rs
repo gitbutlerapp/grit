@@ -22,6 +22,7 @@ use crate::pack;
 use crate::reflog::read_reflog;
 use crate::refs;
 use crate::repo::Repository;
+use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
 
 /// Return `Some(repo)` when a repository can be discovered at `start`.
 ///
@@ -277,9 +278,10 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
     let config_path = repo.git_dir.join("config");
     let config_content = fs::read_to_string(&config_path).map_err(Error::Io)?;
     let Some((remote, merge)) = parse_branch_tracking(&config_content, &branch_key) else {
-        return Err(Error::Message(format!(
-            "fatal: no upstream configured for branch '{display_branch}'"
-        )));
+        return Err(RevParseError::NoUpstream {
+            branch: display_branch,
+        }
+        .into());
     };
     if remote == "." {
         let m = merge.trim();
@@ -293,9 +295,10 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         .ok_or_else(|| Error::InvalidRef(format!("invalid merge ref: {merge}")))?;
     let tracking = format!("refs/remotes/{remote}/{merge_branch}");
     if refs::resolve_ref(&repo.git_dir, &tracking).is_err() {
-        return Err(Error::Message(format!(
-            "fatal: upstream branch '{merge}' not stored as a remote-tracking branch"
-        )));
+        return Err(RevParseError::UpstreamNotTracked {
+            merge: merge.to_owned(),
+        }
+        .into());
     }
     Ok(tracking)
 }
@@ -353,9 +356,7 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
         });
 
     let Some(push_remote_name) = push_remote else {
-        return upstream_tracking.ok_or_else(|| {
-            Error::Message("fatal: branch has no configured push remote".to_owned())
-        });
+        return upstream_tracking.ok_or_else(|| RevParseError::NoPushRemote.into());
     };
 
     // When the push remote has any configured `push` refspecs, they take priority
@@ -366,9 +367,11 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
         return match push_refspec_mapped_tracking(&config_content, &push_remote_name, branch_short)
         {
             Some(mapped) => Ok(mapped),
-            None => Err(Error::Message(format!(
-                "fatal: push refspecs for '{push_remote_name}' do not include '{branch_short}'"
-            ))),
+            None => Err(RevParseError::PushRefspecMissing {
+                remote: push_remote_name,
+                branch: branch_short.to_owned(),
+            }
+            .into()),
         };
     }
 
@@ -376,18 +379,17 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
     let push_default = push_default.as_deref().unwrap_or("simple");
 
     if push_default == "nothing" {
-        return Err(Error::Message(
-            "fatal: push.default is nothing; no push destination".to_owned(),
-        ));
+        return Err(RevParseError::PushDefaultNothing.into());
     }
 
     let current_tracking = format!("refs/remotes/{push_remote_name}/{branch_short}");
 
     match push_default {
         "upstream" => upstream_tracking.ok_or_else(|| {
-            Error::Message(format!(
-                "fatal: branch '{branch_short}' has no upstream for push.default upstream"
-            ))
+            RevParseError::NoUpstreamForPush {
+                branch: branch_short.to_owned(),
+            }
+            .into()
         }),
         "simple" => {
             if let Some(ref up) = upstream_tracking {
@@ -397,9 +399,7 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
                     return Ok(current_tracking);
                 }
             }
-            Err(Error::Message(
-                "fatal: push.default simple: upstream and push ref differ".to_owned(),
-            ))
+            Err(RevParseError::PushDefaultSimpleMismatch.into())
         }
         _ => {
             if refs::resolve_ref(&repo.git_dir, &current_tracking).is_ok() {
@@ -407,9 +407,10 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
             } else if let Some(up) = upstream_tracking {
                 Ok(up)
             } else {
-                Err(Error::Message(format!(
-                    "fatal: no push tracking ref for branch '{branch_short}'"
-                )))
+                Err(RevParseError::NoPushTrackingRef {
+                    branch: branch_short.to_owned(),
+                }
+                .into())
             }
         }
     }
@@ -569,14 +570,10 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
 
     if base.is_empty() {
         let Some(head) = refs::read_head(&repo.git_dir)? else {
-            return Err(Error::Message(
-                "fatal: HEAD does not point to a branch".to_owned(),
-            ));
+            return Err(RevParseError::HeadNotBranch.into());
         };
         let Some(short) = head.strip_prefix("refs/heads/") else {
-            return Err(Error::Message(
-                "fatal: HEAD does not point to a branch".to_owned(),
-            ));
+            return Err(RevParseError::HeadNotBranch.into());
         };
         return Ok((short.to_owned(), short.to_owned()));
     }
@@ -589,7 +586,10 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
     }
     let refname = format!("refs/heads/{base}");
     if refs::resolve_ref(&repo.git_dir, &refname).is_err() {
-        return Err(Error::Message(format!("fatal: no such branch: '{base}'")));
+        return Err(RevParseError::NoSuchBranch {
+            branch: base.to_owned(),
+        }
+        .into());
     }
     Ok((base.to_owned(), base.to_owned()))
 }
@@ -1222,8 +1222,11 @@ fn resolve_revision_impl(
 
     // Pseudo-ref written by `git merge` / grit merge on conflict (tree OID, one line).
     if spec == "AUTO_MERGE" {
-        let raw = fs::read_to_string(repo.git_dir.join("AUTO_MERGE"))
-            .map_err(|e| Error::Message(format!("failed to read AUTO_MERGE: {e}")))?;
+        let raw = fs::read_to_string(repo.git_dir.join("AUTO_MERGE")).map_err(|e| {
+            Error::from(RevParseError::AutoMergeRead {
+                detail: e.to_string(),
+            })
+        })?;
         let line = raw.lines().next().unwrap_or("").trim();
         return line
             .parse::<ObjectId>()
@@ -1328,14 +1331,16 @@ fn resolve_revision_impl(
             ) {
                 Ok(o) => o,
                 Err(Error::ObjectNotFound(s)) if s == before => {
-                    return Err(Error::Message(format!(
-                        "fatal: invalid object name '{before}'."
-                    )));
+                    return Err(RevParseError::InvalidObjectName {
+                        name: before.to_owned(),
+                    }
+                    .into());
                 }
-                Err(Error::Message(msg)) if msg.contains("ambiguous argument") => {
-                    return Err(Error::Message(format!(
-                        "fatal: invalid object name '{before}'."
-                    )));
+                Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+                    return Err(RevParseError::InvalidObjectName {
+                        name: before.to_owned(),
+                    }
+                    .into());
                 }
                 Err(e) => return Err(e),
             };
@@ -1353,9 +1358,11 @@ fn resolve_revision_impl(
                         .and_then(|p| p.canonicalize().ok())
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
-                    return Err(Error::Message(format!(
-                        "fatal: '{after}' is outside repository at '{wt}'"
-                    )));
+                    return Err(RevParseError::OutsideRepository {
+                        path: after.to_owned(),
+                        work_tree: wt,
+                    }
+                    .into());
                 }
                 Err(e) => return Err(e),
             };
@@ -1383,11 +1390,10 @@ fn resolve_revision_impl(
     for step in nav_steps {
         oid = apply_nav_step(repo, oid, step).map_err(|e| {
             if matches!(e, Error::ObjectNotFound(_)) {
-                Error::Message(format!(
-                    "fatal: ambiguous argument '{spec}': unknown revision or path not in the working tree.\n\
-Use '--' to separate paths from revisions, like this:\n\
-'git <command> [<revision>...] -- [<file>...]'"
-                ))
+                RevParseError::AmbiguousArgument {
+                    spec: spec.to_owned(),
+                }
+                .into()
             } else {
                 e
             }
@@ -1602,14 +1608,16 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
         match resolve_revision_impl(repo, before, true, false, true, true, false, false, true) {
             Ok(o) => o,
             Err(Error::ObjectNotFound(s)) if s == before => {
-                return Err(Error::Message(format!(
-                    "fatal: invalid object name '{before}'."
-                )));
+                return Err(RevParseError::InvalidObjectName {
+                    name: before.to_owned(),
+                }
+                .into());
             }
-            Err(Error::Message(msg)) if msg.contains("ambiguous argument") => {
-                return Err(Error::Message(format!(
-                    "fatal: invalid object name '{before}'."
-                )));
+            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+                return Err(RevParseError::InvalidObjectName {
+                    name: before.to_owned(),
+                }
+                .into());
             }
             Err(e) => return Err(e),
         };
@@ -1634,9 +1642,11 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
                 .and_then(|p| p.canonicalize().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            return Err(Error::Message(format!(
-                "fatal: '{after}' is outside repository at '{wt}'"
-            )));
+            return Err(RevParseError::OutsideRepository {
+                path: after.to_owned(),
+                work_tree: wt,
+            }
+            .into());
         }
         Err(e) => return Err(e),
     };
@@ -1885,12 +1895,12 @@ fn oid_satisfies_peel_filter(repo: &Repository, oid: ObjectId, peel_inner: &str)
     apply_peel(repo, oid, Some(peel_inner)).is_ok()
 }
 
-/// Lines for `hint:` output when a short object id is ambiguous (type order, then hex).
+/// Candidate objects when a short object id is ambiguous (type order, then hex).
 pub fn ambiguous_object_hint_lines(
     repo: &Repository,
     short_prefix: &str,
     peel_filter: Option<&str>,
-) -> Result<Vec<String>> {
+) -> Result<Vec<AmbiguousObjectHint>> {
     let mut typed: Vec<(u8, String, &'static str)> = Vec::new();
     let mut bad_hex: Vec<String> = Vec::new();
     for oid in list_all_abbrev_matches(repo, short_prefix)? {
@@ -1912,10 +1922,16 @@ pub fn ambiguous_object_hint_lines(
     typed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     let mut out = Vec::new();
     for h in bad_hex {
-        out.push(format!("hint:   {h} [bad object]"));
+        out.push(AmbiguousObjectHint {
+            oid_hex: h,
+            kind: None,
+        });
     }
     for (_, hex, kind) in typed {
-        out.push(format!("hint:   {hex} {kind}"));
+        out.push(AmbiguousObjectHint {
+            oid_hex: hex,
+            kind: Some(kind),
+        });
     }
     Ok(out)
 }
@@ -2063,7 +2079,7 @@ fn describe_generation_count(
 
 fn try_resolve_describe_name(repo: &Repository, spec: &str) -> Result<Option<ObjectId>> {
     let re = Regex::new(r"(?i)^(.+)-(\d+)-g([0-9a-fA-F]+)$")
-        .map_err(|_| Error::Message("internal: describe regex".to_owned()))?;
+        .map_err(|_| Error::from(RevParseError::InternalDescribeRegex))?;
     let Some(caps) = re.captures(spec) else {
         return Ok(None);
     };
@@ -2243,9 +2259,11 @@ fn resolve_base(
                                         .and_then(|p| p.canonicalize().ok())
                                         .map(|p| p.display().to_string())
                                         .unwrap_or_default();
-                                    return Err(Error::Message(format!(
-                                        "fatal: '{raw_path}' is outside repository at '{wt}'"
-                                    )));
+                                    return Err(RevParseError::OutsideRepository {
+                                        path: raw_path.to_owned(),
+                                        work_tree: wt,
+                                    }
+                                    .into());
                                 }
                                 Err(e) => return Err(e),
                             };
@@ -2265,9 +2283,11 @@ fn resolve_base(
                         .and_then(|p| p.canonicalize().ok())
                         .map(|p| p.display().to_string())
                         .unwrap_or_default();
-                    return Err(Error::Message(format!(
-                        "fatal: '{rest}' is outside repository at '{wt}'"
-                    )));
+                    return Err(RevParseError::OutsideRepository {
+                        path: rest.to_owned(),
+                        work_tree: wt,
+                    }
+                    .into());
                 }
                 Err(e) => return Err(e),
             };
@@ -2489,11 +2509,10 @@ fn resolve_base(
                 return Ok(oid);
             }
         }
-        return Err(Error::Message(format!(
-            "fatal: ambiguous argument '{spec}': unknown revision or path not in the working tree.\n\
-Use '--' to separate paths from revisions, like this:\n\
-'git <command> [<revision>...] -- [<file>...]'"
-        )));
+        return Err(RevParseError::AmbiguousArgument {
+            spec: spec.to_owned(),
+        }
+        .into());
     }
     Err(Error::ObjectNotFound(spec.to_owned()))
 }
@@ -2697,39 +2716,49 @@ fn resolve_reflog_oid(
                     // back to the ref's current value (the `nth == co_cnt` case in
                     // object-name.c).
                     if !crate::reflog::reflog_exists(&repo.git_dir, refname) {
-                        return Err(Error::Message(format!(
-                            "fatal: log for '{display}' is empty"
-                        )));
+                        return Err(RevParseError::ReflogEmpty {
+                            ref_display: display.clone(),
+                        }
+                        .into());
                     }
                     return refs::resolve_ref(&repo.git_dir, refname).map_err(|_| {
-                        Error::Message(format!("fatal: log for '{display}' is empty"))
+                        RevParseError::ReflogEmpty {
+                            ref_display: display.clone(),
+                        }
+                        .into()
                     });
                 }
                 return Ok(entries[len - 1].new_oid);
             }
             if len == 0 {
-                return Err(Error::Message(format!(
-                    "fatal: log for '{display}' is empty"
-                )));
+                return Err(RevParseError::ReflogEmpty {
+                    ref_display: display.clone(),
+                }
+                .into());
             }
             if index > len {
-                return Err(Error::Message(format!(
-                    "fatal: log for '{display}' only has {len} entries"
-                )));
+                return Err(RevParseError::ReflogInsufficientEntries {
+                    ref_display: display.clone(),
+                    available: len,
+                }
+                .into());
             }
             let oid = entries[len - index].old_oid;
             if oid.is_zero() {
-                return Err(Error::Message(format!(
-                    "fatal: log for '{display}' only has {len} entries"
-                )));
+                return Err(RevParseError::ReflogInsufficientEntries {
+                    ref_display: display.clone(),
+                    available: len,
+                }
+                .into());
             }
             Ok(oid)
         }
         ReflogSelector::Date(target_ts) => {
             if entries.is_empty() {
-                return Err(Error::Message(format!(
-                    "fatal: log for '{display}' is empty"
-                )));
+                return Err(RevParseError::ReflogEmpty {
+                    ref_display: display.clone(),
+                }
+                .into());
             }
             for entry in entries.iter().rev() {
                 let ts = parse_reflog_entry_timestamp(entry);
@@ -3082,9 +3111,11 @@ fn diagnose_tree_path_error(
         };
     if let Ok(head_tree) = head_tree_oid(repo) {
         if path_in_tree(repo, head_tree, clean_path) {
-            return Error::Message(format!(
-                "fatal: path '{rel_display}' exists on disk, but not in '{rev_label}'."
-            ));
+            return RevParseError::PathOnDiskNotInRevision {
+                path: rel_display.to_owned(),
+                revision: rev_label.to_owned(),
+            }
+            .into();
         }
         if let Ok(cwd) = std::env::current_dir() {
             let prefix = show_prefix(repo, &cwd);
@@ -3096,10 +3127,13 @@ fn diagnose_tree_path_error(
                     format!("{pfx}/{clean_path}")
                 };
                 if path_in_tree(repo, head_tree, &candidate) {
-                    return Error::Message(format!(
-                        "fatal: path '{candidate}' exists, but not '{rel_display}'\n\
-hint: Did you mean '{rev_label}:{candidate}' aka '{rev_label}:./{rel_display}'?"
-                    ));
+                    let alternate_spec = Some(format!("{rev_label}:{candidate}"));
+                    return RevParseError::PathPrefixExists {
+                        candidate,
+                        path: rel_display.to_owned(),
+                        alternate_spec,
+                    }
+                    .into();
                 }
             }
         }
@@ -3110,14 +3144,18 @@ hint: Did you mean '{rev_label}:{candidate}' aka '{rev_label}:./{rel_display}'?"
             .is_some_and(|p| p.exists());
         let in_index = path_in_index(repo, clean_path, 0);
         if on_disk || in_index {
-            return Error::Message(format!(
-                "fatal: path '{rel_display}' exists on disk, but not in '{rev_label}'."
-            ));
+            return RevParseError::PathOnDiskNotInRevision {
+                path: rel_display.to_owned(),
+                revision: rev_label.to_owned(),
+            }
+            .into();
         }
     }
-    Error::Message(format!(
-        "fatal: path '{rel_display}' does not exist in '{rev_label}'"
-    ))
+    RevParseError::PathNotInRevision {
+        path: rel_display.to_owned(),
+        revision: rev_label.to_owned(),
+    }
+    .into()
 }
 
 fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Error) -> Error {
@@ -3147,23 +3185,29 @@ fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Erro
                     format!("{pfx}/{path}")
                 };
                 if path_in_index(repo, &candidate, 0) && !path_in_index(repo, &candidate, stage) {
-                    return Error::Message(format!(
-                        "fatal: path '{candidate}' is in the index, but not '{path}'\n\
-hint: Did you mean ':0:{candidate}' aka ':0:./{path}'?"
-                    ));
+                    let alternate_spec = Some(format!(":0:{candidate}"));
+                    return RevParseError::PathIndexPrefixMismatch {
+                        candidate,
+                        path: path.to_owned(),
+                        alternate_spec,
+                    }
+                    .into();
                 }
             }
         }
-        return Error::Message(format!(
-            "fatal: path '{path}' does not exist (neither on disk nor in the index)"
-        ));
+        return RevParseError::PathMissingFromWorktreeAndIndex {
+            path: path.to_owned(),
+        }
+        .into();
     }
 
     if stage > 0 && in_index && !at_stage {
-        return Error::Message(format!(
-            "fatal: path '{path}' is in the index, but not at stage {stage}\n\
-hint: Did you mean ':0:{path}'?"
-        ));
+        return RevParseError::PathWrongIndexStage {
+            path: path.to_owned(),
+            stage,
+            alternate_spec: Some(format!(":0:{path}")),
+        }
+        .into();
     }
 
     if stage == 0 {
@@ -3178,24 +3222,32 @@ hint: Did you mean ':0:{path}'?"
                         format!("{pfx}/{path}")
                     };
                     if path_in_index(repo, &candidate, 0) {
-                        return Error::Message(format!(
-                            "fatal: path '{candidate}' is in the index, but not '{path}'\n\
-hint: Did you mean ':0:{candidate}' aka ':0:./{path}'?"
-                        ));
+                        let alternate_spec = Some(format!(":0:{candidate}"));
+                        return RevParseError::PathIndexPrefixMismatch {
+                            candidate,
+                            path: path.to_owned(),
+                            alternate_spec,
+                        }
+                        .into();
                     }
                 }
             }
-            return Error::Message(format!(
-                "fatal: path '{path}' does not exist (neither on disk nor in the index)"
-            ));
+            return RevParseError::PathMissingFromWorktreeAndIndex {
+                path: path.to_owned(),
+            }
+            .into();
         }
         if on_disk && !in_index && !in_head {
-            return Error::Message(format!(
-                "fatal: path '{path}' exists on disk, but not in the index"
-            ));
+            return RevParseError::PathOnDiskNotInIndex {
+                path: path.to_owned(),
+            }
+            .into();
         }
     }
-    Error::Message(format!("fatal: path '{path}' does not exist in the index"))
+    RevParseError::PathNotInIndex {
+        path: path.to_owned(),
+    }
+    .into()
 }
 
 /// Look up a path in the index (stage 0) and return its OID.
@@ -3273,10 +3325,11 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
                 .and_then(|p| p.canonicalize().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            return Err(Error::Message(format!(
-                "fatal: '{}' is outside repository at '{wt}'",
-                colon.raw_path
-            )));
+            return Err(RevParseError::OutsideRepository {
+                path: colon.raw_path.to_owned(),
+                work_tree: wt,
+            }
+            .into());
         }
         Err(e) => return Err(e),
     };
@@ -3501,17 +3554,16 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] for an empty base revision and other resolution failures.
+/// Returns [`RevParseError::AmbiguousArgument`] for an empty base revision and other resolution failures.
 pub fn expand_rev_token_circ_bang(repo: &Repository, token: &str) -> Result<Vec<String>> {
     let Some(base) = token.strip_suffix("^!") else {
         return Ok(vec![token.to_owned()]);
     };
     if base.is_empty() {
-        return Err(Error::Message(format!(
-            "fatal: ambiguous argument '{token}': unknown revision or path not in the working tree.\n\
-Use '--' to separate paths from revisions, like this:\n\
-'git <command> [<revision>...] -- [<file>...]'"
-        )));
+        return Err(RevParseError::AmbiguousArgument {
+            spec: token.to_owned(),
+        }
+        .into());
     }
     let oid = resolve_revision_for_range_end(repo, base)?;
     let commit_oid = peel_to_commit_for_merge_base(repo, oid)?;

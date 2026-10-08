@@ -166,6 +166,14 @@ pub enum Error {
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]
     DetachedHead,
+
+    /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
+    #[error(transparent)]
+    RevParse(#[from] crate::rev_parse_error::RevParseError),
+
+    /// Revision walking / `rev-list` option parsing failed ([`crate::rev_list_error::RevListError`]).
+    #[error(transparent)]
+    RevList(#[from] crate::rev_list_error::RevListError),
 }
 
 /// Convenience alias for `Result<T, Error>`.

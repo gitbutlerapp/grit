@@ -27,6 +27,7 @@ use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclus
 use crate::reflog::{list_reflog_refs, read_reflog};
 use crate::refs;
 use crate::repo::Repository;
+use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
 
 /// User-facing output mode for `rev-list`.
@@ -2912,16 +2913,15 @@ fn sparse_oid_lines_from_filter(
             // A resolved object that is not a parseable sparse blob (e.g. a tree) fails parsing:
             // `unable to parse sparse filter data in <oid>`.
             if obj.kind != ObjectKind::Blob {
-                return Err(Error::Message(format!(
-                    "fatal: unable to parse sparse filter data in {}",
-                    blob_oid.to_hex()
-                )));
+                return Err(RevListError::SparseFilterUnparsable {
+                    object_id: blob_oid.to_hex(),
+                }
+                .into());
             }
             let text = std::str::from_utf8(&obj.data).map_err(|_| {
-                Error::Message(format!(
-                    "fatal: unable to parse sparse filter data in {}",
-                    blob_oid.to_hex()
-                ))
+                Error::from(RevListError::SparseFilterUnparsable {
+                    object_id: blob_oid.to_hex(),
+                })
             })?;
             Ok(Some(parse_sparse_patterns_from_blob(text)))
         }
@@ -2939,7 +2939,10 @@ fn sparse_oid_lines_from_filter(
 
 /// Git's `unable to access sparse blob in '<name>'` error for an unresolvable `sparse:oid` spec.
 fn sparse_blob_access_error(spec: &str) -> Error {
-    Error::Message(format!("fatal: unable to access sparse blob in '{spec}'"))
+    RevListError::SparseBlobUnreadable {
+        spec: spec.to_owned(),
+    }
+    .into()
 }
 
 fn packed_object_set(repo: &Repository) -> HashSet<ObjectId> {
@@ -4886,7 +4889,10 @@ fn parse_long_opt_value(opt: &str, argv0: &str, argv1: Option<&str>) -> Option<(
 }
 
 fn stdin_die_requires_value(opt: &str) -> Error {
-    Error::Message(format!("fatal: Option '{opt}' requires a value"))
+    RevListError::MissingOptionValue {
+        option: opt.to_owned(),
+    }
+    .into()
 }
 
 fn apply_stdin_pseudo_opt(
@@ -5041,22 +5047,21 @@ fn apply_stdin_pseudo_opt(
             if rest == "sorted" || rest == "unsorted" {
                 return Ok(Some(1));
             }
-            eprintln!("error: invalid argument to --no-walk");
-            return Err(Error::Message(format!(
-                "fatal: invalid option '{line}' in --stdin mode"
-            )));
+            return Err(RevListError::InvalidNoWalkArgument.into());
         }
         return Ok(Some(1));
     }
     if line.starts_with("--") {
-        return Err(Error::Message(format!(
-            "fatal: invalid option '{line}' in --stdin mode"
-        )));
+        return Err(RevListError::InvalidStdinOption {
+            line: line.to_owned(),
+        }
+        .into());
     }
     if line.starts_with('-') {
-        return Err(Error::Message(format!(
-            "fatal: invalid option '{line}' in --stdin mode"
-        )));
+        return Err(RevListError::InvalidStdinOption {
+            line: line.to_owned(),
+        }
+        .into());
     }
     Ok(None)
 }
