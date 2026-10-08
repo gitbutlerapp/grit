@@ -87,6 +87,10 @@ harness = false
 name = "hot_paths"
 harness = false
 
+[[bench]]
+name = "midx"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }

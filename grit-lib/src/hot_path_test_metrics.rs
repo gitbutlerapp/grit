@@ -107,6 +107,7 @@ impl HotPathTestMetrics {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn record_midx_stamp_stat(&self) {
         if self.stamp_counting.load(Ordering::Relaxed) {
             self.midx_stamp_stats.fetch_add(1, Ordering::Relaxed);
@@ -140,6 +141,7 @@ pub(crate) fn record_pack_signature_stat_for_active_scope() {
     });
 }
 
+#[allow(dead_code)]
 pub(crate) fn record_midx_stamp_stat_for_active_scope() {
     with_active(|active| {
         if let Some(m) = active {

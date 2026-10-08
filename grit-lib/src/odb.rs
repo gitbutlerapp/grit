@@ -256,6 +256,14 @@ impl Odb {
         &self.hot_path_test_metrics
     }
 
+    #[cfg(test)]
+    #[must_use]
+    pub fn hot_path_test_metrics_arc(
+        &self,
+    ) -> Arc<crate::hot_path_test_metrics::HotPathTestMetrics> {
+        Arc::clone(&self.hot_path_test_metrics)
+    }
+
     /// Share the repository's lazy config snapshot (see [`crate::repo::Repository::config`]).
     #[must_use]
     pub(crate) fn with_shared_config_state(

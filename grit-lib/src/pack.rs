@@ -1995,13 +1995,24 @@ pub fn read_object_info_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Obj
     unreachable!("at most two read attempts")
 }
 
+/// Read and decompress the object stored at `offset` in `idx`'s pack file.
+///
+/// The pack index is used for pack path, object count validation, and resolving ref-delta
+/// bases; the starting location comes from the caller (e.g. a multi-pack-index entry).
+pub(crate) fn read_object_at(idx: &PackIndex, offset: u64) -> Result<Object> {
+    read_object_at_depth(idx, offset, 0)
+}
+
 /// [`read_object_from_pack`] with an explicit starting delta-chain depth, used when the read
 /// itself resolves a delta base from another pack (the chain budget must carry across packs).
 fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize) -> Result<Object> {
     let Some(offset) = idx.find_offset(oid) else {
         return Err(Error::ObjectNotFound(oid.to_hex()));
     };
+    read_object_at_depth(idx, offset, depth)
+}
 
+fn read_object_at_depth(idx: &PackIndex, offset: u64, depth: usize) -> Result<Object> {
     let pack_path = idx.pack_path.clone();
     let objects_dir = idx.pack_path.parent().and_then(Path::parent);
     for attempt in 0..2 {
