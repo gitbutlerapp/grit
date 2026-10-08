@@ -4,7 +4,7 @@
 //! overflow, non-digit timestamps, and whitespace-only timestamps (sentinel handling).
 
 use crate::git_date::tm::date_overflows;
-use crate::objects::ObjectKind;
+use crate::objects::{HashAlgo, ObjectKind};
 
 /// Parsed timestamp from a signature line for display and filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,10 +150,16 @@ pub fn timestamp_for_at_ct(ts: SignatureTimestamp) -> Option<i64> {
     }
 }
 
-/// First fsck error Git would report for commit headers (tree/parents/author/committer), or `Ok`.
-/// Message text matches Git's `fsck.c` `report()` shape: `<camelCaseId>: <detail>`.
-pub fn fsck_commit_idents(data: &[u8]) -> Result<(), String> {
-    crate::fsck_standalone::fsck_object(ObjectKind::Commit, data).map_err(|e| e.report_line())
+/// First fsck error for commit headers (tree/parents/author/committer), or `Ok`.
+///
+/// Returns a [`FsckError::report_line`] string (`msg-id: detail`); compare msg-ids to Git, not detail text.
+pub fn fsck_commit_idents(data: &[u8], hash_algo: HashAlgo) -> Result<(), String> {
+    crate::fsck_standalone::fsck_object(
+        ObjectKind::Commit,
+        data,
+        crate::fsck_standalone::FsckObjectOptions::new(hash_algo),
+    )
+    .map_err(|e| e.report_line())
 }
 
 /// Committer seconds for ordering (`rev-list --date-order`, etc.): unknown/corrupt → `0`.

@@ -4,9 +4,9 @@
 use std::collections::HashSet;
 use std::process::Command;
 
-use grit_lib::fsck_standalone::{fsck_object, FsckError};
+use grit_lib::fsck_standalone::{fsck_object, FsckError, FsckObjectOptions};
 use grit_lib::gitmodules::{fsck_dot_special_object, fsck_dot_special_tree_pass, DotFsckTracker};
-use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_test_support::{
     git_fsck, git_hash_object_literally, git_supports_sha256, write_loose_object,
     HashAlgo as FixtureAlgo, RepoFixture,
@@ -19,6 +19,20 @@ fn tree_oid_hex(algo: FixtureAlgo) -> &'static str {
     match algo {
         FixtureAlgo::Sha1 => SHA1_TREE,
         FixtureAlgo::Sha256 => SHA256_TREE,
+    }
+}
+
+fn fsck_options(algo: FixtureAlgo) -> FsckObjectOptions {
+    FsckObjectOptions::new(match algo {
+        FixtureAlgo::Sha1 => HashAlgo::Sha1,
+        FixtureAlgo::Sha256 => HashAlgo::Sha256,
+    })
+}
+
+fn wrong_width_tree_oid(algo: FixtureAlgo) -> &'static str {
+    match algo {
+        FixtureAlgo::Sha1 => SHA256_TREE,
+        FixtureAlgo::Sha256 => SHA1_TREE,
     }
 }
 
@@ -200,7 +214,7 @@ fn assert_case(algo: FixtureAlgo, case: &ObjectCase) {
     let repo = RepoFixture::init(algo).expect("init repo");
     let kind = grit_kind(case.kind);
 
-    let grit_result = fsck_object(kind, &case.body);
+    let grit_result = fsck_object(kind, &case.body, fsck_options(algo));
     let grit_id = grit_result.as_ref().err().map(|e| e.id);
     let grit_ok = grit_result.is_ok();
 
@@ -337,6 +351,20 @@ fn object_cases(algo: FixtureAlgo) -> Vec<ObjectCase> {
             kind: "commit",
             body: format!(
                 "tree {junk_parent}\nauthor A <a@e.com> 1 +0000\ncommitter C <c@e.com> 1 +0000\n\n"
+            )
+            .into_bytes(),
+            expect_id: Some("badTreeSha1"),
+            git_strict: true,
+            git_tags: false,
+            git_config: &[],
+            git_verdict: None,
+        },
+        ObjectCase {
+            name: "commit tree oid wrong hash width",
+            kind: "commit",
+            body: format!(
+                "tree {}\nauthor A <a@e.com> 1 +0000\ncommitter C <c@e.com> 1 +0000\n\n",
+                wrong_width_tree_oid(algo)
             )
             .into_bytes(),
             expect_id: Some("badTreeSha1"),
@@ -934,10 +962,10 @@ fn fsck_object_cases_match_git_sha256() {
 
 #[test]
 fn fsck_error_report_line_is_stable() {
-    let err = FsckError::new("missingTree", "invalid format - expected 'tree' line");
+    let err = FsckError::new("missingTree", "commit header must start with a tree line");
     assert_eq!(
         err.report_line(),
-        "missingTree: invalid format - expected 'tree' line"
+        "missingTree: commit header must start with a tree line"
     );
 }
 

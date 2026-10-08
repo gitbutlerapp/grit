@@ -1,20 +1,40 @@
-//! Standalone object fsck for `hash-object` and similar entry points.
+//! Standalone object fsck for loose-object validation before hashing.
 //!
-//! Mirrors the buffer-safe checks in Git's `fsck.c` (`verify_headers`,
-//! `fsck_commit`, `fsck_tag_standalone`, `fsck_tree`) so error messages match
-//! `error: object fails fsck: <camelCaseId>: <detail>`.
+//! Checks mirror Git's buffer fsck rules; [`FsckError::id`] values are the
+//! documented camelCase fsck config keys. Detail strings are Grit-owned prose.
 
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::dotfile::{is_hfs_dotgit, is_ntfs_dotgit};
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 
+/// Repository hash width for object-id fields in commit, tag, and tree headers.
+#[derive(Debug, Clone, Copy)]
+pub struct FsckObjectOptions {
+    /// Expected hex width for `tree`, `parent`, `object`, and tree entry oids.
+    pub hash_algo: HashAlgo,
+}
+
+impl FsckObjectOptions {
+    /// Build options for a repository object format.
+    #[must_use]
+    pub const fn new(hash_algo: HashAlgo) -> Self {
+        Self { hash_algo }
+    }
+}
+
+impl Default for FsckObjectOptions {
+    fn default() -> Self {
+        Self::new(HashAlgo::Sha1)
+    }
+}
+
 /// Git-compatible fsck failure for loose object validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FsckError {
     /// CamelCase message id (e.g. `missingTree`).
     pub id: &'static str,
-    /// Human-readable detail after `id: `.
+    /// Human-readable detail after `id: ` (Grit-owned wording).
     pub detail: String,
 }
 
@@ -28,23 +48,26 @@ impl FsckError {
         }
     }
 
-    /// Full line after `error: object fails fsck: ` (matches Git).
+    /// Stable `msg-id: detail` line for logging and CLI output.
     #[must_use]
     pub fn report_line(&self) -> String {
         format!("{}: {}", self.id, self.detail)
     }
 }
 
-/// Validate raw object bytes the same way `git hash-object` does before hashing.
+/// Validate raw object bytes before hashing (same rules as `git hash-object` fsck).
 ///
-/// Returns `Ok(())` when the object is well-formed, or the first fsck error Git
-/// would report for truncated or malformed buffers.
-pub fn fsck_object(kind: ObjectKind, data: &[u8]) -> Result<(), FsckError> {
+/// `options.hash_algo` selects the required object-id hex width on header and tree lines.
+pub fn fsck_object(
+    kind: ObjectKind,
+    data: &[u8],
+    options: FsckObjectOptions,
+) -> Result<(), FsckError> {
     match kind {
         ObjectKind::Blob => Ok(()),
-        ObjectKind::Commit => fsck_commit(data),
-        ObjectKind::Tag => fsck_tag(data),
-        ObjectKind::Tree => fsck_tree(data),
+        ObjectKind::Commit => fsck_commit(data, options),
+        ObjectKind::Tag => fsck_tag(data, options),
+        ObjectKind::Tree => fsck_tree(data, options),
     }
 }
 
@@ -53,7 +76,7 @@ fn verify_headers(data: &[u8], nul_msg_id: &'static str) -> Result<(), FsckError
         if b == 0 {
             return Err(FsckError::new(
                 nul_msg_id,
-                format!("unterminated header: NUL at offset {i}"),
+                format!("header contains a NUL at byte {i}"),
             ));
         }
         if b == b'\n' && i + 1 < data.len() && data[i + 1] == b'\n' {
@@ -63,7 +86,10 @@ fn verify_headers(data: &[u8], nul_msg_id: &'static str) -> Result<(), FsckError
     if !data.is_empty() && data[data.len() - 1] == b'\n' {
         Ok(())
     } else {
-        Err(FsckError::new("unterminatedHeader", "unterminated header"))
+        Err(FsckError::new(
+            "unterminatedHeader",
+            "header is not terminated by a blank line",
+        ))
     }
 }
 
@@ -71,22 +97,24 @@ fn is_hex_lower(b: u8) -> bool {
     matches!(b, b'0'..=b'9' | b'a'..=b'f')
 }
 
-/// Parse a lowercase hex object id at the start of `buf` (40 chars for SHA-1 or
-/// 64 for SHA-256), requiring the next byte to be `\n`. Returns bytes consumed
-/// (hex width + 1).
-fn parse_oid_line(buf: &[u8], bad_sha1_id: &'static str) -> Result<usize, FsckError> {
+/// Parse a lowercase hex object id at the start of `buf`, requiring `expected_hex_len`
+/// hex digits followed by `\n`. Returns bytes consumed (hex width + 1).
+fn parse_oid_line(
+    buf: &[u8],
+    bad_id: &'static str,
+    expected_hex_len: usize,
+) -> Result<usize, FsckError> {
     let bad = || {
         FsckError::new(
-            bad_sha1_id,
+            bad_id,
             format!(
-                "invalid '{}' line format - bad sha1",
-                line_kind(bad_sha1_id)
+                "{} line object id is not valid for this repository format",
+                oid_line_label(bad_id)
             ),
         )
     };
-    // The hex width follows the repository hash (a `\n` terminates the id).
     let hex_len = buf.iter().position(|&b| b == b'\n').ok_or_else(bad)?;
-    if !ObjectId::is_hex_len(hex_len) {
+    if hex_len != expected_hex_len {
         return Err(bad());
     }
     let hex = &buf[..hex_len];
@@ -98,25 +126,20 @@ fn parse_oid_line(buf: &[u8], bad_sha1_id: &'static str) -> Result<usize, FsckEr
     Ok(hex_len + 1)
 }
 
-fn line_kind(bad_sha1_id: &'static str) -> &'static str {
-    match bad_sha1_id {
+fn oid_line_label(bad_id: &'static str) -> &'static str {
+    match bad_id {
         "badObjectSha1" => "object",
         "badParentSha1" => "parent",
         _ => "tree",
     }
 }
 
-fn fsck_ident(
-    data: &[u8],
-    start: usize,
-    buffer_end: usize,
-    oid_line: &'static str,
-) -> Result<usize, FsckError> {
+fn fsck_ident(data: &[u8], start: usize, buffer_end: usize) -> Result<usize, FsckError> {
     let mut p = start;
     if p >= buffer_end {
         return Err(FsckError::new(
             "missingEmail",
-            format!("invalid {oid_line} line - missing email"),
+            "identity line has no email address",
         ));
     }
 
@@ -124,34 +147,28 @@ fn fsck_ident(
         .iter()
         .position(|&b| b == b'\n')
         .map(|rel| p + rel)
-        .ok_or_else(|| {
-            FsckError::new(
-                "missingEmail",
-                format!("invalid {oid_line} line - missing email"),
-            )
-        })?;
+        .ok_or_else(|| FsckError::new("missingEmail", "identity line has no email address"))?;
 
     let ident_end = line_end;
 
     if data[p] == b'<' {
         return Err(FsckError::new(
             "missingNameBeforeEmail",
-            format!("invalid {oid_line} line - missing space before email"),
+            "identity line lists email before a display name",
         ));
     }
 
-    // Name: scan until '<' (Git `fsck_ident`).
     loop {
         if p >= ident_end || data[p] == b'\n' {
             return Err(FsckError::new(
                 "missingEmail",
-                format!("invalid {oid_line} line - missing email"),
+                "identity line has no email address",
             ));
         }
         if data[p] == b'>' {
             return Err(FsckError::new(
                 "badName",
-                format!("invalid {oid_line} line - bad name"),
+                "identity display name is malformed",
             ));
         }
         if data[p] == b'<' {
@@ -163,17 +180,16 @@ fn fsck_ident(
     if p == start || data[p - 1] != b' ' {
         return Err(FsckError::new(
             "missingSpaceBeforeEmail",
-            format!("invalid {oid_line} line - missing space before email"),
+            "identity line needs whitespace before the email address",
         ));
     }
-    p += 1; // skip '<'
+    p += 1;
 
-    // Email (may be empty between `<>`).
     loop {
         if p >= ident_end || data[p] == b'<' || data[p] == b'\n' {
             return Err(FsckError::new(
                 "badEmail",
-                format!("invalid {oid_line} line - bad email"),
+                "email address on identity line is malformed",
             ));
         }
         if data[p] == b'>' {
@@ -181,12 +197,12 @@ fn fsck_ident(
         }
         p += 1;
     }
-    p += 1; // skip '>'
+    p += 1;
 
     if p >= ident_end || data[p] != b' ' {
         return Err(FsckError::new(
             "missingSpaceBeforeDate",
-            format!("invalid {oid_line} line - missing space before date"),
+            "identity line needs whitespace before the timestamp",
         ));
     }
     p += 1;
@@ -198,14 +214,14 @@ fn fsck_ident(
     if p >= ident_end || !data[p].is_ascii_digit() {
         return Err(FsckError::new(
             "badDate",
-            format!("invalid {oid_line} line - bad date"),
+            "timestamp on identity line is not a decimal integer",
         ));
     }
 
     if data[p] == b'0' && p + 1 < ident_end && data[p + 1] != b' ' {
         return Err(FsckError::new(
             "zeroPaddedDate",
-            format!("invalid {oid_line} line - zero-padded date"),
+            "timestamp on identity line has leading zeros",
         ));
     }
 
@@ -217,30 +233,36 @@ fn fsck_ident(
     if ts_len > 21 {
         return Err(FsckError::new(
             "badDateOverflow",
-            format!("invalid {oid_line} line - date causes integer overflow"),
+            "timestamp on identity line overflows",
         ));
     }
-    let ts_str = std::str::from_utf8(&data[ts_start..p])
-        .map_err(|_| FsckError::new("badDate", format!("invalid {oid_line} line - bad date")))?;
-    let raw: u128 = ts_str
-        .parse()
-        .map_err(|_| FsckError::new("badDate", format!("invalid {oid_line} line - bad date")))?;
+    let ts_str = std::str::from_utf8(&data[ts_start..p]).map_err(|_| {
+        FsckError::new(
+            "badDate",
+            "timestamp on identity line is not a decimal integer",
+        )
+    })?;
+    let raw: u128 = ts_str.parse().map_err(|_| {
+        FsckError::new(
+            "badDate",
+            "timestamp on identity line is not a decimal integer",
+        )
+    })?;
     if raw > u64::MAX as u128 || date_overflows(raw as u64) {
         return Err(FsckError::new(
             "badDateOverflow",
-            format!("invalid {oid_line} line - date causes integer overflow"),
+            "timestamp on identity line overflows",
         ));
     }
 
     if p >= ident_end || data[p] != b' ' {
         return Err(FsckError::new(
             "badDate",
-            format!("invalid {oid_line} line - bad date"),
+            "timestamp on identity line is not a decimal integer",
         ));
     }
     p += 1;
 
-    // Timezone: `[+-]HHMM` then newline (Git allows e.g. `-1430`).
     if p + 5 > ident_end
         || (data[p] != b'+' && data[p] != b'-')
         || !data[p + 1..p + 5].iter().all(|b| b.is_ascii_digit())
@@ -248,32 +270,33 @@ fn fsck_ident(
     {
         return Err(FsckError::new(
             "badTimezone",
-            format!("invalid {oid_line} line - bad time zone"),
+            "timezone on identity line is not ±HHMM",
         ));
     }
 
     Ok(line_end + 1)
 }
 
-fn fsck_commit(data: &[u8]) -> Result<(), FsckError> {
+fn fsck_commit(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
     verify_headers(data, "nulInHeader")?;
 
+    let oid_hex_len = options.hash_algo.hex_len();
     let buffer_end = data.len();
     let mut i = 0usize;
 
     if i >= buffer_end || !data[i..].starts_with(b"tree ") {
         return Err(FsckError::new(
             "missingTree",
-            "invalid format - expected 'tree' line",
+            "commit header must start with a tree line",
         ));
     }
     i += 5;
-    let n = parse_oid_line(&data[i..], "badTreeSha1")?;
+    let n = parse_oid_line(&data[i..], "badTreeSha1", oid_hex_len)?;
     i += n;
 
     while i < buffer_end && data[i..].starts_with(b"parent ") {
         i += 7;
-        let n = parse_oid_line(&data[i..], "badParentSha1")?;
+        let n = parse_oid_line(&data[i..], "badParentSha1", oid_hex_len)?;
         i += n;
     }
 
@@ -281,35 +304,35 @@ fn fsck_commit(data: &[u8]) -> Result<(), FsckError> {
     while i < buffer_end && data[i..].starts_with(b"author ") {
         author_count += 1;
         i += 7;
-        i = fsck_ident(data, i, buffer_end, "author/committer")?;
+        i = fsck_ident(data, i, buffer_end)?;
     }
 
     if author_count < 1 {
         return Err(FsckError::new(
             "missingAuthor",
-            "invalid format - expected 'author' line",
+            "commit header must include an author line",
         ));
     }
     if author_count > 1 {
         return Err(FsckError::new(
             "multipleAuthors",
-            "invalid format - multiple 'author' lines",
+            "commit header has more than one author line",
         ));
     }
 
     if i >= buffer_end || !data[i..].starts_with(b"committer ") {
         return Err(FsckError::new(
             "missingCommitter",
-            "invalid format - expected 'committer' line",
+            "commit header must include a committer line",
         ));
     }
     i += 10;
-    fsck_ident(data, i, buffer_end, "author/committer")?;
+    fsck_ident(data, i, buffer_end)?;
 
     if data.contains(&0) {
         return Err(FsckError::new(
             "nulInCommit",
-            "NUL byte in the commit object body",
+            "commit body contains a NUL byte",
         ));
     }
 
@@ -317,26 +340,30 @@ fn fsck_commit(data: &[u8]) -> Result<(), FsckError> {
 }
 
 /// Byte offset immediately after the newline that terminates the `tagger` line.
-fn parse_tag_headers_through_tagger(data: &[u8]) -> Result<usize, FsckError> {
+fn parse_tag_headers_through_tagger(
+    data: &[u8],
+    options: FsckObjectOptions,
+) -> Result<usize, FsckError> {
     verify_headers(data, "nulInHeader")?;
 
+    let oid_hex_len = options.hash_algo.hex_len();
     let buffer_end = data.len();
     let mut i = 0usize;
 
     if i >= buffer_end || !data[i..].starts_with(b"object ") {
         return Err(FsckError::new(
             "missingObject",
-            "invalid format - expected 'object' line",
+            "annotated tag must start with an object line",
         ));
     }
     i += 7;
-    let n = parse_oid_line(&data[i..], "badObjectSha1")?;
+    let n = parse_oid_line(&data[i..], "badObjectSha1", oid_hex_len)?;
     i += n;
 
     if i >= buffer_end || !data[i..].starts_with(b"type ") {
         return Err(FsckError::new(
             "missingTypeEntry",
-            "invalid format - expected 'type' line",
+            "annotated tag header must include a type line",
         ));
     }
     i += 5;
@@ -345,22 +372,20 @@ fn parse_tag_headers_through_tagger(data: &[u8]) -> Result<usize, FsckError> {
         .iter()
         .position(|&b| b == b'\n')
         .map(|rel| type_start + rel)
-        .ok_or_else(|| {
-            FsckError::new(
-                "missingType",
-                "invalid format - unexpected end after 'type' line",
-            )
-        })?;
+        .ok_or_else(|| FsckError::new("missingType", "type line on annotated tag is incomplete"))?;
 
     if ObjectKind::from_tag_type_field(&data[type_start..eol]).is_none() {
-        return Err(FsckError::new("badType", "invalid 'type' value"));
+        return Err(FsckError::new(
+            "badType",
+            "annotated tag has unknown type name",
+        ));
     }
     i = eol + 1;
 
     if i >= buffer_end || !data[i..].starts_with(b"tag ") {
         return Err(FsckError::new(
             "missingTagEntry",
-            "invalid format - expected 'tag' line",
+            "annotated tag header must include a tag line",
         ));
     }
     i += 4;
@@ -370,19 +395,16 @@ fn parse_tag_headers_through_tagger(data: &[u8]) -> Result<usize, FsckError> {
         .position(|&b| b == b'\n')
         .map(|rel| tag_start + rel)
         .ok_or_else(|| {
-            FsckError::new(
-                "missingTag",
-                "invalid format - unexpected end after 'type' line",
-            )
+            FsckError::new("missingTag", "tag name line on annotated tag is incomplete")
         })?;
 
     let tag_name = std::str::from_utf8(&data[tag_start..eol])
-        .map_err(|_| FsckError::new("badTagName", "invalid 'tag' name"))?;
+        .map_err(|_| FsckError::new("badTagName", "annotated tag name is not a valid ref name"))?;
     let refname = format!("refs/tags/{tag_name}");
     if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
         return Err(FsckError::new(
             "badTagName",
-            format!("invalid 'tag' name: {tag_name}"),
+            format!("annotated tag name is not a valid ref name: {tag_name}"),
         ));
     }
     i = eol + 1;
@@ -390,20 +412,20 @@ fn parse_tag_headers_through_tagger(data: &[u8]) -> Result<usize, FsckError> {
     if i >= buffer_end || !data[i..].starts_with(b"tagger ") {
         return Err(FsckError::new(
             "missingTaggerEntry",
-            "invalid format - expected 'tagger' line",
+            "annotated tag header must include a tagger line",
         ));
     }
     i += 7;
-    fsck_ident(data, i, buffer_end, "author/committer")
+    fsck_ident(data, i, buffer_end)
 }
 
-fn fsck_tag(data: &[u8]) -> Result<(), FsckError> {
-    let mut i = parse_tag_headers_through_tagger(data)?;
+fn fsck_tag(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
+    let mut i = parse_tag_headers_through_tagger(data, options)?;
     i = skip_tag_gpgsig_headers(data, i)?;
     if i < data.len() && data[i] != b'\n' {
         return Err(FsckError::new(
             "extraHeaderEntry",
-            "invalid format - extra header(s) after 'tagger'",
+            "annotated tag header has unexpected lines after tagger",
         ));
     }
     Ok(())
@@ -419,12 +441,7 @@ fn skip_tag_gpgsig_headers(data: &[u8], mut i: usize) -> Result<usize, FsckError
             .iter()
             .position(|&b| b == b'\n')
             .map(|rel| sig_start + rel)
-            .ok_or_else(|| {
-                FsckError::new(
-                    "badGpgsig",
-                    "invalid format - unexpected end after 'gpgsig' or 'gpgsig-sha256' line",
-                )
-            })?;
+            .ok_or_else(|| FsckError::new("badGpgsig", "gpgsig header line is incomplete"))?;
         i = sig_eol + 1;
         while i < buffer_end && data[i] == b' ' {
             let cont_eol = data[i..buffer_end]
@@ -434,7 +451,7 @@ fn skip_tag_gpgsig_headers(data: &[u8], mut i: usize) -> Result<usize, FsckError
                 .ok_or_else(|| {
                     FsckError::new(
                         "badHeaderContinuation",
-                        "invalid format - unexpected end in 'gpgsig' or 'gpgsig-sha256' continuation line",
+                        "gpgsig continuation line is incomplete",
                     )
                 })?;
             i = cont_eol + 1;
@@ -453,20 +470,26 @@ fn is_less_than_slash(c: u8) -> bool {
     c > 0 && c < b'/'
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum TreeOrderIssue {
+    DuplicateEntries,
+    NotSorted,
+}
+
 fn verify_tree_order(
     mode1: u32,
     name1: &[u8],
     mode2: u32,
     name2: &[u8],
     candidates: &mut Vec<Vec<u8>>,
-) -> Result<(), &'static str> {
+) -> Result<(), TreeOrderIssue> {
     let len = name1.len().min(name2.len());
     let cmp = name1[..len].cmp(&name2[..len]);
     if cmp == std::cmp::Ordering::Less {
         return Ok(());
     }
     if cmp == std::cmp::Ordering::Greater {
-        return Err("treeNotSorted");
+        return Err(TreeOrderIssue::NotSorted);
     }
 
     let c1 = name1
@@ -479,7 +502,7 @@ fn verify_tree_order(
         .unwrap_or(if is_tree_mode(mode2) { b'/' } else { 0 });
 
     if c1 == 0 && c2 == 0 {
-        return Err("duplicateEntries");
+        return Err(TreeOrderIssue::DuplicateEntries);
     }
 
     if c1 == 0 && is_less_than_slash(c2) {
@@ -494,7 +517,7 @@ fn verify_tree_order(
             }
             let p = f_name.len();
             if name2.len() == p {
-                return Err("duplicateEntries");
+                return Err(TreeOrderIssue::DuplicateEntries);
             }
             if is_less_than_slash(name2[p]) {
                 candidates.push(f_name);
@@ -506,7 +529,7 @@ fn verify_tree_order(
     if c1 < c2 {
         Ok(())
     } else {
-        Err("treeNotSorted")
+        Err(TreeOrderIssue::NotSorted)
     }
 }
 
@@ -546,7 +569,6 @@ fn mode_allowed(mode: u32) -> bool {
 fn tree_issue_after_scan(
     has_null_sha1: bool,
     has_full_path: bool,
-    has_empty_name: bool,
     has_dot: bool,
     has_dotdot: bool,
     has_dotgit: bool,
@@ -557,61 +579,74 @@ fn tree_issue_after_scan(
     has_large_name: bool,
 ) -> Option<FsckError> {
     if has_null_sha1 {
-        return Some(FsckError::new(
-            "nullSha1",
-            "contains entries pointing to null sha1",
-        ));
+        return Some(FsckError::new("nullSha1", "tree lists the null object id"));
     }
     if has_full_path {
-        return Some(FsckError::new("fullPathname", "contains full pathnames"));
-    }
-    if has_empty_name {
-        return Some(FsckError::new("emptyName", "contains empty pathname"));
+        return Some(FsckError::new(
+            "fullPathname",
+            "tree entry name contains a slash",
+        ));
     }
     if has_dot {
-        return Some(FsckError::new("hasDot", "contains '.'"));
+        return Some(FsckError::new("hasDot", "tree entry name is a single dot"));
     }
     if has_dotdot {
-        return Some(FsckError::new("hasDotdot", "contains '..'"));
+        return Some(FsckError::new(
+            "hasDotdot",
+            "tree entry name is parent directory",
+        ));
     }
     if has_dotgit {
-        return Some(FsckError::new("hasDotgit", "contains '.git'"));
+        return Some(FsckError::new(
+            "hasDotgit",
+            "tree entry name is a .git alias",
+        ));
     }
     if has_zero_pad {
         return Some(FsckError::new(
             "zeroPaddedFilemode",
-            "contains zero-padded file modes",
+            "tree entry mode has leading zeros",
         ));
     }
     if has_bad_modes {
-        return Some(FsckError::new("badFilemode", "contains bad file modes"));
+        return Some(FsckError::new(
+            "badFilemode",
+            "tree entry mode is not allowed",
+        ));
     }
     if has_dup_entries {
         return Some(FsckError::new(
             "duplicateEntries",
-            "contains duplicate file entries",
+            "tree lists the same name more than once",
         ));
     }
     if not_properly_sorted {
-        return Some(FsckError::new("treeNotSorted", "not properly sorted"));
+        return Some(FsckError::new(
+            "treeNotSorted",
+            "tree entries are out of canonical order",
+        ));
     }
     if has_large_name {
         return Some(FsckError::new(
             "largePathname",
-            "contains excessively large pathname",
+            "tree entry name exceeds the length limit",
         ));
     }
     None
 }
 
-fn fsck_tree(data: &[u8]) -> Result<(), FsckError> {
-    let oid_len = infer_tree_oid_len(data)
-        .ok_or_else(|| FsckError::new("badTree", "cannot be parsed as a tree"))?;
+fn fsck_tree(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
+    let oid_len = options.hash_algo.len();
+    if !tree_walk_consumes_all(data, oid_len) {
+        return Err(FsckError::new(
+            "badTree",
+            "tree object bytes are not a valid tree encoding",
+        ));
+    }
 
     let mut pos = 0usize;
     let mut has_null_sha1 = false;
     let mut has_full_path = false;
-    let mut has_empty_name = false;
     let mut has_dot = false;
     let mut has_dotdot = false;
     let mut has_dotgit = false;
@@ -628,28 +663,32 @@ fn fsck_tree(data: &[u8]) -> Result<(), FsckError> {
             has_zero_pad = true;
         }
 
-        let sp = data[pos..]
-            .iter()
-            .position(|&b| b == b' ')
-            .ok_or_else(|| FsckError::new("badTree", "cannot be parsed as a tree"))?;
+        let sp = data[pos..].iter().position(|&b| b == b' ').ok_or_else(|| {
+            FsckError::new("badTree", "tree object bytes are not a valid tree encoding")
+        })?;
         let mode_bytes = &data[pos..pos + sp];
         let mode = std::str::from_utf8(mode_bytes)
             .ok()
             .and_then(|s| u32::from_str_radix(s, 8).ok());
         let Some(mode) = mode else {
-            return Err(FsckError::new("badTree", "cannot be parsed as a tree"));
+            return Err(FsckError::new(
+                "badTree",
+                "tree object bytes are not a valid tree encoding",
+            ));
         };
         if !mode_allowed(mode) {
             has_bad_modes = true;
         }
         pos += sp + 1;
 
-        let nul = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| FsckError::new("badTree", "cannot be parsed as a tree"))?;
+        let nul = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
+            FsckError::new("badTree", "tree object bytes are not a valid tree encoding")
+        })?;
         if nul == 0 {
-            return Err(FsckError::new("badTree", "cannot be parsed as a tree"));
+            return Err(FsckError::new(
+                "badTree",
+                "tree object bytes are not a valid tree encoding",
+            ));
         }
         let name = &data[pos..pos + nul];
         if name == b"." {
@@ -678,11 +717,17 @@ fn fsck_tree(data: &[u8]) -> Result<(), FsckError> {
         pos += nul + 1;
 
         if pos + oid_len > data.len() {
-            return Err(FsckError::new("badTree", "cannot be parsed as a tree"));
+            return Err(FsckError::new(
+                "badTree",
+                "tree object bytes are not a valid tree encoding",
+            ));
         }
         let oid_bytes = &data[pos..pos + oid_len];
         if ObjectId::from_bytes(oid_bytes).is_err() {
-            return Err(FsckError::new("badTree", "cannot be parsed as a tree"));
+            return Err(FsckError::new(
+                "badTree",
+                "tree object bytes are not a valid tree encoding",
+            ));
         }
         if is_null_oid_bytes(oid_bytes) {
             has_null_sha1 = true;
@@ -692,9 +737,8 @@ fn fsck_tree(data: &[u8]) -> Result<(), FsckError> {
         if let Some((prev_mode, ref prev_name)) = prev {
             match verify_tree_order(prev_mode, prev_name, mode, name, &mut dup_candidates) {
                 Ok(()) => {}
-                Err("duplicateEntries") => has_dup_entries = true,
-                Err("treeNotSorted") => not_properly_sorted = true,
-                Err(_) => {}
+                Err(TreeOrderIssue::DuplicateEntries) => has_dup_entries = true,
+                Err(TreeOrderIssue::NotSorted) => not_properly_sorted = true,
             }
         }
         prev = Some((mode, name.to_vec()));
@@ -703,7 +747,6 @@ fn fsck_tree(data: &[u8]) -> Result<(), FsckError> {
     if let Some(err) = tree_issue_after_scan(
         has_null_sha1,
         has_full_path,
-        has_empty_name,
         has_dot,
         has_dotdot,
         has_dotgit,
@@ -716,15 +759,6 @@ fn fsck_tree(data: &[u8]) -> Result<(), FsckError> {
         return Err(err);
     }
     Ok(())
-}
-
-fn infer_tree_oid_len(data: &[u8]) -> Option<usize> {
-    for oid_len in [HashAlgo::Sha1.len(), HashAlgo::Sha256.len()] {
-        if tree_walk_consumes_all(data, oid_len) {
-            return Some(oid_len);
-        }
-    }
-    None
 }
 
 fn tree_walk_consumes_all(data: &[u8], oid_len: usize) -> bool {
@@ -750,21 +784,25 @@ fn tree_walk_consumes_all(data: &[u8], oid_len: usize) -> bool {
 mod tests {
     use super::*;
 
+    const SHA1_OPTS: FsckObjectOptions = FsckObjectOptions::new(HashAlgo::Sha1);
+    const SHA256_OPTS: FsckObjectOptions = FsckObjectOptions::new(HashAlgo::Sha256);
+
     #[test]
     fn empty_commit_is_unterminated_header() {
-        let e = fsck_object(ObjectKind::Commit, b"").unwrap_err();
+        let e = fsck_object(ObjectKind::Commit, b"", SHA1_OPTS).unwrap_err();
         assert_eq!(e.id, "unterminatedHeader");
     }
 
     #[test]
     fn commit_missing_tree_matches_git() {
-        let e = fsck_object(ObjectKind::Commit, b"\n\n").unwrap_err();
+        let e = fsck_object(ObjectKind::Commit, b"\n\n", SHA1_OPTS).unwrap_err();
         assert_eq!(e.id, "missingTree");
     }
 
     #[test]
     fn tree_truncated_is_bad_tree() {
-        let e = fsck_object(ObjectKind::Tree, b"100644 foo\0\x01\x01\x01\x01").unwrap_err();
+        let e =
+            fsck_object(ObjectKind::Tree, b"100644 foo\0\x01\x01\x01\x01", SHA1_OPTS).unwrap_err();
         assert_eq!(e.id, "badTree");
     }
 
@@ -773,7 +811,7 @@ mod tests {
         let null = [0u8; 20];
         let mut body = b"100644 file\0".to_vec();
         body.extend_from_slice(&null);
-        let e = fsck_object(ObjectKind::Tree, &body).unwrap_err();
+        let e = fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).unwrap_err();
         assert_eq!(e.id, "nullSha1");
     }
 
@@ -783,16 +821,16 @@ mod tests {
         let tag = format!(
             "object {tree}\ntype commit\ntag signed\ntagger T <t@e.com> 1 +0000\ngpgsig sig\n line\n\nbody\n"
         );
-        assert!(fsck_object(ObjectKind::Tag, tag.as_bytes()).is_ok());
+        assert!(fsck_object(ObjectKind::Tag, tag.as_bytes(), SHA1_OPTS).is_ok());
     }
 
     #[test]
-    fn tag_gpgsig_truncated_before_header_blank_line_matches_git() {
+    fn tag_gpgsig_truncated_before_header_blank_line() {
         let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
         let tag = format!(
             "object {tree}\ntype commit\ntag signed\ntagger T <t@e.com> 1 +0000\ngpgsig sig\n cont"
         );
-        let e = fsck_object(ObjectKind::Tag, tag.as_bytes()).unwrap_err();
+        let e = fsck_object(ObjectKind::Tag, tag.as_bytes(), SHA1_OPTS).unwrap_err();
         assert_eq!(e.id, "unterminatedHeader");
     }
 
@@ -801,19 +839,22 @@ mod tests {
         let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
         let body =
             format!("tree {tree}\nauthor A > <a@e.com> 1 +0000\ncommitter C <c@e.com> 1 +0000\n\n");
-        let e = fsck_object(ObjectKind::Commit, body.as_bytes()).unwrap_err();
+        let e = fsck_object(ObjectKind::Commit, body.as_bytes(), SHA1_OPTS).unwrap_err();
         assert_eq!(e.id, "badName");
     }
 
     #[test]
     fn fsck_error_report_line_format() {
-        let e = FsckError::new("badTree", "cannot be parsed as a tree");
-        assert_eq!(e.report_line(), "badTree: cannot be parsed as a tree");
+        let e = FsckError::new("badTree", "tree object bytes are not a valid tree encoding");
+        assert_eq!(
+            e.report_line(),
+            "badTree: tree object bytes are not a valid tree encoding"
+        );
     }
 
     #[test]
     fn blob_fsck_is_noop() {
-        assert!(fsck_object(ObjectKind::Blob, b"anything").is_ok());
+        assert!(fsck_object(ObjectKind::Blob, b"anything", SHA1_OPTS).is_ok());
     }
 
     #[test]
@@ -823,7 +864,7 @@ mod tests {
         let body = format!(
             "tree {tree}\nparent {parent}\nauthor A <a@e.com> 1 +0000\ncommitter C <c@e.com> 1 +0000\n\n"
         );
-        assert!(fsck_object(ObjectKind::Commit, body.as_bytes()).is_ok());
+        assert!(fsck_object(ObjectKind::Commit, body.as_bytes(), SHA1_OPTS).is_ok());
     }
 
     #[test]
@@ -832,6 +873,34 @@ mod tests {
         let oid = hex::decode(tree).expect("hex");
         let mut body = b"100644 file\0".to_vec();
         body.extend_from_slice(&oid);
-        assert!(fsck_object(ObjectKind::Tree, &body).is_ok());
+        assert!(fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).is_ok());
+    }
+
+    #[test]
+    fn sha256_commit_rejects_sha1_width_tree_oid() {
+        let sha1_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let body = format!(
+            "tree {sha1_tree}\nauthor A <a@e.com> 1 +0000\ncommitter C <c@e.com> 1 +0000\n\n"
+        );
+        let e = fsck_object(ObjectKind::Commit, body.as_bytes(), SHA256_OPTS).unwrap_err();
+        assert_eq!(e.id, "badTreeSha1");
+    }
+
+    #[test]
+    fn sha1_commit_rejects_sha256_width_tree_oid() {
+        let sha256_tree = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
+        let body = format!(
+            "tree {sha256_tree}\nauthor A <a@e.com> 1 +0000\ncommitter C <c@e.com> 1 +0000\n\n"
+        );
+        let e = fsck_object(ObjectKind::Commit, body.as_bytes(), SHA1_OPTS).unwrap_err();
+        assert_eq!(e.id, "badTreeSha1");
+    }
+
+    #[test]
+    fn sha256_tag_rejects_sha1_width_object_oid() {
+        let sha1_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let tag = format!("object {sha1_tree}\ntype commit\ntag t\ntagger T <t@e.com> 1 +0000\n\n");
+        let e = fsck_object(ObjectKind::Tag, tag.as_bytes(), SHA256_OPTS).unwrap_err();
+        assert_eq!(e.id, "badObjectSha1");
     }
 }
