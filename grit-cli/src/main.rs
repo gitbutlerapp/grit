@@ -175,6 +175,8 @@ enum Command {
     },
     /// Update grit to the latest release (re-runs the install script).
     Update,
+    /// Print an agent skill (SKILL.md) that explains how to use grit.
+    Skill,
     /// Read, set, or list configuration values.
     Config {
         /// Use the global (per-user) config file instead of this repository's.
@@ -300,6 +302,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             Some(AuthAction::Logout) => emit(&commands::auth::logout()?, opts),
         },
         Command::Update => emit(&commands::update::run(opts.mode)?, opts),
+        Command::Skill => emit(&commands::skill::run()?, opts),
         Command::Config {
             global,
             list,

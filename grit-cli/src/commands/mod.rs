@@ -19,6 +19,7 @@ pub mod remote;
 pub mod serve;
 pub mod shortlog;
 pub mod show;
+pub mod skill;
 pub mod status;
 pub mod switch;
 pub mod tag;

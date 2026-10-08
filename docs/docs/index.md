@@ -78,6 +78,7 @@ See [Install](https://grit-scm.com/docs/install/index.md) for download options, 
 | Command | Summary |
 | --- | --- |
 | [`grit update`](https://grit-scm.com/docs/update/index.md) | Update grit to the latest release. |
+| [`grit skill`](https://grit-scm.com/docs/skill/index.md) | Print an agent skill that explains how to use grit. |
 
 ### Plumbing
 
