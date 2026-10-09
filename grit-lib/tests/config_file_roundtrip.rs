@@ -7,6 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::{ConfigFile, ConfigIncludeOrigin, ConfigScope, ConfigSet};
 use grit_lib::environment::Environment;
+use grit_lib::error::{ConfigError, Error};
 use tempfile::tempdir;
 
 #[test]
@@ -42,7 +43,13 @@ fn unset_matching_and_last() {
     let mut file = ConfigFile::from_path(&path, ConfigScope::Local)
         .expect("read")
         .expect("exists");
-    file.unset_last("s.url").expect("unset last single-valued key");
+    assert!(matches!(
+        file.unset_last("r.url"),
+        Err(Error::Config(ConfigError::MultipleValues { key })) if key == "r.url"
+    ));
+    assert_eq!(file.count("r.url").expect("count"), 3);
+    file.unset_last("s.url")
+        .expect("unset last single-valued key");
     assert!(file.get("s.url").is_none());
     let n = file
         .unset_matching("r.url", None, false)
