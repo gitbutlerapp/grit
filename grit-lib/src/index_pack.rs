@@ -74,8 +74,11 @@ pub fn ingest_received_pack_path(
     odb: &Odb,
     opts: &IngestPackOptions,
 ) -> Result<HashSet<ObjectId>> {
-    if !pack_path.exists() {
-        return Ok(HashSet::new());
+    if !pack_path.is_file() {
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("received pack file missing: {}", pack_path.display()),
+        )));
     }
     install_pack_path(&pack_path, odb, opts)
 }

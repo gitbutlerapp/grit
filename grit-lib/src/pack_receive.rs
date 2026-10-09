@@ -4,9 +4,10 @@
 //! (channel 1). These helpers demux that stream without holding the full pack in
 //! a `Vec` when the caller writes to disk instead.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
@@ -133,19 +134,28 @@ impl TempPackReceive {
     ///
     /// Returns an I/O error when the directory or file cannot be created.
     pub fn create(objects_dir: &Path) -> Result<Self> {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
         let pack_dir = objects_dir.join("pack");
         std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-        let tmp = tempfile::Builder::new()
-            .prefix("tmp_pack_")
-            .tempfile_in(&pack_dir)
-            .map_err(Error::Io)?;
-        let path = tmp.path().to_path_buf();
-        let file = tmp.into_file();
-        Ok(Self {
-            file,
-            path,
-            seen_pack: false,
-        })
+        for _ in 0..64 {
+            let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+            let path = pack_dir.join(format!("tmp_pack_{}_{seq}", std::process::id()));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    return Ok(Self {
+                        file,
+                        path,
+                        seen_pack: false,
+                    });
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(Error::Io(e)),
+            }
+        }
+        Err(Error::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate tmp_pack file name under objects/pack",
+        )))
     }
 
     /// Whether any pack byte (including the `PACK` header) has been written.
@@ -271,5 +281,34 @@ impl Write for TempPackReceive {
 
     fn flush(&mut self) -> io::Result<()> {
         self.file.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temp_pack_finish_leaves_durable_path_with_bytes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let objects = dir.path().join("objects");
+        let mut recv = TempPackReceive::create(&objects).expect("create");
+        let header = b"PACK";
+        recv.write_raw(header).expect("write");
+        assert!(recv.path().is_file(), "path must exist before finish");
+        let path = recv.finish().expect("finish").expect("some pack");
+        assert!(path.is_file(), "finish must return an on-disk path");
+        assert_eq!(std::fs::read(&path).expect("read"), header);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn temp_pack_finish_removes_empty_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let objects = dir.path().join("objects");
+        let recv = TempPackReceive::create(&objects).expect("create");
+        let path = recv.path().to_path_buf();
+        assert!(recv.finish().expect("finish").is_none());
+        assert!(!path.exists());
     }
 }

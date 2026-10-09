@@ -754,24 +754,24 @@ fn read_stateless_response_stream<R: Read>(
     let mut shallow = Vec::new();
     let mut unshallow = Vec::new();
 
+    let mut replay_payload: Option<Vec<u8>> = None;
     if expect_shallow {
         loop {
             match pkt_line::read_packet(r)? {
                 None | Some(pkt_line::Packet::Flush) => break,
                 Some(pkt_line::Packet::Data(line)) => {
-                    let line = line.trim_end_matches('\n');
-                    if let Some(rest) = line.strip_prefix("shallow ") {
+                    let trimmed = line.trim_end_matches('\n');
+                    if let Some(rest) = trimmed.strip_prefix("shallow ") {
                         if let Ok(oid) = ObjectId::from_hex(rest.trim()) {
                             shallow.push(oid);
                         }
-                    } else if let Some(rest) = line.strip_prefix("unshallow ") {
+                    } else if let Some(rest) = trimmed.strip_prefix("unshallow ") {
                         if let Ok(oid) = ObjectId::from_hex(rest.trim()) {
                             unshallow.push(oid);
                         }
                     } else {
-                        return Err(Error::Message(format!(
-                            "unexpected line in shallow-info section: {line}"
-                        )));
+                        replay_payload = Some(line.into_bytes());
+                        break;
                     }
                 }
                 Some(_) => break,
@@ -779,7 +779,15 @@ fn read_stateless_response_stream<R: Read>(
         }
     }
 
-    while let Some(payload) = read_pkt_payload(r)? {
+    loop {
+        let payload = if let Some(p) = replay_payload.take() {
+            p
+        } else {
+            match read_pkt_payload(r)? {
+                Some(p) => p,
+                None => break,
+            }
+        };
         if payload.is_empty() {
             continue;
         }
