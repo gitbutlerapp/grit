@@ -623,12 +623,37 @@ fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
         && child.starts_with(parent)
 }
 
+/// Removes `lock` on drop unless [`disarm`](Self::disarm) was called after a successful delete.
+struct LooseRefLockGuard<'a> {
+    lock: &'a Path,
+    armed: bool,
+}
+
+impl<'a> LooseRefLockGuard<'a> {
+    fn new(lock: &'a Path) -> Self {
+        Self { lock, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for LooseRefLockGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            abort_loose_ref_lock(self.lock);
+        }
+    }
+}
+
 fn delete_loose_ref_after_lock(
     storage_dir: &Path,
     stor: &str,
     path: &Path,
     lock: &Path,
 ) -> Result<()> {
+    let mut lock_guard = LooseRefLockGuard::new(lock);
     remove_packed_ref(storage_dir, stor)?;
 
     remove_empty_ref_directory(path);
@@ -659,6 +684,7 @@ fn delete_loose_ref_after_lock(
     }
 
     fs::remove_file(lock)?;
+    lock_guard.disarm();
     Ok(())
 }
 

@@ -12,8 +12,8 @@ use std::thread;
 use grit_lib::gc::{update_refs, RefTransactionItem};
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::{
-    delete_ref, lock_path_for_ref, resolve_ref, update_branch_for_commit, write_ref,
-    BranchCommitRefUpdate,
+    delete_ref, delete_ref_cas, lock_path_for_ref, resolve_ref, update_branch_for_commit,
+    write_ref, BranchCommitRefUpdate,
 };
 use grit_lib::reftable::{ReftableReader, ReftableStack};
 use grit_lib::repo::init_repository;
@@ -275,6 +275,40 @@ fn ref_lock_present_fails_and_preserves_ref() {
         write_ref(&git_dir, "refs/heads/locked", &new_oid).expect("write after lock cleared");
         assert!(!lock.exists(), "lock file must not remain after success");
         assert_eq!(resolve_ref(&git_dir, "refs/heads/locked").unwrap(), new_oid);
+    });
+}
+
+#[test]
+fn delete_ref_cas_failure_cleans_ref_lock_and_preserves_packed_ref() {
+    each_backend(|backend, repo| {
+        if backend == Backend::Reftable {
+            return;
+        }
+        let git_dir = repo.git_dir();
+        let oid = git_empty_commit_oid(repo.worktree());
+        write_ref(&git_dir, "refs/heads/packed-cas", &oid).expect("seed ref");
+        git(repo.worktree(), &["pack-refs", "--all"]);
+
+        let ref_path = git_dir.join("refs/heads/packed-cas");
+        let lock = lock_path_for_ref(&ref_path);
+        let packed_lock = git_dir.join("packed-refs.lock");
+        fs::write(&packed_lock, b"held").expect("block packed-refs rewrite");
+
+        assert!(
+            delete_ref_cas(&git_dir, "refs/heads/packed-cas", oid).is_err(),
+            "delete must fail when packed-refs is locked"
+        );
+        assert_eq!(
+            resolve_ref(&git_dir, "refs/heads/packed-cas").unwrap(),
+            oid,
+            "packed ref must remain"
+        );
+        assert!(
+            !lock.exists(),
+            "ref lock must not remain after delete_ref_cas error"
+        );
+
+        fs::remove_file(&packed_lock).expect("clear packed-refs lock");
     });
 }
 
