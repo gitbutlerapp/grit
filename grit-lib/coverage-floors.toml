@@ -38,7 +38,7 @@ files = [
     "ignore.rs",
     "wildmatch.rs",
 ]
-minimum = 71.9
+minimum = 86.3
 
 [group.midx]
 files = [
@@ -114,7 +114,7 @@ minimum = 93.3
 minimum = 86.1
 
 [file."ignore.rs"]
-minimum = 69.3
+minimum = 82.6
 
 [file."index_pack.rs"]
 minimum = 90.7
@@ -162,7 +162,7 @@ minimum = 43.2
 minimum = 82.9
 
 [file."wildmatch.rs"]
-minimum = 74.6
+minimum = 95.9
 
 [file."zlib_inflate.rs"]
 minimum = 85.0

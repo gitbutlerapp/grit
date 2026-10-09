@@ -127,6 +127,10 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t0600-reffiles-backend.sh | empty directory must not block create/delete; non-empty directory and broken ref block create; short hash / trailing token parsing | `grit-lib/tests/refs_loose_symref.rs` (`t0600_*`; files backend only) | partial (lock/transaction cases in step 4) |
 | t1405-main-ref-store.sh | `verify_refname_available_for_create` D/F prefix conflicts (single ref) | `grit-lib/tests/refs_loose_symref.rs` (`t1405_verify_refname_df_prefix_single_ref`) | partial (batch D/F in step 4) |
 | t1430-bad-ref-name.sh | invalid storable names vs `git check-ref-format`; `write_ref` rejects | `grit-lib/tests/refs_loose_symref.rs` (`t1430_invalid_names_match_git_check_ref_format`, `t1430_write_ref_rejects_invalid_names_both_backends`) | covered |
+| t3070-wildmatch.sh | wildmatch / iwildmatch / pathmatch / ipathmatch vectors; pathological `*` backtracking bound | `grit-lib/tests/wildmatch_vectors.rs` (`t3070_vectors_all_modes`, `t3070_pathological_wildmatch_under_time_bound`, ls-files pathmatch cross-check) | covered |
+| t0008-ignores.sh | nested `.gitignore`, exclude, global excludes, negation, tracked overrides; `check-ignore -v -n` source/line/pattern | `grit-lib/tests/ignore_rules.rs` (`t0008_check_path_matches_git_check_ignore_verbose`, symlink warning, CLI precedence) | covered |
+| t3001-ls-files-others-exclude | `--exclude-from`, `--exclude-per-directory` | `grit-lib/tests/ignore_rules.rs` (`t3001_exclude_from_and_per_directory_name`) | covered |
+| t3003-ls-files-exclude | CRLF `.gitignore` lines | `grit-lib/tests/ignore_rules.rs` (`t3003_crlf_gitignore_lines`) | partial (core parse/match; skip UX-only ls-files flags) |
 
 Detailed rows for reflog, packed refs, transactions, and remaining t1405 cases are filled in as steps 3–12 of the refs/config plan land; see also the ODB/pack mapping below.
 
