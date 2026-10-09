@@ -8,7 +8,9 @@ use super::{
     write_line, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
+use crate::index_pack::{ingest_received_pack, IngestPackOptions};
 use crate::objects::ObjectId;
+use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::repo::Repository;
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
 
@@ -103,8 +105,9 @@ pub struct ReceiveOutcome {
 /// Serve one push session: advertise refs, read the ref updates and pack, store
 /// the objects, apply the updates, and report the result to the client.
 ///
-/// Objects from the pushed pack are written as loose objects after their
-/// connectivity has been checked. Updates are checked against `policy` and
+/// Objects from the pushed pack are stored via [`unpack_objects`] for small
+/// packs (below `receive.unpacklimit`) and [`crate::index_pack::ingest_received_pack`]
+/// otherwise, matching Git receive-pack. Updates are checked against `policy` and
 /// against the value the client expected each ref to have; with the `atomic`
 /// capability either every update is applied or none is. Server-side hooks are
 /// not run.
@@ -151,14 +154,16 @@ pub fn receive_pack(
 
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
     let unpack_error = if needs_pack {
-        let opts = UnpackOptions {
-            quiet: true,
-            strict: true,
-            ..UnpackOptions::default()
-        };
-        unpack_objects(input, &repo.odb, &opts)
-            .err()
-            .map(|e| e.to_string())
+        let cfg = repo
+            .config()
+            .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+        let max_input = max_input_size_from_config(cfg.as_ref());
+        match read_push_pack(input, max_input) {
+            Ok(pack) => ingest_pushed_pack(repo, &pack, cfg.as_ref(), max_input)
+                .err()
+                .map(|e| e.to_string()),
+            Err(msg) => Some(msg),
+        }
     } else {
         None
     };
@@ -415,6 +420,61 @@ fn build_report(unpack_error: Option<&str>, updates: &[RefUpdateResult]) -> Resu
 /// Collapse a message to a single line so it fits in one status pkt-line.
 fn one_line(msg: &str) -> String {
     msg.lines().next().unwrap_or_default().trim().to_owned()
+}
+
+/// Read the pack bytes that follow the ref-update command list on the wire.
+fn read_push_pack(
+    input: &mut dyn Read,
+    max_bytes: Option<u64>,
+) -> std::result::Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let n = input.read(&mut chunk).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        if let Some(limit) = max_bytes {
+            let next = buf.len().saturating_add(n);
+            if next as u64 > limit {
+                return Err("pack exceeds maximum input size".to_owned());
+            }
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(buf)
+}
+
+/// Store a pushed pack using unpack-objects or index-pack, per Git limits.
+fn ingest_pushed_pack(
+    repo: &Repository,
+    pack: &[u8],
+    cfg: &ConfigSet,
+    max_input: Option<u64>,
+) -> Result<()> {
+    if should_use_unpack_objects(pack, cfg) {
+        let mut cursor = std::io::Cursor::new(pack);
+        unpack_objects(
+            &mut cursor,
+            &repo.odb,
+            &UnpackOptions {
+                quiet: true,
+                strict: true,
+                max_input_bytes: max_input,
+                ..UnpackOptions::default()
+            },
+        )?;
+    } else {
+        ingest_received_pack(
+            pack.to_vec(),
+            &repo.odb,
+            &IngestPackOptions {
+                fix_thin: true,
+                ..Default::default()
+            },
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

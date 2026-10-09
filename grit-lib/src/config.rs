@@ -1931,6 +1931,26 @@ impl ConfigSet {
             .and_then(|n| usize::try_from(n).ok())
     }
 
+    /// In-pack delta window (`pack.window`, Git default: 10).
+    #[must_use]
+    pub fn pack_object_window(&self) -> usize {
+        self.get_i64("pack.window")
+            .and_then(|r| r.ok())
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(10)
+    }
+
+    /// In-pack delta chain depth cap (`pack.depth`, Git default: 50).
+    #[must_use]
+    pub fn pack_object_depth(&self) -> usize {
+        self.get_i64("pack.depth")
+            .and_then(|r| r.ok())
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(crate::pack::DEFAULT_PACK_DEPTH)
+    }
+
     /// [`crate::hash::Parallelism`] for pack indexing from merged config.
     #[must_use]
     pub fn pack_index_parallelism(&self) -> crate::hash::Parallelism {

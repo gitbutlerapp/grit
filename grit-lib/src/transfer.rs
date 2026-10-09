@@ -293,6 +293,52 @@ impl Default for PackBuildOptions {
     }
 }
 
+impl PackBuildOptions {
+    /// `pack.window` and `pack.depth` from config, or Git's defaults when unset.
+    #[must_use]
+    pub fn window_and_depth_from_config(cfg: Option<&crate::config::ConfigSet>) -> (usize, usize) {
+        cfg.map(|c| (c.pack_object_window(), c.pack_object_depth()))
+            .unwrap_or((10, crate::pack::DEFAULT_PACK_DEPTH))
+    }
+
+    /// Production pack settings for a local full copy (clone/fetch from disk).
+    ///
+    /// Non-thin, delta-compressed, with whole-object reuse when the source ODB
+    /// already stores objects in packs. On-disk delta reuse stays off until
+    /// [`crate::pack::packed_ref_delta_reuse_slice`] reads zlib bounds correctly
+    /// for large packs (follow-up to #936).
+    #[must_use]
+    pub fn for_local_copy(cfg: Option<&crate::config::ConfigSet>) -> Self {
+        let (window, max_depth) = Self::window_and_depth_from_config(cfg);
+        Self {
+            thin: false,
+            delta: true,
+            window,
+            max_depth,
+            use_ofs_delta: true,
+            reuse_deltas: false,
+            reuse_objects: true,
+            ..Default::default()
+        }
+    }
+
+    /// Production pack settings for an in-process local push (thin delta pack).
+    #[must_use]
+    pub fn for_local_push(cfg: Option<&crate::config::ConfigSet>) -> Self {
+        let (window, max_depth) = Self::window_and_depth_from_config(cfg);
+        Self {
+            thin: true,
+            delta: true,
+            window,
+            max_depth,
+            use_ofs_delta: true,
+            reuse_deltas: true,
+            reuse_objects: true,
+            ..Default::default()
+        }
+    }
+}
+
 /// Build a v2 packfile containing exactly the objects reachable from `wants`
 /// but **not** reachable from `haves`, de-duplicated.
 ///
@@ -1310,6 +1356,8 @@ pub fn fetch_local(
 
     let mut pack_oids: HashSet<ObjectId> = HashSet::new();
     if !wants.is_empty() && !opts.dry_run {
+        let remote_cfg = config_for_git_dir(remote_git_dir);
+        let pack_opts = PackBuildOptions::for_local_copy(remote_cfg.as_ref());
         let pack = build_pack_for_local_fetch(
             &remote_odb,
             &wants,
@@ -1317,7 +1365,7 @@ pub fn fetch_local(
             &haves,
             &remote_shallow,
             &local_shallow,
-            &PackBuildOptions::default(),
+            &pack_opts,
         )?;
         pack_oids = crate::index_pack::ingest_received_pack(
             pack,
@@ -1457,8 +1505,8 @@ pub fn fetch_local(
 ///    * unchanged (remote already at the source) → [`PushRefStatus::UpToDate`].
 ///    * otherwise [`PushRefStatus::Ok`].
 /// 3. For accepted non-delete updates, copies the minimal object closure from the
-///    LOCAL odb into the REMOTE odb via [`build_pack`] +
-///    [`crate::unpack_objects::unpack_objects`], excluding objects already
+///    LOCAL odb into the REMOTE odb via [`build_pack`] and
+///    [`crate::index_pack::ingest_received_pack`], excluding objects already
 ///    reachable from the remote's existing ref tips.
 /// 4. Applies the ref change on the remote (unless `opts.dry_run`).
 ///
@@ -1538,18 +1586,14 @@ pub fn push_local(
         }
         match &d.action {
             PushAction::Update(src) => {
-                let pack = build_pack(
-                    &local_odb,
-                    &[*src],
-                    &remote_have_tips,
-                    &PackBuildOptions::default(),
-                )?;
-                let mut cursor = std::io::Cursor::new(pack);
-                crate::unpack_objects::unpack_objects(
-                    &mut cursor,
+                let local_cfg = config_for_git_dir(local_git_dir);
+                let pack_opts = PackBuildOptions::for_local_push(local_cfg.as_ref());
+                let pack = build_pack(&local_odb, &[*src], &remote_have_tips, &pack_opts)?;
+                crate::index_pack::ingest_received_pack(
+                    pack,
                     &remote_odb,
-                    &crate::unpack_objects::UnpackOptions {
-                        quiet: true,
+                    &crate::index_pack::IngestPackOptions {
+                        fix_thin: true,
                         ..Default::default()
                     },
                 )?;
@@ -1813,6 +1857,15 @@ pub(crate) struct MatchedRef {
 /// (and MIDX config) resolve correctly.
 pub(crate) fn open_odb(git_dir: &Path) -> Odb {
     Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf())
+}
+
+fn config_for_git_dir(git_dir: &Path) -> Option<crate::config::ConfigSet> {
+    crate::config::ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(git_dir),
+        true,
+    )
+    .ok()
 }
 
 /// Match a ref name against the positive refspecs, returning the destination
