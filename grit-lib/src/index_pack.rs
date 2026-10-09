@@ -91,6 +91,7 @@ pub fn install_pack_bytes(
     odb: &Odb,
     opts: &IngestPackOptions,
 ) -> Result<HashSet<ObjectId>> {
+    odb.require_files_primary("index_pack")?;
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
     static INSTALL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -115,6 +116,7 @@ pub fn install_pack_path(
     odb: &Odb,
     opts: &IngestPackOptions,
 ) -> Result<HashSet<ObjectId>> {
+    odb.require_files_primary("index_pack")?;
     let mut owned = pack_path.to_path_buf();
     if opts.fix_thin {
         owned = fix_thin_pack_path(&owned, odb)?;

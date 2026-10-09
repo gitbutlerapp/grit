@@ -141,7 +141,7 @@ fn bench_packed_read(c: &mut Criterion) {
     group.bench_function("whole", |b| {
         use grit_lib::pack_store::PackStore;
         use std::sync::Arc;
-        PackStore::with_context(Arc::clone(fx.odb.pack_store()), || {
+        PackStore::with_context(Arc::clone(fx.odb.pack_store().expect("pack_store")), || {
             b.iter(|| {
                 black_box(
                     read_object_from_pack(&fx.packed_whole_idx, &fx.packed_whole_oid)

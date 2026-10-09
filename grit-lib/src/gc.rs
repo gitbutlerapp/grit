@@ -63,6 +63,7 @@ pub fn prune_loose_unreachable(
     reachable_roots: &[ObjectId],
     keep_newer_than: Option<SystemTime>,
 ) -> Result<PruneStats> {
+    odb.require_files_primary("gc")?;
     // 1. Full reachability closure from the roots.
     let reachable = reachable_closure(odb, reachable_roots)?;
 
