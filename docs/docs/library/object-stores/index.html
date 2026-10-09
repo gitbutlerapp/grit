@@ -156,9 +156,32 @@ let _blob = repo.odb.write(ObjectKind::Blob, b&quot;hello&quot;)?;
 # Ok::&lt;(), grit_lib::error::Error&gt;(())</code></pre>
 <p>Filesystem-only maintenance (<code>Odb::gc</code>, <code>Odb::write_commit_graph</code>, <code>Odb::pack_store</code>, pack install, MIDX write) returns <a href="https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html"><code>Error::UnsupportedObjectStore</code></a> when the primary is not the default files backend. Use <code>Odb::files_objects_dir</code> when you need the on-disk <code>objects/</code> path only for files-backed repos.</p>
 <h2 id="conformance-tests">Conformance tests</h2>
-<p>The workspace crate <code>grit_test_support::odb_conformance</code> provides shared read/write suites. Run them from an integration test in your crate (see <a href="https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs"><code>grit-lib/tests/odb_conformance_memory.rs</code></a>) to validate a custom backend before wiring it through <a href="https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html"><code>OdbBuilder</code></a>.</p><div class="pager"><a href="../../library/network/">← Network</a><a href="../../library/objects/">Objects →</a></div></article>
+<p>The workspace crate <code>grit_test_support::odb_conformance</code> provides shared read/write suites. Run them from an integration test in your crate (see <a href="https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs"><code>grit-lib/tests/odb_conformance_memory.rs</code></a>) to validate a custom backend before wiring it through <a href="https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html"><code>OdbBuilder</code></a>.</p>
+<h2 id="example-append-only-packfile-kv-store">Example: append-only packfile KV store</h2>
+<p><code>grit-examples</code> ships a single-file <code>PackfileKvStore</code> in <code>grit_examples::packfile_kv</code> (zlib records plus an in-memory index rebuilt on open) and a walkthrough that commits through a custom primary, walks history, and exports loose objects for system Git:</p>
+<pre><code>//! Custom append-only object store wired through [`OdbBuilder::primary`].
+//!
+//! Writes a small commit graph in the KV store, walks history with [`rev_list`],
+//! then exports objects as loose files for interoperability with system Git.
+
+use std::env;
+use std::path::PathBuf;
+
+use grit_examples::packfile_kv;
+
+fn main() -&gt; grit_lib::error::Result&lt;()&gt; {
+    let root = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
+        let dir = tempfile::tempdir().expect(&quot;tempdir&quot;);
+        dir.path().to_path_buf()
+    });
+    let log = packfile_kv::run_custom_object_store_demo(&amp;root)?;
+    for oid in log {
+        println!(&quot;{oid}&quot;);
+    }
+    Ok(())
+}</code></pre><div class="pager"><a href="../../library/network/">← Network</a><a href="../../library/objects/">Objects →</a></div></article>
     <nav class="docnav" aria-label="Docs"><h2><a href="../../">Getting started</a></h2><ol><li><a href="../../">Overview</a></li><li><a href="../../install/">Install</a></li><li><a href="../../tutorial/">Tutorial</a></li><li><a href="../../library-quickstart/">Library quick start</a></li></ol><h2><a href="../../global-options/">The grit CLI</a></h2><ol><li><a href="../../global-options/">Global options</a></li><li><a href="../../scripting/">Scripting</a></li><li><a href="../../agents/">Agent guide</a></li></ol><h3>Getting started</h3><ol><li><a href="../../init/">grit init</a></li><li><a href="../../clone/">grit clone</a></li><li><a href="../../status/">grit status</a></li><li><a href="../../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../../add/">grit add</a></li><li><a href="../../commit/">grit commit</a></li><li><a href="../../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../../log/">grit log</a></li><li><a href="../../shortlog/">grit shortlog</a></li><li><a href="../../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../../branch/">grit branch</a></li><li><a href="../../switch/">grit switch</a></li><li><a href="../../merge/">grit merge</a></li><li><a href="../../pick/">grit pick</a></li><li><a href="../../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../../remote/">grit remote</a></li><li><a href="../../fetch/">grit fetch</a></li><li><a href="../../pull/">grit pull</a></li><li><a href="../../push/">grit push</a></li><li><a href="../../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../../update/">grit update</a></li><li><a href="../../skill/">grit skill</a></li><li><a href="../../completions/">grit completions</a></li></ol><h3>Plumbing</h3><ol><li><a href="../../upload-pack/">grit upload-pack</a></li><li><a href="../../receive-pack/">grit receive-pack</a></li><li><a href="../../manager/">grit manager</a></li></ol><h2><a href="../../library/">Library guide</a></h2><ol><li><a href="../../library/">Overview</a></li><li><a href="../../library/api-map/">grit-lib API map</a></li><li><a href="../../library/diff/">Diff</a></li><li><a href="../../library/embedding/">Embedding grit-lib</a></li><li><a href="../../library/network/">Network</a></li><li><a class="current" href="../../library/object-stores/">Object stores</a></li><li><a href="../../library/objects/">Objects</a></li><li><a href="../../library/refs/">Refs</a></li><li><a href="../../library/repository/">Repository</a></li><li><a href="../../library/revwalk/">Revwalk</a></li><li><a href="../../library/staging/">Index</a></li><li><a href="../../library/">grit-lib API</a></li></ol><h2><a href="../../benchmarks/">Benchmarks</a></h2><ol><li><a href="../../benchmarks/">Benchmarks</a></li></ol></nav>
-    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#traits">Traits</a></li><li class="toc-level-2"><a href="#lookup-order">Lookup order</a></li><li class="toc-level-2"><a href="#building-a-custom-repository">Building a custom repository</a></li><li class="toc-level-2"><a href="#conformance-tests">Conformance tests</a></li></ol></aside>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#traits">Traits</a></li><li class="toc-level-2"><a href="#lookup-order">Lookup order</a></li><li class="toc-level-2"><a href="#building-a-custom-repository">Building a custom repository</a></li><li class="toc-level-2"><a href="#conformance-tests">Conformance tests</a></li><li class="toc-level-2"><a href="#example-append-only-packfile-kv-store">Example: append-only packfile KV store</a></li></ol></aside>
   </div>
 </section>
 </main>
