@@ -5,11 +5,10 @@
 
 mod support;
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use grit_lib::error::Error;
+use grit_lib::error::{Error, RefLockError};
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::{
     delete_ref, list_refs, list_refs_glob, list_refs_physical, pack_remote_tracking_refs_for_clone,
@@ -19,8 +18,27 @@ use grit_lib::refs::{
 
 use support::{
     assert_list_refs_match_git, files_repo, git, git_empty_commit_oid, git_for_each_ref,
-    git_fsck_strict, TestRepo,
+    git_for_each_ref_output, git_fsck_strict, TestRepo,
 };
+
+/// Grit ref listing and `git for-each-ref` must succeed or fail together, and match when both succeed.
+fn assert_ref_listing_parity(wt: &Path, git_dir: &Path, prefix: &str) {
+    let grit_result = list_refs(git_dir, prefix);
+    let git_out = git_for_each_ref_output(wt, prefix);
+    match (grit_result, git_out.status.success()) {
+        (Ok(grit_rows), true) => {
+            let git_rows = git_for_each_ref(wt, prefix);
+            assert_eq!(grit_rows, git_rows, "list_refs must match git for-each-ref");
+        }
+        (Err(_), false) => {}
+        (Ok(grit_rows), false) => panic!(
+            "grit listed {} refs but git for-each-ref failed: {}",
+            grit_rows.len(),
+            String::from_utf8_lossy(&git_out.stderr)
+        ),
+        (Err(err), true) => panic!("git for-each-ref succeeded but grit failed: {err:?}"),
+    }
+}
 
 fn git_dir(repo: &TestRepo) -> PathBuf {
     repo.git_dir()
@@ -280,13 +298,14 @@ fn t0600_delete_fails_cleanly_when_packed_refs_locked() {
         .expect("hold lock");
 
     let err = delete_ref(&git_dir, "refs/heads/locked").expect_err("delete must fail");
-    match &err {
-        Error::Message(msg) => assert!(
-            msg.contains("Unable to create") && msg.contains("packed-refs.lock"),
-            "unexpected error: {err:?}"
+    assert!(
+        matches!(
+            &err,
+            Error::RefLock(RefLockError::PackedRefsLockHeld { lock_path })
+                if lock_path.ends_with("packed-refs.lock")
         ),
-        other => panic!("expected Error::Message for lock failure, got {other:?}"),
-    }
+        "expected typed packed-refs lock error, got {err:?}"
+    );
 
     assert_eq!(read_bytes(&packed_path), before_packed);
     if loose_path.exists() {
@@ -409,31 +428,86 @@ fn resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs() {
 }
 
 #[test]
-fn packed_refs_load_ignores_garbage_lines_like_git_valid_subset() {
+fn t1408_packed_refs_garbage_line_rejected_like_git() {
     let repo = files_repo();
     let wt = wt_path(&repo);
     let git_dir = git_dir(&repo);
-    let oid = git_empty_commit_oid(wt);
+    git_empty_commit_oid(wt);
     git(wt, &["branch", "good"]);
     git(wt, &["pack-refs", "--all"]);
     let mut content = fs::read_to_string(git_dir.join("packed-refs")).unwrap();
     content.push_str("this is not a valid packed-refs line\n");
     write_packed_refs(&git_dir, &content);
 
-    let grit_map: BTreeMap<_, _> = list_refs(&git_dir, "refs/heads/")
-        .unwrap()
-        .into_iter()
-        .collect();
-    assert_eq!(grit_map.get("refs/heads/good"), Some(&oid));
-    let git_show = std::process::Command::new("git")
+    assert!(
+        matches!(
+            PackedRefs::load(&git_dir),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ),
+        "PackedRefs::load must reject garbage lines"
+    );
+    assert_ref_listing_parity(wt, &git_dir, "refs/heads/");
+}
+
+#[test]
+fn t1408_packed_refs_crlf_rejected_like_git() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    git_empty_commit_oid(wt);
+    git(wt, &["pack-refs", "--all"]);
+    let mut bytes = fs::read(git_dir.join("packed-refs")).unwrap();
+    bytes.extend_from_slice(b"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef refs/heads/extra\r\n");
+    fs::write(git_dir.join("packed-refs"), &bytes).unwrap();
+    assert_packed_refs_unreadable_like_git_show_ref(wt, &git_dir);
+}
+
+#[test]
+fn t1408_packed_refs_whole_file_crlf_rejected_like_git() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    git_empty_commit_oid(wt);
+    git(wt, &["pack-refs", "--all"]);
+    rewrite_packed_refs_lf_to_crlf(&git_dir.join("packed-refs"));
+    assert_packed_refs_unreadable_like_git_show_ref(wt, &git_dir);
+}
+
+fn assert_packed_refs_unreadable_like_git_show_ref(wt: &Path, git_dir: &Path) {
+    assert!(
+        matches!(
+            PackedRefs::load(git_dir),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ),
+        "PackedRefs::load must reject packed-refs Git cannot read"
+    );
+    assert!(
+        list_refs(git_dir, "refs/").is_err(),
+        "list_refs must fail when packed-refs is unreadable"
+    );
+    let git_show = support::git_for_each_ref_output(wt, "refs/");
+    // Git uses fatal errors for `show-ref`; `for-each-ref` may warn on some CR cases.
+    // Match the strict reader: `git show-ref` must fail when grit cannot load packed-refs.
+    let show = std::process::Command::new("git")
         .current_dir(wt)
-        .args(["show-ref", "refs/heads/good"])
+        .args(["show-ref"])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()
         .expect("git show-ref");
     assert!(
-        !git_show.status.success(),
-        "git rejects packed-refs with garbage lines"
+        !show.status.success() || !git_show.status.success(),
+        "git must reject corrupted packed-refs (show-ref or for-each-ref)"
     );
+}
+
+fn rewrite_packed_refs_lf_to_crlf(path: &Path) {
+    let script = format!(
+        "import pathlib; p=pathlib.Path({:?}); p.write_bytes(p.read_bytes().replace(b'\\n', b'\\r\\n'))",
+        path.display()
+    );
+    std::process::Command::new("python3")
+        .args(["-c", &script])
+        .status()
+        .expect("python3 crlf rewrite");
 }

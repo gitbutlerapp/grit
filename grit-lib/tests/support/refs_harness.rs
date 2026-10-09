@@ -261,15 +261,11 @@ pub fn git_for_each_ref(worktree: &Path, prefix: &str) -> Vec<(String, ObjectId)
 pub fn git_for_each_ref_output(worktree: &Path, prefix: &str) -> Output {
     hermetic_git(
         worktree,
-        &[
-            "for-each-ref",
-            "--format=%(refname) %(objectname)",
-            prefix,
-        ],
+        &["for-each-ref", "--format=%(refname) %(objectname)", prefix],
     )
 }
 
-/// Assert grit [`list_refs`] matches `git for-each-ref` for the same prefix.
+/// Assert grit [`list_refs`] and `git for-each-ref` both succeed and agree.
 pub fn assert_list_refs_match_git(worktree: &Path, prefix: &str) {
     let git_dir = worktree.join(".git");
     let grit_rows: Vec<(String, ObjectId)> = list_refs(&git_dir, prefix).expect("list_refs");
