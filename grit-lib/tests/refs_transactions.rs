@@ -19,46 +19,20 @@ use grit_lib::reftable::{ReftableReader, ReftableStack};
 use grit_lib::repo::init_repository;
 
 use support::{
-    duplicate_repo, each_backend, git, git_empty_commit_oid, git_fsck_strict, git_show_ref,
-    git_update_ref_stdin, ref_store_bytes_snapshot, reflog_bytes_snapshot,
-    reftable_tables_snapshot, Backend,
+    assert_fsck_when_git_interop, duplicate_repo, each_backend, git, git_empty_commit_oid,
+    git_interop_available, git_show_ref, git_update_ref_stdin, ref_store_bytes_snapshot,
+    reflog_bytes_snapshot, reftable_tables_snapshot, two_commit_oids, Backend,
 };
-
-fn two_commits(worktree: &Path) -> (ObjectId, ObjectId) {
-    git(
-        worktree,
-        &["commit", "--allow-empty", "-q", "-m", "refs-tx initial"],
-    );
-    let c = git(worktree, &["rev-parse", "HEAD"])
-        .trim()
-        .parse()
-        .expect("C");
-    git(
-        worktree,
-        &["commit", "--allow-empty", "-q", "-m", "refs-tx second"],
-    );
-    let d = git(worktree, &["rev-parse", "HEAD"])
-        .trim()
-        .parse()
-        .expect("D");
-    (c, d)
-}
 
 #[test]
 fn t1404_failed_cas_changes_nothing() {
     each_backend(|_backend, repo| {
         let worktree = repo.worktree();
         let git_dir = repo.git_dir();
-        let (c1, c2) = two_commits(worktree);
+        let (c1, c2) = two_commit_oids(&repo);
 
-        git(
-            worktree,
-            &["update-ref", "refs/heads/to-update", &c1.to_hex()],
-        );
-        git(
-            worktree,
-            &["update-ref", "refs/heads/to-delete", &c1.to_hex()],
-        );
+        write_ref(&git_dir, "refs/heads/to-update", &c1).expect("seed to-update");
+        write_ref(&git_dir, "refs/heads/to-delete", &c1).expect("seed to-delete");
 
         let refs_before = ref_store_bytes_snapshot(&git_dir);
         let logs_before = reflog_bytes_snapshot(&git_dir);
@@ -86,7 +60,7 @@ fn t1404_failed_cas_changes_nothing() {
         assert_eq!(ref_store_bytes_snapshot(&git_dir), refs_before);
         assert_eq!(reflog_bytes_snapshot(&git_dir), logs_before);
         assert_eq!(support::grit_refs(worktree), grit_before);
-        assert!(git_fsck_strict(worktree));
+        assert_fsck_when_git_interop(&repo);
     });
 }
 
@@ -164,7 +138,10 @@ fn df_refs(prefix: &str, add_is_short: bool) -> (String, String) {
 #[test]
 fn t1404_df_conflicts_match_git_update_ref_stdin() {
     for &case in DF_CASES {
-        each_backend(|_backend, repo| {
+        each_backend(|backend, repo| {
+            if !git_interop_available(backend) {
+                return;
+            }
             let grit_repo = duplicate_repo(&repo);
             let git_repo = duplicate_repo(&repo);
 
@@ -174,7 +151,7 @@ fn t1404_df_conflicts_match_git_update_ref_stdin() {
             let mut d = c;
 
             for setup in [&grit_repo, &git_repo] {
-                let (c_oid, d_oid) = two_commits(setup.worktree());
+                let (c_oid, d_oid) = two_commit_oids(setup);
                 c = c_oid;
                 d = d_oid;
                 git(setup.worktree(), &["update-ref", &delref, &c.to_hex()]);
@@ -351,7 +328,7 @@ fn concurrent_cas_winners(
 fn concurrent_cas_single_winner() {
     each_backend(|_backend, repo| {
         let git_dir = repo.git_dir();
-        let (c1, c2) = two_commits(repo.worktree());
+        let (c1, c2) = two_commit_oids(&repo);
         write_ref(&git_dir, "refs/heads/cas-race", &c1).expect("seed");
 
         let item = RefTransactionItem {
@@ -362,7 +339,7 @@ fn concurrent_cas_single_winner() {
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert_eq!(resolve_ref(gd, "refs/heads/cas-race").unwrap(), c2);
         });
-        assert!(git_fsck_strict(repo.worktree()));
+        assert_fsck_when_git_interop(&repo);
     });
 }
 
@@ -373,7 +350,7 @@ fn concurrent_cas_delete_single_winner() {
             return;
         }
         let git_dir = repo.git_dir();
-        let (c1, _) = two_commits(repo.worktree());
+        let (c1, _) = two_commit_oids(&repo);
         write_ref(&git_dir, "refs/heads/cas-del", &c1).expect("seed");
 
         let item = RefTransactionItem {
@@ -384,7 +361,7 @@ fn concurrent_cas_delete_single_winner() {
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert!(resolve_ref(gd, "refs/heads/cas-del").is_err());
         });
-        assert!(git_fsck_strict(repo.worktree()));
+        assert_fsck_when_git_interop(&repo);
     });
 }
 
@@ -413,11 +390,14 @@ fn concurrent_reftable_cas_single_winner() {
 
 #[test]
 fn duplicate_ref_updates_match_git_update_ref_stdin() {
-    each_backend(|_backend, repo| {
+    each_backend(|backend, repo| {
+        if !git_interop_available(backend) {
+            return;
+        }
         let grit_repo = duplicate_repo(&repo);
         let git_repo = duplicate_repo(&repo);
-        let (c1, c2) = two_commits(grit_repo.worktree());
-        let _ = two_commits(git_repo.worktree());
+        let (c1, c2) = two_commit_oids(&grit_repo);
+        let _ = two_commit_oids(&git_repo);
 
         let script = format!(
             "create refs/heads/dup {}\ncreate refs/heads/dup {}\n",
@@ -445,9 +425,12 @@ fn duplicate_ref_updates_match_git_update_ref_stdin() {
 
 #[test]
 fn update_branch_for_commit_writes_head_and_branch_reflogs() {
-    each_backend(|_backend, repo| {
+    each_backend(|backend, repo| {
+        if !git_interop_available(backend) {
+            return;
+        }
         let git_dir = repo.git_dir();
-        let (c1, c2) = two_commits(repo.worktree());
+        let (c1, c2) = two_commit_oids(&repo);
         write_ref(&git_dir, "refs/heads/main", &c1).expect("branch");
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("symref HEAD");
 
@@ -490,7 +473,7 @@ fn reftable_transaction_one_table_single_update_index() {
             return;
         }
         let git_dir = repo.git_dir();
-        let (_, c2) = two_commits(repo.worktree());
+        let (_, c2) = two_commit_oids(&repo);
         let (list_before, count_before) = reftable_tables_snapshot(&git_dir);
 
         update_refs(

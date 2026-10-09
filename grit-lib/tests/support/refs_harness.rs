@@ -200,12 +200,16 @@ pub fn git_empty_commit_oid(worktree: &Path) -> ObjectId {
 }
 
 fn grit_empty_commit_oid(worktree: &Path) -> ObjectId {
+    grit_empty_commit_with_message(worktree, "refs harness seed")
+}
+
+fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
     let repo = Repository::discover(Some(worktree)).expect("discover repo");
     let ident = format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}");
     let outcome = create_commit(
         &repo,
         &CommitRequest {
-            message: "refs harness seed".to_owned(),
+            message: message.to_owned(),
             author: ident.clone(),
             committer: ident,
             allow_empty: true,
@@ -223,6 +227,40 @@ pub fn empty_commit_oid(repo: &TestRepo) -> ObjectId {
         git_empty_commit_oid(repo.worktree())
     } else {
         grit_empty_commit_oid(repo.worktree())
+    }
+}
+
+/// Two distinct empty commits for transaction tests (git or grit, per backend interop).
+pub fn two_commit_oids(repo: &TestRepo) -> (ObjectId, ObjectId) {
+    if git_interop_available(repo.backend()) {
+        git(
+            repo.worktree(),
+            &["commit", "--allow-empty", "-q", "-m", "refs-tx initial"],
+        );
+        let c = git(repo.worktree(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("C");
+        git(
+            repo.worktree(),
+            &["commit", "--allow-empty", "-q", "-m", "refs-tx second"],
+        );
+        let d = git(repo.worktree(), &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("D");
+        (c, d)
+    } else {
+        let c = grit_empty_commit_with_message(repo.worktree(), "refs-tx initial");
+        let d = grit_empty_commit_with_message(repo.worktree(), "refs-tx second");
+        (c, d)
+    }
+}
+
+/// Run `git fsck --strict` when system git can read this backend's ref storage.
+pub fn assert_fsck_when_git_interop(repo: &TestRepo) {
+    if git_interop_available(repo.backend()) {
+        assert_git_fsck_strict(repo.worktree());
     }
 }
 
