@@ -7,14 +7,16 @@
 //! Thread safety: [`ObjectStore`] requires `Send + Sync` so repositories can share
 //! a store across threads; individual methods may take internal locks.
 
-mod midx;
-mod packs;
-
+mod composite;
+mod files;
 pub mod loose;
 
+pub use composite::CompositeStore;
+pub use files::FilesSource;
 pub use loose::LooseStore;
 pub use midx::{MidxObjects, MidxObjectsStatus};
 pub use packs::{PackFilter, PackedObjects};
+
 use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
@@ -200,6 +202,13 @@ impl MemoryStore {
             objects: RwLock::new(HashMap::new()),
         }
     }
+
+    /// Insert `oid` without re-hashing (overlay and tests).
+    pub(crate) fn insert_object(&self, oid: ObjectId, kind: ObjectKind, data: Arc<[u8]>) {
+        if let Ok(mut guard) = self.objects.write() {
+            guard.entry(oid).or_insert((kind, data));
+        }
+    }
 }
 
 impl ObjectStore for MemoryStore {
@@ -324,7 +333,7 @@ pub(super) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<Strin
     Ok(prefix.to_ascii_lowercase())
 }
 
-fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
+pub(super) fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
     if prefix.is_empty() {
         return true;
     }
