@@ -498,6 +498,59 @@ fn local_remote_clone_push_fetch_and_pull_workflow() -> TestResult {
     Ok(())
 }
 
+/// GitHub issue #934: clone must not ODB-read gitlink commit OIDs during checkout.
+#[test]
+fn clone_succeeds_with_uninitialized_gitlink() -> TestResult {
+    const GITLINK_OID: &str = "855827c583bc30645ba427885caa40c5b81764d2";
+    let scratch = Scratch::new("gitlink-clone-934")?;
+    let gl = scratch.child("gl");
+    let remote = scratch.child("gl.git");
+    let clone = scratch.child("glc");
+    fs::create_dir_all(&gl)?;
+
+    git_in(&gl, &["init", "-q", "-b", "main", "."])?;
+    write_file(&gl.join("a"), "a\n")?;
+    git_in(&gl, &["add", "a"])?;
+    git_in(
+        &gl,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{GITLINK_OID},sub"),
+        ],
+    )?;
+    git_in(&gl, &["commit", "-qm", "gl"])?;
+    git_in(scratch.path(), &["clone", "-q", "--bare", "gl", "gl.git"])?;
+
+    gs_ok(
+        scratch.path(),
+        [
+            "clone",
+            path_arg(&remote)?.as_str(),
+            path_arg(&clone)?.as_str(),
+        ],
+    )?;
+
+    assert!(
+        clone.join("sub").is_dir(),
+        "gitlink should checkout as empty directory"
+    );
+    let status = git_in(&clone, &["status", "--porcelain"])?;
+    assert_eq!(
+        status.status,
+        Some(0),
+        "git status after grit clone: {}",
+        status.dump()
+    );
+    assert!(
+        status.stdout.trim().is_empty(),
+        "worktree should be clean: {:?}",
+        status.stdout
+    );
+    Ok(())
+}
+
 /// GitHub issue #909: relative local clone URLs must be stored absolute and push must reach
 /// the real remote, not create a bare repo inside the worktree.
 #[test]
