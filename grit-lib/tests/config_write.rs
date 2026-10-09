@@ -441,9 +441,11 @@ fn multivar_set_and_unset_last_are_typed_errors() {
         Error::Config(ConfigError::MultipleValues { .. })
     ));
 
-    let removed = cfg.unset_last("remote.origin.url").expect("unset last url");
-    assert_eq!(removed, 1);
-    assert_eq!(cfg.get("remote.origin.url").as_deref(), Some("a"));
+    let err = cfg.unset_last("remote.origin.url").unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Config(ConfigError::MultipleValues { .. })
+    ));
 }
 
 #[test]

@@ -1287,6 +1287,12 @@ impl ConfigFile {
     /// Returns the number of entries removed (0 or 1).
     pub fn unset_last(&mut self, key: &str) -> Result<usize> {
         let canon = canonical_key(key)?;
+        let matches: Vec<_> = self.entries.iter().filter(|e| e.key == canon).collect();
+        if matches.len() > 1 {
+            return Err(Error::Config(ConfigError::MultipleValues {
+                key: key.to_owned(),
+            }));
+        }
         let last_idx = self.entries.iter().rposition(|e| e.key == canon);
 
         if let Some(idx) = last_idx {
