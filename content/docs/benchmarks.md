@@ -129,15 +129,40 @@ Recorded on the factory VM after stacking pick/merge/stash perf work on `origin/
 
 **Machine (2026-10-08 acceptance):** Intel Xeon (factory VM), **4** physical / **4** logical CPUs, **16 GiB** RAM, Linux **6.12.94+**, scratch filesystem **ext4**, `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.1**, hyperfine **2.x** (see `machine` in each baseline JSON).
 
-| Scenario | L before × | L after × | H before × | H after × | Notes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `add` | — | **2.52** | — | **4.51** | `suite-after-LH.json` (`add-{N}`) |
-| `commit` | — | **0.84** | — | **1.16** | `commit-after-LH.json` — `grit commit` vs `git add -A && git commit` |
-| `switch` | 3.29 | 3.44 | 4.89 | 5.63 | Still &gt;2× at L; H/L ≈ **1.64×** (&gt;1.25× bar) |
-| `switch-wide` | 3.70 | 2.29 | 26.5 | 2.98 | L still &gt;2×; H/L ≈ **1.30×** |
-| `pick` | 1.41 | 1.14 | 5.50 | 4.04 | L within 2×; H/L ≈ **3.54×** |
-| `merge` | 2.61 | 2.18 | 3.97 | 3.83 | L still above 2×; H/L ≈ **1.76×** |
-| `pick-series` | 12.9 | 11.2 | 21.7 | 17.7 | L &gt;2×; H/L ≈ **1.58×**; 20× sequential `grit pick` vs one `git cherry-pick` range |
+**Machine (2026-10-09 refresh):** same factory VM (Intel Xeon, **4** / **4** CPUs, **16 GiB** RAM, Linux **6.12.94+**, ext4 scratch), `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.3** at **`01a254dc`**, hyperfine **2.0.0**. Committed baselines were regenerated with `./target/release/grit-bench {hot-paths,commit,all} --sizes 10000,100000` (default warmup / min-runs).
+
+| Scenario | L before × | L 2026-10-08 × | L 2026-10-09 × | H before × | H 2026-10-08 × | H 2026-10-09 × | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `add` | — | **2.52** | **2.23** | — | **4.51** | **2.69** | `suite-after-LH.json` — improved at H |
+| `commit` | — | **0.84** | **0.48** | — | **1.16** | **0.70** | `commit-after-LH.json` — faster vs Git at L/H |
+| `switch` | 3.29 | 3.44 | **2.94** | 4.89 | 5.63 | **4.06** | H improved; L still &gt;2× |
+| `switch-wide` | 3.70 | 2.29 | **3.42** | 26.5 | 2.98 | **22.54** | **H regression** — see refresh notes |
+| `pick` | 1.41 | 1.14 | **1.48** | 5.50 | 4.04 | **5.22** | L slightly worse vs 2026-10-08 |
+| `merge` | 2.61 | 2.18 | **2.86** | 3.97 | 3.83 | **3.74** | L ~32% worse ratio vs 2026-10-08 |
+| `pick-series` | 12.9 | 11.2 | **11.94** | 21.7 | 17.7 | **18.56** | Still &gt;2×; 20× `grit pick` vs one `git cherry-pick` range |
+
+**2026-10-09 refresh vs 2026-10-08 baselines:** `grit-bench compare` reports ratio drift beyond the default **0.10** absolute tolerance on most scenarios (many improved). Regressions **more than 20% worse** on the Grit/Git ratio: **`switch-wide-100000`** (2.98× → **22.54×**), **`switch-wide-10000`** (2.29× → 3.42×), **`merge-10000`**, **`pick-10000`**, **`pick-100000`**. **`status-dirty-100000`** remains ~**53×** (unchanged). Suite **status** and **add** ratios improved at L/H except dirty-100k.
+
+| Scenario | Git ms | Grit ms | Old ratio | New ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `status-dirty-10000` | 11.1 | 80.1 | 10.19× | 7.21× |
+| `status-dirty-100000` | 113.0 | 5962.1 | 52.66× | 52.77× |
+| `status-clean-10000` | 9.0 | 21.2 | 4.58× | 2.34× |
+| `status-clean-100000` | 82.7 | 513.8 | 9.67× | 6.21× |
+| `add-10000` | 21.4 | 47.8 | 2.52× | 2.23× |
+| `add-100000` | 224.8 | 603.6 | 4.51× | 2.69× |
+| `commit-10000` | 165.6 | 79.1 | 0.84× | 0.48× |
+| `commit-100000` | 1665.7 | 1159.3 | 1.16× | 0.70× |
+| `switch-10000` | 23.9 | 70.3 | 3.44× | 2.94× |
+| `switch-100000` | 160.6 | 652.4 | 5.63× | 4.06× |
+| `switch-wide-10000` | 45.3 | 155.3 | 2.29× | 3.42× |
+| `switch-wide-100000` | 386.4 | 8711.8 | 2.98× | 22.54× |
+| `pick-10000` | 115.9 | 171.5 | 1.14× | 1.48× |
+| `pick-100000` | 194.0 | 1011.6 | 4.04× | 5.22× |
+| `merge-10000` | 104.9 | 300.5 | 2.18× | 2.86× |
+| `merge-100000` | 283.4 | 1060.6 | 3.83× | 3.74× |
+| `pick-series-10000` | 129.4 | 1544.3 | 11.18× | 11.94× |
+| `pick-series-100000` | 961.6 | 17843.4 | 17.65× | 18.56× |
 
 **Suite at L/H** (`grit-utils/baselines/suite-after-LH.json`): status scenarios remain far above 2× (dirty/clean at 10k and 100k files).
 
