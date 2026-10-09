@@ -653,22 +653,38 @@ fn escape_value(s: &str) -> String {
     // Quote leading `-` so values are not mistaken for config options (Git does this for
     // submodule paths like `-sub` in `.gitmodules`), but leave signed numeric values bare.
     let leading_dash_needs_quoting = s.starts_with('-') && parse_i64(s).is_err();
-    let needs_quoting = leading_dash_needs_quoting
+    let must_quote = leading_dash_needs_quoting
         || s.starts_with(' ')
         || s.starts_with('\t')
         || s.ends_with(' ')
         || s.ends_with('\t')
         || s.contains('"')
-        || s.contains('\\')
-        || s.contains('\n')
-        || s.contains('\r')
         || s.contains('#')
         || s.contains(';');
 
-    if !needs_quoting {
-        return s.to_owned();
+    if must_quote {
+        return escape_value_quoted(s);
     }
 
+    if s.contains('\n') || s.contains('\r') || s.contains('\t') || s.contains('\\') {
+        let mut out = String::with_capacity(s.len() + 4);
+        for ch in s.chars() {
+            match ch {
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                other => out.push(other),
+            }
+        }
+        return out;
+    }
+
+    s.to_owned()
+}
+
+fn escape_value_quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 4);
     out.push('"');
     for ch in s.chars() {
@@ -1039,6 +1055,11 @@ impl ConfigFile {
         comment: Option<&str>,
     ) -> Result<()> {
         let canon = canonical_key(key)?;
+        if self.entries.iter().filter(|e| e.key == canon).count() > 1 {
+            return Err(Error::Config(ConfigError::MultipleValues {
+                key: key.to_owned(),
+            }));
+        }
         let raw_var = raw_variable_name(key);
         let comment_suffix = format_comment_suffix(comment);
 
@@ -1242,11 +1263,19 @@ impl ConfigFile {
     /// Returns the number of entries removed (0 or 1).
     pub fn unset_last(&mut self, key: &str) -> Result<usize> {
         let canon = canonical_key(key)?;
+        let matches: Vec<_> = self.entries.iter().filter(|e| e.key == canon).collect();
+        if matches.len() > 1 {
+            return Err(Error::Config(ConfigError::MultipleValues {
+                key: key.to_owned(),
+            }));
+        }
         let last_idx = self.entries.iter().rposition(|e| e.key == canon);
 
         if let Some(idx) = last_idx {
             let line_idx = self.entries[idx].line - 1;
             self.remove_entry_line(line_idx);
+            let (section, subsection, _) = split_key(&canon)?;
+            self.remove_empty_section_headers_matching(&section, subsection.as_deref());
             let content = self.raw_lines.join("\n");
             let reparsed = Self::parse(&self.path, &content, self.scope)?;
             self.entries = reparsed.entries;
@@ -1282,6 +1311,9 @@ impl ConfigFile {
         }
 
         if count > 0 {
+            if let Ok((section, subsection, _)) = split_key(&canon) {
+                self.remove_empty_section_headers_matching(&section, subsection.as_deref());
+            }
             let content = self.raw_lines.join("\n");
             let reparsed = Self::parse(&self.path, &content, self.scope)?;
             self.entries = reparsed.entries;
@@ -1563,22 +1595,63 @@ impl ConfigFile {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] on write failure.
+    /// Returns [`Error::Io`] on write failure, or [`ConfigError::ConfigFileLocked`] when
+    /// `{path}.lock` already exists.
     pub fn write(&self) -> Result<()> {
-        let content = self.raw_lines.join("\n");
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            // Write empty file if no content
-            fs::write(&self.path, "")?;
-        } else {
-            // Ensure trailing newline
-            let content = if content.ends_with('\n') {
-                content
-            } else {
-                format!("{content}\n")
-            };
-            fs::write(&self.path, content)?;
+        let lock_path = config_lock_path(&self.path);
+        if lock_path.exists() {
+            return Err(Error::Config(ConfigError::ConfigFileLocked {
+                path: lock_path.display().to_string(),
+            }));
         }
+
+        let content = self.raw_lines.join("\n");
+        let bytes: Vec<u8> = if content.trim().is_empty() {
+            Vec::new()
+        } else if content.ends_with('\n') {
+            content.into_bytes()
+        } else {
+            format!("{content}\n").into_bytes()
+        };
+
+        let mut lock_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    Error::Config(ConfigError::ConfigFileLocked {
+                        path: lock_path.display().to_string(),
+                    })
+                } else {
+                    Error::Io(e)
+                }
+            })?;
+
+        if let Ok(meta) = fs::metadata(&self.path) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = meta.permissions().mode();
+                let _ = fs::set_permissions(&lock_path, fs::Permissions::from_mode(mode));
+            }
+        }
+
+        use std::io::Write as _;
+        lock_file.write_all(&bytes).map_err(|e| {
+            let _ = fs::remove_file(&lock_path);
+            Error::Io(e)
+        })?;
+        lock_file.sync_all().map_err(|e| {
+            let _ = fs::remove_file(&lock_path);
+            Error::Io(e)
+        })?;
+        drop(lock_file);
+
+        fs::rename(&lock_path, &self.path).map_err(|e| {
+            let _ = fs::remove_file(&lock_path);
+            Error::Io(e)
+        })?;
         Ok(())
     }
 
@@ -1587,11 +1660,15 @@ impl ConfigFile {
     fn find_or_create_section(&mut self, section: &str, subsection: Option<&str>) -> usize {
         let sec_lower = section.to_lowercase();
         let mut parser = Parser::new();
+        let mut last_match = None;
 
         for (idx, line) in self.raw_lines.iter().enumerate() {
             if parser.try_parse_section(line) && section_matches(&parser, &sec_lower, subsection) {
-                return idx;
+                last_match = Some(idx);
             }
+        }
+        if let Some(idx) = last_match {
+            return idx;
         }
 
         // Create new section at end of file
@@ -1617,11 +1694,15 @@ impl ConfigFile {
     ) -> usize {
         let sec_lower = section.to_lowercase();
         let mut parser = Parser::new();
+        let mut last_match = None;
 
         for (idx, line) in self.raw_lines.iter().enumerate() {
             if parser.try_parse_section(line) && section_matches(&parser, &sec_lower, subsection) {
-                return idx;
+                last_match = Some(idx);
             }
+        }
+        if let Some(idx) = last_match {
+            return idx;
         }
 
         // Create new section at end of file, using original case
@@ -3962,6 +4043,16 @@ fn section_matches(parser: &Parser, section_lower: &str, subsection: Option<&str
     };
     parser.subsection.is_none()
         && parser.section.to_lowercase() == format!("{section_lower}.{}", subsection.to_lowercase())
+}
+
+/// Path to the lock file Git uses when updating a config file (`config.lock`).
+#[must_use]
+pub fn config_lock_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("config");
+    path.with_file_name(format!("{file_name}.lock"))
 }
 
 fn validate_section_name(section: &str, subsection: Option<&str>) -> Result<()> {

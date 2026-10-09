@@ -94,6 +94,14 @@ pub enum ConfigError {
     /// Generic config error with free-form detail (legacy call sites).
     #[error("{0}")]
     Other(String),
+
+    /// The config file could not be written because a `.lock` file is already present.
+    #[error("could not lock config file {path}: File exists")]
+    ConfigFileLocked { path: String },
+
+    /// A single-value operation was requested but the key has multiple values.
+    #[error("cannot overwrite multiple values with a single value for '{key}'")]
+    MultipleValues { key: String },
 }
 
 impl From<String> for ConfigError {
