@@ -30,11 +30,12 @@ use store::{MemoryStore, ObjectStore, WritableObjectStore};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
@@ -49,10 +50,18 @@ use flate2::Compression;
 
 type MemOdbOverlayStore = Arc<RwLock<Option<Arc<MemoryStore>>>>;
 
-/// Cached alternate [`CompositeStore`] keyed by `info/alternates` generation.
+/// Cached alternate [`CompositeStore`] keyed by file/env/submodule alternate state.
 struct AlternateSourcesCache {
-    generation: u64,
+    file_generation: u64,
+    env_fingerprint: u64,
+    submodule_generation: u64,
     sources: Option<Arc<CompositeStore>>,
+}
+
+struct AlternateSourcesKey {
+    file_generation: u64,
+    env_fingerprint: u64,
+    submodule_generation: u64,
 }
 
 /// Cached `info/alternates` chain for one [`Odb`] (generation bumps on invalidation/reload).
@@ -190,6 +199,8 @@ pub struct Odb {
     pack_store: Arc<PackStore>,
     /// Cached [`PackStore`] handles for alternate object directories (lazy).
     alternate_pack_stores: Arc<Mutex<HashMap<PathBuf, Arc<PackStore>>>>,
+    /// Bumps when [`Self::register_submodule_object_directories_from_index`] repopulates submodule sources.
+    submodule_sources_generation: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -254,7 +265,9 @@ impl Odb {
             mem_overlay_active: Arc::new(AtomicBool::new(false)),
             primary_source: Arc::new(RwLock::new(None)),
             alternate_sources_cache: Arc::new(RwLock::new(AlternateSourcesCache {
-                generation: 0,
+                file_generation: 0,
+                env_fingerprint: 0,
+                submodule_generation: 0,
                 sources: None,
             })),
             midx_packs_validated: Arc::new(OnceLock::new()),
@@ -267,6 +280,7 @@ impl Odb {
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
+            submodule_sources_generation: Arc::new(AtomicU64::new(0)),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -297,7 +311,9 @@ impl Odb {
             mem_overlay_active: Arc::new(AtomicBool::new(false)),
             primary_source: Arc::new(RwLock::new(None)),
             alternate_sources_cache: Arc::new(RwLock::new(AlternateSourcesCache {
-                generation: 0,
+                file_generation: 0,
+                env_fingerprint: 0,
+                submodule_generation: 0,
                 sources: None,
             })),
             midx_packs_validated: Arc::new(OnceLock::new()),
@@ -310,6 +326,7 @@ impl Odb {
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
+            submodule_sources_generation: Arc::new(AtomicU64::new(0)),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -419,7 +436,34 @@ impl Odb {
     #[must_use]
     pub fn with_env_alternate_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
         self.env_alternate_dirs = dirs;
+        self.clear_alternate_sources_cache();
         self
+    }
+
+    fn clear_alternate_sources_cache(&self) {
+        if let Ok(mut guard) = self.alternate_sources_cache.write() {
+            guard.sources = None;
+        }
+    }
+
+    fn alternate_sources_key(&self) -> AlternateSourcesKey {
+        AlternateSourcesKey {
+            file_generation: self
+                .file_alternate_dirs_cache
+                .read()
+                .map(|g| g.generation)
+                .unwrap_or(0),
+            env_fingerprint: self.env_alternate_fingerprint(),
+            submodule_generation: self.submodule_sources_generation.load(Ordering::Relaxed),
+        }
+    }
+
+    fn env_alternate_fingerprint(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for path in self.env_alternate_dirs_snapshot().iter() {
+            path.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Drop the cached `info/alternates` chain so the next lookup re-reads the file.
@@ -428,9 +472,7 @@ impl Odb {
             guard.generation = guard.generation.wrapping_add(1);
             guard.snapshot = None;
         }
-        if let Ok(mut guard) = self.alternate_sources_cache.write() {
-            guard.sources = None;
-        }
+        self.clear_alternate_sources_cache();
     }
 
     /// Reload `info/alternates` from disk into this [`Odb`]'s cache (used after external writes).
@@ -444,6 +486,7 @@ impl Odb {
             guard.generation = guard.generation.wrapping_add(1);
             guard.snapshot = Some(snapshot);
         }
+        self.clear_alternate_sources_cache();
         Ok(())
     }
 
@@ -624,13 +667,12 @@ impl Odb {
     ///
     /// Propagates failures while opening any alternate files source.
     pub fn sources(&self) -> Result<Arc<CompositeStore>> {
-        let generation = self
-            .file_alternate_dirs_cache
-            .read()
-            .map(|g| g.generation)
-            .unwrap_or(0);
+        let key = self.alternate_sources_key();
         if let Ok(guard) = self.alternate_sources_cache.read() {
-            if guard.generation == generation {
+            if guard.file_generation == key.file_generation
+                && guard.env_fingerprint == key.env_fingerprint
+                && guard.submodule_generation == key.submodule_generation
+            {
                 if let Some(sources) = guard.sources.as_ref() {
                     return Ok(Arc::clone(sources));
                 }
@@ -652,7 +694,9 @@ impl Odb {
         }
         let composite = Arc::new(CompositeStore::new(stores, self.hash_algo()));
         if let Ok(mut guard) = self.alternate_sources_cache.write() {
-            guard.generation = generation;
+            guard.file_generation = key.file_generation;
+            guard.env_fingerprint = key.env_fingerprint;
+            guard.submodule_generation = key.submodule_generation;
             guard.sources = Some(Arc::clone(&composite));
         }
         Ok(composite)
@@ -717,6 +761,9 @@ impl Odb {
                 dirs.push(canon);
             }
         }
+        self.submodule_sources_generation
+            .fetch_add(1, Ordering::Relaxed);
+        self.clear_alternate_sources_cache();
     }
 
     /// Attach a git directory so [`Self::read`] can honor `core.multiPackIndex` when resolving packed objects.
@@ -1186,11 +1233,23 @@ impl Odb {
             self.ensure_midx_prepared();
         }
         self.sync_delta_base_cache_limit();
-        if let Ok(Some(stream)) = self.primary()?.open_stream(oid) {
-            return materialize_stream(stream);
+        let primary = self.primary()?;
+        let mut unreadable_local_loose = None;
+        match primary.open_stream(oid) {
+            Ok(Some(stream)) => return materialize_stream(stream),
+            Ok(None) => {}
+            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
+                unreadable_local_loose = Some(err);
+            }
+            Err(err) => return Err(err),
         }
-        if let Ok(Some(stream)) = self.sources()?.open_stream(oid) {
-            return materialize_stream(stream);
+        match self.sources()?.open_stream(oid) {
+            Ok(Some(stream)) => return materialize_stream(stream),
+            Ok(None) => {}
+            Err(err) => return Err(err),
+        }
+        if let Some(err) = unreadable_local_loose {
+            return Err(err);
         }
         Ok(None)
     }
@@ -1202,26 +1261,24 @@ impl Odb {
     /// Propagates enumeration failures from any consulted backend.
     pub fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
         let mut seen = HashSet::new();
-        if let Some(overlay) = self.overlay_store() {
-            overlay.for_each_object(&mut |oid| {
+        let mut visit = |store: &dyn ObjectStore| -> Result<bool> {
+            store::for_each_propagate_break(store, &mut |oid| {
                 if !seen.insert(*oid) {
                     return ControlFlow::Continue(());
                 }
                 f(oid)
-            })?;
+            })
+        };
+        if let Some(overlay) = self.overlay_store() {
+            if visit(overlay.as_ref())? {
+                return Ok(());
+            }
         }
-        self.primary()?.for_each_object(&mut |oid| {
-            if !seen.insert(*oid) {
-                return ControlFlow::Continue(());
-            }
-            f(oid)
-        })?;
-        self.sources()?.for_each_object(&mut |oid| {
-            if !seen.insert(*oid) {
-                return ControlFlow::Continue(());
-            }
-            f(oid)
-        })
+        if visit(self.primary()?.as_ref())? {
+            return Ok(());
+        }
+        let _ = visit(self.sources()?.as_ref())?;
+        Ok(())
     }
 
     /// Fill `out` with ids whose hex starts with `prefix` (deduplicated across overlay, primary, alternates).

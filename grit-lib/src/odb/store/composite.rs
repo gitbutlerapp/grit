@@ -42,21 +42,27 @@ impl ObjectStore for CompositeStore {
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
         for store in &self.stores {
-            if let Some(obj) = store.read(oid)? { return Ok(Some(obj)) }
+            if let Some(obj) = store.read(oid)? {
+                return Ok(Some(obj));
+            }
         }
         Ok(None)
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         for store in &self.stores {
-            if let Some(info) = store.read_info(oid)? { return Ok(Some(info)) }
+            if let Some(info) = store.read_info(oid)? {
+                return Ok(Some(info));
+            }
         }
         Ok(None)
     }
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         for store in &self.stores {
-            if let Some(stream) = store.open_stream(oid)? { return Ok(Some(stream)) }
+            if let Some(stream) = store.open_stream(oid)? {
+                return Ok(Some(stream));
+            }
         }
         Ok(None)
     }
@@ -64,12 +70,15 @@ impl ObjectStore for CompositeStore {
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
         let mut seen = HashSet::new();
         for store in &self.stores {
-            store.for_each_object(&mut |oid| {
+            let stop = super::for_each_propagate_break(store.as_ref(), &mut |oid| {
                 if !seen.insert(*oid) {
                     return ControlFlow::Continue(());
                 }
                 f(oid)
             })?;
+            if stop {
+                break;
+            }
         }
         Ok(())
     }
@@ -108,6 +117,33 @@ mod tests {
     use crate::objects::ObjectKind;
     use crate::odb::store::{MemoryStore, WritableObjectStore};
     use crate::odb::WriteOptions;
+
+    #[test]
+    fn for_each_stops_after_break_across_layers() {
+        let store_a = MemoryStore::new(HashAlgo::Sha1);
+        let store_b = MemoryStore::new(HashAlgo::Sha1);
+        store_a
+            .write(ObjectKind::Blob, b"a", WriteOptions::default())
+            .unwrap();
+        store_b
+            .write(ObjectKind::Blob, b"b", WriteOptions::default())
+            .unwrap();
+        let composite = CompositeStore::new(
+            vec![
+                Arc::new(store_a) as Arc<dyn ObjectStore>,
+                Arc::new(store_b) as Arc<dyn ObjectStore>,
+            ],
+            HashAlgo::Sha1,
+        );
+        let mut calls = 0usize;
+        composite
+            .for_each_object(&mut |_| {
+                calls += 1;
+                ControlFlow::Break(())
+            })
+            .unwrap();
+        assert_eq!(calls, 1);
+    }
 
     #[test]
     fn first_hit_read_and_deduped_for_each() {

@@ -76,3 +76,37 @@ fn odb_skips_missing_alternate_directory() {
     let miss = ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").expect("oid");
     assert!(!odb.exists(&miss));
 }
+
+#[test]
+fn odb_warmed_sources_cache_respects_env_alternate_dirs_on_clone() {
+    let root = TempDir::new().expect("tempdir");
+    let primary_objects = root.path().join("primary/objects");
+    fs::create_dir_all(&primary_objects).expect("primary objects");
+
+    let alt_objects = root.path().join("env-alt/objects");
+    fs::create_dir_all(&alt_objects).expect("alt objects");
+    let alt_odb = Odb::new(&alt_objects);
+    let alt_oid = alt_odb
+        .write(ObjectKind::Blob, b"only-in-env-alt")
+        .expect("write alt");
+
+    let base = Odb::new(&primary_objects);
+    assert_eq!(
+        base.sources().expect("warm empty").stores().len(),
+        0,
+        "precondition: no file alternates"
+    );
+
+    let configured = base
+        .clone()
+        .with_env_alternate_dirs(vec![alt_objects.clone()]);
+    assert_eq!(
+        configured.sources().expect("sources").stores().len(),
+        1,
+        "env alternate must appear after warming an empty cache on the clone"
+    );
+    let via_configured = configured.read(&alt_oid).expect("read alt");
+    let direct = alt_odb.read(&alt_oid).expect("read direct");
+    assert_eq!(via_configured.kind, direct.kind);
+    assert_eq!(via_configured.data, direct.data);
+}

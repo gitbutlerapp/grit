@@ -333,6 +333,27 @@ pub(super) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<Strin
     Ok(prefix.to_ascii_lowercase())
 }
 
+/// Run `store.for_each_object` and stop visiting further stores when `f` returns [`ControlFlow::Break`].
+pub(crate) fn for_each_propagate_break(
+    store: &dyn ObjectStore,
+    f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+) -> Result<bool> {
+    let mut stop = false;
+    store.for_each_object(&mut |oid| {
+        if stop {
+            return ControlFlow::Break(());
+        }
+        match f(oid) {
+            ControlFlow::Break(()) => {
+                stop = true;
+                ControlFlow::Break(())
+            }
+            ControlFlow::Continue(()) => ControlFlow::Continue(()),
+        }
+    })?;
+    Ok(stop)
+}
+
 pub(super) fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
     if prefix.is_empty() {
         return true;

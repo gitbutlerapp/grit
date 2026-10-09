@@ -262,9 +262,10 @@ impl ObjectStore for FilesSource {
                 return Ok(true);
             }
             if pack::reprepare_pack_directory_on_miss(&self.objects_dir)?
-                && self.packs.contains_filtered(oid, filter)? {
-                    return Ok(true);
-                }
+                && self.packs.contains_filtered(oid, filter)?
+            {
+                return Ok(true);
+            }
             if self.midx_tip_listing_for_exists && self.use_midx {
                 match midx_oid_listed_in_tip(&self.objects_dir, oid) {
                     Ok(Some(true)) => return Ok(true),
@@ -300,26 +301,22 @@ impl ObjectStore for FilesSource {
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
         let mut seen = HashSet::new();
         PackStore::with_context(self.packs.pack_store().clone(), || {
-            if self.use_midx {
-                self.midx.for_each_object(&mut |oid| {
+            let mut layer = |store: &dyn ObjectStore| -> Result<bool> {
+                super::for_each_propagate_break(store, &mut |oid| {
                     if !seen.insert(*oid) {
                         return ControlFlow::Continue(());
                     }
                     f(oid)
-                })?;
+                })
+            };
+            if self.use_midx && layer(&self.midx)? {
+                return Ok(());
             }
-            self.packs.for_each_object(&mut |oid| {
-                if !seen.insert(*oid) {
-                    return ControlFlow::Continue(());
-                }
-                f(oid)
-            })?;
-            self.loose.for_each_object(&mut |oid| {
-                if !seen.insert(*oid) {
-                    return ControlFlow::Continue(());
-                }
-                f(oid)
-            })
+            if layer(&self.packs)? {
+                return Ok(());
+            }
+            let _ = layer(&self.loose)?;
+            Ok(())
         })
     }
 
