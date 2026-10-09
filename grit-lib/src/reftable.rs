@@ -184,6 +184,9 @@ pub struct WriteOptions {
     /// Object-id width in bytes: 20 for SHA-1 (reftable version 1), 32 for
     /// SHA-256 (reftable version 2). Defaults to SHA-1.
     pub hash_size: usize,
+    /// Geometric factor for stack auto-compaction (`reftable.geometricFactor`).
+    /// Defaults to 2 when unset.
+    pub auto_compaction_factor: u8,
 }
 
 impl Default for WriteOptions {
@@ -195,6 +198,7 @@ impl Default for WriteOptions {
             skip_index_objects: false,
             unpadded: false,
             hash_size: HASH_SIZE,
+            auto_compaction_factor: 2,
         }
     }
 }
@@ -1211,10 +1215,8 @@ impl ReftableReader {
                 break;
             }
 
-            // Read restart count (last 2 bytes before padding)
-            let rc = read_u16(&self.data, records_end - 2);
-            // Restart table is rc * 3 bytes before the restart_count
-            let restart_table_start = records_end - 2 - (rc * 3);
+            let restart_table_start =
+                restart_table_start_for_block(&self.data, records_end, block_data_start)?;
 
             // Read records from block_data_start to restart_table_start
             let mut rpos = block_data_start;
@@ -1251,9 +1253,111 @@ impl ReftableReader {
 
     /// Look up a single ref by name.
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
-        // Simple: scan all refs. For large files the index would speed this up.
+        if self.ref_index_position > 0 {
+            if let Some(rec) = self.lookup_ref_via_index(name)? {
+                return Ok(Some(rec));
+            }
+        }
         let refs = self.read_refs()?;
         Ok(refs.into_iter().find(|r| r.name == name))
+    }
+
+    /// Resolve a ref name to a record using ref index blocks when present.
+    fn lookup_ref_via_index(&self, name: &str) -> Result<Option<RefRecord>> {
+        let Some(block_off) = self.locate_ref_block_via_index(name.as_bytes())? else {
+            return Ok(None);
+        };
+        self.find_ref_in_block(block_off, name)
+    }
+
+    fn locate_ref_block_via_index(&self, name: &[u8]) -> Result<Option<usize>> {
+        let mut pos = self.ref_index_position as usize;
+        if pos == 0 {
+            return Ok(None);
+        }
+        for _ in 0..64 {
+            if pos >= self.data.len() {
+                return Ok(None);
+            }
+            match self.data[pos] {
+                BLOCK_TYPE_REF => return Ok(Some(pos)),
+                BLOCK_TYPE_INDEX => {
+                    let Some(offset) = self.index_block_seek_offset(pos, name)? else {
+                        return Ok(None);
+                    };
+                    let next = offset as usize;
+                    if next == pos {
+                        return Ok(None);
+                    }
+                    pos = next;
+                }
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Pick the index entry for `name`: the first record whose `last_key` is >=
+    /// `name`, or the final entry when every indexed `last_key` is smaller.
+    fn index_block_seek_offset(&self, block_pos: usize, name: &[u8]) -> Result<Option<u64>> {
+        let (records_start, records_end) = self.block_record_range(block_pos)?;
+        let mut rpos = records_start;
+        let mut prev_key = Vec::<u8>::new();
+        let mut last: Option<u64> = None;
+        while rpos < records_end {
+            let (key, offset, new_pos) = decode_index_record(&self.data, rpos, &prev_key)?;
+            prev_key = key;
+            if prev_key.as_slice() >= name {
+                return Ok(Some(offset));
+            }
+            last = Some(offset);
+            rpos = new_pos;
+        }
+        Ok(last)
+    }
+
+    fn find_ref_in_block(&self, block_pos: usize, name: &str) -> Result<Option<RefRecord>> {
+        let (records_start, records_end) = self.block_record_range(block_pos)?;
+        let mut rpos = records_start;
+        let mut prev_name = Vec::<u8>::new();
+        while rpos < records_end {
+            let (rec, new_pos) = decode_ref_record(
+                &self.data,
+                rpos,
+                &prev_name,
+                self.min_update_index,
+                self.hash_size(),
+            )?;
+            prev_name = rec.name.as_bytes().to_vec();
+            match rec.name.as_str().cmp(name) {
+                std::cmp::Ordering::Equal => return Ok(Some(rec)),
+                std::cmp::Ordering::Greater => return Ok(None),
+                std::cmp::Ordering::Less => {}
+            }
+            rpos = new_pos;
+        }
+        Ok(None)
+    }
+
+    fn block_record_range(&self, block_pos: usize) -> Result<(usize, usize)> {
+        if block_pos + 4 > self.data.len() {
+            return Err(Error::InvalidRef("reftable: truncated block header".into()));
+        }
+        let block_len = read_u24(&self.data, block_pos + 1);
+        let header_len = self.header_len();
+        let is_first = block_pos == header_len;
+        let records_end = if is_first {
+            block_len
+        } else {
+            block_pos + block_len
+        };
+        if records_end > self.data.len() || records_end < 2 {
+            return Err(Error::InvalidRef("reftable: invalid block length".into()));
+        }
+        let records_data_start = block_pos + 4;
+        let restart_table_start =
+            restart_table_start_for_block(&self.data, records_end, records_data_start)?;
+        Ok((records_data_start, restart_table_start))
     }
 
     /// Read all log records from the table.
@@ -1322,8 +1426,8 @@ impl ReftableReader {
             if inflated.len() < 2 {
                 break;
             }
-            let rc = read_u16(&inflated, inflated.len() - 2);
-            let restart_table_start = inflated.len() - 2 - (rc * 3);
+            let records_end = inflated.len();
+            let restart_table_start = restart_table_start_for_block(&inflated, records_end, 0)?;
 
             let mut rpos = 0usize;
             let mut prev_key = Vec::<u8>::new();
@@ -1361,11 +1465,40 @@ impl ReftableReader {
     pub fn max_update_index(&self) -> u64 {
         self.max_update_index
     }
+
+    /// Byte offset of the top-level ref index section, or 0 if none.
+    pub fn ref_index_offset(&self) -> u64 {
+        self.ref_index_position
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Record decoding helpers
 // ---------------------------------------------------------------------------
+
+fn decode_index_record(data: &[u8], pos: usize, prev_key: &[u8]) -> Result<(Vec<u8>, u64, usize)> {
+    let (prefix_len, p) = get_varint(data, pos)?;
+    let (suffix_and_type, mut p) = get_varint(data, p)?;
+    let suffix_len = (suffix_and_type >> 3) as usize;
+
+    let mut key = Vec::with_capacity(prefix_len as usize + suffix_len);
+    if prefix_len > 0 {
+        if (prefix_len as usize) > prev_key.len() {
+            return Err(Error::InvalidRef(
+                "reftable: index prefix_len exceeds prev key".into(),
+            ));
+        }
+        key.extend_from_slice(&prev_key[..prefix_len as usize]);
+    }
+    if p + suffix_len > data.len() {
+        return Err(Error::InvalidRef("reftable: index suffix overflows".into()));
+    }
+    key.extend_from_slice(&data[p..p + suffix_len]);
+    p += suffix_len;
+
+    let (offset, p) = get_varint(data, p)?;
+    Ok((key, offset, p))
+}
 
 fn decode_ref_record(
     data: &[u8],
@@ -3057,6 +3190,15 @@ pub fn reftable_delete_reflog(git_dir: &Path, refname: &str) -> Result<()> {
 // Write options helpers
 // ---------------------------------------------------------------------------
 
+/// Apply `reftable.geometricFactor` when the value is in Git's supported range (2..=255).
+fn apply_geometric_factor_from_config(opts: &mut WriteOptions, raw: &str) {
+    if let Ok(v) = raw.trim().parse::<u64>() {
+        if (2..=255).contains(&v) {
+            opts.auto_compaction_factor = v as u8;
+        }
+    }
+}
+
 /// Read reftable write options from the repository config.
 pub fn read_write_options(git_dir: &Path) -> WriteOptions {
     let mut opts = WriteOptions {
@@ -3084,6 +3226,9 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
             if value == "false" || value == "0" || value == "no" || value == "off" {
                 opts.skip_index_objects = true;
             }
+        }
+        if let Some(value) = config.get("reftable.geometricFactor") {
+            apply_geometric_factor_from_config(&mut opts, &value);
         }
         if let Some(value) = config.get("core.logAllRefUpdates") {
             let value = value.to_lowercase();
@@ -3122,6 +3267,15 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
                             if let Ok(v) = value.parse::<usize>() {
                                 opts.restart_interval = v;
                             }
+                        }
+                        "indexobjects" => {
+                            let value = value.to_lowercase();
+                            if value == "false" || value == "0" || value == "no" || value == "off" {
+                                opts.skip_index_objects = true;
+                            }
+                        }
+                        "geometricfactor" => {
+                            apply_geometric_factor_from_config(&mut opts, value);
                         }
                         _ => {}
                     }
@@ -3348,6 +3502,43 @@ fn read_u24(data: &[u8], pos: usize) -> usize {
 /// Read a big-endian u16 from 2 bytes at `pos`.
 fn read_u16(data: &[u8], pos: usize) -> usize {
     ((data[pos] as usize) << 8) | (data[pos + 1] as usize)
+}
+
+/// Start of the restart offset table within a block's record area.
+///
+/// Validates restart count and trailer size so corrupt tables cannot trigger
+/// arithmetic overflow.
+fn restart_table_start_for_block(
+    data: &[u8],
+    records_end: usize,
+    records_data_start: usize,
+) -> Result<usize> {
+    if records_end < 2 || records_end > data.len() {
+        return Err(Error::InvalidRef(
+            "reftable: block trailer out of bounds".into(),
+        ));
+    }
+    let rc = read_u16(data, records_end - 2);
+    if rc > MAX_RESTARTS {
+        return Err(Error::InvalidRef(format!(
+            "reftable: restart count out of range: {rc}"
+        )));
+    }
+    let restart_bytes = rc * 3;
+    let Some(restart_table_start) = records_end
+        .checked_sub(2)
+        .and_then(|without_count| without_count.checked_sub(restart_bytes))
+    else {
+        return Err(Error::InvalidRef(
+            "reftable: restart table larger than block".into(),
+        ));
+    };
+    if restart_table_start < records_data_start {
+        return Err(Error::InvalidRef(
+            "reftable: restart table overlaps block records".into(),
+        ));
+    }
+    Ok(restart_table_start)
 }
 
 /// Parse the footer of a reftable file.

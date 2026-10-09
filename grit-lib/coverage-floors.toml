@@ -75,7 +75,7 @@ files = [
     "reftable.rs",
     "check_ref_format.rs",
 ]
-minimum = 57.9
+minimum = 69.9
 
 [group.supporting]
 files = [
@@ -156,7 +156,7 @@ minimum = 83.4
 minimum = 72.0
 
 [file."reftable.rs"]
-minimum = 43.2
+minimum = 75.6
 
 [file."unpack_objects.rs"]
 minimum = 82.9
