@@ -2491,12 +2491,13 @@ impl ConfigSet {
         included_files: &mut Vec<PathBuf>,
     ) -> Result<()> {
         // Mirror Git behavior and stop runaway include recursion.
-        // t0017 expects the diagnostic to contain this exact phrase.
         const MAX_INCLUDE_DEPTH: usize = 10;
         if depth > MAX_INCLUDE_DEPTH {
-            return Err(Error::Config(
-                "exceeded maximum include depth".to_owned().into(),
-            ));
+            return Err(ConfigError::IncludeDepthExceeded {
+                depth,
+                limit: MAX_INCLUDE_DEPTH,
+            }
+            .into());
         }
         if !process_includes {
             set.merge(file);
@@ -3971,9 +3972,11 @@ fn validate_hasconfig_remote_url_include(
 ) -> Result<()> {
     const MAX_INCLUDE_DEPTH: usize = 10;
     if depth > MAX_INCLUDE_DEPTH {
-        return Err(Error::Config(
-            "exceeded maximum include depth".to_owned().into(),
-        ));
+        return Err(ConfigError::IncludeDepthExceeded {
+            depth,
+            limit: MAX_INCLUDE_DEPTH,
+        }
+        .into());
     }
     if file.entries.iter().any(is_remote_url_entry) {
         return Err(ConfigError::RemoteUrlInHasconfigInclude.into());

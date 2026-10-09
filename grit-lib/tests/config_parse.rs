@@ -309,7 +309,6 @@ fn t1310_config_default_and_urlmatch() {
 }
 
 #[test]
-#[test]
 fn extra_parse_color_and_int_coverage() {
     assert!(parse_color("bold ul red").is_ok());
     assert!(parse_color("reset").is_ok());

@@ -10,8 +10,8 @@ use grit_lib::environment::Environment;
 use grit_lib::error::{ConfigError, Error};
 use grit_lib::repo::init_repository;
 use support::{
-    git_file_get, git_file_list, grit_file_from_content, grit_list_lines, isolated_env,
-    GitConfigLine,
+    git_file_get, git_file_get_includes, git_file_list, git_file_list_with_git_dir,
+    grit_file_from_content, grit_list_lines, isolated_env, normalize_config_corpus, GitConfigLine,
 };
 use tempfile::tempdir;
 
@@ -38,33 +38,26 @@ fn t1305_include_and_includeif_match_git_show_origin() {
     fs::write(root.join("child.conf"), "[user]\n\temail = child@x\n").expect("child");
     fs::write(root.join("branch.conf"), "[user]\n\tname = OnMain\n").expect("branch");
 
-    let git_lines = git_file_list(&main, true).expect("git list");
+    let gd = root.join(".git");
+    fs::create_dir_all(&gd).expect("git");
+    fs::write(gd.join("HEAD"), "ref: refs/heads/main\n").expect("head");
+
+    let git_lines =
+        git_file_list_with_git_dir(Some(&gd), &main, true).expect("git list with GIT_DIR");
     let content = fs::read_to_string(&main).expect("read");
     let file = grit_file_from_content(&main, &content, ConfigScope::Local);
     let mut set = ConfigSet::new();
     let env = Environment::empty();
-    let gd = root.join(".git");
-    fs::create_dir_all(&gd).expect("git");
-    fs::write(gd.join("HEAD"), "ref: refs/heads/main\n").expect("head");
     let ctx = include_ctx(&gd, &env);
     set.merge_file_with_includes(&file, true, &ctx)
         .expect("merge includes");
 
-    for line in &git_lines {
-        if line.key.starts_with("include") {
-            continue;
-        }
-        let grit_val = set.get(&line.key);
-        if line.value.is_empty() && line.key.contains('.') {
-            continue;
-        }
-        assert_eq!(
-            grit_val.as_deref(),
-            Some(line.value.as_str()),
-            "key {}",
-            line.key
-        );
-    }
+    let git_corpus = normalize_config_corpus(&git_lines);
+    let grit_corpus = normalize_config_corpus(&grit_list_lines(&set));
+    assert_eq!(
+        grit_corpus, git_corpus,
+        "full ordered config corpus (scope, origin, key, value)"
+    );
 }
 
 #[test]
@@ -85,12 +78,20 @@ fn include_relative_absolute_and_home() {
     let set = ConfigSet::load_with_options(&env, Some(&repo.join(".git")), &opts).expect("load");
     assert_eq!(set.get("a.k").as_deref(), Some("rel"));
 
-    fs::write(repo.join(".git/config"), "[include]\n\tpath = /abs.conf\n").expect("config");
-    fs::write("/tmp/grit-config-abs.conf", "[b]\n\tk = abs\n").expect("abs");
+    let abs_conf = dir.path().join("abs.conf");
+    fs::write(
+        repo.join(".git/config"),
+        format!("[include]\n\tpath = {}\n", abs_conf.display()),
+    )
+    .expect("config");
+    fs::write(&abs_conf, "[b]\n\tk = abs\n").expect("abs");
     let set2 = ConfigSet::load_with_options(&env, Some(&repo.join(".git")), &opts).expect("load2");
-    if set2.get("b.k").is_some() {
-        assert_eq!(set2.get("b.k").as_deref(), Some("abs"));
-    }
+    assert_eq!(set2.get("b.k").as_deref(), Some("abs"));
+    assert_eq!(
+        git_file_get_includes(&repo.join(".git/config"), "b.k", Some(&repo.join(".git")))
+            .as_deref(),
+        Some("abs")
+    );
 }
 
 #[test]
@@ -110,13 +111,11 @@ fn include_cycle_is_typed_error() {
         .merge_file_with_includes(&file, true, &ctx)
         .expect_err("cycle");
     match err {
-        Error::Config(ConfigError::Other(msg)) => {
-            assert!(
-                msg.contains("maximum include depth"),
-                "expected depth error, got {msg}"
-            );
+        Error::Config(ConfigError::IncludeDepthExceeded { depth, limit }) => {
+            assert!(depth > limit, "depth {depth} should exceed limit {limit}");
+            assert_eq!(limit, 10);
         }
-        other => panic!("expected include depth ConfigError, got {other:?}"),
+        other => panic!("expected IncludeDepthExceeded, got {other:?}"),
     }
 }
 
@@ -214,28 +213,37 @@ fn load_protected_skips_repo_config() {
 #[test]
 fn includeif_gitdir_trailing_slash_and_wildcard() {
     let dir = tempdir().expect("tempdir");
-    let repo = dir.path().join("nested").join("repo");
-    fs::create_dir_all(repo.join(".git")).expect("git");
-    fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").expect("head");
-    fs::write(
-        repo.join(".git/config"),
-        "[includeIf \"gitdir:~/nested/**\"]\n\tpath = extra.conf\n",
-    )
-    .expect("config");
-    fs::write(repo.join(".git/extra.conf"), "[mark]\n\tk = hit\n").expect("extra");
-
     let home = dir.path().join("home");
     fs::create_dir_all(&home).expect("home");
+    let repo = home.join("nested").join("repo");
+    init_repository(&repo, false, "main", None, "files").expect("init");
+    let git_dir = repo.join(".git");
+    let gitdir_pattern = format!("gitdir:{}/", repo.display());
+    let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read config");
+    cfg.push_str(&format!(
+        "[includeIf \"{gitdir_pattern}\"]\n\tpath = extra.conf\n"
+    ));
+    fs::write(git_dir.join("config"), &cfg).expect("config");
+    fs::write(git_dir.join("extra.conf"), "[mark]\n\tk = hit\n").expect("extra");
+
     let mut env = isolated_env(&home);
     env.home = Some(home.as_os_str().to_os_string());
     env.cwd = repo.clone();
     env.pwd = Some(repo.display().to_string());
 
-    let opts = support::default_load_opts(&repo.join(".git"), &env);
-    let set = ConfigSet::load_with_options(&env, Some(&repo.join(".git")), &opts).expect("load");
-    if set.get("mark.k").is_some() {
-        assert_eq!(set.get("mark.k").as_deref(), Some("hit"));
-    }
+    let opts = support::default_load_opts(&git_dir, &env);
+    let set = ConfigSet::load_with_options(&env, Some(&git_dir), &opts).expect("load");
+    assert_eq!(set.get("mark.k").as_deref(), Some("hit"));
+    assert_eq!(
+        support::git_file_get_includes_with_home(
+            &git_dir.join("config"),
+            "mark.k",
+            Some(&git_dir),
+            Some(&home),
+        )
+        .as_deref(),
+        Some("hit")
+    );
 }
 
 #[test]

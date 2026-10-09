@@ -59,13 +59,37 @@ pub fn git_config_in(dir: &Path, args: &[&str]) -> Output {
 
 /// `git config --file PATH --get KEY` (empty stdout + exit 1 means unset).
 pub fn git_file_get(file: &Path, key: &str) -> Option<String> {
-    let out = git_config(&[
+    git_file_get_includes(file, key, None)
+}
+
+/// `git config --file PATH --includes --get KEY`, optionally with `GIT_DIR` for includeIf.
+pub fn git_file_get_includes(file: &Path, key: &str, git_dir: Option<&Path>) -> Option<String> {
+    git_file_get_includes_with_home(file, key, git_dir, None)
+}
+
+pub fn git_file_get_includes_with_home(
+    file: &Path,
+    key: &str,
+    git_dir: Option<&Path>,
+    home: Option<&Path>,
+) -> Option<String> {
+    let file_arg = file.display().to_string();
+    let mut cmd = base_git_command();
+    cmd.args([
         "config",
         "--file",
-        &file.display().to_string(),
+        file_arg.as_str(),
+        "--includes",
         "--get",
         key,
     ]);
+    if let Some(git_dir) = git_dir {
+        cmd.env("GIT_DIR", git_dir);
+    }
+    if let Some(home) = home {
+        cmd.env("HOME", home);
+    }
+    let out = cmd.output().expect("spawn git config");
     if out.status.success() {
         Some(trim_git_config_stdout(&out.stdout))
     } else {
@@ -151,6 +175,15 @@ pub struct GitConfigLine {
 
 /// Parse `git config --list --show-origin --show-scope [--includes]`.
 pub fn git_file_list(file: &Path, includes: bool) -> Result<Vec<GitConfigLine>, String> {
+    git_file_list_with_git_dir(None, file, includes)
+}
+
+/// Same as [`git_file_list`], but sets `GIT_DIR` so `includeIf.onbranch:` and similar match Grit's repo context.
+pub fn git_file_list_with_git_dir(
+    git_dir: Option<&Path>,
+    file: &Path,
+    includes: bool,
+) -> Result<Vec<GitConfigLine>, String> {
     let file_arg = file.display().to_string();
     let mut args = vec![
         "config",
@@ -163,11 +196,60 @@ pub fn git_file_list(file: &Path, includes: bool) -> Result<Vec<GitConfigLine>, 
     if includes {
         args.push("--includes");
     }
-    let out = git_config(&args);
+    let mut cmd = base_git_command();
+    cmd.args(&args);
+    if let Some(git_dir) = git_dir {
+        cmd.env("GIT_DIR", git_dir);
+    }
+    let out = cmd.output().expect("spawn git config");
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).into_owned());
     }
     Ok(parse_git_list_output(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// One row of the normalized config corpus: `(scope, origin, key, value)`.
+pub type ConfigCorpusRow = (String, String, String, String);
+
+fn normalize_list_scope(scope: &str) -> String {
+    // `git config --file` reports `command`; Grit records standalone files as `local`.
+    if scope == "command" {
+        "local".to_owned()
+    } else {
+        scope.to_owned()
+    }
+}
+
+fn normalize_list_origin(origin: &str) -> String {
+    let Some(path_str) = origin.strip_prefix("file:") else {
+        return origin.to_owned();
+    };
+    let path = Path::new(path_str);
+    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    format!("file:{}", canon.display())
+}
+
+fn normalize_list_value(key: &str, value: &str) -> String {
+    if value.is_empty() && key.contains('.') && !key.ends_with(".path") {
+        "true".to_owned()
+    } else {
+        value.to_owned()
+    }
+}
+
+/// Normalize Git/Grit `--show-origin` list rows for ordered corpus comparison.
+pub fn normalize_config_corpus(lines: &[GitConfigLine]) -> Vec<ConfigCorpusRow> {
+    lines
+        .iter()
+        .map(|line| {
+            (
+                normalize_list_scope(&line.scope),
+                normalize_list_origin(&line.origin),
+                line.key.clone(),
+                normalize_list_value(&line.key, &line.value),
+            )
+        })
+        .collect()
 }
 
 fn parse_git_list_output(text: &str) -> Vec<GitConfigLine> {

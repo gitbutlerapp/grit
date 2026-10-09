@@ -91,6 +91,10 @@ pub enum ConfigError {
     )]
     RemoteUrlInHasconfigInclude,
 
+    /// `[include]` / `[includeIf]` nesting exceeded the Git-compatible depth limit.
+    #[error("exceeded maximum include depth (depth {depth} exceeds limit {limit})")]
+    IncludeDepthExceeded { depth: usize, limit: usize },
+
     /// Generic config error with free-form detail (legacy call sites).
     #[error("{0}")]
     Other(String),
