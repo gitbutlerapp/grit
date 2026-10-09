@@ -20,6 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install reftable-capable Git (>= 2.45)
+        run: |
+          sudo add-apt-repository -y ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install -y git
+          git version
+
       - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
         run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
 
@@ -34,7 +41,10 @@ jobs:
           shared-key: coverage
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - run: make coverage
+      - name: Coverage (reftable interop requires Git >= 2.45)
+        env:
+          GRIT_REQUIRE_REFTABLE_GIT: "1"
+        run: make coverage
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -133,6 +143,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install reftable-capable Git (>= 2.45)
+        run: |
+          sudo add-apt-repository -y ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install -y git
+          git version
+
       - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
         run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
 
@@ -145,7 +162,10 @@ jobs:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - run: cargo test -p grit-lib -p grit-cli
+      - name: Workspace tests (reftable interop requires Git >= 2.45)
+        env:
+          GRIT_REQUIRE_REFTABLE_GIT: "1"
+        run: cargo test --workspace
 
       - name: Criterion object micro-benchmarks (smoke)
         run: cargo bench -p grit-lib --bench objects -- --test
@@ -164,6 +184,8 @@ jobs:
       - run: cargo build -p grit-cli -p grit-http-server
 
       - name: Smart-HTTP transport tests
+        env:
+          GRIT_REQUIRE_REFTABLE_GIT: "1"
         run: |
           cargo test -p grit-lib --features http-ureq \
             --test transport_http --test transport_http_auth \

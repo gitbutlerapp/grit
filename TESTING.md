@@ -118,7 +118,7 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 
 ### Upstream test mapping: refs, reflog, config, ignore, attributes
 
-Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are mapped in the table below as those areas gain Rust coverage. Shared setup lives in [`grit-lib/tests/support/refs_harness.rs`](grit-lib/tests/support/refs_harness.rs): tests call `each_backend` to run the same scenario on **files** and **reftable** ref storage (`init_repository` with `ref_storage` `"files"` or `"reftable"`). Helpers run system `git` with a hermetic environment (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, fixed author/committer identity and dates). Grit ref lists come from `grit_lib::refs::list_refs`; git side uses `git show-ref`. When system git is older than 2.45 and cannot `git init --ref-format=reftable`, reftable scenarios print `SKIP: git lacks reftable` and return instead of failing.
+Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are mapped in the table below as those areas gain Rust coverage. Shared setup lives in [`grit-lib/tests/support/refs_harness.rs`](grit-lib/tests/support/refs_harness.rs): tests call `each_backend` to run the same scenario on **files** and **reftable** ref storage (`init_repository` with `ref_storage` `"files"` or `"reftable"`). Helpers run system `git` with a hermetic environment (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, fixed author/committer identity and dates). Grit ref lists come from `grit_lib::refs::list_refs`; git side uses `git show-ref`. When system git is older than 2.45 and cannot `git init --ref-format=reftable`, reftable scenarios print `SKIP: git lacks reftable` and return instead of failing. CI sets **`GRIT_REQUIRE_REFTABLE_GIT=1`** (with Git ≥ 2.45 from the git-core PPA in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) so those skips become hard failures.
 
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
@@ -169,6 +169,10 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t0003-attributes.sh | `builtin_objectmode` / invalid `builtin_*` names | `attributes_rules.rs` (`t0003_builtin_objectmode_*`, `t0003_validate_rules_for_add_rejects_bad_builtin_names`, `t0003_is_reserved_builtin_name`) | partial (skip when system git lacks `builtin_objectmode` in check-attr) |
 | t0003-attributes.sh | command-line / stdin UX, symlink `.gitattributes`, 101 MiB files | — | skipped (UX-only or `EXPENSIVE`; optional `GRIT_RUN_EXPENSIVE_ATTR_TESTS`) |
 | t0003-attributes.sh | bare repo default / `attr.tree` / bad `--attr-source` messages | — | follow-up (library loaders exist; extend `attributes_rules.rs`) |
+| t0610-reftable-basics.sh | stack open/read, git↔grit ref and reflog read, grit writes + git fsck/refs verify, stack lock and update index | `grit-lib/tests/reftable_stack_interop.rs` (`git_written_reftable_read_by_grit`, `grit_written_reftable_passes_git_fsck_and_refs_verify`, `stack_tables_list_and_update_index_mechanics`, `interleaved_git_and_grit_writers_keep_update_index_monotonic`, `compaction_output_readable_by_git`, `concurrent_grit_writers_serialize_and_preserve_updates`) | covered (skip when git < 2.45 locally) |
+| t0614-verify.sh | `git refs verify` on grit-written reftable stacks | `reftable_stack_interop.rs` (`grit_written_reftable_passes_git_fsck_and_refs_verify`, `concurrent_grit_writers_serialize_and_preserve_updates`) | covered when git provides `refs verify` |
+| t1460-refs-migrate.sh | files → reftable migration command | — | skipped: no migration CLI/API in scope |
+| t0612 (JGit interop) | JGit reftable quirks | — | skipped: JGit not in scope |
 
 Detailed rows for remaining t1405 cases and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 

@@ -114,6 +114,22 @@ fn null_device() -> &'static str {
     }
 }
 
+/// When `GRIT_REQUIRE_REFTABLE_GIT=1` (CI), missing reftable support is a hard failure.
+#[must_use]
+pub fn require_reftable_git() -> bool {
+    if git_supports_reftable() {
+        return true;
+    }
+    if std::env::var("GRIT_REQUIRE_REFTABLE_GIT")
+        .ok()
+        .is_some_and(|v| v == "1")
+    {
+        panic!("required reftable-capable system git (>= 2.45); install git-core PPA in CI");
+    }
+    eprintln!("SKIP: git lacks reftable");
+    false
+}
+
 /// Whether the system `git` supports `git init --ref-format=reftable` (Git ≥ 2.45).
 #[must_use]
 pub fn git_supports_reftable() -> bool {
@@ -143,6 +159,9 @@ pub fn git_interop_available(backend: Backend) -> bool {
 /// `git` on reftable repos should guard with [`git_interop_available`].
 pub fn each_backend(f: impl Fn(Backend, &TestRepo)) {
     for backend in [Backend::Files, Backend::Reftable] {
+        if backend == Backend::Reftable && !require_reftable_git() {
+            continue;
+        }
         let root = tempfile::tempdir().expect("tempdir");
         let worktree = root.path().to_path_buf();
         init_repository(&worktree, false, "main", None, ref_storage_name(backend))
@@ -343,6 +362,89 @@ pub fn assert_list_refs_match_git(worktree: &Path, prefix: &str) {
         grit_rows, git_rows,
         "list_refs({prefix:?}) must match git for-each-ref"
     );
+}
+
+/// Fixed author line for grit reftable writes (matches hermetic git env).
+#[must_use]
+pub fn grit_reflog_identity() -> String {
+    format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}")
+}
+
+/// Initialize a reftable repository with system git; returns the temp root.
+pub fn git_init_reftable_repo(initial_branch: &str) -> tempfile::TempDir {
+    assert!(
+        require_reftable_git(),
+        "git_init_reftable_repo requires reftable-capable git"
+    );
+    let root = tempfile::tempdir().expect("tempdir");
+    git(
+        root.path(),
+        &["init", "-q", "--ref-format=reftable", "-b", initial_branch],
+    );
+    root
+}
+
+/// Whether `git refs verify` is available on this git build.
+#[must_use]
+pub fn git_supports_refs_verify() -> bool {
+    static SUPPORTS: OnceLock<bool> = OnceLock::new();
+    *SUPPORTS.get_or_init(|| {
+        let dir = tempfile::tempdir().expect("tempdir");
+        if !git_supports_reftable() {
+            return false;
+        }
+        git(
+            dir.path(),
+            &["init", "-q", "--ref-format=reftable", "-b", "main"],
+        );
+        git_ok(dir.path(), &["refs", "verify"])
+    })
+}
+
+/// Run `git refs verify` when supported.
+pub fn git_refs_verify(worktree: &Path) {
+    if git_supports_refs_verify() {
+        git(worktree, &["refs", "verify"]);
+    }
+}
+
+/// Parse `git for-each-ref` into refname → peeled oid (symrefs resolved by git).
+pub fn git_for_each_ref_peeled(worktree: &Path, pattern: &str) -> BTreeMap<String, ObjectId> {
+    let out = git(
+        worktree,
+        &["for-each-ref", "--format=%(refname) %(objectname)", pattern],
+    );
+    let mut map = BTreeMap::new();
+    for line in out.lines() {
+        let Some((name, oid)) = line.split_once(' ') else {
+            continue;
+        };
+        let oid: ObjectId = oid.parse().expect("for-each-ref oid");
+        map.insert(name.to_owned(), oid);
+    }
+    map
+}
+
+/// Newest-first reflog lines from git (`ref@{n} oid message` simplified).
+pub fn git_reflog_lines(worktree: &Path, refname: &str) -> Vec<(String, ObjectId, String)> {
+    let out = git(
+        worktree,
+        &["reflog", "show", refname, "--format=%gd %H %gs"],
+    );
+    out.lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let mut parts = line.splitn(3, ' ');
+            let selector = parts.next().unwrap_or("").to_owned();
+            let oid: ObjectId = parts
+                .next()
+                .expect("reflog oid")
+                .parse()
+                .expect("parse oid");
+            let msg = parts.next().unwrap_or("").to_owned();
+            (selector, oid, msg)
+        })
+        .collect()
 }
 
 /// Parse `git show-ref` output into a name → oid map (deduplicated, sorted).

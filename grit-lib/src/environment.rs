@@ -59,6 +59,8 @@ pub struct Environment {
     pub sudo_uid: Option<String>,
     pub git_test_utf8_nfd_to_nfc: Option<String>,
     pub git_test_no_write_rev_index: Option<String>,
+    /// Test knob: when `"false"`, reftable auto-compaction is disabled (CLI captures at open).
+    pub git_test_reftable_autocompaction: Option<String>,
     pub git_author_name: Option<String>,
     pub git_author_email: Option<String>,
     pub git_author_date: Option<String>,
@@ -116,6 +118,7 @@ impl Environment {
             sudo_uid: None,
             git_test_utf8_nfd_to_nfc: None,
             git_test_no_write_rev_index: None,
+            git_test_reftable_autocompaction: None,
             git_author_name: None,
             git_author_email: None,
             git_author_date: None,
@@ -193,6 +196,7 @@ impl Environment {
             sudo_uid: get("SUDO_UID"),
             git_test_utf8_nfd_to_nfc: get("GIT_TEST_UTF8_NFD_TO_NFC"),
             git_test_no_write_rev_index: get("GIT_TEST_NO_WRITE_REV_INDEX"),
+            git_test_reftable_autocompaction: get("GIT_TEST_REFTABLE_AUTOCOMPACTION"),
             git_author_name: get("GIT_AUTHOR_NAME"),
             git_author_email: get("GIT_AUTHOR_EMAIL"),
             git_author_date: get("GIT_AUTHOR_DATE"),
@@ -218,6 +222,18 @@ impl Environment {
         raw.split_whitespace()
             .next()
             .and_then(|p| p.parse::<i64>().ok())
+    }
+
+    /// Whether reftable auto-compaction is enabled for this process snapshot.
+    ///
+    /// Defaults to `true`. Set `GIT_TEST_REFTABLE_AUTOCOMPACTION=false` at the CLI
+    /// boundary to disable (see site global-options docs).
+    #[must_use]
+    pub fn reftable_autocompaction_enabled(&self) -> bool {
+        self.git_test_reftable_autocompaction
+            .as_deref()
+            .map(|value| value != "false")
+            .unwrap_or(true)
     }
 
     /// Whether `GIT_TEST_ASSUME_DIFFERENT_OWNER` is enabled.
@@ -317,6 +333,7 @@ impl Environment {
             "GIT_CONFIG_COUNT" => self.git_config_count.clone(),
             "GIT_PREFIX" => self.git_prefix.clone(),
             "GIT_TEST_UTF8_NFD_TO_NFC" => self.git_test_utf8_nfd_to_nfc.clone(),
+            "GIT_TEST_REFTABLE_AUTOCOMPACTION" => self.git_test_reftable_autocompaction.clone(),
             "GIT_AUTHOR_NAME" => self.git_author_name.clone(),
             "GIT_AUTHOR_EMAIL" => self.git_author_email.clone(),
             "GIT_AUTHOR_DATE" => self.git_author_date.clone(),

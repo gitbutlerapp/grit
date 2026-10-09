@@ -187,6 +187,9 @@ pub struct WriteOptions {
     /// Geometric factor for stack auto-compaction (`reftable.geometricFactor`).
     /// Defaults to 2 when unset.
     pub auto_compaction_factor: u8,
+    /// Whether to run automatic stack compaction after writes (Git test knob via
+    /// [`Environment::reftable_autocompaction_enabled`](crate::environment::Environment::reftable_autocompaction_enabled)).
+    pub autocompaction_enabled: bool,
 }
 
 impl Default for WriteOptions {
@@ -199,6 +202,7 @@ impl Default for WriteOptions {
             unpadded: false,
             hash_size: HASH_SIZE,
             auto_compaction_factor: 2,
+            autocompaction_enabled: true,
         }
     }
 }
@@ -569,10 +573,10 @@ impl BlockWriter {
         self.buf[self.header_off + 3] = (block_len & 0xff) as u8;
 
         if self.typ == BLOCK_TYPE_LOG {
-            use flate2::write::DeflateEncoder;
+            use flate2::write::ZlibEncoder;
             use flate2::Compression;
             let skip = 4 + self.header_off;
-            let mut enc = DeflateEncoder::new(Vec::new(), Compression::new(9));
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(9));
             enc.write_all(&self.buf[skip..])
                 .map_err(|e| Error::Zlib(e.to_string()))?;
             let compressed = enc.finish().map_err(|e| Error::Zlib(e.to_string()))?;
@@ -1412,17 +1416,8 @@ impl ReftableReader {
             let header_prefix = if is_first { self.header_len() } else { 0 };
             let inflated_size = block_len.saturating_sub(4 + header_prefix);
 
-            // Decompress
-            use flate2::read::DeflateDecoder;
             let remaining = &self.data[compressed_start..file_end];
-            let mut decoder = DeflateDecoder::new(remaining);
-            let mut inflated = vec![0u8; inflated_size];
-            decoder
-                .read_exact(&mut inflated)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-
-            // How many compressed bytes were consumed?
-            let consumed = decoder.total_in() as usize;
+            let (inflated, consumed) = decompress_log_payload(remaining, inflated_size)?;
 
             // Parse log records from inflated data
             // Read restart_count from end
@@ -2075,7 +2070,12 @@ impl ReftableStack {
     ///
     /// Writes the table bytes to a new file, then atomically updates
     /// `tables.list`.
-    pub fn add_table(&mut self, data: &[u8], update_index: u64) -> Result<String> {
+    pub fn add_table(
+        &mut self,
+        data: &[u8],
+        update_index: u64,
+        opts: &WriteOptions,
+    ) -> Result<String> {
         let table_has_deletion = ReftableReader::new(data.to_vec())
             .and_then(|reader| reader.read_refs())
             .map(|records| {
@@ -2114,13 +2114,8 @@ impl ReftableStack {
         // ref/log updates and should settle back to one table; a following tag write remains as a
         // second table until explicit `pack-refs`.
         if table_has_deletion && self.table_names.len() > 2 {
-            self.compact_prefix_preserving_newest()?;
-        } else if self.table_names.len() > 3
-            && crate::environment::Environment::empty()
-                .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        {
+            self.compact_prefix_preserving_newest(opts)?;
+        } else if self.table_names.len() > 3 && opts.autocompaction_enabled {
             if self
                 .table_names
                 .iter()
@@ -2135,12 +2130,8 @@ impl ReftableStack {
         Ok(filename)
     }
 
-    fn compact_prefix_preserving_newest(&mut self) -> Result<()> {
-        if crate::environment::Environment::empty()
-            .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-            .map(|value| value == "false")
-            .unwrap_or(false)
-        {
+    fn compact_prefix_preserving_newest(&mut self, opts: &WriteOptions) -> Result<()> {
+        if !opts.autocompaction_enabled {
             return Ok(());
         }
         let guard = self.acquire_tables_list_lock()?;
@@ -2301,7 +2292,7 @@ impl ReftableStack {
 
         // Auto-compaction runs after releasing the append lock; it re-acquires
         // the lock internally and works from a fresh view of the stack.
-        self.maybe_auto_compact()?;
+        self.maybe_auto_compact(opts)?;
         Ok(())
     }
 
@@ -2366,7 +2357,7 @@ impl ReftableStack {
             self.write_tables_list_locked(&guard)?;
         }
 
-        self.maybe_auto_compact()?;
+        self.maybe_auto_compact(opts)?;
         Ok(())
     }
 
@@ -2390,18 +2381,13 @@ impl ReftableStack {
 
     /// Run the auto-compaction policy (matching `add_table`) without appending a
     /// new table. Re-reads the stack under the lock to avoid racing.
-    fn maybe_auto_compact(&mut self) -> Result<()> {
+    fn maybe_auto_compact(&mut self, opts: &WriteOptions) -> Result<()> {
         self.reload_table_names();
         let has_locked = self
             .table_names
             .iter()
             .any(|name| self.table_is_locked(name));
-        if self.table_names.len() > 3
-            && crate::environment::Environment::empty()
-                .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        {
+        if self.table_names.len() > 3 && opts.autocompaction_enabled {
             if has_locked {
                 self.compact_unlocked_suffix()?;
             } else {
@@ -2726,13 +2712,27 @@ fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Re
     }
 }
 
-/// Write a ref to a reftable repo.
+/// Write a ref to a reftable repo using config-derived [`WriteOptions`].
 pub fn reftable_write_ref(
     git_dir: &Path,
     refname: &str,
     oid: &ObjectId,
     log_identity: Option<&str>,
     log_message: Option<&str>,
+) -> Result<()> {
+    let (store_git_dir, _) = reftable_storage_location(git_dir, refname);
+    let opts = read_write_options(&store_git_dir);
+    reftable_write_ref_with_write_options(git_dir, refname, oid, log_identity, log_message, &opts)
+}
+
+/// Write a ref to a reftable repo with explicit write options (including auto-compaction).
+pub fn reftable_write_ref_with_write_options(
+    git_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+    log_identity: Option<&str>,
+    log_message: Option<&str>,
+    opts: &WriteOptions,
 ) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
@@ -2768,8 +2768,7 @@ pub fn reftable_write_ref(
     let write_log = log.is_some() || should_log_ref_updates(&store_git_dir);
     let log = if write_log { log } else { None };
 
-    let opts = read_write_options(&store_git_dir);
-    stack.write_ref(&storage_refname, RefValue::Val1(*oid), log, &opts)
+    stack.write_ref(&storage_refname, RefValue::Val1(*oid), log, opts)
 }
 
 /// Build a reflog record for a reftable transaction (update index filled by the writer).
@@ -3113,7 +3112,7 @@ pub fn reftable_append_reflog(
     // hash width so every OID in a sha256 reftable is 32 bytes (a mixed-width
     // log record desynchronizes the block).
     let hash_size = opts.hash_size;
-    let mut writer = ReftableWriter::new(opts, update_index, update_index);
+    let mut writer = ReftableWriter::new(opts.clone(), update_index, update_index);
     writer.add_log(LogRecord {
         refname: storage_refname.clone(),
         update_index,
@@ -3127,7 +3126,7 @@ pub fn reftable_append_reflog(
     })?;
 
     let data = writer.finish()?;
-    stack.add_table(&data, update_index)?;
+    stack.add_table(&data, update_index, &opts)?;
     if storage_refname.starts_with("refs/heads/branch-") {
         stack.reload_table_names();
         let has_locked = stack
@@ -3226,18 +3225,23 @@ fn apply_geometric_factor_from_config(opts: &mut WriteOptions, raw: &str) {
     }
 }
 
-/// Read reftable write options from the repository config.
+/// Read reftable write options from the repository config (auto-compaction enabled).
 pub fn read_write_options(git_dir: &Path) -> WriteOptions {
+    read_write_options_with_environment(git_dir, &crate::environment::Environment::empty())
+}
+
+/// Read reftable write options from config and an explicit discovery environment.
+pub fn read_write_options_with_environment(
+    git_dir: &Path,
+    env: &crate::environment::Environment,
+) -> WriteOptions {
     let mut opts = WriteOptions {
         hash_size: reftable_hash_size_for_git_dir(git_dir),
+        autocompaction_enabled: env.reftable_autocompaction_enabled(),
         ..Default::default()
     };
 
-    if let Ok(config) = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    ) {
+    if let Ok(config) = ConfigSet::load(env, Some(git_dir), true) {
         if let Some(value) = config.get("reftable.blockSize") {
             if let Ok(v) = value.parse::<u32>() {
                 opts.block_size = v;
@@ -3416,11 +3420,8 @@ pub fn dump_reftable_blocks(path: &Path) -> Result<String> {
             // data after the 4-byte header is zlib-compressed.
             let skip = 4 + header_off;
             let comp = &data[block_off as usize + skip..];
-            let mut dec = flate2::read::DeflateDecoder::new(comp);
-            let mut inflated = vec![0u8; blk_len.saturating_sub(skip)];
-            // Read exactly the uncompressed payload.
-            read_exact_inflate(&mut dec, &mut inflated)?;
-            let consumed = dec.total_in() as usize;
+            let inflated_size = blk_len.saturating_sub(skip);
+            let (inflated, consumed) = decompress_log_payload(comp, inflated_size)?;
             // restart trailer lives at the end of the (header + inflated) block.
             let mut full = vec![0u8; skip];
             full.extend_from_slice(&inflated);
@@ -3484,16 +3485,25 @@ fn be16(data: &[u8], off: usize) -> u16 {
     ((data[off] as u16) << 8) | (data[off + 1] as u16)
 }
 
-fn read_exact_inflate<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<()> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match r.read(&mut buf[filled..]) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(e) => return Err(Error::Zlib(e.to_string())),
-        }
+/// Decompress a log block payload (zlib-wrapped, matching Git, or raw deflate for legacy grit tables).
+fn decompress_log_payload(compressed: &[u8], inflated_size: usize) -> Result<(Vec<u8>, usize)> {
+    use flate2::read::{DeflateDecoder, ZlibDecoder};
+    use std::io::Read;
+
+    let mut inflated = vec![0u8; inflated_size];
+    if compressed.len() >= 2 && compressed[0] == 0x78 {
+        let mut decoder = ZlibDecoder::new(compressed);
+        decoder
+            .read_exact(&mut inflated)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        Ok((inflated, decoder.total_in() as usize))
+    } else {
+        let mut decoder = DeflateDecoder::new(compressed);
+        decoder
+            .read_exact(&mut inflated)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        Ok((inflated, decoder.total_in() as usize))
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
