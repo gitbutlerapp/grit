@@ -494,14 +494,7 @@ impl Parser {
             let raw_value = trimmed[eq_pos + 1..].trim();
             // Strip inline comment (not inside quotes)
             let value = strip_inline_comment(raw_value);
-            let quoted = value.trim_start().starts_with('"') && value.trim_end().ends_with('"');
-            let value = if quoted {
-                unescape_value(&value)
-            } else {
-                // Literal tab characters in unquoted values become spaces (t1300); `\t` escapes stay
-                // until after that normalization.
-                unescape_value(&normalize_unquoted_config_value(&value))
-            };
+            let value = unescape_value(&value);
             let key = self.make_key(raw_name);
             Some((key, Some(value)))
         } else {
@@ -624,13 +617,6 @@ fn strip_inline_comment(s: &str) -> String {
     // Trim trailing whitespace that was before the comment
     let trimmed = result.trim_end();
     trimmed.to_owned()
-}
-
-/// Git converts literal tab characters to spaces in unquoted config values (t1300).
-///
-/// Applied to the raw value text before escape sequences are interpreted.
-fn normalize_unquoted_config_value(s: &str) -> String {
-    s.replace('\t', " ")
 }
 
 /// Unescape a config value: handle `\"`, `\\`, `\n`, `\t`, `\b`, and strip
