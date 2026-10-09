@@ -1154,8 +1154,10 @@ impl Odb {
             Err(err) => return Err(err),
         }
 
-        if let Ok(Some(obj)) = self.sources()?.read(oid) {
-            return Ok(obj);
+        match self.sources()?.read(oid) {
+            Ok(Some(obj)) => return Ok(obj),
+            Ok(None) => {}
+            Err(err) => return Err(err),
         }
 
         if let Some(err) = unreadable_local_loose {
@@ -1201,8 +1203,10 @@ impl Odb {
             Err(err) => return Err(err),
         }
 
-        if let Ok(Some(info)) = self.sources()?.read_info(oid) {
-            return Ok(info);
+        match self.sources()?.read_info(oid) {
+            Ok(Some(info)) => return Ok(info),
+            Ok(None) => {}
+            Err(err) => return Err(err),
         }
 
         if let Some(err) = unreadable_local_loose {
@@ -2675,6 +2679,30 @@ mod tests {
             odb.hot_path_test_metrics().loose_path_open_attempts(),
             0,
             "packed objects must not attempt a loose-path open"
+        );
+    }
+
+    #[test]
+    fn loose_only_read_records_loose_path_open() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+        use crate::objects::ObjectKind;
+
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let odb = Odb::new(&objects);
+        let oid = odb
+            .write(ObjectKind::Blob, b"loose-only")
+            .expect("write loose");
+        odb.hot_path_test_metrics().set_loose_open_counting(true);
+        odb.hot_path_test_metrics().reset_loose_path_open_attempts();
+        let _scope = HotPathMetricsScope::install(Arc::clone(&odb.hot_path_test_metrics));
+
+        odb.read(&oid).expect("loose read");
+        assert_eq!(
+            odb.hot_path_test_metrics().loose_path_open_attempts(),
+            1,
+            "loose fallback must record a path open attempt"
         );
     }
 
