@@ -2,12 +2,22 @@
 # Regenerate floors after intentional gains; never lower minimums by hand.
 
 [meta]
-baseline = "c1509db38"
-updated = "2026-10-08"
+baseline = "183dacae1"
+updated = "2026-10-09"
 
 [core]
 groups = ["odb", "pack", "midx", "commit-graph"]
 minimum = 85.0
+
+[aggregate.refs-config]
+groups = ["refs", "reflog", "config", "ignore", "attributes"]
+minimum = 49.7
+
+[group.attributes]
+files = [
+    "attributes.rs",
+]
+minimum = 50.6
 
 [group.commit-graph]
 files = [
@@ -16,6 +26,19 @@ files = [
     "bloom.rs",
 ]
 minimum = 85.0
+
+[group.config]
+files = [
+    "config.rs",
+]
+minimum = 39.5
+
+[group.ignore]
+files = [
+    "ignore.rs",
+    "wildmatch.rs",
+]
+minimum = 71.9
 
 [group.midx]
 files = [
@@ -40,6 +63,20 @@ files = [
 ]
 minimum = 85.0
 
+[group.reflog]
+files = [
+    "reflog.rs",
+]
+minimum = 34.6
+
+[group.refs]
+files = [
+    "refs.rs",
+    "reftable.rs",
+    "check_ref_format.rs",
+]
+minimum = 53.8
+
 [group.supporting]
 files = [
     "objects.rs",
@@ -52,8 +89,17 @@ files = [
 ]
 minimum = 80.0
 
+[file."attributes.rs"]
+minimum = 50.6
+
 [file."bloom.rs"]
 minimum = 91.6
+
+[file."check_ref_format.rs"]
+minimum = 95.2
+
+[file."config.rs"]
+minimum = 39.5
 
 [file."commit_graph_file.rs"]
 minimum = 85.0
@@ -66,6 +112,9 @@ minimum = 93.3
 
 [file."fsck_standalone.rs"]
 minimum = 83.9
+
+[file."ignore.rs"]
+minimum = 69.3
 
 [file."index_pack.rs"]
 minimum = 90.7
@@ -100,8 +149,20 @@ minimum = 73.4
 [file."promisor.rs"]
 minimum = 81.1
 
+[file."reflog.rs"]
+minimum = 34.6
+
+[file."refs.rs"]
+minimum = 61.3
+
+[file."reftable.rs"]
+minimum = 43.2
+
 [file."unpack_objects.rs"]
 minimum = 82.8
+
+[file."wildmatch.rs"]
+minimum = 74.6
 
 [file."zlib_inflate.rs"]
 minimum = 85.0

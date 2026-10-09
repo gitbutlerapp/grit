@@ -95,6 +95,116 @@ minimum = 99.0
             self.assertTrue(failures)
             self.assertTrue(any("odb.rs" in f for f in failures))
 
+    def test_load_floors_legacy_core_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            floors_path = Path(tmp) / "floors.toml"
+            floors_path.write_text(
+                """
+[meta]
+updated = "test"
+
+[core]
+groups = ["odb", "pack"]
+minimum = 80.0
+
+[group.odb]
+files = ["odb.rs"]
+minimum = 80.0
+
+[group.pack]
+files = ["pack.rs"]
+minimum = 75.0
+""",
+                encoding="utf-8",
+            )
+            floors = cov.load_floors(floors_path)
+            self.assertEqual(floors.core_groups, ["odb", "pack"])
+            self.assertEqual(floors.core_minimum, 80.0)
+            stats = cov.parse_coverage_json(_sample_json())
+            table, failures = cov.check(floors, stats)
+            self.assertFalse(failures)
+            self.assertTrue(any(line.startswith("core ") for line in table))
+
+    def test_named_aggregate_groups_and_minimum(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            floors_path = Path(tmp) / "floors.toml"
+            floors_path.write_text(
+                """
+[meta]
+updated = "test"
+
+[core]
+groups = ["odb"]
+minimum = 50.0
+
+[aggregate.refs-config]
+groups = ["refs", "reflog"]
+minimum = 70.0
+
+[group.refs]
+files = ["odb.rs"]
+minimum = 50.0
+
+[group.reflog]
+files = ["pack.rs"]
+minimum = 50.0
+
+[group.odb]
+files = ["odb.rs"]
+minimum = 50.0
+""",
+                encoding="utf-8",
+            )
+            floors = cov.load_floors(floors_path)
+            self.assertIn("refs-config", floors.aggregates)
+            self.assertEqual(floors.aggregates["refs-config"][0], ["refs", "reflog"])
+            self.assertEqual(floors.aggregates["refs-config"][1], 70.0)
+            stats = cov.parse_coverage_json(_sample_json())
+            agg_files = cov.aggregate_group_files(
+                ["refs", "reflog"], floors.groups
+            )
+            expected = cov.aggregate(agg_files, stats)
+            table, failures = cov.check(floors, stats)
+            self.assertFalse(failures)
+            self.assertTrue(
+                any(
+                    line.startswith("aggregate:refs-config")
+                    and f"{expected.percent:.1f}" in line
+                    for line in table
+                )
+            )
+
+    def test_aggregate_failure_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            floors_path = Path(tmp) / "floors.toml"
+            floors_path.write_text(
+                """
+[meta]
+updated = "test"
+
+[core]
+groups = ["odb"]
+minimum = 50.0
+
+[aggregate.strict]
+groups = ["refs"]
+minimum = 99.0
+
+[group.refs]
+files = ["odb.rs"]
+minimum = 50.0
+
+[group.odb]
+files = ["odb.rs"]
+minimum = 50.0
+""",
+                encoding="utf-8",
+            )
+            floors = cov.load_floors(floors_path)
+            stats = cov.parse_coverage_json(_sample_json())
+            _table, failures = cov.check(floors, stats)
+            self.assertTrue(any("aggregate strict" in f for f in failures))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,7 @@ class Floors:
     meta: dict[str, str]
     core_groups: list[str]
     core_minimum: float
+    aggregates: dict[str, tuple[list[str], float]]
     groups: dict[str, tuple[list[str], float | None]]
     files: dict[str, float]
 
@@ -56,6 +57,11 @@ def load_floors(path: Path) -> Floors:
     core_groups = [str(g) for g in core.get("groups", [])]
     core_minimum = float(core.get("minimum", 0.0))
 
+    aggregates: dict[str, tuple[list[str], float]] = {}
+    for name, value in data.get("aggregate", {}).items():
+        group_names = [str(g) for g in value.get("groups", [])]
+        aggregates[str(name)] = (group_names, float(value.get("minimum", 0.0)))
+
     groups: dict[str, tuple[list[str], float | None]] = {}
     for name, value in data.get("group", {}).items():
         files = [str(f) for f in value.get("files", [])]
@@ -70,6 +76,7 @@ def load_floors(path: Path) -> Floors:
         meta=meta,
         core_groups=core_groups,
         core_minimum=core_minimum,
+        aggregates=aggregates,
         groups=groups,
         files=files,
     )
@@ -168,6 +175,12 @@ def write_floors(path: Path, floors: Floors) -> None:
             "",
         ]
     )
+    for name in sorted(floors.aggregates):
+        group_names, minimum = floors.aggregates[name]
+        lines.append(f"[aggregate.{name}]")
+        lines.append("groups = [" + ", ".join(f'"{g}"' for g in group_names) + "]")
+        lines.append(f"minimum = {minimum}")
+        lines.append("")
     for name in sorted(floors.groups):
         files, minimum = floors.groups[name]
         lines.append(f"[group.{name}]")
@@ -206,6 +219,18 @@ def apply_update(floors: Floors, stats: dict[str, LineStats]) -> Floors:
     core_stats = aggregate(core_files, stats)
     new_core_minimum = max(floors.core_minimum, ratchet_floor(core_stats.percent))
 
+    new_aggregates = dict(floors.aggregates)
+    for name, (group_names, minimum) in floors.aggregates.items():
+        agg_files: list[str] = []
+        for group_name in group_names:
+            if group_name in floors.groups:
+                agg_files.extend(floors.groups[group_name][0])
+        agg_stats = aggregate(agg_files, stats)
+        new_aggregates[name] = (
+            group_names,
+            max(minimum, ratchet_floor(agg_stats.percent)),
+        )
+
     meta = dict(floors.meta)
     meta["updated"] = meta.get("updated", "")
 
@@ -213,9 +238,20 @@ def apply_update(floors: Floors, stats: dict[str, LineStats]) -> Floors:
         meta=meta,
         core_groups=floors.core_groups,
         core_minimum=new_core_minimum,
+        aggregates=new_aggregates,
         groups=new_groups,
         files=new_files,
     )
+
+
+def aggregate_group_files(
+    group_names: list[str], groups: dict[str, tuple[list[str], float | None]]
+) -> list[str]:
+    files: list[str] = []
+    for group_name in group_names:
+        if group_name in groups:
+            files.extend(groups[group_name][0])
+    return files
 
 
 def check(
@@ -265,6 +301,17 @@ def check(
         failures.append(
             f"core set: {core_stats.percent:.1f}% below floor {floors.core_minimum:.1f}%"
         )
+
+    for name in sorted(floors.aggregates):
+        group_names, minimum = floors.aggregates[name]
+        agg_files = aggregate_group_files(group_names, floors.groups)
+        st = aggregate(agg_files, stats)
+        ok = st.percent + 1e-9 >= minimum
+        table.append(format_row(f"aggregate:{name}", st, minimum, ok))
+        if not ok:
+            failures.append(
+                f"aggregate {name}: {st.percent:.1f}% below floor {minimum:.1f}%"
+            )
 
     return table, failures
 
@@ -330,6 +377,7 @@ __all__ = [
     "Floors",
     "LineStats",
     "aggregate",
+    "aggregate_group_files",
     "apply_update",
     "check",
     "load_floors",
