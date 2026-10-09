@@ -422,7 +422,6 @@ fn parse_one_line(
     attr_base: &str,
     out: &mut ParsedGitAttributes,
 ) {
-    let _ = display_path;
     let _ = from_blob;
     let cp = skip_ascii_blank(raw_line);
     if cp.is_empty() || cp.starts_with('#') {
@@ -444,6 +443,12 @@ fn parse_one_line(
 
     if pattern_token.len() > ATTR_MACRO_PREFIX.len() && pattern_token.starts_with(ATTR_MACRO_PREFIX)
     {
+        if !attr_base.is_empty() {
+            out.warnings.push(format!(
+                "{pattern_token} not allowed: {display_path}:{line_no}"
+            ));
+            return;
+        }
         let rest = skip_ascii_blank(&pattern_token[ATTR_MACRO_PREFIX.len()..]);
         let (macro_name, leftover) = split_at_first_blank(rest);
         if !leftover.is_empty() || macro_name.is_empty() {
@@ -1043,7 +1048,6 @@ pub(crate) fn load_gitattributes_stack_uncached(
                 &prefix,
             );
             merged.rules.append(&mut p.rules);
-            merged.macros.defs.extend(p.macros.defs.drain());
             merged.warnings.append(&mut p.warnings);
         }
     }
@@ -1177,7 +1181,9 @@ fn walk_tree_attrs(
                     let mut p =
                         parse_gitattributes_content_impl(&content, &display, true, &attr_base);
                     merged.rules.append(&mut p.rules);
-                    merged.macros.defs.extend(p.macros.defs.drain());
+                    if attr_base.is_empty() {
+                        merged.macros.defs.extend(p.macros.defs.drain());
+                    }
                     merged.warnings.append(&mut p.warnings);
                 }
             }
@@ -1295,10 +1301,99 @@ pub fn load_gitattributes_from_index(
             .unwrap_or_default();
         let mut p = parse_gitattributes_content_impl(&content, rel, true, &attr_base);
         merged.rules.append(&mut p.rules);
-        merged.macros.defs.extend(p.macros.defs.drain());
+        if attr_base.is_empty() {
+            merged.macros.defs.extend(p.macros.defs.drain());
+        }
         merged.warnings.append(&mut p.warnings);
     }
     let _ = work_tree;
+    Ok(merged)
+}
+
+fn merge_global_attributes_file(
+    repo: &Repository,
+    merged: &mut ParsedGitAttributes,
+) -> std::result::Result<(), crate::error::Error> {
+    if let Some(g) = global_attributes_path(repo)? {
+        if g.exists() {
+            if let Ok(content) = fs::read_to_string(&g) {
+                if content.len() <= MAX_ATTR_FILE_BYTES {
+                    let mut p =
+                        parse_gitattributes_file_content(&content, g.to_string_lossy().as_ref());
+                    merged.rules.append(&mut p.rules);
+                    merged.macros.defs.extend(p.macros.defs.drain());
+                    merged.warnings.append(&mut p.warnings);
+                } else {
+                    merged
+                        .warnings
+                        .push(crate::diagnostics::warning_line(&format!(
+                            "ignoring overly large gitattributes file '{}'",
+                            g.display()
+                        )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn merge_info_attributes(repo: &Repository, merged: &mut ParsedGitAttributes) {
+    let info = repo.git_dir.join("info/attributes");
+    if info.exists() {
+        if let Ok(content) = fs::read_to_string(&info) {
+            if content.len() <= MAX_ATTR_FILE_BYTES {
+                let mut p = parse_gitattributes_file_content(&content, "info/attributes");
+                merged.rules.append(&mut p.rules);
+                merged.macros.defs.extend(p.macros.defs.drain());
+                merged.warnings.append(&mut p.warnings);
+            }
+        }
+    }
+}
+
+/// Whether attribute pattern matching should fold ASCII case (`core.ignorecase`).
+#[must_use]
+pub fn attribute_matching_ignore_case(repo: &Repository) -> bool {
+    repo.config()
+        .ok()
+        .and_then(|c| c.get_bool("core.ignorecase"))
+        .and_then(|r| r.ok())
+        .unwrap_or(false)
+}
+
+/// Merged attribute rules for `git check-attr --cached` (global, index `.gitattributes`, `info/attributes`).
+///
+/// # Errors
+///
+/// Returns an error if the index cannot be read or global attributes path resolution fails.
+pub fn load_gitattributes_for_check_attr_cached(
+    repo: &Repository,
+) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
+    let mut merged = ParsedGitAttributes::default();
+    merge_global_attributes_file(repo, &mut merged)?;
+    let index = Index::load(&repo.git_dir.join("index"))?;
+    let wt = repo.work_tree.as_deref().unwrap_or(repo.git_dir.as_path());
+    let mut from_index = load_gitattributes_from_index(&index, &repo.odb, wt)?;
+    merged.rules.append(&mut from_index.rules);
+    merged.macros.defs.extend(from_index.macros.defs.drain());
+    merged.warnings.append(&mut from_index.warnings);
+    merge_info_attributes(repo, &mut merged);
+    Ok(merged)
+}
+
+/// Merged attribute rules for `git check-attr --source=<tree>` (global, tree blobs, `info/attributes`).
+///
+/// # Errors
+///
+/// Returns an error if the tree cannot be read or global attributes path resolution fails.
+pub fn load_gitattributes_for_check_attr_source(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
+    let mut merged = ParsedGitAttributes::default();
+    merge_global_attributes_file(repo, &mut merged)?;
+    walk_tree_attrs(&repo.odb, tree_oid, "", &mut merged)?;
+    merge_info_attributes(repo, &mut merged);
     Ok(merged)
 }
 
@@ -1368,6 +1463,68 @@ pub fn builtin_objectmode_index(index: &Index, rel_path: &str) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_unclosed_quote_falls_back_to_literal_pattern() {
+        let parsed = parse_gitattributes_file_content("\"unclosed test=set\n", ".gitattributes");
+        assert_eq!(parsed.rules.len(), 1);
+        assert_eq!(parsed.rules[0].pattern, "\"unclosed");
+    }
+
+    #[test]
+    fn directory_only_pattern_matches_trailing_slash_paths() {
+        let parsed = parse_gitattributes_file_content("dir/ export-submodule\n", ".gitattributes");
+        let rule = &parsed.rules[0];
+        assert!(!attr_rule_matches(rule, "dir", false));
+        assert!(attr_rule_matches(rule, "dir/", false));
+    }
+
+    #[test]
+    fn builtin_objectmode_assignment_emits_check_attr_warning() {
+        let parsed = parse_gitattributes_file_content("* builtin_objectmode=1\n", ".gitattributes");
+        let warnings = builtin_warnings_for_rules(&parsed.rules, ".gitattributes");
+        assert!(warnings.iter().any(|w| w.contains("builtin_objectmode")));
+    }
+
+    #[test]
+    fn attr_rule_endswith_star_suffix() {
+        let parsed = parse_gitattributes_file_content("*.txt text\n", ".gitattributes");
+        let rule = &parsed.rules[0];
+        assert!(attr_rule_matches(rule, "readme.txt", false));
+        assert!(!attr_rule_matches(rule, "readme.txta", false));
+    }
+
+    #[test]
+    fn normalize_rel_path_collapses_dot_dot() {
+        assert_eq!(normalize_rel_path("a/b/../c"), "a/c");
+        assert_eq!(normalize_rel_path("."), "");
+    }
+
+    #[test]
+    fn attr_rule_applies_to_path_honors_nested_attr_base() {
+        assert!(!attr_rule_applies_to_path("a/b", "a/c/f", false));
+        assert!(attr_rule_applies_to_path("a/b", "a/b/f", false));
+        assert!(attr_rule_applies_to_path("a/b", "a/b/c/f", false));
+    }
+
+    #[test]
+    fn leading_slash_pattern_matches_from_repository_root() {
+        let parsed = parse_gitattributes_file_content("/f test=set\n", ".gitattributes");
+        let rule = &parsed.rules[0];
+        assert!(attr_rule_matches(rule, "f", false));
+        assert!(!attr_rule_matches(rule, "sub/f", false));
+    }
+
+    #[test]
+    fn validate_rules_for_add_accepts_normal_attributes() {
+        let parsed = parse_gitattributes_file_content("* text\n", ".gitattributes");
+        assert!(validate_rules_for_add(&parsed.rules, ".gitattributes").is_ok());
+    }
+
+    #[test]
+    fn quote_path_for_check_attr_leaves_simple_paths() {
+        assert_eq!(quote_path_for_check_attr("a/b"), "a/b");
+    }
 
     #[test]
     fn d_yes_rule_clears_test_after_d_star() {
@@ -1490,6 +1647,193 @@ mod attr_cache_tests {
         // stamped work-tree mtime and the fresh walk picks up the edit.
         fs::create_dir(wt.join("poke")).expect("mkdir poke");
         assert_eq!(rules_for(&repo, wt), vec!["two-longer".to_string()]);
+    }
+
+    #[test]
+    fn oversized_worktree_gitattributes_file_is_skipped() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        let data = vec![b'x'; MAX_ATTR_FILE_BYTES + 1];
+        fs::write(wt.join(".gitattributes"), &data).expect("large ga");
+        let parsed = load_gitattributes_stack_uncached(&repo, wt).expect("stack");
+        assert!(parsed.rules.is_empty());
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("ignoring overly large")),
+            "{:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn load_cached_and_source_loaders_merge_info() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        fs::write(wt.join(".gitattributes"), "f test=root\n").expect("ga");
+        fs::write(repo.git_dir.join("info/attributes"), "f test=info\n").expect("info");
+        let cached = load_gitattributes_for_check_attr_cached(&repo).expect("cached");
+        assert_eq!(
+            collect_attrs_for_path(&cached.rules, &cached.macros, "f", false).get("test"),
+            Some(&AttrValue::Value("info".into()))
+        );
+    }
+
+    #[test]
+    fn source_loader_includes_tree_and_info_attributes() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        fs::write(wt.join(".gitattributes"), "tracked test=from-tree\n").expect("ga");
+        fs::write(repo.git_dir.join("info/attributes"), "tracked test=info\n").expect("info");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["add", ".gitattributes"])
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("git add");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["commit", "-m", "c", "--allow-empty"])
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("commit");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["add", ".gitattributes"])
+            .status()
+            .ok();
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["commit", "-m", "attrs"])
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("commit2");
+        let oid = resolve_tree_oid(&repo, "HEAD").expect("head tree");
+        let parsed = load_gitattributes_for_check_attr_source(&repo, &oid).expect("source");
+        let v = collect_attrs_for_path(&parsed.rules, &parsed.macros, "tracked", false);
+        assert_eq!(v.get("test"), Some(&AttrValue::Value("info".into())));
+    }
+
+    #[test]
+    fn attribute_matching_ignore_case_follows_config() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["config", "core.ignorecase", "true"])
+            .status()
+            .expect("cfg");
+        assert!(attribute_matching_ignore_case(&repo));
+    }
+
+    #[test]
+    fn resolve_attr_treeish_prefers_explicit_source_argument() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        let (spec, ignore) = resolve_attr_treeish(&repo, Some("HEAD^{tree}")).expect("treeish");
+        assert_eq!(spec.as_deref(), Some("HEAD^{tree}"));
+        assert!(!ignore);
+    }
+
+    #[test]
+    fn load_gitattributes_for_diff_honors_attr_tree_config() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        fs::write(wt.join(".gitattributes"), "f test=committed\n").expect("ga");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["add", ".gitattributes"])
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("add");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["commit", "-m", "ga"])
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("commit");
+        fs::write(wt.join(".gitattributes"), "f test=worktree\n").expect("ga2");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["config", "attr.tree", "HEAD"])
+            .status()
+            .expect("cfg");
+        let parsed = load_gitattributes_for_diff(&repo).expect("diff attrs");
+        assert_eq!(
+            collect_attrs_for_path(&parsed.rules, &parsed.macros, "f", false).get("test"),
+            Some(&AttrValue::Value("committed".into()))
+        );
+    }
+
+    #[test]
+    fn load_gitattributes_from_tree_reads_nested_blob() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        fs::create_dir_all(wt.join("sub")).expect("mkdir");
+        fs::write(wt.join("sub/.gitattributes"), "f test=nested\n").expect("ga");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["add", "sub/.gitattributes"])
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("add");
+        std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["commit", "-m", "nested-attrs"])
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("commit");
+        let oid = resolve_tree_oid(&repo, "HEAD").expect("tree");
+        let parsed = load_gitattributes_from_tree(&repo, &oid).expect("from tree");
+        assert_eq!(
+            collect_attrs_for_path(&parsed.rules, &parsed.macros, "sub/f", false).get("test"),
+            Some(&AttrValue::Value("nested".into()))
+        );
+    }
+
+    #[test]
+    fn path_relative_to_worktree_resolves_missing_relative_path() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        let mut env = repo.environment().clone();
+        env.cwd = wt.join("a");
+        fs::create_dir_all(wt.join("a")).expect("mkdir");
+        let options = crate::environment::RepositoryOptions::with_environment(env);
+        let repo2 = Repository::open_with(&options, &repo.git_dir, Some(wt)).expect("reopen");
+        let rel = path_relative_to_worktree(&repo2, "../f").expect("rel");
+        assert_eq!(rel, "f");
     }
 
     #[test]

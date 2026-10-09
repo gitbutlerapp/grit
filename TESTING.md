@@ -162,6 +162,13 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t1309 | early config / protected / ceiling (read order) | `grit-lib/tests/config_includes.rs` (`read_early_config_matches_git_layers`, `load_protected_skips_repo_config`) | partial |
 | t1310 | defaults, urlmatch, typed getters | `grit-lib/tests/config_parse.rs` (`t1310_config_default_and_urlmatch`, `typed_getters_match_git_config_type`) | covered |
 | t1311 | optional includes / missing targets | `grit-lib/tests/config_includes.rs` (`optional_include_git_parity`, `missing_include_is_ignored`) | covered |
+| t0003-attributes.sh | setup corpus: worktree, `--cached`, `--source` (tag-1/tag-2) vs `collect_attrs_for_path` | `grit-lib/tests/attributes_rules.rs` (`t0003_attrs_match_git_check_attr_worktree_cached_and_source`) | covered |
+| t0003-attributes.sh | `[attr]` macros only at repo root / `info/attributes` | `attributes_rules.rs` (`t0003_macro_rules_only_top_level`) | covered |
+| t0003-attributes.sh | `binary` macro, negative/`!` patterns, `**` globbing, `core.ignorecase` | `attributes_rules.rs` (`t0003_binary_macro_expansion_matches_git`, `t0003_negative_pattern_emits_warning`, `t0003_escaped_bang_pattern_matches_git`, `t0003_doublestar_patterns_match_git`, `t0003_ignorecase_worktree_matches_git`) | covered |
+| t0003-attributes.sh | `info/attributes` precedence, overlong lines, quoted paths | `attributes_rules.rs` (`t0003_info_attributes_precedence_over_root`, `t0003_overlong_line_skipped_with_warning`, `t0003_quote_path_for_check_attr_matches_git`) | covered |
+| t0003-attributes.sh | `builtin_objectmode` / invalid `builtin_*` names | `attributes_rules.rs` (`t0003_builtin_objectmode_*`, `t0003_validate_rules_for_add_rejects_bad_builtin_names`, `t0003_is_reserved_builtin_name`) | partial (skip when system git lacks `builtin_objectmode` in check-attr) |
+| t0003-attributes.sh | command-line / stdin UX, symlink `.gitattributes`, 101 MiB files | — | skipped (UX-only or `EXPENSIVE`; optional `GRIT_RUN_EXPENSIVE_ATTR_TESTS`) |
+| t0003-attributes.sh | bare repo default / `attr.tree` / bad `--attr-source` messages | — | follow-up (library loaders exist; extend `attributes_rules.rs`) |
 
 Detailed rows for remaining t1405 cases and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 
