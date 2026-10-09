@@ -22,6 +22,7 @@ use grit_lib::refs::{
     append_reflog, append_reflog_with_config, effective_log_refs_config, read_log_refs_config,
     reflog_file_path, write_ref, write_symbolic_ref,
 };
+use grit_lib::reftable::{reftable_create_reflog, reftable_replace_reflog};
 use grit_lib::repo::Repository;
 
 use support::{
@@ -61,6 +62,32 @@ fn open_repo(worktree: &Path) -> Repository {
     Repository::open(&worktree.join(".git"), Some(worktree)).expect("Repository::open")
 }
 
+fn write_controlled_reflog(repo: &TestRepo, refname: &str, entries: &[ReflogEntry]) {
+    let git_dir = repo.git_dir();
+    if repo.backend() == Backend::Reftable {
+        reftable_replace_reflog(&git_dir, refname, entries).expect("replace reftable reflog");
+        return;
+    }
+    let body = entries
+        .iter()
+        .map(|entry| {
+            if entry.message.is_empty() {
+                format!("{} {} {}\n", entry.old_oid, entry.new_oid, entry.identity)
+            } else {
+                format!(
+                    "{} {} {}\t{}\n",
+                    entry.old_oid, entry.new_oid, entry.identity, entry.message
+                )
+            }
+        })
+        .collect::<String>();
+    let path = reflog_file_path(&git_dir, refname);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("mkdir reflog parent");
+    }
+    fs::write(path, body).expect("write controlled reflog");
+}
+
 fn seed_three_entry_reflog(repo: &TestRepo, refname: &str) -> (ObjectId, ObjectId, ObjectId) {
     let git_dir = repo.git_dir();
     let o1 = empty_commit_oid(repo);
@@ -68,20 +95,27 @@ fn seed_three_entry_reflog(repo: &TestRepo, refname: &str) -> (ObjectId, ObjectI
     let o3 = empty_commit_oid(repo);
     write_ref(&git_dir, refname, &o3).expect("write tip");
     let z = ObjectId::zero();
-    let entries = [
-        (z, o1, reflog_identity(1_000_000), "first"),
-        (o1, o2, reflog_identity(1_500_000_000), "second"),
-        (o2, o3, reflog_identity(1_690_000_000), "third"),
+    let entries = vec![
+        ReflogEntry {
+            old_oid: z,
+            new_oid: o1,
+            identity: reflog_identity(1_000_000),
+            message: "first".to_owned(),
+        },
+        ReflogEntry {
+            old_oid: o1,
+            new_oid: o2,
+            identity: reflog_identity(1_500_000_000),
+            message: "second".to_owned(),
+        },
+        ReflogEntry {
+            old_oid: o2,
+            new_oid: o3,
+            identity: reflog_identity(1_690_000_000),
+            message: "third".to_owned(),
+        },
     ];
-    let mut body = String::new();
-    for (old, new, id, msg) in entries {
-        body.push_str(&format!("{old} {new} {id}\t{msg}\n"));
-    }
-    let path = reflog_file_path(&git_dir, refname);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("mkdir reflog parent");
-    }
-    fs::write(path, body).expect("write controlled reflog");
+    write_controlled_reflog(repo, refname, &entries);
     (o1, o2, o3)
 }
 
@@ -259,15 +293,16 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
         let git_dir = repo.git_dir();
         let oid = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &oid).expect("tip");
-        let body = format!(
-            "0000000000000000000000000000000000000000 {oid} {identity}\t2020\n",
-            identity = reflog_identity(1_577_836_800)
+        write_controlled_reflog(
+            repo,
+            refname,
+            &[ReflogEntry {
+                old_oid: ObjectId::zero(),
+                new_oid: oid,
+                identity: reflog_identity(1_577_836_800),
+                message: "2020".to_owned(),
+            }],
         );
-        let path = reflog_file_path(&git_dir, refname);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("mkdir logs");
-        }
-        fs::write(&path, body).expect("write 2020 reflog");
 
         for (expire_val, label) in [(90_000_i64, "90000"), (100_000_000_i64, "100000000")] {
             let grit_copy = tempfile::tempdir().expect("grit copy");
@@ -275,7 +310,7 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
             copy_worktree(repo.worktree(), grit_copy.path());
             copy_worktree(repo.worktree(), git_copy.path());
 
-            write_repo_config(
+            append_repo_config(
                 grit_copy.path(),
                 &format!("[gc]\n\treflogExpire = {expire_val}\n"),
             );
@@ -288,7 +323,7 @@ fn gc_reflog_expire_numeric_90000_and_100m_boundary_match_git() {
                     "90000 must not parse as a literal Unix epoch"
                 );
             }
-            write_repo_config(
+            append_repo_config(
                 git_copy.path(),
                 &format!("[gc]\n\treflogExpire = {expire_val}\n"),
             );
@@ -341,17 +376,24 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
         let oid = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &oid).expect("tip");
         let ts = now - 60 * 86_400;
-        let body = format!(
-            "0000000000000000000000000000000000000000 {oid} {identity}\tsixty-day\n",
-            identity = reflog_identity(ts)
+        write_controlled_reflog(
+            repo,
+            refname,
+            &[ReflogEntry {
+                old_oid: ObjectId::zero(),
+                new_oid: oid,
+                identity: reflog_identity(ts),
+                message: "sixty-day".to_owned(),
+            }],
         );
-        let path = reflog_file_path(&git_dir, refname);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("mkdir logs");
-        }
-        fs::write(&path, body).expect("write reflog");
 
-        let config_fragment = "[gc \"refs/heads/main*suffix\"]\n\treflogExpire = now\n";
+        let config_fragment = "\
+[gc]\n\
+\treflogExpire = never\n\
+\treflogExpireUnreachable = never\n\
+[gc \"refs/heads/main*suffix\"]\n\
+\treflogExpire = now\n\
+";
 
         let grit_copy = tempfile::tempdir().expect("grit copy");
         let git_copy = tempfile::tempdir().expect("git copy");
@@ -389,10 +431,12 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
 
         git_expire(git_copy.path(), &["reflog", "expire", "refs/heads/main"]);
 
-        assert_reflog_tree_matches(
-            &git_copy.path().join(".git"),
-            &grit_copy.path().join(".git"),
-        );
+        if backend == Backend::Files {
+            assert_reflog_tree_matches(
+                &git_copy.path().join(".git"),
+                &grit_copy.path().join(".git"),
+            );
+        }
         assert!(
             !read_reflog(&grit_git_dir, refname)
                 .expect("grit read")
@@ -413,15 +457,16 @@ fn gc_per_ref_overlapping_pattern_precedence_matches_git() {
         let oid = empty_commit_oid(repo);
         write_ref(&git_dir, refname, &oid).expect("tip");
         let ts = now - 60 * 86_400;
-        let body = format!(
-            "0000000000000000000000000000000000000000 {oid} {identity}\tsixty-day\n",
-            identity = reflog_identity(ts)
+        write_controlled_reflog(
+            repo,
+            refname,
+            &[ReflogEntry {
+                old_oid: ObjectId::zero(),
+                new_oid: oid,
+                identity: reflog_identity(ts),
+                message: "sixty-day".to_owned(),
+            }],
         );
-        let path = reflog_file_path(&git_dir, refname);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("mkdir logs");
-        }
-        fs::write(&path, body).expect("write reflog");
 
         let config_fragment = "\
 [gc \"refs/heads/main\"]\n\
@@ -786,7 +831,7 @@ fn git_written_reflog_lines_parse_like_grit() {
 
 #[test]
 fn reflog_exists_list_and_path_match_git() {
-    each_backend_git_oracle(|_, repo| {
+    each_backend_git_oracle(|backend, repo| {
         let git_dir = repo.git_dir();
         let nested = "refs/heads/group/deep/ref";
         let oid = empty_commit_oid(repo);
@@ -809,10 +854,14 @@ fn reflog_exists_list_and_path_match_git() {
         let sibling = "refs/heads/group/deep/empty";
         write_ref(&git_dir, sibling, &oid).expect("sibling");
         let sib_log = reflog_file_path(&git_dir, sibling);
-        if let Some(p) = sib_log.parent() {
-            fs::create_dir_all(p).expect("mkdir");
+        if backend == Backend::Reftable {
+            reftable_create_reflog(&git_dir, sibling).expect("empty reftable reflog");
+        } else {
+            if let Some(p) = sib_log.parent() {
+                fs::create_dir_all(p).expect("mkdir");
+            }
+            fs::write(&sib_log, "").expect("empty reflog file");
         }
-        fs::write(&sib_log, "").expect("empty reflog file");
 
         assert!(reflog_exists(&git_dir, nested));
         assert!(reflog_exists(&git_dir, sibling));
@@ -912,7 +961,9 @@ fn expire_unreachable_stalefix_and_mark_reachable() {
             false,
         )
         .expect("stale append");
-        write_repo_config(repo.worktree(), "[core]\nrepositoryformatversion = 0\n");
+        if backend == Backend::Files {
+            write_repo_config(repo.worktree(), "[core]\nrepositoryformatversion = 0\n");
+        }
         append_repo_config(repo.worktree(), "[gc]\n\treflogExpire = now\n");
         let stale_grit = tempfile::tempdir().expect("stale grit");
         let stale_git = tempfile::tempdir().expect("stale git");

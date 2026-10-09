@@ -183,12 +183,12 @@ fn parse_reflog_line(line: &str) -> Option<ReflogEntry> {
     })
 }
 
-/// Collect every non-null object ID mentioned in any file under `logs/` (recursive).
+/// Collect every non-null object ID mentioned in any reflog.
 ///
-/// Used by `fsck` to validate reflog entries. Skips reftable-backed repos (no file logs).
+/// Used by `fsck` to validate reflog entries across loose-file and reftable backends.
 pub fn all_reflog_oids(git_dir: &Path) -> Result<HashSet<ObjectId>> {
     if crate::reftable::is_reftable_repo(git_dir) {
-        return Ok(HashSet::new());
+        return Ok(all_reflog_oids_ordered(git_dir)?.into_iter().collect());
     }
     let mut out = HashSet::new();
     let logs = git_dir.join("logs");
