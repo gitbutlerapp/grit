@@ -99,11 +99,24 @@ pub fn rev_list_objects(repo: &Repository) -> Result<()> {
     let opts = RevListOptions {
         all_refs: true,
         objects: true,
+        use_commit_graph: true,
         ..Default::default()
     };
-    let result = rev_list(repo, &[], &[], &opts).context("rev-list --objects --all")?;
-    let formatted = format_rev_list_objects(&result);
-    print!("{formatted}");
+    let result = repo
+        .odb
+        .with_pack_read_context(|| rev_list(repo, &[], &[], &opts))
+        .context("rev-list --objects --all")?;
+    let mut stdout = io::stdout().lock();
+    for commit in &result.commits {
+        writeln!(stdout, "{commit}")?;
+    }
+    for (oid, path) in &result.objects {
+        if path.is_empty() {
+            writeln!(stdout, "{oid} ")?;
+        } else {
+            writeln!(stdout, "{oid} {path}")?;
+        }
+    }
     Ok(())
 }
 
