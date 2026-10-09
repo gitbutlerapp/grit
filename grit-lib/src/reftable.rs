@@ -1215,10 +1215,8 @@ impl ReftableReader {
                 break;
             }
 
-            // Read restart count (last 2 bytes before padding)
-            let rc = read_u16(&self.data, records_end - 2);
-            // Restart table is rc * 3 bytes before the restart_count
-            let restart_table_start = records_end - 2 - (rc * 3);
+            let restart_table_start =
+                restart_table_start_for_block(&self.data, records_end, block_data_start)?;
 
             // Read records from block_data_start to restart_table_start
             let mut rpos = block_data_start;
@@ -1262,20 +1260,6 @@ impl ReftableReader {
         }
         let refs = self.read_refs()?;
         Ok(refs.into_iter().find(|r| r.name == name))
-    }
-
-    /// End of the ref+index section (before log/object sections).
-    fn ref_index_section_end(&self) -> usize {
-        let footer_size = if self.version == 2 {
-            72
-        } else {
-            FOOTER_V1_SIZE
-        };
-        let file_end = self.data.len().saturating_sub(footer_size);
-        if self.log_position > 0 {
-            return self.log_position as usize;
-        }
-        file_end
     }
 
     /// Resolve a ref name to a record using ref index blocks when present.
@@ -1370,9 +1354,10 @@ impl ReftableReader {
         if records_end > self.data.len() || records_end < 2 {
             return Err(Error::InvalidRef("reftable: invalid block length".into()));
         }
-        let rc = read_u16(&self.data, records_end - 2);
-        let restart_table_start = records_end - 2 - (rc * 3);
-        Ok((block_pos + 4, restart_table_start))
+        let records_data_start = block_pos + 4;
+        let restart_table_start =
+            restart_table_start_for_block(&self.data, records_end, records_data_start)?;
+        Ok((records_data_start, restart_table_start))
     }
 
     /// Read all log records from the table.
@@ -1441,8 +1426,8 @@ impl ReftableReader {
             if inflated.len() < 2 {
                 break;
             }
-            let rc = read_u16(&inflated, inflated.len() - 2);
-            let restart_table_start = inflated.len() - 2 - (rc * 3);
+            let records_end = inflated.len();
+            let restart_table_start = restart_table_start_for_block(&inflated, records_end, 0)?;
 
             let mut rpos = 0usize;
             let mut prev_key = Vec::<u8>::new();
@@ -3517,6 +3502,43 @@ fn read_u24(data: &[u8], pos: usize) -> usize {
 /// Read a big-endian u16 from 2 bytes at `pos`.
 fn read_u16(data: &[u8], pos: usize) -> usize {
     ((data[pos] as usize) << 8) | (data[pos + 1] as usize)
+}
+
+/// Start of the restart offset table within a block's record area.
+///
+/// Validates restart count and trailer size so corrupt tables cannot trigger
+/// arithmetic overflow.
+fn restart_table_start_for_block(
+    data: &[u8],
+    records_end: usize,
+    records_data_start: usize,
+) -> Result<usize> {
+    if records_end < 2 || records_end > data.len() {
+        return Err(Error::InvalidRef(
+            "reftable: block trailer out of bounds".into(),
+        ));
+    }
+    let rc = read_u16(data, records_end - 2);
+    if rc > MAX_RESTARTS {
+        return Err(Error::InvalidRef(format!(
+            "reftable: restart count out of range: {rc}"
+        )));
+    }
+    let restart_bytes = rc * 3;
+    let Some(restart_table_start) = records_end
+        .checked_sub(2)
+        .and_then(|without_count| without_count.checked_sub(restart_bytes))
+    else {
+        return Err(Error::InvalidRef(
+            "reftable: restart table larger than block".into(),
+        ));
+    };
+    if restart_table_start < records_data_start {
+        return Err(Error::InvalidRef(
+            "reftable: restart table overlaps block records".into(),
+        ));
+    }
+    Ok(restart_table_start)
 }
 
 /// Parse the footer of a reftable file.

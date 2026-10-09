@@ -501,6 +501,37 @@ fn every_truncation_is_typed_error_no_panic() {
     }
 }
 
+fn read_u24(data: &[u8], pos: usize) -> usize {
+    ((data[pos] as usize) << 16) | ((data[pos + 1] as usize) << 8) | (data[pos + 2] as usize)
+}
+
+#[test]
+fn corrupt_index_block_restart_count_is_typed_error_no_panic() {
+    let (mut data, _) = indexed_table_with_many_refs();
+    let reader = ReftableReader::new(data.clone()).expect("open");
+    let index_off = reader.ref_index_offset() as usize;
+    assert_eq!(data[index_off], b'i');
+    let block_len = read_u24(&data, index_off + 1);
+    let records_end = index_off + block_len;
+    assert!(records_end >= 2 && records_end <= data.len());
+    data[records_end - 2] = 0xff;
+    data[records_end - 1] = 0xff;
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let reader = ReftableReader::new(data).expect("reopen");
+        reader.lookup_ref("refs/heads/idx/branch-0000")
+    }));
+    assert!(
+        result.is_ok(),
+        "lookup must not panic on corrupt restart count"
+    );
+    match result.unwrap() {
+        Err(Error::InvalidRef(_)) => {}
+        Ok(None) => {}
+        other => panic!("unexpected lookup result: {other:?}"),
+    }
+}
+
 #[test]
 fn corruption_bad_magic_version_and_crc() {
     let mut data = write_table(
