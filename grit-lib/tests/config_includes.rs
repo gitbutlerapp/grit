@@ -10,7 +10,7 @@ use grit_lib::environment::Environment;
 use grit_lib::error::{ConfigError, Error};
 use grit_lib::repo::init_repository;
 use support::{
-    git_file_get, git_file_get_includes, git_file_list, git_file_list_with_git_dir,
+    git_file_get, git_file_get_includes, git_file_list, git_local_list_with_git_dir,
     grit_file_from_content, grit_list_lines, isolated_env, normalize_config_corpus, GitConfigLine,
 };
 use tempfile::tempdir;
@@ -29,21 +29,18 @@ fn include_ctx(git_dir: &Path, env: &Environment) -> IncludeContext {
 fn t1305_include_and_includeif_match_git_show_origin() {
     let dir = tempdir().expect("tempdir");
     let root = dir.path();
-    let main = root.join("main.conf");
+    init_repository(root, false, "main", None, "files").expect("initialize repository");
+    let gd = root.join(".git");
+    let main = gd.join("config");
     fs::write(
         &main,
         "[include]\n\tpath = child.conf\n[includeIf \"onbranch:main\"]\n\tpath = branch.conf\n",
     )
     .expect("main");
-    fs::write(root.join("child.conf"), "[user]\n\temail = child@x\n").expect("child");
-    fs::write(root.join("branch.conf"), "[user]\n\tname = OnMain\n").expect("branch");
+    fs::write(gd.join("child.conf"), "[user]\n\temail = child@x\n").expect("child");
+    fs::write(gd.join("branch.conf"), "[user]\n\tname = OnMain\n").expect("branch");
 
-    let gd = root.join(".git");
-    fs::create_dir_all(&gd).expect("git");
-    fs::write(gd.join("HEAD"), "ref: refs/heads/main\n").expect("head");
-
-    let git_lines =
-        git_file_list_with_git_dir(Some(&gd), &main, true).expect("git list with GIT_DIR");
+    let git_lines = git_local_list_with_git_dir(&gd, true).expect("git local config list");
     let content = fs::read_to_string(&main).expect("read");
     let file = grit_file_from_content(&main, &content, ConfigScope::Local);
     let mut set = ConfigSet::new();

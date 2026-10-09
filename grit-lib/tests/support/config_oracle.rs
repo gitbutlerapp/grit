@@ -208,6 +208,32 @@ pub fn git_file_list_with_git_dir(
     Ok(parse_git_list_output(&String::from_utf8_lossy(&out.stdout)))
 }
 
+/// List repository-local config with `git_dir` supplying repository context.
+pub fn git_local_list_with_git_dir(
+    git_dir: &Path,
+    includes: bool,
+) -> Result<Vec<GitConfigLine>, String> {
+    let mut args = vec![
+        "config",
+        "--local",
+        "--list",
+        "--show-origin",
+        "--show-scope",
+    ];
+    if includes {
+        args.push("--includes");
+    }
+    let out = base_git_command()
+        .args(&args)
+        .env("GIT_DIR", git_dir)
+        .output()
+        .expect("spawn git config");
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
+    Ok(parse_git_list_output(&String::from_utf8_lossy(&out.stdout)))
+}
+
 /// One row of the normalized config corpus: `(scope, origin, key, value)`.
 pub type ConfigCorpusRow = (String, String, String, String);
 
