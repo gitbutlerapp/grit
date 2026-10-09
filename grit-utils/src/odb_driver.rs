@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
-use grit_lib::pack::{read_pack_index, PackIndex};
+use grit_lib::pack::{read_pack_index, read_pack_index_cached, PackIndex};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions, RevListResult};
 
@@ -43,9 +43,9 @@ pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
         .collect();
     idx_paths.sort();
     for idx_path in idx_paths {
-        let idx =
-            read_pack_index(&idx_path).with_context(|| format!("read {}", idx_path.display()))?;
-        emit_pack_in_offset_order(&mut stdout, repo, &idx)?;
+        let idx = read_pack_index_cached(&idx_path)
+            .with_context(|| format!("read {}", idx_path.display()))?;
+        emit_pack_in_offset_order(&mut stdout, repo, idx.as_ref())?;
     }
     Ok(())
 }
@@ -55,10 +55,10 @@ fn emit_pack_in_offset_order(
     repo: &Repository,
     idx: &PackIndex,
 ) -> Result<()> {
-    let mut order: Vec<_> = idx.entries.iter().collect();
-    order.sort_by_key(|e| e.offset);
+    let mut order: Vec<_> = idx.iter().collect();
+    order.sort_by_key(|e| e.offset());
     for entry in order {
-        let oid = ObjectId::from_bytes(&entry.oid).context("pack entry oid")?;
+        let oid = ObjectId::from_bytes(entry.oid()).context("pack entry oid")?;
         write_batch_object(out, repo, &oid)?;
     }
     Ok(())
@@ -273,8 +273,8 @@ fn collect_hex_ids_for_abbrev(repo: &Repository) -> Result<Vec<String>> {
             let path = entry?.path();
             if path.extension().is_some_and(|e| e == "idx") {
                 let idx = read_pack_index(&path)?;
-                for ent in &idx.entries {
-                    ids.push(ObjectId::from_bytes(&ent.oid).context("pack oid")?.to_hex());
+                for ent in idx.iter() {
+                    ids.push(ObjectId::from_bytes(ent.oid()).context("pack oid")?.to_hex());
                 }
             }
         }
