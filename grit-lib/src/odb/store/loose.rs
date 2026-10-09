@@ -72,6 +72,22 @@ impl LooseStore {
         zlib_compress_store_bytes(store_bytes, self.compression)
     }
 
+    /// When a loose file already exists, freshen (unless silent) and return its id.
+    pub(crate) fn try_finish_if_loose_present(
+        &self,
+        oid: &ObjectId,
+        options: WriteOptions,
+    ) -> Result<Option<ObjectId>> {
+        let path = self.object_path(oid);
+        if path.is_file() {
+            if !options.silent {
+                let _ = self.freshen(oid)?;
+            }
+            return Ok(Some(*oid));
+        }
+        Ok(None)
+    }
+
     /// Write canonical store bytes for a precomputed `oid` (hashing skipped).
     ///
     /// # Errors
@@ -87,13 +103,10 @@ impl LooseStore {
         if oid.algo() != self.hash_algo {
             return Err(Error::InvalidObjectId(oid.to_hex()));
         }
-        let path = self.object_path(oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.freshen(oid)?;
-            }
-            return Ok(*oid);
+        if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
+            return Ok(existing);
         }
+        let path = self.object_path(oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
@@ -116,13 +129,10 @@ impl LooseStore {
         if oid.algo() != self.hash_algo {
             return Err(Error::InvalidObjectId(oid.to_hex()));
         }
-        let path = self.object_path(oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.freshen(oid)?;
-            }
-            return Ok(*oid);
+        if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
+            return Ok(existing);
         }
+        let path = self.object_path(oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
@@ -255,13 +265,10 @@ impl WritableObjectStore for LooseStore {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash::hash_object(self.hash_algo, kind, data);
         debug_assert_eq!(oid, hash::hash_object(self.hash_algo, kind, data));
-        let path = self.object_path(&oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.freshen(&oid)?;
-            }
-            return Ok(oid);
+        if let Some(existing) = self.try_finish_if_loose_present(&oid, options)? {
+            return Ok(existing);
         }
+        let path = self.object_path(&oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;

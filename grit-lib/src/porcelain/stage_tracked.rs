@@ -736,20 +736,7 @@ mod tests {
     }
 
     fn count_loose_objects(repo: &Repository) -> usize {
-        let objects = repo.git_dir.join("objects");
-        let mut count = 0usize;
-        if let Ok(entries) = fs::read_dir(objects) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if name.len() == 2 {
-                    if let Ok(sub) = fs::read_dir(entry.path()) {
-                        count += sub.count();
-                    }
-                }
-            }
-        }
-        count
+        repo.odb.count_loose_objects().unwrap_or(0)
     }
 
     #[test]

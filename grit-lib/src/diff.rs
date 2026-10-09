@@ -2446,11 +2446,7 @@ fn parallel_process_blob_worktree_jobs(
                         odb.write_with_options(
                             ObjectKind::Blob,
                             &data,
-                            crate::odb::WriteOptions {
-                                assume_loose_only_existence: true,
-                                trust_new_loose: true,
-                                ..Default::default()
-                            },
+                            crate::odb::BULK_NEW_LOOSE_WRITE,
                         )?
                     } else {
                         odb.hash(ObjectKind::Blob, &data)
@@ -2589,15 +2585,7 @@ fn push_index_blob_worktree_diff(
         filter_process,
     )?;
     let worktree_oid = if materialize_dirty_blobs {
-        odb.write_with_options(
-            ObjectKind::Blob,
-            &data,
-            crate::odb::WriteOptions {
-                assume_loose_only_existence: true,
-                trust_new_loose: true,
-                ..Default::default()
-            },
-        )?
+        odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
     } else {
         odb.hash(ObjectKind::Blob, &data)
     };
@@ -4134,15 +4122,7 @@ fn worktree_file_oid(
         filter_process,
     )?;
     if materialize {
-        odb.write_with_options(
-            ObjectKind::Blob,
-            &data,
-            crate::odb::WriteOptions {
-                assume_loose_only_existence: true,
-                trust_new_loose: true,
-                ..Default::default()
-            },
-        )
+        odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)
     } else {
         Ok(odb.hash(ObjectKind::Blob, &data))
     }

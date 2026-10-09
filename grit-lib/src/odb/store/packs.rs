@@ -65,6 +65,22 @@ impl PackedObjects {
         &self.store
     }
 
+    /// Object ids listed in a pack index file (for ingest paths outside the live ODB cache).
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack index parse/verify failures from [`pack::read_pack_index`].
+    pub fn object_ids_from_index_path(idx_path: &Path) -> Result<HashSet<ObjectId>> {
+        let idx = pack::read_pack_index(idx_path)?;
+        let mut out = HashSet::new();
+        for entry in idx.iter() {
+            if let Ok(oid) = ObjectId::from_bytes(entry.oid()) {
+                out.insert(oid);
+            }
+        }
+        Ok(out)
+    }
+
     /// Whether `oid` appears in any pack index matching `filter`.
     ///
     /// Used for local materialization checks (promisor/cruft exclusion); not part of

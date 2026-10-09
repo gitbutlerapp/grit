@@ -1,10 +1,9 @@
-//! Workspace guard: pack-index and loose-enumeration helpers must stay inside ODB/pack/MIDX modules.
-//!
-//! Step 10 (`factory/route-write-odb-670`) removes the temporary allowlist entries below.
+//! Workspace guard: pack-index and loose-enumeration helpers must stay inside ODB/pack/MIDX modules,
+//! and library code must not probe loose paths or read pack indexes directly outside the store layer.
 
 use std::path::{Path, PathBuf};
 
-fn forbidden_tokens() -> [&'static str; 4] {
+fn enumeration_forbidden_tokens() -> [&'static str; 4] {
     [
         "read_local_pack_indexes(",
         "read_local_pack_indexes_cached(",
@@ -30,7 +29,7 @@ fn is_excluded(path: &Path) -> bool {
     }
     if path
         .file_name()
-        .is_some_and(|n| n == "odb_abstraction_guard.rs")
+        .is_some_and(|n| n == "odb_abstraction_guard.rs" || n == "hash_abstraction_guard.rs")
     {
         return true;
     }
@@ -42,26 +41,24 @@ fn is_excluded(path: &Path) -> bool {
         || path_str.contains("\\grit-lib\\src\\pack")
         || path_str.contains("/grit-lib/src/midx.rs")
         || path_str.contains("\\grit-lib\\src\\midx.rs")
+        || path_str.ends_with("/grit-lib/src/objects.rs")
+        || path_str.ends_with("\\grit-lib\\src\\objects.rs")
+        || path_str.contains("/grit-lib/src/pack_store")
+        || path_str.contains("\\grit-lib\\src\\pack_store")
+        || path_str.contains("/grit-lib/src/prune_packed.rs")
+        || path_str.contains("\\grit-lib\\src\\prune_packed.rs")
     {
         return true;
     }
 
-    // Temporary allowlist — removed when step 10 routes write-path callers through traits.
-    const S10_ALLOWLIST: &[&str] = &[
-        "/grit-lib/src/porcelain/add.rs",
-        "\\grit-lib\\src\\porcelain\\add.rs",
-        "/grit-lib/src/porcelain/stage_tracked.rs",
-        "\\grit-lib\\src\\porcelain\\stage_tracked.rs",
-        "/grit-lib/src/unpack_objects.rs",
-        "\\grit-lib\\src\\unpack_objects.rs",
-        "/grit-lib/src/write_tree.rs",
-        "\\grit-lib\\src\\write_tree.rs",
-        "/grit-lib/src/gitmodules.rs",
-        "\\grit-lib\\src\\gitmodules.rs",
+    // Pack-ingest exceptions: read a just-written index before it is in the ODB cache.
+    const PACK_INDEX_READ_ALLOWLIST: &[&str] = &[
         "/grit-lib/src/index_pack.rs",
         "\\grit-lib\\src\\index_pack.rs",
+        "/grit-lib/src/pack_rev.rs",
+        "\\grit-lib\\src\\pack_rev.rs",
     ];
-    if S10_ALLOWLIST.iter().any(|p| path_str.contains(p)) {
+    if PACK_INDEX_READ_ALLOWLIST.iter().any(|p| path_str.contains(p)) {
         return true;
     }
 
@@ -87,7 +84,11 @@ fn scan_rs_files(dir: &Path, violations: &mut Vec<String>) {
         } else if path.extension().is_some_and(|e| e == "rs") && !is_excluded(&path) {
             let text = std::fs::read_to_string(&path).expect("read rust source");
             for (line_no, line) in text.lines().enumerate() {
-                for token in forbidden_tokens() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") || trimmed.starts_with('*') {
+                    continue;
+                }
+                for token in enumeration_forbidden_tokens() {
                     if line.contains(token) {
                         violations.push(format!(
                             "{}:{}: forbidden token `{token}`",
@@ -95,6 +96,20 @@ fn scan_rs_files(dir: &Path, violations: &mut Vec<String>) {
                             line_no + 1
                         ));
                     }
+                }
+                if line.contains(".object_path(") || line.contains("loose_path_in(") {
+                    violations.push(format!(
+                        "{}:{}: direct loose path probe",
+                        path.display(),
+                        line_no + 1
+                    ));
+                }
+                if line.contains("read_pack_index(") {
+                    violations.push(format!(
+                        "{}:{}: direct read_pack_index (use PackedObjects or allowlist)",
+                        path.display(),
+                        line_no + 1
+                    ));
                 }
             }
         }

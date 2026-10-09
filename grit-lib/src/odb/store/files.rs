@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::diagnostics::DiagnosticsHandle;
 use crate::error::{Error, Result};
+use crate::hash;
 use crate::midx::midx_oid_listed_in_tip;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::pack::{self, PackLookupOptions};
@@ -88,6 +89,56 @@ impl FilesSource {
     #[must_use]
     pub fn midx_objects(&self) -> &MidxObjects {
         &self.midx
+    }
+
+    /// Whether `oid` is materialized under this `objects/` tree (local loose or non-promisor pack).
+    #[must_use]
+    pub fn exists_local_materialized(&self, oid: &ObjectId) -> bool {
+        super::local_object_materialized(&self.objects_dir, oid)
+    }
+
+    /// Resolve duplicate-write short-circuit for this directory before creating a loose file.
+    ///
+    /// Returns `Some(oid)` when the object is already present locally and was freshened when
+    /// appropriate. When `options.trust_new_loose` is set, only an existing loose file stops the
+    /// write (callers may still consult alternates).
+    pub fn try_finish_duplicate_write(
+        &self,
+        oid: &ObjectId,
+        options: WriteOptions,
+    ) -> Result<Option<ObjectId>> {
+        if let Some(existing) = self.loose.try_finish_if_loose_present(oid, options)? {
+            return Ok(Some(existing));
+        }
+        if options.trust_new_loose {
+            return Ok(None);
+        }
+        if options.assume_loose_only_existence && self.exists_local_materialized(oid) {
+            if self.freshen(oid)? {
+                return Ok(Some(*oid));
+            }
+            // Cruft packs (and other unfreshenable local copies) must not block loose
+            // materialization — matches `try_freshen_existing_local` / unpack-objects.
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
+    /// Write zlib-compressed store bytes for a precomputed `oid` into this source's loose store.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`WritableObjectStore::write`].
+    pub fn write_zlib_prehashed(
+        &self,
+        oid: &ObjectId,
+        zlib_store: &[u8],
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        if let Some(existing) = self.try_finish_duplicate_write(oid, options)? {
+            return Ok(existing);
+        }
+        self.loose.write_zlib_prehashed(oid, zlib_store, options)
     }
 
     /// Whether a loose object file exists but could not be parsed (caller may consult alternates).
@@ -355,6 +406,10 @@ impl ObjectStore for FilesSource {
 
 impl WritableObjectStore for FilesSource {
     fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
+        let oid = hash::hash_object(self.hash_algo(), kind, data);
+        if let Some(existing) = self.try_finish_duplicate_write(&oid, options)? {
+            return Ok(existing);
+        }
         self.loose.write(kind, data, options)
     }
 

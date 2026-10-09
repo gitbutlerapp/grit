@@ -20,8 +20,9 @@
 pub mod store;
 
 pub(crate) use store::loose::{
-    build_store_bytes, decompress_zlib_loose_bytes, loose_store_bytes_header_valid,
-    parse_object_bytes, read_loose_object_info, read_zlib_loose_payload, zlib_compress_store_bytes,
+    build_store_bytes, decompress_zlib_loose_bytes, for_each_loose_object_id,
+    loose_store_bytes_header_valid, parse_object_bytes, read_loose_object_info,
+    read_zlib_loose_payload, zlib_compress_store_bytes,
 };
 pub use store::LooseStore;
 pub use store::{CompositeStore, FilesSource, ObjectStream};
@@ -85,22 +86,20 @@ pub struct WriteOptions {
     pub trust_new_loose: bool,
 }
 
+/// [`WriteOptions`] for parallel staging of new worktree blobs (bulk `git add`).
+pub const BULK_NEW_LOOSE_WRITE: WriteOptions = WriteOptions {
+    assume_loose_only_existence: true,
+    trust_new_loose: true,
+    silent: false,
+};
+
 /// True when `oid` is stored as a loose object or in a **non-promisor** local pack.
 ///
 /// Non-promisor pack membership is checked before loose storage so packed objects
 /// avoid a per-probe loose `stat` on the hot path. A non-promisor pack hit already
 /// implies the object is materialized locally, including when a loose copy also exists.
 fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
-    if object_in_local_packs(objects_dir, oid) {
-        return true;
-    }
-    if oid.loose_path_in(objects_dir).is_file() {
-        return true;
-    }
-    if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true) {
-        return object_in_local_packs(objects_dir, oid);
-    }
-    false
+    store::local_object_materialized(objects_dir, oid)
 }
 
 fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
@@ -111,29 +110,6 @@ fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
     entries
         .filter_map(|e| e.ok())
         .any(|ent| ent.path().extension().is_some_and(|ext| ext == "idx"))
-}
-
-fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
-    object_in_local_packs_filtered(objects_dir, oid, false)
-}
-
-fn object_in_local_packs_filtered(
-    objects_dir: &Path,
-    oid: &ObjectId,
-    include_promisor: bool,
-) -> bool {
-    let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
-        return false;
-    };
-    for idx in &indexes {
-        if !include_promisor && idx.is_promisor {
-            continue;
-        }
-        if idx.contains(oid) {
-            return true;
-        }
-    }
-    false
 }
 
 /// A loose-object database rooted at a given `objects/` directory.
@@ -1066,9 +1042,12 @@ impl Odb {
     /// When `oid` is already reachable, freshen it and return its id. Returns `None` when the
     /// object lives only in a pack and freshening failed so the caller can materialize a loose copy.
     fn try_freshen_existing(&self, oid: &ObjectId) -> Option<ObjectId> {
-        if self.object_path(oid).is_file() {
-            let _ = self.freshen_object(oid);
-            return Some(*oid);
+        if let Ok(primary) = self.primary() {
+            if let Ok(Some(existing)) =
+                primary.try_finish_duplicate_write(oid, WriteOptions::default())
+            {
+                return Some(existing);
+            }
         }
         if !self.exists(oid) {
             return None;
@@ -1080,17 +1059,17 @@ impl Odb {
     }
 
     fn try_freshen_existing_local(&self, oid: &ObjectId) -> Option<ObjectId> {
-        if self.object_path(oid).is_file() {
-            let _ = self.freshen_object(oid);
-            return Some(*oid);
-        }
-        if self.with_pack_store_for(&self.objects_dir, || {
-            exists_materialized_in_objects_dir(&self.objects_dir, oid)
-        }) && self.freshen_object(oid)
-        {
-            return Some(*oid);
-        }
-        None
+        let primary = self.primary().ok()?;
+        primary
+            .try_finish_duplicate_write(
+                oid,
+                WriteOptions {
+                    assume_loose_only_existence: true,
+                    ..WriteOptions::default()
+                },
+            )
+            .ok()
+            .flatten()
     }
 
     /// Read a loose object file at `path`, verifying the uncompressed payload hashes to `expected_oid`.
@@ -1353,6 +1332,33 @@ impl Odb {
         self.local_loose()?.ensure_all_loose_prefix_dirs()
     }
 
+    /// Test-only: filesystem path for a loose object (see `grit-lib/tests/odb_abstraction_guard.rs`).
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_loose_object_path(&self, oid: &ObjectId) -> PathBuf {
+        self.object_path(oid)
+    }
+
+    /// Test-only: delete a loose object file if present.
+    #[cfg(test)]
+    pub fn test_remove_loose_object(&self, oid: &ObjectId) {
+        let _ = fs::remove_file(self.object_path(oid));
+    }
+
+    /// Count loose object files under this repository's `objects/` directory.
+    ///
+    /// # Errors
+    ///
+    /// Propagates directory enumeration failures from the loose store walker.
+    pub fn count_loose_objects(&self) -> Result<usize> {
+        let mut count = 0usize;
+        for_each_loose_object_id(&self.objects_dir, self.hash_algo(), &mut |_| {
+            count += 1;
+            ControlFlow::Continue(())
+        })?;
+        Ok(count)
+    }
+
     /// Zlib-compress canonical loose store bytes using the repository's loose level.
     ///
     /// # Errors
@@ -1377,21 +1383,13 @@ impl Odb {
         zlib_store: &[u8],
         options: WriteOptions,
     ) -> Result<ObjectId> {
-        let path = self.object_path(oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.touch_object_mtime(&path);
-            }
-            return Ok(*oid);
+        let primary = self.primary()?;
+        if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
+            return Ok(existing);
         }
 
-        let already_exists = if options.trust_new_loose {
-            false
-        } else if options.assume_loose_only_existence {
-            self.exists_local(oid)
-        } else {
-            self.exists(oid)
-        };
+        let already_exists =
+            !(options.trust_new_loose || options.assume_loose_only_existence) && self.exists(oid);
 
         if self.overlay_active() && !already_exists {
             if let Ok(raw) = decompress_zlib_loose_bytes(zlib_store) {
@@ -1410,8 +1408,7 @@ impl Odb {
             return Ok(*oid);
         }
 
-        self.local_loose()?
-            .write_zlib_prehashed(oid, zlib_store, options)
+        primary.write_zlib_prehashed(oid, zlib_store, options)
     }
 
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
@@ -1424,23 +1421,13 @@ impl Odb {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
-        // Cheapest check first: a loose copy in this store answers every case below with a
-        // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
-        let path = self.object_path(&oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.touch_object_mtime(&path);
-            }
-            return Ok(oid);
+        let primary = self.primary()?;
+        if let Some(existing) = primary.try_finish_duplicate_write(&oid, options)? {
+            return Ok(existing);
         }
 
-        let already_exists = if options.trust_new_loose {
-            false
-        } else if options.assume_loose_only_existence {
-            self.exists_local(&oid)
-        } else {
-            self.exists(&oid)
-        };
+        let already_exists = !(options.trust_new_loose || options.assume_loose_only_existence)
+            && self.exists(&oid);
 
         // When the in-memory overlay is active, keep the object in memory only (unless it is
         // already present on disk, in which case nothing new needs to be written anyway).
@@ -1455,7 +1442,7 @@ impl Odb {
             return Ok(oid);
         }
 
-        self.local_loose()?.write(kind, data, options)
+        WritableObjectStore::write(primary.as_ref(), kind, data, options)
     }
 
     /// Write an object as a loose file in this object directory only.
@@ -1494,10 +1481,13 @@ impl Odb {
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
-        let path = self.object_path(&oid);
-        if path.exists() {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
+        if let Ok(primary) = self.primary() {
+            if let Ok(Some(existing)) = primary
+                .loose_store()
+                .try_finish_if_loose_present(&oid, WriteOptions::default())
+            {
+                return Ok(existing);
+            }
         }
 
         self.local_loose()?

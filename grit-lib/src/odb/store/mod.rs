@@ -24,10 +24,13 @@ use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock};
 
+use std::path::Path;
+
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::odb::WriteOptions;
+use crate::pack;
 
 type MemoryObjectEntry = (ObjectKind, Arc<[u8]>);
 
@@ -184,6 +187,35 @@ pub trait WritableObjectStore: ObjectStore {
     ///
     /// Propagates backend failures.
     fn freshen(&self, oid: &ObjectId) -> Result<bool>;
+}
+
+/// True when `oid` is stored as loose or in a non-promisor pack under `objects_dir`.
+pub(crate) fn local_object_materialized(objects_dir: &Path, oid: &ObjectId) -> bool {
+    if object_in_local_packs(objects_dir, oid) {
+        return true;
+    }
+    if oid.loose_path_in(objects_dir).is_file() {
+        return true;
+    }
+    if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true) {
+        return object_in_local_packs(objects_dir, oid);
+    }
+    false
+}
+
+fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
+    let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
+        return false;
+    };
+    for idx in &indexes {
+        if idx.is_promisor {
+            continue;
+        }
+        if idx.contains(oid) {
+            return true;
+        }
+    }
+    false
 }
 
 /// In-memory object map keyed by [`ObjectId`].
