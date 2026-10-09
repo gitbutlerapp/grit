@@ -14,8 +14,8 @@ use grit_lib::ref_namespace::storage_ref_name;
 use grit_lib::refs::list_refs;
 use grit_lib::repo::{init_repository, Repository};
 
-const AUTHOR_NAME: &str = "Refs Harness Author";
-const AUTHOR_EMAIL: &str = "refs-harness@example.com";
+pub const AUTHOR_NAME: &str = "Refs Harness Author";
+pub const AUTHOR_EMAIL: &str = "refs-harness@example.com";
 const DETERMINISTIC_DATE: &str = "1700000000 +0000";
 
 /// Loose files backend or reftable ref storage.
@@ -239,4 +239,104 @@ pub fn git_show_ref(worktree: &Path) -> BTreeMap<String, ObjectId> {
         map.insert(name.to_owned(), oid);
     }
     map
+}
+
+/// Reflog author identity with a Unix timestamp (matches hermetic git env layout).
+#[must_use]
+pub fn reflog_identity(timestamp: i64) -> String {
+    format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {timestamp} +0000")
+}
+
+/// Deep-copy a work tree (including `.git`) for side-by-side grit vs git experiments.
+pub fn copy_worktree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("mkdir dest worktree");
+    let status = Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", from.display()),
+            &to.to_string_lossy(),
+        ])
+        .status()
+        .expect("spawn cp");
+    assert!(status.success(), "cp -a failed");
+}
+
+/// Append `fragment` to `.git/config` (creates `[core]` when missing).
+pub fn append_repo_config(worktree: &Path, fragment: &str) {
+    let config_path = worktree.join(".git/config");
+    let mut body = std::fs::read_to_string(&config_path).unwrap_or_default();
+    if !body.ends_with('\n') && !body.is_empty() {
+        body.push('\n');
+    }
+    body.push_str(fragment);
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    std::fs::write(&config_path, body).expect("write config");
+}
+
+/// Replace `.git/config` entirely.
+pub fn write_repo_config(worktree: &Path, body: &str) {
+    std::fs::write(worktree.join(".git/config"), body).expect("write config");
+}
+
+/// Collect every file under `git_dir/logs/` with path relative to `logs/` and raw bytes.
+pub fn reflog_tree_bytes(git_dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let logs = git_dir.join("logs");
+    let mut out = BTreeMap::new();
+    collect_reflog_bytes_recursive(&logs, &logs, &mut out);
+    out
+}
+
+fn collect_reflog_bytes_recursive(
+    logs_root: &Path,
+    dir: &Path,
+    out: &mut BTreeMap<String, Vec<u8>>,
+) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_reflog_bytes_recursive(logs_root, &path, out);
+        } else if path.is_file() {
+            let rel = path
+                .strip_prefix(logs_root)
+                .expect("under logs")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let bytes = std::fs::read(&path).expect("read reflog file");
+            out.insert(rel, bytes);
+        }
+    }
+}
+
+/// Byte-compare all loose reflog files under `git_dir/logs/`.
+pub fn assert_reflog_tree_matches(expected_git_dir: &Path, actual_git_dir: &Path) {
+    let expected = reflog_tree_bytes(expected_git_dir);
+    let actual = reflog_tree_bytes(actual_git_dir);
+    assert_eq!(
+        expected, actual,
+        "reflog tree mismatch\nexpected: {expected:?}\nactual: {actual:?}"
+    );
+}
+
+/// List ref names that have a reflog according to `git for-each-ref` + `git reflog`.
+pub fn git_reflog_refs(worktree: &Path) -> Vec<String> {
+    let out = git(worktree, &["for-each-ref", "--format=%(refname)"]);
+    let mut refs: Vec<String> = out
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    refs.sort();
+    refs.dedup();
+    refs.retain(|r| git_ok(worktree, &["reflog", "exists", r]));
+    if git_ok(worktree, &["reflog", "exists", "HEAD"]) && !refs.iter().any(|r| r == "HEAD") {
+        refs.push("HEAD".to_string());
+    }
+    refs.sort();
+    refs
 }
