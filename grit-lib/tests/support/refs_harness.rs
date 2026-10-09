@@ -8,9 +8,11 @@ use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::progress::NullProgress;
 use grit_lib::ref_namespace::storage_ref_name;
 use grit_lib::refs::list_refs;
-use grit_lib::repo::init_repository;
+use grit_lib::repo::{init_repository, Repository};
 
 const AUTHOR_NAME: &str = "Refs Harness Author";
 const AUTHOR_EMAIL: &str = "refs-harness@example.com";
@@ -98,16 +100,18 @@ pub fn git_supports_reftable() -> bool {
     })
 }
 
-/// Run `f` for [`Backend::Files`] and, when supported, [`Backend::Reftable`].
+/// Whether system `git` can read/write refs in a reftable repository (`git init --ref-format=reftable`).
+#[must_use]
+pub fn git_interop_available(backend: Backend) -> bool {
+    backend == Backend::Files || git_supports_reftable()
+}
+
+/// Run `f` for [`Backend::Files`] and [`Backend::Reftable`].
 ///
-/// Reftable runs are skipped (with `SKIP: git lacks reftable` on stderr) when system git
-/// cannot initialize a reftable repository.
+/// Both backends are initialized with grit (`init_repository`). Tests that shell out to system
+/// `git` on reftable repos should guard with [`git_interop_available`].
 pub fn each_backend(f: impl Fn(Backend, &TestRepo)) {
     for backend in [Backend::Files, Backend::Reftable] {
-        if backend == Backend::Reftable && !git_supports_reftable() {
-            eprintln!("SKIP: git lacks reftable");
-            continue;
-        }
         let root = tempfile::tempdir().expect("tempdir");
         let worktree = root.path().to_path_buf();
         init_repository(&worktree, false, "main", None, ref_storage_name(backend))
@@ -162,6 +166,33 @@ pub fn git_empty_commit_oid(worktree: &Path) -> ObjectId {
         .trim()
         .parse()
         .expect("HEAD oid")
+}
+
+fn grit_empty_commit_oid(worktree: &Path) -> ObjectId {
+    let repo = Repository::discover(Some(worktree)).expect("discover repo");
+    let ident = format!("{AUTHOR_NAME} <{AUTHOR_EMAIL}> {DETERMINISTIC_DATE}");
+    let outcome = create_commit(
+        &repo,
+        &CommitRequest {
+            message: "refs harness seed".to_owned(),
+            author: ident.clone(),
+            committer: ident,
+            allow_empty: true,
+            sign_override: None,
+        },
+        &mut NullProgress,
+    )
+    .expect("grit empty commit");
+    outcome.oid
+}
+
+/// Seed commit for refs tests: system git when interop is available, otherwise grit.
+pub fn empty_commit_oid(repo: &TestRepo) -> ObjectId {
+    if git_interop_available(repo.backend()) {
+        git_empty_commit_oid(repo.worktree())
+    } else {
+        grit_empty_commit_oid(repo.worktree())
+    }
 }
 
 /// Loose ref file path under the git directory for `refname`.
