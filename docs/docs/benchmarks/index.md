@@ -128,15 +128,40 @@ Recorded on the factory VM after stacking pick/merge/stash perf work on `origin/
 
 **Machine (2026-10-08 acceptance):** Intel Xeon (factory VM), **4** physical / **4** logical CPUs, **16 GiB** RAM, Linux **6.12.94+**, scratch filesystem **ext4**, `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.1**, hyperfine **2.x** (see `machine` in each baseline JSON).
 
-| Scenario | L before × | L after × | H before × | H after × | Notes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `add` | — | **2.52** | — | **4.51** | `suite-after-LH.json` (`add-{N}`) |
-| `commit` | — | **0.84** | — | **1.16** | `commit-after-LH.json` — `grit commit` vs `git add -A && git commit` |
-| `switch` | 3.29 | 3.44 | 4.89 | 5.63 | Still &gt;2× at L; H/L ≈ **1.64×** (&gt;1.25× bar) |
-| `switch-wide` | 3.70 | 2.29 | 26.5 | 2.98 | L still &gt;2×; H/L ≈ **1.30×** |
-| `pick` | 1.41 | 1.14 | 5.50 | 4.04 | L within 2×; H/L ≈ **3.54×** |
-| `merge` | 2.61 | 2.18 | 3.97 | 3.83 | L still above 2×; H/L ≈ **1.76×** |
-| `pick-series` | 12.9 | 11.2 | 21.7 | 17.7 | L &gt;2×; H/L ≈ **1.58×**; 20× sequential `grit pick` vs one `git cherry-pick` range |
+**Machine (2026-10-09 refresh):** same factory VM (Intel Xeon, **4** / **4** CPUs, **16 GiB** RAM, Linux **6.12.94+**, ext4 scratch), `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.3** at **`01a254dc`**, hyperfine **2.0.0**. Committed baselines were regenerated with `./target/release/grit-bench {hot-paths,commit,all} --sizes 10000,100000` (default warmup / min-runs).
+
+| Scenario | L before × | L 2026-10-08 × | L 2026-10-09 × | H before × | H 2026-10-08 × | H 2026-10-09 × | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `add` | — | **2.52** | **2.23** | — | **4.51** | **2.69** | `suite-after-LH.json` — improved at H |
+| `commit` | — | **0.84** | **0.48** | — | **1.16** | **0.70** | `commit-after-LH.json` — faster vs Git at L/H |
+| `switch` | 3.29 | 3.44 | **2.94** | 4.89 | 5.63 | **4.06** | H improved; L still &gt;2× |
+| `switch-wide` | 3.70 | 2.29 | **3.42** | 26.5 | 2.98 | **22.54** | **H regression** — see refresh notes |
+| `pick` | 1.41 | 1.14 | **1.48** | 5.50 | 4.04 | **5.22** | L slightly worse vs 2026-10-08 |
+| `merge` | 2.61 | 2.18 | **2.86** | 3.97 | 3.83 | **3.74** | L ~32% worse ratio vs 2026-10-08 |
+| `pick-series` | 12.9 | 11.2 | **11.94** | 21.7 | 17.7 | **18.56** | Still &gt;2×; 20× `grit pick` vs one `git cherry-pick` range |
+
+**2026-10-09 refresh vs 2026-10-08 baselines:** `grit-bench compare` reports ratio drift beyond the default **0.10** absolute tolerance on most scenarios (many improved). Regressions **more than 20% worse** on the Grit/Git ratio: **`switch-wide-100000`** (2.98× → **22.54×**), **`switch-wide-10000`** (2.29× → 3.42×), **`merge-10000`**, **`pick-10000`**, **`pick-100000`**. **`status-dirty-100000`** remains ~**53×** (unchanged). Suite **status** and **add** ratios improved at L/H except dirty-100k.
+
+| Scenario | Git ms | Grit ms | Old ratio | New ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `status-dirty-10000` | 11.1 | 80.1 | 10.19× | 7.21× |
+| `status-dirty-100000` | 113.0 | 5962.1 | 52.66× | 52.77× |
+| `status-clean-10000` | 9.0 | 21.2 | 4.58× | 2.34× |
+| `status-clean-100000` | 82.7 | 513.8 | 9.67× | 6.21× |
+| `add-10000` | 21.4 | 47.8 | 2.52× | 2.23× |
+| `add-100000` | 224.8 | 603.6 | 4.51× | 2.69× |
+| `commit-10000` | 165.6 | 79.1 | 0.84× | 0.48× |
+| `commit-100000` | 1665.7 | 1159.3 | 1.16× | 0.70× |
+| `switch-10000` | 23.9 | 70.3 | 3.44× | 2.94× |
+| `switch-100000` | 160.6 | 652.4 | 5.63× | 4.06× |
+| `switch-wide-10000` | 45.3 | 155.3 | 2.29× | 3.42× |
+| `switch-wide-100000` | 386.4 | 8711.8 | 2.98× | 22.54× |
+| `pick-10000` | 115.9 | 171.5 | 1.14× | 1.48× |
+| `pick-100000` | 194.0 | 1011.6 | 4.04× | 5.22× |
+| `merge-10000` | 104.9 | 300.5 | 2.18× | 2.86× |
+| `merge-100000` | 283.4 | 1060.6 | 3.83× | 3.74× |
+| `pick-series-10000` | 129.4 | 1544.3 | 11.18× | 11.94× |
+| `pick-series-100000` | 961.6 | 17843.4 | 17.65× | 18.56× |
 
 **Suite at L/H** (`grit-utils/baselines/suite-after-LH.json`): status scenarios remain far above 2× (dirty/clean at 10k and 100k files).
 
@@ -190,44 +215,44 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 | | |
 | --- | --- |
 | Git | git version 2.43.0 |
-| Grit | grit 0.5.1 |
+| Grit | grit 0.5.3 |
 | CPU | Intel(R) Xeon(R) Processor |
 | OS | linux (Linux 6.12.94+) |
-| Recorded | 2026-10-08 06:51:40.138623969 |
+| Recorded | 2026-10-09 07:45:00.292685959 |
 
 ## Summary by operation
 
 | Operation | Scenarios | Median Grit / Git | Worst Grit / Git |
 | --- | ---: | ---: | ---: |
-| add | 2 | 3.49× | 4.50× |
-| commit | 2 | 1.00× | 1.16× |
-| merge | 2 | 3.00× | 3.80× |
+| add | 2 | 2.56× | 2.59× |
+| commit | 2 | 0.58× | 0.68× |
+| merge | 2 | 3.40× | 3.84× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 3 | 22.88× | 98.20× |
-| pick | 4 | 6.96× | 16.49× |
-| status | 4 | 9.02× | 46.96× |
-| switch | 4 | 3.25× | 5.36× |
+| pick | 4 | 8.63× | 17.09× |
+| status | 4 | 6.17× | 48.09× |
+| switch | 4 | 3.61× | 22.50× |
 
 ### add
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `add-10000` | synthetic-10000 | 19.7 | 49.0 | 2.49× | ±2.49 ms |
-| `add-100000` | synthetic-100000 | 198 | 891 | 4.50× | ±65.8 ms |
+| `add-10000` | synthetic-10000 | 21.8 | 55.2 | 2.53× | ±32.9 ms |
+| `add-100000` | synthetic-100000 | 234 | 608 | 2.59× | ±45.7 ms |
 
 ### commit
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `commit-10000` | synthetic-10000 | 176 | 148 | 0.84× | ±7.32 ms |
-| `commit-100000` | synthetic-100000 | 1,929 | 2,243 | 1.16× | ±93.4 ms |
+| `commit-10000` | synthetic-10000 | 167 | 81.3 | 0.49× | ±9.20 ms |
+| `commit-100000` | synthetic-100000 | 1,680 | 1,140 | 0.68× | ±48.6 ms |
 
 ### merge
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `merge-10000` | synthetic-10000 | 116 | 256 | 2.21× | ±38.0 ms |
-| `merge-100000` | synthetic-100000 | 246 | 934 | 3.80× | ±26.5 ms |
+| `merge-10000` | synthetic-10000 | 105 | 310 | 2.95× | ±23.6 ms |
+| `merge-100000` | synthetic-100000 | 289 | 1,110 | 3.84× | ±93.2 ms |
 
 ### object_reads
 
@@ -254,28 +279,28 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `pick-10000` | synthetic-10000 | 126 | 170 | 1.35× | ±53.6 ms |
-| `pick-series-10000` | synthetic-10000 | 137 | 1,354 | 9.86× | ±53.6 ms |
-| `pick-100000` | synthetic-100000 | 204 | 828 | 4.06× | ±25.0 ms |
-| `pick-series-100000` | synthetic-100000 | 996 | 16,428 | 16.49× | ±315 ms |
+| `pick-10000` | synthetic-10000 | 117 | 171 | 1.46× | ±4.25 ms |
+| `pick-series-10000` | synthetic-10000 | 129 | 1,551 | 11.98× | ±64.2 ms |
+| `pick-100000` | synthetic-100000 | 194 | 1,021 | 5.27× | ±48.8 ms |
+| `pick-series-100000` | synthetic-100000 | 1,045 | 17,861 | 17.09× | ±426 ms |
 
 ### status
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `status-clean-10000` | synthetic-10000 | 8.25 | 37.8 | 4.58× | ±2.78 ms |
-| `status-dirty-10000` | synthetic-10000 | 10.3 | 103 | 10.03× | ±5.66 ms |
-| `status-clean-100000` | synthetic-100000 | 89.0 | 712 | 8.01× | ±13.3 ms |
-| `status-dirty-100000` | synthetic-100000 | 113 | 5,328 | 46.96× | ±95.1 ms |
+| `status-clean-10000` | synthetic-10000 | 9.79 | 21.7 | 2.22× | ±2.13 ms |
+| `status-dirty-10000` | synthetic-10000 | 11.5 | 81.1 | 7.04× | ±5.29 ms |
+| `status-clean-100000` | synthetic-100000 | 95.6 | 506 | 5.29× | ±26.6 ms |
+| `status-dirty-100000` | synthetic-100000 | 125 | 6,011 | 48.09× | ±274 ms |
 
 ### switch
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `switch-10000` | synthetic-10000 | 25.4 | 90.3 | 3.55× | ±15.4 ms |
-| `switch-wide-10000` | synthetic-10000 | 49.8 | 111 | 2.24× | ±17.3 ms |
-| `switch-100000` | synthetic-100000 | 183 | 979 | 5.36× | ±88.7 ms |
-| `switch-wide-100000` | synthetic-100000 | 418 | 1,235 | 2.96× | ±30.3 ms |
+| `switch-10000` | synthetic-10000 | 24.6 | 70.5 | 2.86× | ±2.28 ms |
+| `switch-wide-10000` | synthetic-10000 | 46.6 | 158 | 3.38× | ±6.96 ms |
+| `switch-100000` | synthetic-100000 | 172 | 658 | 3.83× | ±20.5 ms |
+| `switch-wide-100000` | synthetic-100000 | 389 | 8,763 | 22.50× | ±179 ms |
 
 
 To refresh this page after updating a baseline JSON file, regenerate the static site:
