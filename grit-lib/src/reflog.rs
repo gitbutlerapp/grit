@@ -632,11 +632,15 @@ fn parse_gc_reflog_expiry(raw: &str, now: i64) -> Result<i64> {
     if s.eq_ignore_ascii_case("now") || s.eq_ignore_ascii_case("all") {
         return Ok(i64::MAX);
     }
-    if let Ok(days) = s.parse::<u64>() {
-        if days == 0 {
+    if let Ok(n) = s.parse::<u64>() {
+        if n == 0 {
             return Ok(0);
         }
-        return Ok(now - (days as i64 * 86400));
+        // Match Git: bare integers above one day in seconds are absolute timestamps.
+        if n > 86_400 {
+            return Ok(n as i64);
+        }
+        return Ok(now - (n as i64 * 86_400));
     }
     s.parse::<i64>()
         .map_err(|_| Error::Message(format!("invalid reflog expiry: {raw:?}")))
@@ -1035,7 +1039,20 @@ pub fn mark_stalefix_reachable(repo: &Repository, git_dir: &Path) -> Result<Hash
 
 #[cfg(test)]
 mod default_expire_tests {
-    use super::{default_expire_total, default_expire_unreachable};
+    use super::{default_expire_total, default_expire_unreachable, parse_gc_reflog_expiry};
+
+    #[test]
+    fn gc_reflog_expiry_bare_integer_days_vs_timestamp() {
+        let now = 1_700_000_000_i64;
+        assert_eq!(
+            parse_gc_reflog_expiry("90", now).expect("days"),
+            now - 90 * 86_400
+        );
+        assert_eq!(
+            parse_gc_reflog_expiry("1600000000", now).expect("ts"),
+            1_600_000_000
+        );
+    }
 
     #[test]
     fn default_expire_total_is_ninety_days_before_now() {
