@@ -132,6 +132,13 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t0600-reffile.sh | delete loose+packed, packed-only, symref target; packed-refs lock failure; no stray lock files; no mkdir on packed-only delete | `grit-lib/tests/refs_packed.rs` (`t0600_delete_*`) | covered (files backend) |
 | t1409-avoid-packing-refs.sh | post-clone remote-tracking batch into sorted packed-refs (leave `origin/HEAD` loose) | `grit-lib/tests/refs_packed.rs` (`pack_remote_tracking_refs_for_clone_matches_git`) | partial (clone pack layout only) |
 | t0601 / fetch apply | `PackedRefs` snapshot + `resolve_ref_cached` / `write_ref_cached` after external `git pack-refs` | `grit-lib/tests/refs_packed.rs` (`resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs`) | covered (files backend) |
+| t1404-update-ref-errors.sh | CAS batch: bad `expected_old` applies nothing (refs + reflogs) | `grit-lib/tests/refs_transactions.rs` (`t1404_failed_cas_changes_nothing`) | covered |
+| t1404-update-ref-errors.sh | D/F batch add/delete long vs short (loose + packed), both orders vs `git update-ref --stdin` | `refs_transactions.rs` (`t1404_df_conflicts_match_git_update_ref_stdin`) | covered (symref variants skipped) |
+| t0031-lockfile-pid.sh | pre-existing `<ref>.lock` blocks write/delete; ref preserved | `refs_transactions.rs` (`ref_lock_present_fails_and_preserves_ref`) | covered (files backend) |
+| t1400-update-ref.sh | `--stdin` CAS concurrency: one winner, `fsck` clean | `refs_transactions.rs` (`concurrent_cas_single_winner`) | covered |
+| — | reftable failed transaction leaves `tables.list` unchanged | `reftable.rs` unit test (`write_transaction_inject_failure_leaves_tables_list_unchanged`) | covered |
+| t1416-ref-transaction-hooks.sh | hook ordering | — | skipped (hooks covered elsewhere) |
+| — | `update_refs` whole-batch lock-all atomicity vs Git `RefStore` transactions | — | gap → item 12 (RefStore transactions) |
 | t3070-wildmatch.sh | wildmatch / iwildmatch / pathmatch / ipathmatch vectors; pathological `*` backtracking bound | `grit-lib/tests/wildmatch_vectors.rs` (`t3070_vectors_all_modes`, `t3070_pathological_wildmatch_under_time_bound`, ls-files pathmatch cross-check) | covered |
 | t0008-ignores.sh | nested `.gitignore`, exclude, global excludes, negation, tracked overrides; `check-ignore -v -n` source/line/pattern | `grit-lib/tests/ignore_rules.rs` (`t0008_check_path_matches_git_check_ignore_verbose`, symlink warning, CLI precedence) | covered |
 | t3001-ls-files-others-exclude | `--exclude-from`, `--exclude-per-directory` | `grit-lib/tests/ignore_rules.rs` (`t3001_exclude_from_and_per_directory_name`) | covered |
@@ -156,7 +163,7 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t1310 | defaults, urlmatch, typed getters | `grit-lib/tests/config_parse.rs` (`t1310_config_default_and_urlmatch`, `typed_getters_match_git_config_type`) | covered |
 | t1311 | optional includes / missing targets | `grit-lib/tests/config_includes.rs` (`optional_include_git_parity`, `missing_include_is_ignored`) | covered |
 
-Detailed rows for ref transactions, remaining t1405 cases, and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
+Detailed rows for remaining t1405 cases and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 
