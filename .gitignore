@@ -1,4 +1,9 @@
 target/*
+# Build dirs agents create with --target-dir (target-review-62/, review-target-910/)
+/target*/
+/review-target*/
+# rustup state when RUSTUP_HOME points into the checkout
+/.rustup/
 .claude/
 scripts/__pycache__
 scripts/subscripts/__pycache__
