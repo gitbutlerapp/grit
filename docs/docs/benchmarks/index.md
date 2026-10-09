@@ -141,14 +141,9 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json
 ```
 
-**Profiling notes (2026-10-09 factory VM, after rebasing onto `origin/main` and step 480 tuning):**
+**Measured outcomes:** the Object reads table below is generated from committed `grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs per scenario, grit vs system git medians and peak RSS). Refresh with two invocations and `grit-bench compare run1.json run2.json --tolerance 0.10` before updating the baseline file and running `make docs`.
 
-- **Cat-file batch (unordered)** on git.git: grit is typically **≤1.2×** git after pack read context reuse and offset-order batch reads (see refreshed `grit-utils/baselines/odb-read.json`).
-- **Cat-file on hot-path-100k** (repacked): acceptance target is ≤**1.2×** git wall time and ≤**1.5×** peak RSS; see the baseline JSON for current medians.
-- **`rev-list --objects --all`**: acceptance target is ≤**1.2×** git on **both** git.git and hot-path-100k. System git uses pack reachability bitmaps when present; grit still walks trees with parent pruning and commit-graph parent lookup — see baseline ratios.
-- **`log -p -2000`**: documented exception path only when revwalk/tree-diff dominates; see baseline `log-patch-2000-*` scenarios.
-
-Refresh tables with `./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs; run twice and compare drift before committing).
+Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git peak RSS on the large fixture; compare the table ratios to those bars rather than this prose.
 
 ### Results
 
