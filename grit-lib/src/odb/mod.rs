@@ -20,9 +20,8 @@
 pub mod store;
 
 pub(crate) use store::loose::{
-    build_store_bytes, decompress_zlib_loose_bytes, enumerate_loose_objects,
-    for_each_loose_object_id, loose_store_bytes_header_valid, parse_object_bytes,
-    read_loose_object_info, read_zlib_loose_payload, zlib_compress_store_bytes,
+    build_store_bytes, decompress_zlib_loose_bytes, loose_store_bytes_header_valid,
+    parse_object_bytes, read_loose_object_info, read_zlib_loose_payload, zlib_compress_store_bytes,
 };
 pub use store::LooseStore;
 pub use store::{CompositeStore, FilesSource, ObjectStream};
@@ -1303,6 +1302,24 @@ impl Odb {
             return Ok(());
         }
         append_lookup_prefix_layer(self.sources()?.as_ref(), prefix, limit, out, &mut seen)
+    }
+
+    /// Enumerate loose objects in this database's primary `objects/` directory as `(oid, path)`.
+    ///
+    /// Pack files and alternate object directories are not scanned.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures while opening the primary files source or walking loose storage.
+    pub fn enumerate_local_loose_objects(&self) -> Result<Vec<(ObjectId, PathBuf)>> {
+        let primary = self.primary()?;
+        let loose = primary.loose_store();
+        let mut out = Vec::new();
+        loose.for_each_object(&mut |oid| {
+            out.push((*oid, loose.object_path(oid)));
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
     }
 
     /// Hash raw content of a given kind using this repository's hash algorithm.

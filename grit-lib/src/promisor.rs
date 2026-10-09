@@ -15,8 +15,9 @@ use std::path::Path;
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
-use crate::pack;
+use crate::odb::Odb;
 use crate::repo::Repository;
+use std::ops::ControlFlow;
 
 /// Basename of the marker file under the git directory.
 pub const PROMISOR_MISSING_FILE: &str = "grit-promisor-missing";
@@ -77,20 +78,17 @@ pub fn repo_treats_promisor_packs(_git_dir: &Path, config: &ConfigSet) -> bool {
 /// All object IDs stored in packfiles that have a sibling `.promisor` marker file.
 #[must_use]
 pub fn promisor_pack_object_ids(objects_dir: &Path) -> HashSet<ObjectId> {
-    let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
+    let odb = Odb::new(objects_dir);
+    let Ok(primary) = odb.primary() else {
         return HashSet::new();
     };
     let mut ids = HashSet::new();
-    for idx in indexes {
-        if !idx.is_promisor {
-            continue;
-        }
-        for e in idx.iter() {
-            if let Ok(oid) = crate::objects::ObjectId::from_bytes(e.oid()) {
-                ids.insert(oid);
-            }
-        }
-    }
+    let _ = primary
+        .packed_objects()
+        .for_each_promisor_object(&mut |oid| {
+            ids.insert(*oid);
+            ControlFlow::Continue(())
+        });
     ids
 }
 

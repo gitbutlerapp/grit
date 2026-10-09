@@ -18,7 +18,6 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
-use crate::pack;
 use crate::reflog::read_reflog;
 use crate::refs;
 use crate::repo::Repository;
@@ -1810,11 +1809,15 @@ pub fn abbreviate_object_id(repo: &Repository, oid: ObjectId, min_len: usize) ->
         return Ok(target[..min_len].to_owned());
     }
 
-    let all = collect_loose_object_ids(repo)?;
+    let mut all_hex: Vec<String> = Vec::new();
+    repo.odb.for_each_object(&mut |oid| {
+        all_hex.push(oid.to_hex());
+        std::ops::ControlFlow::Continue(())
+    })?;
 
     for len in min_len..=40 {
         let prefix = &target[..len];
-        let matches = all
+        let matches = all_hex
             .iter()
             .filter(|candidate| candidate.starts_with(prefix))
             .count();
@@ -1852,36 +1855,6 @@ pub fn to_relative_path(path: &Path, cwd: &Path) -> String {
     } else {
         parts.join("/")
     }
-}
-
-fn object_storage_dirs_for_abbrev(repo: &Repository) -> Result<Vec<PathBuf>> {
-    let mut dirs = Vec::new();
-    let primary = repo.odb.objects_dir().to_path_buf();
-    dirs.push(primary.clone());
-    if let Ok(alts) = pack::read_alternates_recursive(&primary) {
-        for alt in alts {
-            if !dirs.iter().any(|d| d == &alt) {
-                dirs.push(alt);
-            }
-        }
-    }
-    Ok(dirs)
-}
-
-fn collect_pack_oids_with_prefix(objects_dir: &Path, prefix: &str) -> Result<Vec<ObjectId>> {
-    let mut out = Vec::new();
-    for idx in pack::read_local_pack_indexes_cached(objects_dir)? {
-        for e in idx.iter() {
-            let Ok(oid) = crate::objects::ObjectId::from_bytes(e.oid()) else {
-                continue;
-            };
-            let hex = pack::oid_bytes_to_hex(e.oid());
-            if hex.starts_with(prefix) {
-                out.push(oid);
-            }
-        }
-    }
-    Ok(out)
 }
 
 fn disambiguate_kind_rank(kind: ObjectKind) -> u8 {
@@ -3704,41 +3677,9 @@ fn find_abbrev_matches(repo: &Repository, prefix: &str) -> Result<Vec<ObjectId>>
     if !is_hex_prefix(prefix) || !(4..=max_len).contains(&prefix.len()) {
         return Ok(Vec::new());
     }
-    let mut seen = HashSet::new();
     let mut matches = Vec::new();
-    let hash_algo = repo.odb.hash_algo();
-    for objects_dir in object_storage_dirs_for_abbrev(repo)? {
-        for hex in collect_loose_object_ids_in_dir(&objects_dir, hash_algo)? {
-            if hex.starts_with(prefix) {
-                let oid = hex.parse::<ObjectId>()?;
-                if seen.insert(oid) {
-                    matches.push(oid);
-                }
-            }
-        }
-        for oid in collect_pack_oids_with_prefix(&objects_dir, prefix)? {
-            if seen.insert(oid) {
-                matches.push(oid);
-            }
-        }
-    }
+    repo.odb.lookup_prefix(prefix, 0, &mut matches)?;
     Ok(matches)
-}
-
-fn collect_loose_object_ids(repo: &Repository) -> Result<Vec<String>> {
-    collect_loose_object_ids_in_dir(repo.odb.objects_dir(), repo.odb.hash_algo())
-}
-
-fn collect_loose_object_ids_in_dir(
-    objects_dir: &Path,
-    hash_algo: crate::objects::HashAlgo,
-) -> Result<Vec<String>> {
-    let mut ids = Vec::new();
-    crate::odb::for_each_loose_object_id(objects_dir, hash_algo, &mut |oid| {
-        ids.push(oid.to_hex());
-        std::ops::ControlFlow::Continue(())
-    })?;
-    Ok(ids)
 }
 
 fn is_hex_prefix(text: &str) -> bool {

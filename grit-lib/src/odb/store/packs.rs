@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
+use std::path::Path;
 use std::sync::Arc;
 
 use flate2::read::ZlibDecoder;
@@ -81,6 +82,56 @@ impl PackedObjects {
             }
             Ok(false)
         })
+    }
+
+    /// Whether a pack or MIDX reachability bitmap (`*.bitmap`) is present under `objects/pack/`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack directory read failures other than a missing directory.
+    pub fn reachability_bitmap_present(&self) -> Result<bool> {
+        self.with_pack(pack_dir_has_bitmap_extension)
+    }
+
+    /// Invoke `f` for each object id stored in a promisor-marked pack index.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack index enumeration failures.
+    pub fn for_each_promisor_object(
+        &self,
+        f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.with_pack(|objects_dir| {
+            let indexes = read_local_pack_indexes_cached(objects_dir)?;
+            let mut seen = HashSet::new();
+            for idx in indexes {
+                if !idx.is_promisor {
+                    continue;
+                }
+                for entry in idx.iter() {
+                    let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
+                        continue;
+                    };
+                    if !seen.insert(oid) {
+                        continue;
+                    }
+                    if f(&oid).is_break() {
+                        return Ok(());
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Collect object ids from pack indexes that have a sibling `.keep` file.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack directory or index read failures.
+    pub fn kept_pack_object_ids(&self) -> Result<HashSet<ObjectId>> {
+        self.with_pack(collect_kept_pack_object_ids)
     }
 
     /// Touch the mtime of the pack file holding `oid` (Git pack freshen), when not cruft.
@@ -219,6 +270,40 @@ impl ObjectStore for PackedObjects {
     fn refresh(&self) -> Result<bool> {
         self.with_pack(reprepare_pack_directory_on_miss)
     }
+}
+
+fn pack_dir_has_bitmap_extension(objects_dir: &Path) -> Result<bool> {
+    let pack_dir = objects_dir.join("pack");
+    let Ok(rd) = std::fs::read_dir(&pack_dir) else {
+        return Ok(false);
+    };
+    Ok(rd.filter_map(|e| e.ok()).any(|e| {
+        e.path()
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext == "bitmap")
+    }))
+}
+
+fn collect_kept_pack_object_ids(objects_dir: &Path) -> Result<HashSet<ObjectId>> {
+    let pack_dir = objects_dir.join("pack");
+    let mut kept = HashSet::new();
+    if !pack_dir.is_dir() {
+        return Ok(kept);
+    }
+    for entry in std::fs::read_dir(&pack_dir).map_err(Error::Io)? {
+        let entry = entry.map_err(Error::Io)?;
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "keep") {
+            let idx_path = path.with_extension("idx");
+            if idx_path.is_file() {
+                if let Ok(oids) = pack::read_idx_object_ids(&idx_path) {
+                    kept.extend(oids);
+                }
+            }
+        }
+    }
+    Ok(kept)
 }
 
 fn filtered_indexes(

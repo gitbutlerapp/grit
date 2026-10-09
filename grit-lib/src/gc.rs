@@ -68,7 +68,7 @@ pub fn prune_loose_unreachable(
 
     // 2. Enumerate loose objects and delete the unreachable, sufficiently-old ones.
     let mut stats = PruneStats::default();
-    for (oid, path) in crate::odb::enumerate_loose_objects(odb.objects_dir(), odb.hash_algo())? {
+    for (oid, path) in odb.enumerate_local_loose_objects()? {
         if reachable.contains(&oid) {
             stats.kept += 1;
             continue;
