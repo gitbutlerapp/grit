@@ -8,6 +8,7 @@ use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 use grit_lib::objects::ObjectId;
+use grit_lib::ref_namespace::storage_ref_name;
 use grit_lib::refs::list_refs;
 use grit_lib::repo::init_repository;
 
@@ -161,6 +162,38 @@ pub fn git_empty_commit_oid(worktree: &Path) -> ObjectId {
         .trim()
         .parse()
         .expect("HEAD oid")
+}
+
+/// Loose ref file path under the git directory for `refname`.
+#[must_use]
+pub fn loose_ref_path(git_dir: &Path, refname: &str) -> PathBuf {
+    git_dir.join(storage_ref_name(refname))
+}
+
+/// Run `git fsck --strict` and panic on failure.
+pub fn assert_git_fsck_strict(worktree: &Path) {
+    assert!(
+        git_fsck_strict(worktree),
+        "git fsck --strict failed under {}",
+        worktree.display()
+    );
+}
+
+/// Run `git update-ref` with a hex oid.
+pub fn git_update_ref(worktree: &Path, refname: &str, oid: &ObjectId) {
+    git(worktree, &["update-ref", refname, &oid.to_hex()]);
+}
+
+/// Run `git check-ref-format` on a full ref name.
+#[must_use]
+pub fn git_check_ref_format(refname: &str) -> bool {
+    Command::new("git")
+        .args(["check-ref-format", refname])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Parse `git show-ref` output into a name → oid map (deduplicated, sorted).
