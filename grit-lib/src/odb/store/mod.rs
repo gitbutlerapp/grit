@@ -7,6 +7,8 @@
 //! Thread safety: [`ObjectStore`] requires `Send + Sync` so repositories can share
 //! a store across threads; individual methods may take internal locks.
 
+mod packs;
+
 use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;
@@ -302,7 +304,7 @@ impl WritableObjectStore for MemoryStore {
     }
 }
 
-fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
+pub(crate) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
     if prefix.is_empty() {
         return Ok(String::new());
     }
@@ -315,6 +317,8 @@ fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
     }
     Ok(prefix.to_ascii_lowercase())
 }
+
+pub use packs::{PackFilter, PackedObjects};
 
 fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
     if prefix.is_empty() {
