@@ -636,6 +636,21 @@ impl Odb {
         Ok(src)
     }
 
+    /// Whether any alternate object directory is configured for this database.
+    #[must_use]
+    fn alternate_object_lookup_needed(&self) -> bool {
+        if !self.file_alternate_dirs_snapshot().is_empty() {
+            return true;
+        }
+        if !self.env_alternate_dirs_snapshot().is_empty() {
+            return true;
+        }
+        self.submodule_alternate_dirs
+            .lock()
+            .ok()
+            .is_some_and(|guard| !guard.is_empty())
+    }
+
     /// Alternate object directories (`info/alternates`, env, submodules) as one composite store.
     ///
     /// # Errors
@@ -941,6 +956,9 @@ impl Odb {
             == Some(true)
         {
             return true;
+        }
+        if !self.alternate_object_lookup_needed() {
+            return false;
         }
         self.sources()
             .ok()

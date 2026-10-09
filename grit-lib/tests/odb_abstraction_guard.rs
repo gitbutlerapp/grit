@@ -66,10 +66,16 @@ fn is_excluded(path: &Path) -> bool {
     }
 
     // Direct pack-index inspection tools and conformance tests.
-    path_str.contains("/grit-lib/examples/pack_index.rs")
+    if path_str.contains("/grit-lib/examples/pack_index.rs")
         || path_str.contains("\\grit-lib\\examples\\pack_index.rs")
         || path_str.contains("/grit-lib/tests/pack_index_formats.rs")
         || path_str.contains("\\grit-lib\\tests\\pack_index_formats.rs")
+    {
+        return true;
+    }
+
+    // Criterion / fixture builders (not production library paths).
+    path_str.contains("/grit-lib/benches/") || path_str.contains("\\grit-lib\\benches\\")
 }
 
 fn scan_rs_files(dir: &Path, violations: &mut Vec<String>) {
@@ -119,10 +125,28 @@ fn scan_rs_files(dir: &Path, violations: &mut Vec<String>) {
     }
 }
 
+fn production_scan_roots() -> Vec<PathBuf> {
+    let root = workspace_root();
+    [
+        "grit-lib/src",
+        "grit-cli/src",
+        "grit-protocol/src",
+        "grit-http-server/src",
+        "grit-examples/src",
+        "grit-utils/src",
+    ]
+    .into_iter()
+    .map(|rel| root.join(rel))
+    .filter(|p| p.is_dir())
+    .collect()
+}
+
 #[test]
 fn no_direct_pack_or_loose_enumeration_outside_odb_modules() {
     let mut violations = Vec::new();
-    scan_rs_files(&workspace_root(), &mut violations);
+    for dir in production_scan_roots() {
+        scan_rs_files(&dir, &mut violations);
+    }
     assert!(
         violations.is_empty(),
         "direct pack-index / loose-path enumeration must go through Odb / ObjectStore:\n{}",

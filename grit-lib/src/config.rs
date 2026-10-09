@@ -494,7 +494,7 @@ impl Parser {
             let raw_value = trimmed[eq_pos + 1..].trim();
             // Strip inline comment (not inside quotes)
             let value = strip_inline_comment(raw_value);
-            let value = unescape_value(&value);
+            let value = parse_config_value(&value);
             let key = self.make_key(raw_name);
             Some((key, Some(value)))
         } else {
@@ -619,7 +619,44 @@ fn strip_inline_comment(s: &str) -> String {
     trimmed.to_owned()
 }
 
-/// Unescape a config value: handle `\"`, `\\`, `\n`, `\t`, `\b`, and strip
+/// Parse a config value after `=` (comments already stripped).
+fn parse_config_value(s: &str) -> String {
+    if s.starts_with('"') {
+        unescape_value(s)
+    } else {
+        unescape_unquoted_value(s)
+    }
+}
+
+/// Unquoted config values: backslash escapes plus literal tab → space (Git t1300).
+fn unescape_unquoted_value(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('b') => result.push('\x08'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else if ch == '\t' {
+            result.push(' ');
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Unescape a quoted config value: handle `\"`, `\\`, `\n`, `\t`, `\b`, and strip
 /// surrounding quotes.
 fn unescape_value(s: &str) -> String {
     let mut result = String::with_capacity(s.len());

@@ -308,6 +308,17 @@ impl ObjectStore for FilesSource {
         if self.loose.object_path(oid).is_file() {
             return Ok(true);
         }
+        let indexes = pack::read_local_pack_indexes_cached(&self.objects_dir)?;
+        if indexes.is_empty() && !pack_directory_has_index_files(&self.objects_dir) {
+            if self.midx_tip_listing_for_exists && self.use_midx {
+                match midx_oid_listed_in_tip(&self.objects_dir, oid) {
+                    Ok(Some(true)) => return Ok(true),
+                    Ok(Some(false)) | Ok(None) => {}
+                    Err(_) => return Ok(false),
+                }
+            }
+            return Ok(false);
+        }
         PackStore::with_context(self.packs.pack_store().clone(), || {
             let filter = super::PackFilter {
                 include_promisor: true,
@@ -421,6 +432,16 @@ impl WritableObjectStore for FilesSource {
             self.packs.freshen_pack_containing(oid)
         })
     }
+}
+
+fn pack_directory_has_index_files(objects_dir: &Path) -> bool {
+    let pack_dir = objects_dir.join("pack");
+    let Ok(entries) = std::fs::read_dir(pack_dir) else {
+        return false;
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .any(|ent| ent.path().extension().is_some_and(|ext| ext == "idx"))
 }
 
 fn merge_prefix_matches(

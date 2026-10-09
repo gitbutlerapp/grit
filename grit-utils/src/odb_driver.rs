@@ -9,7 +9,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
-use grit_lib::pack::{read_pack_index, PackIndex};
+use grit_lib::pack::{read_pack_index_cached, PackIndex};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions, RevListResult};
 
@@ -68,9 +68,9 @@ pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
         .collect();
     idx_paths.sort();
     for idx_path in idx_paths {
-        let idx =
-            read_pack_index(&idx_path).with_context(|| format!("read {}", idx_path.display()))?;
-        emit_pack_in_offset_order(&mut stdout, repo, &idx)?;
+        let idx = read_pack_index_cached(&idx_path)
+            .with_context(|| format!("read {}", idx_path.display()))?;
+        emit_pack_in_offset_order(&mut stdout, repo, idx.as_ref())?;
     }
     Ok(())
 }
@@ -297,7 +297,7 @@ fn collect_hex_ids_for_abbrev(repo: &Repository) -> Result<Vec<String>> {
         for entry in std::fs::read_dir(&pack_dir)? {
             let path = entry?.path();
             if path.extension().is_some_and(|e| e == "idx") {
-                let idx = read_pack_index(&path)?;
+                let idx = read_pack_index_cached(&path)?;
                 for ent in idx.iter() {
                     ids.push(
                         ObjectId::from_bytes(ent.oid())
