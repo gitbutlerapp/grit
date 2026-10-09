@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
+use grit_lib::environment::Environment;
 use grit_lib::error::Error;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
-use grit_lib::environment::Environment;
 use grit_lib::odb::{hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb, WriteOptions};
 use grit_test_support::objects::{
     flip_byte_at, git_fsck, git_supports_sha256, write_loose_object, HashAlgo as FixtureAlgo,
