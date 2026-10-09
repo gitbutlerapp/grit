@@ -141,8 +141,10 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t0600 / rev-list | `all_reflog_oids` walk order | `grit-lib/tests/reflog_roundtrip.rs` (`all_reflog_oids_and_ordered_match_git_walk`) | covered |
 | — | `core.logAllRefUpdates` modes vs git auto-create | `grit-lib/tests/reflog_roundtrip.rs` (`log_all_ref_updates_modes_match_git`) | covered |
 | — | delete / truncate vs `git reflog delete` | `grit-lib/tests/reflog_roundtrip.rs` (`delete_reflog_and_truncate_match_git`) | covered (files backend byte-compare) |
+| t1300-config.sh | config write: set/add/replace-all/unset/count, sections, quoting, multivar errors, lock file | `grit-lib/tests/config_write.rs` (`t1300_edit_matches_git_byte_for_byte`, `config_lock_present_is_typed_error_and_preserves_file`) | covered (read/parse subset on other steps; `--comment` cases grit-only on Git &lt; 2.46) |
+| t1303-write-readonly.sh | write paths, subsection escaping, round-trip after edit | `grit-lib/tests/config_write.rs` (`subsection_backslash_in_name`, `grit_edited_repo_config_git_status_and_reread`) | partial (readonly-file cases N/A) |
 
-Detailed rows for packed refs, transactions, and remaining t1405 cases are filled in as later plan steps land; see also the ODB/pack mapping below.
+Detailed rows for packed refs, transactions, and remaining plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 
