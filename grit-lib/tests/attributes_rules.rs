@@ -5,13 +5,13 @@
 mod support;
 
 use grit_lib::attributes::{
-    builtin_objectmode_index, builtin_objectmode_worktree, builtin_warnings_for_rules,
-    collect_attrs_for_path, is_reserved_builtin_name, load_gitattributes_bare,
-    load_gitattributes_for_check_attr_cached, load_gitattributes_for_check_attr_source,
-    load_gitattributes_for_diff, load_gitattributes_from_index, load_gitattributes_from_tree,
-    parse_gitattributes_file_content, parse_gitattributes_file_content_with_base,
-    quote_path_for_check_attr, resolve_attr_treeish, resolve_tree_oid, validate_rules_for_add,
-    AttrValue, MAX_ATTR_FILE_BYTES, MAX_ATTR_LINE_BYTES,
+    attribute_matching_ignore_case, builtin_objectmode_index, builtin_objectmode_worktree,
+    builtin_warnings_for_rules, collect_attrs_for_path, is_reserved_builtin_name,
+    load_gitattributes_bare, load_gitattributes_for_check_attr_cached,
+    load_gitattributes_for_check_attr_source, load_gitattributes_for_diff,
+    load_gitattributes_from_index, load_gitattributes_from_tree, parse_gitattributes_file_content,
+    parse_gitattributes_file_content_with_base, quote_path_for_check_attr, resolve_attr_treeish,
+    resolve_tree_oid, validate_rules_for_add, AttrValue, MAX_ATTR_FILE_BYTES, MAX_ATTR_LINE_BYTES,
 };
 use grit_lib::error::Error;
 use grit_lib::index::Index;
@@ -516,7 +516,7 @@ fn t0003_symlink_gitattributes_in_tree_skipped_with_warning() {
 }
 
 #[test]
-fn t0003_gitattributes_blob_literal_backslash_n_expanded_from_index() {
+fn t0003_gitattributes_blob_literal_backslash_n_not_invented_from_index() {
     let root = tempfile::tempdir().expect("tempdir");
     let wt = root.path();
     init_git_repo(wt);
@@ -527,7 +527,148 @@ fn t0003_gitattributes_blob_literal_backslash_n_expanded_from_index() {
     let index = Index::load(&wt.join(".git/index")).expect("index");
     let parsed = load_gitattributes_from_index(&index, &repo.odb, wt).expect("from index");
     let map = collect_attrs_for_path(&parsed.rules, &parsed.macros, "file", false);
-    assert_eq!(map.get("text"), Some(&AttrValue::Set));
+    assert!(map.get("text").is_none());
+    assert_attrs_match(wt, &repo, &parsed, "text", &["file"], &["--cached"]);
+}
+
+#[test]
+fn t0003_index_ignores_foo_gitattributes_basename() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(wt.join("foo.gitattributes"), "* suffix=wrong\n").expect("ga");
+    hermetic_git_ok(wt, &["add", "foo.gitattributes"]);
+    let repo = grit_repo(wt);
+    let parsed = load_cached_parsed(&repo);
+    assert_attrs_match(wt, &repo, &parsed, "suffix", &["any"], &["--cached"]);
+}
+
+#[test]
+fn t0003_nested_gitattributes_overrides_root_for_cached() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::create_dir_all(wt.join("dir")).expect("mkdir");
+    std::fs::write(wt.join(".gitattributes"), "f test=root\n").expect("root ga");
+    std::fs::write(wt.join("dir/.gitattributes"), "f test=nested\n").expect("nested ga");
+    hermetic_git_ok(wt, &["add", ".gitattributes", "dir/.gitattributes"]);
+    let repo = grit_repo(wt);
+    let parsed = load_cached_parsed(&repo);
+    assert_attrs_match(wt, &repo, &parsed, "test", &["dir/f"], &["--cached"]);
+}
+
+#[test]
+fn t0003_macro_recursive_set_expands_cached() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(
+        wt.join(".gitattributes"),
+        "[attr]outer inner\n[attr]inner leaf=set\nf outer\n",
+    )
+    .expect("ga");
+    hermetic_git_ok(wt, &["add", ".gitattributes"]);
+    let repo = grit_repo(wt);
+    let parsed = load_cached_parsed(&repo);
+    for attr in ["inner", "leaf", "outer"] {
+        assert_attrs_match(wt, &repo, &parsed, attr, &["f"], &["--cached"]);
+    }
+}
+
+#[test]
+fn t0003_macro_negated_name_does_not_expand_cached() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(
+        wt.join(".gitattributes"),
+        "[attr]outer inner\n[attr]inner leaf=set\nf -outer\n",
+    )
+    .expect("ga");
+    hermetic_git_ok(wt, &["add", ".gitattributes"]);
+    let repo = grit_repo(wt);
+    let parsed = load_cached_parsed(&repo);
+    for attr in ["inner", "outer"] {
+        assert_attrs_match(wt, &repo, &parsed, attr, &["f"], &["--cached"]);
+    }
+}
+
+#[test]
+fn t0003_rule_line_bang_clears_attr_cached() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(wt.join(".gitattributes"), "* test=first\nf !test\n").expect("ga");
+    hermetic_git_ok(wt, &["add", ".gitattributes"]);
+    let repo = grit_repo(wt);
+    let parsed = load_cached_parsed(&repo);
+    assert_attrs_match(wt, &repo, &parsed, "test", &["f"], &["--cached"]);
+}
+
+#[test]
+fn source_loader_includes_tree_and_info_attributes() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(wt.join(".gitattributes"), "tracked test=from-tree\n").expect("ga");
+    std::fs::write(
+        wt.join(".git").join("info/attributes"),
+        "tracked test=info\n",
+    )
+    .expect("info");
+    hermetic_git_ok(wt, &["add", ".gitattributes"]);
+    hermetic_git_ok(wt, &["commit", "-m", "attrs"]);
+    let repo = grit_repo(wt);
+    let oid = resolve_tree_oid(&repo, "HEAD").expect("head tree");
+    let parsed = load_gitattributes_for_check_attr_source(&repo, &oid).expect("source");
+    let v = collect_attrs_for_path(&parsed.rules, &parsed.macros, "tracked", false);
+    assert_eq!(v.get("test"), Some(&AttrValue::Value("info".into())));
+}
+
+#[test]
+fn attribute_matching_ignore_case_follows_config() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    hermetic_git_ok(wt, &["config", "core.ignorecase", "true"]);
+    let repo = grit_repo(wt);
+    assert!(attribute_matching_ignore_case(&repo));
+}
+
+#[test]
+fn load_gitattributes_for_diff_honors_attr_tree_config() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(wt.join(".gitattributes"), "f test=committed\n").expect("ga");
+    hermetic_git_ok(wt, &["add", ".gitattributes"]);
+    hermetic_git_ok(wt, &["commit", "-m", "ga"]);
+    std::fs::write(wt.join(".gitattributes"), "f test=worktree\n").expect("ga2");
+    hermetic_git_ok(wt, &["config", "attr.tree", "HEAD"]);
+    let repo = grit_repo(wt);
+    let parsed = load_gitattributes_for_diff(&repo).expect("diff attrs");
+    assert_eq!(
+        collect_attrs_for_path(&parsed.rules, &parsed.macros, "f", false).get("test"),
+        Some(&AttrValue::Value("committed".into()))
+    );
+}
+
+#[test]
+fn load_gitattributes_from_tree_reads_nested_blob() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::create_dir_all(wt.join("sub")).expect("mkdir");
+    std::fs::write(wt.join("sub/.gitattributes"), "f test=nested\n").expect("ga");
+    hermetic_git_ok(wt, &["add", "sub/.gitattributes"]);
+    hermetic_git_ok(wt, &["commit", "-m", "nested-attrs"]);
+    let repo = grit_repo(wt);
+    let oid = resolve_tree_oid(&repo, "HEAD").expect("tree");
+    let parsed = load_gitattributes_from_tree(&repo, &oid).expect("from tree");
+    assert_eq!(
+        collect_attrs_for_path(&parsed.rules, &parsed.macros, "sub/f", false).get("test"),
+        Some(&AttrValue::Value("nested".into()))
+    );
 }
 
 #[test]

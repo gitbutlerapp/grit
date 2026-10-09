@@ -21,7 +21,6 @@ use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
@@ -251,25 +250,13 @@ pub fn parse_gitattributes_file_content_with_base(
     parse_gitattributes_content_impl(content, display_path, false, attr_base)
 }
 
-fn preprocess_gitattributes_blob_text(content: &str) -> Cow<'_, str> {
-    if !content.contains("\\n") {
-        return Cow::Borrowed(content);
-    }
-    Cow::Owned(content.replace("\\n", "\n"))
-}
-
 fn parse_gitattributes_content_impl(
     content: &str,
     display_path: &str,
     from_blob: bool,
     attr_base: &str,
 ) -> ParsedGitAttributes {
-    let preprocessed = if from_blob {
-        preprocess_gitattributes_blob_text(content)
-    } else {
-        Cow::Borrowed(content)
-    };
-    let content = preprocessed.as_ref();
+    let _ = from_blob;
 
     let mut out = ParsedGitAttributes::default();
     for (idx, raw_line) in content.lines().enumerate() {
@@ -487,7 +474,7 @@ fn push_attr_token(
     tok: &str,
     attrs: &mut Vec<(String, AttrValue)>,
     _macros: &MacroTable,
-    in_macro_def: bool,
+    _in_macro_def: bool,
 ) {
     if tok == "binary" {
         attrs.push(("text".into(), AttrValue::Unset));
@@ -496,8 +483,8 @@ fn push_attr_token(
         attrs.push(("binary".into(), AttrValue::Set));
         return;
     }
-    if in_macro_def {
-        if let Some(rest) = tok.strip_prefix('!') {
+    if let Some(rest) = tok.strip_prefix('!') {
+        if !rest.is_empty() {
             attrs.push((rest.to_string(), AttrValue::Clear));
             return;
         }
@@ -703,6 +690,38 @@ pub fn attr_rule_matches(rule: &AttrRule, rel_path: &str, icase: bool) -> bool {
     )
 }
 
+const MAX_MACRO_EXPAND_DEPTH: u32 = 3000;
+
+/// Push one assignment, expanding user macros only on bare `Set` (Git `expand_attr`).
+fn push_expanded_assignment(
+    name: String,
+    val: AttrValue,
+    macros: &MacroTable,
+    out: &mut Vec<(String, AttrValue)>,
+    depth: u32,
+) {
+    if depth > MAX_MACRO_EXPAND_DEPTH {
+        return;
+    }
+    if name == "binary" {
+        out.push(("text".into(), AttrValue::Unset));
+        out.push(("diff".into(), AttrValue::Unset));
+        out.push(("merge".into(), AttrValue::Unset));
+        out.push(("binary".into(), AttrValue::Set));
+        return;
+    }
+    if matches!(val, AttrValue::Set) {
+        if let Some(body) = macros.defs.get(&name) {
+            out.push((name, AttrValue::Set));
+            for (n, v) in body {
+                push_expanded_assignment(n.clone(), v.clone(), macros, out, depth + 1);
+            }
+            return;
+        }
+    }
+    out.push((name, val));
+}
+
 /// Expand macros and `binary` for one rule's assignments into source-order operations.
 ///
 /// These must be applied in order to the same map as later rules (not folded into a local map),
@@ -710,21 +729,7 @@ pub fn attr_rule_matches(rule: &AttrRule, rel_path: &str, icase: bool) -> bool {
 fn expand_rule_attrs_flat(rule: &AttrRule, macros: &MacroTable) -> Vec<(String, AttrValue)> {
     let mut flat: Vec<(String, AttrValue)> = Vec::new();
     for (name, val) in &rule.attrs {
-        if name == "binary" {
-            flat.push(("text".into(), AttrValue::Unset));
-            flat.push(("diff".into(), AttrValue::Unset));
-            flat.push(("merge".into(), AttrValue::Unset));
-            flat.push(("binary".into(), AttrValue::Set));
-            continue;
-        }
-        if let Some(exp) = macros.defs.get(name) {
-            flat.push((name.clone(), val.clone()));
-            for (n, v) in exp {
-                flat.push((n.clone(), v.clone()));
-            }
-        } else {
-            flat.push((name.clone(), val.clone()));
-        }
+        push_expanded_assignment(name.clone(), val.clone(), macros, &mut flat, 0);
     }
     flat
 }
@@ -1125,6 +1130,52 @@ pub(crate) fn load_gitattributes_bare_uncached(
 }
 
 /// Read `.gitattributes` blob from a tree object at `tree_oid`, recursively.
+/// Index or tree path is a `.gitattributes` file (basename must be exactly `.gitattributes`).
+fn path_is_gitattributes(rel: &str) -> bool {
+    Path::new(rel)
+        .file_name()
+        .is_some_and(|n| n == ".gitattributes")
+}
+
+/// Directory depth of a `.gitattributes` path (`".gitattributes"` → 0, `"a/b/.gitattributes"` → 2).
+fn gitattributes_file_depth(rel: &str) -> usize {
+    match rel.rfind('/') {
+        None => 0,
+        Some(i) => rel[..i].matches('/').count() + 1,
+    }
+}
+
+fn cmp_gitattributes_paths(a: &str, b: &str) -> std::cmp::Ordering {
+    gitattributes_file_depth(a)
+        .cmp(&gitattributes_file_depth(b))
+        .then_with(|| a.cmp(b))
+}
+
+struct CollectedGitAttributes {
+    depth: usize,
+    sort_key: String,
+    root_macros: bool,
+    parsed: ParsedGitAttributes,
+}
+
+fn merge_collected_gitattributes(
+    collected: &mut Vec<CollectedGitAttributes>,
+    merged: &mut ParsedGitAttributes,
+) {
+    collected.sort_by(|a, b| {
+        a.depth
+            .cmp(&b.depth)
+            .then_with(|| a.sort_key.cmp(&b.sort_key))
+    });
+    for mut item in collected.drain(..) {
+        merged.rules.append(&mut item.parsed.rules);
+        if item.root_macros {
+            merged.macros.defs.extend(item.parsed.macros.defs.drain());
+        }
+        merged.warnings.append(&mut item.parsed.warnings);
+    }
+}
+
 pub fn load_gitattributes_from_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
@@ -1132,16 +1183,18 @@ pub fn load_gitattributes_from_tree(
     repo.caches()
         .load_gitattributes_from_tree_cached(&repo.odb, tree_oid, || {
             let mut merged = ParsedGitAttributes::default();
-            walk_tree_attrs(&repo.odb, tree_oid, "", &mut merged)?;
+            let mut collected = Vec::new();
+            walk_tree_attrs_collect(&repo.odb, tree_oid, "", &mut collected)?;
+            merge_collected_gitattributes(&mut collected, &mut merged);
             Ok(merged)
         })
 }
 
-fn walk_tree_attrs(
+fn walk_tree_attrs_collect(
     odb: &Odb,
     tree_oid: &ObjectId,
     prefix: &str,
-    merged: &mut ParsedGitAttributes,
+    out: &mut Vec<CollectedGitAttributes>,
 ) -> std::result::Result<(), crate::error::Error> {
     let obj = odb.read(tree_oid)?;
     if obj.kind != ObjectKind::Tree {
@@ -1157,39 +1210,56 @@ fn walk_tree_attrs(
         };
         match e.mode {
             0o040000 => {
-                walk_tree_attrs(odb, &e.oid, &path, merged)?;
+                walk_tree_attrs_collect(odb, &e.oid, &path, out)?;
             }
             0o100644 | 0o100755 | 0o120000 if name == ".gitattributes" => {
                 let oid = e.oid;
-                {
-                    let blob = odb.read(&oid)?;
-                    if blob.kind != ObjectKind::Blob {
-                        continue;
-                    }
-                    if blob.data.len() > MAX_ATTR_FILE_BYTES {
-                        merged.warnings.push(crate::diagnostics::warning_line(
-                            "ignoring overly large gitattributes blob '.gitattributes'",
-                        ));
-                        continue;
-                    }
-                    let content = String::from_utf8_lossy(&blob.data).into_owned();
-                    let display = format!("{path} (tree)");
-                    let attr_base = Path::new(&path)
-                        .parent()
-                        .map(|p| p.to_string_lossy().replace('\\', "/"))
-                        .unwrap_or_default();
-                    let mut p =
-                        parse_gitattributes_content_impl(&content, &display, true, &attr_base);
-                    merged.rules.append(&mut p.rules);
-                    if attr_base.is_empty() {
-                        merged.macros.defs.extend(p.macros.defs.drain());
-                    }
-                    merged.warnings.append(&mut p.warnings);
+                let blob = odb.read(&oid)?;
+                if blob.kind != ObjectKind::Blob {
+                    continue;
                 }
+                if blob.data.len() > MAX_ATTR_FILE_BYTES {
+                    out.push(CollectedGitAttributes {
+                        depth: gitattributes_file_depth(&path),
+                        sort_key: path.clone(),
+                        root_macros: false,
+                        parsed: ParsedGitAttributes {
+                            warnings: vec![crate::diagnostics::warning_line(
+                                "ignoring overly large gitattributes blob '.gitattributes'",
+                            )],
+                            ..Default::default()
+                        },
+                    });
+                    continue;
+                }
+                let content = String::from_utf8_lossy(&blob.data).into_owned();
+                let display = format!("{path} (tree)");
+                let attr_base = Path::new(&path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                let parsed = parse_gitattributes_content_impl(&content, &display, true, &attr_base);
+                out.push(CollectedGitAttributes {
+                    depth: gitattributes_file_depth(&path),
+                    sort_key: path,
+                    root_macros: attr_base.is_empty(),
+                    parsed,
+                });
             }
             _ => {}
         }
     }
+    Ok(())
+}
+
+fn append_gitattributes_from_tree(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    merged: &mut ParsedGitAttributes,
+) -> std::result::Result<(), crate::error::Error> {
+    let mut collected = Vec::new();
+    walk_tree_attrs_collect(odb, tree_oid, "", &mut collected)?;
+    merge_collected_gitattributes(&mut collected, merged);
     Ok(())
 }
 
@@ -1274,10 +1344,19 @@ pub fn load_gitattributes_from_index(
     let mut paths: Vec<Vec<u8>> = index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && e.path.ends_with(b".gitattributes"))
+        .filter(|e| {
+            e.stage() == 0
+                && std::str::from_utf8(&e.path)
+                    .ok()
+                    .is_some_and(path_is_gitattributes)
+        })
         .map(|e| e.path.clone())
         .collect();
-    paths.sort();
+    paths.sort_by(|a, b| {
+        let sa = std::str::from_utf8(a).unwrap_or("");
+        let sb = std::str::from_utf8(b).unwrap_or("");
+        cmp_gitattributes_paths(sa, sb)
+    });
     for path_bytes in paths {
         let Ok(rel) = std::str::from_utf8(&path_bytes) else {
             continue;
@@ -1392,7 +1471,7 @@ pub fn load_gitattributes_for_check_attr_source(
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
     let mut merged = ParsedGitAttributes::default();
     merge_global_attributes_file(repo, &mut merged)?;
-    walk_tree_attrs(&repo.odb, tree_oid, "", &mut merged)?;
+    append_gitattributes_from_tree(&repo.odb, tree_oid, &mut merged)?;
     merge_info_attributes(repo, &mut merged);
     Ok(merged)
 }
@@ -1683,66 +1762,6 @@ mod attr_cache_tests {
     }
 
     #[test]
-    fn source_loader_includes_tree_and_info_attributes() {
-        let td = tempfile::tempdir().expect("tempdir");
-        let wt = td.path();
-        let repo = test_repo(wt);
-        fs::write(wt.join(".gitattributes"), "tracked test=from-tree\n").expect("ga");
-        fs::write(repo.git_dir.join("info/attributes"), "tracked test=info\n").expect("info");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["add", ".gitattributes"])
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("git add");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["commit", "-m", "c", "--allow-empty"])
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t.com")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t.com")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("commit");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["add", ".gitattributes"])
-            .status()
-            .ok();
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["commit", "-m", "attrs"])
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t.com")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t.com")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("commit2");
-        let oid = resolve_tree_oid(&repo, "HEAD").expect("head tree");
-        let parsed = load_gitattributes_for_check_attr_source(&repo, &oid).expect("source");
-        let v = collect_attrs_for_path(&parsed.rules, &parsed.macros, "tracked", false);
-        assert_eq!(v.get("test"), Some(&AttrValue::Value("info".into())));
-    }
-
-    #[test]
-    fn attribute_matching_ignore_case_follows_config() {
-        let td = tempfile::tempdir().expect("tempdir");
-        let wt = td.path();
-        let repo = test_repo(wt);
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["config", "core.ignorecase", "true"])
-            .status()
-            .expect("cfg");
-        assert!(attribute_matching_ignore_case(&repo));
-    }
-
-    #[test]
     fn resolve_attr_treeish_prefers_explicit_source_argument() {
         let td = tempfile::tempdir().expect("tempdir");
         let wt = td.path();
@@ -1750,76 +1769,6 @@ mod attr_cache_tests {
         let (spec, ignore) = resolve_attr_treeish(&repo, Some("HEAD^{tree}")).expect("treeish");
         assert_eq!(spec.as_deref(), Some("HEAD^{tree}"));
         assert!(!ignore);
-    }
-
-    #[test]
-    fn load_gitattributes_for_diff_honors_attr_tree_config() {
-        let td = tempfile::tempdir().expect("tempdir");
-        let wt = td.path();
-        let repo = test_repo(wt);
-        fs::write(wt.join(".gitattributes"), "f test=committed\n").expect("ga");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["add", ".gitattributes"])
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("add");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["commit", "-m", "ga"])
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t.com")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t.com")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("commit");
-        fs::write(wt.join(".gitattributes"), "f test=worktree\n").expect("ga2");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["config", "attr.tree", "HEAD"])
-            .status()
-            .expect("cfg");
-        let parsed = load_gitattributes_for_diff(&repo).expect("diff attrs");
-        assert_eq!(
-            collect_attrs_for_path(&parsed.rules, &parsed.macros, "f", false).get("test"),
-            Some(&AttrValue::Value("committed".into()))
-        );
-    }
-
-    #[test]
-    fn load_gitattributes_from_tree_reads_nested_blob() {
-        let td = tempfile::tempdir().expect("tempdir");
-        let wt = td.path();
-        let repo = test_repo(wt);
-        fs::create_dir_all(wt.join("sub")).expect("mkdir");
-        fs::write(wt.join("sub/.gitattributes"), "f test=nested\n").expect("ga");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["add", "sub/.gitattributes"])
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("add");
-        std::process::Command::new("git")
-            .current_dir(wt)
-            .args(["commit", "-m", "nested-attrs"])
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t.com")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t.com")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .status()
-            .expect("commit");
-        let oid = resolve_tree_oid(&repo, "HEAD").expect("tree");
-        let parsed = load_gitattributes_from_tree(&repo, &oid).expect("from tree");
-        assert_eq!(
-            collect_attrs_for_path(&parsed.rules, &parsed.macros, "sub/f", false).get("test"),
-            Some(&AttrValue::Value("nested".into()))
-        );
     }
 
     #[test]
