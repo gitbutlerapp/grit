@@ -27,8 +27,8 @@ use grit_lib::repo::Repository;
 use support::{
     append_repo_config, assert_reflog_tree_matches, copy_worktree, each_backend, empty_commit_oid,
     git, git_empty_commit_oid, git_fsck_strict, git_interop_available, git_ok, git_reflog_refs,
-    reflog_identity,
-    reflog_tree_bytes, write_repo_config, Backend, TestRepo, AUTHOR_EMAIL, AUTHOR_NAME,
+    reflog_identity, reflog_tree_bytes, write_repo_config, Backend, TestRepo, AUTHOR_EMAIL,
+    AUTHOR_NAME,
 };
 
 fn each_backend_git_oracle(f: impl Fn(Backend, &TestRepo)) {

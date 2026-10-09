@@ -258,6 +258,8 @@
 - Coverage of these modules is ≥85%.
 - Overall grit-lib line coverage is ≥80% and gated in CI so it can't drop.
 
+**Refs-config coverage (factory step 660, canonical stack `7ba03a1`):** `make coverage` on the integrated 651–659 stack ratchets floors in `grit-lib/coverage-floors.toml`. Latest measured groups: attributes **86.3%**, reflog **86.3%**, ignore **88.3%**, config **~80.5%**, refs **~82.7%**, **refs-config aggregate ~83.3%** (MIDX/core/ODB gates green after nested `odb/` path tracking). Remaining work: raise **config** and **refs** (incl. reftable) to **≥85%** before locking aggregate **refs-config** at 85%.
+
 ## 17. Public API design pass
 *Workstream: Library*
 
