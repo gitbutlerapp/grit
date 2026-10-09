@@ -377,13 +377,16 @@ fn load_attribute_stack_prefix_and_info(
 
 fn global_attributes_path(config: &ConfigSet) -> Result<Option<PathBuf>> {
     if let Some(path) = config.get("core.attributesfile") {
-        return Ok(Some(PathBuf::from(parse_path(&path))));
+        return Ok(Some(PathBuf::from(parse_path(
+            &crate::environment::Environment::empty(),
+            &path,
+        ))));
     }
-    let home = std::env::var("HOME").ok();
+    let home = crate::environment::Environment::empty().var("HOME");
     let Some(home) = home else {
         return Ok(None);
     };
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+    if let Some(xdg) = crate::environment::Environment::empty().var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
             return Ok(Some(PathBuf::from(xdg).join("git/attributes")));
         }

@@ -71,13 +71,9 @@ fn local_change_diffs(
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
-    let config = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
-        Some(&repo.git_dir),
-        true,
-    )
-    .ok()
-    .map(Arc::new);
+    let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true)
+        .ok()
+        .map(Arc::new);
     let worktree_rules = match config.as_ref() {
         Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
             repo,

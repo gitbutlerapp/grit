@@ -375,8 +375,8 @@ mod tests {
         fs::write(root.join("tracked.txt"), b"x\n").unwrap();
         stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
 
-        let prev_global = env::var("GIT_CONFIG_GLOBAL").ok();
-        let prev_system = env::var("GIT_CONFIG_SYSTEM").ok();
+        let prev_global = crate::environment::Environment::empty().var("GIT_CONFIG_GLOBAL");
+        let prev_system = crate::environment::Environment::empty().var("GIT_CONFIG_SYSTEM");
         env::set_var("GIT_CONFIG_GLOBAL", &global);
         env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
 
@@ -421,7 +421,7 @@ mod tests {
         let git_dir_thread = git_dir.clone();
         let probe = std::thread::spawn(move || is_reftable_repo(&git_dir_thread));
         let cfg = ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(&git_dir),
             true,
         )

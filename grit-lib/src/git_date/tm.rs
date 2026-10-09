@@ -1,10 +1,8 @@
 //! Time conversion helpers that produce Git-compatible timestamps.
 
-use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::compat::{self, time_t, tm};
-
-static EXPLICIT_TZ_LOCK: Mutex<()> = Mutex::new(());
 
 /// Unix timestamp as used by Git (`timestamp_t` is typically `uintmax_t`).
 pub type Timestamp = u64;
@@ -131,9 +129,9 @@ pub fn local_tzoffset(time: u64) -> TzHhmm {
 /// Like [`local_tzoffset`] but uses an explicit `TZ`-style string when provided.
 ///
 /// Fixed numeric offsets (`+0200`, `-0500`, `+02:00`) and `UTC`/`GMT` are parsed without
-/// touching the process environment. Named IANA zones (e.g. `America/New_York`) apply that
-/// zone for the instant via a scoped `TZ`/`tzset` sequence so results do not depend on the
-/// ambient process timezone.
+/// touching the process environment. IANA names (e.g. `America/New_York`) and POSIX `TZ`
+/// specs (e.g. `EST5`, `EST5EDT`) are resolved from the tzdata / POSIX rules without
+/// mutating the process environment.
 #[must_use]
 pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
     if date_overflows(time) {
@@ -143,9 +141,7 @@ pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
         if let Some(hhmm) = parse_fixed_tz_hhmm(tz) {
             return hhmm;
         }
-        if is_named_tz(tz) {
-            return local_tzoffset_with_named_zone(time, tz);
-        }
+        return local_tzoffset_with_zone_spec(time, tz);
     }
     let t = time as time_t;
     let mut buf = std::mem::MaybeUninit::<tm>::uninit();
@@ -155,30 +151,33 @@ pub fn local_tzoffset_with_tz(time: u64, tz: Option<&str>) -> TzHhmm {
     }
 }
 
-fn is_named_tz(tz: &str) -> bool {
-    let t = tz.trim();
-    !t.is_empty()
-        && !t.starts_with('+')
-        && !t.starts_with('-')
-        && !t.chars().all(|c| c.is_ascii_digit() || c == ':')
+fn local_tzoffset_with_zone_spec(time: u64, tz: &str) -> TzHhmm {
+    if tz.contains('/') {
+        if let Some(zone) = tzdb::tz_by_name(tz) {
+            if let Ok(local) = zone.find_local_time_type(time as i64) {
+                return utc_offset_secs_to_hhmm(local.ut_offset());
+            }
+        }
+    }
+    if let Ok(zone) = tz::TimeZone::from_posix_tz(tz) {
+        if let Ok(local) = zone.find_local_time_type(time as i64) {
+            return utc_offset_secs_to_hhmm(local.ut_offset());
+        }
+    }
+    if let Some(zone) = tzdb::tz_by_name(tz) {
+        if let Ok(local) = zone.find_local_time_type(time as i64) {
+            return utc_offset_secs_to_hhmm(local.ut_offset());
+        }
+    }
+    0
 }
 
-fn local_tzoffset_with_named_zone(time: u64, tz: &str) -> TzHhmm {
-    let _guard = EXPLICIT_TZ_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let saved = std::env::var("TZ").ok();
-    std::env::set_var("TZ", tz);
-    refresh_process_tz();
-    let t = time as time_t;
-    let mut buf = std::mem::MaybeUninit::<tm>::uninit();
-    let offset = unsafe { local_time_tzoffset(t, buf.as_mut_ptr()) };
-    match saved {
-        Some(prev) => std::env::set_var("TZ", prev),
-        None => std::env::remove_var("TZ"),
-    }
-    refresh_process_tz();
-    offset
+fn utc_offset_secs_to_hhmm(offset_secs: i32) -> TzHhmm {
+    let sign = if offset_secs >= 0 { 1 } else { -1 };
+    let abs = offset_secs.unsigned_abs();
+    let hours = (abs / 3600) as i32;
+    let minutes = ((abs % 3600) / 60) as i32;
+    sign * (hours * 100 + minutes)
 }
 
 /// Re-read the process timezone after `TZ` changes (scoped named zones and integration tests).
@@ -225,8 +224,18 @@ mod local_tz_tests {
     use super::*;
 
     #[test]
+    fn posix_tz_est5_matches_git() {
+        let off = local_tzoffset_with_tz(1_112_911_993, Some("EST5"));
+        assert_eq!(
+            off, -500,
+            "EST5 at 2005-04-07 should be -0500 in Git HHMM encoding"
+        );
+    }
+
+    #[test]
     fn explicit_named_tz_ignores_process_timezone() {
-        let saved = std::env::var("TZ").ok();
+        let env = crate::environment::Environment::empty();
+        let saved = env.var("TZ");
         std::env::set_var("TZ", "UTC");
         refresh_process_tz();
         let off = local_tzoffset_with_tz(1_112_911_993, Some("America/New_York"));
@@ -242,17 +251,11 @@ mod local_tz_tests {
     }
 }
 
-/// Current Unix time in seconds (no environment reads).
+/// Process wall clock in whole seconds (real time; not repository-scoped).
 #[must_use]
-pub fn get_time_sec() -> i64 {
-    system_now_sec()
-}
-
-/// Current Unix time in seconds (no environment reads).
-#[must_use]
-pub fn system_now_sec() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+pub fn process_wall_clock_sec() -> i64 {
+    let now = SystemTime::now(); // hygiene: process wall clock when no repository handle supplies reference time
+    now.duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }

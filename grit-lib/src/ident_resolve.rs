@@ -21,20 +21,6 @@ pub trait IdentityEnv {
     fn var_os(&self, key: &str) -> Option<OsString>;
 }
 
-/// Environment provider backed by the current process environment.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemIdentityEnv;
-
-impl IdentityEnv for SystemIdentityEnv {
-    fn var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
-    }
-
-    fn var_os(&self, key: &str) -> Option<OsString> {
-        std::env::var_os(key)
-    }
-}
-
 /// Whether `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` is unset vs set (possibly empty).
 ///
 /// Git treats a set-but-empty value as an explicit override: it must not fall through
@@ -287,7 +273,7 @@ pub fn peek_name_with<E: IdentityEnv>(
                     return Some(t.to_owned());
                 }
             }
-            let d = ident_default_name(config);
+            let d = ident_default_name(config, env);
             if d.is_empty() {
                 None
             } else {
@@ -313,10 +299,10 @@ pub fn resolve_name_with<E: IdentityEnv>(
                 if !t.is_empty() {
                     t.to_owned()
                 } else {
-                    ident_default_name(config)
+                    ident_default_name(config, env)
                 }
             } else {
-                ident_default_name(config)
+                ident_default_name(config, env)
             }
         }
     };
@@ -361,7 +347,7 @@ pub fn resolve_loose_committer_parts_with<E: IdentityEnv>(
             .filter(|s| !s.is_empty())
     })
     .or_else(|| {
-        let d = ident_default_name(config);
+        let d = ident_default_name(config, env);
         if d.is_empty() {
             None
         } else {

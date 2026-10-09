@@ -148,7 +148,7 @@ fn sha256_grit_midx_and_rev_passes_git_verify() {
     };
     let objects = git_dir.join("objects");
     let pack_dir = objects.join("pack");
-    let algo = hash_algo_for_objects_dir(&objects);
+    let algo = hash_algo_for_objects_dir(&grit_lib::environment::Environment::empty(), &objects);
     assert_eq!(algo, HashAlgo::Sha256);
 
     grit_write_midx_with_rev(&pack_dir);
@@ -193,7 +193,7 @@ fn sha256_git_midx_grit_reads_every_object() {
     };
     let objects = git_dir.join("objects");
     let pack_dir = objects.join("pack");
-    let algo = hash_algo_for_objects_dir(&objects);
+    let algo = hash_algo_for_objects_dir(&grit_lib::environment::Environment::empty(), &objects);
     assert_eq!(algo, HashAlgo::Sha256);
 
     git(_tmp.path(), &["multi-pack-index", "write"]);
@@ -289,8 +289,9 @@ fn sha256_objectformat_odd_casing_resolves_for_midx() {
     text.push_str("\n[ExTeNsIoNs]\n\tObjectFormat = Sha256\n");
     std::fs::write(&config, text).expect("append extensions section");
 
-    assert_eq!(hash_algo_for_git_dir(&git_dir), HashAlgo::Sha256);
-    assert_eq!(hash_algo_for_objects_dir(&objects), HashAlgo::Sha256);
+    let env = grit_lib::environment::Environment::empty();
+    assert_eq!(hash_algo_for_git_dir(&env, &git_dir), HashAlgo::Sha256);
+    assert_eq!(hash_algo_for_objects_dir(&env, &objects), HashAlgo::Sha256);
 
     grit_write_midx_with_rev(&objects.join("pack"));
 
@@ -405,7 +406,7 @@ fn sha256_incremental_midx_read_objects() {
         );
     }
 
-    let algo = hash_algo_for_objects_dir(&objects);
+    let algo = hash_algo_for_objects_dir(&grit_lib::environment::Environment::empty(), &objects);
     let sample = listed[0].oid;
     assert!(
         try_read_object_via_midx(&objects, &sample)

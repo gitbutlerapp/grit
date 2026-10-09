@@ -31,7 +31,7 @@ impl IngestPackOptions {
             Parallelism::resolve(Some(n))
         } else if let Some(git_dir) = odb.config_git_dir() {
             crate::config::ConfigSet::load(
-                &crate::environment::Environment::capture_process(),
+                &crate::environment::Environment::empty(),
                 Some(git_dir),
                 true,
             )

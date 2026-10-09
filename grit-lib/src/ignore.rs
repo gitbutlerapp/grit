@@ -360,7 +360,7 @@ fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
         return Ok(Vec::new());
     };
 
-    let expanded = parse_path(&raw_path);
+    let expanded = parse_path(repo.environment(), &raw_path);
     let resolved = if Path::new(&expanded).is_absolute() {
         PathBuf::from(&expanded)
     } else if let Some(work_tree) = &repo.work_tree {
@@ -374,14 +374,14 @@ fn load_global_excludes(repo: &Repository) -> Result<Vec<IgnoreRule>> {
 }
 
 fn default_global_ignore_path() -> Option<String> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+    if let Some(xdg) = crate::environment::Environment::empty().var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
             return Some(format!("{xdg}/git/ignore"));
         }
     }
 
-    std::env::var("HOME")
-        .ok()
+    crate::environment::Environment::empty()
+        .var("HOME")
         .map(|home| format!("{home}/.config/git/ignore"))
 }
 

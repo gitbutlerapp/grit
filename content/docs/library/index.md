@@ -8,6 +8,7 @@ These pages walk through opening a repository, the object database, refs, the in
 | Page | Topic |
 | --- | --- |
 | [Repository](repository/) | Discover, open, config, errors |
+| [Embedding](embedding/) | Environment, sinks, subprocess injection, concurrency |
 | [Objects](objects/) | Odb read/write, object kinds |
 | [Refs](refs/) | Resolve, list, update refs and reflog |
 | [Index](staging/) | Read index, stage paths, write trees |

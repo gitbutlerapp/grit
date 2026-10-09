@@ -531,7 +531,7 @@ fn global_excludes_path(repo: &Repository, config: &ConfigSet) -> Option<PathBuf
     let raw = config
         .get("core.excludesFile")
         .or_else(|| config.get("core.excludesfile"))?;
-    let expanded = parse_path(&raw);
+    let expanded = parse_path(repo.environment(), &raw);
     let p = Path::new(&expanded);
     if p.is_absolute() {
         Some(p.to_path_buf())

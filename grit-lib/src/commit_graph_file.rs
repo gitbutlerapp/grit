@@ -544,13 +544,6 @@ impl CommitGraphLayer {
         let mut chunk_bloom_data = None;
         if let (Some(_bidx), Some((bdat_off, bdat_len))) = (bloom_idx_off, bloom_data_range) {
             if bdat_len < BLOOM_HEADER {
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::warning_line(&format!(
-                        "ignoring too-small changed-path chunk ({} < {}) in commit-graph file",
-                        bdat_len, BLOOM_HEADER
-                    ))
-                );
             } else if bdat_off + bdat_len <= body.len() {
                 let hdr = &body[bdat_off..bdat_off + BLOOM_HEADER];
                 let hash_version: [u8; 4] = hdr[0..4]
@@ -573,17 +566,7 @@ impl CommitGraphLayer {
         }
 
         let bloom_indexes_ok = if let (Some(bidx), Some(bsize)) = (bloom_idx_off, bidx_len) {
-            if bsize / 4 != num_commits as usize || bidx + bsize > body.len() {
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::warning_line(
-                        "commit-graph changed-path index chunk is too small"
-                    )
-                );
-                false
-            } else {
-                true
-            }
+            !(bsize / 4 != num_commits as usize || bidx + bsize > body.len())
         } else {
             false
         };
@@ -695,7 +678,7 @@ impl CommitGraphLayer {
         let _settings = self.bloom_settings.as_ref()?;
         let bidx_base = self.chunk_bloom_indexes?;
         let (bdat_off, bdat_total) = self.chunk_bloom_data?;
-        let graph_warn = warn_path_for_graph_file(self.path.as_path());
+        let _graph_warn = warn_path_for_graph_file(self.path.as_path());
         if lex_index >= self.num_commits {
             return None;
         }
@@ -722,39 +705,12 @@ impl CommitGraphLayer {
         // back) when it fails.
         let max_payload = payload_len;
         if end_rel > max_payload {
-            eprintln!(
-                "{}",
-                crate::diagnostics::warning_line(&format!(
-                    "ignoring out-of-range offset ({end_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
-                    lex_index,
-                    graph_warn,
-                    bdat_total = bdat_total
-                ))
-            );
             return None;
         }
         if start_rel > max_payload {
-            eprintln!(
-                "{}",
-                crate::diagnostics::warning_line(&format!(
-                    "ignoring out-of-range offset ({start_rel}) for changed-path filter at pos {} of {} (chunk size: {bdat_total})",
-                    lex_index.saturating_sub(1),
-                    graph_warn,
-                    bdat_total = bdat_total
-                ))
-            );
             return None;
         }
         if end_rel < start_rel {
-            eprintln!(
-                "{}",
-                crate::diagnostics::warning_line(&format!(
-                    "ignoring decreasing changed-path index offsets ({start_rel} > {end_rel}) for positions {} and {} of {}",
-                    lex_index.saturating_sub(1),
-                    lex_index,
-                    graph_warn
-                ))
-            );
             return None;
         }
         let data_base = bdat_off + BLOOM_HEADER;
@@ -934,7 +890,8 @@ impl CommitGraphChain {
         let info = objects_dir.join("info");
         let chain_path = info.join("commit-graphs").join("commit-graph-chain");
         if chain_path.is_file() {
-            let algo = hash_algo_for_objects_dir(objects_dir);
+            let algo =
+                hash_algo_for_objects_dir(&crate::environment::Environment::empty(), objects_dir);
             let content = std::fs::read_to_string(&chain_path).map_err(Error::from)?;
             let mut layers = Vec::new();
             for line in content.lines() {
@@ -953,14 +910,7 @@ impl CommitGraphChain {
                 // already loaded below this one.
                 let n = layers.len();
                 if n > 0 && layer.base_chunk_size / layer.hash_len < n {
-                    if warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id()) {
-                        eprintln!(
-                            "{}",
-                            crate::diagnostics::warning_line(
-                                "commit-graph base graphs chunk is too small"
-                            )
-                        );
-                    }
+                    warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id());
                     break;
                 }
                 layers.push(layer);
@@ -1066,7 +1016,8 @@ impl CommitGraphChain {
             }
         };
 
-        let algo = hash_algo_for_objects_dir(objects_dir);
+        let algo =
+            hash_algo_for_objects_dir(&crate::environment::Environment::empty(), objects_dir);
         let content = std::fs::read_to_string(&chain_path).map_err(Error::from)?;
         let mut layers = Vec::new();
         for line in content.lines() {
@@ -1084,14 +1035,7 @@ impl CommitGraphChain {
             let layer = CommitGraphLayer::try_parse(graph_path, raw)?;
             let n = layers.len();
             if n > 0 && layer.base_chunk_size / layer.hash_len < n {
-                if warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id()) {
-                    eprintln!(
-                        "{}",
-                        crate::diagnostics::warning_line(
-                            "commit-graph base graphs chunk is too small"
-                        )
-                    );
-                }
+                warn_once_for_base_chunk_too_small(caches, &layer.layer_display_id());
                 break;
             }
             layers.push(layer);
@@ -1129,14 +1073,7 @@ impl CommitGraphChain {
                         // most once per layer. Grit re-reads the chain from disk several
                         // times within a single command (settings probe, commit set,
                         // filter reuse), so dedupe the warning per layer id to match.
-                        if warn_once_for_disabled_bloom_layer(caches, &id) {
-                            eprintln!(
-                                "{}",
-                                crate::diagnostics::warning_line(&format!(
-                                    "disabling Bloom filters for commit-graph layer '{id}' due to incompatible settings"
-                                ))
-                            );
-                        }
+                        warn_once_for_disabled_bloom_layer(caches, &id);
                         layer.disable_bloom();
                     }
                 }

@@ -196,7 +196,7 @@ fn target_file(global: bool) -> Result<(ConfigScope, PathBuf)> {
 /// an existing `~/.gitconfig`, then an existing XDG `git/config`, otherwise the
 /// conventional `~/.gitconfig`.
 fn global_config_path() -> Option<PathBuf> {
-    let paths = grit_lib::config::global_config_paths_pub();
+    let paths = grit_lib::config::global_config_paths_pub(&crate::context::environment());
     // grit-lib returns `[XDG git/config, ~/.gitconfig]` (or a single
     // `$GIT_CONFIG_GLOBAL`); the last entry is the conventional `~/.gitconfig`.
     let dotgitconfig = paths.last().cloned();

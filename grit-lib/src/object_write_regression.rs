@@ -65,6 +65,7 @@ fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
 }
 
 fn git_in(dir: &Path, args: &[&str]) {
+    // hygiene: git oracle subprocess in integration test module
     let out = Command::new("git")
         .current_dir(dir)
         .args(args)
@@ -85,6 +86,7 @@ fn git_in(dir: &Path, args: &[&str]) {
 }
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
+    // hygiene: git oracle subprocess in integration test module
     let out = Command::new("git")
         .current_dir(dir)
         .args(args)

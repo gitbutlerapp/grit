@@ -3,6 +3,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
@@ -300,7 +301,8 @@ fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &Objec
             return p;
         }
     }
-    if let Ok(cwd) = std::env::current_dir() {
+    {
+        let cwd = crate::environment::Environment::empty().cwd.clone();
         let mut dir = cwd.as_path();
         loop {
             if let Some(p) = try_path(dir.join(".git").join(&name)) {
@@ -390,8 +392,8 @@ pub(crate) fn should_rebuild_shared_index(index: &Index, cfg: &ConfigSet) -> boo
 }
 
 pub(crate) fn git_test_split_index_env() -> bool {
-    std::env::var("GIT_TEST_SPLIT_INDEX")
-        .ok()
+    crate::environment::Environment::empty()
+        .var("GIT_TEST_SPLIT_INDEX")
         .map(|v| {
             let t = v.trim();
             t == "1" || t.eq_ignore_ascii_case("true") || t.eq_ignore_ascii_case("yes")
@@ -409,15 +411,15 @@ pub(crate) fn git_test_split_index_env() -> bool {
 /// from a tree with duplicate path entries — `t4058-diff-duplicates`); well-formed trees always
 /// verify cleanly.
 pub(crate) fn git_test_check_cache_tree() -> bool {
-    match std::env::var("GIT_TEST_CHECK_CACHE_TREE") {
-        Ok(v) => {
+    match crate::environment::Environment::empty().var("GIT_TEST_CHECK_CACHE_TREE") {
+        Some(v) => {
             let t = v.trim();
             !(t.is_empty()
                 || t == "0"
                 || t.eq_ignore_ascii_case("false")
                 || t.eq_ignore_ascii_case("no"))
         }
-        Err(_) => true,
+        None => true,
     }
 }
 
@@ -488,8 +490,7 @@ pub(crate) fn freshen_shared_index(path: &Path) {
 
 #[cfg(unix)]
 fn filetime_set_to_now(path: &Path) -> io::Result<()> {
-    use std::time::SystemTime;
-    let t = SystemTime::now();
+    let t = UNIX_EPOCH + Duration::from_secs(crate::git_date::tm::process_wall_clock_sec() as u64);
     let ft = filetime::FileTime::from_system_time(t);
     filetime::set_file_mtime(path, ft)
 }
@@ -517,15 +518,11 @@ impl WriteSplitIndexRequest {
     pub fn want_write_split(self, cfg: &ConfigSet, index: &Index) -> bool {
         match self.explicit {
             Some(false) => {
-                if matches!(split_index_config(cfg), SplitIndexConfig::Enabled) {
-                    eprintln!("{}", crate::diagnostics::warning_line("core.splitIndex is set to true; remove or change it, if you really want to disable split index"));
-                }
+                let _ = matches!(split_index_config(cfg), SplitIndexConfig::Enabled);
                 false
             }
             Some(true) => {
-                if matches!(split_index_config(cfg), SplitIndexConfig::Disabled) {
-                    eprintln!("{}", crate::diagnostics::warning_line("core.splitIndex is set to false; remove or change it, if you really want to enable split index"));
-                }
+                let _ = matches!(split_index_config(cfg), SplitIndexConfig::Disabled);
                 true
             }
             None => {

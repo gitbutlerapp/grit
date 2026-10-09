@@ -62,7 +62,7 @@ pub fn registered_worktree_count(common: &Path) -> usize {
 #[must_use]
 pub fn is_bare_repository(common: &Path) -> bool {
     ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(common),
         true,
     )

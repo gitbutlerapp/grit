@@ -366,6 +366,7 @@ struct BuiltinPattern {
     ignore_case: bool,
 }
 
+// hygiene: immutable built-in diff funcname matchers, initialized once
 static BUILTIN_FUNCNAME_MATCHERS: OnceLock<BTreeMap<String, Arc<FuncnameMatcher>>> =
     OnceLock::new();
 
@@ -514,7 +515,8 @@ pub fn matcher_for_driver(
 
 fn cached_builtin_matcher(driver: &str) -> Option<Arc<FuncnameMatcher>> {
     let map = BUILTIN_FUNCNAME_MATCHERS.get_or_init(|| {
-        parse_builtin_patterns()
+        builtin_patterns()
+            .clone()
             .into_iter()
             .map(|(name, builtin)| {
                 let matcher = compile_matcher(&builtin.pattern, true, builtin.ignore_case)

@@ -73,6 +73,8 @@ pub struct Environment {
     pub program_files: Option<String>,
     /// Windows `%ProgramFiles(x86)%`.
     pub program_files_x86: Option<String>,
+    /// Full variable snapshot from [`Self::from_vars`] / [`Self::capture_process`].
+    pub(crate) captured_vars: HashMap<String, OsString>,
 }
 
 impl Environment {
@@ -125,12 +127,14 @@ impl Environment {
             username: None,
             program_files: None,
             program_files_x86: None,
+            captured_vars: HashMap::new(),
         }
     }
 
     /// Parse known discovery/config variables from `vars` without reading the process environment.
     ///
-    /// Unknown keys are ignored. `GIT_CONFIG_COUNT` expands into [`Self::git_config_pairs`].
+    /// Unknown keys from `vars` are retained for later lookup via [`Self::var`] / [`Self::var_os`].
+    /// `GIT_CONFIG_COUNT` expands into [`Self::git_config_pairs`].
     pub fn from_vars(vars: impl IntoIterator<Item = (OsString, OsString)>, cwd: PathBuf) -> Self {
         let map: HashMap<String, OsString> = vars
             .into_iter()
@@ -200,6 +204,7 @@ impl Environment {
             username: get("USERNAME"),
             program_files: get("ProgramFiles"),
             program_files_x86: get("ProgramFiles(x86)"),
+            captured_vars: map,
         }
     }
 
@@ -230,6 +235,7 @@ impl Environment {
     /// Snapshot discovery/config variables from the current process (CLI and legacy call sites).
     #[must_use]
     pub fn capture_process() -> Self {
+        // hygiene: CLI boundary — snapshot process environment into [`Environment`].
         Self::from_vars(std::env::vars_os(), process_cwd_fallback())
     }
 
@@ -345,7 +351,10 @@ impl Environment {
                 let idx: usize = key["GIT_CONFIG_VALUE_".len()..].parse().ok()?;
                 self.git_config_pairs.get(idx).map(|p| p.1.clone())
             }
-            _ => None,
+            _ => self
+                .captured_vars
+                .get(key)
+                .and_then(|v| v.to_str().map(str::to_owned)),
         }
     }
 
@@ -363,7 +372,10 @@ impl Environment {
         if key == "GIT_EXEC_PATH" {
             return self.git_exec_path.clone();
         }
-        self.var(key).map(OsString::from)
+        if let Some(v) = self.var(key) {
+            return Some(OsString::from(v));
+        }
+        self.captured_vars.get(key).cloned()
     }
 
     /// Resolve `cwd` for discovery: canonicalize when possible without `env::current_dir`.
@@ -591,6 +603,7 @@ impl RepositoryOptions {
 }
 
 fn process_cwd_fallback() -> PathBuf {
+    // hygiene: used only from [`Environment::capture_process`].
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 

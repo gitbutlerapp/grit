@@ -9,8 +9,8 @@ pub struct DateParseError;
 
 use super::compat::{self, time_t, tm};
 use super::tm::{
-    empty_tm, get_time_sec, init_tm_unknown, is_date_known, match_string, maybeiso8601, nodate,
-    parse_timestamp_prefix, skip_alpha, tm_to_time_t, TIMESTAMP_MAX,
+    empty_tm, init_tm_unknown, is_date_known, match_string, maybeiso8601, nodate,
+    parse_timestamp_prefix, process_wall_clock_sec, skip_alpha, tm_to_time_t, TIMESTAMP_MAX,
 };
 
 struct TzName {
@@ -280,12 +280,22 @@ pub fn date_string(date: u64, offset: i32) -> String {
 
 /// Git `parse_date` — returns canonical `date_string` output.
 pub fn parse_date(date: &str) -> Result<String, DateParseError> {
-    let (ts, off) = parse_date_basic(date)?;
+    parse_date_at(date, process_wall_clock_sec())
+}
+
+/// Like [`parse_date`] but uses `now_sec` for relative and fuzzy fields.
+pub fn parse_date_at(date: &str, now_sec: i64) -> Result<String, DateParseError> {
+    let (ts, off) = parse_date_basic_at(date, now_sec)?;
     Ok(date_string(ts, off))
 }
 
 /// Git `parse_date_basic` — UTC seconds and timezone offset in **minutes** (signed).
 pub fn parse_date_basic(date: &str) -> Result<(u64, i32), DateParseError> {
+    parse_date_basic_at(date, process_wall_clock_sec())
+}
+
+/// Like [`parse_date_basic`] but uses `now_sec` for relative and fuzzy fields.
+pub fn parse_date_basic_at(date: &str, now_sec: i64) -> Result<(u64, i32), DateParseError> {
     let bytes = date.as_bytes();
     let mut tm = init_tm_unknown();
     let mut offset: i32 = -1;
@@ -307,7 +317,7 @@ pub fn parse_date_basic(date: &str) -> Result<(u64, i32), DateParseError> {
         if c.is_ascii_alphabetic() {
             m = match_alpha(&bytes[i..], &mut tm, &mut offset);
         } else if c.is_ascii_digit() {
-            m = match_digit(&bytes[i..], &mut tm, &mut offset, &mut tm_gmt);
+            m = match_digit(&bytes[i..], &mut tm, &mut offset, &mut tm_gmt, now_sec);
         } else if (c == b'-' || c == b'+') && bytes.get(i + 1).is_some_and(|x| x.is_ascii_digit()) {
             m = match_tz(&bytes[i..], &mut offset);
         }
@@ -563,7 +573,11 @@ pub(crate) fn match_multi_number(
             }
         }
         b'-' | b'/' | b'.' => {
-            let now = if now_in == 0 { get_time_sec() } else { now_in };
+            let now = if now_in == 0 {
+                process_wall_clock_sec()
+            } else {
+                now_in
+            };
             let mut now_tm = empty_tm();
             let refuse_future: Option<&tm> = if compat::gmtime(now as time_t, &mut now_tm) {
                 Some(&now_tm)
@@ -649,7 +663,13 @@ fn match_alpha(date: &[u8], tm: &mut tm, offset: &mut i32) -> usize {
     skip_alpha(date)
 }
 
-fn match_digit(date: &[u8], tm: &mut tm, offset: &mut i32, tm_gmt: &mut i32) -> usize {
+fn match_digit(
+    date: &[u8],
+    tm: &mut tm,
+    offset: &mut i32,
+    tm_gmt: &mut i32,
+    now_sec: i64,
+) -> usize {
     let (num, n) = parse_timestamp_prefix(date);
     if n == 0 {
         return 0;
@@ -665,7 +685,7 @@ fn match_digit(date: &[u8], tm: &mut tm, offset: &mut i32, tm_gmt: &mut i32) -> 
         if matches!(sep, b':' | b'.' | b'/' | b'-')
             && date.get(end + 1).is_some_and(|b| b.is_ascii_digit())
         {
-            let m = match_multi_number(num, date, end, tm, 0);
+            let m = match_multi_number(num, date, end, tm, now_sec);
             if m != 0 {
                 return m;
             }
@@ -685,7 +705,7 @@ fn match_digit(date: &[u8], tm: &mut tm, offset: &mut i32, tm_gmt: &mut i32) -> 
         let num2 = ((num % 10000) / 100) as i32;
         let num3 = (num % 100) as i32;
         if n_digits == 8 {
-            let _ = set_date(num1, num2, num3, None, get_time_sec(), tm);
+            let _ = set_date(num1, num2, num3, None, now_sec, tm);
         } else if set_time(num1 as i64, num2 as i64, num3 as i64, tm) == 0
             && date.get(end) == Some(&b'.')
             && date.get(end + 1).is_some_and(|b| b.is_ascii_digit())

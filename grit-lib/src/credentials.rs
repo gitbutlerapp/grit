@@ -525,7 +525,7 @@ fn hex_value(byte: u8) -> Option<u8> {
 /// `/usr/libexec/git-core`, which is not on `PATH`.
 fn credential_helper_exec_path_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    if let Ok(ep) = std::env::var("GIT_EXEC_PATH") {
+    if let Some(ep) = crate::environment::Environment::empty().var("GIT_EXEC_PATH") {
         let p = PathBuf::from(ep.trim());
         if p.is_dir() {
             v.push(p);

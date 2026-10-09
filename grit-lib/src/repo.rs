@@ -256,10 +256,19 @@ impl Repository {
     /// Unix timestamp for rev-parse relative date selectors (`@{yesterday}`, etc.).
     #[must_use]
     pub fn reference_unix_time(&self) -> i64 {
+        self.wall_clock_epoch()
+    }
+
+    /// Wall clock used for commit dates, rerere GC, relative dates, and similar operations on this handle.
+    #[must_use]
+    pub fn wall_clock_epoch(&self) -> i64 {
         if let Some(ts) = self.reference_unix_time {
             return ts;
         }
-        self.environment.git_now_date_override().unwrap_or(0)
+        if let Some(ts) = self.environment.git_now_date_override() {
+            return ts;
+        }
+        crate::git_date::tm::process_wall_clock_sec()
     }
 
     /// Subprocess runner used for hooks, filters, and helpers.
@@ -2174,9 +2183,7 @@ fn ensure_safe_directory_allows(
 ) -> Result<()> {
     let effective = safe_directory_effective_values(git_dir, environment);
     let checked_s = checked.to_string_lossy().to_string();
-    if environment.grit_debug_safe_dir {
-        eprintln!("debug-safe-directory values={:?}", effective);
-    }
+    let _ = environment.grit_debug_safe_dir;
     if effective
         .iter()
         .any(|v| safe_directory_matches(v, &checked_s, &environment.discovery_cwd()))
@@ -2306,15 +2313,7 @@ impl Repository {
                 .unwrap_or_else(|_| self.git_dir.clone())
         };
 
-        if self.environment.grit_debug_safe_dir {
-            eprintln!(
-                "debug-safe-directory checked={} git_dir={} work_tree={:?} cwd={:?}",
-                checked.display(),
-                self.git_dir.display(),
-                self.work_tree,
-                Some(self.environment.discovery_cwd())
-            );
-        }
+        let _ = self.environment.grit_debug_safe_dir;
         self.enforce_safe_directory_checked(&checked)
     }
 
@@ -2332,14 +2331,7 @@ impl Repository {
             .git_dir
             .canonicalize()
             .unwrap_or_else(|_| self.git_dir.clone());
-        if self.environment.grit_debug_safe_dir {
-            eprintln!(
-                "debug-safe-directory(gitdir) checked={} git_dir={} work_tree={:?}",
-                checked.display(),
-                self.git_dir.display(),
-                self.work_tree
-            );
-        }
+        let _ = self.environment.grit_debug_safe_dir;
         self.enforce_safe_directory_checked(&checked)
     }
 
@@ -2478,7 +2470,7 @@ fn read_core_bare_and_worktree_from_config(cfg: &ConfigSet) -> (bool, Option<Str
 
 fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)> {
     let cfg = ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -2702,7 +2694,7 @@ fn write_fresh_git_directory(
     apply_init_filesystem_config(
         git_dir,
         InitFilesystemConfigOptions::default(),
-        &Environment::capture_process(),
+        &Environment::empty(),
     )?;
 
     fs::write(
@@ -2828,7 +2820,7 @@ pub fn init_bare_clone_minimal(
     apply_init_filesystem_config(
         git_dir,
         InitFilesystemConfigOptions::default(),
-        &Environment::capture_process(),
+        &crate::environment::Environment::empty(),
     )?;
 
     fs::write(
@@ -2957,7 +2949,7 @@ pub fn init_repository_separate(
     apply_init_filesystem_config(
         git_dir,
         InitFilesystemConfigOptions::default(),
-        &Environment::capture_process(),
+        &Environment::empty(),
     )?;
     fs::write(
         git_dir.join("description"),

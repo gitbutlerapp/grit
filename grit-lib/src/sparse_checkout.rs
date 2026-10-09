@@ -511,7 +511,7 @@ pub fn apply_sparse_checkout_skip_worktree(
     }
 
     let config = crate::config::ConfigSet::load(
-        &crate::environment::Environment::capture_process(),
+        &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
@@ -655,7 +655,7 @@ pub fn clear_skip_worktree_from_present_files(
 ) {
     let config = config.cloned().unwrap_or_else(|| {
         crate::config::ConfigSet::load(
-            &crate::environment::Environment::capture_process(),
+            &crate::environment::Environment::empty(),
             Some(git_dir),
             true,
         )

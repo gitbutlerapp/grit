@@ -259,20 +259,26 @@ enum ResolvedHook {
 
 /// Resolve the hooks directory from config or fall back to `$GIT_DIR/hooks`.
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
-    resolve_hooks_dir_for_config(Some(&repo.git_dir), repo.config().ok().as_deref())
+    resolve_hooks_dir_for_config(
+        repo.environment(),
+        Some(&repo.git_dir),
+        repo.config().ok().as_deref(),
+    )
 }
 
-fn resolve_hooks_dir_for_config(git_dir: Option<&Path>, config: Option<&ConfigSet>) -> PathBuf {
+fn resolve_hooks_dir_for_config(
+    env: &crate::environment::Environment,
+    git_dir: Option<&Path>,
+    config: Option<&ConfigSet>,
+) -> PathBuf {
     if let Some(cfg) = config {
         if let Some(hooks_path) = cfg.get("core.hooksPath") {
-            let expanded = parse_path(&hooks_path);
+            let expanded = parse_path(env, &hooks_path);
             let p = PathBuf::from(expanded);
             if p.is_absolute() {
                 return p;
             }
-            if let Ok(cwd) = std::env::current_dir() {
-                return cwd.join(p);
-            }
+            return env.cwd.join(p);
         }
     }
     git_dir
@@ -369,7 +375,8 @@ fn resolve_hook_sequence(
     for (_friendly, command) in tables.hooks_for_event(hook_name)? {
         seq.push(ResolvedHook::Configured { command });
     }
-    let hooks_dir = resolve_hooks_dir_for_config(Some(&repo.git_dir), Some(config));
+    let hooks_dir =
+        resolve_hooks_dir_for_config(repo.environment(), Some(&repo.git_dir), Some(config));
     if let Some(path) = traditional_hook_candidate(repo, &hooks_dir, hook_name) {
         let work_dir = repo.work_tree.as_deref().unwrap_or(&repo.git_dir);
         let argv0 = hook_argv0(repo, &hooks_dir, hook_name, work_dir);
@@ -391,7 +398,7 @@ pub fn list_hooks_display_lines(
         lines.push(friendly);
     }
     if let Some(r) = repo {
-        let hooks_dir = resolve_hooks_dir_for_config(git_dir, Some(config));
+        let hooks_dir = resolve_hooks_dir_for_config(r.environment(), git_dir, Some(config));
         if traditional_hook_candidate(r, &hooks_dir, hook_name).is_some() {
             lines.push("hook from hookdir".to_owned());
         }
@@ -503,14 +510,7 @@ fn spawn_configured_hook(
     runner.spawn(&spec)
 }
 
-fn report_spawn_error(path: &Path, err: &std::io::Error) {
-    let msg = format!("{err}");
-    let p = path.display();
-    eprintln!(
-        "{}",
-        crate::diagnostics::error_line(&format!("cannot exec '{p}': {msg}"))
-    );
-}
+fn report_spawn_error(_path: &Path, _err: &std::io::Error) {}
 
 /// Result of running a hook.
 #[derive(Debug)]
@@ -662,13 +662,7 @@ pub fn run_hook_opts(
                     stderr_piped,
                 ) {
                     Ok(c) => c,
-                    Err(e) => {
-                        eprintln!(
-                            "{}",
-                            crate::diagnostics::error_line(&format!(
-                                "failed to run configured hook: {e}"
-                            ))
-                        );
+                    Err(_e) => {
                         return Ok(HookResult::Failed(1));
                     }
                 }
@@ -678,14 +672,7 @@ pub fn run_hook_opts(
         if let Some(ref path) = stdin_file {
             let file = match fs::File::open(path) {
                 Ok(f) => f,
-                Err(e) => {
-                    eprintln!(
-                        "{}",
-                        crate::diagnostics::error_line(&format!(
-                            "failed to open stdin file {}: {e}",
-                            path.display()
-                        ))
-                    );
+                Err(_e) => {
                     return Ok(HookResult::Failed(1));
                 }
             };
@@ -811,10 +798,7 @@ pub fn run_hook(
         None,
     ) {
         Ok(r) => r,
-        Err(msg) => {
-            eprintln!("{}", crate::diagnostics::fatal_line(&msg));
-            HookResult::Failed(1)
-        }
+        Err(_msg) => HookResult::Failed(1),
     }
 }
 

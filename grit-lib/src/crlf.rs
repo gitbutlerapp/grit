@@ -1196,34 +1196,26 @@ fn validate_utf_bom(
         let stripped = label
             .strip_prefix("utf")
             .or_else(|| label.strip_prefix("UTF"));
-        let utf_num = stripped
+        let _utf_num = stripped
             .map(|s| s.trim_start_matches('-'))
             .and_then(|s| s.get(..s.len().saturating_sub(2)))
             .unwrap_or("");
-        eprintln!(
-            "The file '{rel_path}' contains a byte order mark (BOM). Please use UTF-{utf_num} as working-tree-encoding."
-        );
         let body = format!("BOM is prohibited in '{rel_path}' if encoded as {label}");
         if die_on_error {
             return Err(body);
         }
-        eprintln!("{}", crate::diagnostics::error_line(&body));
         return Err(body);
     }
     if is_missing_required_utf_bom(canon, data) {
-        let utf_num = label
+        let _utf_num = label
             .strip_prefix("utf")
             .or_else(|| label.strip_prefix("UTF"))
             .map(|s| s.trim_start_matches('-'))
             .unwrap_or("");
-        eprintln!(
-            "The file '{rel_path}' is missing a byte order mark (BOM). Please use UTF-{utf_num}BE or UTF-{utf_num}LE (depending on the byte order) as working-tree-encoding."
-        );
         let body = format!("BOM is required in '{rel_path}' if encoded as {label}");
         if die_on_error {
             return Err(body);
         }
-        eprintln!("{}", crate::diagnostics::error_line(&body));
         return Err(body);
     }
     Ok(())
@@ -1246,7 +1238,7 @@ fn encoding_needs_roundtrip_check(enc_name: &str, conv: &ConversionConfig) -> bo
 /// Git `trace_printf("Checking roundtrip encoding for %s...\n", enc)`.
 fn trace_roundtrip_encoding(enc_name: &str) {
     use std::io::Write;
-    let Ok(trace_val) = std::env::var("GIT_TRACE") else {
+    let Some(trace_val) = crate::environment::Environment::empty().var("GIT_TRACE") else {
         return;
     };
     if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
@@ -1606,10 +1598,6 @@ pub fn convert_to_git_with_opts(
                 if e.starts_with("filter status: abort") {
                     filter_state.disable_process_filter(proc_cmd);
                 }
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::error_line(&format!("external filter '{name}' failed"))
-                );
             }
         }
     } else {
@@ -1746,24 +1734,10 @@ fn would_convert_on_input(conv: &ConversionConfig, attrs: &FileAttrs, data: &[u8
 }
 
 /// Git-compatible stderr when `core.safecrlf` is `warn` (clean direction, CRLF→LF).
-fn eprint_safecrlf_warn_crlf_to_lf(rel_path: &str) {
-    eprintln!(
-        "{}",
-        crate::diagnostics::warning_line(&format!(
-            "in the working copy of '{rel_path}', CRLF will be replaced by LF the next time Git touches it"
-        ))
-    );
-}
+fn eprint_safecrlf_warn_crlf_to_lf(_rel_path: &str) {}
 
 /// Git-compatible stderr when `core.safecrlf` is `warn` (clean direction, LF→CRLF).
-fn eprint_safecrlf_warn_lf_to_crlf(rel_path: &str) {
-    eprintln!(
-        "{}",
-        crate::diagnostics::warning_line(&format!(
-            "in the working copy of '{rel_path}', LF will be replaced by CRLF the next time Git touches it"
-        ))
-    );
-}
+fn eprint_safecrlf_warn_lf_to_crlf(_rel_path: &str) {}
 
 /// Git `convert.c` `check_global_conv_flags_eol` after simulating clean + smudge.
 fn check_safecrlf_roundtrip(
@@ -1959,10 +1933,6 @@ pub fn convert_to_worktree_with_runner(
                 if e.starts_with("filter status: abort") {
                     filter_state.disable_process_filter(proc_cmd);
                 }
-                eprintln!(
-                    "{}",
-                    crate::diagnostics::error_line(&format!("external filter '{driver}' failed"))
-                );
                 return Ok(Some(buf));
             }
         };

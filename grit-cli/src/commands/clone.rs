@@ -85,8 +85,9 @@ fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
         .context("could not load config")?;
     let refspecs = net::fetch_refspecs(&config, net::DEFAULT_REMOTE);
     let clone_message = format!("clone: from {url}");
-    let identity = grit_lib::fetch::fetch_operation_identity(&repo.git_dir)
-        .context("could not build clone reflog identity")?;
+    let identity =
+        grit_lib::fetch::fetch_operation_identity(&crate::context::environment(), &repo.git_dir)
+            .context("could not build clone reflog identity")?;
     let clone_reflog = CloneReflog {
         identity: identity.clone(),
         message: clone_message.clone(),

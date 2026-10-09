@@ -219,6 +219,7 @@ pub(crate) fn collect_refresh_hash_work_parallel(
 /// # Errors
 ///
 /// Propagates I/O or hashing failures from any worker.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn parallel_refresh_index_stat_hashes(
     odb: &Odb,
     entries: &[IndexEntry],

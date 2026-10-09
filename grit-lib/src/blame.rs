@@ -447,7 +447,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::ConfigSet;
 use crate::crlf::{
@@ -741,10 +740,7 @@ fn run_textconv_command(command: &str, input_data: &[u8]) -> Result<Vec<u8>> {
 fn create_temp_textconv_file(data: &[u8]) -> Result<std::path::PathBuf> {
     let pid = std::process::id();
     for attempt in 0..32u32 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
+        let now = crate::git_date::tm::process_wall_clock_sec() as u128;
         let path = std::env::temp_dir().join(format!("grit-blame-textconv-{pid}-{now}-{attempt}"));
         match OpenOptions::new().create_new(true).write(true).open(&path) {
             Ok(mut file) => {

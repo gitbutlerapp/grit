@@ -30,6 +30,7 @@ const PATTERNS: &[&str] = &[
     "command_new",
     "static_global",
     "system_time_now",
+    "capture_process",
 ];
 
 type PatternCounts = BTreeMap<&'static str, u32>;
@@ -48,6 +49,16 @@ fn hygiene_ratchet_matches_baseline() {
     let baseline_path = manifest_dir().join("hygiene-baseline.toml");
     let baseline = load_baseline(&baseline_path);
     let (counts, exempt) = scan_tree(&src);
+
+    let total_nonzero: u32 = counts
+        .values()
+        .flat_map(|file| PATTERNS.iter().map(move |p| *file.get(p).unwrap_or(&0)))
+        .sum();
+    assert_eq!(
+        total_nonzero, 0,
+        "grit-lib hygiene: all non-exempt pattern counts must be zero (got {total_nonzero}); \
+         fix code or add `// hygiene: reason` on exempt lines only"
+    );
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -788,6 +799,10 @@ fn pattern_hits(line: &str) -> PatternCounts {
         count_substring_occurrences(code, "Command::new")
     );
     bump_count!("system_time_now", count_system_time_now(code));
+    bump_count!(
+        "capture_process",
+        count_substring_occurrences(code, "::capture_process()")
+    );
 
     counts
 }

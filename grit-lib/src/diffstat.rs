@@ -31,7 +31,7 @@ pub fn display_width_minus_ansi(s: &str) -> usize {
 /// `term_columns()` approximation: `COLUMNS` env, then TTY width, then 80.
 #[must_use]
 pub fn terminal_columns() -> usize {
-    if let Ok(cols) = std::env::var("COLUMNS") {
+    if let Some(cols) = crate::environment::Environment::empty().var("COLUMNS") {
         if let Ok(w) = cols.parse::<usize>() {
             if w > 0 {
                 return w;
