@@ -374,8 +374,7 @@ fn main() -> Result<()> {
         | Cmd::PreparePick { .. }
         | Cmd::PrepareMerge { .. }
         | Cmd::PreparePickSeries { .. }
-        | Cmd::PrepareCommit { .. }
-        | Cmd::OdbBackend { .. } => unreachable!(),
+        | Cmd::PrepareCommit { .. } => unreachable!(),
     };
 
     let rendered = render_report(&cli.format, &report)?;
