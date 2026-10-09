@@ -114,7 +114,7 @@ fn checked_add_end(start: usize, len: usize, bound: usize) -> Result<usize, Erro
         .ok_or_else(commit_graph_chunk_oob)
 }
 
-fn body_slice<'a>(body: &'a [u8], start: usize, len: usize) -> Result<&'a [u8], Error> {
+fn body_slice(body: &[u8], start: usize, len: usize) -> Result<&[u8], Error> {
     let end = checked_add_end(start, len, body.len())?;
     body.get(start..end).ok_or_else(commit_graph_chunk_oob)
 }
@@ -135,6 +135,7 @@ fn fanout_num_commits(body: &[u8], fanout_off: usize) -> Result<u32, Error> {
     Ok(u32::from_be_bytes(word))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_single_layer_parent_indices(
     body: &[u8],
     num_commits: u32,
