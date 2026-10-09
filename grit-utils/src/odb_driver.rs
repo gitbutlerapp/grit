@@ -1,13 +1,15 @@
 //! Library-backed workloads matched to common `git` ODB-heavy commands.
 
 use std::fmt::Write as FmtWrite;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, BufWriter, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
-use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
-use grit_lib::pack::{read_local_pack_indexes_cached, read_pack_index, PackIndex};
+use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
+use grit_lib::pack::{
+    read_local_pack_indexes_cached, read_object_from_pack_at_offset, read_pack_index, PackIndex,
+};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions, RevListResult};
 
@@ -33,31 +35,34 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
 pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
     let objects_dir = repo.odb.objects_dir();
     repo.odb.with_pack_read_context(|| {
-        let mut stdout = io::stdout().lock();
+        let mut stdout = BufWriter::with_capacity(1 << 20, io::stdout().lock());
         let indexes = read_local_pack_indexes_cached(objects_dir)?;
         for idx in indexes {
-            emit_pack_in_offset_order(&mut stdout, repo, idx.as_ref())?;
+            emit_pack_in_offset_order(&mut stdout, idx.as_ref())?;
         }
+        stdout.flush()?;
         Ok(())
     })
 }
 
-fn emit_pack_in_offset_order(
-    out: &mut impl Write,
-    repo: &Repository,
-    idx: &PackIndex,
-) -> Result<()> {
+fn emit_pack_in_offset_order(out: &mut impl Write, idx: &PackIndex) -> Result<()> {
     let mut order: Vec<_> = idx.iter().collect();
     order.sort_by_key(|e| e.offset());
     for entry in order {
         let oid = ObjectId::from_bytes(entry.oid()).context("pack entry oid")?;
-        write_batch_object(out, repo, &oid)?;
+        let object = read_object_from_pack_at_offset(idx, entry.offset())
+            .with_context(|| format!("read packed object at offset {}", entry.offset()))?;
+        write_batch_object_body(out, &oid, &object)?;
     }
     Ok(())
 }
 
 fn write_batch_object(out: &mut impl Write, repo: &Repository, oid: &ObjectId) -> Result<()> {
     let object = repo.odb.read(oid).with_context(|| format!("read {oid}"))?;
+    write_batch_object_body(out, oid, &object)
+}
+
+fn write_batch_object_body(out: &mut impl Write, oid: &ObjectId, object: &Object) -> Result<()> {
     let kind = object.kind.as_str();
     writeln!(out, "{oid} {kind} {}", object.data.len())?;
     out.write_all(&object.data)?;
