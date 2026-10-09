@@ -123,6 +123,20 @@ fn apply_git(path: &Path, op: Op) {
     }
 }
 
+fn assert_git_get_matches(path: &Path, key: &str, expected: &str, case: &str) {
+    let out = git_config(path, &["--get", key]);
+    assert!(
+        out.ok(),
+        "{case}: git config --get {key} failed: {}",
+        out.stderr
+    );
+    assert_eq!(
+        out.stdout.trim(),
+        expected,
+        "{case}: git logical value for {key}"
+    );
+}
+
 fn oracle_byte_match(initial: &str, op: Op) {
     let dir = tempdir().expect("tempdir");
     let git_path = dir.path().join("git.cfg");
@@ -362,9 +376,11 @@ fn t1300_edit_matches_git_byte_for_byte() {
                 | Op::ReplaceAllWithComment(k, v, _)
                 | Op::ReplaceAllPatternWithComment(k, v, _, _) => {
                     assert_eq!(set.get_all(k).last().map(|s| s.as_str()), Some(v));
+                    assert_git_get_matches(&path, k, v, case.name);
                 }
                 Op::AddValueWithComment(k, v, _) => {
                     assert!(set.get_all(k).iter().any(|x| x == v));
+                    assert_git_get_matches(&path, k, v, case.name);
                 }
                 _ => {}
             }
@@ -377,6 +393,38 @@ fn t1300_edit_matches_git_byte_for_byte() {
         }
         oracle_byte_match(case.initial, case.op);
     }
+}
+
+#[test]
+fn comment_rejects_multiline_and_normalizes_leading_whitespace() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cfg");
+    fs::write(&path, "[a]\n\tx = 1\n").unwrap();
+    let mut cfg = load_grit(&path, "[a]\n\tx = 1\n");
+
+    let err = cfg.set_with_comment("a.x", "2", Some("a\nb")).unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Config(ConfigError::MultilineCommentNotAllowed)
+    ));
+
+    cfg.set_with_comment("a.x", "2", Some(" note"))
+        .expect("set with normalized comment");
+    cfg.write().expect("write");
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("\tx = 2 #  note\n") || text.contains("\tx = 2 # note\n"),
+        "expected comment marker before note text: {text:?}"
+    );
+
+    let reloaded = ConfigFile::from_path(&path, ConfigScope::Local)
+        .expect("reload")
+        .unwrap();
+    let mut set = ConfigSet::new();
+    set.merge(&reloaded);
+    assert_eq!(set.get("a.x").as_deref(), Some("2"));
+    assert!(set.get("a.b").is_none());
+    assert_git_get_matches(&path, "a.x", "2", "comment_normalization");
 }
 
 #[test]

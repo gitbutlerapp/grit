@@ -685,9 +685,7 @@ fn escape_value(s: &str) -> String {
 }
 
 /// Compile a Git config value-pattern (`drop`, `!keep`, or full regex).
-fn compile_config_value_pattern(
-    pat: &str,
-) -> std::result::Result<(regex::Regex, bool), Error> {
+fn compile_config_value_pattern(pat: &str) -> std::result::Result<(regex::Regex, bool), Error> {
     let (negated, actual_pat) = if let Some(rest) = pat.strip_prefix('!') {
         (true, rest)
     } else {
@@ -726,23 +724,27 @@ fn escape_value_quoted(s: &str) -> String {
 
 /// Format a comment suffix for appending to a config value line.
 ///
-/// Git's `--comment` flag normalises the comment:
-/// - If the comment already starts with `#` (possibly preceded by whitespace/tab),
-///   it is used as-is.
-/// - Otherwise, ` # ` is prepended.
-fn format_comment_suffix(comment: Option<&str>) -> String {
+/// Matches Git's `git_config_prepare_comment_string` normalization:
+/// leading space/tab is preserved only when followed by `#`; otherwise ` # ` is inserted.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::MultilineCommentNotAllowed`] when `comment` contains `\n` or `\r`.
+fn format_comment_suffix(comment: Option<&str>) -> Result<String> {
     match comment {
-        None => String::new(),
+        None => Ok(String::new()),
         Some(c) => {
-            if c.starts_with(' ') || c.starts_with('\t') {
-                // Comment has its own leading whitespace separator
-                c.to_owned()
+            if c.contains('\n') || c.contains('\r') {
+                return Err(Error::Config(ConfigError::MultilineCommentNotAllowed));
+            }
+            let leading_blanks = c.find(|ch| ch != ' ' && ch != '\t').unwrap_or(c.len());
+            let after_blanks = &c[leading_blanks..];
+            if leading_blanks > 0 && after_blanks.starts_with('#') {
+                Ok(c.to_owned())
             } else if c.starts_with('#') {
-                // Comment starts with #, just prepend a space separator
-                format!(" {c}")
+                Ok(format!(" {c}"))
             } else {
-                // Plain text comment, prepend " # "
-                format!(" # {c}")
+                Ok(format!(" # {c}"))
             }
         }
     }
@@ -1084,7 +1086,7 @@ impl ConfigFile {
             }));
         }
         let raw_var = raw_variable_name(key);
-        let comment_suffix = format_comment_suffix(comment);
+        let comment_suffix = format_comment_suffix(comment)?;
 
         // Find the last entry with this key to replace in-place.
         let existing_idx = self.entries.iter().rposition(|e| e.key == canon);
@@ -1159,7 +1161,7 @@ impl ConfigFile {
         comment: Option<&str>,
     ) -> Result<()> {
         let canon = canonical_key(key)?;
-        let comment_suffix = format_comment_suffix(comment);
+        let comment_suffix = format_comment_suffix(comment)?;
 
         let (re, negated) = match value_pattern {
             Some(pat) => {
@@ -1495,7 +1497,7 @@ impl ConfigFile {
     ) -> Result<()> {
         let canon = canonical_key(key)?;
         let raw_var = raw_variable_name(key);
-        let comment_suffix = format_comment_suffix(comment);
+        let comment_suffix = format_comment_suffix(comment)?;
         let (section, subsection, _var) = split_key(&canon)?;
         let (raw_sec, raw_sub) = raw_section_parts(key);
 

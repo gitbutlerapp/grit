@@ -102,6 +102,10 @@ pub enum ConfigError {
     /// A single-value operation was requested but the key has multiple values.
     #[error("cannot overwrite multiple values with a single value for '{key}'")]
     MultipleValues { key: String },
+
+    /// Inline `--comment` text must not span lines.
+    #[error("no multi-line comment allowed")]
+    MultilineCommentNotAllowed,
 }
 
 impl From<String> for ConfigError {
