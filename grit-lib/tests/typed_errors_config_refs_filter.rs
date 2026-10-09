@@ -63,7 +63,13 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     assert!(init.ok(), "git init failed: {}", init.stderr);
     git(
         dir.path(),
-        &["commit", "--allow-empty", "-q", "-m", "seed object for lock test"],
+        &[
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "seed object for lock test",
+        ],
     );
     let head = git(dir.path(), &["rev-parse", "HEAD"]);
     let oid = ObjectId::from_hex(head.trim()).expect("HEAD oid");

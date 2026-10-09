@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use grit_lib::error::Error;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::reflog::ReflogEntry;
 use grit_lib::reftable::{
@@ -19,7 +20,6 @@ use grit_lib::reftable::{
     reftable_write_ref, reftable_write_ref_with_write_options, reftable_write_symref,
     reftable_write_transaction, RefValue, ReftableStack, ReftableTransactionUpdate,
 };
-use grit_lib::error::Error;
 
 use support::{
     git, git_empty_commit_oid, git_for_each_ref_peeled, git_fsck_strict, git_init_reftable_repo,
@@ -210,6 +210,7 @@ fn grit_written_reftable_passes_git_fsck_and_refs_verify() {
             refname: "refs/heads/grit-txn".to_owned(),
             value: Some(RefValue::Val1(oid2)),
             log: Some(log),
+            expected_old: None,
         }],
     )
     .expect("write transaction");
