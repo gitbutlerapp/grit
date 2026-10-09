@@ -10,9 +10,11 @@
 mod midx;
 mod packs;
 
+pub mod loose;
+
+pub use loose::LooseStore;
 pub use midx::{MidxObjects, MidxObjectsStatus};
 pub use packs::{PackFilter, PackedObjects};
-
 use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
 use std::ops::ControlFlow;

@@ -68,7 +68,7 @@ pub fn prune_loose_unreachable(
 
     // 2. Enumerate loose objects and delete the unreachable, sufficiently-old ones.
     let mut stats = PruneStats::default();
-    for (oid, path) in enumerate_loose_objects(odb)? {
+    for (oid, path) in crate::odb::enumerate_loose_objects(odb.objects_dir(), odb.hash_algo())? {
         if reachable.contains(&oid) {
             stats.kept += 1;
             continue;
@@ -156,57 +156,6 @@ fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>>
 /// Entries whose names do not form a valid full-length hex OID for the
 /// repository's hash algorithm are skipped (e.g. tmp files, the wrong hash
 /// width), matching Git's loose-object scan.
-fn enumerate_loose_objects(odb: &Odb) -> Result<Vec<(ObjectId, std::path::PathBuf)>> {
-    let objects_dir = odb.objects_dir();
-    let mut out = Vec::new();
-
-    let top = match std::fs::read_dir(objects_dir) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(Error::Io(e)),
-    };
-
-    for top_entry in top {
-        let top_entry = top_entry.map_err(Error::Io)?;
-        let name = top_entry.file_name();
-        let Some(prefix) = name.to_str() else {
-            continue;
-        };
-        // Fan-out directories are exactly two lowercase hex chars.
-        if prefix.len() != 2 || !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-            continue;
-        }
-        if !top_entry.file_type().map_err(Error::Io)?.is_dir() {
-            continue;
-        }
-
-        let sub = match std::fs::read_dir(top_entry.path()) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(Error::Io(e)),
-        };
-        for sub_entry in sub {
-            let sub_entry = sub_entry.map_err(Error::Io)?;
-            let suffix_name = sub_entry.file_name();
-            let Some(suffix) = suffix_name.to_str() else {
-                continue;
-            };
-            if !ObjectId::is_loose_suffix_len(suffix.len())
-                || !suffix.bytes().all(|b| b.is_ascii_hexdigit())
-            {
-                continue;
-            }
-            let hex = format!("{prefix}{suffix}");
-            let Ok(oid) = ObjectId::from_hex(&hex) else {
-                continue;
-            };
-            out.push((oid, sub_entry.path()));
-        }
-    }
-
-    Ok(out)
-}
-
 /// Return the short name of a local remote's default branch (its `HEAD` symref
 /// target), e.g. `main` for a `HEAD` pointing at `refs/heads/main`.
 ///

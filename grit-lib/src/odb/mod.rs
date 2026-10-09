@@ -19,9 +19,17 @@
 
 pub mod store;
 
+pub(crate) use store::loose::{
+    build_store_bytes, decompress_zlib_loose_bytes, enumerate_loose_objects,
+    for_each_loose_object_id, loose_store_bytes_header_valid, parse_object_bytes,
+    read_loose_object_info,
+    read_zlib_loose_payload, zlib_compress_store_bytes,
+};
+pub use store::LooseStore;
+use store::{ObjectStore, WritableObjectStore};
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -39,9 +47,6 @@ use crate::midx::{
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::pack;
 use crate::pack_store::PackStore;
-use crate::zlib_inflate::ZlibInflateScratch;
-use flate2::read::ZlibDecoder;
-use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
 type MemOdbOverlay = Arc<Mutex<Option<std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>>>>;
@@ -66,22 +71,6 @@ pub struct WriteOptions {
     /// When set, skip existence probes and write when the loose path is absent
     /// (bulk add of all-new blobs).
     pub trust_new_loose: bool,
-}
-
-/// Decompress a zlib-wrapped loose object payload from an open file.
-///
-/// When the zlib wrapper advertises a preset dictionary (FDICT), `flate2` typically fails with a
-/// generic corrupt-stream error; map that to `"needs dictionary"` so callers match Git's messages
-/// (`t1006-cat-file` zlib-dictionary test).
-fn read_zlib_loose_payload(file: fs::File) -> Result<Vec<u8>> {
-    let mut hdr = [0u8; 2];
-    let mut read_file = file;
-    read_file.read_exact(&mut hdr).map_err(Error::Io)?;
-    let cmf_flg = u16::from(hdr[0]) << 8 | u16::from(hdr[1]);
-    let looks_like_zlib_header = cmf_flg != 0 && cmf_flg % 31 == 0;
-    let preset_dictionary = looks_like_zlib_header && (hdr[1] & 0x20) != 0;
-    let mut scratch = ZlibInflateScratch::default();
-    scratch.decompress_loose_payload(&hdr, read_file, preset_dictionary)
 }
 
 /// True when `oid` is stored as a loose object or in a **non-promisor** local pack.
@@ -1001,19 +990,23 @@ impl Odb {
     /// - [`Error::CorruptObject`] — header is malformed.
     /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_loose_verify_oid(path: &Path, expected_oid: &ObjectId) -> Result<Object> {
-        let file = fs::File::open(path).map_err(Error::Io)?;
-        let raw = read_zlib_loose_payload(file)?;
-        let obj = parse_object_bytes_with_oid(&raw, expected_oid)?;
-        // Verify against the expected OID using its own hash algorithm; a SHA-256
-        // loose object must be re-hashed with SHA-256, not SHA-1.
-        let computed = hash_object_data_with(expected_oid.algo(), obj.kind, &obj.data);
-        if computed != *expected_oid {
-            return Err(Error::LooseHashMismatch {
-                path: path.display().to_string(),
-                real_oid: computed.to_hex(),
-            });
-        }
-        Ok(obj)
+        LooseStore::read_verify_oid(path, expected_oid)
+    }
+
+    fn local_loose(&self) -> Result<LooseStore> {
+        Ok(LooseStore::new(
+            self.objects_dir.clone(),
+            self.hash_algo(),
+            self.loose_compression()?,
+        ))
+    }
+
+    fn loose_at(&self, objects_dir: &Path) -> Result<LooseStore> {
+        Ok(LooseStore::new(
+            objects_dir.to_path_buf(),
+            self.hash_algo(),
+            self.loose_compression()?,
+        ))
     }
 
     /// Read and decompress an object from the loose store.
@@ -1269,16 +1262,10 @@ impl Odb {
             }
         }
 
-        let loose = oid.loose_path_in(objects_dir);
         #[cfg(test)]
         crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
-        match fs::File::open(&loose) {
-            Ok(file) => {
-                let raw = read_zlib_loose_payload(file)?;
-                return parse_object_bytes(&raw);
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(Error::Io(err)),
+        if let Some(obj) = self.loose_at(objects_dir)?.read(oid)? {
+            return Ok(obj);
         }
 
         Err(Error::ObjectNotFound(oid.to_hex()))
@@ -1386,11 +1373,7 @@ impl Odb {
     ///
     /// Returns [`Error::Io`] if a directory cannot be created.
     pub fn ensure_all_loose_prefix_dirs(&self) -> Result<()> {
-        for i in 0u8..=255 {
-            let prefix = self.objects_dir.join(format!("{i:02x}"));
-            fs::create_dir_all(prefix).map_err(Error::Io)?;
-        }
-        Ok(())
+        self.local_loose()?.ensure_all_loose_prefix_dirs()
     }
 
     /// Zlib-compress canonical loose store bytes using the repository's loose level.
@@ -1399,44 +1382,7 @@ impl Odb {
     ///
     /// Returns [`Error::Zlib`] when compression fails.
     pub fn zlib_compress_loose_store(&self, store_bytes: &[u8]) -> Result<Vec<u8>> {
-        let compression = self.loose_compression()?;
-        zlib_compress_store_bytes(store_bytes, compression)
-    }
-
-    /// Publish precompressed bytes to a loose object path via a same-directory temp file.
-    ///
-    /// Readers never observe a partial object at the final name; failed writes remove the temp.
-    fn publish_zlib_loose_object(
-        path: &Path,
-        prefix_dir: &Path,
-        oid: &ObjectId,
-        zlib_store: &[u8],
-        prefix_dirs_precreated: bool,
-    ) -> Result<()> {
-        if !prefix_dirs_precreated {
-            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
-        }
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        if let Err(e) = fs::write(&tmp_path, zlib_store) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(Error::Io(e));
-        }
-        match fs::rename(&tmp_path, path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let _ = fs::remove_file(&tmp_path);
-            }
-            Err(e) => {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(Error::Io(e));
-            }
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o444));
-        }
-        Ok(())
+        self.local_loose()?.zlib_compress_store_bytes(store_bytes)
     }
 
     /// Write a loose object from precomputed id and zlib-compressed store bytes.
@@ -1487,21 +1433,8 @@ impl Odb {
             return Ok(*oid);
         }
 
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        if !options.trust_new_loose {
-            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
-        }
-
-        Self::publish_zlib_loose_object(
-            &path,
-            prefix_dir,
-            oid,
-            zlib_store,
-            options.trust_new_loose,
-        )?;
-        Ok(*oid)
+        self.local_loose()?
+            .write_zlib_prehashed(oid, zlib_store, options)
     }
 
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
@@ -1545,29 +1478,7 @@ impl Odb {
             return Ok(oid);
         }
 
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?.write(kind, data, options)
     }
 
     /// Write an object as a loose file in this object directory only.
@@ -1593,30 +1504,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write(kind, data, WriteOptions::default())
     }
 
     /// Write a loose object file when it is missing, even if [`Self::exists`] is true because
@@ -1634,29 +1523,8 @@ impl Odb {
             return Ok(oid);
         }
 
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write(kind, data, WriteOptions::default())
     }
 
     /// Write an already-serialized object (header + data) to the loose store.
@@ -1677,30 +1545,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
     }
 
     /// Like [`Self::write_raw`] but only consults this object directory, not alternates.
@@ -1718,30 +1564,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
     }
 
     /// Returns true when a loose object exists at `oid`'s path and zlib-decompresses to a
@@ -1775,31 +1599,6 @@ impl Odb {
     }
 }
 
-fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
-    let nul = match raw.iter().position(|&b| b == 0) {
-        Some(i) => i,
-        None => return false,
-    };
-    let header = &raw[..nul];
-    let data = &raw[nul + 1..];
-    let sp = match header.iter().position(|&b| b == b' ') {
-        Some(i) => i,
-        None => return false,
-    };
-    if sp == 0 || sp > 32 {
-        return false;
-    }
-    let size_str = match std::str::from_utf8(&header[sp + 1..]) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let size: usize = match size_str.parse() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    data.len() == size
-}
-
 /// Hash the canonical store bytes of an object (`"<kind> <len>\0<data>"`) with
 /// the given hash algorithm.
 fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
@@ -1823,135 +1622,6 @@ pub(crate) fn zlib_compress_loose_store_from_bytes(
     compression: flate2::Compression,
 ) -> Result<Vec<u8>> {
     zlib_compress_store_bytes(store_bytes, compression)
-}
-
-fn zlib_compress_store_bytes(
-    store_bytes: &[u8],
-    compression: flate2::Compression,
-) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut encoder = ZlibEncoder::new(&mut out, compression);
-    encoder
-        .write_all(store_bytes)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-    Ok(out)
-}
-
-fn decompress_zlib_loose_bytes(zlib: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = ZlibDecoder::new(zlib);
-    let mut raw = Vec::new();
-    decoder
-        .read_to_end(&mut raw)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    Ok(raw)
-}
-
-/// Build the canonical store byte sequence: `"<kind> <len>\0<data>"`.
-fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
-    let header = format!("{} {}\0", kind, data.len());
-    let mut out = Vec::with_capacity(header.len() + data.len());
-    out.extend_from_slice(header.as_bytes());
-    out.extend_from_slice(data);
-    out
-}
-
-/// Parse decompressed object bytes (`"<type> <size>\0<data>"`) into an [`Object`].
-pub(crate) fn parse_object_bytes(raw: &[u8]) -> Result<Object> {
-    parse_object_bytes_inner(raw, None)
-}
-
-pub(crate) fn parse_object_bytes_with_oid(raw: &[u8], oid: &ObjectId) -> Result<Object> {
-    parse_object_bytes_inner(raw, Some(oid))
-}
-
-/// Parse `"<type> <size>\0"` from decompressed bytes that include at least the header prefix.
-pub(crate) fn parse_object_header_prefix(raw: &[u8]) -> Result<(ObjectKind, u64)> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
-
-    let header = &raw[..nul];
-    let sp = header
-        .iter()
-        .position(|&b| b == b' ')
-        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
-
-    if sp > 32 {
-        return Err(Error::ObjectHeaderTooLong {
-            oid: hash_bytes_with(HashAlgo::Sha1, raw).to_hex(),
-        });
-    }
-
-    let kind = ObjectKind::from_bytes(&header[..sp])?;
-    let size_str = std::str::from_utf8(&header[sp + 1..])
-        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
-    let size: u64 = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
-    Ok((kind, size))
-}
-
-/// Read kind and size from a loose object file without loading the full payload.
-pub(crate) fn read_loose_object_info(path: &Path) -> Result<ObjectInfo> {
-    let file = fs::File::open(path).map_err(Error::Io)?;
-    let mut decoder = ZlibDecoder::new(file);
-    let mut prefix = Vec::with_capacity(64);
-    let mut buf = [0u8; 256];
-    loop {
-        let n = decoder
-            .read(&mut buf)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
-        if n == 0 {
-            break;
-        }
-        prefix.extend_from_slice(&buf[..n]);
-        if prefix.contains(&0) || prefix.len() >= 128 {
-            break;
-        }
-    }
-    let (kind, size) = parse_object_header_prefix(&prefix)?;
-    Ok(ObjectInfo { kind, size })
-}
-
-fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<Object> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
-
-    let header = &raw[..nul];
-    let data = raw[nul + 1..].to_vec();
-
-    let sp = header
-        .iter()
-        .position(|&b| b == b' ')
-        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
-
-    if sp > 32 {
-        let oid_str = oid_hint
-            .map(|o| o.to_hex())
-            .unwrap_or_else(|| hash_bytes_with(HashAlgo::Sha1, raw).to_hex());
-        return Err(Error::ObjectHeaderTooLong { oid: oid_str });
-    }
-
-    let kind = ObjectKind::from_bytes(&header[..sp])?;
-
-    let size_str = std::str::from_utf8(&header[sp + 1..])
-        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
-    let size: usize = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
-
-    if data.len() != size {
-        return Err(Error::CorruptObject(format!(
-            "object size mismatch: header says {size} but got {}",
-            data.len()
-        )));
-    }
-
-    Ok(Object::new(kind, data))
 }
 
 /// When a loose object file exists locally but cannot be parsed, consult alternates (Git t5613).
@@ -2089,7 +1759,8 @@ mod tests {
 
     #[test]
     fn parse_object_header_prefix_unknown_kind_is_typed_error() {
-        let err = parse_object_header_prefix(b"not-a-git-kind 0\0").unwrap_err();
+        let err = crate::odb::store::loose::parse_object_header_prefix(b"not-a-git-kind 0\0")
+            .unwrap_err();
         assert!(matches!(err, Error::UnknownObjectType(_)));
     }
 

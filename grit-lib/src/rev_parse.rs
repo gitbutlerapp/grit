@@ -3729,49 +3729,16 @@ fn collect_loose_object_ids(repo: &Repository) -> Result<Vec<String>> {
 }
 
 fn collect_loose_object_ids_in_dir(objects_dir: &Path) -> Result<Vec<String>> {
+    let algo = crate::odb::hash_algo_for_objects_dir(
+        &crate::environment::Environment::capture_process(),
+        objects_dir,
+    );
     let mut ids = Vec::new();
-    let read = match fs::read_dir(objects_dir) {
-        Ok(read) => read,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(ids),
-        Err(err) => return Err(Error::Io(err)),
-    };
-
-    for dir_entry in read {
-        let dir_entry = dir_entry?;
-        let name = dir_entry.file_name();
-        let Some(prefix) = name.to_str() else {
-            continue;
-        };
-        if !is_two_hex(prefix) {
-            continue;
-        }
-        if !dir_entry.file_type()?.is_dir() {
-            continue;
-        }
-
-        let files = fs::read_dir(dir_entry.path())?;
-        for file_entry in files {
-            let file_entry = file_entry?;
-            if !file_entry.file_type()?.is_file() {
-                continue;
-            }
-            let file_name = file_entry.file_name();
-            let Some(suffix) = file_name.to_str() else {
-                continue;
-            };
-            if ObjectId::is_loose_suffix_len(suffix.len())
-                && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
-            {
-                ids.push(format!("{prefix}{suffix}"));
-            }
-        }
-    }
-
+    crate::odb::for_each_loose_object_id(objects_dir, algo, &mut |oid| {
+        ids.push(oid.to_hex());
+        std::ops::ControlFlow::Continue(())
+    })?;
     Ok(ids)
-}
-
-fn is_two_hex(text: &str) -> bool {
-    text.len() == 2 && text.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn is_hex_prefix(text: &str) -> bool {
