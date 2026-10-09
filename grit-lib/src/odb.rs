@@ -873,6 +873,18 @@ impl Odb {
         PackStore::with_context(store, f)
     }
 
+    /// Run `f` with pack read caches for this database's primary `objects/` directory.
+    ///
+    /// Use for batch workloads (for example `cat-file --batch`) so each object read does not
+    /// reinstall thread-local pack context.
+    pub fn with_pack_read_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.with_pack_store_for(&self.objects_dir, f)
+    }
+
+    fn read_primary_in_objects_dir(&self, oid: &ObjectId, use_midx: bool) -> Result<Object> {
+        self.read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
+    }
+
     /// Touch the loose object file or pack file containing `oid`, matching Git's
     /// `odb_freshen_object` (updates mtime so age-based prune keeps recently re-referenced objects).
     ///
@@ -1043,9 +1055,12 @@ impl Odb {
         self.sync_delta_base_cache_limit();
 
         let mut unreadable_local_loose = None;
-        match self.with_pack_store_for(&self.objects_dir, || {
-            self.read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
-        }) {
+        let read_primary = || self.read_primary_in_objects_dir(oid, use_midx);
+        match if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            read_primary()
+        } else {
+            self.with_pack_store_for(&self.objects_dir, read_primary)
+        } {
             Ok(obj) => return Ok(obj),
             Err(Error::ObjectNotFound(_)) => {}
             Err(err) if local_loose_unreadable_try_alternates(&self.objects_dir, oid, &err) => {
