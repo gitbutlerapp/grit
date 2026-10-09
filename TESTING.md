@@ -127,6 +127,11 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t0600-reffiles-backend.sh | empty directory must not block create/delete; non-empty directory and broken ref block create; short hash / trailing token parsing | `grit-lib/tests/refs_loose_symref.rs` (`t0600_*`; files backend only) | partial (lock/transaction cases in step 4) |
 | t1405-main-ref-store.sh | `verify_refname_available_for_create` D/F prefix conflicts (single ref) | `grit-lib/tests/refs_loose_symref.rs` (`t1405_verify_refname_df_prefix_single_ref`) | partial (batch D/F in step 4) |
 | t1430-bad-ref-name.sh | invalid storable names vs `git check-ref-format`; `write_ref` rejects | `grit-lib/tests/refs_loose_symref.rs` (`t1430_invalid_names_match_git_check_ref_format`, `t1430_write_ref_rejects_invalid_names_both_backends`) | covered |
+| t1408-packed-refs.sh | load packed-refs (peeled/sorted headers, unsorted files, stale loose-over-packed, unicode names, malformed line grammar vs git) | `grit-lib/tests/refs_packed.rs` (`t1408_*`, `t1408_malformed_packed_refs_*`, `t1408_packed_refs_garbage_line_rejected_like_git`, `t1408_packed_refs_crlf_rejected_like_git`) | covered (files backend) |
+| t0601-reffiles-pack-refs.sh | peeled annotated tags, `list_refs` / `list_refs_physical` / `list_refs_glob` vs `git for-each-ref`, namespace helpers | `grit-lib/tests/refs_packed.rs` (`t0601_peeled_and_sorted_traits_match_git`, `list_refs_physical_and_glob_merge_loose_over_packed`, `packed_refs_get_has_namespace_and_entry_exists`) | covered (files backend) |
+| t0600-reffile.sh | delete loose+packed, packed-only, symref target; packed-refs lock failure; no stray lock files; no mkdir on packed-only delete | `grit-lib/tests/refs_packed.rs` (`t0600_delete_*`) | covered (files backend) |
+| t1409-avoid-packing-refs.sh | post-clone remote-tracking batch into sorted packed-refs (leave `origin/HEAD` loose) | `grit-lib/tests/refs_packed.rs` (`pack_remote_tracking_refs_for_clone_matches_git`) | partial (clone pack layout only) |
+| t0601 / fetch apply | `PackedRefs` snapshot + `resolve_ref_cached` / `write_ref_cached` after external `git pack-refs` | `grit-lib/tests/refs_packed.rs` (`resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs`) | covered (files backend) |
 | t3070-wildmatch.sh | wildmatch / iwildmatch / pathmatch / ipathmatch vectors; pathological `*` backtracking bound | `grit-lib/tests/wildmatch_vectors.rs` (`t3070_vectors_all_modes`, `t3070_pathological_wildmatch_under_time_bound`, ls-files pathmatch cross-check) | covered |
 | t0008-ignores.sh | nested `.gitignore`, exclude, global excludes, negation, tracked overrides; `check-ignore -v -n` source/line/pattern | `grit-lib/tests/ignore_rules.rs` (`t0008_check_path_matches_git_check_ignore_verbose`, symlink warning, CLI precedence) | covered |
 | t3001-ls-files-others-exclude | `--exclude-from`, `--exclude-per-directory` | `grit-lib/tests/ignore_rules.rs` (`t3001_exclude_from_and_per_directory_name`) | covered |
@@ -151,7 +156,7 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | t1310 | defaults, urlmatch, typed getters | `grit-lib/tests/config_parse.rs` (`t1310_config_default_and_urlmatch`, `typed_getters_match_git_config_type`) | covered |
 | t1311 | optional includes / missing targets | `grit-lib/tests/config_includes.rs` (`optional_include_git_parity`, `missing_include_is_ignored`) | covered |
 
-Detailed rows for packed refs, transactions, remaining t1405 cases, and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
+Detailed rows for ref transactions, remaining t1405 cases, and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 

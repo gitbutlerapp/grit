@@ -153,7 +153,7 @@ minimum = 81.1
 minimum = 83.4
 
 [file."refs.rs"]
-minimum = 72.0
+minimum = 72.3
 
 [file."reftable.rs"]
 minimum = 75.6

@@ -227,6 +227,59 @@ pub fn git_check_ref_format(refname: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Initialize a **files** backend repository (no reftable).
+#[must_use]
+pub fn files_repo() -> TestRepo {
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path().to_path_buf();
+    init_repository(&worktree, false, "main", None, "files").expect("init_repository");
+    TestRepo {
+        _root: root,
+        worktree,
+        backend: Backend::Files,
+    }
+}
+
+/// `git for-each-ref --format='%(refname) %(objectname)'` under `prefix`, sorted.
+pub fn git_for_each_ref(worktree: &Path, prefix: &str) -> Vec<(String, ObjectId)> {
+    let out = git(
+        worktree,
+        &["for-each-ref", "--format=%(refname) %(objectname)", prefix],
+    );
+    let mut rows: Vec<(String, ObjectId)> = out
+        .lines()
+        .filter_map(|line| {
+            let (name, oid) = line.split_once(' ')?;
+            Some((name.to_owned(), oid.parse().ok()?))
+        })
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows
+}
+
+/// Run `git for-each-ref` without asserting success (for parity checks on corrupt repos).
+pub fn git_for_each_ref_output(worktree: &Path, prefix: &str) -> Output {
+    hermetic_git(
+        worktree,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            prefix,
+        ],
+    )
+}
+
+/// Assert grit [`list_refs`] matches `git for-each-ref` for the same prefix.
+pub fn assert_list_refs_match_git(worktree: &Path, prefix: &str) {
+    let git_dir = worktree.join(".git");
+    let grit_rows: Vec<(String, ObjectId)> = list_refs(&git_dir, prefix).expect("list_refs");
+    let git_rows = git_for_each_ref(worktree, prefix);
+    assert_eq!(
+        grit_rows, git_rows,
+        "list_refs({prefix:?}) must match git for-each-ref"
+    );
+}
+
 /// Parse `git show-ref` output into a name → oid map (deduplicated, sorted).
 pub fn git_show_ref(worktree: &Path) -> BTreeMap<String, ObjectId> {
     let out = git(worktree, &["show-ref"]);
