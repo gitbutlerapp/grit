@@ -1254,12 +1254,14 @@ pub fn fetch_local(
     let local_shallow = crate::shallow::load_shallow_boundaries(local_git_dir);
     let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
 
+    let mut tag_shallow = local_shallow.clone();
+    tag_shallow.extend(remote_shallow.iter().copied());
+
     apply_tag_mode(
         opts.tags,
         &remote_refs,
-        &local_odb,
         &remote_odb,
-        &local_shallow,
+        &tag_shallow,
         &negatives,
         &mut matched,
         &mut matched_oids,
@@ -1888,9 +1890,8 @@ fn glob_matches(pattern: &str, refname: &str) -> bool {
 pub(crate) fn apply_tag_mode(
     mode: TagMode,
     remote_refs: &[(String, ObjectId)],
-    local_odb: &Odb,
     remote_odb: &Odb,
-    local_shallow: &HashSet<ObjectId>,
+    shallow_boundaries: &HashSet<ObjectId>,
     negatives: &[RefspecItem],
     matched: &mut Vec<MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
@@ -1900,15 +1901,17 @@ pub(crate) fn apply_tag_mode(
         return Ok(());
     }
 
-    // For Following we need commits reachable from matched heads in the *local*
-    // repository (respecting shallow grafts), not the remote's full history.
+    // For Following, decide reachability on the source ODB using both the local
+    // and remote shallow grafts (unioned by the caller). Post-pack pruning via
+    // [`crate::fetch::retain_following_tags`] still drops tags whose objects did
+    // not arrive. Using the local ODB here would miss every tip on first fetch.
     let following_closure: HashSet<ObjectId> = if mode == TagMode::Following {
         let roots: Vec<ObjectId> = matched
             .iter()
             .filter(|m| !m.is_tag)
             .map(|m| m.oid)
             .collect();
-        crate::fetch::reachable_commits(local_odb, &roots, local_shallow)
+        crate::fetch::reachable_commits(remote_odb, &roots, shallow_boundaries)
     } else {
         HashSet::new()
     };

@@ -128,5 +128,65 @@ fn fetch_local_clone_from_shallow_source_propagates_shallow_file() {
         dest_git.join("shallow").is_file(),
         "clone fetch must copy shallow boundaries from a shallow source"
     );
+    assert_eq!(
+        resolve_ref(&dest_git, "refs/tags/v3").expect("v3 on shallow clone"),
+        rev_parse(&shallow_src, "HEAD")
+    );
+    assert!(
+        resolve_ref(&dest_git, "refs/tags/v1").is_err(),
+        "v1 must not be imported from a depth-1 source"
+    );
+    let log = git(&dest, &["log", "--oneline", "refs/remotes/origin/main"]);
+    assert_eq!(log.lines().count(), 1, "expected single commit history");
     git_fsck_clean(&dest);
+}
+
+#[test]
+fn fetch_local_initial_fetch_following_imports_reachable_tags() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let upstream = tmp.path().join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    git(&upstream, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(upstream.join("README"), b"tag following\n").unwrap();
+    git(&upstream, &["add", "README"]);
+    git(&upstream, &["commit", "-q", "-m", "init"]);
+    git(&upstream, &["tag", "-a", "v1.0", "-m", "release"]);
+    git(&upstream, &["tag", "lightweight-tip"]);
+    git(&upstream, &["checkout", "-q", "-b", "topic"]);
+    std::fs::write(upstream.join("topic.txt"), b"topic\n").unwrap();
+    git(&upstream, &["add", "topic.txt"]);
+    git(&upstream, &["commit", "-q", "-m", "topic work"]);
+    git(&upstream, &["checkout", "-q", "main"]);
+    git(
+        &upstream,
+        &["tag", "-a", "on-topic", "-m", "topic tag", "topic"],
+    );
+
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    let upstream_git = upstream.join(".git");
+
+    fetch_local(
+        &local_git,
+        &upstream_git,
+        &FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            tags: TagMode::Following,
+            initial_remote_fetch: true,
+            remote_name: Some("origin".to_owned()),
+            ..Default::default()
+        },
+    )
+    .expect("initial fetch");
+
+    for tag in [
+        "refs/tags/v1.0",
+        "refs/tags/lightweight-tip",
+        "refs/tags/on-topic",
+    ] {
+        resolve_ref(&local_git, tag).unwrap_or_else(|_| panic!("missing {tag}"));
+    }
+    git_fsck_clean(&local);
 }
