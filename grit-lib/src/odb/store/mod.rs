@@ -9,6 +9,8 @@
 
 mod composite;
 mod files;
+mod midx;
+mod packs;
 pub mod loose;
 
 pub use composite::CompositeStore;
