@@ -34,16 +34,20 @@ fn set_unset_replace_and_count() {
 fn unset_matching_and_last() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config");
-    fs::write(&path, "[r]\n\turl = a\n\turl = b\n\turl = c\n").expect("write");
+    fs::write(
+        &path,
+        "[r]\n\turl = a\n\turl = b\n\turl = c\n[s]\n\turl = only\n",
+    )
+    .expect("write");
     let mut file = ConfigFile::from_path(&path, ConfigScope::Local)
         .expect("read")
         .expect("exists");
-    file.unset_last("r.url").expect("unset last");
-    assert_eq!(file.get("r.url").as_deref(), Some("b"));
+    file.unset_last("s.url").expect("unset last single-valued key");
+    assert!(file.get("s.url").is_none());
     let n = file
         .unset_matching("r.url", None, false)
         .expect("unset all");
-    assert_eq!(n, 2);
+    assert_eq!(n, 3);
 }
 
 #[test]
