@@ -461,75 +461,212 @@ fn skip_tag_gpgsig_headers(data: &[u8], mut i: usize) -> Result<usize, FsckError
 }
 
 const MAX_TREE_ENTRY_LEN: usize = 4096;
+const MODE_TREE: u32 = 0o040000;
 
-fn is_tree_mode(mode: u32) -> bool {
-    mode == 0o040000
+/// One decoded row from a tree object's on-disk encoding.
+struct ParsedTreeEntry {
+    mode: u32,
+    name: Vec<u8>,
 }
 
-fn is_less_than_slash(c: u8) -> bool {
-    c > 0 && c < b'/'
+/// Collects semantic tree problems discovered after parsing.
+#[derive(Default)]
+struct TreeProblemSet {
+    null_oid: bool,
+    slash_in_name: bool,
+    dot_name: bool,
+    dotdot_name: bool,
+    dotgit_alias: bool,
+    zero_padded_mode: bool,
+    disallowed_mode: bool,
+    duplicate_names: bool,
+    wrong_order: bool,
+    oversized_name: bool,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-enum TreeOrderIssue {
-    DuplicateEntries,
-    NotSorted,
+impl TreeProblemSet {
+    fn first_error(&self) -> Option<FsckError> {
+        if self.null_oid {
+            return Some(FsckError::new("nullSha1", "tree lists the null object id"));
+        }
+        if self.slash_in_name {
+            return Some(FsckError::new(
+                "fullPathname",
+                "tree entry name contains a slash",
+            ));
+        }
+        if self.dot_name {
+            return Some(FsckError::new("hasDot", "tree entry name is a single dot"));
+        }
+        if self.dotdot_name {
+            return Some(FsckError::new(
+                "hasDotdot",
+                "tree entry name is parent directory",
+            ));
+        }
+        if self.dotgit_alias {
+            return Some(FsckError::new(
+                "hasDotgit",
+                "tree entry name is a .git alias",
+            ));
+        }
+        if self.zero_padded_mode {
+            return Some(FsckError::new(
+                "zeroPaddedFilemode",
+                "tree entry mode has leading zeros",
+            ));
+        }
+        if self.disallowed_mode {
+            return Some(FsckError::new(
+                "badFilemode",
+                "tree entry mode is not allowed",
+            ));
+        }
+        if self.duplicate_names {
+            return Some(FsckError::new(
+                "duplicateEntries",
+                "tree lists the same name more than once",
+            ));
+        }
+        if self.wrong_order {
+            return Some(FsckError::new(
+                "treeNotSorted",
+                "tree entries are out of canonical order",
+            ));
+        }
+        if self.oversized_name {
+            return Some(FsckError::new(
+                "largePathname",
+                "tree entry name exceeds the length limit",
+            ));
+        }
+        None
+    }
 }
 
-fn verify_tree_order(
-    mode1: u32,
-    name1: &[u8],
-    mode2: u32,
-    name2: &[u8],
-    candidates: &mut Vec<Vec<u8>>,
-) -> Result<(), TreeOrderIssue> {
-    let len = name1.len().min(name2.len());
-    let cmp = name1[..len].cmp(&name2[..len]);
-    if cmp == std::cmp::Ordering::Less {
-        return Ok(());
+/// Git compares tree names with an implicit terminator: blobs end with NUL, trees with `/`.
+fn sort_key_byte(entry: &ParsedTreeEntry, index: usize) -> u8 {
+    if index < entry.name.len() {
+        entry.name[index]
+    } else if entry.mode == MODE_TREE {
+        b'/'
+    } else {
+        0
     }
-    if cmp == std::cmp::Ordering::Greater {
-        return Err(TreeOrderIssue::NotSorted);
-    }
+}
 
-    let c1 = name1
-        .get(len)
-        .copied()
-        .unwrap_or(if is_tree_mode(mode1) { b'/' } else { 0 });
-    let c2 = name2
-        .get(len)
-        .copied()
-        .unwrap_or(if is_tree_mode(mode2) { b'/' } else { 0 });
+/// Tracks file basenames that can collide with a later directory entry (prefix rules).
+#[derive(Default)]
+struct FileBeforeDirTracker {
+    pending: Vec<Vec<u8>>,
+}
 
-    if c1 == 0 && c2 == 0 {
-        return Err(TreeOrderIssue::DuplicateEntries);
-    }
-
-    if c1 == 0 && is_less_than_slash(c2) {
-        candidates.push(name1.to_vec());
-    } else if c2 == b'/' && is_less_than_slash(c1) {
-        loop {
-            let Some(f_name) = candidates.pop() else {
-                break;
-            };
-            if !name2.starts_with(&f_name) {
+impl FileBeforeDirTracker {
+    /// Returns `true` when the pair implies a duplicate path (file vs directory alias).
+    fn on_ordered_pair(&mut self, left: &ParsedTreeEntry, right: &ParsedTreeEntry) -> bool {
+        let shared = left.name.len().min(right.name.len());
+        if left.name[..shared] != right.name[..shared] {
+            return false;
+        }
+        let left_key = sort_key_byte(left, shared);
+        let right_key = sort_key_byte(right, shared);
+        if left.name == right.name && left_key == 0 && right_key == b'/' {
+            return true;
+        }
+        if left_key == 0 && (1..b'/').contains(&right_key) {
+            self.pending.push(left.name.clone());
+            return false;
+        }
+        if right_key != b'/' || !(1..b'/').contains(&left_key) {
+            return false;
+        }
+        while let Some(file_name) = self.pending.pop() {
+            if !right.name.starts_with(&file_name) {
                 continue;
             }
-            let p = f_name.len();
-            if name2.len() == p {
-                return Err(TreeOrderIssue::DuplicateEntries);
+            let prefix_len = file_name.len();
+            if right.name.len() == prefix_len {
+                return true;
             }
-            if is_less_than_slash(name2[p]) {
-                candidates.push(f_name);
+            let next = right.name[prefix_len];
+            if (1..b'/').contains(&next) {
+                self.pending.push(file_name);
                 break;
             }
         }
+        false
     }
+}
 
-    if c1 < c2 {
-        Ok(())
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum PairOrder {
+    Increasing,
+    Duplicate,
+    Decreasing,
+}
+
+fn pair_order(left: &ParsedTreeEntry, right: &ParsedTreeEntry) -> PairOrder {
+    let shared = left.name.len().min(right.name.len());
+    match left.name[..shared].cmp(&right.name[..shared]) {
+        std::cmp::Ordering::Less => return PairOrder::Increasing,
+        std::cmp::Ordering::Greater => return PairOrder::Decreasing,
+        std::cmp::Ordering::Equal => {}
+    }
+    let left_key = sort_key_byte(left, shared);
+    let right_key = sort_key_byte(right, shared);
+    if left_key == 0 && right_key == 0 {
+        return PairOrder::Duplicate;
+    }
+    if left_key < right_key {
+        PairOrder::Increasing
     } else {
-        Err(TreeOrderIssue::NotSorted)
+        PairOrder::Decreasing
+    }
+}
+
+fn audit_canonical_order(entries: &[ParsedTreeEntry]) -> (bool, bool) {
+    let mut wrong_order = false;
+    let mut duplicate = false;
+    let mut tracker = FileBeforeDirTracker::default();
+    for window in entries.windows(2) {
+        let left = &window[0];
+        let right = &window[1];
+        match pair_order(left, right) {
+            PairOrder::Increasing => {
+                if tracker.on_ordered_pair(left, right) {
+                    duplicate = true;
+                }
+            }
+            PairOrder::Duplicate => duplicate = true,
+            PairOrder::Decreasing => wrong_order = true,
+        }
+    }
+    (wrong_order, duplicate)
+}
+
+fn note_entry_shape(entry: &ParsedTreeEntry, problems: &mut TreeProblemSet) {
+    if entry.name == b"." {
+        problems.dot_name = true;
+    }
+    if entry.name == b".." {
+        problems.dotdot_name = true;
+    }
+    if entry.name.contains(&b'/') {
+        problems.slash_in_name = true;
+    }
+    if entry.name.len() > MAX_TREE_ENTRY_LEN {
+        problems.oversized_name = true;
+    }
+    if tree_entry_name_is_dotgit(&entry.name) {
+        problems.dotgit_alias = true;
+    }
+    if let Ok(name_str) = std::str::from_utf8(&entry.name) {
+        if is_hfs_dotgit(name_str) || is_ntfs_dotgit(name_str) {
+            problems.dotgit_alias = true;
+        }
+        if scan_ntfs_backslash_dotgit(name_str) {
+            problems.dotgit_alias = true;
+        }
     }
 }
 
@@ -563,73 +700,59 @@ fn mode_allowed(mode: u32) -> bool {
     matches!(mode, 0o100644 | 0o100755 | 0o120000 | 0o040000 | 0o160000)
 }
 
-fn tree_issue_after_scan(
-    has_null_sha1: bool,
-    has_full_path: bool,
-    has_dot: bool,
-    has_dotdot: bool,
-    has_dotgit: bool,
-    has_zero_pad: bool,
-    has_bad_modes: bool,
-    has_dup_entries: bool,
-    not_properly_sorted: bool,
-    has_large_name: bool,
-) -> Option<FsckError> {
-    if has_null_sha1 {
-        return Some(FsckError::new("nullSha1", "tree lists the null object id"));
+fn decode_tree_for_fsck(
+    data: &[u8],
+    oid_len: usize,
+) -> Result<(Vec<ParsedTreeEntry>, TreeProblemSet), FsckError> {
+    let bad = || FsckError::new("badTree", "tree object bytes are not a valid tree encoding");
+    let mut pos = 0usize;
+    let mut entries = Vec::new();
+    let mut problems = TreeProblemSet::default();
+    while pos < data.len() {
+        if data[pos] == b'0' {
+            problems.zero_padded_mode = true;
+        }
+        let sp = data[pos..]
+            .iter()
+            .position(|&b| b == b' ')
+            .ok_or_else(bad)?;
+        let mode_bytes = &data[pos..pos + sp];
+        let mode = std::str::from_utf8(mode_bytes)
+            .ok()
+            .and_then(|s| u32::from_str_radix(s, 8).ok())
+            .ok_or_else(bad)?;
+        if !mode_allowed(mode) {
+            problems.disallowed_mode = true;
+        }
+        pos += sp + 1;
+
+        let nul = data[pos..].iter().position(|&b| b == 0).ok_or_else(bad)?;
+        if nul == 0 {
+            return Err(bad());
+        }
+        let name = data[pos..pos + nul].to_vec();
+        pos += nul + 1;
+
+        if pos + oid_len > data.len() {
+            return Err(bad());
+        }
+        let oid_bytes = &data[pos..pos + oid_len];
+        if ObjectId::from_bytes(oid_bytes).is_err() {
+            return Err(bad());
+        }
+        if is_null_oid_bytes(oid_bytes) {
+            problems.null_oid = true;
+        }
+        pos += oid_len;
+
+        let entry = ParsedTreeEntry { mode, name };
+        note_entry_shape(&entry, &mut problems);
+        entries.push(entry);
     }
-    if has_full_path {
-        return Some(FsckError::new(
-            "fullPathname",
-            "tree entry name contains a slash",
-        ));
-    }
-    if has_dot {
-        return Some(FsckError::new("hasDot", "tree entry name is a single dot"));
-    }
-    if has_dotdot {
-        return Some(FsckError::new(
-            "hasDotdot",
-            "tree entry name is parent directory",
-        ));
-    }
-    if has_dotgit {
-        return Some(FsckError::new(
-            "hasDotgit",
-            "tree entry name is a .git alias",
-        ));
-    }
-    if has_zero_pad {
-        return Some(FsckError::new(
-            "zeroPaddedFilemode",
-            "tree entry mode has leading zeros",
-        ));
-    }
-    if has_bad_modes {
-        return Some(FsckError::new(
-            "badFilemode",
-            "tree entry mode is not allowed",
-        ));
-    }
-    if has_dup_entries {
-        return Some(FsckError::new(
-            "duplicateEntries",
-            "tree lists the same name more than once",
-        ));
-    }
-    if not_properly_sorted {
-        return Some(FsckError::new(
-            "treeNotSorted",
-            "tree entries are out of canonical order",
-        ));
-    }
-    if has_large_name {
-        return Some(FsckError::new(
-            "largePathname",
-            "tree entry name exceeds the length limit",
-        ));
-    }
-    None
+    let (wrong_order, duplicate) = audit_canonical_order(&entries);
+    problems.wrong_order |= wrong_order;
+    problems.duplicate_names |= duplicate;
+    Ok((entries, problems))
 }
 
 fn fsck_tree(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
@@ -640,119 +763,8 @@ fn fsck_tree(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
             "tree object bytes are not a valid tree encoding",
         ));
     }
-
-    let mut pos = 0usize;
-    let mut has_null_sha1 = false;
-    let mut has_full_path = false;
-    let mut has_dot = false;
-    let mut has_dotdot = false;
-    let mut has_dotgit = false;
-    let mut has_zero_pad = false;
-    let mut has_bad_modes = false;
-    let mut has_dup_entries = false;
-    let mut not_properly_sorted = false;
-    let mut has_large_name = false;
-    let mut dup_candidates: Vec<Vec<u8>> = Vec::new();
-    let mut prev: Option<(u32, Vec<u8>)> = None;
-
-    while pos < data.len() {
-        if data[pos] == b'0' {
-            has_zero_pad = true;
-        }
-
-        let sp = data[pos..].iter().position(|&b| b == b' ').ok_or_else(|| {
-            FsckError::new("badTree", "tree object bytes are not a valid tree encoding")
-        })?;
-        let mode_bytes = &data[pos..pos + sp];
-        let mode = std::str::from_utf8(mode_bytes)
-            .ok()
-            .and_then(|s| u32::from_str_radix(s, 8).ok());
-        let Some(mode) = mode else {
-            return Err(FsckError::new(
-                "badTree",
-                "tree object bytes are not a valid tree encoding",
-            ));
-        };
-        if !mode_allowed(mode) {
-            has_bad_modes = true;
-        }
-        pos += sp + 1;
-
-        let nul = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
-            FsckError::new("badTree", "tree object bytes are not a valid tree encoding")
-        })?;
-        if nul == 0 {
-            return Err(FsckError::new(
-                "badTree",
-                "tree object bytes are not a valid tree encoding",
-            ));
-        }
-        let name = &data[pos..pos + nul];
-        if name == b"." {
-            has_dot = true;
-        }
-        if name == b".." {
-            has_dotdot = true;
-        }
-        if name.contains(&b'/') {
-            has_full_path = true;
-        }
-        if name.len() > MAX_TREE_ENTRY_LEN {
-            has_large_name = true;
-        }
-        if tree_entry_name_is_dotgit(name) {
-            has_dotgit = true;
-        }
-        if let Ok(name_str) = std::str::from_utf8(name) {
-            if is_hfs_dotgit(name_str) || is_ntfs_dotgit(name_str) {
-                has_dotgit = true;
-            }
-            if scan_ntfs_backslash_dotgit(name_str) {
-                has_dotgit = true;
-            }
-        }
-        pos += nul + 1;
-
-        if pos + oid_len > data.len() {
-            return Err(FsckError::new(
-                "badTree",
-                "tree object bytes are not a valid tree encoding",
-            ));
-        }
-        let oid_bytes = &data[pos..pos + oid_len];
-        if ObjectId::from_bytes(oid_bytes).is_err() {
-            return Err(FsckError::new(
-                "badTree",
-                "tree object bytes are not a valid tree encoding",
-            ));
-        }
-        if is_null_oid_bytes(oid_bytes) {
-            has_null_sha1 = true;
-        }
-        pos += oid_len;
-
-        if let Some((prev_mode, ref prev_name)) = prev {
-            match verify_tree_order(prev_mode, prev_name, mode, name, &mut dup_candidates) {
-                Ok(()) => {}
-                Err(TreeOrderIssue::DuplicateEntries) => has_dup_entries = true,
-                Err(TreeOrderIssue::NotSorted) => not_properly_sorted = true,
-            }
-        }
-        prev = Some((mode, name.to_vec()));
-    }
-
-    if let Some(err) = tree_issue_after_scan(
-        has_null_sha1,
-        has_full_path,
-        has_dot,
-        has_dotdot,
-        has_dotgit,
-        has_zero_pad,
-        has_bad_modes,
-        has_dup_entries,
-        not_properly_sorted,
-        has_large_name,
-    ) {
+    let (_entries, problems) = decode_tree_for_fsck(data, oid_len)?;
+    if let Some(err) = problems.first_error() {
         return Err(err);
     }
     Ok(())
@@ -920,5 +932,17 @@ mod tests {
         body.push(0);
         body.extend_from_slice(&oid);
         assert!(fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).is_ok());
+    }
+
+    #[test]
+    fn tree_file_then_tree_same_name_is_duplicate() {
+        let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let oid = hex::decode(tree).expect("hex");
+        let mut body = b"100644 a\0".to_vec();
+        body.extend_from_slice(&oid);
+        body.extend_from_slice(b"40000 a\0");
+        body.extend_from_slice(&oid);
+        let e = fsck_object(ObjectKind::Tree, &body, SHA1_OPTS).unwrap_err();
+        assert_eq!(e.id, "duplicateEntries");
     }
 }

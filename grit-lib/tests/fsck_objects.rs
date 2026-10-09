@@ -606,6 +606,23 @@ fn object_cases(algo: FixtureAlgo) -> Vec<ObjectCase> {
             git_verdict: None,
         },
         ObjectCase {
+            name: "tree file and directory same basename",
+            kind: "tree",
+            body: {
+                let oid = hex::decode(tree).expect("hex");
+                let mut out = b"100644 a\0".to_vec();
+                out.extend_from_slice(&oid);
+                out.extend_from_slice(b"40000 a\0");
+                out.extend_from_slice(&oid);
+                out
+            },
+            expect_id: Some("duplicateEntries"),
+            git_strict: true,
+            git_tags: false,
+            git_config: &[],
+            git_verdict: None,
+        },
+        ObjectCase {
             name: "tree zero-padded mode",
             kind: "tree",
             body: {
