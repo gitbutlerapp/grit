@@ -65,6 +65,47 @@ fn t1300_whitespace_corpus_matches_git() {
 }
 
 #[test]
+fn unquoted_backslash_t_and_b_escapes_match_git() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("config");
+    let cases: &[(&str, &str)] = &[
+        ("[s]\n\tescaped = a\\tb\n", "s.escaped"),
+        ("[s]\n\tbackspace = a\\bb\n", "s.backspace"),
+    ];
+    for (content, key) in cases {
+        assert_file_get_matches_git(&path, content, key);
+        let git_bytes: Vec<u8> = {
+            fs::write(&path, content).expect("write");
+            let out = Command::new("git")
+                .args([
+                    "config",
+                    "--file",
+                    path.display().to_string().as_str(),
+                    "--get",
+                    key,
+                ])
+                .env("GIT_CONFIG_GLOBAL", null_device())
+                .env("GIT_CONFIG_SYSTEM", null_device())
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git get {key}");
+            String::from_utf8_lossy(&out.stdout)
+                .strip_suffix('\n')
+                .unwrap_or("")
+                .as_bytes()
+                .to_vec()
+        };
+        let file = grit_file_from_content(&path, content, ConfigScope::Local);
+        let grit_val = grit_get(&file, key).expect("grit get");
+        assert_eq!(
+            grit_val.as_bytes(),
+            git_bytes.as_slice(),
+            "byte parity for {key}"
+        );
+    }
+}
+
+#[test]
 fn t1300_values_match_git_config_get() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("config");
