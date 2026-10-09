@@ -2526,7 +2526,7 @@ fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathBuf, String)
 }
 
 fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Result<ObjectId> {
-    if depth > 10 {
+    if depth >= crate::refs::SYMREF_MAXDEPTH {
         return Err(Error::InvalidRef(format!(
             "reftable: symlink too deep: {refname}"
         )));
@@ -2743,6 +2743,9 @@ fn test_inject_reftable_transaction_fail() -> Result<()> {
 pub fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
+    if stack.lookup_ref(&storage_refname)?.is_none() {
+        return Err(Error::InvalidRef(format!("ref not found: {refname}")));
+    }
     let opts = read_write_options(&store_git_dir);
     stack.write_ref(&storage_refname, RefValue::Deletion, None, &opts)
 }

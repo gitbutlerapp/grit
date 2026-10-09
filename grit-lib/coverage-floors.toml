@@ -11,7 +11,7 @@ minimum = 85.0
 
 [aggregate.refs-config]
 groups = ["refs", "reflog", "config", "ignore", "attributes"]
-minimum = 49.7
+minimum = 51.6
 
 [group.attributes]
 files = [
@@ -25,13 +25,13 @@ files = [
     "commit_graph_write.rs",
     "bloom.rs",
 ]
-minimum = 85.0
+minimum = 86.5
 
 [group.config]
 files = [
     "config.rs",
 ]
-minimum = 39.5
+minimum = 40.0
 
 [group.ignore]
 files = [
@@ -61,7 +61,7 @@ files = [
     "pack_index_build.rs",
     "pack_zlib.rs",
 ]
-minimum = 85.0
+minimum = 86.1
 
 [group.reflog]
 files = [
@@ -75,7 +75,7 @@ files = [
     "reftable.rs",
     "check_ref_format.rs",
 ]
-minimum = 53.8
+minimum = 57.9
 
 [group.supporting]
 files = [
@@ -87,7 +87,7 @@ files = [
     "promisor.rs",
     "fsck_standalone.rs",
 ]
-minimum = 80.0
+minimum = 85.2
 
 [file."attributes.rs"]
 minimum = 50.6
@@ -98,20 +98,20 @@ minimum = 91.6
 [file."check_ref_format.rs"]
 minimum = 95.2
 
-[file."config.rs"]
-minimum = 39.5
-
 [file."commit_graph_file.rs"]
 minimum = 85.0
 
 [file."commit_graph_write.rs"]
 minimum = 87.9
 
+[file."config.rs"]
+minimum = 40.0
+
 [file."delta_encode.rs"]
 minimum = 93.3
 
 [file."fsck_standalone.rs"]
-minimum = 83.9
+minimum = 86.1
 
 [file."ignore.rs"]
 minimum = 69.3
@@ -138,7 +138,7 @@ minimum = 89.7
 minimum = 87.0
 
 [file."pack_map.rs"]
-minimum = 88.7
+minimum = 91.1
 
 [file."pack_rev.rs"]
 minimum = 89.3
@@ -153,13 +153,13 @@ minimum = 81.1
 minimum = 34.6
 
 [file."refs.rs"]
-minimum = 61.3
+minimum = 72.0
 
 [file."reftable.rs"]
 minimum = 43.2
 
 [file."unpack_objects.rs"]
-minimum = 82.8
+minimum = 82.9
 
 [file."wildmatch.rs"]
 minimum = 74.6
