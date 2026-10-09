@@ -589,7 +589,10 @@ struct LoosePayloadReader {
     file: File,
     dec: Decompress,
     pending: Vec<u8>,
-    eof: bool,
+    /// All compressed input from the file has been read.
+    input_exhausted: bool,
+    /// Inflater reached `Status::StreamEnd` (payload + zlib trailer validated).
+    zlib_complete: bool,
     preset_dictionary: bool,
     kind: ObjectKind,
     payload_size: u64,
@@ -616,7 +619,8 @@ impl LoosePayloadReader {
             file,
             dec: Decompress::new(true),
             pending: hdr.to_vec(),
-            eof: false,
+            input_exhausted: false,
+            zlib_complete: false,
             preset_dictionary,
             kind: ObjectKind::Blob,
             payload_size: 0,
@@ -638,7 +642,7 @@ impl LoosePayloadReader {
             if header_buf.contains(&0) || header_buf.len() >= 128 {
                 break;
             }
-            if self.eof && self.pending.is_empty() {
+            if self.input_exhausted && self.pending.is_empty() {
                 break;
             }
         }
@@ -657,16 +661,19 @@ impl LoosePayloadReader {
     }
 
     fn pump_zlib(&mut self, on_out: &mut dyn FnMut(&[u8])) -> Result<()> {
-        if self.pending.is_empty() && !self.eof {
+        if self.zlib_complete {
+            return Ok(());
+        }
+        if self.pending.is_empty() && !self.input_exhausted {
             let mut buf = [0u8; READ_CHUNK];
             let n = self.file.read(&mut buf).map_err(Error::Io)?;
             if n == 0 {
-                self.eof = true;
+                self.input_exhausted = true;
             } else {
                 self.pending.extend_from_slice(&buf[..n]);
             }
         }
-        let flush = if self.eof && self.pending.is_empty() {
+        let flush = if self.input_exhausted && self.pending.is_empty() {
             FlushDecompress::Finish
         } else {
             FlushDecompress::None
@@ -696,9 +703,41 @@ impl LoosePayloadReader {
         let produced = (self.dec.total_out() - before_out) as usize;
         on_out(&out_chunk[..produced]);
         if matches!(status, Status::StreamEnd) {
-            self.eof = true;
+            self.zlib_complete = true;
         }
         Ok(())
+    }
+
+    /// After the declared payload is delivered, drain the zlib trailer and reject truncation.
+    fn ensure_zlib_complete(&mut self) -> io::Result<()> {
+        if self.zlib_complete {
+            return Ok(());
+        }
+        if !self.extra_payload.is_empty() {
+            return Err(io::Error::other(
+                "corrupt object: inflated bytes remain after declared payload size",
+            ));
+        }
+        loop {
+            let mut excess = 0usize;
+            self.pump_zlib(&mut |bytes| {
+                excess += bytes.len();
+            })
+            .map_err(|e| io::Error::other(e.to_string()))?;
+            if excess > 0 {
+                return Err(io::Error::other(
+                    "corrupt object: excess decompressed data after declared payload size",
+                ));
+            }
+            if self.zlib_complete {
+                return Ok(());
+            }
+            if self.input_exhausted && self.pending.is_empty() {
+                return Err(io::Error::other(
+                    "corrupt object: zlib stream ended before trailer validation",
+                ));
+            }
+        }
     }
 }
 
@@ -708,6 +747,7 @@ impl Read for LoosePayloadReader {
             return Ok(0);
         }
         if self.payload_remaining == 0 {
+            self.ensure_zlib_complete()?;
             return Ok(0);
         }
         if buf.is_empty() {
@@ -731,7 +771,7 @@ impl Read for LoosePayloadReader {
             self.pump_zlib(&mut |bytes| out_chunk.extend_from_slice(bytes))
                 .map_err(|e| io::Error::other(e.to_string()))?;
             if out_chunk.is_empty() {
-                if self.eof {
+                if self.input_exhausted && !self.zlib_complete {
                     return Err(io::Error::other(format!(
                         "corrupt object: zlib stream ended with {} payload bytes remaining",
                         self.payload_remaining
@@ -749,6 +789,9 @@ impl Read for LoosePayloadReader {
             }
             delivered += take;
             self.payload_remaining -= take as u64;
+        }
+        if self.payload_remaining == 0 {
+            self.ensure_zlib_complete()?;
         }
         Ok(delivered)
     }
@@ -853,6 +896,46 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(out.len() < payload.len());
+    }
+
+    #[test]
+    fn truncated_zlib_checksum_only_errors_on_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LooseStore::new(
+            dir.path().join("objects"),
+            HashAlgo::Sha1,
+            Compression::default(),
+        );
+        fs::create_dir_all(store.objects_dir()).unwrap();
+        let payload = vec![0u8; 100_000];
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, &payload, WriteOptions::default())
+                .unwrap();
+        let path = store.object_path(&oid);
+        let mut bytes = fs::read(&path).unwrap();
+        assert!(bytes.len() > 1);
+        bytes.pop();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        fs::write(&path, &bytes).unwrap();
+        match ObjectStore::read(&store, &oid) {
+            Ok(None) => {}
+            Ok(Some(_)) => panic!("full read must not succeed on checksum-truncated loose object"),
+            Err(_) => {}
+        }
+        let mut stream = ObjectStore::open_stream(&store, &oid)
+            .expect("open_stream")
+            .expect("stream hit");
+        let mut out = Vec::new();
+        let err = stream.reader.read_to_end(&mut out).unwrap_err();
+        assert!(
+            err.to_string().contains("trailer validation")
+                || err.to_string().contains("corrupt object"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
