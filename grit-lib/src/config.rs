@@ -684,6 +684,29 @@ fn escape_value(s: &str) -> String {
     s.to_owned()
 }
 
+/// Compile a Git config value-pattern (`drop`, `!keep`, or full regex).
+fn compile_config_value_pattern(
+    pat: &str,
+) -> std::result::Result<(regex::Regex, bool), Error> {
+    let (negated, actual_pat) = if let Some(rest) = pat.strip_prefix('!') {
+        (true, rest)
+    } else {
+        (false, pat)
+    };
+    let re = regex::Regex::new(actual_pat)
+        .map_err(|e| Error::Config(format!("invalid value-pattern regex: {e}").into()))?;
+    Ok((re, negated))
+}
+
+fn value_matches_config_pattern(re: &regex::Regex, negated: bool, value: &str) -> bool {
+    let matched = re.is_match(value);
+    if negated {
+        !matched
+    } else {
+        matched
+    }
+}
+
 fn escape_value_quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 4);
     out.push('"');
@@ -1138,17 +1161,9 @@ impl ConfigFile {
         let canon = canonical_key(key)?;
         let comment_suffix = format_comment_suffix(comment);
 
-        // Parse optional regex pattern, handling `!` negation
         let (re, negated) = match value_pattern {
             Some(pat) => {
-                let (neg, actual_pat) = if let Some(rest) = pat.strip_prefix('!') {
-                    (true, rest)
-                } else {
-                    (false, pat)
-                };
-                let compiled = regex::Regex::new(actual_pat).map_err(|e| {
-                    Error::Config(format!("invalid value-pattern regex: {e}").into())
-                })?;
+                let (compiled, neg) = compile_config_value_pattern(pat)?;
                 (Some(compiled), neg)
             }
             None => (None, false),
@@ -1165,12 +1180,7 @@ impl ConfigFile {
                 }
                 if let Some(ref re) = re {
                     let v = e.value.as_deref().unwrap_or("");
-                    let matched = re.is_match(v);
-                    if negated {
-                        !matched
-                    } else {
-                        matched
-                    }
+                    value_matches_config_pattern(re, negated, v)
                 } else {
                     true
                 }
@@ -1185,13 +1195,9 @@ impl ConfigFile {
 
         let raw_var = raw_variable_name(key);
 
-        let target_idx = if value_pattern.is_some() {
-            matching_indices[0]
-        } else {
-            *matching_indices
-                .last()
-                .ok_or_else(|| Error::Config("missing config match".to_owned().into()))?
-        };
+        let target_idx = *matching_indices
+            .last()
+            .ok_or_else(|| Error::Config("missing config match".to_owned().into()))?;
         let target_line_idx = self.entries[target_idx].line - 1;
         let raw_line = &self.raw_lines[target_line_idx];
         if is_section_header_with_inline_entry(raw_line) {
@@ -1338,13 +1344,13 @@ impl ConfigFile {
         preserve_empty_section_header: bool,
     ) -> Result<usize> {
         let canon = canonical_key(key)?;
-        let re =
-            match value_pattern {
-                Some(pat) => Some(regex::Regex::new(pat).map_err(|e| {
-                    Error::Config(format!("invalid value-pattern regex: {e}").into())
-                })?),
-                None => None,
-            };
+        let pattern = match value_pattern {
+            Some(pat) => {
+                let (re, negated) = compile_config_value_pattern(pat)?;
+                Some((re, negated))
+            }
+            None => None,
+        };
 
         let line_indices: Vec<usize> = self
             .entries
@@ -1353,9 +1359,9 @@ impl ConfigFile {
                 if e.key != canon {
                     return false;
                 }
-                if let Some(ref re) = re {
+                if let Some((ref re, negated)) = pattern {
                     let v = e.value.as_deref().unwrap_or("");
-                    re.is_match(v)
+                    value_matches_config_pattern(re, negated, v)
                 } else {
                     true
                 }

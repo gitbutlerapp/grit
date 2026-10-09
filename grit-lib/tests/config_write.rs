@@ -20,6 +20,7 @@ enum Op {
     ReplaceAll(&'static str, &'static str),
     ReplaceAllPattern(&'static str, &'static str, &'static str),
     ReplaceAllWithComment(&'static str, &'static str, &'static str),
+    ReplaceAllPatternWithComment(&'static str, &'static str, &'static str, &'static str),
     UnsetLast(&'static str),
     Unset(&'static str),
     UnsetMatching(&'static str, Option<&'static str>),
@@ -59,6 +60,9 @@ fn apply_grit(cfg: &mut ConfigFile, op: Op) -> Result<(), Error> {
         Op::ReplaceAll(k, v) => cfg.replace_all(k, v, None),
         Op::ReplaceAllPattern(k, v, pat) => cfg.replace_all(k, v, Some(pat)),
         Op::ReplaceAllWithComment(k, v, c) => cfg.replace_all_with_comment(k, v, None, Some(c)),
+        Op::ReplaceAllPatternWithComment(k, v, pat, c) => {
+            cfg.replace_all_with_comment(k, v, Some(pat), Some(c))
+        }
         Op::UnsetLast(k) => {
             cfg.unset_last(k)?;
             Ok(())
@@ -99,6 +103,9 @@ fn apply_git(path: &Path, op: Op) {
         Op::ReplaceAllPattern(k, v, pat) => git_config_ok(path, &["--replace-all", k, v, pat]),
         Op::ReplaceAllWithComment(k, v, _c) => {
             git_config_ok(path, &["--replace-all", k, v]);
+        }
+        Op::ReplaceAllPatternWithComment(k, v, pat, _c) => {
+            git_config_ok(path, &["--replace-all", k, v, pat]);
         }
         Op::UnsetLast(k) => git_config_ok(path, &["--unset", k]),
         Op::Unset(k) => git_config_ok(path, &["--unset-all", k]),
@@ -204,6 +211,12 @@ const CASES: &[Case] = &[
         grit_only: false,
     },
     Case {
+        name: "value_semicolon",
+        initial: "",
+        op: Op::Set("alias.st", "a; b"),
+        grit_only: false,
+    },
+    Case {
         name: "value_newline",
         initial: "",
         op: Op::Set("foo.bar", "line1\nline2"),
@@ -240,6 +253,12 @@ const CASES: &[Case] = &[
         grit_only: false,
     },
     Case {
+        name: "replace_all_pattern_last_of_many_matches",
+        initial: "[a]\n\tx = drop\n\tx = keep\n\tx = drop\n",
+        op: Op::ReplaceAllPattern("a.x", "new", "drop"),
+        grit_only: false,
+    },
+    Case {
         name: "unset_last_single",
         initial: "[user]\n\tname = Ada\n",
         op: Op::UnsetLast("user.name"),
@@ -255,6 +274,12 @@ const CASES: &[Case] = &[
         name: "unset_matching_value",
         initial: "[remote \"origin\"]\n\turl = a\n\turl = b\n",
         op: Op::UnsetMatching("remote.origin.url", Some("b")),
+        grit_only: false,
+    },
+    Case {
+        name: "unset_matching_negated_pattern",
+        initial: "[a]\n\tx = keep\n\tx = drop\n",
+        op: Op::UnsetMatching("a.x", Some("!keep")),
         grit_only: false,
     },
     Case {
@@ -305,6 +330,12 @@ const CASES: &[Case] = &[
         op: Op::ReplaceAllWithComment("a.x", "9", "replaced"),
         grit_only: true,
     },
+    Case {
+        name: "replace_all_with_comment_and_value_pattern",
+        initial: "[a]\n\tx = drop\n\tx = keep\n\tx = drop\n",
+        op: Op::ReplaceAllPatternWithComment("a.x", "new", "drop", "replaced"),
+        grit_only: true,
+    },
 ];
 
 #[test]
@@ -327,8 +358,10 @@ fn t1300_edit_matches_git_byte_for_byte() {
                 s
             };
             match case.op {
-                Op::SetWithComment(k, v, _) | Op::ReplaceAllWithComment(k, v, _) => {
-                    assert_eq!(set.get(k).as_deref(), Some(v));
+                Op::SetWithComment(k, v, _)
+                | Op::ReplaceAllWithComment(k, v, _)
+                | Op::ReplaceAllPatternWithComment(k, v, _, _) => {
+                    assert_eq!(set.get_all(k).last().map(|s| s.as_str()), Some(v));
                 }
                 Op::AddValueWithComment(k, v, _) => {
                     assert!(set.get_all(k).iter().any(|x| x == v));
