@@ -598,6 +598,54 @@ fn packed_refs_unexpected_line(path: &Path, line: impl Into<String>) -> Error {
     }
 }
 
+fn packed_refs_unterminated_line(path: &Path, line: impl Into<String>) -> Error {
+    Error::PackedRefsUnexpectedLine {
+        path: path.display().to_string(),
+        line: line.into(),
+    }
+}
+
+fn parse_packed_ref_peel_line(path: &Path, line: &str, expect_peel: bool) -> Result<()> {
+    if !expect_peel {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    let inner = line
+        .strip_prefix('^')
+        .ok_or_else(|| packed_refs_unexpected_line(path, line))?;
+    let mut j = 0usize;
+    while j < inner.len() && inner.as_bytes()[j].is_ascii_hexdigit() {
+        j += 1;
+    }
+    if !ObjectId::is_hex_len(j) || j != inner.len() {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    Ok(())
+}
+
+fn parse_packed_ref_data_line(
+    path: &Path,
+    line: &str,
+    ref_opts: &RefNameOptions,
+) -> Result<(String, ObjectId)> {
+    let bytes = line.as_bytes();
+    let mut j = 0usize;
+    while j < bytes.len() && bytes[j].is_ascii_hexdigit() {
+        j += 1;
+    }
+    if !ObjectId::is_hex_len(j) || j + 1 >= bytes.len() || bytes[j] != b' ' {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    let refname = &line[j + 1..];
+    if refname.is_empty() || refname.as_bytes().iter().any(|b| b.is_ascii_whitespace()) {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    if check_refname_format(refname, ref_opts).is_err() {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    let oid: ObjectId = line[..j].parse()?;
+    Ok((refname.to_owned(), oid))
+}
+
 /// Parse `packed-refs` bytes the way Git reads them for ref listing (strict).
 fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, ObjectId>> {
     if data.is_empty() {
@@ -609,6 +657,12 @@ fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, 
             "<contains carriage return>",
         ));
     }
+    if !data.ends_with(b"\n") {
+        let tail = std::str::from_utf8(data)
+            .map(|s| s.rsplit('\n').next().unwrap_or(s))
+            .unwrap_or("<invalid utf-8>");
+        return Err(packed_refs_unterminated_line(path, tail));
+    }
     let text = std::str::from_utf8(data)
         .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
 
@@ -618,51 +672,30 @@ fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, 
         normalize: false,
     };
 
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+
     let mut map = HashMap::new();
-    for (line_no, line) in text.split('\n').enumerate() {
-        let line_no = line_no + 1;
+    let mut expect_peel = false;
+    for line in lines {
         if line.is_empty() {
-            continue;
+            return Err(packed_refs_unexpected_line(path, line));
         }
         if line.starts_with('#') {
+            expect_peel = false;
             continue;
         }
-        if let Some(inner) = line.strip_prefix('^') {
-            let mut j = 0usize;
-            while j < inner.len() && inner.as_bytes()[j].is_ascii_hexdigit() {
-                j += 1;
-            }
-            if !ObjectId::is_hex_len(j) || j < inner.len() {
-                return Err(packed_refs_unexpected_line(path, line));
-            }
+        if line.starts_with('^') {
+            parse_packed_ref_peel_line(path, line, expect_peel)?;
+            expect_peel = false;
             continue;
         }
 
-        let mut j = 0usize;
-        while j < line.len() && line.as_bytes()[j].is_ascii_hexdigit() {
-            j += 1;
-        }
-        let oid_hex = &line[..j];
-        let rest = &line[j..];
-        if !ObjectId::is_hex_len(oid_hex.len())
-            || rest.is_empty()
-            || !rest
-                .as_bytes()
-                .first()
-                .is_some_and(|b| b.is_ascii_whitespace())
-        {
-            return Err(packed_refs_unexpected_line(path, line));
-        }
-        let refname = match rest.chars().next() {
-            Some(c) if c.is_whitespace() => rest[c.len_utf8()..].trim(),
-            _ => return Err(packed_refs_unexpected_line(path, line)),
-        };
-        if refname.is_empty() || check_refname_format(refname, &ref_opts).is_err() {
-            return Err(packed_refs_unexpected_line(path, line));
-        }
-        let oid: ObjectId = oid_hex.parse()?;
-        let _line_no = line_no;
-        map.insert(refname.to_owned(), oid);
+        let (refname, oid) = parse_packed_ref_data_line(path, line, &ref_opts)?;
+        map.insert(refname, oid);
+        expect_peel = true;
     }
     Ok(map)
 }
@@ -2782,6 +2815,65 @@ mod packed_refs_parse_tests {
             &path,
             "# pack-refs with: peeled\n\
              0000000000000000000000000000000000000000 refs/heads/main\r\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_blank_line_and_missing_final_newline() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("packed-refs");
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\n\
+             0000000000000000000000000000000000000000 refs/heads/main\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             0000000000000000000000000000000000000000 refs/heads/main",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_orphan_peel_and_double_space() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("packed-refs");
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             ^0000000000000000000000000000000000000000\n\
+             0000000000000000000000000000000000000000 refs/heads/main\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             0000000000000000000000000000000000000000  refs/heads/main\n",
         )
         .unwrap();
         let data = fs::read(&path).unwrap();
