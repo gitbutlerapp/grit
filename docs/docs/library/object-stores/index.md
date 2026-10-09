@@ -71,10 +71,14 @@ use std::path::PathBuf;
 use grit_examples::packfile_kv;
 
 fn main() -> grit_lib::error::Result<()> {
-    let root = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        let dir = tempfile::tempdir().expect("tempdir");
-        dir.path().to_path_buf()
-    });
+    let (root, _tmpdir) = match env::args().nth(1) {
+        Some(path) => (PathBuf::from(path), None),
+        None => {
+            let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+            let root = dir.path().to_path_buf();
+            (root, Some(dir))
+        }
+    };
     let log = packfile_kv::run_custom_object_store_demo(&root)?;
     for oid in log {
         println!("{oid}");

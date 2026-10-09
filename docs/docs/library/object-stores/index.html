@@ -170,10 +170,14 @@ use std::path::PathBuf;
 use grit_examples::packfile_kv;
 
 fn main() -&gt; grit_lib::error::Result&lt;()&gt; {
-    let root = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        let dir = tempfile::tempdir().expect(&quot;tempdir&quot;);
-        dir.path().to_path_buf()
-    });
+    let (root, _tmpdir) = match env::args().nth(1) {
+        Some(path) =&gt; (PathBuf::from(path), None),
+        None =&gt; {
+            let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+            let root = dir.path().to_path_buf();
+            (root, Some(dir))
+        }
+    };
     let log = packfile_kv::run_custom_object_store_demo(&amp;root)?;
     for oid in log {
         println!(&quot;{oid}&quot;);
