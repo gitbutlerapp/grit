@@ -184,6 +184,12 @@ Detailed rows for packed refs, transactions, and remaining t1405 cases are fille
 | `t/t5319-multi-pack-index.sh` | Grit/git MIDX write and verify; preferred pack and RIDX; duplicate OID selection; large offsets (LOFF); stale MIDX after pack changes; `verify_midx` corruption diagnostics | `grit-lib/tests/midx_roundtrip.rs`, `grit-lib/tests/midx_corruption.rs`, `grit-lib/tests/midx_write_coverage.rs` | covered (skip Git MIDX v2 verify on older Git; bitmap UX cases skipped) |
 | `t/t5334-incremental-multi-pack-index.sh` | Incremental chain layers; `resolve_midx_layer_path`; reads through `PreparedMidxChain`; convert to non-incremental via rewrite | `grit-lib/tests/midx_roundtrip.rs` (`incremental_chain_layer_paths_and_reads`; compact/chain tests skip when `git multi-pack-index --incremental` unavailable) | partial (bitmap/rev-list UX skipped) |
 | `t/t5335-compact-multi-pack-index.sh` | `compact_multi_pack_index` success path and `CompactError` variants | `grit-lib/tests/midx_roundtrip.rs` (`compact_multi_pack_index_builds_verified_chain`, `compact_error_variants`) | partial (skips when incremental chain unavailable) |
+| `t/unit-tests/u-reftable-record.c` | Ref/log record encode-decode, prefix compression | `grit-lib/tests/reftable_format.rs` (`ref_records_*`, `prefix_compression_*`, `log_*`) | covered |
+| `t/unit-tests/u-reftable-block.c` | Block layout, restart points, padding | `grit-lib/tests/reftable_format.rs` (`block_size_*`, `restart_interval_*`, `unpadded_*`) | covered |
+| `t/unit-tests/u-reftable-readwrite.c` | Writer/reader round-trip, index lookups | `grit-lib/tests/reftable_format.rs` (`index_block_lookups_find_every_ref`, `random_ref_and_log_sets_round_trip`) | covered |
+| `t/unit-tests/u-reftable-table.c` | Table footer, CRC, corruption | `grit-lib/tests/reftable_format.rs` (`corruption_*`, `every_truncation_is_typed_error_no_panic`) | covered |
+| `t/unit-tests/u-reftable-basics.c` | Empty table, update-index bounds, dump blocks | `grit-lib/tests/reftable_format.rs` (`empty_table_*`, `dump_reftable_blocks_stable_structure`) | covered |
+| `t0613-reftable-write-options.sh` | Config-driven block size, restart interval, indexObjects | `grit-lib/tests/reftable_format.rs` (`write_options_block_size_and_restart_interval_applied`) | covered (geometricFactor parsed; stack compaction in later step) |
 
 ### Documentation site and rustdoc jobs
 
