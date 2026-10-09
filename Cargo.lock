@@ -665,7 +665,9 @@ version = "0.5.4"
 dependencies = [
  "anyhow",
  "clap",
+ "flate2",
  "grit-lib",
+ "grit-test-support",
  "serde_json",
  "tempfile",
 ]
