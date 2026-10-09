@@ -25,6 +25,9 @@ cargo build --release -p grit-cli -p grit-utils
 # Hot-path scenarios (switch / pick / merge / pick-series) at L and H
 ./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output baselines/hot-paths-before.json
 
+# ODB backend scenarios (cat-file batch/check, rev-list --objects) on repacked 100k repo
+./target/release/grit-bench odb-backend --format json --output baselines/odb-backend-before.json
+
 # Optional FSMN index extension (core.fsmonitor hook v2)
 ./target/release/grit-bench hot-paths --sizes 10000 --fsmonitor-fixture
 

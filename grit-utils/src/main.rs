@@ -6,7 +6,7 @@ use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::odb_driver::{self, open_repo};
-use grit_utils::odb_suite::{run_odb_suite, OdbRunConfig};
+use grit_utils::odb_suite::{run_odb_backend_suite, run_odb_suite, OdbRunConfig};
 use grit_utils::render::{render_markdown, render_text};
 use grit_utils::scenarios::{
     run_add_suite, run_commit_suite, run_hot_path_suite, run_prepare_add, run_prepare_commit,
@@ -77,6 +77,8 @@ enum Cmd {
     },
     /// ODB read workloads (cat-file batch, rev-list --objects, log -p) vs system git
     Odb,
+    /// ODB cat-file / rev-list scenarios on the repacked 100k synthetic repo
+    OdbBackend,
     /// Internal: library-backed workloads for ODB benchmarks
     #[command(hide = true)]
     Drive {
@@ -132,6 +134,9 @@ enum Cmd {
 #[derive(Subcommand)]
 enum DriveCmd {
     CatFileBatch {
+        repo: PathBuf,
+    },
+    CatFileBatchCheck {
         repo: PathBuf,
     },
     CatFileBatchAllUnordered {
@@ -202,6 +207,10 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         DriveCmd::CatFileBatch { repo } => {
             let repo = open_repo(repo)?;
             odb_driver::cat_file_batch(&repo)?;
+        }
+        DriveCmd::CatFileBatchCheck { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::cat_file_batch_check(&repo)?;
         }
         DriveCmd::CatFileBatchAllUnordered { repo } => {
             let repo = open_repo(repo)?;
@@ -322,6 +331,17 @@ fn main() -> Result<()> {
             let bench_exe = std::env::current_exe().context("current exe")?;
             run_odb_suite(&hyperfine, &git, &grit, &bench_exe, &cfg, timestamp)?
         }
+        Cmd::OdbBackend => {
+            eprintln!("Running ODB backend benchmarks (100k repacked fixture)...");
+            let cfg = OdbRunConfig {
+                warmup: cli.warmup,
+                min_runs: cli.min_runs,
+                prepare_bin: std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("grit-bench")),
+            };
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            run_odb_backend_suite(&hyperfine, &git, &grit, &bench_exe, &cfg, timestamp)?
+        }
         Cmd::HotPaths {
             sizes,
             fsmonitor_fixture,
@@ -354,12 +374,13 @@ fn main() -> Result<()> {
         | Cmd::PreparePick { .. }
         | Cmd::PrepareMerge { .. }
         | Cmd::PreparePickSeries { .. }
-        | Cmd::PrepareCommit { .. } => unreachable!(),
+        | Cmd::PrepareCommit { .. }
+        | Cmd::OdbBackend { .. } => unreachable!(),
     };
 
     let rendered = render_report(&cli.format, &report)?;
     write_output(&cli, &rendered)?;
-    if !matches!(cli.command, Cmd::Odb) {
+    if !matches!(cli.command, Cmd::Odb | Cmd::OdbBackend) {
         remove_dir_robust(&scratch_dir());
     }
     Ok(())

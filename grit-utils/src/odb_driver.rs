@@ -7,6 +7,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
+use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::pack::{read_pack_index, PackIndex};
 use grit_lib::repo::Repository;
@@ -24,6 +25,30 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
         }
         let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
         write_batch_object(&mut stdout, repo, &oid)?;
+    }
+    Ok(())
+}
+
+/// Read hex object ids from stdin and emit `git cat-file --batch-check` lines.
+pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout().lock();
+    for line in stdin.lock().lines() {
+        let line = line.context("read oid line")?;
+        let hex = line.trim();
+        if hex.is_empty() {
+            continue;
+        }
+        let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
+        match repo.odb.read_info(&oid) {
+            Ok(info) => {
+                writeln!(stdout, "{oid} {} {}", info.kind.as_str(), info.size)?;
+            }
+            Err(Error::ObjectNotFound(_)) => {
+                writeln!(stdout, "{oid} missing")?;
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
     Ok(())
 }

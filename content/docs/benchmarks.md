@@ -20,6 +20,40 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 
 Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
 
+## grit-lib: ODB backend (pre-refactor baseline)
+
+Criterion group **`odb_backend`** (`cargo bench -p grit-lib --bench odb_backend -- --save-baseline odb-before`) measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
+
+| Fixture | Shape |
+| --- | --- |
+| `loose_10k` | 10 000 loose blobs, no packs |
+| `pack_100k` | Single repacked pack (~100 000 objects) |
+| `midx_8` | Eight pack layers with multi-pack-index (`git prune-packed` so hits are pack-only, not loose) |
+| `alternate_only` | Primary store empty; objects only in an alternate |
+
+An additional benchmark, **`odb_backend/exists_miss_loop_10k`**, calls `exists` on 10 000 distinct missing OIDs against the 100k pack fixture (models add/status miss scans).
+
+Command-level ODB scenarios on the repacked **100k-file / 1000-commit** synthetic repo live in **`grit-utils/baselines/odb-backend-before.json`** (`grit-bench odb-backend`): library drivers (`grit-bench drive …`) vs **`git cat-file --batch`**, **`git cat-file --batch-check`**, and **`git rev-list --objects --all`** on the same sorted OID stdin list where applicable.
+
+```bash
+cargo build --release -p grit-utils
+./target/release/grit-bench odb-backend --format json --output grit-utils/baselines/odb-backend-before.json
+cargo bench -p grit-lib --bench odb_backend -- --save-baseline odb-before
+make docs
+```
+
+Run `grit-bench odb-backend` once before the Criterion command (or leave a populated `GRIT_BENCH_ODB_CACHE`) so the `pack_100k` fixture reuses the repacked 100k repo instead of rebuilding 100k commits inline.
+
+**Recorded on the factory VM (2026-10-09, `odb-backend-before.json`, repacked 100k synthetic repo):**
+
+| Scenario | Git median | Grit median | Grit / Git |
+| --- | ---: | ---: | ---: |
+| `cat-file-batch-hot-path-100k` | 151 ms | 1 117 ms | **7.38×** |
+| `cat-file-batch-check-hot-path-100k` | 52 ms | 1 261 ms | **24.2×** |
+| `rev-list-objects-odb-backend-hot-path-100k` | 70 ms | 6 916 ms | **99.1×** |
+
+The rev-list gap is dominated by history/object enumeration in `grit-lib`, not bulk pack I/O; cat-file scenarios exercise ODB read and `read_info` paths directly.
+
 ## grit-lib: parallel index-pack (in-memory)
 
 Hyperfine on a **~90 000-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-07). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) via `cargo run --release -p grit-lib --example index_pack_bench` (see `GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`).

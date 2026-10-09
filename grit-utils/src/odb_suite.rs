@@ -301,3 +301,106 @@ pub fn run_odb_suite(
         scenarios,
     })
 }
+
+fn stdin_batch_scenario(
+    bench_exe: &Path,
+    repo: &Path,
+    oid_list: &Path,
+    id: &str,
+    grit_sub: &str,
+    git_args: &[&str],
+    description: &str,
+) -> Scenario {
+    let grit_inner = shell_command(bench_exe, &drive_argv(grit_sub, repo, &[]));
+    let git_inner = shell_command(Path::new("git"), git_args);
+    Scenario {
+        id: id.into(),
+        group: "odb_backend".into(),
+        fixture: "hot-path-100k".into(),
+        description: description.into(),
+        grit_argv: vec![sh_redirect_stdin(&grit_inner, oid_list)],
+        git_argv: vec![sh_redirect_stdin(&git_inner, oid_list)],
+        driver: Driver::Lib,
+        prepare_kind: None,
+        grit_via_shell: true,
+        git_via_shell: true,
+    }
+}
+
+/// Run ODB cat-file / rev-list scenarios on the repacked 100k synthetic repo.
+pub fn run_odb_backend_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit_cli: &Path,
+    bench_exe: &Path,
+    cfg: &OdbRunConfig,
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let hot = ensure_hot_path_repacked(git)?;
+    let oids = ensure_sorted_oid_list(git, &hot)?;
+
+    let mut scenarios = Vec::new();
+    scenarios.push(run_odb_scenario(
+        hyperfine,
+        bench_exe,
+        git,
+        cfg,
+        &stdin_batch_scenario(
+            bench_exe,
+            &hot,
+            &oids,
+            "cat-file-batch-hot-path-100k",
+            "cat-file-batch",
+            &["cat-file", "--batch"],
+            "cat-file --batch over all packed objects (sorted OID stdin)",
+        ),
+        &hot,
+    )?);
+    scenarios.push(run_odb_scenario(
+        hyperfine,
+        bench_exe,
+        git,
+        cfg,
+        &stdin_batch_scenario(
+            bench_exe,
+            &hot,
+            &oids,
+            "cat-file-batch-check-hot-path-100k",
+            "cat-file-batch-check",
+            &["cat-file", "--batch-check"],
+            "cat-file --batch-check over all packed objects (sorted OID stdin)",
+        ),
+        &hot,
+    )?);
+    scenarios.push(run_odb_scenario(
+        hyperfine,
+        bench_exe,
+        git,
+        cfg,
+        &Scenario {
+            id: "rev-list-objects-odb-backend-hot-path-100k".into(),
+            group: "odb_backend".into(),
+            fixture: "hot-path-100k".into(),
+            description: "rev-list --objects --all on repacked 100k-file repo".into(),
+            grit_argv: drive_argv("rev-list-objects", &hot, &[]),
+            git_argv: vec!["rev-list".into(), "--objects".into(), "--all".into()],
+            driver: Driver::Lib,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &hot,
+    )?);
+
+    Ok(BenchReport {
+        schema_version: SCHEMA_VERSION,
+        timestamp: format_timestamp(timestamp),
+        machine: collect_machine_info(&crate::odb_fixture::odb_scratch_root())?,
+        tools: ToolVersions {
+            git: tool_version(git),
+            grit: tool_version(grit_cli),
+            grit_commit: grit_source_commit(),
+        },
+        scenarios,
+    })
+}
