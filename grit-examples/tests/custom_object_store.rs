@@ -1,5 +1,7 @@
 //! [`PackfileKvStore`] conformance and Git interoperability after export.
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::process::Command;
 
 use flate2::Compression;
@@ -55,6 +57,56 @@ fn packfile_kv_sha256_write_suite() {
         return;
     }
     run_write_suite(make_kv(HashAlgo::Sha256));
+}
+
+#[test]
+fn packfile_kv_reopen_append_reopen() -> grit_lib::error::Result<()> {
+    let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+    let path = dir.path().join("objects.kv");
+    let oid_a = {
+        let store = PackfileKvStore::create(&path, HashAlgo::Sha1)?;
+        WritableObjectStore::write(&store, ObjectKind::Blob, b"a", WriteOptions::default())?
+    };
+    let oid_b = {
+        let store = PackfileKvStore::open(&path)?;
+        WritableObjectStore::write(&store, ObjectKind::Blob, b"b", WriteOptions::default())?
+    };
+    let store = PackfileKvStore::open(&path)?;
+    assert_eq!(store.read(&oid_a)?.expect("first blob").data, b"a");
+    assert_eq!(store.read(&oid_b)?.expect("second blob").data, b"b");
+    Ok(())
+}
+
+#[test]
+fn packfile_kv_recovers_from_torn_length_prefix() -> grit_lib::error::Result<()> {
+    let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+    let path = dir.path().join("objects.kv");
+    let oid_a = {
+        let store = PackfileKvStore::create(&path, HashAlgo::Sha1)?;
+        WritableObjectStore::write(&store, ObjectKind::Blob, b"first", WriteOptions::default())?
+    };
+    {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .map_err(grit_lib::error::Error::Io)?;
+        file.write_all(&[0x00])
+            .map_err(grit_lib::error::Error::Io)?;
+    }
+    let oid_b = {
+        let store = PackfileKvStore::open(&path)?;
+        assert_eq!(
+            store
+                .read(&oid_a)?
+                .expect("first blob after torn tail")
+                .data,
+            b"first"
+        );
+        WritableObjectStore::write(&store, ObjectKind::Blob, b"second", WriteOptions::default())?
+    };
+    let store = PackfileKvStore::open(&path)?;
+    assert_eq!(store.read(&oid_b)?.expect("second blob").data, b"second");
+    Ok(())
 }
 
 #[test]

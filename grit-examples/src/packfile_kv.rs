@@ -63,9 +63,13 @@ impl PackfileKvStore {
     /// Returns I/O, format, or corruption errors while scanning records.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let mut file = File::open(&path).map_err(Error::Io)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(Error::Io)?;
         let algo = read_header(&mut file)?;
-        let index = rebuild_index(&path, algo)?;
+        let index = rebuild_index(&mut file, algo)?;
         Ok(Self {
             path,
             algo,
@@ -310,30 +314,51 @@ fn parse_algo_byte(byte: u8) -> Result<HashAlgo> {
     }
 }
 
-fn rebuild_index(path: &Path, algo: HashAlgo) -> Result<HashMap<ObjectId, u64>> {
-    let mut file = File::open(path).map_err(Error::Io)?;
+fn rebuild_index(file: &mut File, algo: HashAlgo) -> Result<HashMap<ObjectId, u64>> {
     file.seek(SeekFrom::Start(HEADER_LEN)).map_err(Error::Io)?;
+    let file_len = file.metadata().map_err(Error::Io)?.len();
     let mut index = HashMap::new();
+    let mut valid_end = HEADER_LEN;
     loop {
-        let offset = match file.stream_position() {
-            Ok(pos) => pos,
-            Err(err) => return Err(Error::Io(err)),
-        };
-        let len = match read_u32_be(&mut file) {
-            Ok(len) => len as usize,
-            Err(Error::Io(err)) if err.kind() == io::ErrorKind::UnexpectedEof => break,
+        let offset = file.stream_position().map_err(Error::Io)?;
+        if offset >= file_len {
+            break;
+        }
+        let len = match read_u32_be_or_eof(file) {
+            Ok(None) => break,
+            Ok(Some(len)) => len as usize,
+            Err(Error::CorruptObject(_)) => break,
             Err(err) => return Err(err),
         };
+        let payload_start = file.stream_position().map_err(Error::Io)?;
+        let remaining = usize::try_from(file_len.saturating_sub(payload_start)).map_err(|_| {
+            Error::CorruptObject("packfile kv record extends past address space".into())
+        })?;
+        if len > remaining {
+            break;
+        }
         let mut zlib = vec![0u8; len];
-        file.read_exact(&mut zlib).map_err(Error::Io)?;
+        if let Err(err) = file.read_exact(&mut zlib) {
+            if err.kind() == io::ErrorKind::UnexpectedEof {
+                break;
+            }
+            return Err(Error::Io(err));
+        }
         let mut decoder = ZlibDecoder::new(zlib.as_slice());
         let mut raw = Vec::new();
-        decoder
-            .read_to_end(&mut raw)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
-        let obj = parse_store_bytes(&raw)?;
+        if decoder.read_to_end(&mut raw).is_err() {
+            break;
+        }
+        let obj = match parse_store_bytes(&raw) {
+            Ok(obj) => obj,
+            Err(_) => break,
+        };
         let oid = hash::hash_object(algo, obj.kind, &obj.data);
         index.entry(oid).or_insert(offset);
+        valid_end = file.stream_position().map_err(Error::Io)?;
+    }
+    if valid_end < file_len {
+        file.set_len(valid_end).map_err(Error::Io)?;
     }
     Ok(index)
 }
@@ -390,9 +415,35 @@ fn info_from_store_bytes(raw: &[u8]) -> Result<ObjectInfo> {
 }
 
 fn read_u32_be(reader: &mut impl Read) -> Result<u32> {
+    read_u32_be_or_eof(reader)?.ok_or_else(|| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "missing record length",
+        ))
+    })
+}
+
+/// Read a big-endian record length, or `None` at a clean end-of-file (zero bytes read).
+///
+/// A partial 1–3 byte prefix is corruption and returns [`Error::CorruptObject`].
+fn read_u32_be_or_eof(reader: &mut impl Read) -> Result<Option<u32>> {
     let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf).map_err(Error::Io)?;
-    Ok(u32::from_be_bytes(buf))
+    let mut filled = 0usize;
+    while filled < 4 {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => {
+                if filled == 0 {
+                    return Ok(None);
+                }
+                return Err(Error::CorruptObject(
+                    "truncated packfile kv record length prefix".into(),
+                ));
+            }
+            Ok(n) => filled += n,
+            Err(err) => return Err(Error::Io(err)),
+        }
+    }
+    Ok(Some(u32::from_be_bytes(buf)))
 }
 
 fn write_u32_be(writer: &mut impl Write, value: u32) -> Result<()> {
