@@ -281,14 +281,20 @@ fn t0600_delete_fails_cleanly_when_packed_refs_locked() {
     git_empty_commit_oid(wt);
     git(wt, &["branch", "locked"]);
     git(wt, &["pack-refs", "--all"]);
+    let oid: ObjectId = git(wt, &["rev-parse", "refs/heads/locked"])
+        .trim()
+        .parse()
+        .unwrap();
+    write_ref(&git_dir, "refs/heads/locked", &oid).expect("loose copy over packed");
 
     let packed_path = git_dir.join("packed-refs");
     let loose_path = git_dir.join("refs/heads/locked");
     let before_packed = read_bytes(&packed_path);
-    let before_loose = loose_path
-        .exists()
-        .then(|| read_bytes(&loose_path))
-        .unwrap_or_default();
+    assert!(
+        loose_path.is_file(),
+        "need loose ref for byte-identity check"
+    );
+    let before_loose = read_bytes(&loose_path);
 
     let lock_path = git_dir.join("packed-refs.lock");
     let _lock = fs::OpenOptions::new()
@@ -308,9 +314,7 @@ fn t0600_delete_fails_cleanly_when_packed_refs_locked() {
     );
 
     assert_eq!(read_bytes(&packed_path), before_packed);
-    if loose_path.exists() {
-        assert_eq!(read_bytes(&loose_path), before_loose);
-    }
+    assert_eq!(read_bytes(&loose_path), before_loose);
     assert!(
         packed_refs_entry_exists(&git_dir, "refs/heads/locked").unwrap(),
         "ref must remain after failed delete"
@@ -498,6 +502,113 @@ fn assert_packed_refs_unreadable_like_git_show_ref(wt: &Path, git_dir: &Path) {
     assert!(
         !show.status.success() || !git_show.status.success(),
         "git must reject corrupted packed-refs (show-ref or for-each-ref)"
+    );
+}
+
+#[test]
+fn t1408_malformed_packed_refs_double_space_rejected_like_git() {
+    assert_malformed_packed_refs_rejected(|data| {
+        let needle = b" refs/heads/";
+        let pos = data
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .expect("packed ref line");
+        data.insert(pos + 1, b' ');
+    });
+}
+
+#[test]
+fn t1408_malformed_packed_refs_trailing_space_rejected_like_git() {
+    assert_malformed_packed_refs_rejected(|data| {
+        insert_trailing_space_before_first_ref_newline(data);
+    });
+}
+
+fn insert_trailing_space_before_first_ref_newline(data: &mut Vec<u8>) {
+    let needle = b" refs/heads/";
+    let start = data
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .expect("refs/heads line");
+    let line_end = data[start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|i| start + i)
+        .expect("newline");
+    data.insert(line_end, b' ');
+}
+
+#[test]
+fn t1408_malformed_packed_refs_orphan_peel_rejected_like_git() {
+    assert_malformed_packed_refs_rejected(|data| {
+        let oid_line = data
+            .split(|&b| b == b'\n')
+            .find(|l| !l.is_empty() && !l.starts_with(b"#"))
+            .expect("oid line");
+        let peel = [b'^']
+            .into_iter()
+            .chain(oid_line.iter().copied())
+            .chain([b'\n'])
+            .collect::<Vec<_>>();
+        data.splice(0..0, peel);
+    });
+}
+
+#[test]
+fn t1408_malformed_packed_refs_blank_line_rejected_like_git() {
+    assert_malformed_packed_refs_rejected(|data| {
+        if let Some(pos) = data.iter().position(|&b| b == b'\n') {
+            data.insert(pos + 1, b'\n');
+        }
+    });
+}
+
+#[test]
+fn t1408_malformed_packed_refs_missing_final_newline_rejected_like_git() {
+    assert_malformed_packed_refs_rejected(|data| {
+        if data.last() == Some(&b'\n') {
+            data.pop();
+        }
+    });
+}
+
+fn assert_malformed_packed_refs_rejected(mut mutate: impl FnMut(&mut Vec<u8>)) {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    git_empty_commit_oid(wt);
+    git(wt, &["branch", "probe"]);
+    git(wt, &["pack-refs", "--all"]);
+    let path = git_dir.join("packed-refs");
+    let mut data = fs::read(&path).expect("packed-refs");
+    mutate(&mut data);
+    fs::write(&path, &data).expect("write mutated packed-refs");
+    assert_git_show_ref_and_grit_load_both_reject(wt, &git_dir);
+}
+
+fn assert_git_show_ref_and_grit_load_both_reject(wt: &Path, git_dir: &Path) {
+    assert!(
+        matches!(
+            PackedRefs::load(git_dir),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ),
+        "PackedRefs::load must reject malformed packed-refs"
+    );
+    assert!(
+        list_refs(git_dir, "refs/").is_err(),
+        "list_refs must fail on malformed packed-refs"
+    );
+    let show = std::process::Command::new("git")
+        .current_dir(wt)
+        .args(["show-ref"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git show-ref");
+    assert!(
+        !show.status.success(),
+        "git show-ref must reject malformed packed-refs: {}",
+        String::from_utf8_lossy(&show.stderr)
     );
 }
 
