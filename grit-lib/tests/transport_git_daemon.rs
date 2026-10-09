@@ -262,3 +262,115 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
         String::from_utf8_lossy(&fsck.stderr)
     );
 }
+
+/// Issue #933: a lightweight tag at the same commit as a side branch tip must not
+/// suppress the branch `want`, leaving `origin/<branch>` dangling after clone/fetch.
+#[test]
+fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(work.join("a"), "a\n").unwrap();
+    git(&work, &["add", "a"]);
+    git(&work, &["commit", "-q", "-m", "a"]);
+    git(&work, &["checkout", "-q", "-b", "rel"]);
+    std::fs::write(work.join("r"), "r\n").unwrap();
+    git(&work, &["add", "r"]);
+    git(&work, &["commit", "-q", "-m", "rel"]);
+    git(&work, &["tag", "light"]);
+    git(&work, &["tag", "-a", "-m", "rel1", "rel-1.0"]);
+    git(&work, &["checkout", "-q", "main"]);
+    std::fs::write(work.join("b"), "b\n").unwrap();
+    git(&work, &["add", "b"]);
+    git(&work, &["commit", "-q", "-m", "b"]);
+
+    let base = tmp.path().join("srv");
+    std::fs::create_dir_all(&base).unwrap();
+    let source = base.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            source.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&source, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    let main_oid = rev_parse(&source, "refs/heads/main");
+    let rel_oid = rev_parse(&source, "refs/heads/rel");
+    let light_oid = rev_parse(&source, "refs/tags/light");
+    let rel10_oid = rev_parse(&source, "refs/tags/rel-1.0");
+    assert_eq!(light_oid, rel_oid, "fixture: lightweight tag at rel tip");
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_daemon(&base, port) else {
+        eprintln!("SKIP: `git daemon` is unavailable");
+        return;
+    };
+    let _guard = DaemonGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: git daemon did not become ready on port {port}");
+        return;
+    }
+
+    let url = format!("git://127.0.0.1:{port}/repo.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+
+    let transport = GitDaemonTransport::new();
+    let mut conn = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("SKIP: could not connect to git daemon: {e}");
+            return;
+        }
+    };
+
+    let opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        tags: TagMode::Following,
+        ..Default::default()
+    };
+    fetch_remote(&local_git, &mut *conn, &opts, &mut NoProgress)
+        .expect("fetch with TagMode::Following");
+
+    let got_rel = resolve_ref(&local_git, "refs/remotes/origin/rel").expect("origin/rel");
+    assert_eq!(got_rel, rel_oid);
+    assert_eq!(
+        resolve_ref(&local_git, "refs/tags/light").expect("light tag"),
+        light_oid
+    );
+    assert_eq!(
+        resolve_ref(&local_git, "refs/tags/rel-1.0").expect("annotated tag"),
+        rel10_oid
+    );
+
+    let local_odb = open_odb(&local_git);
+    for oid in [main_oid, rel_oid, light_oid, rel10_oid] {
+        assert!(
+            local_odb.exists(&oid),
+            "object {} missing after fetch",
+            oid.to_hex()
+        );
+    }
+
+    let fsck = Command::new("git")
+        .current_dir(&local)
+        .args(["fsck", "--no-dangling"])
+        .output()
+        .expect("run git fsck");
+    assert!(
+        fsck.status.success(),
+        "git fsck failed (issue #933): {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+}
