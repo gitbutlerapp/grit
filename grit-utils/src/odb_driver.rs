@@ -80,10 +80,10 @@ fn emit_pack_in_offset_order(
     repo: &Repository,
     idx: &PackIndex,
 ) -> Result<()> {
-    let mut order: Vec<_> = idx.iter().collect();
-    order.sort_by_key(|e| e.offset());
-    for entry in order {
-        let oid = ObjectId::from_bytes(entry.oid()).context("pack entry oid")?;
+    let mut order: Vec<usize> = (0..idx.len()).collect();
+    order.sort_by_key(|&i| idx.offset_at(i));
+    for i in order {
+        let oid = ObjectId::from_bytes(idx.oid_at(i)).context("pack entry oid")?;
         write_batch_object(out, repo, &oid)?;
     }
     Ok(())
