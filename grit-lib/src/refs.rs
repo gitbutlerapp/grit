@@ -23,6 +23,9 @@ use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::pack;
 
+/// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
+pub const SYMREF_MAXDEPTH: usize = 5;
+
 /// A symbolic or direct reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ref {
@@ -66,16 +69,17 @@ pub fn read_ref_file(path: &Path) -> Result<Ref> {
 pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
     if let Some(target) = content.strip_prefix("ref: ") {
         Ok(Ref::Symbolic(target.trim().to_owned()))
-    } else if ObjectId::is_full_hex(content) {
-        let oid: ObjectId = content.parse()?;
-        Ok(Ref::Direct(oid))
-    } else if content == "unknown-oid" {
-        // Simplified harness `test_oid` placeholder (not valid hex). Match
-        // `for-each-ref` loose ref loading: treat as a direct ref to a
-        // non-resident OID so missing-object diagnostics match t6301.
-        const PLACEHOLDER: &[u8; 20] = b"GritUnknownOidPlc!X!";
-        let oid = ObjectId::from_bytes(PLACEHOLDER)?;
-        Ok(Ref::Direct(oid))
+    } else if let Some(token) = content.split_whitespace().next() {
+        if ObjectId::is_full_hex(token) {
+            let oid: ObjectId = token.parse()?;
+            Ok(Ref::Direct(oid))
+        } else if content == "unknown-oid" {
+            const PLACEHOLDER: &[u8; 20] = b"GritUnknownOidPlc!X!";
+            let oid = ObjectId::from_bytes(PLACEHOLDER)?;
+            Ok(Ref::Direct(oid))
+        } else {
+            Err(Error::InvalidRef(content.to_owned()))
+        }
     } else {
         Err(Error::InvalidRef(content.to_owned()))
     }
@@ -131,7 +135,7 @@ fn resolve_ref_depth(
     refname: &str,
     depth: usize,
 ) -> Result<ObjectId> {
-    if depth > 10 {
+    if depth >= SYMREF_MAXDEPTH {
         return Err(Error::InvalidRef(format!(
             "ref symlink too deep: {refname}"
         )));
@@ -749,6 +753,11 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
         }
         .into());
     }
+    if path.is_file() && matches!(read_ref_file(&path), Err(Error::InvalidRef(_))) {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{refname}': reference broken"
+        )));
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -974,6 +983,24 @@ fn dir_tree_has_files(dir: &Path) -> bool {
     false
 }
 
+/// Walk upward from `ref_path`'s parent, removing empty directories until `refs/`.
+fn prune_empty_loose_ref_parents(storage_dir: &Path, ref_path: &Path) {
+    let refs_root = storage_dir.join("refs");
+    let mut current = ref_path.parent();
+    while let Some(dir) = current {
+        if dir == refs_root.as_path() || !dir.starts_with(&refs_root) {
+            break;
+        }
+        if dir_tree_has_files(dir) {
+            break;
+        }
+        if fs::remove_dir(dir).is_err() {
+            break;
+        }
+        current = dir.parent();
+    }
+}
+
 /// Recursively remove an empty directory tree (assumes [`dir_tree_has_files`] returned false).
 fn remove_dir_tree(dir: &Path) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
@@ -997,6 +1024,9 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     ensure_refname_safe_for_storage(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_delete_ref(git_dir, refname);
+    }
+    if matches!(read_raw_ref(git_dir, refname)?, RawRefLookup::NotFound) {
+        return Err(Error::InvalidRef(format!("ref not found: {refname}")));
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
@@ -1025,6 +1055,8 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
             if e.raw_os_error() == Some(libc::EISDIR) || e.raw_os_error() == Some(libc::EPERM) => {}
         Err(e) => return Err(Error::Io(e)),
     }
+
+    prune_empty_loose_ref_parents(&storage_dir, &path);
 
     let log_path = storage_dir.join("logs").join(&stor);
 

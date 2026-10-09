@@ -2526,7 +2526,7 @@ fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathBuf, String)
 }
 
 fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Result<ObjectId> {
-    if depth > 10 {
+    if depth >= crate::refs::SYMREF_MAXDEPTH {
         return Err(Error::InvalidRef(format!(
             "reftable: symlink too deep: {refname}"
         )));
