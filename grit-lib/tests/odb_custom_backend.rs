@@ -7,25 +7,45 @@ use std::sync::Arc;
 use grit_lib::diff::diff_trees;
 use grit_lib::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::gc::prune_loose_unreachable;
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
-use grit_lib::odb::store::MemoryStore;
+use grit_lib::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::odb::OdbBuilder;
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::rev_list::{rev_list, RevListOptions};
+use grit_lib::rev_parse::resolve_revision;
 
-fn count_loose_hex_dirs(objects: &Path) -> usize {
-    let Ok(entries) = fs::read_dir(objects) else {
-        return 0;
-    };
-    entries
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|n| n.len() == 2 && n.chars().all(|c| c.is_ascii_hexdigit()))
-        })
-        .count()
+fn canonical_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
+    let header = format!("{kind} {}\0", data.len());
+    let mut store_bytes = header.into_bytes();
+    store_bytes.extend_from_slice(data);
+    store_bytes
+}
+
+fn list_files_under(base: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut stack = vec![base.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(read) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for ent in read.flatten() {
+            let path = ent.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                paths.push(
+                    path.strip_prefix(base)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    paths.sort();
+    paths
 }
 
 fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
@@ -89,11 +109,98 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
     let diff = diff_trees(&repo.odb, Some(&tree2), Some(&tree), "").expect("diff");
     assert!(!diff.is_empty());
 
-    assert_eq!(
-        count_loose_hex_dirs(repo.odb.objects_dir()),
-        0,
-        "custom primary must not create loose object shards"
+    let objects = repo.odb.objects_dir();
+    let files = list_files_under(objects);
+    assert!(
+        !files.iter().any(|p| {
+            p.len() >= 3
+                && p.as_bytes().get(2) == Some(&b'/')
+                && p[..2].chars().all(|c| c.is_ascii_hexdigit())
+        }),
+        "custom primary must not create loose object shards; found {files:?}"
     );
+}
+
+#[test]
+fn memory_primary_resolve_abbrev_via_lookup_prefix() {
+    let (_dir, repo, _store) = memory_repo();
+    let blob = repo
+        .odb
+        .write(ObjectKind::Blob, b"abbrev-test\n")
+        .expect("blob");
+    let prefix = &blob.to_hex()[..8];
+    let resolved = resolve_revision(&repo, prefix).expect("abbrev");
+    assert_eq!(resolved, blob);
+}
+
+#[test]
+fn memory_primary_write_raw_ignores_seeded_loose_on_disk() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let git_dir = dir.path().join(".git");
+    let objects = git_dir.join("objects");
+    let payload = b"seed-on-disk-only\n";
+    let store_bytes = canonical_store_bytes(ObjectKind::Blob, payload);
+    let oid =
+        grit_lib::hash::hash_object(grit_lib::objects::HashAlgo::Sha1, ObjectKind::Blob, payload);
+    let loose = objects.join(oid.loose_prefix()).join(oid.loose_suffix());
+    fs::create_dir_all(loose.parent().unwrap()).expect("shard");
+    fs::write(&loose, b"placeholder").expect("seed loose");
+
+    let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
+    let repo = Repository::open_with_odb(
+        &RepositoryOptions::empty(),
+        &git_dir,
+        Some(dir.path()),
+        OdbBuilder::files(&objects)
+            .primary(store.clone())
+            .alternates(false),
+    )
+    .expect("open");
+
+    assert!(!store.contains(&oid).expect("contains"));
+    repo.odb.write_raw(&store_bytes).expect("write_raw");
+    assert!(store.contains(&oid).expect("contains after"));
+}
+
+#[test]
+fn files_primary_gc_prunes_unreachable_loose() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let kept_blob = repo.odb.write(ObjectKind::Blob, b"keep\n").expect("keep");
+    let tree_body = serialize_tree(&[TreeEntry {
+        mode: 0o100644,
+        name: b"f".to_vec(),
+        oid: kept_blob,
+    }]);
+    let tree = repo.odb.write(ObjectKind::Tree, &tree_body).expect("tree");
+    let commit_body = format!(
+        "tree {tree}\nauthor T <t@example.com> 1 +0000\ncommitter T <t@example.com> 1 +0000\n\nm\n"
+    );
+    let commit = repo
+        .odb
+        .write(ObjectKind::Commit, commit_body.as_bytes())
+        .expect("commit");
+    write_ref(&repo.git_dir, "refs/heads/main", &commit).expect("ref");
+
+    let orphan_payload = b"orphan\n";
+    let orphan_oid = grit_lib::hash::hash_object(
+        grit_lib::objects::HashAlgo::Sha1,
+        ObjectKind::Blob,
+        orphan_payload,
+    );
+    let orphan_path = repo.odb.object_path(&orphan_oid);
+    fs::create_dir_all(orphan_path.parent().unwrap()).expect("shard");
+    fs::write(&orphan_path, b"x").expect("orphan loose");
+
+    repo.odb.gc().expect("gc");
+    assert!(
+        !orphan_path.exists(),
+        "gc must prune unreachable loose objects"
+    );
+    assert!(repo.odb.read(&kept_blob).is_ok());
+    let stats = prune_loose_unreachable(&repo.odb, &[commit], None).expect("verify prune");
+    assert_eq!(stats.pruned, 0, "gc should have already pruned orphans");
 }
 
 #[test]

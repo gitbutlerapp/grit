@@ -927,6 +927,11 @@ impl Odb {
     }
 
     /// Return the path to the `objects/` directory.
+    ///
+    /// This is always the repository layout path (including for custom primaries that do not
+    /// store objects on disk). Prefer [`Self::files_objects_dir`] when the operation requires a
+    /// files-backed primary; filesystem maintenance returns
+    /// [`Error::UnsupportedObjectStore`] otherwise.
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
@@ -1550,6 +1555,11 @@ impl Odb {
         zlib_store: &[u8],
         options: WriteOptions,
     ) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_loose_zlib_prehashed",
+            });
+        }
         let primary = self.primary()?;
         if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
             return Ok(existing);
@@ -1648,6 +1658,11 @@ impl Odb {
     ///
     /// Same as [`Self::write`].
     pub fn write_local(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_local",
+            });
+        }
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
@@ -1666,6 +1681,11 @@ impl Odb {
     /// before local packs are removed. Unlike [`Self::write_local`], objects present only in a
     /// promisor pack are still written because [`Self::exists_local`] treats those as absent.
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_loose_materialize",
+            });
+        }
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
         if let Ok(primary) = self.primary() {
@@ -1691,10 +1711,24 @@ impl Odb {
     /// - [`Error::CorruptObject`] — the provided bytes don't form a valid header.
     /// - [`Error::Io`] / [`Error::Zlib`] — storage errors.
     pub fn write_raw(&self, store_bytes: &[u8]) -> Result<ObjectId> {
-        // Validate the header before storing
-        parse_object_bytes(store_bytes)?;
-
+        let obj = parse_object_bytes(store_bytes)?;
         let oid = hash_bytes_with(self.hash_algo(), store_bytes);
+
+        if let Some(primary) = &self.custom_primary {
+            if self.exists(&oid) {
+                return Ok(oid);
+            }
+            if self.overlay_active() && self.overlay_store_object(oid, obj.kind, &obj.data) {
+                return Ok(oid);
+            }
+            return WritableObjectStore::write(
+                primary.as_ref(),
+                obj.kind,
+                &obj.data,
+                WriteOptions::default(),
+            );
+        }
+
         if let Some(existing) = self.try_freshen_existing(&oid) {
             return Ok(existing);
         }
@@ -1711,6 +1745,11 @@ impl Odb {
     ///
     /// Same as [`Self::write_raw`].
     pub fn write_raw_local(&self, store_bytes: &[u8]) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_raw_local",
+            });
+        }
         parse_object_bytes(store_bytes)?;
 
         let oid = hash_bytes_with(self.hash_algo(), store_bytes);
