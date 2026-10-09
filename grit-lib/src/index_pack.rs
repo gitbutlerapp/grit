@@ -5,14 +5,16 @@
 //! use [`crate::unpack_objects`] via [`crate::receive_pack::should_use_unpack_objects`].
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::hash::Parallelism;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::pack::{verify_pack_and_collect, write_v2_pack_index_with_trailer};
-use crate::transfer::fix_thin_pack;
+use crate::pack_map::PackData;
+use crate::transfer::fix_thin_pack_path;
 use crate::unpack_objects::{pack_index_records_with_threads, PackIndexRecord};
 
 /// Options controlling how a received pack is ingested.
@@ -62,6 +64,22 @@ pub fn ingest_received_pack(
     install_pack_bytes(pack, odb, opts)
 }
 
+/// Ingest a pack already written to disk (streaming fetch/clone receive path).
+///
+/// # Errors
+///
+/// Same as [`install_pack_path`].
+pub fn ingest_received_pack_path(
+    pack_path: PathBuf,
+    odb: &Odb,
+    opts: &IngestPackOptions,
+) -> Result<HashSet<ObjectId>> {
+    if !pack_path.exists() {
+        return Ok(HashSet::new());
+    }
+    install_pack_path(&pack_path, odb, opts)
+}
+
 /// Write `pack` into `odb`'s `objects/pack/` directory with a v2 index.
 ///
 /// Builds under temporary names and publishes the `.pack`/`.idx` pair atomically.
@@ -70,11 +88,39 @@ pub fn install_pack_bytes(
     odb: &Odb,
     opts: &IngestPackOptions,
 ) -> Result<HashSet<ObjectId>> {
-    let pack = if opts.fix_thin {
-        fix_thin_pack(pack, odb)?
-    } else {
-        pack
-    };
+    let pack_dir = odb.objects_dir().join("pack");
+    std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
+    let tmp = pack_dir.join(format!("tmp_install_{}", std::process::id()));
+    std::fs::write(&tmp, &pack).map_err(Error::Io)?;
+    match install_pack_path(&tmp, odb, opts) {
+        Ok(oids) => Ok(oids),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+/// Install a pack from `pack_path` into `odb`'s `objects/pack/` directory.
+///
+/// The file is moved into place when possible; callers may pass a temp receive
+/// path under `objects/pack/`.
+pub fn install_pack_path(
+    pack_path: &Path,
+    odb: &Odb,
+    opts: &IngestPackOptions,
+) -> Result<HashSet<ObjectId>> {
+    let mut owned = pack_path.to_path_buf();
+    if opts.fix_thin {
+        owned = fix_thin_pack_path(&owned, odb)?;
+    }
+    let pack_data = PackData::open(&owned)?;
+    let pack: &[u8] = pack_data.deref();
+    if pack.len() < 12 || &pack[0..4] != b"PACK" {
+        return Err(Error::CorruptObject(
+            "received data is not a pack stream".to_owned(),
+        ));
+    }
     let hb = odb.hash_algo().len();
     if pack.len() < 12 + hb {
         return Err(Error::CorruptObject("pack too small".to_owned()));
@@ -83,7 +129,7 @@ pub fn install_pack_bytes(
     let stem = format!("pack-{}", pack_hash.to_hex());
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-    let pack_path = pack_dir.join(format!("{stem}.pack"));
+    let final_pack = pack_dir.join(format!("{stem}.pack"));
     let idx_path = pack_dir.join(format!("{stem}.idx"));
     let stage = pack_dir.join(format!(".{stem}-install"));
     let stage_pack = stage.join(format!("{stem}.pack"));
@@ -93,20 +139,26 @@ pub fn install_pack_bytes(
 
     let install_result = (|| -> Result<HashSet<ObjectId>> {
         std::fs::create_dir_all(&stage).map_err(Error::Io)?;
-        std::fs::write(&stage_pack, &pack).map_err(Error::Io)?;
-        let records = pack_index_records_with_threads(&pack, odb, opts.index_parallelism(odb))?;
+        drop(pack_data);
+        if std::fs::rename(&owned, &stage_pack).is_err() {
+            std::fs::copy(&owned, &stage_pack).map_err(Error::Io)?;
+            let _ = std::fs::remove_file(&owned);
+        }
+        let indexed = PackData::open(&stage_pack)?;
+        let pack_bytes: &[u8] = indexed.deref();
+        let records =
+            pack_index_records_with_threads(pack_bytes, odb, opts.index_parallelism(odb))?;
         let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
         let entries: Vec<(ObjectId, u64, u32)> = records
             .into_iter()
             .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
             .collect();
-        let trailer = &pack[pack.len() - hb..];
+        let trailer = &pack_bytes[pack_bytes.len() - hb..];
         write_v2_pack_index_with_trailer(&stage_idx, &entries, trailer, hb)?;
-        // Same validation `git index-pack` performs before the pack is usable (CRCs, offsets, hashes).
         verify_pack_and_collect(&stage_idx)?;
-        std::fs::rename(&stage_pack, &pack_path).map_err(Error::Io)?;
+        std::fs::rename(&stage_pack, &final_pack).map_err(Error::Io)?;
         std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
-            let _ = std::fs::remove_file(&pack_path);
+            let _ = std::fs::remove_file(&final_pack);
             Error::Io(e)
         })?;
         let _ = std::fs::remove_dir(&stage);
@@ -115,8 +167,9 @@ pub fn install_pack_bytes(
 
     if install_result.is_err() {
         cleanup_stale_install_stage(&stage);
-        let _ = std::fs::remove_file(&pack_path);
+        let _ = std::fs::remove_file(&final_pack);
         let _ = std::fs::remove_file(&idx_path);
+        let _ = std::fs::remove_file(&owned);
     }
     let oids = install_result?;
     odb.invalidate_packs();

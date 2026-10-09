@@ -134,34 +134,6 @@ fn read_ack_round(reader: &mut dyn Read, negotiator: &mut SkippingNegotiator) ->
     Ok(())
 }
 
-/// Read a raw pkt-line payload (length-prefixed), returning `None` on
-/// flush/delim/response-end/EOF. Side-band readers stop at a flush.
-fn read_pkt_payload_raw(r: &mut dyn Read) -> std::io::Result<Option<Vec<u8>>> {
-    let mut len_buf = [0u8; 4];
-    match r.read_exact(&mut len_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
-    }
-    let len_str = std::str::from_utf8(&len_buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let len = usize::from_str_radix(len_str, 16)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    match len {
-        0..=2 => Ok(None),
-        n if n <= 4 => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("invalid pkt-line length: {n}"),
-        )),
-        n => {
-            let payload_len = n - 4;
-            let mut buf = vec![0u8; payload_len];
-            r.read_exact(&mut buf)?;
-            Ok(Some(buf))
-        }
-    }
-}
-
 /// Demultiplex the side-band-64k stream after `done`: collect channel-1 pack
 /// bytes into `out` (scanning for the `PACK` magic, which may span chunk
 /// boundaries), and forward channel-2 progress to `progress`. Channel 3 is a
@@ -171,48 +143,8 @@ fn read_sideband_pack(
     out: &mut Vec<u8>,
     progress: &mut dyn Progress,
 ) -> Result<()> {
-    let mut seen_pack = false;
-    let mut pending: Vec<u8> = Vec::new();
-    while let Some(payload) = read_pkt_payload_raw(r)? {
-        if payload.is_empty() {
-            continue;
-        }
-        match payload[0] {
-            1 => {
-                let data = &payload[1..];
-                if seen_pack {
-                    out.extend_from_slice(data);
-                } else {
-                    pending.extend_from_slice(data);
-                    if let Some(pos) = pending.windows(4).position(|w| w == b"PACK") {
-                        seen_pack = true;
-                        out.extend_from_slice(&pending[pos..]);
-                        pending.clear();
-                    } else if pending.len() > 3 {
-                        let keep_from = pending.len() - 3;
-                        pending.drain(..keep_from);
-                    }
-                }
-            }
-            2 => progress.message(&payload[1..]),
-            3 => {
-                return Err(Error::Message(format!(
-                    "remote error: {}",
-                    String::from_utf8_lossy(&payload[1..]).trim_end()
-                )));
-            }
-            _ => {
-                // No side-band: raw pack bytes.
-                if !seen_pack && payload.starts_with(b"PACK") {
-                    seen_pack = true;
-                    out.extend_from_slice(&payload);
-                } else if seen_pack {
-                    out.extend_from_slice(&payload);
-                }
-            }
-        }
-    }
-    Ok(())
+    let mut target = crate::pack_receive::PackReceiveTarget::Memory(out);
+    crate::pack_receive::read_sideband_pack_to(r, &mut target, progress)
 }
 
 /// Peel `oid` to the commit usable as a negotiation tip; `None` if it is not a
@@ -796,7 +728,13 @@ fn negotiate_pack_v2(
             deepen,
             true,
         )?;
-        read_v2_fetch_pack_response(conn.reader(), &mut pack, &mut shallow_update, progress)?;
+        read_v2_fetch_pack_response(
+            conn.reader(),
+            &mut pack,
+            None,
+            &mut shallow_update,
+            progress,
+        )?;
         return Ok((pack, shallow_update));
     }
 
@@ -817,12 +755,24 @@ fn negotiate_pack_v2(
     match ack {
         // Server is `ready`: the pack follows in the SAME response after a delim.
         Some(round) if round.ready => {
-            read_v2_fetch_pack_response(conn.reader(), &mut pack, &mut shallow_update, progress)?;
+            read_v2_fetch_pack_response(
+                conn.reader(),
+                &mut pack,
+                None,
+                &mut shallow_update,
+                progress,
+            )?;
         }
         // Server skipped acknowledgments and went straight to the pack header
         // (consumed inside the reader); read the pack now.
         None => {
-            read_v2_fetch_pack_response(conn.reader(), &mut pack, &mut shallow_update, progress)?;
+            read_v2_fetch_pack_response(
+                conn.reader(),
+                &mut pack,
+                None,
+                &mut shallow_update,
+                progress,
+            )?;
         }
         // Not ready yet: round 2 sends the remaining haves + `done`, then pack.
         Some(_) => {
@@ -836,7 +786,13 @@ fn negotiate_pack_v2(
                 deepen,
                 true,
             )?;
-            read_v2_fetch_pack_response(conn.reader(), &mut pack, &mut shallow_update, progress)?;
+            read_v2_fetch_pack_response(
+                conn.reader(),
+                &mut pack,
+                None,
+                &mut shallow_update,
+                progress,
+            )?;
         }
     }
     Ok((pack, shallow_update))
@@ -1041,6 +997,7 @@ pub(crate) fn read_v2_acknowledgments(reader: &mut dyn Read) -> Result<Option<V2
 pub(crate) fn read_v2_fetch_pack_response(
     reader: &mut dyn Read,
     out: &mut Vec<u8>,
+    pack_file: Option<&mut crate::pack_receive::TempPackReceive>,
     shallow_out: &mut ShallowUpdate,
     progress: &mut dyn Progress,
 ) -> Result<()> {
@@ -1077,7 +1034,11 @@ pub(crate) fn read_v2_fetch_pack_response(
             h if h == crate::protocol_v2::FetchResponseSection::Packfile.header() => {
                 // The `packfile` section body is side-band-64k framed; reuse the
                 // shared demuxer (channel 1 = pack, channel 2 = progress, 3 = err).
-                read_sideband_pack(&mut *reader, out, progress)?;
+                if let Some(pf) = pack_file {
+                    pf.read_sideband(&mut *reader, progress)?;
+                } else {
+                    read_sideband_pack(&mut *reader, out, progress)?;
+                }
                 return Ok(());
             }
             other => {

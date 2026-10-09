@@ -522,6 +522,22 @@ pub(crate) fn append_whole_objects_from_odb(
 
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
 /// `git index-pack --fix-thin`.
+/// Expand a thin on-disk pack, returning the path to the pack bytes to index.
+///
+/// When the pack is not thin, returns `pack_path` unchanged. Otherwise writes a
+/// fixed pack alongside the input and removes the thin temp file.
+pub(crate) fn fix_thin_pack_path(pack_path: &Path, odb: &Odb) -> Result<std::path::PathBuf> {
+    let data = std::fs::read(pack_path).map_err(Error::Io)?;
+    if !crate::unpack_objects::pack_is_thin(&data, odb.hash_algo()) {
+        return Ok(pack_path.to_path_buf());
+    }
+    let fixed = fix_thin_pack(data, odb)?;
+    let out = pack_path.with_extension("fixed");
+    std::fs::write(&out, &fixed).map_err(Error::Io)?;
+    let _ = std::fs::remove_file(pack_path);
+    Ok(out)
+}
+
 pub(crate) fn fix_thin_pack(mut pack: Vec<u8>, odb: &Odb) -> Result<Vec<u8>> {
     let algo = odb.hash_algo();
     let hb = algo.len();

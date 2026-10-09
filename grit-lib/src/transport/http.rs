@@ -84,6 +84,31 @@ pub trait HttpClient: Send + Sync {
         git_protocol: Option<&str>,
     ) -> Result<Vec<u8>>;
 
+    /// Issue a `POST` and return the response body as a readable stream.
+    ///
+    /// The default implementation buffers via [`post`](Self::post). Embedders
+    /// should override this when large packfiles make buffering untenable.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`post`](Self::post).
+    fn post_into_reader(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> Result<Box<dyn Read + Send>> {
+        Ok(Box::new(Cursor::new(self.post(
+            url,
+            content_type,
+            accept,
+            body,
+            git_protocol,
+        )?)))
+    }
+
     /// Issue a `GET` to `url` and return both the response body and the final
     /// URL the request resolved to after any HTTP redirects the client followed
     /// (`None` when the client does not track it).
@@ -140,6 +165,17 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         git_protocol: Option<&str>,
     ) -> Result<Vec<u8>> {
         (**self).post(url, content_type, accept, body, git_protocol)
+    }
+
+    fn post_into_reader(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> Result<Box<dyn Read + Send>> {
+        (**self).post_into_reader(url, content_type, accept, body, git_protocol)
     }
 
     fn get_with_final_url(
@@ -632,7 +668,7 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
 }
 
 /// Read a length-prefixed pkt-line payload, returning `None` on flush/delim/EOF.
-fn read_pkt_payload(r: &mut impl Read) -> std::io::Result<Option<Vec<u8>>> {
+fn read_pkt_payload(r: &mut (impl Read + ?Sized)) -> std::io::Result<Option<Vec<u8>>> {
     let mut len_buf = [0u8; 4];
     match r.read_exact(&mut len_buf) {
         Ok(()) => {}
@@ -704,104 +740,23 @@ struct RoundResult {
     unshallow: Vec<ObjectId>,
 }
 
-/// Demultiplex the side-band pack from a stateless-RPC response, appending pack
-/// bytes to `out` and forwarding channel-2 progress. Mirrors the CLI's
-/// `read_sideband_pack_until_done`.
-fn read_sideband_pack(
-    r: &mut impl Read,
-    out: &mut Vec<u8>,
-    progress: &mut dyn Progress,
-) -> Result<()> {
-    let mut seen_pack = false;
-    let mut pending: Vec<u8> = Vec::new();
-    loop {
-        let mut len_buf = [0u8; 4];
-        match r.read_exact(&mut len_buf) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(e.into()),
-        }
-        let len_str = std::str::from_utf8(&len_buf)
-            .map_err(|_| Error::Message("bad pkt length".to_owned()))?;
-        let len = usize::from_str_radix(len_str, 16)
-            .map_err(|_| Error::Message("bad pkt length".to_owned()))?;
-        match len {
-            0 => {
-                if seen_pack {
-                    break;
-                }
-                continue;
-            }
-            1 | 2 => continue,
-            n if n <= 4 => {
-                return Err(Error::Message(format!(
-                    "invalid pkt-line length in side-band stream: {n}"
-                )))
-            }
-            _ => {}
-        }
-        let mut payload = vec![0u8; len - 4];
-        r.read_exact(&mut payload)?;
-        if payload.is_empty() {
-            continue;
-        }
-        match payload[0] {
-            1 => append_pack_data(&payload[1..], out, &mut pending, &mut seen_pack),
-            2 => progress.message(&payload[1..]),
-            3 => {
-                return Err(Error::Message(format!(
-                    "remote error: {}",
-                    String::from_utf8_lossy(&payload[1..]).trim_end()
-                )))
-            }
-            _ => append_pack_data(&payload, out, &mut pending, &mut seen_pack),
-        }
-    }
-    Ok(())
-}
-
-/// Append channel-1 (or raw) data to `out`, scanning for the `PACK` magic that
-/// may straddle chunk boundaries.
-fn append_pack_data(data: &[u8], out: &mut Vec<u8>, pending: &mut Vec<u8>, seen_pack: &mut bool) {
-    if *seen_pack {
-        out.extend_from_slice(data);
-        return;
-    }
-    pending.extend_from_slice(data);
-    if let Some(pos) = pending.windows(4).position(|w| w == b"PACK") {
-        *seen_pack = true;
-        out.extend_from_slice(&pending[pos..]);
-        pending.clear();
-    } else if pending.len() > 3 {
-        let keep_from = pending.len() - 3;
-        pending.drain(..keep_from);
-    }
-}
-
-/// Parse one v0 stateless-RPC `git-upload-pack` response: an optional leading
-/// `shallow-info` section (only when `expect_shallow`, i.e. a deepen was
-/// requested), then optional `ACK`/`NAK` negotiation lines, then (if the server
-/// is generating one) the side-band pack.
-fn read_stateless_response(
-    resp: &[u8],
+/// Parse a stateless-RPC `git-upload-pack` response from a stream and write any
+/// any pack bytes to `pack_receive` instead of a `Vec`.
+fn read_stateless_response_stream<R: Read>(
+    r: &mut R,
     sideband: bool,
     expect_shallow: bool,
-    pack_buf: &mut Vec<u8>,
+    pack_receive: &mut crate::pack_receive::TempPackReceive,
     progress: &mut dyn Progress,
 ) -> Result<RoundResult> {
-    let mut cur = Cursor::new(resp);
     let mut acks = Vec::new();
     let mut got_pack = false;
     let mut shallow = Vec::new();
     let mut unshallow = Vec::new();
 
-    // Shallow-info section: `shallow`/`unshallow` lines terminated by a flush. A
-    // server with nothing to report still emits the trailing flush. Rewind and
-    // fall through if the first line is not a shallow-info line (no section).
     if expect_shallow {
         loop {
-            let start = cur.position() as usize;
-            match pkt_line::read_packet(&mut cur)? {
+            match pkt_line::read_packet(r)? {
                 None | Some(pkt_line::Packet::Flush) => break,
                 Some(pkt_line::Packet::Data(line)) => {
                     let line = line.trim_end_matches('\n');
@@ -814,8 +769,9 @@ fn read_stateless_response(
                             unshallow.push(oid);
                         }
                     } else {
-                        cur.set_position(start as u64);
-                        break;
+                        return Err(Error::Message(format!(
+                            "unexpected line in shallow-info section: {line}"
+                        )));
                     }
                 }
                 Some(_) => break,
@@ -823,11 +779,7 @@ fn read_stateless_response(
         }
     }
 
-    loop {
-        let start = cur.position() as usize;
-        let Some(payload) = read_pkt_payload(&mut cur)? else {
-            break;
-        };
+    while let Some(payload) = read_pkt_payload(r)? {
         if payload.is_empty() {
             continue;
         }
@@ -836,11 +788,45 @@ fn read_stateless_response(
                 || payload.starts_with(b"PACK");
         if is_pack {
             got_pack = true;
-            cur.set_position(start as u64);
             if sideband {
-                read_sideband_pack(&mut cur, pack_buf, progress)?;
+                let mut target =
+                    crate::pack_receive::PackReceiveTarget::File(pack_receive.file_mut());
+                let mut pending = Vec::new();
+                let mut seen = false;
+                if payload.first() == Some(&1) {
+                    crate::pack_receive::append_pack_data(
+                        &payload[1..],
+                        &mut target,
+                        &mut pending,
+                        &mut seen,
+                    )?;
+                } else {
+                    crate::pack_receive::append_pack_data(
+                        &payload,
+                        &mut target,
+                        &mut pending,
+                        &mut seen,
+                    )?;
+                }
+                crate::pack_receive::read_sideband_pack_tail(
+                    r,
+                    &mut target,
+                    progress,
+                    &mut pending,
+                    &mut seen,
+                )?;
+                pack_receive.mark_seen_pack(seen);
             } else {
-                pack_buf.extend_from_slice(&resp[start..]);
+                let data = if payload.starts_with(b"PACK") {
+                    payload.as_slice()
+                } else if let Some(pos) = payload.windows(4).position(|w| w == b"PACK") {
+                    &payload[pos..]
+                } else {
+                    payload.as_slice()
+                };
+                pack_receive.write_raw(data)?;
+                std::io::copy(r, pack_receive).map_err(Error::Io)?;
+                pack_receive.mark_seen_pack(true);
             }
             break;
         }
@@ -956,7 +942,7 @@ fn negotiate_pack_http(
     opts: &FetchOptions,
     local_shallow: &[ObjectId],
     progress: &mut dyn Progress,
-) -> Result<(Vec<u8>, crate::fetch::ShallowUpdate)> {
+) -> Result<(Option<std::path::PathBuf>, crate::fetch::ShallowUpdate)> {
     let post_url = upload_pack_url(repo_url);
     let content_type = format!("application/x-{UPLOAD_PACK}-request");
     let accept = format!("application/x-{UPLOAD_PACK}-result");
@@ -1031,7 +1017,8 @@ fn negotiate_pack_http(
         }
     }
 
-    let mut pack_buf: Vec<u8> = Vec::new();
+    let local_odb = open_odb(local_git_dir);
+    let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
     let mut got_ready = false;
     let mut got_pack = false;
     let mut shallow_applied = false;
@@ -1055,9 +1042,14 @@ fn negotiate_pack_http(
         pkt_line::write_flush(&mut req)?;
         round.clear();
 
-        let resp = client.post(&post_url, &content_type, &accept, &req, None)?;
-        let round_result =
-            read_stateless_response(&resp, sideband, shallow_request, &mut pack_buf, progress)?;
+        let mut reader = client.post_into_reader(&post_url, &content_type, &accept, &req, None)?;
+        let round_result = read_stateless_response_stream(
+            &mut reader,
+            sideband,
+            shallow_request,
+            &mut pack_receive,
+            progress,
+        )?;
         if shallow_request && !shallow_applied {
             shallow_update
                 .shallow
@@ -1094,16 +1086,30 @@ fn negotiate_pack_http(
         let mut req = state.clone();
         pkt_line::write_line_to_vec(&mut req, "done")?;
         pkt_line::write_flush(&mut req)?;
-        let resp = client.post(&post_url, &content_type, &accept, &req, None)?;
-        let round_result =
-            read_stateless_response(&resp, sideband, shallow_request, &mut pack_buf, progress)?;
+        let mut reader = client.post_into_reader(&post_url, &content_type, &accept, &req, None)?;
+        let round_result = read_stateless_response_stream(
+            &mut reader,
+            sideband,
+            shallow_request,
+            &mut pack_receive,
+            progress,
+        )?;
         if shallow_request && !shallow_applied {
             shallow_update.shallow.extend(round_result.shallow);
             shallow_update.unshallow.extend(round_result.unshallow);
         }
+        if round_result.got_pack {
+            got_pack = true;
+        }
     }
 
-    Ok((pack_buf, shallow_update))
+    let pack_path = if got_pack {
+        pack_receive.finish()?
+    } else {
+        let _ = pack_receive.finish()?;
+        None
+    };
+    Ok((pack_path, shallow_update))
 }
 
 /// Resolve the `wants` for a fetch from the advertised refs and the matched set.
@@ -1346,14 +1352,9 @@ pub fn http_fetch(
             progress,
         )?;
         shallow_update = su;
-        if !pack.is_empty() {
-            if pack.len() < 12 || &pack[0..4] != b"PACK" {
-                return Err(Error::Message(
-                    "did not receive a valid pack from HTTP fetch".to_owned(),
-                ));
-            }
-            pack_oids = crate::index_pack::ingest_received_pack(
-                pack,
+        if let Some(pack_path) = pack {
+            pack_oids = crate::index_pack::ingest_received_pack_path(
+                pack_path,
                 &local_odb,
                 &crate::index_pack::IngestPackOptions {
                     fix_thin: true,
@@ -1556,14 +1557,9 @@ fn http_fetch_v2(
             progress,
         )?;
         shallow_update = su;
-        if !pack.is_empty() {
-            if pack.len() < 12 || &pack[0..4] != b"PACK" {
-                return Err(Error::Message(
-                    "did not receive a valid pack from v2 HTTP fetch".to_owned(),
-                ));
-            }
-            pack_oids = crate::index_pack::ingest_received_pack(
-                pack,
+        if let Some(pack_path) = pack {
+            pack_oids = crate::index_pack::ingest_received_pack_path(
+                pack_path,
                 &local_odb,
                 &crate::index_pack::IngestPackOptions {
                     fix_thin: true,
@@ -1682,9 +1678,9 @@ fn negotiate_pack_v2_http(
     wants: &[ObjectId],
     deepen: &crate::fetch::V2DeepenArgs,
     progress: &mut dyn Progress,
-) -> Result<(Vec<u8>, crate::fetch::ShallowUpdate)> {
+) -> Result<(Option<std::path::PathBuf>, crate::fetch::ShallowUpdate)> {
     if wants.is_empty() {
-        return Ok((Vec::new(), crate::fetch::ShallowUpdate::default()));
+        return Ok((None, crate::fetch::ShallowUpdate::default()));
     }
     let object_format = crate::fetch::v2_object_format(server_caps, local_odb);
     let cap_echo = protocol_v2::cap_lines_for_command_request(server_caps);
@@ -1704,8 +1700,23 @@ fn negotiate_pack_v2_http(
         crate::fetch::v2_local_haves(local_git_dir, wants)?
     };
 
-    let mut pack = Vec::new();
+    let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
     let mut shallow_update = crate::fetch::ShallowUpdate::default();
+    let mut scratch = Vec::new();
+    let mut got_pack = false;
+
+    let mut read_pack_from_reader = |reader: &mut dyn Read| -> Result<()> {
+        scratch.clear();
+        crate::fetch::read_v2_fetch_pack_response(
+            reader,
+            &mut scratch,
+            Some(&mut pack_receive),
+            &mut shallow_update,
+            progress,
+        )?;
+        got_pack = true;
+        Ok(())
+    };
 
     // No local history: one POST, wants + done, then the pack.
     if haves.is_empty() {
@@ -1720,15 +1731,16 @@ fn negotiate_pack_v2_http(
             deepen,
             true,
         )?;
-        let resp = client.post(post_url, content_type, accept, &req, Some(git_protocol))?;
-        let mut cur = Cursor::new(resp);
-        crate::fetch::read_v2_fetch_pack_response(
-            &mut cur,
-            &mut pack,
-            &mut shallow_update,
-            progress,
-        )?;
-        return Ok((pack, shallow_update));
+        let mut reader =
+            client.post_into_reader(post_url, content_type, accept, &req, Some(git_protocol))?;
+        read_pack_from_reader(&mut reader)?;
+        let pack_path = if got_pack {
+            pack_receive.finish()?
+        } else {
+            let _ = pack_receive.finish()?;
+            None
+        };
+        return Ok((pack_path, shallow_update));
     }
 
     // Batched negotiation: each round resends wants + the accumulated have prefix
@@ -1755,24 +1767,24 @@ fn negotiate_pack_v2_http(
             let ack = crate::fetch::read_v2_acknowledgments(&mut cur)?;
             if let Some(round) = ack {
                 if round.ready {
-                    // The pack follows in this same response after the delimiter.
-                    crate::fetch::read_v2_fetch_pack_response(
-                        &mut cur,
-                        &mut pack,
-                        &mut shallow_update,
-                        progress,
-                    )?;
-                    return Ok((pack, shallow_update));
+                    read_pack_from_reader(&mut cur)?;
+                    let pack_path = if got_pack {
+                        pack_receive.finish()?
+                    } else {
+                        let _ = pack_receive.finish()?;
+                        None
+                    };
+                    return Ok((pack_path, shallow_update));
                 }
             } else {
-                // Server skipped acknowledgments and went straight to the pack.
-                crate::fetch::read_v2_fetch_pack_response(
-                    &mut cur,
-                    &mut pack,
-                    &mut shallow_update,
-                    progress,
-                )?;
-                return Ok((pack, shallow_update));
+                read_pack_from_reader(&mut cur)?;
+                let pack_path = if got_pack {
+                    pack_receive.finish()?
+                } else {
+                    let _ = pack_receive.finish()?;
+                    None
+                };
+                return Ok((pack_path, shallow_update));
             }
             flush_at = next_flush(flush_at).min(haves.len());
             continue;
@@ -1790,15 +1802,16 @@ fn negotiate_pack_v2_http(
             deepen,
             true,
         )?;
-        let resp = client.post(post_url, content_type, accept, &req, Some(git_protocol))?;
-        let mut cur = Cursor::new(resp);
-        crate::fetch::read_v2_fetch_pack_response(
-            &mut cur,
-            &mut pack,
-            &mut shallow_update,
-            progress,
-        )?;
-        return Ok((pack, shallow_update));
+        let mut reader =
+            client.post_into_reader(post_url, content_type, accept, &req, Some(git_protocol))?;
+        read_pack_from_reader(&mut reader)?;
+        let pack_path = if got_pack {
+            pack_receive.finish()?
+        } else {
+            let _ = pack_receive.finish()?;
+            None
+        };
+        return Ok((pack_path, shallow_update));
     }
 }
 
