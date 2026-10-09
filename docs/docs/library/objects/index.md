@@ -22,6 +22,10 @@ When you only need type and size (for example listing objects without loading bl
 
 After repack, garbage collection, or installing a pack with [`install_pack_bytes`](https://docs.rs/grit-lib/latest/grit_lib/index_pack/fn.install_pack_bytes.html), call [`Odb::invalidate_packs`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so the next read rescans `objects/pack/`. If another [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
 
+For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`Odb::with_pack_read_context`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so pack indexes, mmap-backed pack bytes, and the delta-base LRU stay on one thread-local context instead of reinstalling it per object. [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) detects an active matching context and skips nested setup.
+
+When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) with the entry offset from [`PackIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndex.html) so the read path does not repeat index lookup by OID.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
