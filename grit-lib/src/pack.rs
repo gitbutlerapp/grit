@@ -2727,8 +2727,10 @@ pub fn packed_ref_delta_reuse_slice(
             continue;
         }
         let zlib_start = p;
-        let mut end_pos = zlib_start;
-        if skip_one_pack_object(&pack_bytes, &mut end_pos, entry_offset, hb).is_err() {
+        let Some(end_pos) = pack_entry_raw_end(&idx, &pack_bytes, entry_offset) else {
+            continue;
+        };
+        if zlib_start >= end_pos {
             continue;
         }
         let compressed = &pack_bytes[zlib_start..end_pos];
@@ -2738,6 +2740,18 @@ pub fn packed_ref_delta_reuse_slice(
             Ok(d) => d,
             Err(_) => continue,
         };
+        let Ok(base_obj) = read_object_from_pack(&idx, &base) else {
+            continue;
+        };
+        let Ok(target_obj) = read_object_from_pack(&idx, oid) else {
+            continue;
+        };
+        let Ok(applied) = crate::unpack_objects::apply_delta(&base_obj.data, &delta) else {
+            continue;
+        };
+        if applied != target_obj.data {
+            continue;
+        }
         return Ok(Some((base, delta)));
     }
     Ok(None)

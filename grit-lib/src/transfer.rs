@@ -303,10 +303,8 @@ impl PackBuildOptions {
 
     /// Production pack settings for a local full copy (clone/fetch from disk).
     ///
-    /// Non-thin, delta-compressed, with whole-object reuse when the source ODB
-    /// already stores objects in packs. On-disk delta reuse stays off until
-    /// [`crate::pack::packed_ref_delta_reuse_slice`] reads zlib bounds correctly
-    /// for large packs (follow-up to #936).
+    /// Non-thin, delta-compressed, reusing on-disk deltas and whole-object bytes
+    /// when the source ODB already stores objects in packs (Git pack-objects parity).
     #[must_use]
     pub fn for_local_copy(cfg: Option<&crate::config::ConfigSet>) -> Self {
         let (window, max_depth) = Self::window_and_depth_from_config(cfg);
@@ -316,7 +314,8 @@ impl PackBuildOptions {
             window,
             max_depth,
             use_ofs_delta: true,
-            reuse_deltas: false,
+            // Git stores whole objects only when `pack.depth=0` (no on-disk delta reuse either).
+            reuse_deltas: max_depth > 0,
             reuse_objects: true,
             ..Default::default()
         }
@@ -831,6 +830,31 @@ fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
         .count()
 }
 
+/// Every OID in the on-disk delta chain ending at `oid` is included in `in_pack`.
+///
+/// Reusing a delta instruction stream requires the whole chain to be emitted in
+/// the new pack (Git pack-objects only reuses when all bases are in the object set).
+fn on_disk_delta_chain_in_send(
+    objects_dir: &Path,
+    oid: ObjectId,
+    in_pack: &HashSet<ObjectId>,
+) -> Result<bool> {
+    let mut cur = oid;
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(cur) {
+            return Ok(true);
+        }
+        if !in_pack.contains(&cur) {
+            return Ok(false);
+        }
+        let Some(base) = crate::pack::packed_delta_base_oid(objects_dir, &cur)? else {
+            return Ok(true);
+        };
+        cur = base;
+    }
+}
+
 /// Select blob deltas for `send` and produce an ordered emit plan.
 ///
 /// A lift of the CLI's `optimize_blob_deltas`: a size-sorted prefix/LCP window
@@ -882,26 +906,36 @@ fn plan_deltas(
     let mut reused: HashMap<ObjectId, Vec<u8>> = HashMap::new();
     let mut external_bases: HashSet<ObjectId> = HashSet::new();
 
-    if opts.max_depth > 0 {
-        // On-disk delta reuse runs even with `--window=0` (no new deltas), matching
-        // Git pack-objects. SHA-256 packs are skipped inside the reuse helper.
-        if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
-            let objects_dir = odb.objects_dir();
-            for &t in send {
-                if objects[&t].kind != ObjectKind::Blob || objects[&t].data.is_empty() {
-                    continue;
-                }
-                if let Ok(Some((base, zdelta))) =
-                    crate::pack::packed_ref_delta_reuse_slice(objects_dir, &t, &in_pack)
+    // On-disk delta reuse runs even with `--window=0` (no new deltas), matching Git pack-objects.
+    if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
+        let objects_dir = odb.objects_dir();
+        for &t in send {
+            if objects[&t].data.is_empty() {
+                continue;
+            }
+            if let Ok(Some((base, zdelta))) =
+                crate::pack::packed_ref_delta_reuse_slice(objects_dir, &t, &in_pack)
+            {
+                if base != t
+                    && in_pack.contains(&base)
+                    && islands.in_same_island(&t, &base)
+                    && on_disk_delta_chain_in_send(objects_dir, t, &in_pack)?
                 {
-                    if base != t && in_pack.contains(&base) && islands.in_same_island(&t, &base) {
-                        delta_to_base.insert(t, base);
-                        reused.insert(t, zdelta);
-                    }
+                    delta_to_base.insert(t, base);
+                    reused.insert(t, zdelta);
                 }
             }
         }
     }
+
+    // Objects referenced as the base of a reused on-disk delta must be stored as
+    // whole objects (or reuse their own on-disk delta), not as a freshly computed
+    // window delta — otherwise REF bases no longer match `by_oid` during indexing.
+    let reuse_delta_bases: HashSet<ObjectId> = delta_to_base
+        .iter()
+        .filter(|(t, _)| reused.contains_key(t))
+        .map(|(_, b)| *b)
+        .collect();
 
     if opts.window > 0 && opts.max_depth > 0 {
         // Blobs in the pack, smallest-first (size-sorted window proximity).
@@ -931,6 +965,10 @@ fn plan_deltas(
         for (i, &t) in blobs.iter().enumerate() {
             // A reused on-disk delta already covers this target.
             if delta_to_base.contains_key(&t) {
+                continue;
+            }
+            // Do not replace a reuse base with a fresh delta encoding.
+            if reuse_delta_bases.contains(&t) {
                 continue;
             }
             let t_data = &objects[&t].data;
@@ -1134,8 +1172,13 @@ fn serialize_pack_with_deltas(
                     }
                 };
 
+                // Reused streams were validated against resolved base payloads in the
+                // source pack; always address the base by OID so we do not depend on
+                // emit order (OFS would require the base header at a stable offset).
                 let in_pack_offset = oid_to_offset.get(&base_oid).copied();
-                if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                if let Some(base_off) =
+                    in_pack_offset.filter(|_| opts.use_ofs_delta && entry.reused_delta.is_none())
+                {
                     let dist = start.checked_sub(base_off).ok_or_else(|| {
                         Error::CorruptObject("ofs-delta distance underflow".to_owned())
                     })?;
