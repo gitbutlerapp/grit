@@ -726,6 +726,62 @@ fn git_pack_layer(dir: &Path, layer: usize, all_objects: bool) {
     );
 }
 
+/// Pick an object that lives in a pack (not loose) after `git prune-packed`.
+fn pack_only_hit_oid(repo_root: &Path, objects_dir: &Path) -> Result<ObjectId> {
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["rev-parse", "HEAD"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .map_err(grit_lib::error::Error::Io)?;
+    if !out.status.success() {
+        return Err(grit_lib::error::Error::Message(
+            "rev-parse HEAD for pack-only hit".into(),
+        ));
+    }
+    let hit = ObjectId::from_hex(std::str::from_utf8(&out.stdout).expect("utf8").trim())
+        .map_err(|_| grit_lib::error::Error::Message("HEAD oid hex".into()))?;
+    if loose_object_path(objects_dir, &hit).is_file() {
+        let pack_dir = objects_dir.join("pack");
+        for entry in std::fs::read_dir(&pack_dir).map_err(grit_lib::error::Error::Io)? {
+            let entry = entry.map_err(grit_lib::error::Error::Io)?;
+            let path = entry.path();
+            if path.extension().is_some_and(|x| x == "idx") {
+                let idx = read_pack_index(&path)?;
+                for e in idx.iter() {
+                    if e.oid().len() == 20 {
+                        if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
+                            if !loose_object_path(objects_dir, &oid).is_file() {
+                                return Ok(oid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Err(grit_lib::error::Error::Message(
+            "no pack-only oid after prune-packed".into(),
+        ));
+    }
+    Ok(hit)
+}
+
+fn loose_object_path(objects_dir: &Path, oid: &ObjectId) -> PathBuf {
+    Odb::new(objects_dir).object_path(oid)
+}
+
+fn assert_midx_pack_only_hit(objects_dir: &Path, odb: &Odb, hit: &ObjectId) {
+    assert!(
+        !loose_object_path(objects_dir, hit).is_file(),
+        "MIDX bench hit {hit} must not exist as a loose object"
+    );
+    assert!(
+        odb.exists(hit),
+        "MIDX bench hit {hit} must be reachable via packs/MIDX"
+    );
+}
+
 fn build_midx_backend(pack_count: usize) -> OdbBackendCase {
     let keep = tempfile::tempdir().expect("midx backend tempdir");
     let dir = keep.path();
@@ -740,19 +796,12 @@ fn build_midx_backend(pack_count: usize) -> OdbBackendCase {
         git_pack_layer(dir, i, i + 1 == pack_count);
     }
     git_run(dir, &["multi-pack-index", "write"]);
+    git_run(dir, &["prune-packed"]);
     let git_dir = dir.join(".git");
     let objects = git_dir.join("objects");
-    let out = Command::new("git")
-        .current_dir(dir)
-        .args(["rev-parse", "HEAD"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("rev-parse HEAD");
-    assert!(out.status.success());
-    let hit = ObjectId::from_hex(std::str::from_utf8(&out.stdout).expect("utf8").trim())
-        .expect("HEAD oid");
+    let hit = pack_only_hit_oid(dir, &objects).expect("pack-only hit for midx bench");
     let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+    assert_midx_pack_only_hit(&objects, &odb, &hit);
     OdbBackendCase {
         _keep: keep,
         odb,
