@@ -203,7 +203,7 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 | commit | 2 | 1.00× | 1.16× |
 | merge | 2 | 3.00× | 3.80× |
 | object_reads | 8 | 234.49× | 4569.02× |
-| odb_backend | 3 | 19.61× | 111.58× |
+| odb_backend | 3 | 22.88× | 98.20× |
 | pick | 4 | 6.96× | 16.49× |
 | status | 4 | 9.02× | 46.96× |
 | switch | 4 | 3.25× | 5.36× |
@@ -246,9 +246,9 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `cat-file-batch-check-hot-path-100k` | hot-path-100k | 45.3 | 888 | 19.61× | ±11.8 ms |
-| `cat-file-batch-hot-path-100k` | hot-path-100k | 129 | 993 | 7.69× | ±22.4 ms |
-| `rev-list-objects-odb-backend-hot-path-100k` | hot-path-100k | 65.2 | 7,271 | 111.58× | ±202 ms |
+| `cat-file-batch-check-hot-path-100k` | hot-path-100k | 56.7 | 1,298 | 22.88× | ±196 ms |
+| `cat-file-batch-hot-path-100k` | hot-path-100k | 162 | 1,117 | 6.91× | ±19.5 ms |
+| `rev-list-objects-odb-backend-hot-path-100k` | hot-path-100k | 71.9 | 7,062 | 98.20× | ±446 ms |
 
 ### pick
 
