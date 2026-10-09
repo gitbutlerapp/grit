@@ -93,7 +93,9 @@ pub fn install_pack_bytes(
 ) -> Result<HashSet<ObjectId>> {
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-    let tmp = pack_dir.join(format!("tmp_install_{}", std::process::id()));
+    static INSTALL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = INSTALL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = pack_dir.join(format!("tmp_install_{}_{seq}", std::process::id()));
     std::fs::write(&tmp, &pack).map_err(Error::Io)?;
     match install_pack_path(&tmp, odb, opts) {
         Ok(oids) => Ok(oids),
@@ -148,16 +150,20 @@ pub fn install_pack_path(
             let _ = std::fs::remove_file(&owned);
         }
         let indexed = PackData::open(&stage_pack)?;
-        let pack_bytes: &[u8] = indexed.deref();
-        let records =
-            pack_index_records_with_threads(pack_bytes, odb, opts.index_parallelism(odb))?;
+        let (records, trailer) = {
+            let pack_bytes: &[u8] = indexed.deref();
+            let records =
+                pack_index_records_with_threads(pack_bytes, odb, opts.index_parallelism(odb))?;
+            let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
+            (records, trailer)
+        };
+        drop(indexed);
         let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
         let entries: Vec<(ObjectId, u64, u32)> = records
             .into_iter()
             .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
             .collect();
-        let trailer = &pack_bytes[pack_bytes.len() - hb..];
-        write_v2_pack_index_with_trailer(&stage_idx, &entries, trailer, hb)?;
+        write_v2_pack_index_with_trailer(&stage_idx, &entries, &trailer, hb)?;
         verify_pack_and_collect(&stage_idx)?;
         std::fs::rename(&stage_pack, &final_pack).map_err(Error::Io)?;
         std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
@@ -244,6 +250,21 @@ mod tests {
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .collect()
+    }
+
+    /// Manual RSS: `GRIT_CARGO_PACK=/path/to.pack cargo test -p grit-lib --release rss_mmap_index_records -- --ignored --exact`
+    #[test]
+    #[ignore = "manual RSS harness (GRIT_CARGO_PACK)"]
+    fn rss_mmap_index_records() {
+        use crate::hash::Parallelism;
+        use std::env;
+        let path = env::var("GRIT_CARGO_PACK").expect("GRIT_CARGO_PACK");
+        let mapped = PackData::open(Path::new(&path)).expect("mmap");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        let _records =
+            pack_index_records_with_threads(mapped.deref(), &odb, Parallelism::resolve(Some(4)))
+                .expect("index records");
     }
 
     #[test]

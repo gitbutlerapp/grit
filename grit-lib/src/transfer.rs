@@ -527,10 +527,14 @@ pub(crate) fn append_whole_objects_from_odb(
 /// When the pack is not thin, returns `pack_path` unchanged. Otherwise writes a
 /// fixed pack alongside the input and removes the thin temp file.
 pub(crate) fn fix_thin_pack_path(pack_path: &Path, odb: &Odb) -> Result<std::path::PathBuf> {
-    let data = std::fs::read(pack_path).map_err(Error::Io)?;
-    if !crate::unpack_objects::pack_is_thin(&data, odb.hash_algo()) {
+    use crate::pack_map::PackData;
+    use std::ops::Deref;
+
+    let mapped = PackData::open(pack_path)?;
+    if !crate::unpack_objects::pack_is_thin(mapped.deref(), odb.hash_algo()) {
         return Ok(pack_path.to_path_buf());
     }
+    let data = std::fs::read(pack_path).map_err(Error::Io)?;
     let fixed = fix_thin_pack(data, odb)?;
     let out = pack_path.with_extension("fixed");
     std::fs::write(&out, &fixed).map_err(Error::Io)?;

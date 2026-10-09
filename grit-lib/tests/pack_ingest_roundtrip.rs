@@ -1209,6 +1209,74 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
     .expect("fix thin install");
 }
 
+/// Manual RSS harness: `GRIT_PACK_IDX=/path/to.idx cargo test --release rss_harness_verify_pack_only -- --ignored --exact`
+#[test]
+#[ignore = "manual RSS harness (set GRIT_PACK_IDX)"]
+fn rss_harness_verify_pack_only() {
+    use grit_lib::pack::verify_pack_and_collect;
+    use std::path::Path;
+    let idx = std::env::var("GRIT_PACK_IDX").expect("GRIT_PACK_IDX");
+    verify_pack_and_collect(Path::new(&idx)).expect("verify");
+}
+
+/// Runs index build then verify in one process (matches install peak order).
+#[test]
+#[ignore = "manual RSS harness (GRIT_CARGO_PACK + GRIT_PACK_IDX)"]
+fn rss_harness_index_then_verify() {
+    use grit_lib::hash::Parallelism;
+    use grit_lib::pack::verify_pack_and_collect;
+    use grit_lib::unpack_objects::pack_index_records_with_threads;
+    use std::path::Path;
+    let pack = std::env::var("GRIT_CARGO_PACK").expect("GRIT_CARGO_PACK");
+    let idx = std::env::var("GRIT_PACK_IDX").expect("GRIT_PACK_IDX");
+    let data = std::fs::read(Path::new(&pack)).expect("read pack");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let odb = Odb::new(tmp.path());
+    let threads = std::env::var("GRIT_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let _records =
+        pack_index_records_with_threads(&data, &odb, Parallelism::resolve(threads)).expect("index");
+    verify_pack_and_collect(Path::new(&idx)).expect("verify");
+}
+
+/// Manual RSS harness: `GRIT_CARGO_PACK=/path/to.pack cargo test --release rss_harness_build_index_records_only -- --ignored --exact`
+#[test]
+#[ignore = "manual RSS harness (set GRIT_CARGO_PACK)"]
+fn rss_harness_build_index_records_only() {
+    use grit_lib::hash::Parallelism;
+    use grit_lib::unpack_objects::pack_index_records_with_threads;
+    use std::path::Path;
+    let pack = std::env::var("GRIT_CARGO_PACK").expect("GRIT_CARGO_PACK");
+    let data = std::fs::read(Path::new(&pack)).expect("read pack");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let odb = Odb::new(tmp.path());
+    let threads = std::env::var("GRIT_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let _records = pack_index_records_with_threads(&data, &odb, Parallelism::resolve(threads))
+        .expect("index records");
+}
+
+/// Manual RSS harness: `GRIT_CARGO_PACK=/path/to.pack cargo test --release rss_harness_install_pack_path -- --ignored --exact`
+#[test]
+#[ignore = "manual RSS harness (set GRIT_CARGO_PACK)"]
+fn rss_harness_install_pack_path() {
+    use grit_lib::index_pack::{install_pack_path, IngestPackOptions};
+    use std::path::Path;
+    let pack = std::env::var("GRIT_CARGO_PACK").expect("GRIT_CARGO_PACK");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let staging = tmp.path().join("in.pack");
+    std::fs::copy(Path::new(&pack), &staging).expect("copy pack");
+    let odb = Odb::new(tmp.path());
+    let threads = std::env::var("GRIT_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let fix_thin = std::env::var("GRIT_FIX_THIN").ok().as_deref() != Some("0");
+    install_pack_path(&staging, &odb, &IngestPackOptions { fix_thin, threads })
+        .expect("install pack");
+}
+
 #[test]
 fn pack_index_build_sha256_delta_pack_threads() {
     let Some(fx) = shared_pack(PackShape::GitDelta, HashAlgo::Sha256) else {
