@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::ops::ControlFlow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
@@ -28,7 +28,8 @@ use grit_test_support::odb_conformance::run_read_suite;
 use tempfile::TempDir;
 
 use midx_support::{
-    all_packed_oids, git_available, git_write_midx, git_write_midx_incremental, multi_pack_repo,
+    all_packed_oids, git_available, git_write_midx, head_oid, multi_pack_repo, pack_objects_layer,
+    read_chain_hashes, tip_midx_path,
 };
 
 struct MidxBackedStore {
@@ -313,22 +314,117 @@ fn git_midx_eight_pack_roundtrip() {
     assert_midx_git_roundtrip(repo.path(), &objects);
 }
 
+/// Base MIDX plus one grit incremental layer (two chain entries).
+fn grit_two_layer_incremental_fixture(
+) -> Option<(midx_support::RepoFixture, PathBuf, ObjectId, ObjectId)> {
+    let (repo, objects, base_oids) = multi_pack_repo(FixtureHashAlgo::Sha1, 2)?;
+    let pack_dir = objects.join("pack");
+    write_multi_pack_index_with_options(
+        &pack_dir,
+        &WriteMultiPackIndexOptions {
+            version: Some(1),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let old_only = *base_oids.first()?;
+    std::fs::write(repo.path().join("incr-only.txt"), b"incr layer\n").ok()?;
+    repo.git(&["add", "incr-only.txt"]);
+    repo.git(&["commit", "-q", "-m", "incr layer"]);
+    let new_only = head_oid(&repo);
+    if !pack_objects_layer(repo.path(), 50) {
+        return None;
+    }
+    write_multi_pack_index_with_options(
+        &pack_dir,
+        &WriteMultiPackIndexOptions {
+            incremental: true,
+            version: Some(1),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let chain = read_chain_hashes(&pack_dir)?;
+    if chain.len() != 2 {
+        return None;
+    }
+    Some((repo, objects, old_only, new_only))
+}
+
 #[test]
-fn git_midx_incremental_eight_pack_roundtrip() {
-    if !git_available() {
-        eprintln!("SKIP: git unavailable");
-        return;
-    }
-    let Some((repo, objects, _)) = multi_pack_repo(FixtureHashAlgo::Sha1, 8) else {
-        eprintln!("SKIP: eight-pack fixture failed");
-        return;
+fn grit_incremental_two_layer_old_and_new_reads() {
+    let Some((repo, objects, old_only, new_only)) = grit_two_layer_incremental_fixture() else {
+        panic!("grit two-layer incremental fixture setup failed");
     };
-    if !git_write_midx_incremental(&repo) {
-        eprintln!("SKIP: git incremental MIDX unavailable");
-        return;
-    }
     clear_pack_cache();
-    assert_midx_git_roundtrip(repo.path(), &objects);
+    let store = Arc::new(PackStore::new(objects.clone()));
+    let midx = MidxObjects::new(Arc::clone(&store), true).expect("open midx store");
+    assert_eq!(midx.status(), MidxObjectsStatus::Active);
+    assert_eq!(
+        read_chain_hashes(&objects.join("pack"))
+            .expect("chain file")
+            .len(),
+        2
+    );
+
+    assert!(
+        midx.read(&old_only).expect("old read").is_some(),
+        "object listed only in the base layer must read via chain offset"
+    );
+    assert!(
+        midx.read(&new_only).expect("new read").is_some(),
+        "object in the incremental layer must read"
+    );
+    let _ = repo;
+}
+
+#[test]
+fn grit_incremental_two_layer_for_each_stops_on_break() {
+    let Some((_repo, objects, _, _)) = grit_two_layer_incremental_fixture() else {
+        panic!("grit two-layer incremental fixture setup failed");
+    };
+    clear_pack_cache();
+    let midx = MidxObjects::new(Arc::new(PackStore::new(objects)), true).expect("open");
+    let mut break_callbacks = 0usize;
+    midx.for_each_object(&mut |_| {
+        break_callbacks += 1;
+        ControlFlow::Break(())
+    })
+    .expect("for_each");
+    assert_eq!(
+        break_callbacks, 1,
+        "for_each_object must stop after the first Break across chain layers"
+    );
+}
+
+#[test]
+fn grit_incremental_corrupt_tip_makes_store_unusable() {
+    let Some((repo, objects, old_only, _)) = grit_two_layer_incremental_fixture() else {
+        panic!("grit two-layer incremental fixture setup failed");
+    };
+    let pack_dir = objects.join("pack");
+    let tip = tip_midx_path(&pack_dir);
+    let mut data = std::fs::read(&tip).expect("read tip layer");
+    if data.len() > 24 {
+        let corrupt_offset = data.len() - 21;
+        data[corrupt_offset] ^= 0xff;
+    }
+    std::fs::write(&tip, &data).expect("write corrupt tip");
+    clear_pack_cache();
+    grit_lib::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
+
+    let store = Arc::new(PackStore::new(objects.clone()));
+    let midx = MidxObjects::new(Arc::clone(&store), true).expect("open");
+    assert_eq!(
+        midx.status(),
+        MidxObjectsStatus::Unusable,
+        "any corrupt referenced chain layer must disable the MIDX backend"
+    );
+    assert!(midx.read(&old_only).expect("read").is_none());
+
+    let packs = PackedObjects::new(store);
+    assert!(packs.read(&old_only).expect("pack fallback").is_some());
+    let _ = repo;
 }
 
 #[test]

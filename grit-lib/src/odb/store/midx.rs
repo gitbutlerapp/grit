@@ -1,15 +1,16 @@
 //! Multi-pack-index object backend ([`MidxObjects`]).
 //!
-//! OID membership and prefix search use the prepared MIDX chain; object bytes are read through
-//! [`PackedObjects`] restricted to MIDX-listed pack indexes.
+//! OID membership and prefix search use the prepared MIDX chain; object bytes are read at the
+//! layer-resolved pack offset via [`PreparedMidxChain::try_read_object`].
 
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::ops::ControlFlow;
 use std::sync::{Arc, RwLock};
 
+use crate::diagnostics::NullDiagnostics;
 use crate::error::{Error, Result};
-use crate::midx::{prepared_midx_chain, PreparedMidxChain};
+use crate::midx::{prepared_midx_chain_strict, PreparedMidxChain};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo};
 use crate::pack::clear_pack_cache;
 use crate::pack_store::PackStore;
@@ -106,14 +107,21 @@ impl MidxObjects {
         if self.status() != MidxObjectsStatus::Active {
             return Ok(None);
         }
-        prepared_midx_chain(self.packs.pack_store().objects_dir())
+        prepared_midx_chain_strict(self.packs.pack_store().objects_dir())
     }
 
-    fn oid_listed(&self, oid: &ObjectId) -> Result<bool> {
+    fn read_via_chain(&self, oid: &ObjectId) -> Result<Option<Object>> {
         let Some(chain) = self.active_chain()? else {
-            return Ok(false);
+            return Ok(None);
         };
-        Ok(chain.oid_listed_in_tip(oid))
+        chain.try_read_object(oid, &NullDiagnostics)
+    }
+
+    fn read_info_via_chain(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        let Some(chain) = self.active_chain()? else {
+            return Ok(None);
+        };
+        chain.try_read_info(oid, &NullDiagnostics)
     }
 }
 
@@ -123,17 +131,11 @@ impl ObjectStore for MidxObjects {
     }
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        if !self.oid_listed(oid)? {
-            return Ok(None);
-        }
-        self.packs.read_midx_covered(oid)
+        self.read_via_chain(oid)
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-        if !self.oid_listed(oid)? {
-            return Ok(None);
-        }
-        self.packs.read_info_midx_covered(oid)
+        self.read_info_via_chain(oid)
     }
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
@@ -187,7 +189,7 @@ impl ObjectStore for MidxObjects {
 }
 
 fn classify_midx_status(objects_dir: &std::path::Path) -> Result<MidxObjectsStatus> {
-    match prepared_midx_chain(objects_dir)? {
+    match prepared_midx_chain_strict(objects_dir)? {
         Some(_) => Ok(MidxObjectsStatus::Active),
         None => Ok(MidxObjectsStatus::Unusable),
     }

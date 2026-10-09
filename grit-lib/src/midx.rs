@@ -702,12 +702,20 @@ pub(crate) mod midx_cache {
             use std::collections::HashSet;
             let mut seen = HashSet::new();
             for layer in &self.layers {
+                let mut stop = false;
                 layer.for_each_listed_object(&mut |oid| {
                     if !seen.insert(*oid) {
                         return ControlFlow::Continue(());
                     }
-                    f(oid)
+                    if f(oid).is_break() {
+                        stop = true;
+                        return ControlFlow::Break(());
+                    }
+                    ControlFlow::Continue(())
                 })?;
+                if stop {
+                    break;
+                }
             }
             Ok(())
         }
@@ -794,6 +802,7 @@ pub(crate) mod midx_cache {
     #[derive(Default)]
     pub(crate) struct State {
         chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
+        strict_chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
         hot_chain: Option<(PathBuf, Arc<PreparedMidxChain>)>,
     }
 
@@ -801,28 +810,57 @@ pub(crate) mod midx_cache {
         objects_dir: &Path,
         diagnostics: &dyn DiagnosticSink,
     ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        build_chain_impl(objects_dir, diagnostics, false)
+    }
+
+    fn build_chain_strict(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        build_chain_impl(objects_dir, diagnostics, true)
+    }
+
+    fn build_chain_impl(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+        require_every_layer: bool,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
         let pack_dir = objects_dir.join("pack");
         let paths = midx_chain_layer_paths_newest_first(&pack_dir);
         if paths.is_empty() {
             return Ok(None);
         }
+        let path_count = paths.len();
         let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
-        let mut layers = Vec::with_capacity(paths.len());
-        let mut pack_names_by_layer = Vec::with_capacity(paths.len());
+        let mut layers = Vec::with_capacity(path_count);
+        let mut pack_names_by_layer = Vec::with_capacity(path_count);
         for path in paths {
             let bytes: Arc<[u8]> = match fs::read(&path) {
                 Ok(b) => Arc::from(b),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    if require_every_layer {
+                        return Ok(None);
+                    }
+                    continue;
+                }
                 Err(err) => return Err(Error::Io(err)),
             };
             let view = match midx_load_for_read(&bytes, hash_version, diagnostics)? {
                 MidxLoadResult::Ok(v) => v,
-                MidxLoadResult::Skip => continue,
+                MidxLoadResult::Skip => {
+                    if require_every_layer {
+                        return Ok(None);
+                    }
+                    continue;
+                }
             };
             pack_names_by_layer.push(view.pack_names.clone());
             layers.push(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
         }
         if layers.is_empty() {
+            return Ok(None);
+        }
+        if require_every_layer && layers.len() != path_count {
             return Ok(None);
         }
         Ok(Some(Arc::new(PreparedMidxChain {
@@ -868,6 +906,32 @@ pub(crate) mod midx_cache {
         Ok(Some(stored))
     }
 
+    /// Like [`prepared_chain`], but every referenced chain layer must load cleanly.
+    pub fn prepared_chain_strict(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        let pack_dir = objects_dir.join("pack");
+        if let Some(chain) = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            state.strict_chains.get(&pack_dir).map(Arc::clone)
+        }) {
+            return Ok(Some(chain));
+        }
+        let built = build_chain_strict(objects_dir, diagnostics)?;
+        let Some(chain) = built else {
+            return Ok(None);
+        };
+        let stored = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            Arc::clone(
+                state
+                    .strict_chains
+                    .entry(pack_dir)
+                    .or_insert_with(|| Arc::clone(&chain)),
+            )
+        });
+        Ok(Some(stored))
+    }
+
     pub fn evict_pack_dir(pack_dir: &Path) {
         crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
             evict_pack_dir_in_state(state, pack_dir);
@@ -886,6 +950,9 @@ pub(crate) mod midx_cache {
             state.hot_chain = None;
         }
         state.chains.retain(|path, _| !path.starts_with(pack_dir));
+        state
+            .strict_chains
+            .retain(|path, _| !path.starts_with(pack_dir));
     }
 }
 
@@ -894,6 +961,13 @@ pub(crate) use midx_cache::PreparedMidxChain;
 
 pub(crate) fn prepared_midx_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
     midx_cache::prepared_chain(objects_dir, &NullDiagnostics)
+}
+
+/// Prepared chain requiring every on-disk layer file to parse (for [`crate::odb::store::MidxObjects`]).
+pub(crate) fn prepared_midx_chain_strict(
+    objects_dir: &Path,
+) -> Result<Option<Arc<PreparedMidxChain>>> {
+    midx_cache::prepared_chain_strict(objects_dir, &NullDiagnostics)
 }
 
 /// MIDX layer files to search on object reads, newest chain layer first.
