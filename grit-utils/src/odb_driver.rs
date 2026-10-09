@@ -55,10 +55,10 @@ fn emit_pack_in_offset_order(
     repo: &Repository,
     idx: &PackIndex,
 ) -> Result<()> {
-    let mut order: Vec<_> = idx.entries.iter().collect();
-    order.sort_by_key(|e| e.offset);
+    let mut order: Vec<_> = idx.iter().collect();
+    order.sort_by_key(|e| e.offset());
     for entry in order {
-        let oid = ObjectId::from_bytes(&entry.oid).context("pack entry oid")?;
+        let oid = ObjectId::from_bytes(entry.oid()).context("pack entry oid")?;
         write_batch_object(out, repo, &oid)?;
     }
     Ok(())
@@ -254,7 +254,7 @@ fn log_path_for_binary(path: &str, prefix: &str) -> String {
 }
 
 fn min_abbrev_len(repo: &Repository) -> usize {
-    ConfigSet::load(Some(&repo.git_dir), true)
+    ConfigSet::load(repo.environment(), Some(&repo.git_dir), true)
         .ok()
         .and_then(|cfg| cfg.get("core.abbrev"))
         .and_then(|v| v.parse::<i64>().ok())
@@ -273,8 +273,12 @@ fn collect_hex_ids_for_abbrev(repo: &Repository) -> Result<Vec<String>> {
             let path = entry?.path();
             if path.extension().is_some_and(|e| e == "idx") {
                 let idx = read_pack_index(&path)?;
-                for ent in &idx.entries {
-                    ids.push(ObjectId::from_bytes(&ent.oid).context("pack oid")?.to_hex());
+                for ent in idx.iter() {
+                    ids.push(
+                        ObjectId::from_bytes(ent.oid())
+                            .context("pack oid")?
+                            .to_hex(),
+                    );
                 }
             }
         }
