@@ -217,6 +217,9 @@ pub struct ReftableTransactionUpdate {
     pub value: Option<RefValue>,
     /// Optional reflog entry to record in the same table and update index.
     pub log: Option<LogRecord>,
+    /// When set, the ref's current oid must match before the update is applied (checked
+    /// while the stack lock is held).
+    pub expected_old: Option<ObjectId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1907,6 +1910,15 @@ impl ReftableStack {
         Ok(merged.into_values().collect())
     }
 
+    /// Resolve the current oid for `name`, or `None` when the ref is absent or deleted.
+    pub fn lookup_ref_oid(&self, name: &str) -> Result<Option<ObjectId>> {
+        Ok(self.lookup_ref(name)?.and_then(|rec| match rec.value {
+            RefValue::Val1(oid) => Some(oid),
+            RefValue::Val2(oid, _) => Some(oid),
+            RefValue::Deletion | RefValue::Symref(_) => None,
+        }))
+    }
+
     /// Look up a single ref across all tables (most recent wins).
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
         // Search tables in reverse (newest first)
@@ -2312,6 +2324,21 @@ impl ReftableStack {
         {
             let guard = self.acquire_tables_list_lock()?;
             self.reload_table_names();
+            for update in &updates {
+                if let Some(expected) = update.expected_old {
+                    let current = self.lookup_ref_oid(&update.refname)?;
+                    if current != Some(expected) {
+                        return Err(Error::Message(format!(
+                            "ref transaction rejected: '{}' expected {} but found {}",
+                            update.refname,
+                            expected.to_hex(),
+                            current
+                                .map(|o| o.to_hex())
+                                .unwrap_or_else(|| "<absent>".to_owned()),
+                        )));
+                    }
+                }
+            }
             let update_index = self.max_update_index_unlocked()? + 1;
             let mut writer = ReftableWriter::new(opts.clone(), update_index, update_index);
 
@@ -3882,6 +3909,7 @@ mod tests {
                 refname: "refs/heads/inject-fail".to_owned(),
                 value: Some(RefValue::Val1(oid)),
                 log: None,
+                expected_old: None,
             }],
             &opts,
         );

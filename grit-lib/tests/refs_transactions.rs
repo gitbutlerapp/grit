@@ -15,7 +15,8 @@ use grit_lib::refs::{
     delete_ref, lock_path_for_ref, resolve_ref, update_branch_for_commit, write_ref,
     BranchCommitRefUpdate,
 };
-use grit_lib::reftable::ReftableStack;
+use grit_lib::reftable::{ReftableReader, ReftableStack};
+use grit_lib::repo::init_repository;
 
 use support::{
     duplicate_repo, each_backend, git, git_empty_commit_oid, git_fsck_strict, git_show_ref,
@@ -277,6 +278,41 @@ fn ref_lock_present_fails_and_preserves_ref() {
     });
 }
 
+fn concurrent_cas_winners(
+    git_dir: &Path,
+    items: RefTransactionItem,
+    expected_winners: usize,
+    final_check: impl FnOnce(&Path),
+) {
+    let n = 32;
+    let barrier = Arc::new(Barrier::new(n));
+    let wins = Arc::new(AtomicUsize::new(0));
+    let git_dir = git_dir.to_path_buf();
+
+    let mut handles = Vec::new();
+    for _ in 0..n {
+        let git_dir = git_dir.clone();
+        let barrier = barrier.clone();
+        let wins = wins.clone();
+        let items = items.clone();
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+            if update_refs(&git_dir, std::slice::from_ref(&items)).is_ok() {
+                wins.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+    }
+    for h in handles {
+        h.join().expect("join");
+    }
+    assert_eq!(
+        wins.load(Ordering::SeqCst),
+        expected_winners,
+        "CAS winner count"
+    );
+    final_check(&git_dir);
+}
+
 #[test]
 fn concurrent_cas_single_winner() {
     each_backend(|_backend, repo| {
@@ -284,37 +320,92 @@ fn concurrent_cas_single_winner() {
         let (c1, c2) = two_commits(repo.worktree());
         write_ref(&git_dir, "refs/heads/cas-race", &c1).expect("seed");
 
-        let n = 8;
-        let barrier = Arc::new(Barrier::new(n));
-        let wins = Arc::new(AtomicUsize::new(0));
-
-        let mut handles = Vec::new();
-        for _ in 0..n {
-            let git_dir = git_dir.clone();
-            let barrier = barrier.clone();
-            let wins = wins.clone();
-            handles.push(thread::spawn(move || {
-                barrier.wait();
-                let ok = update_refs(
-                    &git_dir,
-                    &[RefTransactionItem {
-                        name: "refs/heads/cas-race".to_owned(),
-                        new_oid: Some(c2),
-                        expected_old: Some(c1),
-                    }],
-                )
-                .is_ok();
-                if ok {
-                    wins.fetch_add(1, Ordering::SeqCst);
-                }
-            }));
-        }
-        for h in handles {
-            h.join().expect("join");
-        }
-        assert_eq!(wins.load(Ordering::SeqCst), 1);
-        assert_eq!(resolve_ref(&git_dir, "refs/heads/cas-race").unwrap(), c2);
+        let item = RefTransactionItem {
+            name: "refs/heads/cas-race".to_owned(),
+            new_oid: Some(c2),
+            expected_old: Some(c1),
+        };
+        concurrent_cas_winners(&git_dir, item, 1, |gd| {
+            assert_eq!(resolve_ref(gd, "refs/heads/cas-race").unwrap(), c2);
+        });
         assert!(git_fsck_strict(repo.worktree()));
+    });
+}
+
+#[test]
+fn concurrent_cas_delete_single_winner() {
+    each_backend(|backend, repo| {
+        if backend == Backend::Reftable {
+            return;
+        }
+        let git_dir = repo.git_dir();
+        let (c1, _) = two_commits(repo.worktree());
+        write_ref(&git_dir, "refs/heads/cas-del", &c1).expect("seed");
+
+        let item = RefTransactionItem {
+            name: "refs/heads/cas-del".to_owned(),
+            new_oid: None,
+            expected_old: Some(c1),
+        };
+        concurrent_cas_winners(&git_dir, item, 1, |gd| {
+            assert!(resolve_ref(gd, "refs/heads/cas-del").is_err());
+        });
+        assert!(git_fsck_strict(repo.worktree()));
+    });
+}
+
+#[test]
+fn concurrent_reftable_cas_single_winner() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = init_repository(tmp.path(), false, "main", None, "reftable").expect("init");
+    let git_dir = repo.git_dir.clone();
+    let c1: ObjectId = "67bf698f3ab735e92fb011a99cff3497c44d30c1"
+        .parse()
+        .expect("c1");
+    let c2: ObjectId = "1111111111111111111111111111111111111111"
+        .parse()
+        .expect("c2");
+    write_ref(&git_dir, "refs/heads/cas-rt", &c1).expect("seed");
+
+    let item = RefTransactionItem {
+        name: "refs/heads/cas-rt".to_owned(),
+        new_oid: Some(c2),
+        expected_old: Some(c1),
+    };
+    concurrent_cas_winners(&git_dir, item, 1, |gd| {
+        assert_eq!(resolve_ref(gd, "refs/heads/cas-rt").unwrap(), c2);
+    });
+}
+
+#[test]
+fn duplicate_ref_updates_match_git_update_ref_stdin() {
+    each_backend(|_backend, repo| {
+        let grit_repo = duplicate_repo(&repo);
+        let git_repo = duplicate_repo(&repo);
+        let (c1, c2) = two_commits(grit_repo.worktree());
+        let _ = two_commits(git_repo.worktree());
+
+        let script = format!(
+            "create refs/heads/dup {}\ncreate refs/heads/dup {}\n",
+            c1.to_hex(),
+            c2.to_hex()
+        );
+        assert!(!git_update_ref_stdin(git_repo.worktree(), &script));
+
+        let items = vec![
+            RefTransactionItem {
+                name: "refs/heads/dup".to_owned(),
+                new_oid: Some(c1),
+                expected_old: None,
+            },
+            RefTransactionItem {
+                name: "refs/heads/dup".to_owned(),
+                new_oid: Some(c2),
+                expected_old: None,
+            },
+        ];
+        assert!(update_refs(&grit_repo.git_dir(), &items).is_err());
+        assert!(resolve_ref(&grit_repo.git_dir(), "refs/heads/dup").is_err());
     });
 }
 
@@ -392,5 +483,23 @@ fn reftable_transaction_one_table_single_update_index() {
         let stack = ReftableStack::open(&git_dir).expect("open stack");
         let max_idx = stack.max_update_index().expect("max idx");
         assert!(max_idx >= 1);
+
+        let list = fs::read_to_string(git_dir.join("reftable/tables.list")).expect("tables.list");
+        let table_name = list
+            .lines()
+            .filter(|l| !l.is_empty())
+            .next_back()
+            .expect("new table name");
+        let data = fs::read(git_dir.join("reftable").join(table_name)).expect("read table");
+        let reader = ReftableReader::new(data).expect("reader");
+        let refs = reader.read_refs().expect("refs");
+        let indices: Vec<u64> = refs
+            .iter()
+            .filter(|r| r.name.starts_with("refs/heads/tx-"))
+            .map(|r| r.update_index)
+            .collect();
+        assert_eq!(indices.len(), 2);
+        assert_eq!(indices[0], indices[1]);
+        assert_eq!(indices[0], max_idx);
     });
 }

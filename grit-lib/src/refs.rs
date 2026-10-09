@@ -585,6 +585,24 @@ pub fn verify_ref_transaction_batch(
     git_dir: &Path,
     items: &[RefBatchItem],
 ) -> std::result::Result<(), RefnameUnavailable> {
+    let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+    for i in 0..names.len() {
+        for j in (i + 1)..names.len() {
+            let (a, b) = (names[i], names[j]);
+            let (parent, child) = if refname_is_strict_prefix(a, b) {
+                (a, b)
+            } else if refname_is_strict_prefix(b, a) {
+                (b, a)
+            } else {
+                continue;
+            };
+            return Err(RefnameUnavailable::SameBatch {
+                refname: child.to_owned(),
+                other: parent.to_owned(),
+            });
+        }
+    }
+
     let extras: BTreeSet<String> = items.iter().map(|i| i.name.clone()).collect();
     let empty_skip = HashSet::new();
     for item in items {
@@ -596,6 +614,51 @@ pub fn verify_ref_transaction_batch(
         }
         verify_refname_available_for_create(git_dir, &item.name, &extras, &empty_skip)?;
     }
+    Ok(())
+}
+
+fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
+    child.len() > parent.len()
+        && child.as_bytes().get(parent.len()) == Some(&b'/')
+        && child.starts_with(parent)
+}
+
+fn delete_loose_ref_after_lock(
+    storage_dir: &Path,
+    stor: &str,
+    path: &Path,
+    lock: &Path,
+) -> Result<()> {
+    remove_packed_ref(storage_dir, stor)?;
+
+    remove_empty_ref_directory(path);
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e)
+            if e.kind() == io::ErrorKind::NotADirectory
+                || e.raw_os_error() == Some(libc::ENOTDIR) => {}
+        Err(e)
+            if e.raw_os_error() == Some(libc::EISDIR) || e.raw_os_error() == Some(libc::EPERM) => {}
+        Err(e) => return Err(Error::Io(e)),
+    }
+
+    let log_path = storage_dir.join("logs").join(stor);
+    let _ = fs::remove_file(&log_path);
+
+    let logs_root = storage_dir.join("logs");
+    let mut parent = log_path.parent();
+    while let Some(p) = parent {
+        if p == logs_root.as_path() || !p.starts_with(&logs_root) {
+            break;
+        }
+        if fs::remove_dir(p).is_err() {
+            break;
+        }
+        parent = p.parent();
+    }
+
+    fs::remove_file(lock)?;
     Ok(())
 }
 
@@ -988,9 +1051,15 @@ pub fn write_ref_cas(
 pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> Result<()> {
     ensure_refname_safe_for_storage(refname)?;
     if crate::reftable::is_reftable_repo(git_dir) {
-        let current = resolve_ref(git_dir, refname).ok();
-        verify_branch_cas(Some(expected_old), current, refname)?;
-        return delete_ref(git_dir, refname);
+        return crate::reftable::reftable_write_transaction(
+            git_dir,
+            vec![crate::reftable::ReftableTransactionUpdate {
+                refname: refname.to_owned(),
+                value: Some(crate::reftable::RefValue::Deletion),
+                log: None,
+                expected_old: Some(expected_old),
+            }],
+        );
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
@@ -1011,8 +1080,7 @@ pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> 
         abort_loose_ref_lock(&lock);
         return Err(err);
     }
-    abort_loose_ref_lock(&lock);
-    delete_ref(git_dir, refname)
+    delete_loose_ref_after_lock(&storage_dir, &stor, &path, &lock)
 }
 
 /// A one-time, in-memory snapshot of a ref store's `packed-refs` file.
@@ -1972,6 +2040,7 @@ fn update_branch_for_commit_reftable(
         refname: update.branch_ref.to_owned(),
         value: Some(crate::reftable::RefValue::Val1(update.new_oid)),
         log: branch_log,
+        expected_old: update.expected_old,
     });
 
     if should_autocreate_reflog(git_dir, "HEAD") {
@@ -1986,6 +2055,7 @@ fn update_branch_for_commit_reftable(
                 update.identity,
                 update.reflog_message,
             )?),
+            expected_old: None,
         });
     }
 
