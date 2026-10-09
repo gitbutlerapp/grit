@@ -2669,6 +2669,248 @@ pub fn try_read_object_from_local_packs_cached(
 
 /// When `oid` is stored as a delta in a pack, return its delta base object id.
 /// Returns [`None`] for loose objects and for non-delta packed objects.
+/// Parse a packed delta entry and inflate its instruction stream when the base OID is in `in_pack`.
+fn parse_in_pack_delta_reuse_candidate(
+    idx: &PackIndex,
+    pack_bytes: &[u8],
+    entry_offset: u64,
+    in_pack: &HashSet<ObjectId>,
+) -> Result<Option<(ObjectId, Vec<u8>)>> {
+    let hb = idx.hash_bytes();
+    let mut p = entry_offset as usize;
+    let (packed_type, size) = parse_pack_object_header(pack_bytes, &mut p)?;
+    let base = match packed_type {
+        PackedType::RefDelta => {
+            if p + hb > pack_bytes.len() {
+                return Err(Error::CorruptObject(
+                    "truncated ref-delta base oid while scanning for reuse".to_owned(),
+                ));
+            }
+            let bo = ObjectId::from_bytes(&pack_bytes[p..p + hb])?;
+            p += hb;
+            bo
+        }
+        PackedType::OfsDelta => {
+            let base_off = parse_ofs_delta_base(pack_bytes, &mut p, entry_offset)?;
+            let Some(pos) = find_position_by_pack_offset(idx, base_off) else {
+                return Ok(None);
+            };
+            let base_oid_bytes = idx.oid_at(pos);
+            if base_oid_bytes.len() != hb {
+                return Ok(None);
+            }
+            ObjectId::from_bytes(base_oid_bytes)?
+        }
+        _ => return Ok(None),
+    };
+    if !in_pack.contains(&base) {
+        return Ok(None);
+    }
+    let zlib_start = p;
+    let Some(end_pos) = pack_entry_raw_end(idx, pack_bytes, entry_offset) else {
+        return Ok(None);
+    };
+    if zlib_start >= end_pos {
+        return Ok(None);
+    }
+    let compressed = &pack_bytes[zlib_start..end_pos];
+    let mut zpos = 0usize;
+    let mut scratch = ZlibInflateScratch::default();
+    let delta = match scratch.decompress_fixed(compressed, &mut zpos, size) {
+        Ok(d) => d,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some((base, delta)))
+}
+
+/// Like [`parse_in_pack_delta_reuse_candidate`], but returns the zlib payload and header size
+/// without inflating (for verbatim reuse in a new pack).
+fn parse_in_pack_delta_reuse_zlib(
+    idx: &PackIndex,
+    pack_bytes: &[u8],
+    entry_offset: u64,
+    in_pack: &HashSet<ObjectId>,
+) -> Result<Option<(ObjectId, u64, usize, usize)>> {
+    let start = entry_offset as usize;
+    let hb = idx.hash_bytes();
+    let mut p = start;
+    let (packed_type, size) = parse_pack_object_header(pack_bytes, &mut p)?;
+    let base = match packed_type {
+        PackedType::RefDelta => {
+            if p + hb > pack_bytes.len() {
+                return Err(Error::CorruptObject(
+                    "truncated ref-delta base oid while scanning for reuse".to_owned(),
+                ));
+            }
+            let bo = ObjectId::from_bytes(&pack_bytes[p..p + hb])?;
+            p += hb;
+            bo
+        }
+        PackedType::OfsDelta => {
+            let base_off = parse_ofs_delta_base(pack_bytes, &mut p, entry_offset)?;
+            let Some(pos) = find_position_by_pack_offset(idx, base_off) else {
+                return Ok(None);
+            };
+            let base_oid_bytes = idx.oid_at(pos);
+            if base_oid_bytes.len() != hb {
+                return Ok(None);
+            }
+            ObjectId::from_bytes(base_oid_bytes)?
+        }
+        _ => return Ok(None),
+    };
+    if !in_pack.contains(&base) {
+        return Ok(None);
+    }
+    let zlib_start = p;
+    let Some(end_pos) = pack_entry_raw_end(idx, pack_bytes, entry_offset) else {
+        return Ok(None);
+    };
+    if zlib_start >= end_pos {
+        return Ok(None);
+    }
+    let entry_bytes = &pack_bytes[start..end_pos];
+    if let Some(crc) = idx.crc32_for_pack_offset(entry_offset) {
+        if crc32fast::hash(entry_bytes) != crc {
+            return Ok(None);
+        }
+    }
+    Ok(Some((base, size, zlib_start, end_pos)))
+}
+
+fn reuse_delta_matches_pack_resolution(
+    idx: &PackIndex,
+    target: &ObjectId,
+    base: ObjectId,
+    delta: &[u8],
+) -> bool {
+    let Ok(base_obj) = read_object_from_pack(idx, &base) else {
+        return false;
+    };
+    let Ok(target_obj) = read_object_from_pack(idx, target) else {
+        return false;
+    };
+    crate::unpack_objects::apply_delta(&base_obj.data, delta)
+        .ok()
+        .is_some_and(|applied| applied == target_obj.data)
+}
+
+fn on_disk_delta_chain_in_send_map(
+    oid: ObjectId,
+    immediate_base: &HashMap<ObjectId, ObjectId>,
+    in_pack: &HashSet<ObjectId>,
+    memo: &mut HashMap<ObjectId, bool>,
+) -> bool {
+    if let Some(&ok) = memo.get(&oid) {
+        return ok;
+    }
+    let mut cur = oid;
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(cur) {
+            memo.insert(oid, true);
+            return true;
+        }
+        if !in_pack.contains(&cur) {
+            memo.insert(oid, false);
+            return false;
+        }
+        let Some(&base) = immediate_base.get(&cur) else {
+            memo.insert(oid, true);
+            return true;
+        };
+        cur = base;
+    }
+}
+
+/// Scan local packs once and collect on-disk delta reuse candidates for objects in `send`.
+///
+/// Copies zlib delta bytes from the source pack (CRC-checked when the index provides CRC32).
+/// Callers already hold resolved object payloads in `resolved` for the send set.
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] when a pack stream is malformed.
+pub(crate) type OnDiskReuseZlibEntry = (ObjectId, u64, Arc<PackData>, usize, usize);
+
+pub fn collect_packed_delta_reuse_for_send(
+    objects_dir: &Path,
+    send: &HashSet<ObjectId>,
+    in_pack: &HashSet<ObjectId>,
+    resolved: &HashMap<ObjectId, Object>,
+) -> Result<HashMap<ObjectId, OnDiskReuseZlibEntry>> {
+    let _ = resolved;
+    let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
+    sort_pack_indexes_oldest_first(&mut indexes);
+
+    let pack_bytes_by_index: Vec<(Arc<PackIndex>, Arc<PackData>)> = indexes
+        .iter()
+        .filter(|idx| idx.hash_bytes() == 20)
+        .map(|idx| read_pack_bytes_cached(&idx.pack_path).map(|bytes| (Arc::clone(idx), bytes)))
+        .collect::<Result<Vec<_>>>()?;
+
+    struct OnDiskDelta {
+        base: ObjectId,
+        size: u64,
+        pack_bytes: Arc<PackData>,
+        zlib_start: usize,
+        zlib_end: usize,
+    }
+
+    let mut on_disk: HashMap<ObjectId, OnDiskDelta> = HashMap::new();
+    for (idx, pack_bytes) in &pack_bytes_by_index {
+        for entry in idx.iter() {
+            let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
+                continue;
+            };
+            if !send.contains(&oid) || on_disk.contains_key(&oid) {
+                continue;
+            }
+            let Some((base, size, zlib_start, zlib_end)) =
+                parse_in_pack_delta_reuse_zlib(idx, pack_bytes, entry.offset(), in_pack)?
+            else {
+                continue;
+            };
+            on_disk.insert(
+                oid,
+                OnDiskDelta {
+                    base,
+                    size,
+                    pack_bytes: Arc::clone(pack_bytes),
+                    zlib_start,
+                    zlib_end,
+                },
+            );
+        }
+    }
+
+    let immediate_base: HashMap<ObjectId, ObjectId> =
+        on_disk.iter().map(|(&oid, d)| (oid, d.base)).collect();
+
+    let mut chain_ok: HashMap<ObjectId, bool> = HashMap::new();
+    for &oid in on_disk.keys() {
+        on_disk_delta_chain_in_send_map(oid, &immediate_base, in_pack, &mut chain_ok);
+    }
+
+    let mut results = HashMap::new();
+    for (oid, slot) in on_disk {
+        if !chain_ok.get(&oid).copied().unwrap_or(false) || !resolved.contains_key(&oid) {
+            continue;
+        }
+        results.insert(
+            oid,
+            (
+                slot.base,
+                slot.size,
+                slot.pack_bytes,
+                slot.zlib_start,
+                slot.zlib_end,
+            ),
+        );
+    }
+    Ok(results)
+}
+
 /// If `oid` is stored as `REF_DELTA` or `OFS_DELTA` in a local pack and its base OID is in
 /// `packed_set`, return the base OID and the **uncompressed** delta payload (Git binary delta).
 ///
@@ -2685,74 +2927,21 @@ pub fn packed_ref_delta_reuse_slice(
     let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_oldest_first(&mut indexes);
     for idx in indexes {
-        let hb = idx.hash_bytes();
-        if hb != 20 {
+        if idx.hash_bytes() != 20 {
             continue;
         }
         let Some(entry_offset) = idx.find_offset(oid) else {
             continue;
         };
         let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
-        let mut p = entry_offset as usize;
-        let (packed_type, _size) = parse_pack_object_header(&pack_bytes, &mut p)?;
-        let base = match packed_type {
-            PackedType::RefDelta => {
-                if p + hb > pack_bytes.len() {
-                    return Err(Error::CorruptObject(
-                        "truncated ref-delta base oid while scanning for reuse".to_owned(),
-                    ));
-                }
-                let bo = ObjectId::from_bytes(&pack_bytes[p..p + hb])?;
-                p += hb;
-                bo
-            }
-            PackedType::OfsDelta => {
-                let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
-                let Some(pos) = find_position_by_pack_offset(&idx, base_off) else {
-                    continue;
-                };
-                let base_oid_bytes = idx.oid_at(pos);
-                if base_oid_bytes.len() != hb {
-                    continue;
-                }
-                ObjectId::from_bytes(base_oid_bytes)?
-            }
-            _ => {
-                // Same OID may exist as a full object in an older pack and as a delta in a newer
-                // one; keep scanning packs.
-                continue;
-            }
-        };
-        if !packed_set.contains(&base) {
+        let Some((base, delta)) =
+            parse_in_pack_delta_reuse_candidate(&idx, &pack_bytes, entry_offset, packed_set)?
+        else {
             continue;
+        };
+        if reuse_delta_matches_pack_resolution(&idx, oid, base, &delta) {
+            return Ok(Some((base, delta)));
         }
-        let zlib_start = p;
-        let Some(end_pos) = pack_entry_raw_end(&idx, &pack_bytes, entry_offset) else {
-            continue;
-        };
-        if zlib_start >= end_pos {
-            continue;
-        }
-        let compressed = &pack_bytes[zlib_start..end_pos];
-        let mut zpos = 0usize;
-        let mut scratch = ZlibInflateScratch::default();
-        let delta = match scratch.decompress_fixed(compressed, &mut zpos, _size) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let Ok(base_obj) = read_object_from_pack(&idx, &base) else {
-            continue;
-        };
-        let Ok(target_obj) = read_object_from_pack(&idx, oid) else {
-            continue;
-        };
-        let Ok(applied) = crate::unpack_objects::apply_delta(&base_obj.data, &delta) else {
-            continue;
-        };
-        if applied != target_obj.data {
-            continue;
-        }
-        return Ok(Some((base, delta)));
     }
     Ok(None)
 }

@@ -807,11 +807,11 @@ struct PlannedEntry {
     /// The base may be an in-pack object or — for thin packs — an external base
     /// present only on the peer.
     base: Option<ObjectId>,
-    /// A delta instruction stream reused verbatim from an existing on-disk pack
-    /// (Git's `reuse_delta`). When present, the serializer emits these bytes
-    /// instead of recomputing the delta against `base`. Only set for a delta
-    /// entry whose `base` matches the recorded on-disk base.
+    /// Uncompressed delta bytes when freshly computed or reused after inflate.
     reused_delta: Option<Vec<u8>>,
+    /// On-disk reuse: uncompressed size from the source pack header plus zlib
+    /// bytes copied verbatim from a cached pack buffer (Git's `reuse_delta`).
+    reused_delta_zlib: Option<(u64, std::sync::Arc<crate::pack::PackData>, usize, usize)>,
 }
 
 /// The full delta plan: the ordered entries to emit plus the set of external
@@ -828,31 +828,6 @@ fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
         .zip(b.iter())
         .take_while(|(left, right)| left == right)
         .count()
-}
-
-/// Every OID in the on-disk delta chain ending at `oid` is included in `in_pack`.
-///
-/// Reusing a delta instruction stream requires the whole chain to be emitted in
-/// the new pack (Git pack-objects only reuses when all bases are in the object set).
-fn on_disk_delta_chain_in_send(
-    objects_dir: &Path,
-    oid: ObjectId,
-    in_pack: &HashSet<ObjectId>,
-) -> Result<bool> {
-    let mut cur = oid;
-    let mut seen = HashSet::new();
-    loop {
-        if !seen.insert(cur) {
-            return Ok(true);
-        }
-        if !in_pack.contains(&cur) {
-            return Ok(false);
-        }
-        let Some(base) = crate::pack::packed_delta_base_oid(objects_dir, &cur)? else {
-            return Ok(true);
-        };
-        cur = base;
-    }
 }
 
 /// Select blob deltas for `send` and produce an ordered emit plan.
@@ -903,27 +878,28 @@ fn plan_deltas(
     // target oid -> base oid (the object `target` deltas against).
     let mut delta_to_base: HashMap<ObjectId, ObjectId> = HashMap::new();
     // Deltas whose instruction stream is reused verbatim from an existing pack.
-    let mut reused: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+    let mut reused_zlib: HashMap<
+        ObjectId,
+        (u64, std::sync::Arc<crate::pack::PackData>, usize, usize),
+    > = HashMap::new();
     let mut external_bases: HashSet<ObjectId> = HashSet::new();
 
     // On-disk delta reuse runs even with `--window=0` (no new deltas), matching Git pack-objects.
     if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
         let objects_dir = odb.objects_dir();
-        for &t in send {
+        let candidates = crate::pack::collect_packed_delta_reuse_for_send(
+            objects_dir,
+            &in_pack,
+            &in_pack,
+            &objects,
+        )?;
+        for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
             if objects[&t].data.is_empty() {
                 continue;
             }
-            if let Ok(Some((base, zdelta))) =
-                crate::pack::packed_ref_delta_reuse_slice(objects_dir, &t, &in_pack)
-            {
-                if base != t
-                    && in_pack.contains(&base)
-                    && islands.in_same_island(&t, &base)
-                    && on_disk_delta_chain_in_send(objects_dir, t, &in_pack)?
-                {
-                    delta_to_base.insert(t, base);
-                    reused.insert(t, zdelta);
-                }
+            if base != t && in_pack.contains(&base) && islands.in_same_island(&t, &base) {
+                delta_to_base.insert(t, base);
+                reused_zlib.insert(t, (size, pack_bytes, zlib_start, zlib_end));
             }
         }
     }
@@ -933,7 +909,7 @@ fn plan_deltas(
     // window delta — otherwise REF bases no longer match `by_oid` during indexing.
     let reuse_delta_bases: HashSet<ObjectId> = delta_to_base
         .iter()
-        .filter(|(t, _)| reused.contains_key(t))
+        .filter(|(t, _)| reused_zlib.contains_key(t))
         .map(|(_, b)| *b)
         .collect();
 
@@ -1062,7 +1038,7 @@ fn plan_deltas(
 
         // A reused delta whose target was snipped (or whose base ceased to be the
         // chosen base) reverts to a freshly-computed full/delta object.
-        reused.retain(|t, _| delta_to_base.contains_key(t));
+        reused_zlib.retain(|t, _| delta_to_base.contains_key(t));
 
         // A base that is no longer referenced as an external base (because its
         // only dependent was snipped) must not be counted as external.
@@ -1082,7 +1058,8 @@ fn plan_deltas(
             kind: obj.kind,
             data: obj.data.clone(),
             base: delta_to_base.get(&oid).copied(),
-            reused_delta: reused.get(&oid).cloned(),
+            reused_delta: None,
+            reused_delta_zlib: reused_zlib.get(&oid).cloned(),
         });
     }
 
@@ -1154,46 +1131,63 @@ fn serialize_pack_with_deltas(
                 oid_to_offset.insert(entry.oid, start);
             }
             Some(base_oid) => {
-                // A reused on-disk delta stream is emitted verbatim; otherwise
-                // compute a fresh delta against the resolved base payload.
-                let delta = if let Some(reused) = &entry.reused_delta {
-                    reused.clone()
-                } else {
-                    // Resolve the base payload: in-pack first, else (thin) from odb.
-                    let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
-                        d.to_vec()
-                    } else {
-                        odb.read(&base_oid)?.data
-                    };
-                    if entry.data.starts_with(&base_data) && entry.data.len() > base_data.len() {
-                        encode_prefix_extension_delta(&base_data, &entry.data)?
-                    } else {
-                        encode_lcp_delta(&base_data, &entry.data)?
-                    }
-                };
-
-                // Reused streams were validated against resolved base payloads in the
-                // source pack; always address the base by OID so we do not depend on
-                // emit order (OFS would require the base header at a stable offset).
                 let in_pack_offset = oid_to_offset.get(&base_oid).copied();
-                if let Some(base_off) =
-                    in_pack_offset.filter(|_| opts.use_ofs_delta && entry.reused_delta.is_none())
+                if let Some((delta_size, pack_bytes, zlib_start, zlib_end)) =
+                    &entry.reused_delta_zlib
                 {
-                    let dist = start.checked_sub(base_off).ok_or_else(|| {
-                        Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                    let delta_len = usize::try_from(*delta_size).map_err(|_| {
+                        Error::CorruptObject("reused delta size exceeds usize".to_owned())
                     })?;
-                    encode_pack_object_header(&mut buf, 6, delta.len());
-                    encode_ofs_delta_distance(&mut buf, dist);
-                } else {
-                    encode_pack_object_header(&mut buf, 7, delta.len());
-                    if base_oid.as_bytes().len() != algo.len() {
-                        return Err(Error::CorruptObject(
-                            "ref-delta base oid width mismatch".to_owned(),
-                        ));
+                    if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                        let dist = start.checked_sub(base_off).ok_or_else(|| {
+                            Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                        })?;
+                        encode_pack_object_header(&mut buf, 6, delta_len);
+                        encode_ofs_delta_distance(&mut buf, dist);
+                    } else {
+                        encode_pack_object_header(&mut buf, 7, delta_len);
+                        if base_oid.as_bytes().len() != algo.len() {
+                            return Err(Error::CorruptObject(
+                                "ref-delta base oid width mismatch".to_owned(),
+                            ));
+                        }
+                        buf.extend_from_slice(base_oid.as_bytes());
                     }
-                    buf.extend_from_slice(base_oid.as_bytes());
+                    buf.extend_from_slice(&pack_bytes[*zlib_start..*zlib_end]);
+                } else {
+                    let delta = if let Some(reused) = &entry.reused_delta {
+                        reused.clone()
+                    } else {
+                        let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
+                            d.to_vec()
+                        } else {
+                            odb.read(&base_oid)?.data
+                        };
+                        if entry.data.starts_with(&base_data) && entry.data.len() > base_data.len()
+                        {
+                            encode_prefix_extension_delta(&base_data, &entry.data)?
+                        } else {
+                            encode_lcp_delta(&base_data, &entry.data)?
+                        }
+                    };
+
+                    if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                        let dist = start.checked_sub(base_off).ok_or_else(|| {
+                            Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                        })?;
+                        encode_pack_object_header(&mut buf, 6, delta.len());
+                        encode_ofs_delta_distance(&mut buf, dist);
+                    } else {
+                        encode_pack_object_header(&mut buf, 7, delta.len());
+                        if base_oid.as_bytes().len() != algo.len() {
+                            return Err(Error::CorruptObject(
+                                "ref-delta base oid width mismatch".to_owned(),
+                            ));
+                        }
+                        buf.extend_from_slice(base_oid.as_bytes());
+                    }
+                    write_zlib(&mut buf, &delta)?;
                 }
-                write_zlib(&mut buf, &delta)?;
                 oid_to_offset.insert(entry.oid, start);
             }
         }
