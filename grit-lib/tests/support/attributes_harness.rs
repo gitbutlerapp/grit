@@ -88,13 +88,32 @@ pub fn grit_attr_value(
 ) -> String {
     let icase = ignore_case(repo);
     let map = collect_attrs_for_path(&parsed.rules, &parsed.macros, rel, icase);
-    match map.get(name) {
+    attr_value_to_git_string(map.get(name))
+}
+
+/// Map one [`AttrValue`] to `git check-attr` text (`unspecified` attrs are omitted from `-a` output).
+pub fn attr_value_to_git_string(v: Option<&AttrValue>) -> String {
+    match v {
         None => "unspecified".to_string(),
         Some(AttrValue::Set) => "set".to_string(),
         Some(AttrValue::Unset) => "unset".to_string(),
         Some(AttrValue::Clear) => "unspecified".to_string(),
-        Some(AttrValue::Value(v)) => v.clone(),
+        Some(AttrValue::Value(s)) => s.clone(),
     }
+}
+
+/// All non-unspecified attributes Grit would report for `rel_path` (keys sorted for stable diffs).
+pub fn grit_all_attrs_for_path(
+    parsed: &ParsedGitAttributes,
+    repo: &Repository,
+    rel: &str,
+) -> BTreeMap<String, String> {
+    let icase = ignore_case(repo);
+    let map = collect_attrs_for_path(&parsed.rules, &parsed.macros, rel, icase);
+    map.iter()
+        .map(|(k, v)| (k.clone(), attr_value_to_git_string(Some(v))))
+        .filter(|(_, v)| v != "unspecified")
+        .collect()
 }
 
 /// Parse `git check-attr -z` records (`path\\0attr\\0value\\0`).
@@ -115,6 +134,74 @@ pub fn parse_check_attr_z(stdout: &[u8], attr: &str) -> BTreeMap<String, String>
         }
     }
     out
+}
+
+/// Parse `git check-attr -a -z --stdin` output: for each input path, a map of attribute → value.
+///
+/// Git emits `path\\0attr\\0value\\0` per assigned attribute; paths with no attributes produce
+/// no records (the path is omitted entirely).
+pub fn parse_check_attr_all_z(
+    stdout: &[u8],
+    paths: &[&str],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let tokens: Vec<&[u8]> = stdout
+        .split(|&b| b == 0)
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut parsed: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut i = 0usize;
+    while i + 2 < tokens.len() {
+        let path = String::from_utf8_lossy(tokens[i]).into_owned();
+        let attr = String::from_utf8_lossy(tokens[i + 1]).into_owned();
+        let val = String::from_utf8_lossy(tokens[i + 2]).into_owned();
+        i += 3;
+        parsed.entry(path).or_default().insert(attr, val);
+    }
+    paths
+        .iter()
+        .map(|p| ((*p).to_string(), parsed.remove(*p).unwrap_or_default()))
+        .collect()
+}
+
+pub fn git_check_attr_all_z(
+    worktree: &Path,
+    paths: &[&str],
+    extra_args: &[&str],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(worktree)
+        .arg("check-attr")
+        .args(extra_args)
+        .arg("-a")
+        .arg("-z")
+        .arg("--stdin")
+        .env("GIT_AUTHOR_NAME", AUTHOR)
+        .env("GIT_AUTHOR_EMAIL", EMAIL)
+        .env("GIT_COMMITTER_NAME", AUTHOR)
+        .env("GIT_COMMITTER_EMAIL", EMAIL)
+        .env("GIT_AUTHOR_DATE", DATE)
+        .env("GIT_COMMITTER_DATE", DATE)
+        .env("GIT_CONFIG_GLOBAL", null_dev())
+        .env("GIT_CONFIG_SYSTEM", null_dev())
+        .env_remove("GIT_ATTR_SOURCE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn check-attr -a -z");
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for p in paths {
+            stdin.write_all(p.as_bytes()).expect("write path");
+            stdin.write_all(&[0]).expect("write nul");
+        }
+    }
+    let out = child.wait_with_output().expect("wait check-attr");
+    assert!(
+        out.status.success(),
+        "check-attr -a -z failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    parse_check_attr_all_z(&out.stdout, paths)
 }
 
 pub fn git_check_attr_z(
@@ -199,6 +286,26 @@ pub fn assert_attrs_match(
         assert_eq!(
             grit_v, git_v,
             "attr {attr} path {p} (git extra {git_extra:?})"
+        );
+    }
+}
+
+/// Compare every attribute `git check-attr -a -z --stdin` returns for each path with Grit.
+pub fn assert_all_attrs_match(
+    worktree: &Path,
+    repo: &Repository,
+    parsed: &ParsedGitAttributes,
+    paths: &[&str],
+    git_extra: &[&str],
+) {
+    let git_by_path = git_check_attr_all_z(worktree, paths, git_extra);
+    for p in paths {
+        let rel = normalize_rel_path(p);
+        let grit_map = grit_all_attrs_for_path(parsed, repo, &rel);
+        let git_map = git_by_path.get(*p).cloned().unwrap_or_default();
+        assert_eq!(
+            grit_map, git_map,
+            "all attrs path {p} (git extra {git_extra:?})"
         );
     }
 }

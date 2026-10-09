@@ -17,9 +17,10 @@ use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::repo::Repository;
 use support::{
-    assert_attrs_match, grit_attr_value, grit_repo, hermetic_git, hermetic_git_ok, init_git_repo,
-    load_cached_parsed, load_source_parsed, load_worktree_parsed, rel_path_for_check,
-    setup_t0003_tags, setup_t0003_worktree, t0003_corpus_paths, t0003_source_paths,
+    assert_all_attrs_match, assert_attrs_match, grit_attr_value, grit_repo, hermetic_git,
+    hermetic_git_ok, init_git_repo, load_cached_parsed, load_source_parsed, load_worktree_parsed,
+    rel_path_for_check, setup_t0003_tags, setup_t0003_worktree, t0003_corpus_paths,
+    t0003_source_paths,
 };
 
 #[test]
@@ -44,23 +45,55 @@ fn t0003_attrs_match_git_check_attr_worktree_cached_and_source() {
     let path_refs: Vec<&str> = paths.iter().copied().collect();
 
     let worktree = load_worktree_parsed(&repo, wt);
-    assert_attrs_match(wt, &repo, &worktree, "test", &path_refs, &[]);
+    assert_all_attrs_match(wt, &repo, &worktree, &path_refs, &[]);
 
     let cached = load_cached_parsed(&repo);
-    assert_attrs_match(wt, &repo, &cached, "test", &path_refs, &["--cached"]);
+    assert_all_attrs_match(wt, &repo, &cached, &path_refs, &["--cached"]);
 
     for treeish in ["tag-1", "tag-2"] {
         let parsed = load_source_parsed(&repo, treeish);
         let git_extra = ["--source", treeish];
-        assert_attrs_match(
-            wt,
-            &repo,
-            &parsed,
-            "test",
-            &t0003_source_paths(),
-            &git_extra,
-        );
+        let source_paths: Vec<&str> = t0003_source_paths();
+        assert_all_attrs_match(wt, &repo, &parsed, &source_paths, &git_extra);
     }
+}
+
+#[test]
+fn t0003_deep_macro_recursion_3000() {
+    const N: usize = 3000;
+    let mut content = String::new();
+    for i in 0..N {
+        use std::fmt::Write;
+        write!(content, "[attr]a{i} a{}\n", i + 1).expect("write macro line");
+    }
+    use std::fmt::Write;
+    write!(content, "[attr]a{N} -text\nfile a0\n").expect("write tail");
+
+    let parsed = parse_gitattributes_file_content(&content, ".gitattributes");
+    let rules = parsed.rules.clone();
+    let macros = parsed.macros.clone();
+    std::thread::Builder::new()
+        .stack_size(128 * 1024)
+        .spawn(move || {
+            let map = collect_attrs_for_path(&rules, &macros, "file", false);
+            assert_eq!(map.get("text"), Some(&AttrValue::Unset));
+            for i in 0..=N {
+                let key = format!("a{i}");
+                assert_eq!(map.get(&key), Some(&AttrValue::Set), "missing {key}");
+            }
+        })
+        .expect("spawn limited stack thread")
+        .join()
+        .expect("join limited stack thread");
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::write(wt.join(".gitattributes"), &content).expect("ga");
+    hermetic_git_ok(wt, &["add", ".gitattributes"]);
+    let repo = grit_repo(wt);
+    let worktree = load_worktree_parsed(&repo, wt);
+    assert_all_attrs_match(wt, &repo, &worktree, &["file"], &[]);
 }
 
 #[test]
@@ -234,6 +267,21 @@ fn t0003_overlong_line_skipped_with_warning() {
 }
 
 #[test]
+fn t0003_builtin_objectmode_submodule_gitdir_file() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    let sub = wt.join("submod");
+    std::fs::create_dir(&sub).expect("mkdir");
+    std::fs::write(sub.join(".git"), "gitdir: ../.git/modules/submod\n").expect("gitdir");
+    let repo = grit_repo(wt);
+    assert_eq!(
+        builtin_objectmode_worktree(&repo, "submod"),
+        Some("160000".into())
+    );
+}
+
+#[test]
 fn t0003_builtin_objectmode_worktree_matches_git() {
     let root = tempfile::tempdir().expect("tempdir");
     let wt = root.path();
@@ -384,6 +432,57 @@ fn t0003_crlf_in_gitattributes_blob_from_index() {
     let parsed = load_gitattributes_from_index(&index, &repo.odb, wt).expect("from index");
     let map = collect_attrs_for_path(&parsed.rules, &parsed.macros, "any.txt", false);
     assert_eq!(map.get("text"), Some(&AttrValue::Set));
+}
+
+#[test]
+fn t0003_oversized_global_attributesfile_skipped_with_warning() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    let global = wt.join("global-attrs");
+    let data = vec![b'x'; MAX_ATTR_FILE_BYTES + 1];
+    std::fs::write(&global, &data).expect("large global");
+    hermetic_git_ok(
+        wt,
+        &[
+            "config",
+            "core.attributesfile",
+            global.to_str().expect("utf8"),
+        ],
+    );
+    std::fs::write(wt.join(".gitattributes"), "f test=root\n").expect("root");
+    let repo = grit_repo(wt);
+    let parsed = load_worktree_parsed(&repo, wt);
+    assert_eq!(grit_attr_value(&parsed, &repo, "f", "test"), "root");
+    assert!(
+        parsed
+            .warnings
+            .iter()
+            .any(|w| w.contains("ignoring overly large gitattributes file")),
+        "{:?}",
+        parsed.warnings
+    );
+}
+
+#[test]
+fn t0003_oversized_nested_worktree_gitattributes_skipped() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_git_repo(wt);
+    std::fs::create_dir_all(wt.join("nested")).expect("mkdir");
+    let data = vec![b'x'; MAX_ATTR_FILE_BYTES + 1];
+    std::fs::write(wt.join("nested/.gitattributes"), &data).expect("large nested");
+    let repo = grit_repo(wt);
+    let parsed = load_worktree_parsed(&repo, wt);
+    assert!(parsed.rules.is_empty());
+    assert!(
+        parsed
+            .warnings
+            .iter()
+            .any(|w| w.contains("ignoring overly large gitattributes file")),
+        "{:?}",
+        parsed.warnings
+    );
 }
 
 #[test]

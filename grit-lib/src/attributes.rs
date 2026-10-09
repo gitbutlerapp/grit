@@ -690,7 +690,22 @@ pub fn attr_rule_matches(rule: &AttrRule, rel_path: &str, icase: bool) -> bool {
     )
 }
 
-const MAX_MACRO_EXPAND_DEPTH: u32 = 3000;
+/// Git's t0003 deep-macro case uses 3000 chained `[attr]` lines plus a terminal `-text` assignment.
+const MAX_MACRO_EXPAND_DEPTH: u32 = 3001;
+
+/// One macro/`binary` expansion step (iterative queue avoids deep recursion on long chains).
+struct ExpandStep {
+    name: String,
+    val: AttrValue,
+    depth: u32,
+}
+
+fn push_binary_expansion(out: &mut Vec<(String, AttrValue)>) {
+    out.push(("text".into(), AttrValue::Unset));
+    out.push(("diff".into(), AttrValue::Unset));
+    out.push(("merge".into(), AttrValue::Unset));
+    out.push(("binary".into(), AttrValue::Set));
+}
 
 /// Push one assignment, expanding user macros only on bare `Set` (Git `expand_attr`).
 fn push_expanded_assignment(
@@ -698,28 +713,35 @@ fn push_expanded_assignment(
     val: AttrValue,
     macros: &MacroTable,
     out: &mut Vec<(String, AttrValue)>,
-    depth: u32,
 ) {
-    if depth > MAX_MACRO_EXPAND_DEPTH {
-        return;
-    }
-    if name == "binary" {
-        out.push(("text".into(), AttrValue::Unset));
-        out.push(("diff".into(), AttrValue::Unset));
-        out.push(("merge".into(), AttrValue::Unset));
-        out.push(("binary".into(), AttrValue::Set));
-        return;
-    }
-    if matches!(val, AttrValue::Set) {
-        if let Some(body) = macros.defs.get(&name) {
-            out.push((name, AttrValue::Set));
-            for (n, v) in body {
-                push_expanded_assignment(n.clone(), v.clone(), macros, out, depth + 1);
-            }
-            return;
+    let mut pending = vec![ExpandStep {
+        name,
+        val,
+        depth: 0,
+    }];
+    while let Some(ExpandStep { name, val, depth }) = pending.pop() {
+        if depth > MAX_MACRO_EXPAND_DEPTH {
+            continue;
         }
+        if name == "binary" {
+            push_binary_expansion(out);
+            continue;
+        }
+        if matches!(val, AttrValue::Set) {
+            if let Some(body) = macros.defs.get(&name) {
+                out.push((name, AttrValue::Set));
+                for (n, v) in body.iter().rev() {
+                    pending.push(ExpandStep {
+                        name: n.clone(),
+                        val: v.clone(),
+                        depth: depth + 1,
+                    });
+                }
+                continue;
+            }
+        }
+        out.push((name, val));
     }
-    out.push((name, val));
 }
 
 /// Expand macros and `binary` for one rule's assignments into source-order operations.
@@ -729,7 +751,7 @@ fn push_expanded_assignment(
 fn expand_rule_attrs_flat(rule: &AttrRule, macros: &MacroTable) -> Vec<(String, AttrValue)> {
     let mut flat: Vec<(String, AttrValue)> = Vec::new();
     for (name, val) in &rule.attrs {
-        push_expanded_assignment(name.clone(), val.clone(), macros, &mut flat, 0);
+        push_expanded_assignment(name.clone(), val.clone(), macros, &mut flat);
     }
     flat
 }
@@ -1548,6 +1570,26 @@ mod tests {
         let parsed = parse_gitattributes_file_content("\"unclosed test=set\n", ".gitattributes");
         assert_eq!(parsed.rules.len(), 1);
         assert_eq!(parsed.rules[0].pattern, "\"unclosed");
+    }
+
+    #[test]
+    fn unquote_c_style_rejects_invalid_escape() {
+        assert!(unquote_c_style("\"bad\\\"").is_err());
+    }
+
+    #[test]
+    fn macro_expansion_respects_depth_limit() {
+        const N: u32 = 3003;
+        let mut content = String::new();
+        for i in 0..N {
+            use std::fmt::Write;
+            write!(content, "[attr]a{i} a{}\n", i + 1).expect("write");
+        }
+        use std::fmt::Write;
+        write!(content, "[attr]a{N} tail=deep\nfile a0\n").expect("write tail");
+        let parsed = parse_gitattributes_file_content(&content, ".gitattributes");
+        let map = collect_attrs_for_path(&parsed.rules, &parsed.macros, "file", false);
+        assert!(!map.contains_key("tail"));
     }
 
     #[test]
