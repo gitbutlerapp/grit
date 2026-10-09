@@ -3040,6 +3040,21 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::odb` | module | Loose object database: reading and writing zlib-compressed Git objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/index.html) |
 | `grit_lib::odb::Odb` | struct | A loose-object database rooted at a given objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) |
 | `grit_lib::odb::WriteOptions` | struct | Options for Odb::write_with_options. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.WriteOptions.html) |
+| `grit_lib::odb::store` | module | Pluggable object storage backends and the ObjectStore trait surface. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/index.html) |
+| `grit_lib::odb::store::CompositeStore` | struct | Read-only store that consults an ordered list of backends. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) |
+| `grit_lib::odb::store::FilesSource` | struct | Read/write object storage backed by one objects/ directory tree. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) |
+| `grit_lib::odb::store::MemoryStore` | struct | In-memory object map keyed by ObjectId. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.MemoryStore.html) |
+| `grit_lib::odb::store::MidxObjects` | struct | MIDX-backed read-only ObjectStore for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.MidxObjects.html) |
+| `grit_lib::odb::store::MidxObjectsStatus` | enum | Whether MidxObjects can serve reads for this repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/enum.MidxObjectsStatus.html) |
+| `grit_lib::odb::store::ObjectStore` | trait | Read-only object storage: lookup, metadata, streaming, and enumeration. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) |
+| `grit_lib::odb::store::ObjectStream` | struct | Streaming handle for a single object’s uncompressed payload. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.ObjectStream.html) |
+| `grit_lib::odb::store::PackFilter` | struct | Which local pack indexes participate in filtered membership checks. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.PackFilter.html) |
+| `grit_lib::odb::store::PackedObjects` | struct | Pack-index-backed read-only ObjectStore for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.PackedObjects.html) |
+| `grit_lib::odb::store::WritableObjectStore` | trait | Object storage that supports inserting new objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.WritableObjectStore.html) |
+| `grit_lib::odb::store::loose` | module | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/index.html) |
+| `grit_lib::odb::store::loose::LooseStore` | struct | Pluggable object storage backends and the ObjectStore trait surface. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
+| `grit_lib::odb::store::loose::LooseStore` | struct | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
+| `grit_lib::odb::store::loose::LooseStore` | struct | On-disk loose object store for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
 | `grit_lib::pack` | module | Pack and pack-index helpers for object counting and verification. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) |
 | `grit_lib::pack::LocalPackInfo` | struct | Basic information about local packs. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.LocalPackInfo.html) |
 | `grit_lib::pack::PackData` | struct | Immutable bytes of a .pack or MIDX file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackData.html) |
@@ -3154,6 +3169,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::refs::PackedRefs` | struct | A one-time, in-memory snapshot of a ref store’s packed-refs file. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/struct.PackedRefs.html) |
 | `grit_lib::refs::RawRefLookup` | enum | Outcome of a single storage-level ref lookup (Git refs_read_raw_ref style). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.RawRefLookup.html) |
 | `grit_lib::refs::Ref` | enum | A symbolic or direct reference. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.Ref.html) |
+| `grit_lib::refs::RefBatchItem` | struct | One ref create/update/delete in a batch transaction (see crate::gc::update_refs). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/struct.RefBatchItem.html) |
 | `grit_lib::refs::RefnameUnavailable` | enum | Why a reference name cannot be created (Git refs_verify_refname_available style). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.RefnameUnavailable.html) |
 | `grit_lib::refs_fsck` | module | Reference database consistency checks for git refs verify and git fsck --references. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/index.html) |
 | `grit_lib::refs_fsck::RefsFsckIssue` | struct | One diagnostic (use format_refs_fsck_line for Git-compatible output). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/struct.RefsFsckIssue.html) |
@@ -4302,9 +4318,13 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 
 Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
 
-## grit-lib: ODB backend (pre-refactor baseline)
+## grit-lib: ODB backend (pluggable object store)
 
-Criterion group **`odb_backend`** (`cargo bench -p grit-lib --bench odb_backend -- --save-baseline odb-before`) measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
+Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). The baseline was captured before routing through [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) / [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html); after the refactor, hot paths keep direct pack/loose probes in [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read), [`Odb::exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists), and inline loose writes so trait dispatch stays off the measured path for built-in layouts.
+
+**Pluggable object store overhead (factory VM, 2026-10-09):** Criterion **`odb_backend`** scenarios are within **±3%** of **`odb-before`** after the hot-path restore (compare with `--baseline odb-before`). Command-level **`grit-bench odb-backend`** (`grit-utils/baselines/odb-backend-after.json` vs `odb-backend-before.json`) shows **lower** Grit times for cat-file batch/check and similar rev-list wall time; Grit/Git **ratios** for rev-list can drift when system `git` speeds up on the same fixture between captures even if Grit improves.
+
+Criterion measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
 
 | Fixture | Shape |
 | --- | --- |
@@ -4315,24 +4335,26 @@ Criterion group **`odb_backend`** (`cargo bench -p grit-lib --bench odb_backend 
 
 An additional benchmark, **`odb_backend/exists_miss_loop_10k`**, calls `exists` on 10 000 distinct missing OIDs against the 100k pack fixture (models add/status miss scans).
 
-Command-level ODB scenarios on the repacked **100k-file / 1000-commit** synthetic repo live in **`grit-utils/baselines/odb-backend-before.json`** (`grit-bench odb-backend`): library drivers (`grit-bench drive …`) vs **`git cat-file --batch`**, **`git cat-file --batch-check`**, and **`git rev-list --objects --all`** on the same sorted OID stdin list where applicable.
+Command-level ODB scenarios on the repacked **100k-file / 1000-commit** synthetic repo live in **`grit-utils/baselines/odb-backend-before.json`** and **`grit-utils/baselines/odb-backend-after.json`** (`grit-bench odb-backend`): library drivers (`grit-bench drive …`) vs **`git cat-file --batch`**, **`git cat-file --batch-check`**, and **`git rev-list --objects --all`** on the same sorted OID stdin list where applicable.
 
 ```bash
 cargo build --release -p grit-utils
-./target/release/grit-bench odb-backend --format json --output grit-utils/baselines/odb-backend-before.json
-cargo bench -p grit-lib --bench odb_backend -- --save-baseline odb-before
+./target/release/grit-bench odb-backend --format json --output grit-utils/baselines/odb-backend-after.json
+cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before
 make docs
 ```
 
 Run `grit-bench odb-backend` once before the Criterion command (or leave a populated `GRIT_BENCH_ODB_CACHE`) so the `pack_100k` fixture reuses the repacked 100k repo instead of rebuilding 100k commits inline.
 
-**Recorded on the factory VM (2026-10-09, `odb-backend-before.json`, repacked 100k synthetic repo):**
+**Recorded on the factory VM (2026-10-09, repacked 100k synthetic repo).** Pre-refactor numbers are in **`odb-backend-before.json`**; post-refactor in **`odb-backend-after.json`** (also drives the generated ODB rows below).
 
-| Scenario | Git median | Grit median | Grit / Git |
+| Scenario | Git median | Grit median (before → after) | Grit / Git (before → after) |
 | --- | ---: | ---: | ---: |
-| `cat-file-batch-hot-path-100k` | 151 ms | 1 117 ms | **7.38×** |
-| `cat-file-batch-check-hot-path-100k` | 52 ms | 1 261 ms | **24.2×** |
-| `rev-list-objects-odb-backend-hot-path-100k` | 70 ms | 6 916 ms | **99.1×** |
+| `cat-file-batch-hot-path-100k` | ~151 ms | 1 117 ms → ~955 ms | **7.4× → ~7.5×** |
+| `cat-file-batch-check-hot-path-100k` | ~52 ms | 1 298 ms → ~836 ms | **24.2× → ~20.8×** |
+| `rev-list-objects-odb-backend-hot-path-100k` | ~70 ms | 6 916 ms → ~6 710 ms | **99.1× → ~106×** |
+
+Rev-list **ratios** can rise when system **`git`** speeds up between captures even if Grit wall time improves; compare absolute Grit medians when judging regressions.
 
 The rev-list gap is dominated by history/object enumeration in `grit-lib`, not bulk pack I/O; cat-file scenarios exercise ODB read and `read_info` paths directly.
 
@@ -4511,7 +4533,7 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 | commit | 2 | 0.58× | 0.68× |
 | merge | 2 | 3.40× | 3.84× |
 | object_reads | 8 | 234.49× | 4569.02× |
-| odb_backend | 3 | 22.88× | 98.20× |
+| odb_backend | 3 | 21.76× | 112.44× |
 | pick | 4 | 8.63× | 17.09× |
 | status | 4 | 6.17× | 48.09× |
 | switch | 4 | 3.61× | 22.50× |
@@ -4554,9 +4576,9 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `cat-file-batch-check-hot-path-100k` | hot-path-100k | 56.7 | 1,298 | 22.88× | ±196 ms |
-| `cat-file-batch-hot-path-100k` | hot-path-100k | 162 | 1,117 | 6.91× | ±19.5 ms |
-| `rev-list-objects-odb-backend-hot-path-100k` | hot-path-100k | 71.9 | 7,062 | 98.20× | ±446 ms |
+| `cat-file-batch-check-hot-path-100k` | hot-path-100k | 40.0 | 871 | 21.76× | ±42.8 ms |
+| `cat-file-batch-hot-path-100k` | hot-path-100k | 124 | 963 | 7.79× | ±9.61 ms |
+| `rev-list-objects-odb-backend-hot-path-100k` | hot-path-100k | 56.1 | 6,304 | 112.44× | ±81.6 ms |
 
 ### pick
 

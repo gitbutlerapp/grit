@@ -267,6 +267,21 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::odb` | module | Loose object database: reading and writing zlib-compressed Git objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/index.html) |
 | `grit_lib::odb::Odb` | struct | A loose-object database rooted at a given objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) |
 | `grit_lib::odb::WriteOptions` | struct | Options for Odb::write_with_options. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.WriteOptions.html) |
+| `grit_lib::odb::store` | module | Pluggable object storage backends and the ObjectStore trait surface. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/index.html) |
+| `grit_lib::odb::store::CompositeStore` | struct | Read-only store that consults an ordered list of backends. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) |
+| `grit_lib::odb::store::FilesSource` | struct | Read/write object storage backed by one objects/ directory tree. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) |
+| `grit_lib::odb::store::MemoryStore` | struct | In-memory object map keyed by ObjectId. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.MemoryStore.html) |
+| `grit_lib::odb::store::MidxObjects` | struct | MIDX-backed read-only ObjectStore for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.MidxObjects.html) |
+| `grit_lib::odb::store::MidxObjectsStatus` | enum | Whether MidxObjects can serve reads for this repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/enum.MidxObjectsStatus.html) |
+| `grit_lib::odb::store::ObjectStore` | trait | Read-only object storage: lookup, metadata, streaming, and enumeration. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) |
+| `grit_lib::odb::store::ObjectStream` | struct | Streaming handle for a single object’s uncompressed payload. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.ObjectStream.html) |
+| `grit_lib::odb::store::PackFilter` | struct | Which local pack indexes participate in filtered membership checks. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.PackFilter.html) |
+| `grit_lib::odb::store::PackedObjects` | struct | Pack-index-backed read-only ObjectStore for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.PackedObjects.html) |
+| `grit_lib::odb::store::WritableObjectStore` | trait | Object storage that supports inserting new objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.WritableObjectStore.html) |
+| `grit_lib::odb::store::loose` | module | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/index.html) |
+| `grit_lib::odb::store::loose::LooseStore` | struct | Pluggable object storage backends and the ObjectStore trait surface. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
+| `grit_lib::odb::store::loose::LooseStore` | struct | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
+| `grit_lib::odb::store::loose::LooseStore` | struct | On-disk loose object store for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
 | `grit_lib::pack` | module | Pack and pack-index helpers for object counting and verification. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) |
 | `grit_lib::pack::LocalPackInfo` | struct | Basic information about local packs. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.LocalPackInfo.html) |
 | `grit_lib::pack::PackData` | struct | Immutable bytes of a .pack or MIDX file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackData.html) |
@@ -381,6 +396,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::refs::PackedRefs` | struct | A one-time, in-memory snapshot of a ref store’s packed-refs file. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/struct.PackedRefs.html) |
 | `grit_lib::refs::RawRefLookup` | enum | Outcome of a single storage-level ref lookup (Git refs_read_raw_ref style). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.RawRefLookup.html) |
 | `grit_lib::refs::Ref` | enum | A symbolic or direct reference. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.Ref.html) |
+| `grit_lib::refs::RefBatchItem` | struct | One ref create/update/delete in a batch transaction (see crate::gc::update_refs). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/struct.RefBatchItem.html) |
 | `grit_lib::refs::RefnameUnavailable` | enum | Why a reference name cannot be created (Git refs_verify_refname_available style). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.RefnameUnavailable.html) |
 | `grit_lib::refs_fsck` | module | Reference database consistency checks for git refs verify and git fsck --references. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/index.html) |
 | `grit_lib::refs_fsck::RefsFsckIssue` | struct | One diagnostic (use format_refs_fsck_line for Git-compatible output). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/struct.RefsFsckIssue.html) |

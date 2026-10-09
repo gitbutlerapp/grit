@@ -58,6 +58,15 @@ impl ObjectStore for CompositeStore {
         Ok(None)
     }
 
+    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+        for store in &self.stores {
+            if store.contains(oid)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         for store in &self.stores {
             if let Some(stream) = store.open_stream(oid)? {
@@ -177,5 +186,21 @@ mod tests {
         let mut expected = vec![oid_a, oid_b];
         expected.sort_by_key(|o| o.to_hex());
         assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn contains_delegates_without_reading_payload() {
+        let store_a = MemoryStore::new(HashAlgo::Sha1);
+        let oid = store_a
+            .write(ObjectKind::Blob, b"x", WriteOptions::default())
+            .unwrap();
+        let composite = CompositeStore::new(
+            vec![Arc::new(store_a) as Arc<dyn ObjectStore>],
+            HashAlgo::Sha1,
+        );
+        assert!(composite.contains(&oid).unwrap());
+        assert!(!composite
+            .contains(&ObjectId::from_hex("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef").unwrap())
+            .unwrap());
     }
 }

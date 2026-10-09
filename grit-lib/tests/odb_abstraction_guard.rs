@@ -58,7 +58,10 @@ fn is_excluded(path: &Path) -> bool {
         "/grit-lib/src/pack_rev.rs",
         "\\grit-lib\\src\\pack_rev.rs",
     ];
-    if PACK_INDEX_READ_ALLOWLIST.iter().any(|p| path_str.contains(p)) {
+    if PACK_INDEX_READ_ALLOWLIST
+        .iter()
+        .any(|p| path_str.contains(p))
+    {
         return true;
     }
 

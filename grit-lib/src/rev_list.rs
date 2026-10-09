@@ -7295,10 +7295,7 @@ fn collect_reachable_objects_in_commit_order(
 
 /// Collect OIDs of all objects in packs that have a `.keep` file.
 fn kept_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
-    repo.odb
-        .primary()?
-        .packed_objects()
-        .kept_pack_object_ids()
+    repo.odb.primary()?.packed_objects().kept_pack_object_ids()
 }
 
 /// Like [`flatten_tree`] but also carries each blob's file mode, so callers can detect

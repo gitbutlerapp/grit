@@ -23,7 +23,7 @@ pub struct PrunePackedOptions {
 
 /// Remove loose objects that are already stored in a pack file.
 ///
-/// For each loose object under `objects_dir` whose [`ObjectId`] appears in
+/// For each loose object under `objects_dir` whose [`crate::objects::ObjectId`] appears in
 /// at least one local pack index, the file is deleted (or, with
 /// [`PrunePackedOptions::dry_run`], paths are listed in the return value only).
 /// Empty two-char prefix directories are removed afterwards.
@@ -32,7 +32,7 @@ pub struct PrunePackedOptions {
 ///
 /// # Errors
 ///
-/// - [`Error::Io`] for directory or file access failures.
+/// - [`crate::error::Error::Io`] for directory or file access failures.
 pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Result<Vec<PathBuf>> {
     let odb = Odb::new(objects_dir);
     let primary = odb.primary()?;
