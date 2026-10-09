@@ -280,6 +280,7 @@ pub(crate) mod midx_cache {
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
     use std::collections::HashMap;
     use std::fs;
+    use std::ops::ControlFlow;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
@@ -492,6 +493,101 @@ pub(crate) mod midx_cache {
         fn test_find_position(&self, oid: &ObjectId) -> Option<usize> {
             self.find_position(oid)
         }
+
+        fn for_each_listed_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> Result<()> {
+            for i in 0..self.num_objects {
+                let oid = ObjectId::from_bytes(self.oid_at(i))
+                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                if f(&oid).is_break() {
+                    break;
+                }
+            }
+            Ok(())
+        }
+
+        fn lookup_prefix(
+            &self,
+            prefix: &str,
+            limit: usize,
+            count: &mut usize,
+            out: &mut Vec<ObjectId>,
+            seen: &mut std::collections::HashSet<ObjectId>,
+        ) -> Result<()> {
+            if prefix.is_empty() {
+                return self.for_each_listed_object(&mut |oid| {
+                    if !seen.insert(*oid) {
+                        return ControlFlow::Continue(());
+                    }
+                    out.push(*oid);
+                    *count += 1;
+                    if limit != 0 && *count >= limit {
+                        return ControlFlow::Break(());
+                    }
+                    ControlFlow::Continue(())
+                });
+            }
+            let hash_bytes = self.hash_len;
+            let hex_len = hash_bytes * 2;
+            if prefix.len() > hex_len {
+                return Err(Error::InvalidObjectId(prefix.to_owned()));
+            }
+            let pad = hex_len - prefix.len();
+            let min_hex = format!("{prefix}{:0>pad$}", "", pad = pad);
+            let max_hex = format!("{prefix}{}", "f".repeat(pad));
+            let min = ObjectId::from_hex(&min_hex)?;
+            let max = ObjectId::from_hex(&max_hex)?;
+            let min_bytes = min.as_bytes();
+            let max_bytes = max.as_bytes();
+            let lo = self.lower_bound_oid(min_bytes);
+            let hi = self.upper_bound_oid(max_bytes);
+            for pos in lo..hi {
+                let oid = ObjectId::from_bytes(self.oid_at(pos))
+                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                if !oid.to_hex().starts_with(prefix) {
+                    continue;
+                }
+                if !seen.insert(oid) {
+                    continue;
+                }
+                out.push(oid);
+                *count += 1;
+                if limit != 0 && *count >= limit {
+                    break;
+                }
+            }
+            Ok(())
+        }
+
+        fn lower_bound_oid(&self, needle: &[u8]) -> usize {
+            let mut lo = 0usize;
+            let mut hi = self.num_objects;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if self.oid_at(mid) < needle {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        }
+
+        fn upper_bound_oid(&self, needle: &[u8]) -> usize {
+            let mut lo = 0usize;
+            let mut hi = self.num_objects;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if self.oid_at(mid) <= needle {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        }
     }
 
     #[cfg(test)]
@@ -585,6 +681,54 @@ pub(crate) mod midx_cache {
             for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
                 layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
             }
+        }
+
+        /// Pack index basenames referenced by any layer in this chain.
+        pub(crate) fn covered_pack_basenames(&self) -> std::collections::HashSet<String> {
+            let mut out = std::collections::HashSet::new();
+            for names in &self.pack_names_by_layer {
+                for name in names {
+                    out.insert(name.clone());
+                }
+            }
+            out
+        }
+
+        /// Invoke `f` for each OID listed in the chain (newest layer wins deduplication).
+        pub(crate) fn for_each_listed_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> Result<()> {
+            use std::collections::HashSet;
+            let mut seen = HashSet::new();
+            for layer in &self.layers {
+                layer.for_each_listed_object(&mut |oid| {
+                    if !seen.insert(*oid) {
+                        return ControlFlow::Continue(());
+                    }
+                    f(oid)
+                })?;
+            }
+            Ok(())
+        }
+
+        /// Collect OIDs whose hex form starts with `prefix` (case-insensitive), up to `limit`.
+        pub(crate) fn lookup_prefix(
+            &self,
+            prefix: &str,
+            limit: usize,
+            out: &mut Vec<ObjectId>,
+        ) -> Result<()> {
+            use std::collections::HashSet;
+            let mut seen = HashSet::new();
+            let mut count = 0usize;
+            for layer in &self.layers {
+                layer.lookup_prefix(prefix, limit, &mut count, out, &mut seen)?;
+                if limit != 0 && count >= limit {
+                    break;
+                }
+            }
+            Ok(())
         }
     }
 

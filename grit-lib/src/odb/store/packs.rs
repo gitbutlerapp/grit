@@ -140,6 +140,44 @@ impl PackedObjects {
             },
         )
     }
+
+    /// Read `oid` from pack indexes listed in the active multi-pack-index only.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack read failures other than a missing object.
+    pub(crate) fn read_midx_covered(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        self.with_pack(|objects_dir| {
+            match pack::try_read_object_from_packs_with_options(
+                objects_dir,
+                oid,
+                pack::PackLookupOptions::MIDX_COVERED_PACKS,
+            ) {
+                Ok(obj) => Ok(Some(obj)),
+                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(err) => Err(err),
+            }
+        })
+    }
+
+    /// Object metadata from MIDX-listed packs only.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read_midx_covered`].
+    pub(crate) fn read_info_midx_covered(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        self.with_pack(|objects_dir| {
+            match pack::try_read_object_info_from_packs_with_options(
+                objects_dir,
+                oid,
+                pack::PackLookupOptions::MIDX_COVERED_PACKS,
+            ) {
+                Ok(info) => Ok(Some(info)),
+                Err(Error::ObjectNotFound(_)) => Ok(None),
+                Err(err) => Err(err),
+            }
+        })
+    }
 }
 
 impl ObjectStore for PackedObjects {

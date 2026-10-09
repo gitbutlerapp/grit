@@ -7,7 +7,11 @@
 //! Thread safety: [`ObjectStore`] requires `Send + Sync` so repositories can share
 //! a store across threads; individual methods may take internal locks.
 
+mod midx;
 mod packs;
+
+pub use midx::{MidxObjects, MidxObjectsStatus};
+pub use packs::{PackFilter, PackedObjects};
 
 use std::collections::HashMap;
 use std::io::{self, Cursor, Read};
@@ -304,7 +308,7 @@ impl WritableObjectStore for MemoryStore {
     }
 }
 
-pub(crate) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
+pub(super) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
     if prefix.is_empty() {
         return Ok(String::new());
     }
@@ -317,8 +321,6 @@ pub(crate) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<Strin
     }
     Ok(prefix.to_ascii_lowercase())
 }
-
-pub use packs::{PackFilter, PackedObjects};
 
 fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
     if prefix.is_empty() {
