@@ -102,7 +102,9 @@ Line coverage for the object-database modules is measured with [`cargo llvm-cov`
 make coverage
 ```
 
-This builds `grit` into `target/llvm-cov-target/` (integration tests such as `precompose_system_git_roundtrip` need that binary via `GRIT_BIN`), runs `cargo llvm-cov -p grit-lib --lib --tests`, prints a per-module table (module, lines, missed, %), and fails if any tracked file, module group, or the **core** set (odb + pack* + midx + commit-graph) is below its floor. HTML and lcov reports land under `target/llvm-cov/html` and `target/llvm-cov/lcov.info`.
+This builds `grit` into `target/llvm-cov-target/` (integration tests such as `precompose_system_git_roundtrip` need that binary via `GRIT_BIN`), runs `cargo llvm-cov -p grit-lib --lib --tests`, prints a per-module table (module, lines, missed, %), and fails if any tracked file, module group, named aggregate, or the **core** set (odb + pack* + midx + commit-graph) is below its floor. HTML and lcov reports land under `target/llvm-cov/html` and `target/llvm-cov/lcov.info`.
+
+**Module groups** in [`grit-lib/coverage-floors.toml`](grit-lib/coverage-floors.toml) include the ODB/pack/MIDX/commit-graph **core** groups plus refs-area groups (`refs`, `reflog`, `config`, `ignore`, `attributes`). The **refs-config** aggregate spans those five groups. Legacy `[core]` and newer `[aggregate.<name>]` tables are both supported by [`scripts/coverage.py`](scripts/coverage.py).
 
 **Ratchet:** Floors are minimum allowed line-coverage percentages. After adding tests, raise floors with:
 
@@ -113,6 +115,15 @@ python3 scripts/coverage.py --input target/llvm-cov/summary.json --update
 Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal; the script never lowers an existing floor. Commit the updated `coverage-floors.toml` with the tests that improved coverage.
 
 **CI:** The **coverage** job runs `make coverage` and uploads the HTML/lcov artifact. Unit tests for the gate live in `scripts/tests/test_coverage.py` and run under `python3 -m unittest discover scripts/tests` with the **docs** job.
+
+### Upstream test mapping: refs, reflog, config, ignore, attributes
+
+Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are mapped in the table below as those areas gain Rust coverage. Shared setup lives in [`grit-lib/tests/support/refs_harness.rs`](grit-lib/tests/support/refs_harness.rs): tests call `each_backend` to run the same scenario on **files** and **reftable** ref storage (`init_repository` with `ref_storage` `"files"` or `"reftable"`). Helpers run system `git` with a hermetic environment (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, fixed author/committer identity and dates). Grit ref lists come from `grit_lib::refs::list_refs`; git side uses `git show-ref`. When system git is older than 2.45 and cannot `git init --ref-format=reftable`, reftable scenarios print `SKIP: git lacks reftable` and return instead of failing.
+
+| upstream file | scenario | Rust test | status |
+| --- | --- | --- | --- |
+
+Detailed rows for this area are filled in as steps 2–12 of the refs/config plan land; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 
