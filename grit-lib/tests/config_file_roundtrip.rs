@@ -55,6 +55,7 @@ fn unset_matching_and_last() {
         .unset_matching("r.url", None, false)
         .expect("unset all");
     assert_eq!(n, 3);
+    assert!(file.get("r.url").is_none());
 }
 
 #[test]
@@ -132,4 +133,30 @@ fn resolve_diff_context_and_global_paths() {
         grit_lib::config::resolve_diff_context_lines(&set).expect("ctx"),
         Some(5)
     );
+}
+
+#[test]
+fn write_api_comments_patterns_and_multivar() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("config");
+    fs::write(
+        &path,
+        "[remote \"origin\"]\n\turl = a\n\turl = b\n[sec]\n\tk = old\n",
+    )
+    .expect("write");
+    let mut file = ConfigFile::from_path(&path, ConfigScope::Local)
+        .expect("read")
+        .expect("exists");
+    file.set_with_comment("sec.k", "new", Some("note"))
+        .expect("set comment");
+    file.replace_all_with_comment("remote.origin.url", "u", Some("u*"), Some("c"))
+        .expect("replace pattern");
+    file.add_value_with_comment("sec.extra", "v", Some("added"))
+        .expect("add comment");
+    file.write().expect("persist");
+    let again = ConfigFile::from_path(&path, ConfigScope::Local)
+        .expect("reread")
+        .expect("exists");
+    assert_eq!(again.get("sec.k").as_deref(), Some("new"));
+    assert_eq!(again.get("sec.extra").as_deref(), Some("v"));
 }

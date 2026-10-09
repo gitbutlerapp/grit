@@ -539,6 +539,30 @@ fn write_default_v2_midx_roundtrip() {
 }
 
 #[test]
+fn format_midx_dump_and_show_objects_layers() {
+    let Some((repo, objects, oids)) = multi_pack_repo(HashAlgo::Sha1, 2) else {
+        eprintln!("SKIP: fixture");
+        return;
+    };
+    let pack_dir = objects.join("pack");
+    grit_write_midx(&pack_dir, &WriteMultiPackIndexOptions::default());
+    let dump = grit_lib::midx::format_midx_dump(&objects).expect("dump");
+    assert!(dump.contains("header:"));
+    assert!(dump.contains("packs:"));
+    let show = grit_lib::midx::format_midx_show_objects(&objects).expect("show");
+    assert!(show.contains(&oids[0].to_hex()));
+    let tip = tip_midx_path(&pack_dir);
+    let hex = midx_trailing_hex(&tip);
+    let layer_dump =
+        grit_lib::midx::format_midx_dump_layer(&objects, Some(&hex)).expect("layer dump");
+    assert!(layer_dump.contains("num_objects:"));
+    let layer_show =
+        grit_lib::midx::format_midx_show_objects_layer(&objects, Some(&hex)).expect("layer show");
+    assert!(layer_show.lines().count() >= oids.len());
+    let _ = repo;
+}
+
+#[test]
 fn midx_lookup_errors_when_oid_absent() {
     let Some((repo, objects, oids)) = multi_pack_repo(HashAlgo::Sha1, 2) else {
         eprintln!("SKIP: fixture");

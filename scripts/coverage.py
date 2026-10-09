@@ -95,9 +95,9 @@ def parse_coverage_json(raw: str | bytes) -> dict[str, LineStats]:
                 rel = path.relative_to(ROOT / "grit-lib" / "src")
             except ValueError:
                 continue
-            if rel.suffix != ".rs" or len(rel.parts) != 1:
+            if rel.suffix != ".rs":
                 continue
-            name = rel.name
+            name = rel.as_posix()
             summary = item.get("summary", {}).get("lines", {})
             count = int(summary.get("count", 0))
             covered = int(summary.get("covered", 0))

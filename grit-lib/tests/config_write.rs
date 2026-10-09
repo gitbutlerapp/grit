@@ -353,6 +353,18 @@ const CASES: &[Case] = &[
 ];
 
 #[test]
+fn grit_apply_exercises_every_case_operation() {
+    for case in CASES {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("cfg");
+        fs::write(&path, case.initial).expect("write initial");
+        let mut cfg = load_grit(&path, case.initial);
+        apply_grit(&mut cfg, case.op).unwrap_or_else(|e| panic!("{}: {e:?}", case.name));
+        cfg.write().expect("write");
+    }
+}
+
+#[test]
 fn t1300_edit_matches_git_byte_for_byte() {
     for case in CASES {
         if case.grit_only {
