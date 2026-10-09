@@ -732,6 +732,7 @@ name = "grit-test-support"
 version = "0.5.3"
 dependencies = [
  "flate2",
+ "grit-lib",
  "hex",
  "regex",
  "sha1",

@@ -5,6 +5,7 @@
 //! integration tests in `grit` and `grit-lib`.
 
 pub mod objects;
+pub mod odb_conformance;
 
 pub use objects::{
     git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,
