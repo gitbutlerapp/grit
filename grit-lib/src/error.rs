@@ -437,6 +437,11 @@ pub enum Error {
     /// A Git hook subprocess failed or could not be started.
     #[error(transparent)]
     Hook(#[from] crate::hooks::HookError),
+
+    /// An [`ObjectStore`](crate::odb::store::ObjectStore) backend does not implement the
+    /// requested operation (for example filesystem-only helpers on an in-memory store).
+    #[error("object store does not support: {operation}")]
+    UnsupportedObjectStore { operation: &'static str },
 }
 
 impl Error {

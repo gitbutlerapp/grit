@@ -17,6 +17,8 @@
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
 
+pub mod store;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Read, Write};
