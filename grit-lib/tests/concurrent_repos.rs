@@ -384,6 +384,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
                 author: ident.clone(),
                 committer: ident,
                 allow_empty: false,
+                sign_override: None,
             },
             &mut NullProgress,
         )
