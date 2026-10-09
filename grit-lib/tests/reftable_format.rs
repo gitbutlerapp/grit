@@ -715,11 +715,13 @@ fn reftable_write_transaction_batch() {
                 refname: "refs/heads/a".into(),
                 value: Some(RefValue::Val1(o1)),
                 log: None,
+                expected_old: None,
             },
             ReftableTransactionUpdate {
                 refname: "refs/heads/b".into(),
                 value: Some(RefValue::Val1(o2)),
                 log: None,
+                expected_old: None,
             },
         ],
     )
