@@ -2369,6 +2369,13 @@ pub(crate) fn read_object_at(idx: &PackIndex, offset: u64) -> Result<Object> {
     read_object_at_depth(idx, offset, 0)
 }
 
+/// Read a packed object when the pack index entry is already known (batch cat-file workloads).
+///
+/// Avoids a second index lookup when iterating objects in offset order.
+pub fn read_object_from_pack_at_offset(idx: &PackIndex, offset: u64) -> Result<Object> {
+    read_object_at(idx, offset)
+}
+
 /// [`read_object_from_pack`] with an explicit starting delta-chain depth, used when the read
 /// itself resolves a delta base from another pack (the chain budget must carry across packs).
 fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize) -> Result<Object> {
