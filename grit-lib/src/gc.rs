@@ -290,6 +290,10 @@ pub struct RefTransactionItem {
 /// pre-checked, conflict-free case), which is the same guarantee Git's files
 /// backend gives outside of `core.refTransaction` hooks.
 pub fn update_refs(git_dir: &Path, updates: &[RefTransactionItem]) -> Result<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+
     // Phase 1: verify every CAS expectation against current state. Apply nothing
     // if any check fails.
     for item in updates {
@@ -308,11 +312,79 @@ pub fn update_refs(git_dir: &Path, updates: &[RefTransactionItem]) -> Result<()>
         }
     }
 
-    // Phase 2: apply. All CAS checks passed, so conflicts are not expected.
+    let batch: Vec<crate::refs::RefBatchItem> = updates
+        .iter()
+        .map(|item| crate::refs::RefBatchItem {
+            name: item.name.clone(),
+            new_oid: item.new_oid,
+        })
+        .collect();
+    if let Err(unavail) = crate::refs::verify_ref_transaction_batch(git_dir, &batch) {
+        let refname = match &unavail {
+            crate::refs::RefnameUnavailable::AncestorExists { new_ref, .. }
+            | crate::refs::RefnameUnavailable::DescendantExists { new_ref, .. } => new_ref.clone(),
+            crate::refs::RefnameUnavailable::SameBatch { refname, .. } => refname.clone(),
+        };
+        return Err(Error::Message(format!(
+            "ref transaction rejected: cannot lock ref '{refname}': {}",
+            unavail.lock_message_suffix()
+        )));
+    }
+
+    if crate::reftable::is_reftable_repo(git_dir) {
+        for item in updates {
+            if let Some(expected) = item.expected_old {
+                let current = crate::refs::resolve_ref(git_dir, &item.name).ok();
+                if current != Some(expected) {
+                    return Err(Error::Message(format!(
+                        "ref transaction rejected: '{}' expected {} but found {}",
+                        item.name,
+                        expected,
+                        current
+                            .map(|o| o.to_hex())
+                            .unwrap_or_else(|| "<absent>".to_owned()),
+                    )));
+                }
+            }
+        }
+        let rt_updates: Vec<crate::reftable::ReftableTransactionUpdate> = updates
+            .iter()
+            .map(|item| crate::reftable::ReftableTransactionUpdate {
+                refname: item.name.clone(),
+                value: Some(match item.new_oid {
+                    Some(oid) => crate::reftable::RefValue::Val1(oid),
+                    None => crate::reftable::RefValue::Deletion,
+                }),
+                log: None,
+            })
+            .collect();
+        return crate::reftable::reftable_write_transaction(git_dir, rt_updates);
+    }
+
+    // Phase 2: apply. Re-check CAS immediately before each write so concurrent
+    // updaters cannot both succeed after the initial pre-check (see TESTING.md
+    // gap note for whole-batch lock-all atomicity).
     for item in updates {
-        match &item.new_oid {
-            Some(oid) => crate::refs::write_ref(git_dir, &item.name, oid)?,
-            None => crate::refs::delete_ref(git_dir, &item.name)?,
+        if let Some(expected) = item.expected_old {
+            let current = crate::refs::resolve_ref(git_dir, &item.name).ok();
+            if current != Some(expected) {
+                return Err(Error::Message(format!(
+                    "ref transaction rejected: '{}' expected {} but found {}",
+                    item.name,
+                    expected,
+                    current
+                        .map(|o| o.to_hex())
+                        .unwrap_or_else(|| "<absent>".to_owned()),
+                )));
+            }
+        }
+        match (&item.new_oid, item.expected_old) {
+            (Some(oid), Some(expected)) => {
+                crate::refs::write_ref_cas(git_dir, &item.name, oid, expected)?
+            }
+            (Some(oid), None) => crate::refs::write_ref(git_dir, &item.name, oid)?,
+            (None, Some(expected)) => crate::refs::delete_ref_cas(git_dir, &item.name, expected)?,
+            (None, None) => crate::refs::delete_ref(git_dir, &item.name)?,
         }
     }
 

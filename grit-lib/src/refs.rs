@@ -562,6 +562,43 @@ pub fn verify_refname_available_for_create(
     Ok(())
 }
 
+/// One ref create/update/delete in a batch transaction (see [`crate::gc::update_refs`]).
+#[derive(Clone, Debug)]
+pub struct RefBatchItem {
+    /// Full ref name (e.g. `refs/heads/main`).
+    pub name: String,
+    /// New oid to write, or `None` to delete the ref.
+    pub new_oid: Option<ObjectId>,
+}
+
+/// Verify that every *new* ref in a batch can be created without D/F or namespace
+/// conflicts with the existing store or other items in the batch.
+///
+/// Matches Git's pre-lock `refs_verify_refnames_available` checks with an empty
+/// `skip` list (refs scheduled for deletion in the same batch do not suppress
+/// ancestor/descendant conflicts — see t1404 D/F batch tests).
+///
+/// # Errors
+///
+/// Returns [`RefnameUnavailable`] describing the first conflict.
+pub fn verify_ref_transaction_batch(
+    git_dir: &Path,
+    items: &[RefBatchItem],
+) -> std::result::Result<(), RefnameUnavailable> {
+    let extras: BTreeSet<String> = items.iter().map(|i| i.name.clone()).collect();
+    let empty_skip = HashSet::new();
+    for item in items {
+        let Some(_oid) = item.new_oid else {
+            continue;
+        };
+        if resolve_ref(git_dir, &item.name).is_ok() {
+            continue;
+        }
+        verify_refname_available_for_create(git_dir, &item.name, &extras, &empty_skip)?;
+    }
+    Ok(())
+}
+
 fn read_raw_ref_reftable(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
     if refname == "HEAD" {
         let head_path = git_dir.join("HEAD");
@@ -882,6 +919,102 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
     Ok(())
 }
 
+/// Like [`write_ref`], but requires `expected_old` to match the ref's current value
+/// while the loose-ref lock is held (atomic CAS for concurrent updaters).
+///
+/// # Errors
+///
+/// Same as [`write_ref`], plus [`Error::Message`] when the CAS check fails under lock.
+pub fn write_ref_cas(
+    git_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+    expected_old: ObjectId,
+) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
+    if crate::reftable::is_reftable_repo(git_dir) {
+        let current = resolve_ref(git_dir, refname).ok();
+        verify_branch_cas(Some(expected_old), current, refname)?;
+        return write_ref(git_dir, refname, oid);
+    }
+    let storage_dir = ref_storage_dir(git_dir, refname);
+    if packed_ref_namespace_conflict(&storage_dir, refname)? {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{refname}': reference namespace conflict"
+        )));
+    }
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let path = storage_dir.join(&stor);
+    remove_empty_ref_directory(&path);
+    if fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+    {
+        let display = ref_path_for_display(&path);
+        return Err(crate::error::RefLockError::DirectoryInTheWay {
+            refname: refname.to_owned(),
+            path: display,
+        }
+        .into());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let lock = lock_path_for_ref(&path);
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock)?;
+    let current = read_loose_or_packed_oid(git_dir, refname)?;
+    if let Err(err) = verify_branch_cas(Some(expected_old), current, refname) {
+        abort_loose_ref_lock(&lock);
+        return Err(err);
+    }
+    let content = format!("{oid}\n");
+    {
+        use std::io::Write as _;
+        let mut file = fs::OpenOptions::new().write(true).open(&lock)?;
+        file.write_all(content.as_bytes())?;
+    }
+    fs::rename(&lock, &path)?;
+    Ok(())
+}
+
+/// Like [`delete_ref`], but requires `expected_old` to match under the ref lock.
+///
+/// # Errors
+///
+/// Same as [`delete_ref`], plus [`Error::Message`] when the CAS check fails.
+pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
+    if crate::reftable::is_reftable_repo(git_dir) {
+        let current = resolve_ref(git_dir, refname).ok();
+        verify_branch_cas(Some(expected_old), current, refname)?;
+        return delete_ref(git_dir, refname);
+    }
+    let storage_dir = ref_storage_dir(git_dir, refname);
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let path = storage_dir.join(&stor);
+    let lock = lock_path_for_ref(&path);
+    if fs::symlink_metadata(&lock).is_ok() {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("ref lock present: {}", lock.display()),
+        )));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock)?;
+    let current = read_loose_or_packed_oid(git_dir, refname)?;
+    if let Err(err) = verify_branch_cas(Some(expected_old), current, refname) {
+        abort_loose_ref_lock(&lock);
+        return Err(err);
+    }
+    abort_loose_ref_lock(&lock);
+    delete_ref(git_dir, refname)
+}
+
 /// A one-time, in-memory snapshot of a ref store's `packed-refs` file.
 ///
 /// Bulk ref operations — notably `fetch`'s apply phase — resolve and write
@@ -1110,6 +1243,13 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(&stor);
+    let lock = lock_path_for_ref(&path);
+    if fs::symlink_metadata(&lock).is_ok() {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("ref lock present: {}", lock.display()),
+        )));
+    }
 
     // Remove the packed-refs entry *first* (acquiring the packed-refs lock). Git deletes the
     // packed version while holding the lock before unlinking the loose ref, so that a failure to
@@ -2506,6 +2646,32 @@ mod refname_available_tests {
     use super::*;
     use std::collections::{BTreeSet, HashSet};
     use tempfile::tempdir;
+
+    #[test]
+    fn verify_ref_transaction_batch_rejects_same_batch_parent_child() {
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path();
+        fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+        let items = vec![
+            RefBatchItem {
+                name: "refs/heads/c".to_owned(),
+                new_oid: Some(sample_oid()),
+            },
+            RefBatchItem {
+                name: "refs/heads/c/x".to_owned(),
+                new_oid: Some(sample_oid()),
+            },
+        ];
+        let err = verify_ref_transaction_batch(git_dir, &items).unwrap_err();
+        assert!(matches!(
+            err,
+            RefnameUnavailable::SameBatch { refname, .. } if refname == "refs/heads/c/x"
+        ));
+    }
+
+    fn sample_oid() -> ObjectId {
+        "67bf698f3ab735e92fb011a99cff3497c44d30c1".parse().unwrap()
+    }
 
     #[test]
     fn loose_parent_blocks_child_create() {

@@ -2849,7 +2849,7 @@ mod reftable_tx_fail_inject {
     }
 }
 
-/// When enabled (debug builds only), the next [`ReftableStack::write_transaction`] fails before writing.
+/// When enabled (tests only), the next [`ReftableStack::write_transaction`] fails before writing.
 #[cfg(test)]
 pub fn set_test_inject_reftable_transaction_fail(enabled: bool) {
     reftable_tx_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
@@ -3859,5 +3859,36 @@ mod tests {
         let refs = reader.read_refs().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].value, RefValue::Deletion);
+    }
+
+    #[test]
+    fn write_transaction_inject_failure_leaves_tables_list_unchanged() {
+        use crate::objects::ObjectId;
+        use crate::repo::init_repository;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repository(tmp.path(), false, "main", None, "reftable").unwrap();
+        let git_dir = repo.git_dir;
+        let tables_list = git_dir.join("reftable/tables.list");
+        let before = fs::read_to_string(&tables_list).unwrap_or_default();
+
+        let oid = ObjectId::from_bytes(&[0xcd; 20]).unwrap();
+        set_test_inject_reftable_transaction_fail(true);
+        let mut stack = ReftableStack::open(&git_dir).unwrap();
+        let opts = read_write_options(&git_dir);
+        let err = stack.write_transaction(
+            vec![ReftableTransactionUpdate {
+                refname: "refs/heads/inject-fail".to_owned(),
+                value: Some(RefValue::Val1(oid)),
+                log: None,
+            }],
+            &opts,
+        );
+        set_test_inject_reftable_transaction_fail(false);
+        assert!(err.is_err());
+
+        let after = fs::read_to_string(&tables_list).unwrap_or_default();
+        assert_eq!(after, before);
     }
 }
