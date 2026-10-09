@@ -3,8 +3,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
 
 use grit_lib::objects::ObjectId;
@@ -30,6 +32,35 @@ pub struct TestRepo {
     _root: tempfile::TempDir,
     worktree: PathBuf,
     backend: Backend,
+}
+
+/// Duplicate an initialized repo tree into a fresh temp directory (same backend tag).
+pub fn duplicate_repo(repo: &TestRepo) -> TestRepo {
+    let root = tempfile::tempdir().expect("tempdir");
+    let worktree = root.path().join("wt");
+    fs::create_dir_all(&worktree).expect("mkdir wt");
+    copy_tree(repo.worktree(), &worktree).expect("copy tree");
+    TestRepo {
+        _root: root,
+        worktree,
+        backend: repo.backend(),
+    }
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            copy_tree(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(src, dst).map(|_| ())
+    }
 }
 
 impl TestRepo {
@@ -277,6 +308,105 @@ pub fn assert_list_refs_match_git(worktree: &Path, prefix: &str) {
 }
 
 /// Parse `git show-ref` output into a name → oid map (deduplicated, sorted).
+/// Run `git update-ref --stdin` with hermetic env; returns whether it succeeded.
+pub fn git_update_ref_stdin(worktree: &Path, script: &str) -> bool {
+    let mut child = Command::new("git")
+        .current_dir(worktree)
+        .args(["update-ref", "--stdin"])
+        .env("GIT_AUTHOR_NAME", AUTHOR_NAME)
+        .env("GIT_AUTHOR_EMAIL", AUTHOR_EMAIL)
+        .env("GIT_COMMITTER_NAME", AUTHOR_NAME)
+        .env("GIT_COMMITTER_EMAIL", AUTHOR_EMAIL)
+        .env("GIT_AUTHOR_DATE", DETERMINISTIC_DATE)
+        .env("GIT_COMMITTER_DATE", DETERMINISTIC_DATE)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn git update-ref --stdin");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(script.as_bytes())
+        .expect("write stdin");
+    child.wait().expect("wait").success()
+}
+
+/// Byte snapshot of every file under `logs/` (reflogs), keyed by path relative to `git_dir`.
+pub fn reflog_bytes_snapshot(git_dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let logs = git_dir.join("logs");
+    let mut out = BTreeMap::new();
+    if !logs.is_dir() {
+        return out;
+    }
+    let mut stack = vec![logs];
+    while let Some(dir) = stack.pop() {
+        let read = match fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for entry in read.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() {
+                let rel = path
+                    .strip_prefix(git_dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                let bytes = fs::read(&path).unwrap_or_default();
+                out.insert(rel, bytes);
+            }
+        }
+    }
+    out
+}
+
+/// Loose + packed ref file bytes under `refs/` and `packed-refs` for files-backend repos.
+pub fn ref_store_bytes_snapshot(git_dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let packed = git_dir.join("packed-refs");
+    if packed.is_file() {
+        out.insert(
+            "packed-refs".to_owned(),
+            fs::read(&packed).unwrap_or_default(),
+        );
+    }
+    let refs_root = git_dir.join("refs");
+    if refs_root.is_dir() {
+        let mut stack = vec![refs_root];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.is_file() {
+                    let rel = path
+                        .strip_prefix(git_dir)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .into_owned();
+                    out.insert(rel, fs::read(&path).unwrap_or_default());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `tables.list` contents and table file count for reftable repos.
+pub fn reftable_tables_snapshot(git_dir: &Path) -> (String, usize) {
+    let reftable_dir = git_dir.join("reftable");
+    let list_path = reftable_dir.join("tables.list");
+    let list = fs::read_to_string(&list_path).unwrap_or_default();
+    let count = list.lines().filter(|l| !l.is_empty()).count();
+    (list, count)
+}
+
 pub fn git_show_ref(worktree: &Path) -> BTreeMap<String, ObjectId> {
     let out = git(worktree, &["show-ref"]);
     let mut map = BTreeMap::new();
