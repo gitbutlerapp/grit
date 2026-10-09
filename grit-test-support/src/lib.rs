@@ -524,6 +524,7 @@ fn run_program(
         child_stdin
             .write_all(stdin)
             .unwrap_or_else(|e| panic!("write stdin for {} {args:?}: {e}", program.display()));
+        drop(child_stdin);
         child
             .wait_with_output()
             .unwrap_or_else(|e| panic!("wait {} {args:?}: {e}", program.display()))
