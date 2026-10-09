@@ -107,7 +107,11 @@ impl MidxObjects {
         if self.status() != MidxObjectsStatus::Active {
             return Ok(None);
         }
-        prepared_midx_chain_strict(self.packs.pack_store().objects_dir())
+        match prepared_midx_chain_strict(self.packs.pack_store().objects_dir()) {
+            Ok(chain) => Ok(chain),
+            Err(Error::Midx(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn read_via_chain(&self, oid: &ObjectId) -> Result<Option<Object>> {
@@ -189,8 +193,9 @@ impl ObjectStore for MidxObjects {
 }
 
 fn classify_midx_status(objects_dir: &std::path::Path) -> Result<MidxObjectsStatus> {
-    match prepared_midx_chain_strict(objects_dir)? {
-        Some(_) => Ok(MidxObjectsStatus::Active),
-        None => Ok(MidxObjectsStatus::Unusable),
+    match prepared_midx_chain_strict(objects_dir) {
+        Ok(Some(_)) => Ok(MidxObjectsStatus::Active),
+        Ok(None) | Err(Error::Midx(_)) => Ok(MidxObjectsStatus::Unusable),
+        Err(err) => Err(err),
     }
 }

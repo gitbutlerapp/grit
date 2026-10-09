@@ -140,7 +140,6 @@ impl PackedObjects {
             },
         )
     }
-
 }
 
 impl ObjectStore for PackedObjects {

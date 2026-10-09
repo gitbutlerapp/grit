@@ -845,14 +845,16 @@ pub(crate) mod midx_cache {
                 }
                 Err(err) => return Err(Error::Io(err)),
             };
-            let view = match midx_load_for_read(&bytes, hash_version, diagnostics)? {
-                MidxLoadResult::Ok(v) => v,
-                MidxLoadResult::Skip => {
+            let view = match midx_load_for_read(&bytes, hash_version, diagnostics) {
+                Ok(MidxLoadResult::Ok(v)) => v,
+                Ok(MidxLoadResult::Skip) => {
                     if require_every_layer {
                         return Ok(None);
                     }
                     continue;
                 }
+                Err(Error::Midx(_)) if require_every_layer => return Ok(None),
+                Err(err) => return Err(err),
             };
             pack_names_by_layer.push(view.pack_names.clone());
             layers.push(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
@@ -917,7 +919,11 @@ pub(crate) mod midx_cache {
         }) {
             return Ok(Some(chain));
         }
-        let built = build_chain_strict(objects_dir, diagnostics)?;
+        let built = match build_chain_strict(objects_dir, diagnostics) {
+            Ok(v) => v,
+            Err(Error::Midx(_)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
         let Some(chain) = built else {
             return Ok(None);
         };

@@ -28,9 +28,38 @@ use grit_test_support::odb_conformance::run_read_suite;
 use tempfile::TempDir;
 
 use midx_support::{
-    all_packed_oids, git_available, git_write_midx, head_oid, multi_pack_repo, pack_objects_layer,
-    read_chain_hashes, tip_midx_path,
+    all_packed_oids, find_midx_chunk, git_available, git_write_midx, head_oid, multi_pack_repo,
+    pack_objects_layer, patch_midx_file, read_chain_hashes, tip_midx_path,
 };
+
+const CHUNK_OIDFANOUT: u32 = 0x4f49_4446;
+
+fn recompute_midx_sha1_trailer(data: &mut [u8]) {
+    let hash_len = 20;
+    let payload_len = data.len().saturating_sub(hash_len);
+    let digest = HashAlgo::Sha1.digest(&data[..payload_len]);
+    data[payload_len..].copy_from_slice(digest.as_bytes());
+}
+
+fn rename_oid_fanout_chunk_id_in_toc(data: &mut [u8]) {
+    assert!(data.len() >= 12);
+    let num_chunks = data[6] as usize;
+    let toc_off = 12usize;
+    for i in 0..num_chunks {
+        let entry = toc_off + i * 12;
+        let chunk_id = u32::from_be_bytes([
+            data[entry],
+            data[entry + 1],
+            data[entry + 2],
+            data[entry + 3],
+        ]);
+        if chunk_id == CHUNK_OIDFANOUT {
+            data[entry..entry + 4].copy_from_slice(&0x4241_4421u32.to_be_bytes());
+            return;
+        }
+    }
+    panic!("OIDFANOUT chunk id not found in MIDX TOC");
+}
 
 struct MidxBackedStore {
     _root: TempDir,
@@ -425,6 +454,42 @@ fn grit_incremental_corrupt_tip_makes_store_unusable() {
     let packs = PackedObjects::new(store);
     assert!(packs.read(&old_only).expect("pack fallback").is_some());
     let _ = repo;
+}
+
+#[test]
+fn checksum_valid_missing_oid_fanout_chunk_midx_unusable() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let Some((repo, objects, oids)) = multi_pack_repo(FixtureHashAlgo::Sha1, 3) else {
+        eprintln!("SKIP: fixture");
+        return;
+    };
+    git_write_midx(&repo);
+    let pack_dir = objects.join("pack");
+    patch_midx_file(&pack_dir, |data| {
+        rename_oid_fanout_chunk_id_in_toc(data);
+        recompute_midx_sha1_trailer(data);
+        assert!(
+            find_midx_chunk(data, CHUNK_OIDFANOUT).is_none(),
+            "OIDFANOUT chunk must be absent after TOC rename"
+        );
+    });
+    clear_pack_cache();
+    grit_lib::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
+
+    let store = Arc::new(PackStore::new(objects.clone()));
+    let midx = MidxObjects::new(Arc::clone(&store), true).expect("open");
+    assert_eq!(
+        midx.status(),
+        MidxObjectsStatus::Unusable,
+        "checksum-valid structural corruption must yield Unusable, not Err"
+    );
+    let oid = oids.last().copied().expect("commit oid");
+    assert!(midx.read(&oid).expect("read").is_none());
+    let packs = PackedObjects::new(store);
+    assert!(packs.read(&oid).expect("pack fallback").is_some());
 }
 
 #[test]
