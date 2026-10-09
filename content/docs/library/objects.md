@@ -23,9 +23,9 @@ When you only need type and size (for example listing objects without loading bl
 
 After repack, garbage collection, or installing a pack with [`install_pack_bytes`](rustdoc:grit_lib::index_pack::install_pack_bytes), call [`Odb::invalidate_packs`](rustdoc:grit_lib::odb::Odb) so the next read rescans `objects/pack/`. If another [`Odb`](rustdoc:grit_lib::odb::Odb) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
 
-For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`Odb::with_pack_read_context`](rustdoc:grit_lib::odb::Odb::with_pack_read_context) so pack indexes, mmap-backed pack bytes, and the delta-base LRU stay on one thread-local context instead of reinstalling it per object. [`Odb::read`](rustdoc:grit_lib::odb::Odb::read) detects an active matching context and skips nested setup.
+For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`Odb::with_pack_read_context`](rustdoc:grit_lib::odb::Odb) so pack indexes, mmap-backed pack bytes, and the delta-base LRU stay on one thread-local context instead of reinstalling it per object. [`Odb::read`](rustdoc:grit_lib::odb::Odb) detects an active matching context and skips nested setup.
 
-When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](rustdoc:grit_lib::pack::read_object_from_pack_at_offset) with the entry offset from [`PackIndex`](rustdoc:grit_lib::pack::PackIndex) so the read path does not repeat index lookup by OID.
+When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](rustdoc:grit_lib::pack) with the entry offset from [`PackIndex`](rustdoc:grit_lib::pack::PackIndex) so the read path does not repeat index lookup by OID.
 
 ## Example
 

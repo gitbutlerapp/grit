@@ -141,13 +141,14 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json
 ```
 
-**Profiling notes (2026-10-08 factory VM, baseline `grit-utils/baselines/odb-read.json`):**
+**Profiling notes (2026-10-09 factory VM, after rebasing onto `origin/main` and step 480 tuning):**
 
-- **Cat-file batch** on git.git (pack order): grit ~15.8 s / ~543 MiB peak vs git ~10.5 s / ~477 MiB — mostly ODB pack reads; grit is ~1.5× slower on wall time.
-- **`rev-list --objects --all`** on git.git: grit ~1 612 s vs git ~3.0 s — **not ODB-bound**; time is in `rev_list` history/object enumeration (tree walks and object listing), not bulk cat-file batch I/O.
-- **`log -p -2000`** on git.git: grit ~8.8 s vs git ~1.5 s — **mostly revwalk + tree diff/patch formatting** (`rev_list` then per-commit `diff_trees` / unified diff); ODB reads happen per diff hunk but dominate less than walk/diff work at this commit count.
+- **Cat-file batch (unordered)** on git.git: grit ~9.6 s vs git ~11.3 s (~**0.85×**). Dominant cost was reinstalling thread-local [`PackStore`](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) context on every [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html); batch drivers now hold [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) pack read context and reuse cached pack indexes for `--batch-all-objects`.
+- **Cat-file on hot-path-100k** (repacked): see refreshed `grit-utils/baselines/odb-read.json` — acceptance target is ≤**1.2×** git on wall time with peak RSS ≤**1.5×** git.
+- **`rev-list --objects --all`** on git.git: still **≫1.2×** git (~3 min grit vs ~3 s git in spot checks) — **not ODB-bound**; needs Git-style tree-diff parent pruning and cheaper object listing in [`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/index.html), not more pack mmap work.
+- **`log -p -2000`**: still **≫1.2×** git — **revwalk + tree diff / unified diff formatting** dominate; track with the same rev-list follow-up.
 
-Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / object listing**, not pack index or mmap ODB work.
+Follow-up for rev-list / log-p ratios: **revwalk and object enumeration** (parent-aware tree listing), not pack index or delta cache tuning.
 
 ### Results
 

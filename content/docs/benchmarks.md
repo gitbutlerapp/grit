@@ -144,8 +144,8 @@ cargo build --release -p grit-cli -p grit-utils
 
 **Profiling notes (2026-10-09 factory VM, after rebasing onto `origin/main` and step 480 tuning):**
 
-- **Cat-file batch (unordered)** on git.git: grit ~11.5 s vs git ~11.1 s (~**1.04×**). Dominant cost was reinstalling thread-local [`PackStore`](rustdoc:grit_lib::pack_store::PackStore) context on every [`Odb::read`](rustdoc:grit_lib::odb::Odb::read); batch drivers now call [`Odb::with_pack_read_context`](rustdoc:grit_lib::odb::Odb::with_pack_read_context) and reuse cached pack indexes for `--batch-all-objects`.
-- **Cat-file on hot-path-100k** (repacked): see refreshed `grit-utils/baselines/odb-read.json` — acceptance target is ≤**1.2×** git on wall time with peak RSS ≤**1.5×** git.
+- **Cat-file batch (unordered)** on git.git: grit ~9.6 s vs git ~11.3 s (~**0.85×**). Dominant cost was reinstalling thread-local [`PackStore`](rustdoc:grit_lib::pack_store::PackStore) context on every [`Odb::read`](rustdoc:grit_lib::odb::Odb); batch drivers now hold [`Odb`](rustdoc:grit_lib::odb::Odb) pack read context and reuse cached pack indexes for `--batch-all-objects`.
+- **Cat-file on hot-path-100k** (repacked): ~**1.48×** git on unordered batch (hyperfine min-runs 5); see `grit-utils/baselines/odb-read.json` — target is ≤**1.2×** git (small-pack overhead follow-up).
 - **`rev-list --objects --all`** on git.git: still **≫1.2×** git (~3 min grit vs ~3 s git in spot checks) — **not ODB-bound**; needs Git-style tree-diff parent pruning and cheaper object listing in [`rev_list`](rustdoc:grit_lib::rev_list), not more pack mmap work.
 - **`log -p -2000`**: still **≫1.2×** git — **revwalk + tree diff / unified diff formatting** dominate; track with the same rev-list follow-up.
 
