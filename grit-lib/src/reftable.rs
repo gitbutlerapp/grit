@@ -1280,70 +1280,56 @@ impl ReftableReader {
 
     /// Resolve a ref name to a record using ref index blocks when present.
     fn lookup_ref_via_index(&self, name: &str) -> Result<Option<RefRecord>> {
-        let name_bytes = name.as_bytes();
-        let Some(mut block_off) = self.locate_ref_block_via_index(name_bytes)? else {
+        let Some(block_off) = self.locate_ref_block_via_index(name.as_bytes())? else {
             return Ok(None);
         };
-        loop {
-            if block_off >= self.data.len() {
-                return Ok(None);
-            }
-            match self.data[block_off] {
-                BLOCK_TYPE_REF => {
-                    if let Some(rec) = self.find_ref_in_block(block_off, name)? {
-                        return Ok(Some(rec));
-                    }
-                    block_off = self.next_ref_block_pos(block_off)?;
-                    if block_off == 0 {
-                        return Ok(None);
-                    }
-                }
-                BLOCK_TYPE_INDEX => {
-                    let Some(offset) = self.index_block_best_offset(block_off, name_bytes)? else {
-                        return Ok(None);
-                    };
-                    block_off = offset as usize;
-                }
-                _ => return Ok(None),
-            }
-        }
+        self.find_ref_in_block(block_off, name)
     }
 
     fn locate_ref_block_via_index(&self, name: &[u8]) -> Result<Option<usize>> {
         let mut pos = self.ref_index_position as usize;
-        let section_end = self.ref_index_section_end();
-        if pos == 0 || pos >= section_end {
+        if pos == 0 {
             return Ok(None);
         }
-        while pos < section_end && self.data[pos] == BLOCK_TYPE_INDEX {
-            let Some(offset) = self.index_block_best_offset(pos, name)? else {
+        for _ in 0..64 {
+            if pos >= self.data.len() {
                 return Ok(None);
-            };
-            pos = offset as usize;
+            }
+            match self.data[pos] {
+                BLOCK_TYPE_REF => return Ok(Some(pos)),
+                BLOCK_TYPE_INDEX => {
+                    let Some(offset) = self.index_block_seek_offset(pos, name)? else {
+                        return Ok(None);
+                    };
+                    let next = offset as usize;
+                    if next == pos {
+                        return Ok(None);
+                    }
+                    pos = next;
+                }
+                _ => return Ok(None),
+            }
         }
-        if pos < self.data.len() && self.data[pos] == BLOCK_TYPE_REF {
-            Ok(Some(pos))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
-    fn index_block_best_offset(&self, block_pos: usize, name: &[u8]) -> Result<Option<u64>> {
+    /// Pick the index entry for `name`: the first record whose `last_key` is >=
+    /// `name`, or the final entry when every indexed `last_key` is smaller.
+    fn index_block_seek_offset(&self, block_pos: usize, name: &[u8]) -> Result<Option<u64>> {
         let (records_start, records_end) = self.block_record_range(block_pos)?;
         let mut rpos = records_start;
         let mut prev_key = Vec::<u8>::new();
-        let mut best: Option<u64> = None;
+        let mut last: Option<u64> = None;
         while rpos < records_end {
             let (key, offset, new_pos) = decode_index_record(&self.data, rpos, &prev_key)?;
             prev_key = key;
-            if prev_key.as_slice() <= name {
-                best = Some(offset);
-            } else {
-                break;
+            if prev_key.as_slice() >= name {
+                return Ok(Some(offset));
             }
+            last = Some(offset);
             rpos = new_pos;
         }
-        Ok(best)
+        Ok(last)
     }
 
     fn find_ref_in_block(&self, block_pos: usize, name: &str) -> Result<Option<RefRecord>> {
@@ -1367,18 +1353,6 @@ impl ReftableReader {
             rpos = new_pos;
         }
         Ok(None)
-    }
-
-    fn next_ref_block_pos(&self, block_pos: usize) -> Result<usize> {
-        let header_len = self.header_len();
-        let is_first = block_pos == header_len;
-        if self.block_size > 0 {
-            let bs = self.block_size as usize;
-            Ok(if is_first { bs } else { block_pos + bs })
-        } else {
-            let block_len = read_u24(&self.data, block_pos + 1);
-            Ok(block_pos + block_len)
-        }
     }
 
     fn block_record_range(&self, block_pos: usize) -> Result<(usize, usize)> {
@@ -3231,6 +3205,15 @@ pub fn reftable_delete_reflog(git_dir: &Path, refname: &str) -> Result<()> {
 // Write options helpers
 // ---------------------------------------------------------------------------
 
+/// Apply `reftable.geometricFactor` when the value is in Git's supported range (2..=255).
+fn apply_geometric_factor_from_config(opts: &mut WriteOptions, raw: &str) {
+    if let Ok(v) = raw.trim().parse::<u64>() {
+        if (2..=255).contains(&v) {
+            opts.auto_compaction_factor = v as u8;
+        }
+    }
+}
+
 /// Read reftable write options from the repository config.
 pub fn read_write_options(git_dir: &Path) -> WriteOptions {
     let mut opts = WriteOptions {
@@ -3260,11 +3243,7 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
             }
         }
         if let Some(value) = config.get("reftable.geometricFactor") {
-            if let Ok(v) = value.parse::<u16>() {
-                if (2..=256u16).contains(&v) {
-                    opts.auto_compaction_factor = v as u8;
-                }
-            }
+            apply_geometric_factor_from_config(&mut opts, &value);
         }
         if let Some(value) = config.get("core.logAllRefUpdates") {
             let value = value.to_lowercase();
@@ -3311,11 +3290,7 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
                             }
                         }
                         "geometricfactor" => {
-                            if let Ok(v) = value.parse::<u16>() {
-                                if (2..=256u16).contains(&v) {
-                                    opts.auto_compaction_factor = v as u8;
-                                }
-                            }
+                            apply_geometric_factor_from_config(&mut opts, value);
                         }
                         _ => {}
                     }

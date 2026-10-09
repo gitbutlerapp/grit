@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
@@ -314,8 +315,7 @@ fn unpadded_table_round_trip() {
     assert_eq!(reader.read_refs().expect("refs").len(), 1);
 }
 
-#[test]
-fn index_block_lookups_find_every_ref() {
+fn indexed_table_with_many_refs() -> (Vec<u8>, Vec<String>) {
     let mut opts = WriteOptions::default();
     opts.block_size = 256;
     opts.restart_interval = 4;
@@ -328,12 +328,87 @@ fn index_block_lookups_find_every_ref() {
         refs.push(ref_record(&name, 1, RefValue::Val1(oid((i % 250) as u8))));
     }
     let data = write_table(refs, vec![], opts, 1, 1);
+    (data, names)
+}
+
+#[test]
+fn index_block_lookups_find_every_ref() {
+    let (data, names) = indexed_table_with_many_refs();
     let reader = ReftableReader::new(data).expect("open");
     assert!(reader.ref_index_offset() > 0, "expected ref index block");
     for name in &names {
         let got = reader.lookup_ref(name).expect("lookup").expect("found");
         assert_eq!(got.name, *name);
     }
+}
+
+#[test]
+fn index_lookup_missing_above_last_key_returns_none_quickly() {
+    let (data, _) = indexed_table_with_many_refs();
+    let reader = ReftableReader::new(data).expect("open");
+    let start = Instant::now();
+    let missing = reader
+        .lookup_ref("refs/heads/idx/branch-9999")
+        .expect("lookup");
+    assert!(missing.is_none());
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "missing-key lookup took too long: {:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn index_lookup_missing_gap_between_refs_returns_none() {
+    let mut opts = WriteOptions::default();
+    opts.block_size = 256;
+    opts.restart_interval = 4;
+    opts.write_log = false;
+    let data = write_table(
+        vec![
+            ref_record("refs/heads/idx/branch-0000", 1, RefValue::Val1(oid(1))),
+            ref_record("refs/heads/idx/branch-0002", 1, RefValue::Val1(oid(2))),
+        ],
+        vec![],
+        opts,
+        1,
+        1,
+    );
+    let reader = ReftableReader::new(data).expect("open");
+    assert!(reader
+        .lookup_ref("refs/heads/idx/branch-0001")
+        .expect("lookup")
+        .is_none());
+}
+
+#[test]
+fn geometric_factor_boundary_values_from_config() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let git_dir = dir.path();
+    fs::write(
+        git_dir.join("config"),
+        "[reftable]\ngeometricFactor = 255\n",
+    )
+    .expect("config");
+    assert_eq!(read_write_options(git_dir).auto_compaction_factor, 255);
+
+    fs::write(
+        git_dir.join("config"),
+        "[reftable]\ngeometricFactor = 256\n",
+    )
+    .expect("config");
+    assert_eq!(
+        read_write_options(git_dir).auto_compaction_factor,
+        2,
+        "256 must not wrap to 0; keep default"
+    );
+
+    fs::write(git_dir.join("config"), "[reftable]\ngeometricFactor = 1\n").expect("config");
+    assert_eq!(
+        read_write_options(git_dir).auto_compaction_factor,
+        2,
+        "out-of-range values are ignored"
+    );
 }
 
 #[test]
