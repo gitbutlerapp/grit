@@ -141,6 +141,10 @@ pub enum RefLockError {
         "cannot lock ref '{refname}': there is a non-empty directory '{path}' blocking reference '{refname}'"
     )]
     DirectoryInTheWay { refname: String, path: String },
+
+    /// Another process holds the `packed-refs.lock` file (or it already exists).
+    #[error("Unable to create '{lock_path}': File exists.")]
+    PackedRefsLockHeld { lock_path: String },
 }
 
 /// Clean/smudge filter and EOL conversion failures.
@@ -365,6 +369,10 @@ pub enum Error {
     /// A reference name or value is invalid.
     #[error("invalid ref: {0}")]
     InvalidRef(String),
+
+    /// A `packed-refs` line Git would reject when reading the ref database.
+    #[error("unexpected line in {path}: {line}")]
+    PackedRefsUnexpectedLine { path: String, line: String },
 
     /// A general path-related error (invalid UTF-8, out-of-bounds, etc.).
     #[error("path error: {0}")]
