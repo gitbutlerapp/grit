@@ -143,8 +143,15 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | — | delete / truncate vs `git reflog delete` | `grit-lib/tests/reflog_roundtrip.rs` (`delete_reflog_and_truncate_match_git`) | covered (files backend byte-compare) |
 | t1300-config.sh | config write: set/add/replace-all/unset/count, sections, quoting, multivar errors, lock file | `grit-lib/tests/config_write.rs` (`t1300_edit_matches_git_byte_for_byte`, `config_lock_present_is_typed_error_and_preserves_file`) | covered (read/parse subset on other steps; `--comment` cases grit-only on Git &lt; 2.46) |
 | t1303-write-readonly.sh | write paths, subsection escaping, round-trip after edit | `grit-lib/tests/config_write.rs` (`subsection_backslash_in_name`, `grit_edited_repo_config_git_status_and_reread`) | partial (readonly-file cases N/A) |
+| t1300 | config read (whitespace, escapes, continuations, bare keys, subsections); oracle vs `git config --file` | `grit-lib/tests/config_parse.rs` (`t1300_values_match_git_config_get`) | covered (read subset) |
+| t1303 | wacky config (BOM, CRLF, long lines) | `grit-lib/tests/config_parse.rs` (`t1303_wacky_files_match_git`) | covered |
+| t1305 | `[include]` / `[includeIf]` and `--show-origin` | `grit-lib/tests/config_includes.rs` (`t1305_include_and_includeif_match_git_show_origin`) | covered |
+| t1308 | config set precedence (system/global/local/command) | `grit-lib/tests/config_parse.rs` (`t1308_config_set_precedence_matches_git`) | covered |
+| t1309 | early config / protected / ceiling (read order) | `grit-lib/tests/config_includes.rs` (`read_early_config_matches_git_layers`, `load_protected_skips_repo_config`) | partial |
+| t1310 | defaults, urlmatch, typed getters | `grit-lib/tests/config_parse.rs` (`t1310_config_default_and_urlmatch`, `typed_getters_match_git_config_type`) | covered |
+| t1311 | optional includes / missing targets | `grit-lib/tests/config_includes.rs` (`optional_include_git_parity`, `missing_include_is_ignored`) | covered |
 
-Detailed rows for packed refs, transactions, and remaining plan steps are filled in as later work lands; see also the ODB/pack mapping below.
+Detailed rows for packed refs, transactions, remaining t1405 cases, and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 

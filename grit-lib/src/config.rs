@@ -98,6 +98,7 @@ pub mod cascade_load_counters {
         });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn record_cache_validated() {
         MEASURING.with(|m| {
             if m.get() {
@@ -367,6 +368,12 @@ impl Parser {
         }
     }
 
+    fn valid_variable_name(name: &str) -> bool {
+        let name = name.trim();
+        name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    }
+
     /// Build the canonical key for a variable name in the current section.
     fn make_key(&self, name: &str) -> String {
         let sec = self.section.to_lowercase();
@@ -481,10 +488,19 @@ impl Parser {
 
         if let Some(eq_pos) = trimmed.find('=') {
             let raw_name = trimmed[..eq_pos].trim();
+            if !Self::valid_variable_name(raw_name) {
+                return None;
+            }
             let raw_value = trimmed[eq_pos + 1..].trim();
             // Strip inline comment (not inside quotes)
             let value = strip_inline_comment(raw_value);
+            let quoted = value.trim_start().starts_with('"') && value.trim_end().ends_with('"');
             let value = unescape_value(&value);
+            let value = if quoted {
+                value
+            } else {
+                normalize_unquoted_config_value(&value)
+            };
             let key = self.make_key(raw_name);
             Some((key, Some(value)))
         } else {
@@ -493,7 +509,11 @@ impl Parser {
             if raw_name.split_whitespace().count() > 1 {
                 return None;
             }
-            let key = self.make_key(raw_name.trim());
+            let raw_name = raw_name.trim();
+            if !Self::valid_variable_name(raw_name) {
+                return None;
+            }
+            let key = self.make_key(raw_name);
             Some((key, None))
         }
     }
@@ -603,6 +623,11 @@ fn strip_inline_comment(s: &str) -> String {
     // Trim trailing whitespace that was before the comment
     let trimmed = result.trim_end();
     trimmed.to_owned()
+}
+
+/// Git converts tabs to spaces in unquoted config values (see t1300 internal whitespace).
+fn normalize_unquoted_config_value(s: &str) -> String {
+    s.replace('\t', " ")
 }
 
 /// Unescape a config value: handle `\"`, `\\`, `\n`, `\t`, and strip
@@ -763,6 +788,7 @@ impl ConfigFile {
     ///
     /// Returns [`Error::Config`] on malformed input.
     pub fn parse(path: &Path, content: &str, scope: ConfigScope) -> Result<Self> {
+        let content = content.strip_prefix('\u{feff}').unwrap_or(content);
         let raw_lines: Vec<String> = content
             .lines()
             .map(|l| l.strip_suffix('\r').unwrap_or(l))
