@@ -328,6 +328,7 @@ fn stdin_batch_scenario(
 }
 
 /// Run ODB cat-file / rev-list scenarios on the repacked 100k synthetic repo.
+#[allow(clippy::vec_init_then_push)]
 pub fn run_odb_backend_suite(
     hyperfine: &Path,
     git: &Path,
