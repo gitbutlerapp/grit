@@ -8,13 +8,15 @@ use grit_lib::diff::diff_trees;
 use grit_lib::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::gc::prune_loose_unreachable;
+use grit_lib::objects::{serialize_tag, TagData};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::odb::OdbBuilder;
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::rev_list::{rev_list, RevListOptions};
-use grit_lib::rev_parse::resolve_revision;
+use grit_lib::rev_parse::{abbreviate_object_id, resolve_revision};
+use std::process::Command;
 
 fn canonical_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
     let header = format!("{kind} {}\0", data.len());
@@ -48,6 +50,21 @@ fn list_files_under(base: &Path) -> Vec<String> {
     paths
 }
 
+fn git_fsck_full(repo_root: &Path) {
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["fsck", "--full"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git fsck");
+    assert!(
+        out.status.success(),
+        "git fsck --full: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     let dir = tempfile::tempdir().expect("tempdir");
     init_repository(dir.path(), false, "main", None, "files").expect("init");
@@ -70,6 +87,7 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
 #[test]
 fn memory_primary_revwalk_diff_without_loose_objects() {
     let (_dir, repo, _store) = memory_repo();
+    let objects_snapshot_before = list_files_under(repo.odb.objects_dir());
 
     let blob = repo
         .odb
@@ -109,15 +127,10 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
     let diff = diff_trees(&repo.odb, Some(&tree2), Some(&tree), "").expect("diff");
     assert!(!diff.is_empty());
 
-    let objects = repo.odb.objects_dir();
-    let files = list_files_under(objects);
-    assert!(
-        !files.iter().any(|p| {
-            p.len() >= 3
-                && p.as_bytes().get(2) == Some(&b'/')
-                && p[..2].chars().all(|c| c.is_ascii_hexdigit())
-        }),
-        "custom primary must not create loose object shards; found {files:?}"
+    assert_eq!(
+        list_files_under(repo.odb.objects_dir()),
+        objects_snapshot_before,
+        "custom primary must not mutate the on-disk objects/ tree"
     );
 }
 
@@ -201,6 +214,79 @@ fn files_primary_gc_prunes_unreachable_loose() {
     assert!(repo.odb.read(&kept_blob).is_ok());
     let stats = prune_loose_unreachable(&repo.odb, &[commit], None).expect("verify prune");
     assert_eq!(stats.pruned, 0, "gc should have already pruned orphans");
+}
+
+#[test]
+fn memory_primary_abbrev_unique_prefix_considers_store_collisions() {
+    use grit_lib::objects::ObjectId;
+    use std::collections::HashMap;
+
+    let (_dir, repo, _store) = memory_repo();
+    let mut by_prefix: HashMap<String, ObjectId> = HashMap::new();
+    let mut pair = None;
+    for i in 0..100_000u32 {
+        let oid = repo
+            .odb
+            .write(ObjectKind::Blob, format!("collide-{i}\n").as_bytes())
+            .expect("blob");
+        let prefix4 = oid.to_hex()[..4].to_owned();
+        if let Some(other) = by_prefix.insert(prefix4.clone(), oid) {
+            if other != oid {
+                pair = Some((other, oid));
+                break;
+            }
+        }
+    }
+    let (first, second) = pair.expect("find blob pair with shared 4-char prefix");
+    assert_ne!(first, second);
+    assert_eq!(first.to_hex()[..4], second.to_hex()[..4]);
+    let abbrev = abbreviate_object_id(&repo, first, 4).expect("abbrev");
+    assert_ne!(
+        abbrev.len(),
+        4,
+        "shared prefix {second} must force longer abbreviation"
+    );
+    assert!(first.to_hex().starts_with(&abbrev));
+}
+
+#[test]
+fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+
+    let blob = repo
+        .odb
+        .write(ObjectKind::Blob, b"tagged-blob\n")
+        .expect("blob");
+    write_ref(&repo.git_dir, "refs/tags/blob-tip", &blob).expect("blob ref");
+
+    let tree_body = serialize_tree(&[TreeEntry {
+        mode: 0o100644,
+        name: b"t".to_vec(),
+        oid: blob,
+    }]);
+    let tree = repo.odb.write(ObjectKind::Tree, &tree_body).expect("tree");
+    write_ref(&repo.git_dir, "refs/tags/tree-tip", &tree).expect("tree ref");
+
+    let tag_bytes = serialize_tag(&TagData {
+        object: blob,
+        object_type: "blob".into(),
+        tag: "v1".into(),
+        tagger: Some("T <t@example.com> 1 +0000".into()),
+        message: "annotated\n".into(),
+    });
+    let tag_oid = repo
+        .odb
+        .write(ObjectKind::Tag, &tag_bytes)
+        .expect("tag object");
+    write_ref(&repo.git_dir, "refs/tags/annotated", &tag_oid).expect("tag ref");
+
+    repo.odb.gc().expect("gc");
+
+    assert!(repo.odb.read(&blob).is_ok());
+    assert!(repo.odb.read(&tree).is_ok());
+    assert!(repo.odb.read(&tag_oid).is_ok());
+    git_fsck_full(dir.path());
 }
 
 #[test]

@@ -23,6 +23,7 @@ use std::time::SystemTime;
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::refs::{self, Ref};
 
 /// Result of a loose-object prune.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,11 +93,36 @@ pub fn prune_loose_unreachable(
             Ok(()) => stats.pruned += 1,
             // A concurrent prune may have already removed it; treat as pruned.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => stats.pruned += 1,
-            Err(e) => return Err(Error::Io(e)),
+            Err(e) => return Err(e.into()),
         }
     }
 
     Ok(stats)
+}
+
+/// Object ids named directly by refs (any kind), used as roots for [`prune_loose_unreachable`].
+///
+/// Includes annotated tag objects, blob/tree tips, and detached-HEAD oids. Does not peel tags to
+/// commits only — the reachability walk expands each root through the object graph.
+///
+/// # Errors
+///
+/// Propagates ref listing or HEAD read failures.
+pub fn collect_referenced_object_roots(git_dir: &Path) -> Result<Vec<ObjectId>> {
+    let mut roots = HashSet::new();
+    for (_, oid) in refs::list_refs(git_dir, "refs/")? {
+        roots.insert(oid);
+    }
+    let head_path = git_dir.join("HEAD");
+    if head_path.is_file() {
+        match refs::read_ref_file(&head_path)? {
+            Ref::Direct(oid) => {
+                roots.insert(oid);
+            }
+            Ref::Symbolic(_) => {}
+        }
+    }
+    Ok(roots.into_iter().collect())
 }
 
 /// Compute the full object closure reachable from `roots` (commits → parents and

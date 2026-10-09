@@ -26,7 +26,7 @@ use crate::commit_graph_write::{
     build_commit_graph_bytes, collect_reachable_commit_oids, load_commit_graph_commit_info,
 };
 use crate::error::{Error, Result};
-use crate::gc::prune_loose_unreachable;
+use crate::gc::{collect_referenced_object_roots, prune_loose_unreachable};
 use crate::objects::ObjectId;
 use crate::odb::store::{ObjectStore, WritableObjectStore};
 
@@ -150,9 +150,7 @@ impl Odb {
         let Some(git_dir) = self.config_git_dir() else {
             return Err(Error::UnsupportedObjectStore { operation: "gc" });
         };
-        let roots: Vec<ObjectId> = collect_reachable_commit_oids(git_dir, self)?
-            .into_iter()
-            .collect();
+        let roots = collect_referenced_object_roots(git_dir)?;
         prune_loose_unreachable(self, &roots, None)?;
         Ok(())
     }

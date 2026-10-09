@@ -1809,19 +1809,11 @@ pub fn abbreviate_object_id(repo: &Repository, oid: ObjectId, min_len: usize) ->
         return Ok(target[..min_len].to_owned());
     }
 
-    let mut all_hex: Vec<String> = Vec::new();
-    repo.odb.for_each_object(&mut |oid| {
-        all_hex.push(oid.to_hex());
-        std::ops::ControlFlow::Continue(())
-    })?;
-
     for len in min_len..=40 {
         let prefix = &target[..len];
-        let matches = all_hex
-            .iter()
-            .filter(|candidate| candidate.starts_with(prefix))
-            .count();
-        if matches <= 1 {
+        let mut matches = Vec::new();
+        repo.odb.lookup_prefix(prefix, 0, &mut matches)?;
+        if matches.len() <= 1 {
             return Ok(prefix.to_owned());
         }
     }
