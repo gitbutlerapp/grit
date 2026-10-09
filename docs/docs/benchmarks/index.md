@@ -143,12 +143,12 @@ cargo build --release -p grit-cli -p grit-utils
 
 **Profiling notes (2026-10-09 factory VM, after rebasing onto `origin/main` and step 480 tuning):**
 
-- **Cat-file batch (unordered)** on git.git: grit ~9.6 s vs git ~11.3 s (~**0.85×**). Dominant cost was reinstalling thread-local [`PackStore`](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) context on every [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html); batch drivers now hold [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) pack read context and reuse cached pack indexes for `--batch-all-objects`.
-- **Cat-file on hot-path-100k** (repacked): see refreshed `grit-utils/baselines/odb-read.json` — acceptance target is ≤**1.2×** git on wall time with peak RSS ≤**1.5×** git.
-- **`rev-list --objects --all`** on git.git: still **≫1.2×** git (~3 min grit vs ~3 s git in spot checks) — **not ODB-bound**; needs Git-style tree-diff parent pruning and cheaper object listing in [`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/index.html), not more pack mmap work.
-- **`log -p -2000`**: still **≫1.2×** git — **revwalk + tree diff / unified diff formatting** dominate; track with the same rev-list follow-up.
+- **Cat-file batch (unordered)** on git.git: grit is typically **≤1.2×** git after pack read context reuse and offset-order batch reads (see refreshed `grit-utils/baselines/odb-read.json`).
+- **Cat-file on hot-path-100k** (repacked): acceptance target is ≤**1.2×** git wall time and ≤**1.5×** peak RSS; see the baseline JSON for current medians.
+- **`rev-list --objects --all`**: acceptance target is ≤**1.2×** git on **both** git.git and hot-path-100k. System git uses pack reachability bitmaps when present; grit still walks trees with parent pruning and commit-graph parent lookup — see baseline ratios.
+- **`log -p -2000`**: documented exception path only when revwalk/tree-diff dominates; see baseline `log-patch-2000-*` scenarios.
 
-Follow-up for rev-list / log-p ratios: **revwalk and object enumeration** (parent-aware tree listing), not pack index or delta cache tuning.
+Refresh tables with `./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs; run twice and compare drift before committing).
 
 ### Results
 

@@ -3728,6 +3728,10 @@ When you only need type and size (for example listing objects without loading bl
 
 After repack, garbage collection, or installing a pack with [`install_pack_bytes`](https://docs.rs/grit-lib/latest/grit_lib/index_pack/fn.install_pack_bytes.html), call [`Odb::invalidate_packs`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so the next read rescans `objects/pack/`. If another [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
 
+For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`Odb::with_pack_read_context`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so pack indexes, mmap-backed pack bytes, and the delta-base LRU stay on one thread-local context instead of reinstalling it per object. [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) detects an active matching context and skips nested setup.
+
+When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) with the entry offset from [`PackIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndex.html) so the read path does not repeat index lookup by OID.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
@@ -4424,13 +4428,14 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json
 ```
 
-**Profiling notes (2026-10-08 factory VM, baseline `grit-utils/baselines/odb-read.json`):**
+**Profiling notes (2026-10-09 factory VM, after rebasing onto `origin/main` and step 480 tuning):**
 
-- **Cat-file batch** on git.git (pack order): grit ~15.8 s / ~543 MiB peak vs git ~10.5 s / ~477 MiB — mostly ODB pack reads; grit is ~1.5× slower on wall time.
-- **`rev-list --objects --all`** on git.git: grit ~1 612 s vs git ~3.0 s — **not ODB-bound**; time is in `rev_list` history/object enumeration (tree walks and object listing), not bulk cat-file batch I/O.
-- **`log -p -2000`** on git.git: grit ~8.8 s vs git ~1.5 s — **mostly revwalk + tree diff/patch formatting** (`rev_list` then per-commit `diff_trees` / unified diff); ODB reads happen per diff hunk but dominate less than walk/diff work at this commit count.
+- **Cat-file batch (unordered)** on git.git: grit is typically **≤1.2×** git after pack read context reuse and offset-order batch reads (see refreshed `grit-utils/baselines/odb-read.json`).
+- **Cat-file on hot-path-100k** (repacked): acceptance target is ≤**1.2×** git wall time and ≤**1.5×** peak RSS; see the baseline JSON for current medians.
+- **`rev-list --objects --all`**: acceptance target is ≤**1.2×** git on **both** git.git and hot-path-100k. System git uses pack reachability bitmaps when present; grit still walks trees with parent pruning and commit-graph parent lookup — see baseline ratios.
+- **`log -p -2000`**: documented exception path only when revwalk/tree-diff dominates; see baseline `log-patch-2000-*` scenarios.
 
-Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / object listing**, not pack index or mmap ODB work.
+Refresh tables with `./target/release/grit-bench odb --format json --output grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs; run twice and compare drift before committing).
 
 ### Results
 
