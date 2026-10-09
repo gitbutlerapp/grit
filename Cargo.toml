@@ -4,7 +4,7 @@ default-members = ["grit-lib", "grit-protocol", "grit-cli"]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 repository = "https://github.com/gitbutlerapp/grit"
 
