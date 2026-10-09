@@ -149,9 +149,11 @@
 - Add `cargo llvm-cov` reporting for these modules.
 
 **Acceptance.**
-- A mapping table from upstream Git test scenarios to Rust tests lives in TESTING.md.
-- Line coverage of odb/pack/midx/commit-graph modules is ≥85%.
+- A mapping table from upstream Git test scenarios to Rust tests lives in TESTING.md (validated by `scripts/tests/test_upstream_mapping.py`).
+- Line coverage of odb/pack/midx/commit-graph modules is ≥85% (`grit-lib/coverage-floors.toml` gates the **coverage** CI job).
 - Everything runs in CI.
+
+**Status.** Coverage floors at 85% for the core set and each of odb / pack / midx / commit-graph (supporting modules ≥80%); upstream mapping table complete for the object-database scenario set in TESTING.md.
 
 ## 10. Pluggable object database backend
 *Workstream: Library*
