@@ -19,7 +19,7 @@
   },
   "scenarios": [
     {
-      "id": "cat-file-batch-hot-path-100k",
+      "id": "cat-file-batch-hot-path-100k-pre-refactor",
       "group": "odb_backend",
       "fixture": "hot-path-100k",
       "description": "cat-file --batch over all packed objects (sorted OID stdin)",
@@ -67,7 +67,7 @@
       "ratio": 7.377587847048656
     },
     {
-      "id": "cat-file-batch-check-hot-path-100k",
+      "id": "cat-file-batch-check-hot-path-100k-pre-refactor",
       "group": "odb_backend",
       "fixture": "hot-path-100k",
       "description": "cat-file --batch-check over all packed objects (sorted OID stdin)",
@@ -133,7 +133,7 @@
       "ratio": 24.236079387014144
     },
     {
-      "id": "rev-list-objects-odb-backend-hot-path-100k",
+      "id": "rev-list-objects-odb-backend-hot-path-100k-pre-refactor",
       "group": "odb_backend",
       "fixture": "hot-path-100k",
       "description": "rev-list --objects --all on repacked 100k-file repo",

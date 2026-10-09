@@ -4320,9 +4320,9 @@ Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HAS
 
 ## grit-lib: ODB backend (pluggable object store)
 
-Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). The baseline was captured before routing through [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) / [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html); after the refactor, hot paths keep direct pack/loose probes in [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read), [`Odb::exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists), and inline loose writes so trait dispatch stays off the measured path for built-in layouts.
+Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) on the primary store and [`CompositeStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) boundary.
 
-**Pluggable object store overhead (factory VM, 2026-10-09):** Criterion **`odb_backend`** scenarios are within **±3%** of **`odb-before`** after the hot-path restore (compare with `--baseline odb-before`). Command-level **`grit-bench odb-backend`** (`grit-utils/baselines/odb-backend-after.json` vs `odb-backend-before.json`) shows **lower** Grit times for cat-file batch/check and similar rev-list wall time; Grit/Git **ratios** for rev-list can drift when system `git` speeds up on the same fixture between captures even if Grit improves.
+**Pluggable object store overhead (factory VM, 2026-10-09):** Re-run Criterion with `--baseline odb-before` after ODB changes; command-level **`grit-bench odb-backend`** baselines are in **`odb-backend-before.json`** (pre-refactor capture, scenario ids suffixed `-pre-refactor`) and **`odb-backend-after.json`**. Post-refactor Grit medians for cat-file batch/check are much lower than the pre-refactor capture on the same fixture; rev-list wall time is similar while Grit/Git **ratios** can drift when system `git` speeds up between runs.
 
 Criterion measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
 
@@ -4350,9 +4350,9 @@ Run `grit-bench odb-backend` once before the Criterion command (or leave a popul
 
 | Scenario | Git median | Grit median (before → after) | Grit / Git (before → after) |
 | --- | ---: | ---: | ---: |
-| `cat-file-batch-hot-path-100k` | ~151 ms | 1 117 ms → ~955 ms | **7.4× → ~7.5×** |
-| `cat-file-batch-check-hot-path-100k` | ~52 ms | 1 298 ms → ~836 ms | **24.2× → ~20.8×** |
-| `rev-list-objects-odb-backend-hot-path-100k` | ~70 ms | 6 916 ms → ~6 710 ms | **99.1× → ~106×** |
+| `cat-file-batch-hot-path-100k` | ~144 ms | 1 117 ms → ~356 ms | **7.4× → ~2.5×** |
+| `cat-file-batch-check-hot-path-100k` | ~52 ms | 1 261 ms → ~239 ms | **24.2× → ~5.2×** |
+| `rev-list-objects-odb-backend-hot-path-100k` | ~65 ms | 6 916 ms → ~6 189 ms | **99.1× → ~96×** |
 
 Rev-list **ratios** can rise when system **`git`** speeds up between captures even if Grit wall time improves; compare absolute Grit medians when judging regressions.
 
@@ -4533,7 +4533,7 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 | commit | 2 | 0.58× | 0.68× |
 | merge | 2 | 3.40× | 3.84× |
 | object_reads | 8 | 234.49× | 4569.02× |
-| odb_backend | 3 | 21.76× | 112.44× |
+| odb_backend | 6 | 14.90× | 98.20× |
 | pick | 4 | 8.63× | 17.09× |
 | status | 4 | 6.17× | 48.09× |
 | switch | 4 | 3.61× | 22.50× |
@@ -4576,9 +4576,12 @@ Follow-up optimization for the super-linear rev-list gap belongs in **revwalk / 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `cat-file-batch-check-hot-path-100k` | hot-path-100k | 40.0 | 871 | 21.76× | ±42.8 ms |
-| `cat-file-batch-hot-path-100k` | hot-path-100k | 124 | 963 | 7.79× | ±9.61 ms |
-| `rev-list-objects-odb-backend-hot-path-100k` | hot-path-100k | 56.1 | 6,304 | 112.44× | ±81.6 ms |
+| `cat-file-batch-check-hot-path-100k` | hot-path-100k | 46.8 | 246 | 5.26× | ±17.0 ms |
+| `cat-file-batch-check-hot-path-100k-pre-refactor` | hot-path-100k | 56.7 | 1,298 | 22.88× | ±196 ms |
+| `cat-file-batch-hot-path-100k` | hot-path-100k | 150 | 354 | 2.36× | ±9.24 ms |
+| `cat-file-batch-hot-path-100k-pre-refactor` | hot-path-100k | 162 | 1,117 | 6.91× | ±19.5 ms |
+| `rev-list-objects-odb-backend-hot-path-100k` | hot-path-100k | 66.2 | 6,242 | 94.23× | ±121 ms |
+| `rev-list-objects-odb-backend-hot-path-100k-pre-refactor` | hot-path-100k | 71.9 | 7,062 | 98.20× | ±446 ms |
 
 ### pick
 

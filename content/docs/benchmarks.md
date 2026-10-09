@@ -22,9 +22,9 @@ Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HAS
 
 ## grit-lib: ODB backend (pluggable object store)
 
-Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). The baseline was captured before routing through [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) / [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html); after the refactor, hot paths keep direct pack/loose probes in [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read), [`Odb::exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists), and inline loose writes so trait dispatch stays off the measured path for built-in layouts.
+Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) on the primary store and [`CompositeStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) boundary.
 
-**Pluggable object store overhead (factory VM, 2026-10-09):** Criterion **`odb_backend`** scenarios are within **±3%** of **`odb-before`** after the hot-path restore (compare with `--baseline odb-before`). Command-level **`grit-bench odb-backend`** (`grit-utils/baselines/odb-backend-after.json` vs `odb-backend-before.json`) shows **lower** Grit times for cat-file batch/check and similar rev-list wall time; Grit/Git **ratios** for rev-list can drift when system `git` speeds up on the same fixture between captures even if Grit improves.
+**Pluggable object store overhead (factory VM, 2026-10-09):** Re-run Criterion with `--baseline odb-before` after ODB changes; command-level **`grit-bench odb-backend`** baselines are in **`odb-backend-before.json`** (pre-refactor capture, scenario ids suffixed `-pre-refactor`) and **`odb-backend-after.json`**. Post-refactor Grit medians for cat-file batch/check are much lower than the pre-refactor capture on the same fixture; rev-list wall time is similar while Grit/Git **ratios** can drift when system `git` speeds up between runs.
 
 Criterion measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
 
@@ -52,9 +52,9 @@ Run `grit-bench odb-backend` once before the Criterion command (or leave a popul
 
 | Scenario | Git median | Grit median (before → after) | Grit / Git (before → after) |
 | --- | ---: | ---: | ---: |
-| `cat-file-batch-hot-path-100k` | ~151 ms | 1 117 ms → ~955 ms | **7.4× → ~7.5×** |
-| `cat-file-batch-check-hot-path-100k` | ~52 ms | 1 298 ms → ~836 ms | **24.2× → ~20.8×** |
-| `rev-list-objects-odb-backend-hot-path-100k` | ~70 ms | 6 916 ms → ~6 710 ms | **99.1× → ~106×** |
+| `cat-file-batch-hot-path-100k` | ~144 ms | 1 117 ms → ~356 ms | **7.4× → ~2.5×** |
+| `cat-file-batch-check-hot-path-100k` | ~52 ms | 1 261 ms → ~239 ms | **24.2× → ~5.2×** |
+| `rev-list-objects-odb-backend-hot-path-100k` | ~65 ms | 6 916 ms → ~6 189 ms | **99.1× → ~96×** |
 
 Rev-list **ratios** can rise when system **`git`** speeds up between captures even if Grit wall time improves; compare absolute Grit medians when judging regressions.
 
