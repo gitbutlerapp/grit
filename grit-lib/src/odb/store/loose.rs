@@ -203,11 +203,14 @@ impl ObjectStore for LooseStore {
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
         let prefix = normalize_oid_prefix(prefix, self.hash_algo)?;
-        if prefix.is_empty() {
-            return ObjectStore::lookup_prefix(self, prefix.as_str(), limit, out);
-        }
         if prefix.len() < 2 {
-            return ObjectStore::lookup_prefix(self, prefix.as_str(), limit, out);
+            return lookup_prefix_scan_all(
+                &self.objects_dir,
+                self.hash_algo,
+                prefix.as_str(),
+                limit,
+                out,
+            );
         }
         let fanout = &prefix[..2];
         let fanout_dir = self.objects_dir.join(fanout);
@@ -562,6 +565,25 @@ fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
     oid.to_hex().starts_with(prefix)
 }
 
+fn lookup_prefix_scan_all(
+    objects_dir: &Path,
+    hash_algo: HashAlgo,
+    prefix: &str,
+    limit: usize,
+    out: &mut Vec<ObjectId>,
+) -> Result<()> {
+    let start_len = out.len();
+    for_each_loose_object_id(objects_dir, hash_algo, &mut |oid| {
+        if oid_hex_has_prefix(oid, prefix) {
+            out.push(*oid);
+            if limit != 0 && out.len() - start_len >= limit {
+                return ControlFlow::Break(());
+            }
+        }
+        ControlFlow::Continue(())
+    })
+}
+
 /// Incremental zlib reader yielding only the object payload (after the Git header).
 struct LoosePayloadReader {
     file: File,
@@ -710,7 +732,10 @@ impl Read for LoosePayloadReader {
                 .map_err(|e| io::Error::other(e.to_string()))?;
             if out_chunk.is_empty() {
                 if self.eof {
-                    break;
+                    return Err(io::Error::other(format!(
+                        "corrupt object: zlib stream ended with {} payload bytes remaining",
+                        self.payload_remaining
+                    )));
                 }
                 continue;
             }
@@ -720,8 +745,7 @@ impl Read for LoosePayloadReader {
                 .min(self.payload_remaining as usize);
             buf[delivered..delivered + take].copy_from_slice(&out_chunk[..take]);
             if take < out_chunk.len() {
-                self.extra_payload
-                    .extend_from_slice(&out_chunk[take..]);
+                self.extra_payload.extend_from_slice(&out_chunk[take..]);
             }
             delivered += take;
             self.payload_remaining -= take as u64;
@@ -777,6 +801,58 @@ mod tests {
         let mut out = Vec::new();
         ObjectStore::lookup_prefix(&store, &oid.to_hex()[..4], 0, &mut out).unwrap();
         assert_eq!(out, vec![oid]);
+    }
+
+    #[test]
+    fn lookup_prefix_one_hex_char_does_not_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LooseStore::new(
+            dir.path().join("objects"),
+            HashAlgo::Sha1,
+            Compression::default(),
+        );
+        fs::create_dir_all(store.objects_dir()).unwrap();
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, b"x", WriteOptions::default())
+                .unwrap();
+        let mut out = Vec::new();
+        ObjectStore::lookup_prefix(&store, &oid.to_hex()[..1], 0, &mut out).unwrap();
+        assert!(out.contains(&oid));
+    }
+
+    #[test]
+    fn truncated_zlib_stream_errors_on_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LooseStore::new(
+            dir.path().join("objects"),
+            HashAlgo::Sha1,
+            Compression::default(),
+        );
+        fs::create_dir_all(store.objects_dir()).unwrap();
+        let payload = vec![0u8; 100_000];
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, &payload, WriteOptions::default())
+                .unwrap();
+        let path = store.object_path(&oid);
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.truncate(bytes.len() / 2);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        fs::write(&path, &bytes).unwrap();
+        let mut stream = ObjectStore::open_stream(&store, &oid)
+            .unwrap()
+            .expect("stream");
+        let mut out = Vec::new();
+        let err = stream.reader.read_to_end(&mut out).unwrap_err();
+        assert!(
+            err.to_string().contains("payload bytes remaining")
+                || err.to_string().contains("corrupt object"),
+            "unexpected error: {err}"
+        );
+        assert!(out.len() < payload.len());
     }
 
     #[test]

@@ -22,8 +22,7 @@ pub mod store;
 pub(crate) use store::loose::{
     build_store_bytes, decompress_zlib_loose_bytes, enumerate_loose_objects,
     for_each_loose_object_id, loose_store_bytes_header_valid, parse_object_bytes,
-    read_loose_object_info,
-    read_zlib_loose_payload, zlib_compress_store_bytes,
+    read_loose_object_info, read_zlib_loose_payload, zlib_compress_store_bytes,
 };
 pub use store::LooseStore;
 use store::{ObjectStore, WritableObjectStore};

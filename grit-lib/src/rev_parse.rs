@@ -3706,8 +3706,9 @@ fn find_abbrev_matches(repo: &Repository, prefix: &str) -> Result<Vec<ObjectId>>
     }
     let mut seen = HashSet::new();
     let mut matches = Vec::new();
+    let hash_algo = repo.odb.hash_algo();
     for objects_dir in object_storage_dirs_for_abbrev(repo)? {
-        for hex in collect_loose_object_ids_in_dir(&objects_dir)? {
+        for hex in collect_loose_object_ids_in_dir(&objects_dir, hash_algo)? {
             if hex.starts_with(prefix) {
                 let oid = hex.parse::<ObjectId>()?;
                 if seen.insert(oid) {
@@ -3725,16 +3726,15 @@ fn find_abbrev_matches(repo: &Repository, prefix: &str) -> Result<Vec<ObjectId>>
 }
 
 fn collect_loose_object_ids(repo: &Repository) -> Result<Vec<String>> {
-    collect_loose_object_ids_in_dir(repo.odb.objects_dir())
+    collect_loose_object_ids_in_dir(repo.odb.objects_dir(), repo.odb.hash_algo())
 }
 
-fn collect_loose_object_ids_in_dir(objects_dir: &Path) -> Result<Vec<String>> {
-    let algo = crate::odb::hash_algo_for_objects_dir(
-        &crate::environment::Environment::capture_process(),
-        objects_dir,
-    );
+fn collect_loose_object_ids_in_dir(
+    objects_dir: &Path,
+    hash_algo: crate::objects::HashAlgo,
+) -> Result<Vec<String>> {
     let mut ids = Vec::new();
-    crate::odb::for_each_loose_object_id(objects_dir, algo, &mut |oid| {
+    crate::odb::for_each_loose_object_id(objects_dir, hash_algo, &mut |oid| {
         ids.push(oid.to_hex());
         std::ops::ControlFlow::Continue(())
     })?;
