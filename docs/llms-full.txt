@@ -798,6 +798,8 @@ Without `<dir>`, the directory is named after the last part of the URL with any 
 
 For private GitHub repositories over HTTPS, sign in first with [`grit auth`](https://grit-scm.com/docs/auth/index.md).
 
+You can clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
+
 ## Options
 
 | Option | Description |
@@ -2124,6 +2126,8 @@ grit fetch [<remote>]
 Downloads everything new from a remote and updates your remote-tracking branches, such as `origin/main`, along with any new tags. Your own branches and working tree are left alone; to bring the new commits into your branch, use [`grit merge`](https://grit-scm.com/docs/merge/index.md) or [`grit pull`](https://grit-scm.com/docs/pull/index.md).
 
 Each updated ref is listed with its old and new commit.
+
+Repositories created as shallow clones with Git (for example `git clone --depth 1`) are supported: `grit fetch` respects the existing shallow boundary, does not create tag refs to missing commits, and leaves a clean repository when there is nothing new to download.
 
 ## Options
 

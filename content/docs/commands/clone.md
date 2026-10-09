@@ -21,6 +21,8 @@ Without `<dir>`, the directory is named after the last part of the URL with any 
 
 For private GitHub repositories over HTTPS, sign in first with [`grit auth`](../auth/).
 
+You can clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
+
 ## Options
 
 | Option | Description |

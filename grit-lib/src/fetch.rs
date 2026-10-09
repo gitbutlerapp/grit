@@ -1346,7 +1346,12 @@ pub fn fetch_remote(
     // objects). All/None already handled; Following kept only when reachable.
     if opts.tags == crate::transfer::TagMode::Following {
         let t = std::time::Instant::now();
-        retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
+        retain_following_tags(
+            &local_odb,
+            &mut matched,
+            &pack_oids,
+            &crate::shallow::load_shallow_boundaries(local_git_dir),
+        )?;
         net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
@@ -1612,6 +1617,7 @@ pub(crate) fn retain_following_tags(
     local_odb: &crate::odb::Odb,
     matched: &mut Vec<crate::transfer::MatchedRef>,
     pack_oids: &HashSet<ObjectId>,
+    shallow_boundaries: &HashSet<ObjectId>,
 ) -> Result<()> {
     if !matched.iter().any(|m| m.is_tag) {
         return Ok(());
@@ -1622,7 +1628,7 @@ pub(crate) fn retain_following_tags(
         .filter(|m| !m.is_tag)
         .map(|m| m.oid)
         .collect();
-    let commit_reach = reachable_commits(local_odb, &roots);
+    let commit_reach = reachable_commits(local_odb, &roots, shallow_boundaries);
     let pack_reach = pack_delivered_reachable(local_odb, &roots, pack_oids)?;
     matched.retain(|m| {
         if !m.is_tag {
@@ -1698,7 +1704,11 @@ fn pack_delivered_reachable(
 /// [`reachable_closure`] it never descends into trees or blobs, so it stays cheap
 /// across thousands of heads. Sufficient for tag-following retention, whose only
 /// question is whether a tag's target commit is reachable from the fetched heads.
-pub(crate) fn reachable_commits(odb: &crate::odb::Odb, roots: &[ObjectId]) -> HashSet<ObjectId> {
+pub(crate) fn reachable_commits(
+    odb: &crate::odb::Odb,
+    roots: &[ObjectId],
+    shallow_boundaries: &HashSet<ObjectId>,
+) -> HashSet<ObjectId> {
     use crate::objects::{parse_commit, parse_tag, ObjectKind};
 
     // Read commit parents from the commit-graph file when present — an mmap-style
@@ -1710,11 +1720,18 @@ pub(crate) fn reachable_commits(odb: &crate::odb::Odb, roots: &[ObjectId]) -> Ha
     let mut seen: HashSet<ObjectId> = HashSet::new();
     let mut stack: Vec<ObjectId> = roots.to_vec();
     while let Some(oid) = stack.pop() {
-        if !seen.insert(oid) {
+        if seen.contains(&oid) {
+            continue;
+        }
+        if shallow_boundaries.contains(&oid) {
+            if odb.exists(&oid) {
+                seen.insert(oid);
+            }
             continue;
         }
         if let Some(graph) = graph.as_ref() {
             if let Some((parents, _time)) = graph.graph_commit(&oid) {
+                seen.insert(oid);
                 stack.extend(parents);
                 continue;
             }
@@ -1722,6 +1739,7 @@ pub(crate) fn reachable_commits(odb: &crate::odb::Odb, roots: &[ObjectId]) -> Ha
         let Ok(obj) = odb.read(&oid) else {
             continue;
         };
+        seen.insert(oid);
         match obj.kind {
             ObjectKind::Commit => {
                 if let Ok(c) = parse_commit(&obj.data) {

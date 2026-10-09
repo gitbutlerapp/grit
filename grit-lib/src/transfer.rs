@@ -325,11 +325,12 @@ pub fn build_pack(
     // stop descent into them. A `have` that is not present in this odb (e.g. a
     // local-only commit named by a local tracking ref) simply prunes nothing, so
     // missing haves are tolerated rather than erroring.
-    let have_closure = reachable_closure(odb, haves, &HashSet::new(), true)?;
+    let empty_shallow = HashSet::new();
+    let have_closure = reachable_closure(odb, haves, &HashSet::new(), true, &empty_shallow)?;
 
     // Objects reachable from wants but not from haves, in discovery order. A
     // missing want IS an error (we were asked to pack an object we don't have).
-    let send = collect_reachable_excluding(odb, wants, &have_closure, false)?;
+    let send = collect_reachable_excluding(odb, wants, &have_closure, false, &empty_shallow)?;
 
     if !opts.delta {
         // Phase-1 behavior: whole objects only. Correct and minimal in object
@@ -350,13 +351,37 @@ pub(crate) fn reachable_closure(
     roots: &[ObjectId],
     stop: &HashSet<ObjectId>,
     skip_missing: bool,
+    shallow_grafts: &HashSet<ObjectId>,
 ) -> Result<HashSet<ObjectId>> {
     let mut seen = HashSet::new();
-    let order = collect_reachable_excluding(odb, roots, stop, skip_missing)?;
+    let order = collect_reachable_excluding(odb, roots, stop, skip_missing, shallow_grafts)?;
     for oid in order {
         seen.insert(oid);
     }
     Ok(seen)
+}
+
+/// Build a pack for [`fetch_local`]: `have_closure` is computed from the local
+/// ODB (what the client already holds, respecting its shallow grafts), while
+/// objects are read from `source_odb`. Descent from `wants` on the source stops
+/// at `source_shallow` boundaries so a shallow remote is not walked past its cut.
+pub(crate) fn build_pack_for_local_fetch(
+    source_odb: &Odb,
+    wants: &[ObjectId],
+    have_odb: &Odb,
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    have_shallow: &HashSet<ObjectId>,
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    let have_closure = reachable_closure(have_odb, haves, &HashSet::new(), true, have_shallow)?;
+    let send =
+        collect_reachable_excluding(source_odb, wants, &have_closure, false, source_shallow)?;
+    if !opts.delta {
+        return serialize_pack(source_odb, &send, opts);
+    }
+    let plan = plan_deltas(source_odb, &send, &have_closure, opts)?;
+    serialize_pack_with_deltas(source_odb, &plan, opts)
 }
 
 /// BFS over `roots` collecting every reachable object (commits, trees, blobs,
@@ -370,6 +395,7 @@ fn collect_reachable_excluding(
     roots: &[ObjectId],
     exclude: &HashSet<ObjectId>,
     skip_missing: bool,
+    shallow_grafts: &HashSet<ObjectId>,
 ) -> Result<Vec<ObjectId>> {
     let mut visited: HashSet<ObjectId> = HashSet::new();
     let mut ordered: Vec<ObjectId> = Vec::new();
@@ -408,8 +434,10 @@ fn collect_reachable_excluding(
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
-                for parent in commit.parents {
-                    enqueue(parent, &mut queue, &mut visited, &mut ordered);
+                if !shallow_grafts.contains(&oid) {
+                    for parent in commit.parents {
+                        enqueue(parent, &mut queue, &mut visited, &mut ordered);
+                    }
                 }
                 enqueue(commit.tree, &mut queue, &mut visited, &mut ordered);
             }
@@ -1223,10 +1251,15 @@ pub fn fetch_local(
 
     // TagMode: add tags. We need the closure of objects already being fetched to
     // decide "Following".
+    let local_shallow = crate::shallow::load_shallow_boundaries(local_git_dir);
+    let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
+
     apply_tag_mode(
         opts.tags,
         &remote_refs,
+        &local_odb,
         &remote_odb,
+        &local_shallow,
         &negatives,
         &mut matched,
         &mut matched_oids,
@@ -1253,9 +1286,18 @@ pub fn fetch_local(
         }
     }
 
+    let mut pack_oids: HashSet<ObjectId> = HashSet::new();
     if !wants.is_empty() && !opts.dry_run {
-        let pack = build_pack(&remote_odb, &wants, &haves, &PackBuildOptions::default())?;
-        crate::index_pack::ingest_received_pack(
+        let pack = build_pack_for_local_fetch(
+            &remote_odb,
+            &wants,
+            &local_odb,
+            &haves,
+            &remote_shallow,
+            &local_shallow,
+            &PackBuildOptions::default(),
+        )?;
+        pack_oids = crate::index_pack::ingest_received_pack(
             pack,
             &local_odb,
             &crate::index_pack::IngestPackOptions {
@@ -1263,6 +1305,15 @@ pub fn fetch_local(
                 ..Default::default()
             },
         )?;
+    }
+
+    if opts.initial_remote_fetch && !remote_shallow.is_empty() && !opts.dry_run {
+        let remote_shallow_vec: Vec<ObjectId> = remote_shallow.iter().copied().collect();
+        crate::shallow::apply_shallow_updates(local_git_dir, &remote_shallow_vec, &[])?;
+    }
+
+    if opts.tags == TagMode::Following {
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &local_shallow)?;
     }
 
     // 4. Classify and apply ref updates. Ancestry checks use the local repo,
@@ -1322,6 +1373,17 @@ pub fn fetch_local(
                 });
                 continue;
             }
+            if m.is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid) {
+                updates.push(RefUpdate {
+                    remote_ref: m.remote_ref.clone(),
+                    local_ref: Some(local_ref.clone()),
+                    old_oid: old,
+                    new_oid: Some(m.oid),
+                    mode: UpdateMode::NoChangeNeeded,
+                    note: Some("skipped (tag target not present locally)".to_owned()),
+                });
+                continue;
+            }
             crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
         }
 
@@ -1335,17 +1397,20 @@ pub fn fetch_local(
         });
     }
 
-    // The local / file:// path copies the exact object closure and never grafts,
-    // so it neither introduces nor resolves shallow boundaries.
     crate::fetch::finish_initial_remote_fetch_layout(
         local_git_dir,
         opts,
         default_branch.as_deref(),
     )?;
+    let new_shallow = if opts.initial_remote_fetch {
+        remote_shallow.iter().copied().collect()
+    } else {
+        Vec::new()
+    };
     Ok(FetchOutcome {
         updates,
         default_branch,
-        new_shallow: Vec::new(),
+        new_shallow,
         new_unshallow: Vec::new(),
     })
 }
@@ -1823,7 +1888,9 @@ fn glob_matches(pattern: &str, refname: &str) -> bool {
 pub(crate) fn apply_tag_mode(
     mode: TagMode,
     remote_refs: &[(String, ObjectId)],
+    local_odb: &Odb,
     remote_odb: &Odb,
+    local_shallow: &HashSet<ObjectId>,
     negatives: &[RefspecItem],
     matched: &mut Vec<MatchedRef>,
     matched_oids: &mut HashSet<ObjectId>,
@@ -1833,11 +1900,15 @@ pub(crate) fn apply_tag_mode(
         return Ok(());
     }
 
-    // For Following we need the set of objects reachable from the already-matched
-    // (non-tag) refs, so we can keep tags pointing into that closure.
+    // For Following we need commits reachable from matched heads in the *local*
+    // repository (respecting shallow grafts), not the remote's full history.
     let following_closure: HashSet<ObjectId> = if mode == TagMode::Following {
-        let roots: Vec<ObjectId> = matched.iter().map(|m| m.oid).collect();
-        reachable_closure(remote_odb, &roots, &HashSet::new(), true)?
+        let roots: Vec<ObjectId> = matched
+            .iter()
+            .filter(|m| !m.is_tag)
+            .map(|m| m.oid)
+            .collect();
+        crate::fetch::reachable_commits(local_odb, &roots, local_shallow)
     } else {
         HashSet::new()
     };
@@ -1873,6 +1944,20 @@ pub(crate) fn apply_tag_mode(
         }
     }
     Ok(())
+}
+
+/// Whether a tag ref's peeled target (or the oid itself for lightweight tags)
+/// exists in the local or remote object database.
+fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> bool {
+    let peel_odb = if local_odb.exists(&tag_oid) {
+        local_odb
+    } else {
+        remote_odb
+    };
+    let Ok(peeled) = peel_tag_target(peel_odb, tag_oid) else {
+        return local_odb.exists(&tag_oid);
+    };
+    local_odb.exists(&peeled)
 }
 
 /// Peel an (annotated) tag to the non-tag object it ultimately points at.
