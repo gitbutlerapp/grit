@@ -23,6 +23,8 @@ When you only need type and size (for example listing objects without loading bl
 
 After repack, garbage collection, or installing a pack with [`install_pack_bytes`](rustdoc:grit_lib::index_pack::install_pack_bytes), call [`Odb::invalidate_packs`](rustdoc:grit_lib::odb::Odb) so the next read rescans `objects/pack/`. If another [`Odb`](rustdoc:grit_lib::odb::Odb) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
 
+For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`Odb::with_pack_read_context`](rustdoc:grit_lib::odb::Odb::with_pack_read_context) so pack indexes, mmap-backed pack bytes, and the delta-base LRU stay on one thread-local context instead of reinstalling it per object. [`Odb::read`](rustdoc:grit_lib::odb::Odb::read) detects an active matching context and skips nested setup.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:

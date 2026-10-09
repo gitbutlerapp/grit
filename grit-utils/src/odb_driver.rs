@@ -5,49 +5,41 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use grit_lib::config::ConfigSet;
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
-use grit_lib::pack::{read_pack_index, read_pack_index_cached, PackIndex};
+use grit_lib::pack::{read_local_pack_indexes_cached, read_pack_index, PackIndex};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions, RevListResult};
 
 /// Read hex object ids from stdin and emit `git cat-file --batch` lines.
 pub fn cat_file_batch(repo: &Repository) -> Result<()> {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout().lock();
-    for line in stdin.lock().lines() {
-        let line = line.context("read oid line")?;
-        let hex = line.trim();
-        if hex.is_empty() {
-            continue;
+    repo.odb.with_pack_read_context(|| {
+        let stdin = io::stdin();
+        let mut stdout = io::stdout().lock();
+        for line in stdin.lock().lines() {
+            let line = line.context("read oid line")?;
+            let hex = line.trim();
+            if hex.is_empty() {
+                continue;
+            }
+            let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
+            write_batch_object(&mut stdout, repo, &oid)?;
         }
-        let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
-        write_batch_object(&mut stdout, repo, &oid)?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Emit every packed object in pack-file offset order (like `cat-file --batch-all-objects --unordered`).
 pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
-    let objects_dir = repo.git_dir.join("objects");
-    let pack_dir = objects_dir.join("pack");
-    let mut stdout = io::stdout().lock();
-    if !pack_dir.is_dir() {
-        return Ok(());
-    }
-    let mut idx_paths: Vec<_> = std::fs::read_dir(&pack_dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "idx"))
-        .collect();
-    idx_paths.sort();
-    for idx_path in idx_paths {
-        let idx = read_pack_index_cached(&idx_path)
-            .with_context(|| format!("read {}", idx_path.display()))?;
-        emit_pack_in_offset_order(&mut stdout, repo, idx.as_ref())?;
-    }
-    Ok(())
+    let objects_dir = repo.odb.objects_dir();
+    repo.odb.with_pack_read_context(|| {
+        let mut stdout = io::stdout().lock();
+        let indexes = read_local_pack_indexes_cached(objects_dir)?;
+        for idx in indexes {
+            emit_pack_in_offset_order(&mut stdout, repo, idx.as_ref())?;
+        }
+        Ok(())
+    })
 }
 
 fn emit_pack_in_offset_order(
@@ -254,7 +246,7 @@ fn log_path_for_binary(path: &str, prefix: &str) -> String {
 }
 
 fn min_abbrev_len(repo: &Repository) -> usize {
-    ConfigSet::load(Some(&repo.git_dir), true)
+    repo.config()
         .ok()
         .and_then(|cfg| cfg.get("core.abbrev"))
         .and_then(|v| v.parse::<i64>().ok())
@@ -274,7 +266,11 @@ fn collect_hex_ids_for_abbrev(repo: &Repository) -> Result<Vec<String>> {
             if path.extension().is_some_and(|e| e == "idx") {
                 let idx = read_pack_index(&path)?;
                 for ent in idx.iter() {
-                    ids.push(ObjectId::from_bytes(ent.oid()).context("pack oid")?.to_hex());
+                    ids.push(
+                        ObjectId::from_bytes(ent.oid())
+                            .context("pack oid")?
+                            .to_hex(),
+                    );
                 }
             }
         }

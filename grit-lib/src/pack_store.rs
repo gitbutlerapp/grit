@@ -88,6 +88,13 @@ impl PackStore {
         CURRENT.with(|c| c.borrow().is_some())
     }
 
+    /// Whether the active read context is scoped to `objects_dir`.
+    #[must_use]
+    pub(crate) fn read_context_matches_objects_dir(objects_dir: &Path) -> bool {
+        Self::has_context()
+            && ACTIVE_OBJECTS_DIR.with(|d| d.borrow().as_deref() == Some(objects_dir))
+    }
+
     /// Run `f` with `store` as the pack-read context on this thread.
     pub fn with_context<R>(store: Arc<Self>, f: impl FnOnce() -> R) -> R {
         let _guard = PackReadContextGuard::install(store);
