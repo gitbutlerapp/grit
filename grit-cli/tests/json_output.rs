@@ -255,6 +255,45 @@ fn status_json_merge_conflict_lists_path_once_with_merge_fields() -> TestResult 
 }
 
 #[test]
+fn status_json_merge_conflict_keeps_ahead_of_target() -> TestResult {
+    let scratch = Scratch::new("status-merge-ahead")?;
+    let remote = scratch.child("origin.git");
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(scratch.path(), &["init", "--bare", &path_arg(&remote)]);
+    system_git_ok(&repo, &["init", "-q", "-b", "main"]);
+    system_git_ok(&repo, &["config", "user.name", "T"]);
+    system_git_ok(&repo, &["config", "user.email", "t@e.com"]);
+    system_git_ok(&repo, &["remote", "add", "origin", &path_arg(&remote)]);
+    write_file(&repo.join("f"), "base\n");
+    system_git_ok(&repo, &["add", "f"]);
+    system_git_ok(&repo, &["commit", "-qm", "base"]);
+    system_git_ok(&repo, &["push", "-u", "origin", "main"]);
+    system_git_ok(&repo, &["checkout", "-qb", "side"]);
+    write_file(&repo.join("f"), "side\n");
+    system_git_ok(&repo, &["commit", "-qam", "side"]);
+    system_git_ok(&repo, &["checkout", "-q", "main"]);
+    write_file(&repo.join("f"), "main\n");
+    system_git_ok(&repo, &["commit", "-qam", "main on main"]);
+    let merge = Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(&repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git merge");
+    assert_ne!(merge.status.code(), Some(0), "expected merge conflict");
+
+    let v = gs_json(&repo, &["status"]);
+    assert_eq!(v["merging"], Value::Bool(true));
+    assert_eq!(v["target"], "origin/main");
+    assert_eq!(v["ahead"], 1);
+    assert_eq!(v["commits"].as_array().unwrap().len(), 1);
+    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    Ok(())
+}
+
+#[test]
 fn add_and_commit_emit_json() -> TestResult {
     let scratch = Scratch::new("commit")?;
     let repo = scratch.child("repo");

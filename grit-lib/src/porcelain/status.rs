@@ -1326,8 +1326,6 @@ fn directory_pathspec_matches_self(rel_dir: &str, pathspecs: &[String]) -> bool 
         || status_path_matches(&format!("{}/", rel_dir.trim_end_matches('/')), pathspecs)
 }
 
-// --- Conflict presentation --------------------------------------------------
-
 use crate::diff::DiffStatus;
 
 /// Collect repository-relative paths that have unmerged index stages (1–3).

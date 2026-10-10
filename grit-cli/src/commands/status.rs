@@ -145,7 +145,7 @@ impl StatusOutcome {
             return;
         }
         if self.merging {
-            println!("→ resolve conflicts, then grit commit \"message\"");
+            println!("→ grit commit \"message\" to finish the merge");
             return;
         }
         let mut hints = Vec::new();
@@ -264,46 +264,34 @@ fn resolve_header(
             oid: Some(head_oid),
             ..
         } => {
-            if let Some(in_progress_header) = header_for_in_progress(merging, in_progress) {
-                let target = context::find_target_branch(repo)?.map(|t| t.display_name);
-                (
+            let in_progress_header = header_for_in_progress(merging, in_progress);
+            match context::find_target_branch(repo)? {
+                None => (
                     Some(short_name.clone()),
                     false,
                     Some(head_oid.to_hex()),
-                    target,
+                    None,
                     0,
                     Vec::new(),
-                    in_progress_header,
-                )
-            } else {
-                match context::find_target_branch(repo)? {
-                    None => (
+                    in_progress_header.unwrap_or(HeaderKind::NoTarget),
+                ),
+                Some(target) => {
+                    let ahead =
+                        context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?;
+                    let header = in_progress_header.unwrap_or(if ahead.total == 0 {
+                        HeaderKind::EvenWith
+                    } else {
+                        HeaderKind::AheadOfTarget
+                    });
+                    (
                         Some(short_name.clone()),
                         false,
                         Some(head_oid.to_hex()),
-                        None,
-                        0,
-                        Vec::new(),
-                        HeaderKind::NoTarget,
-                    ),
-                    Some(target) => {
-                        let ahead =
-                            context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?;
-                        let header = if ahead.total == 0 {
-                            HeaderKind::EvenWith
-                        } else {
-                            HeaderKind::AheadOfTarget
-                        };
-                        (
-                            Some(short_name.clone()),
-                            false,
-                            Some(head_oid.to_hex()),
-                            Some(target.display_name),
-                            ahead.total,
-                            ahead.commits,
-                            header,
-                        )
-                    }
+                        Some(target.display_name),
+                        ahead.total,
+                        ahead.commits,
+                        header,
+                    )
                 }
             }
         }
