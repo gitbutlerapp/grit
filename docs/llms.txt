@@ -61,6 +61,7 @@ Each docs page has a Markdown twin at the same URL with `index.md` instead of `i
 
 - [Overview](https://grit-scm.com/docs/library/index.md): Use grit-lib from Rust — the same engine that powers the grit CLI.
 - [grit-lib API map](https://grit-scm.com/docs/library/api-map/index.md): Generated index of public grit-lib modules and key types with docs.rs links.
+- [Reachability bitmaps](https://grit-scm.com/docs/library/bitmaps/index.md): Query pack and MIDX commit bitmaps for fast object reachability and counting.
 - [Diff](https://grit-scm.com/docs/library/diff/index.md): Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.
 - [Embedding grit-lib](https://grit-scm.com/docs/library/embedding/index.md): Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.
 - [Network](https://grit-scm.com/docs/library/network/index.md): Remote dispatch, fetch, push, and ls-remote over every transport.

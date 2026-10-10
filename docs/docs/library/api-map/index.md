@@ -18,6 +18,11 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::attributes::AttrValue` | enum | Parsed attribute value for display (check-attr output). | [API](https://docs.rs/grit-lib/latest/grit_lib/attributes/enum.AttrValue.html) |
 | `grit_lib::attributes::MacroTable` | struct | Macro definitions from [attr]name ... | [API](https://docs.rs/grit-lib/latest/grit_lib/attributes/struct.MacroTable.html) |
 | `grit_lib::attributes::ParsedGitAttributes` | struct | Result of parsing a gitattributes file. | [API](https://docs.rs/grit-lib/latest/grit_lib/attributes/struct.ParsedGitAttributes.html) |
+| `grit_lib::bitmap_walk` | module | Reachability queries using pack / MIDX commit bitmaps (Git prepare_bitmap_walk semantics). | [API](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/index.html) |
+| `grit_lib::bitmap_walk::BitmapWalkError` | enum | Errors during a bitmap reachability walk. | [API](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/enum.BitmapWalkError.html) |
+| `grit_lib::bitmap_walk::BitmapWalkUnsupported` | struct | Bitmap walk could not run (unsupported filter or shallow repo); use a non-bitmap walk instead. | [API](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.BitmapWalkUnsupported.html) |
+| `grit_lib::bitmap_walk::ReachabilityQuery` | struct | Query parameters for a bitmap reachability walk. | [API](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachabilityQuery.html) |
+| `grit_lib::bitmap_walk::ReachableSet` | struct | Reachable objects from a ReachabilityQuery: in-index bits plus out-of-namespace oids. | [API](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) |
 | `grit_lib::blame` | module | Blame line-mapping algorithm. | [API](https://docs.rs/grit-lib/latest/grit_lib/blame/index.html) |
 | `grit_lib::blame::BlameLine` | struct | A single line attribution. | [API](https://docs.rs/grit-lib/latest/grit_lib/blame/struct.BlameLine.html) |
 | `grit_lib::blame::BlameTextconvContext` | struct | annotate-tests.sh “blame huge graft”: octopus graft with 29 parents on commit 00 and a two-line 0/0 file. | [API](https://docs.rs/grit-lib/latest/grit_lib/blame/struct.BlameTextconvContext.html) |
@@ -312,6 +317,12 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack::PackedDeltaDependency` | enum | Dependency of a packed delta object at object_offset within pack_bytes. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedDeltaDependency.html) |
 | `grit_lib::pack::PackedType` | enum | A pack object type as encoded in the packed stream header. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedType.html) |
 | `grit_lib::pack::VerifyObjectRecord` | struct | A decoded object header record used by verify-pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.VerifyObjectRecord.html) |
+| `grit_lib::pack_bitmap` | module | Read Git pack and multi-pack-index reachability bitmaps (.bitmap / BITM v1). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/index.html) |
+| `grit_lib::pack_bitmap::BitmapError` | enum | Failure mode when a .bitmap sidecar cannot be used. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.BitmapError.html) |
+| `grit_lib::pack_bitmap::BitmapIndex` | struct | Memory-mapped pack or MIDX reachability bitmap (Git BITM v1). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) |
+| `grit_lib::pack_bitmap::BitmapIndexCache` | struct | Repository-scoped cache slot for BitmapIndex::open. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndexCache.html) |
+| `grit_lib::pack_bitmap::CommitReachabilityBitmap` | struct | Decoded reachability set for one commit (bits index pack/MIDX object positions). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.CommitReachabilityBitmap.html) |
+| `grit_lib::pack_bitmap::TypeBitmap` | struct | Borrowed type filter bitmap (commits, trees, blobs, or tags). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.TypeBitmap.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
 | `grit_lib::pack_receive` | module | Stream side-band pack data from fetch/clone into memory or a pack temp file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/index.html) |
 | `grit_lib::pack_receive::PackReceiveTarget` | enum | Where demuxed pack bytes are stored. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/enum.PackReceiveTarget.html) |
