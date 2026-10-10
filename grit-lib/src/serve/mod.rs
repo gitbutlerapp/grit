@@ -12,7 +12,9 @@
 //! configuration at their own boundary.
 
 mod receive_pack;
+mod shallow_upload;
 mod upload_pack;
+mod upload_pack_policy;
 
 pub use receive_pack::{
     receive_pack, HookRunRecord, ReceiveOutcome, ReceivePolicy, RefUpdateResult,
@@ -34,6 +36,9 @@ pub enum ServeError {
     /// The client requested a v2 command this server does not implement.
     #[error("unknown command: {0}")]
     UnknownCommand(String),
+    /// An upload-pack filter request was rejected by repository config.
+    #[error(transparent)]
+    UploadFilter(#[from] crate::upload_filter::UploadFilterError),
     /// The client and repository disagree on the object hash algorithm.
     #[error("object format mismatch: client wants {client}, repository uses {repository}")]
     ObjectFormatMismatch {

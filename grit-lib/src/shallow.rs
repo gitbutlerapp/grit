@@ -206,28 +206,76 @@ pub fn apply_shallow_updates(
 ///
 /// # Errors
 /// Returns an error on an unexpected non-data packet or a malformed oid.
-pub fn read_shallow_info_section(r: &mut dyn Read) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
-    let mut shallow = Vec::new();
-    let mut unshallow = Vec::new();
-    let mut r = r;
+/// Decode one sideband-all primary line from a data pkt-line payload.
+///
+/// Returns `Ok(None)` for progress packets (band 2) the caller should skip.
+pub(crate) fn v2_primary_line_from_pkt(
+    payload: String,
+    sideband_all: bool,
+) -> Result<Option<String>> {
+    if !sideband_all {
+        return Ok(Some(payload.trim_end().to_owned()));
+    }
+    let bytes = payload.as_bytes();
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    match bytes[0] {
+        1 => Ok(Some(
+            String::from_utf8_lossy(&bytes[1..]).trim_end().to_owned(),
+        )),
+        2 => Ok(None),
+        3 => Err(Error::Message(format!(
+            "remote error: {}",
+            String::from_utf8_lossy(&bytes[1..]).trim_end()
+        ))),
+        _ => Ok(Some(payload.trim_end().to_owned())),
+    }
+}
+
+/// Read one primary payload line from a v2 fetch response (`sideband-all` demux when enabled).
+pub(crate) fn read_v2_fetch_primary_line(
+    r: &mut dyn Read,
+    sideband_all: bool,
+) -> Result<Option<String>> {
     loop {
-        match pkt_line::read_packet(&mut r)? {
-            None | Some(pkt_line::Packet::Flush) | Some(pkt_line::Packet::Delim) => break,
-            Some(pkt_line::Packet::ResponseEnd) => break,
-            Some(pkt_line::Packet::Data(line)) => {
-                let line = line.trim_end();
-                if let Some(rest) = line.strip_prefix("shallow ") {
-                    let oid = ObjectId::from_hex(rest.trim()).map_err(|_| {
-                        Error::Message(format!("parse shallow oid {}", rest.trim()))
-                    })?;
-                    shallow.push(oid);
-                } else if let Some(rest) = line.strip_prefix("unshallow ") {
-                    let oid = ObjectId::from_hex(rest.trim()).map_err(|_| {
-                        Error::Message(format!("parse unshallow oid {}", rest.trim()))
-                    })?;
-                    unshallow.push(oid);
+        match pkt_line::read_packet(&mut &mut *r)? {
+            None | Some(pkt_line::Packet::Flush) | Some(pkt_line::Packet::Delim) => {
+                return Ok(None);
+            }
+            Some(pkt_line::Packet::ResponseEnd) => return Ok(None),
+            Some(pkt_line::Packet::Data(payload)) => {
+                if let Some(line) = v2_primary_line_from_pkt(payload, sideband_all)? {
+                    return Ok(Some(line));
                 }
             }
+        }
+    }
+}
+
+pub fn read_shallow_info_section(r: &mut dyn Read) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
+    read_shallow_info_section_sideband(r, false)
+}
+
+/// Like [`read_shallow_info_section`], demuxing `sideband-all` section lines when `sideband_all`.
+pub fn read_shallow_info_section_sideband(
+    r: &mut dyn Read,
+    sideband_all: bool,
+) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
+    let mut shallow = Vec::new();
+    let mut unshallow = Vec::new();
+    while let Some(line) = read_v2_fetch_primary_line(r, sideband_all)? {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("shallow ") {
+            let oid = ObjectId::from_hex(rest.trim())
+                .map_err(|_| Error::Message(format!("parse shallow oid {}", rest.trim())))?;
+            shallow.push(oid);
+        } else if let Some(rest) = line.strip_prefix("unshallow ") {
+            let oid = ObjectId::from_hex(rest.trim())
+                .map_err(|_| Error::Message(format!("parse unshallow oid {}", rest.trim())))?;
+            unshallow.push(oid);
         }
     }
     Ok((shallow, unshallow))
@@ -381,6 +429,13 @@ mod tests {
         let mut rest = Vec::new();
         std::io::Read::read_to_end(&mut cur, &mut rest).unwrap();
         assert_eq!(&rest, b"PACK");
+    }
+
+    #[test]
+    fn v2_primary_line_from_pkt_strips_sideband_all_header() {
+        let payload = format!("\u{1}packfile\n");
+        let line = v2_primary_line_from_pkt(payload, true).unwrap().unwrap();
+        assert_eq!(line, "packfile");
     }
 
     #[test]

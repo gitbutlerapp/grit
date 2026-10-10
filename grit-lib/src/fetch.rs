@@ -734,6 +734,7 @@ fn negotiate_pack_v2(
             None,
             &mut shallow_update,
             progress,
+            sideband_all,
         )?;
         return Ok((pack, shallow_update));
     }
@@ -751,7 +752,7 @@ fn negotiate_pack_v2(
         false,
     )?;
 
-    let ack = read_v2_acknowledgments(conn.reader())?;
+    let ack = read_v2_acknowledgments(conn.reader(), sideband_all)?;
     match ack {
         // Server is `ready`: the pack follows in the SAME response after a delim.
         Some(round) if round.ready => {
@@ -761,6 +762,7 @@ fn negotiate_pack_v2(
                 None,
                 &mut shallow_update,
                 progress,
+                sideband_all,
             )?;
         }
         // Server skipped acknowledgments and went straight to the pack header
@@ -772,6 +774,7 @@ fn negotiate_pack_v2(
                 None,
                 &mut shallow_update,
                 progress,
+                sideband_all,
             )?;
         }
         // Not ready yet: round 2 sends the remaining haves + `done`, then pack.
@@ -792,6 +795,7 @@ fn negotiate_pack_v2(
                 None,
                 &mut shallow_update,
                 progress,
+                sideband_all,
             )?;
         }
     }
@@ -932,19 +936,16 @@ pub(crate) struct V2AckRound {
 /// section and started a different one (e.g. went straight to `packfile`) — in
 /// which case the header has been consumed and the caller proceeds to read the
 /// pack response directly. Lifted from the CLI's `read_v2_acknowledgments`.
-pub(crate) fn read_v2_acknowledgments(reader: &mut dyn Read) -> Result<Option<V2AckRound>> {
+pub(crate) fn read_v2_acknowledgments(
+    reader: &mut dyn Read,
+    sideband_all: bool,
+) -> Result<Option<V2AckRound>> {
     let mut reader = reader;
-    let hdr = match pkt_line::read_packet(&mut reader)? {
-        Some(pkt_line::Packet::Data(s)) => s,
-        Some(pkt_line::Packet::Flush) => return Ok(Some(V2AckRound { ready: false })),
-        None => return Ok(None),
-        Some(other) => {
-            return Err(Error::Message(format!(
-                "unexpected v2 fetch response: {other:?}"
-            )))
-        }
+    let hdr = match crate::shallow::read_v2_fetch_primary_line(&mut reader, sideband_all)? {
+        Some(s) => s,
+        None => return Ok(Some(V2AckRound { ready: false })),
     };
-    let hdr = hdr.trim_end();
+    let hdr = hdr.as_str();
     if let Some(msg) = hdr.strip_prefix("ERR ") {
         return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
     }
@@ -965,8 +966,13 @@ pub(crate) fn read_v2_acknowledgments(reader: &mut dyn Read) -> Result<Option<V2
     let mut ready = false;
     loop {
         match pkt_line::read_packet(&mut reader)? {
-            Some(pkt_line::Packet::Data(ln)) => {
-                let ln = ln.trim_end();
+            Some(pkt_line::Packet::Delim) | Some(pkt_line::Packet::Flush) | None => break,
+            Some(pkt_line::Packet::ResponseEnd) => break,
+            Some(pkt_line::Packet::Data(payload)) => {
+                let Some(ln) = crate::shallow::v2_primary_line_from_pkt(payload, sideband_all)?
+                else {
+                    continue;
+                };
                 if ln == "NAK" || ln.starts_with("ACK ") {
                     continue;
                 }
@@ -977,12 +983,6 @@ pub(crate) fn read_v2_acknowledgments(reader: &mut dyn Read) -> Result<Option<V2
                 return Err(Error::Message(format!(
                     "unexpected acknowledgment line: '{ln}'"
                 )));
-            }
-            Some(pkt_line::Packet::Delim) | Some(pkt_line::Packet::Flush) | None => break,
-            Some(other) => {
-                return Err(Error::Message(format!(
-                    "unexpected acknowledgments packet: {other:?}"
-                )))
             }
         }
     }
@@ -1000,19 +1000,28 @@ pub(crate) fn read_v2_fetch_pack_response(
     pack_file: Option<&mut crate::pack_receive::TempPackReceive>,
     shallow_out: &mut ShallowUpdate,
     progress: &mut dyn Progress,
+    sideband_all: bool,
 ) -> Result<()> {
     loop {
-        let hdr = match pkt_line::read_packet(&mut &mut *reader)? {
-            Some(pkt_line::Packet::Data(s)) => s,
-            Some(pkt_line::Packet::Flush) | None => return Ok(()),
-            Some(pkt_line::Packet::Delim) => continue,
-            Some(other) => {
-                return Err(Error::Message(format!(
-                    "unexpected v2 fetch response: {other:?}"
-                )))
+        let hdr = loop {
+            match pkt_line::read_packet(&mut &mut *reader)? {
+                Some(pkt_line::Packet::Data(payload)) => {
+                    if let Some(line) =
+                        crate::shallow::v2_primary_line_from_pkt(payload, sideband_all)?
+                    {
+                        break line;
+                    }
+                }
+                Some(pkt_line::Packet::Flush) | None => return Ok(()),
+                Some(pkt_line::Packet::Delim) => continue,
+                Some(other) => {
+                    return Err(Error::Message(format!(
+                        "unexpected v2 fetch response: {other:?}"
+                    )))
+                }
             }
         };
-        let hdr = hdr.trim_end();
+        let hdr = hdr.as_str();
         if let Some(msg) = hdr.strip_prefix("ERR ") {
             return Err(Error::Message(format!("remote error: {}", msg.trim_end())));
         }
@@ -1021,7 +1030,8 @@ pub(crate) fn read_v2_fetch_pack_response(
                 // Capture the shallow/unshallow boundary updates. The section is
                 // delim-terminated (before the `packfile` header), which
                 // `read_shallow_info_section` stops at, leaving the header intact.
-                let (sh, unsh) = crate::shallow::read_shallow_info_section(&mut *reader)?;
+                let (sh, unsh) =
+                    crate::shallow::read_shallow_info_section_sideband(&mut *reader, sideband_all)?;
                 shallow_out.shallow.extend(sh);
                 shallow_out.unshallow.extend(unsh);
             }
@@ -1029,7 +1039,7 @@ pub(crate) fn read_v2_fetch_pack_response(
                 || h == crate::protocol_v2::FetchResponseSection::WantedRefs.header()
                 || h == crate::protocol_v2::FetchResponseSection::PackfileUris.header() =>
             {
-                skip_v2_section_until_boundary(&mut *reader)?;
+                skip_v2_section_until_boundary(&mut *reader, sideband_all)?;
             }
             h if h == crate::protocol_v2::FetchResponseSection::Packfile.header() => {
                 // The `packfile` section body is side-band-64k framed; reuse the
@@ -1051,12 +1061,14 @@ pub(crate) fn read_v2_fetch_pack_response(
 }
 
 /// Skip a v2 response section up to its terminating flush/delim.
-fn skip_v2_section_until_boundary(reader: &mut dyn Read) -> Result<()> {
+fn skip_v2_section_until_boundary(reader: &mut dyn Read, sideband_all: bool) -> Result<()> {
     loop {
         match pkt_line::read_packet(&mut &mut *reader)? {
             None | Some(pkt_line::Packet::Flush) | Some(pkt_line::Packet::Delim) => return Ok(()),
             Some(pkt_line::Packet::ResponseEnd) => return Ok(()),
-            Some(pkt_line::Packet::Data(_)) => {}
+            Some(pkt_line::Packet::Data(payload)) => {
+                let _ = crate::shallow::v2_primary_line_from_pkt(payload, sideband_all)?;
+            }
         }
     }
 }

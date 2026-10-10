@@ -459,10 +459,13 @@ impl RecordingClient {
             }
             let payload = &resp[i + 4..i + len];
             i += len;
-            let text = String::from_utf8_lossy(payload);
-            let header = text.trim_end();
+            let header = if !payload.is_empty() && payload[0] == 1 {
+                String::from_utf8_lossy(&payload[1..]).trim_end().to_owned()
+            } else {
+                String::from_utf8_lossy(payload).trim_end().to_owned()
+            };
             if matches!(
-                header,
+                header.as_str(),
                 "acknowledgments" | "shallow-info" | "wanted-refs" | "packfile-uris" | "packfile"
             ) {
                 in_packfile = header == "packfile";
