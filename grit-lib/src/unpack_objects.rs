@@ -479,7 +479,6 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
     let nr_objects = rd.read_u32_be()? as usize;
 
     let mut ref_delta_bases: Vec<ObjectId> = Vec::new();
-    let mut ofs_deltas = false;
     let mut saw_ref_delta = false;
 
     for _ in 0..nr_objects {
@@ -492,7 +491,6 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
                 rd.pos = zlib_offset + consumed;
             }
             6 => {
-                ofs_deltas = true;
                 let neg = rd.read_ofs_neg_offset()?;
                 let _base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
                     Error::CorruptObject("ofs-delta base offset underflow".to_owned())
@@ -516,35 +514,6 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
 
     if !saw_ref_delta {
         return Ok(false);
-    }
-
-    if !ofs_deltas {
-        let mut whole_oids: HashSet<ObjectId> = HashSet::new();
-        let mut rd = PackReader::new(data);
-        rd.read_exact(4)?;
-        rd.read_u32_be()?;
-        rd.read_u32_be()?;
-        for _ in 0..nr_objects {
-            let (type_code, size) = rd.read_type_size()?;
-            if (1..=4).contains(&type_code) {
-                let kind = type_code_to_kind(type_code)?;
-                let obj_data = rd.decompress(size)?;
-                let oid = crate::hash::hash_object(algo, kind, &obj_data);
-                whole_oids.insert(oid);
-            } else if type_code == 6 {
-                let neg = rd.read_ofs_neg_offset()?;
-                let _ = neg;
-                let zlib_offset = rd.pos;
-                let consumed = skip_zlib_at(data, zlib_offset, size)?;
-                rd.pos = zlib_offset + consumed;
-            } else if type_code == 7 {
-                rd.read_exact(algo.len())?;
-                let zlib_offset = rd.pos;
-                let consumed = skip_zlib_at(data, zlib_offset, size)?;
-                rd.pos = zlib_offset + consumed;
-            }
-        }
-        return Ok(ref_delta_bases.iter().any(|b| !whole_oids.contains(b)));
     }
 
     pack_is_thin_with_ofs_deltas(data, algo, ref_delta_bases)

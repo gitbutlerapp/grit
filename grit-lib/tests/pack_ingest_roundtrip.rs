@@ -748,6 +748,15 @@ fn ingest_received_pack_matches_install_sha1() {
 }
 
 #[test]
+fn pack_builder_delta_fixture_is_not_thin() {
+    let fx = shared_pack(PackShape::PackBuilderDelta, HashAlgo::Sha1).expect("fixture");
+    assert!(
+        !grit_lib::unpack_objects::pack_is_thin(&fx.bytes, fx.algo),
+        "full pack-builder delta fixture must not be classified as thin"
+    );
+}
+
+#[test]
 fn pack_is_thin_classifies_thin_and_full_packs() {
     let full = shared_pack(PackShape::PackBuilderWhole, HashAlgo::Sha1).expect("fixture");
     assert!(
