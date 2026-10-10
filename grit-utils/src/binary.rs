@@ -19,6 +19,15 @@ pub fn resolve_binary(name: &str, user_path: Option<&Path>) -> Result<PathBuf> {
             return workspace.canonicalize().context("canonicalize grit path");
         }
     }
+    if name == "grit-http-server" {
+        let workspace =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/release/grit-http-server");
+        if workspace.is_file() {
+            return workspace
+                .canonicalize()
+                .context("canonicalize grit-http-server path");
+        }
+    }
     find_on_path(name).with_context(|| format!("could not find `{name}` on PATH"))
 }
 
@@ -38,6 +47,11 @@ fn canonicalize_executable(p: &Path) -> Result<PathBuf> {
 }
 
 /// Locate `hyperfine` or fail with an actionable message.
+/// Resolve `grit-http-server` (explicit path, workspace release build, then `PATH`).
+pub fn resolve_http_server(user_path: Option<&Path>) -> Result<PathBuf> {
+    resolve_binary("grit-http-server", user_path)
+}
+
 pub fn require_hyperfine() -> Result<PathBuf> {
     find_on_path("hyperfine").context(
         "hyperfine is required for grit-bench but was not found on PATH. \

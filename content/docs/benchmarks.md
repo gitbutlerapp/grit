@@ -209,6 +209,27 @@ cargo build --release -p grit-cli -p grit-utils
 
 **Measured outcomes:** the Object reads table below is generated from committed `grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs per scenario, grit vs system git medians and peak RSS). Refresh with two invocations and `grit-bench compare run1.json run2.json --tolerance 0.10` before updating the baseline file and running `make docs`.
 
+## grit-bench: network (clone, fetch, push, ls-remote)
+
+The **`grit-bench network`** suite compares **`grit`** and system **`git`** on the same remote URLs. Cached fixtures live under **`GRIT_BENCH_NETWORK_CACHE`** (default `/tmp/grit-bench-network-cache`):
+
+| Fixture | Shape |
+| --- | --- |
+| **deep-history** | **≥50 000** commits and **≥20 000** tracked files (built once via `git fast-import`) |
+| **many-refs** | deep-history plus **≥10 000** `refs/heads/bench-ref-*` branches |
+| **large-blobs** | a small tree with multi‑MiB blobs for pack-heavy transfer |
+
+Scenarios include **clone** over **`file://`** and **grit-http-server** smart HTTP, **incremental fetch** and **no-op fetch** over **`file://`**, **push** over **`file://`**, and **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture. Set **`GRIT_BENCH_GIT_HTTP_SERVER=1`** to add a production-only scenario that compares system **`git clone`** against **git http-backend** (local CGI) vs **grit-http-server**. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
+
+```bash
+cargo build --release -p grit-cli -p grit-http-server -p grit-utils
+./target/release/grit-bench network --format json --output grit-utils/baselines/network.json
+./target/release/grit-bench compare grit-utils/baselines/network.json /tmp/network-rerun.json --tolerance 0.10
+make docs
+```
+
+Integration smoke (tiny fixtures, six scenarios): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
+
 Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git peak RSS on the large fixture; compare the table ratios to those bars rather than this prose.
 
 ### Results

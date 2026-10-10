@@ -4660,6 +4660,27 @@ cargo build --release -p grit-cli -p grit-utils
 
 **Measured outcomes:** the Object reads table below is generated from committed `grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs per scenario, grit vs system git medians and peak RSS). Refresh with two invocations and `grit-bench compare run1.json run2.json --tolerance 0.10` before updating the baseline file and running `make docs`.
 
+## grit-bench: network (clone, fetch, push, ls-remote)
+
+The **`grit-bench network`** suite compares **`grit`** and system **`git`** on the same remote URLs. Cached fixtures live under **`GRIT_BENCH_NETWORK_CACHE`** (default `/tmp/grit-bench-network-cache`):
+
+| Fixture | Shape |
+| --- | --- |
+| **deep-history** | **≥50 000** commits and **≥20 000** tracked files (built once via `git fast-import`) |
+| **many-refs** | deep-history plus **≥10 000** `refs/heads/bench-ref-*` branches |
+| **large-blobs** | a small tree with multi‑MiB blobs for pack-heavy transfer |
+
+Scenarios include **clone** over **`file://`** and **grit-http-server** smart HTTP, **incremental fetch** and **no-op fetch** over **`file://`**, **push** over **`file://`**, and **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture. Set **`GRIT_BENCH_GIT_HTTP_SERVER=1`** to add a production-only scenario that compares system **`git clone`** against **git http-backend** (local CGI) vs **grit-http-server**. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
+
+```bash
+cargo build --release -p grit-cli -p grit-http-server -p grit-utils
+./target/release/grit-bench network --format json --output grit-utils/baselines/network.json
+./target/release/grit-bench compare grit-utils/baselines/network.json /tmp/network-rerun.json --tolerance 0.10
+make docs
+```
+
+Integration smoke (tiny fixtures, six scenarios): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
+
 Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git peak RSS on the large fixture; compare the table ratios to those bars rather than this prose.
 
 ### Results
@@ -4681,6 +4702,10 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | add | 2 | 2.56× | 2.59× |
 | commit | 2 | 0.58× | 0.68× |
 | merge | 2 | 3.40× | 3.84× |
+| network-clone | 2 | 10.52× | 19.63× |
+| network-fetch | 2 | 18.32× | 21.82× |
+| network-ls-remote | 1 | 1.11× | 1.11× |
+| network-push | 1 | 16.22× | 16.22× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 6 | 14.90× | 98.20× |
 | pick | 4 | 8.63× | 17.09× |
@@ -4707,6 +4732,32 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | --- | --- | ---: | ---: | ---: | --- |
 | `merge-10000` | synthetic-10000 | 105 | 310 | 2.95× | ±23.6 ms |
 | `merge-100000` | synthetic-100000 | 289 | 1,110 | 3.84× | ±93.2 ms |
+
+### network-clone
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `clone-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 1,240 | 24,356 | 19.63× | ±1,117 ms |
+| `clone-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 20,428 | 28,559 | 1.40× | ±3,056 ms |
+
+### network-fetch
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `fetch-incr-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 74.3 | 1,101 | 14.82× | ±10.6 ms |
+| `fetch-noop-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 17.0 | 372 | 21.82× | ±92.3 ms |
+
+### network-ls-remote
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `ls-remote-file-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 58.4 | 64.9 | 1.11× | ±2.20 ms |
+
+### network-push
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `push-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 52.4 | 851 | 16.22× | ±223 ms |
 
 ### object_reads
 
