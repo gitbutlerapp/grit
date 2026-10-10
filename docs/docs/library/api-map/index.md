@@ -421,6 +421,19 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::refs::Ref` | enum | A symbolic or direct reference. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.Ref.html) |
 | `grit_lib::refs::RefBatchItem` | struct | One ref create/update/delete in a batch transaction (see crate::gc::update_refs). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/struct.RefBatchItem.html) |
 | `grit_lib::refs::RefnameUnavailable` | enum | Why a reference name cannot be created (Git refs_verify_refname_available style). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.RefnameUnavailable.html) |
+| `grit_lib::refs::store` | module | Pluggable reference storage: typed transactions and backends. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/index.html) |
+| `grit_lib::refs::store::Expected` | enum | Compare-and-swap expectation for a single ref update. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/enum.Expected.html) |
+| `grit_lib::refs::store::MemoryRefStore` | struct | Fully in-memory ref database with transactional updates. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.MemoryRefStore.html) |
+| `grit_lib::refs::store::PreparedRefTransaction` | trait | Committable ref update batch returned from RefStore::prepare. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/trait.PreparedRefTransaction.html) |
+| `grit_lib::refs::store::RawRef` | enum | Storage-level ref value without DWIM or resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/enum.RawRef.html) |
+| `grit_lib::refs::store::RefEntry` | struct | One ref returned from iteration, optionally with a peeled object id. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefEntry.html) |
+| `grit_lib::refs::store::RefStorageFormat` | enum | Which physical backend backs a super::RefStore. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/enum.RefStorageFormat.html) |
+| `grit_lib::refs::store::RefStore` | trait | Reference storage backend (loose/packed files, reftable, or in-memory). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/trait.RefStore.html) |
+| `grit_lib::refs::store::RefStoreError` | enum | Failure modes for reference store reads and transactions. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/enum.RefStoreError.html) |
+| `grit_lib::refs::store::RefTransaction` | struct | Batch of ref updates prepared for super::RefStore::prepare. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefTransaction.html) |
+| `grit_lib::refs::store::RefUpdate` | struct | One ref create, update, delete, or reflog-only touch in a transaction. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefUpdate.html) |
+| `grit_lib::refs::store::RefUpdateFlags` | struct | Per-update flags (Git REF_NO_DEREF / REF_LOG_ONLY semantics). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefUpdateFlags.html) |
+| `grit_lib::refs::store::ReflogUpdate` | struct | Metadata appended to a ref update for the reflog. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.ReflogUpdate.html) |
 | `grit_lib::refs_fsck` | module | Reference database consistency checks for git refs verify and git fsck --references. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/index.html) |
 | `grit_lib::refs_fsck::RefsFsckIssue` | struct | One diagnostic (use format_refs_fsck_line for Git-compatible output). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/struct.RefsFsckIssue.html) |
 | `grit_lib::refs_fsck::RefsFsckSeverity` | enum | Severity of a refs-fsck diagnostic. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/enum.RefsFsckSeverity.html) |

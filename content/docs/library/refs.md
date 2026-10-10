@@ -27,6 +27,10 @@ By default, grit uses the **files** backend: one file per ref under `refs/`, plu
 
 When `extensions.refStorage = reftable` is set in config, the same functions dispatch to the **reftable** backend ([`is_reftable_repo`](rustdoc:grit_lib::reftable::is_reftable_repo)). Reflog appends and ref listing go through reftable files instead of `logs/` and loose ref files. You do not choose the backend per call; discovery is automatic from the repository layout and config.
 
+## Pluggable ref storage (`RefStore`)
+
+For embedders and upcoming repository wiring, [`refs::store`](rustdoc:grit_lib::refs::store) defines a [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) trait: raw reads, sorted prefix iteration, compare-and-swap transactions ([`RefTransaction`](rustdoc:grit_lib::refs::store::RefTransaction) → prepare/commit/abort), and reflog helpers. [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) is a fully in-memory backend for tests and hosts that keep refs outside a git directory. Files and reftable repositories will implement the same trait in later steps; free functions such as [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref) remain the path-based API for on-disk repos today.
+
 ## Example
 
 The program below resolves `HEAD`, lists branches and tags, updates `refs/heads/library-guide-demo`, and appends a reflog entry:
