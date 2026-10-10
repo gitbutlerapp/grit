@@ -55,3 +55,9 @@ Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_st
 ## Conformance tests
 
 The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](rustdoc:grit_lib::odb::OdbBuilder).
+
+## Example: append-only packfile KV store
+
+`grit-examples` ships a single-file `PackfileKvStore` in `grit_examples::packfile_kv` (zlib records plus an in-memory index rebuilt on open) and a walkthrough that commits through a custom primary, walks history, and exports loose objects for system Git:
+
+<!-- include: grit-examples/examples/custom-object-store.rs -->

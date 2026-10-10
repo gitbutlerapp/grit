@@ -54,3 +54,35 @@ Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_st
 ## Conformance tests
 
 The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html).
+
+## Example: append-only packfile KV store
+
+`grit-examples` ships a single-file `PackfileKvStore` in `grit_examples::packfile_kv` (zlib records plus an in-memory index rebuilt on open) and a walkthrough that commits through a custom primary, walks history, and exports loose objects for system Git:
+
+```rust
+//! Custom append-only object store wired through [`OdbBuilder::primary`].
+//!
+//! Writes a small commit graph in the KV store, walks history with [`rev_list`],
+//! then exports objects as loose files for interoperability with system Git.
+
+use std::env;
+use std::path::PathBuf;
+
+use grit_examples::packfile_kv;
+
+fn main() -> grit_lib::error::Result<()> {
+    let (root, _tmpdir) = match env::args().nth(1) {
+        Some(path) => (PathBuf::from(path), None),
+        None => {
+            let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+            let root = dir.path().to_path_buf();
+            (root, Some(dir))
+        }
+    };
+    let log = packfile_kv::run_custom_object_store_demo(&root)?;
+    for oid in log {
+        println!("{oid}");
+    }
+    Ok(())
+}
+```
