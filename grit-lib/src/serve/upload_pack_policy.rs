@@ -206,10 +206,26 @@ fn reachable_from_advertised(
         let Ok(obj) = repo.odb.read(&oid) else {
             continue;
         };
-        if obj.kind == ObjectKind::Commit {
-            if let Ok(c) = crate::objects::parse_commit(&obj.data) {
-                q.extend(c.parents);
+        match obj.kind {
+            ObjectKind::Commit => {
+                if let Ok(c) = crate::objects::parse_commit(&obj.data) {
+                    q.extend(c.parents);
+                    q.push_back(c.tree);
+                }
             }
+            ObjectKind::Tree => {
+                if let Ok(entries) = crate::objects::parse_tree(&obj.data) {
+                    for entry in entries {
+                        q.push_back(entry.oid);
+                    }
+                }
+            }
+            ObjectKind::Tag => {
+                if let Ok(tag) = crate::objects::parse_tag(&obj.data) {
+                    q.push_back(tag.object);
+                }
+            }
+            ObjectKind::Blob => {}
         }
     }
     Ok(seen)

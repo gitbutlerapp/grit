@@ -315,7 +315,13 @@ pub fn build_pack_with_shallow_and_filter(
             .config_git_dir()
             .ok_or_else(|| Error::Message("filter pack requires ODB config git dir".into()))?;
         let repo = Repository::open(git_dir, None)?;
+        let allowed =
+            collect_reachable_excluding(odb, wants, &have_closure, false, source_shallow)?;
+        let allowed_set: HashSet<ObjectId> = allowed.into_iter().collect();
         enumerate_filtered_send(&repo, wants, haves, filter, &have_closure)?
+            .into_iter()
+            .filter(|oid| allowed_set.contains(oid))
+            .collect()
     } else {
         collect_reachable_excluding(odb, wants, &have_closure, false, source_shallow)?
     };

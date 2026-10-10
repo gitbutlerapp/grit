@@ -162,9 +162,6 @@ fn relative_deepen_depth(
         if client_set.contains(&oid) {
             max_to_shallow = max_to_shallow.max(depth);
         }
-        if depth > 256 {
-            continue;
-        }
         for p in parent_commits(repo, oid).ok()? {
             let nd = depth.saturating_add(1);
             let prev = best_depth.get(&p).copied().unwrap_or(usize::MAX);

@@ -1768,6 +1768,7 @@ fn negotiate_pack_v2_http(
             Some(&mut pack_receive),
             &mut shallow_update,
             progress,
+            sideband_all,
         )?;
         got_pack = true;
         Ok(())
@@ -1819,7 +1820,7 @@ fn negotiate_pack_v2_http(
             )?;
             let resp = client.post(post_url, content_type, accept, &req, Some(git_protocol))?;
             let mut cur = Cursor::new(resp);
-            let ack = crate::fetch::read_v2_acknowledgments(&mut cur)?;
+            let ack = crate::fetch::read_v2_acknowledgments(&mut cur, sideband_all)?;
             if let Some(round) = ack {
                 if round.ready {
                     read_pack_from_reader(&mut cur)?;
