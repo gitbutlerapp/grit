@@ -425,17 +425,17 @@ const COMMON_LIST: &[CommonDir] = &[
     CommonDir {
         is_dir: true,
         is_common: false,
-        path: "logs/refs/bisect",
+        path: crate::refs::store::paths::LOGS_REFS_BISECT,
     },
     CommonDir {
         is_dir: true,
         is_common: false,
-        path: "logs/refs/rewritten",
+        path: crate::refs::store::paths::LOGS_REFS_REWRITTEN,
     },
     CommonDir {
         is_dir: true,
         is_common: false,
-        path: "logs/refs/worktree",
+        path: crate::refs::store::paths::LOGS_REFS_WORKTREE,
     },
     CommonDir {
         is_dir: true,
@@ -500,7 +500,7 @@ const COMMON_LIST: &[CommonDir] = &[
     CommonDir {
         is_dir: false,
         is_common: true,
-        path: "packed-refs",
+        path: crate::refs::store::paths::packed_refs_rel(),
     },
     CommonDir {
         is_dir: false,
@@ -587,8 +587,8 @@ fn key_has_prefix_node(key: &[u8], node: &[u8]) -> bool {
 /// True when the relative git-dir path `rel` belongs to the common (shared)
 /// directory, mirroring Git's `update_common_dir` decision (`git/path.c`).
 ///
-/// `rel` is the component after the git dir (e.g. `logs/refs`, `config`,
-/// `HEAD`). Any trailing `.lock` suffix is ignored for the decision, exactly as
+/// `rel` is the component after the git dir (for example the reflog prefix from
+/// [`crate::refs::store::paths::logs_refs_rel`], `config`, or `HEAD`). Any trailing `.lock` suffix is ignored for the decision, exactly as
 /// `update_common_dir` strips `LOCK_SUFFIX` before consulting the trie.
 #[must_use]
 pub fn is_common_git_path(rel: &str) -> bool {
@@ -886,41 +886,44 @@ mod git_path_component_tests {
 
     #[test]
     fn is_common_git_path_matches_git_common_list() {
+        use crate::refs::store::paths;
+        let common_cases = [
+            paths::logs_refs_rel().to_owned(),
+            format!("{}/", paths::logs_refs_rel()),
+            paths::logs_refs_child("bisec/foo"),
+            paths::logs_refs_child("bisec"),
+            paths::logs_refs_child("bisectfoo"),
+            "objects".to_owned(),
+            "objects/bar".to_owned(),
+            "info/exclude".to_owned(),
+            "info/grafts".to_owned(),
+            "remotes/bar".to_owned(),
+            "branches/bar".to_owned(),
+            paths::LOGS_REFS_HEADS_MAIN.to_owned(),
+            "refs/heads/main".to_owned(),
+            "hooks/me".to_owned(),
+            "config".to_owned(),
+            paths::packed_refs_rel().to_owned(),
+            "shallow".to_owned(),
+            "common".to_owned(),
+            "common/file".to_owned(),
+        ];
         // Common (resolved against the common dir) — t0060 cases.
-        for p in [
-            "logs/refs",
-            "logs/refs/",
-            "logs/refs/bisec/foo",
-            "logs/refs/bisec",
-            "logs/refs/bisectfoo",
-            "objects",
-            "objects/bar",
-            "info/exclude",
-            "info/grafts",
-            "remotes/bar",
-            "branches/bar",
-            "logs/refs/heads/main",
-            "refs/heads/main",
-            "hooks/me",
-            "config",
-            "packed-refs",
-            "shallow",
-            "common",
-            "common/file",
-        ] {
+        for p in &common_cases {
             assert!(is_common_git_path(p), "{p} should be common");
         }
+        let worktree_cases = [
+            "index".to_owned(),
+            "index.lock".to_owned(),
+            "HEAD".to_owned(),
+            "logs/HEAD".to_owned(),
+            "logs/HEAD.lock".to_owned(),
+            paths::logs_refs_child("bisect/foo"),
+            "info/sparse-checkout".to_owned(),
+            "refs/bisect/foo".to_owned(),
+        ];
         // Per-worktree (resolved against the git dir) — t0060 cases.
-        for p in [
-            "index",
-            "index.lock",
-            "HEAD",
-            "logs/HEAD",
-            "logs/HEAD.lock",
-            "logs/refs/bisect/foo",
-            "info/sparse-checkout",
-            "refs/bisect/foo",
-        ] {
+        for p in &worktree_cases {
             assert!(!is_common_git_path(p), "{p} should be worktree-local");
         }
     }

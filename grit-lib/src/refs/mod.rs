@@ -397,7 +397,7 @@ fn read_raw_ref_at(path: PathBuf) -> Result<Option<RawRefLookup>> {
 }
 
 fn packed_ref_with_prefix(git_dir: &Path, prefix_with_slash: &str) -> Result<Option<String>> {
-    let packed = git_dir.join("packed-refs");
+    let packed = store::paths::packed_refs_path(git_dir);
     let content = match fs::read_to_string(&packed) {
         Ok(c) => c,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -941,7 +941,7 @@ fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, 
 }
 
 pub(crate) fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, ObjectId>> {
-    let packed_path = store.join("packed-refs");
+    let packed_path = store::paths::packed_refs_path(store);
     let data = match fs::read(&packed_path) {
         Ok(d) => d,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
@@ -1430,7 +1430,7 @@ pub(crate) fn remove_packed_ref_under_lock(git_dir: &Path, refname: &str) -> Res
 }
 
 fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: bool) -> Result<()> {
-    let packed_path = git_dir.join("packed-refs");
+    let packed_path = store::paths::packed_refs_path(git_dir);
     let content = match fs::read(&packed_path) {
         Ok(c) => c,
         Err(e)
@@ -2316,7 +2316,7 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
     let odb =
         crate::odb::Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf());
     let mut merged: HashMap<String, (ObjectId, Option<ObjectId>)> = HashMap::new();
-    let packed_path = git_dir.join("packed-refs");
+    let packed_path = store::paths::packed_refs_path(git_dir);
     if let Ok(data) = fs::read(&packed_path) {
         parse_packed_refs_to_map(&packed_path, &data)?;
         let content = String::from_utf8(data)
@@ -2406,7 +2406,7 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
 
 /// Rewrite `packed-refs` under the packed-refs lock (tempfile + rename).
 fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
-    let packed_path = git_dir.join("packed-refs");
+    let packed_path = store::paths::packed_refs_path(git_dir);
     let lock = lock_path_for_ref(&packed_path);
     let abs_lock = fs::canonicalize(git_dir)
         .map(|d| d.join("packed-refs.lock"))
@@ -3196,7 +3196,7 @@ mod read_raw_ref_tests {
         let dir = tempdir().unwrap();
         let git_dir = dir.path();
         fs::write(
-            git_dir.join("packed-refs"),
+            store::paths::packed_refs_path(git_dir),
             "# pack-refs with: peeled fully-peeled \n\
              0000000000000000000000000000000000000000 refs/heads/packed\n",
         )
@@ -3216,7 +3216,7 @@ mod packed_refs_parse_tests {
     #[test]
     fn parse_rejects_garbage_line() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("packed-refs");
+        let path = store::paths::packed_refs_path(dir.path());
         fs::write(
             &path,
             "# pack-refs with: peeled\n\
@@ -3234,7 +3234,7 @@ mod packed_refs_parse_tests {
     #[test]
     fn parse_rejects_carriage_return_bytes() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("packed-refs");
+        let path = store::paths::packed_refs_path(dir.path());
         fs::write(
             &path,
             "# pack-refs with: peeled\n\
@@ -3251,7 +3251,7 @@ mod packed_refs_parse_tests {
     #[test]
     fn parse_rejects_blank_line_and_missing_final_newline() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("packed-refs");
+        let path = store::paths::packed_refs_path(dir.path());
         fs::write(
             &path,
             "# pack-refs with: peeled\n\n\
@@ -3280,7 +3280,7 @@ mod packed_refs_parse_tests {
     #[test]
     fn parse_rejects_orphan_peel_and_double_space() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("packed-refs");
+        let path = store::paths::packed_refs_path(dir.path());
         fs::write(
             &path,
             "# pack-refs with: peeled\n\

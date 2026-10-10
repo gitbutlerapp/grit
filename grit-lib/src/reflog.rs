@@ -552,17 +552,27 @@ pub fn list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
         if logs_dir.join("HEAD").is_file() && seen.insert("HEAD".to_string()) {
             out.push("HEAD".to_string());
         }
-        let refs_logs = logs_dir.join("refs");
+        let refs_logs = crate::refs::store::paths::logs_refs_from_logs_root(logs_dir);
         if refs_logs.is_dir() {
             collect_reflog_refs(&refs_logs, "refs", out, seen, skip_per_worktree_refs)?;
         }
         Ok(())
     }
 
-    collect_from_logs_root(&git_dir.join("logs"), &mut refs, &mut seen, false)?;
+    collect_from_logs_root(
+        &crate::refs::store::paths::logs_dir_path(git_dir),
+        &mut refs,
+        &mut seen,
+        false,
+    )?;
     if let Some(common) = refs::common_dir(git_dir) {
         if common != git_dir {
-            collect_from_logs_root(&common.join("logs"), &mut refs, &mut seen, true)?;
+            collect_from_logs_root(
+                &crate::refs::store::paths::logs_dir_path(&common),
+                &mut refs,
+                &mut seen,
+                true,
+            )?;
         }
     }
 

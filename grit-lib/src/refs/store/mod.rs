@@ -10,6 +10,7 @@ mod error;
 mod files;
 mod memory;
 mod open;
+pub mod paths;
 mod reftable;
 mod routing;
 mod semantics;

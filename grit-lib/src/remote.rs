@@ -394,9 +394,11 @@ impl Remote {
         connect: ConnectOptions,
     ) -> RemoteResult<FetchOutcome> {
         match url {
-            RemoteUrl::Bundle(path) => {
-                Ok(crate::bundle_remote::fetch_from_bundle(&repo.git_dir, path, opts)?)
-            }
+            RemoteUrl::Bundle(path) => Ok(crate::bundle_remote::fetch_from_bundle(
+                &repo.git_dir,
+                path,
+                opts,
+            )?),
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git =
                     local_git_dir_from_url(url, &repo.git_dir, repo.work_tree.as_deref())?;
@@ -770,9 +772,8 @@ fn parse_list_refs_v2_response(
                     continue;
                 }
                 if name == "HEAD" {
-                    let sym = symref_target.filter(|t| {
-                        crate::refs::is_valid_advertised_symref_target(t)
-                    });
+                    let sym =
+                        symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t));
                     if let Some(t) = sym.clone() {
                         head_symref = Some(t);
                     }
@@ -1088,7 +1089,7 @@ fn read_packed_refs(git_dir: &Path) -> Result<Vec<(String, ObjectId)>> {
     use std::fs;
     use std::io;
 
-    let path = git_dir.join("packed-refs");
+    let path = crate::refs::store::paths::packed_refs_path(git_dir);
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),

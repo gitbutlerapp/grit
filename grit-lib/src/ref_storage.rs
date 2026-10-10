@@ -76,9 +76,23 @@ impl RefStorageFormat {
         }
     }
 
+    /// Validate an `extensions.refStorage` value from repository config.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidRefStorageFormat`] when the value is not recognized.
+    pub fn validate_config_extension(raw: &str) -> Result<()> {
+        Self::parse_config_value(raw).map(|_| ())
+    }
+
     /// Whether this format uses the reftable backend.
     #[must_use]
     pub const fn is_reftable(self) -> bool {
         matches!(self, Self::Reftable)
     }
+}
+
+/// Detect ref storage format for `git_dir` (see [`RefStorageFormat::detect`]).
+pub fn detect_format(git_dir: &Path) -> Result<RefStorageFormat> {
+    RefStorageFormat::detect(git_dir)
 }

@@ -345,7 +345,8 @@ impl RepoCaches {
                 return *v;
             }
         }
-        let v = crate::RefStorageFormat::detect(git_dir).unwrap_or(crate::RefStorageFormat::Files);
+        let v =
+            crate::ref_storage::detect_format(git_dir).unwrap_or(crate::RefStorageFormat::Files);
         if let Ok(mut guard) = self.ref_storage_format.lock() {
             guard.insert(key, v);
         }

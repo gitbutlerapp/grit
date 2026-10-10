@@ -488,7 +488,7 @@ pub fn collect_reachable_commit_oids(
     let refs_dir = git_dir.join("refs");
     collect_ref_tips(&refs_dir, &mut stack)?;
 
-    let packed_refs = git_dir.join("packed-refs");
+    let packed_refs = crate::refs::store::paths::packed_refs_path(git_dir);
     if packed_refs.exists() {
         if let Ok(content) = fs::read_to_string(&packed_refs) {
             for line in content.lines() {
@@ -587,7 +587,7 @@ pub fn count_referenced_commit_tips(
 
     collect_ref_tips(&git_dir.join("refs"), &mut tips)?;
 
-    let packed_refs = git_dir.join("packed-refs");
+    let packed_refs = crate::refs::store::paths::packed_refs_path(git_dir);
     if packed_refs.exists() {
         if let Ok(content) = fs::read_to_string(&packed_refs) {
             for line in content.lines() {

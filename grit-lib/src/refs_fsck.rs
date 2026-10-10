@@ -652,7 +652,7 @@ fn fsck_packed_refs(
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
 ) -> io::Result<()> {
-    let path = common_dir.join("packed-refs");
+    let path = crate::refs::store::paths::packed_refs_path(common_dir);
     let meta = match fs::symlink_metadata(&path) {
         Ok(m) => m,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),

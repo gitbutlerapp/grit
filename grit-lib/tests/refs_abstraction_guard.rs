@@ -32,37 +32,11 @@ fn is_excluded(path: &Path) -> bool {
         return true;
     }
 
-    const SELECTION_AND_FACADE: &[&str] = &[
+    const REF_STORAGE_SELECTION: &[&str] = &[
         "/grit-lib/src/ref_storage.rs",
         "\\grit-lib\\src\\ref_storage.rs",
-        "/grit-lib/src/refs/mod.rs",
-        "\\grit-lib\\src\\refs\\mod.rs",
-        "/grit-lib/src/reftable.rs",
-        "\\grit-lib\\src\\reftable.rs",
-        "/grit-lib/src/reflog.rs",
-        "\\grit-lib\\src\\reflog.rs",
-        "/grit-lib/src/refs_fsck.rs",
-        "\\grit-lib\\src\\refs_fsck.rs",
-        "/grit-lib/src/git_path.rs",
-        "\\grit-lib\\src\\git_path.rs",
-        "/grit-lib/src/repo_caches.rs",
-        "\\grit-lib\\src\\repo_caches.rs",
     ];
-    if SELECTION_AND_FACADE.iter().any(|p| path_str.contains(p)) {
-        return true;
-    }
-
-    const PACKED_REFS_EXTRA: &[&str] = &[
-        "/grit-lib/src/remote.rs",
-        "\\grit-lib\\src\\remote.rs",
-        "/grit-lib/src/commit_graph_write.rs",
-        "\\grit-lib\\src\\commit_graph_write.rs",
-        "/grit-lib/src/repo.rs",
-        "\\grit-lib\\src\\repo.rs",
-        "/grit-lib/src/merge_base.rs",
-        "\\grit-lib\\src\\merge_base.rs",
-    ];
-    if PACKED_REFS_EXTRA.iter().any(|p| path_str.contains(p)) {
+    if REF_STORAGE_SELECTION.iter().any(|p| path_str.contains(p)) {
         return true;
     }
 
@@ -126,7 +100,9 @@ fn scan_rs_files(dir: &Path, violations: &mut Vec<String>) {
                         line_no + 1
                     ));
                 }
-                if line.contains(".join(\"logs\")") && line.contains("refs") {
+                if line.contains(".join(\"refs\")")
+                    && (line.contains("logs") || line.contains("\"logs/refs"))
+                {
                     violations.push(format!(
                         "{}:{}: direct reflog path join under logs/refs",
                         path.display(),

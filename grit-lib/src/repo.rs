@@ -2021,7 +2021,7 @@ pub(crate) fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Re
     }
 
     if let Some(raw) = parsed.ref_storage.as_deref() {
-        crate::ref_storage::RefStorageFormat::parse_config_value(raw)?;
+        crate::ref_storage::RefStorageFormat::validate_config_extension(raw)?;
     }
 
     if let Some(msg) = parsed.format_error_message() {
@@ -3109,7 +3109,7 @@ pub fn init_bare_clone_minimal(
     )?;
 
     fs::write(
-        git_dir.join("packed-refs"),
+        crate::refs::store::paths::packed_refs_path(git_dir),
         "# pack-refs with: peeled fully-peeled sorted\n",
     )?;
     Ok(())

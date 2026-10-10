@@ -79,7 +79,7 @@ impl FilesRefStore {
     /// Open a files backend at `config.git_dir`.
     #[must_use]
     pub fn open(config: FilesRefStoreConfig) -> Self {
-        let path = config.common_dir.join("packed-refs");
+        let path = super::paths::packed_refs_path(&config.common_dir);
         let stamp = Self::packed_refs_stamp(&path);
         let map = read_packed_refs_map(&config.common_dir).unwrap_or_default();
         Self {
@@ -119,7 +119,7 @@ impl FilesRefStore {
     }
 
     fn refresh_packed_cache_if_stale(&self) -> Result<()> {
-        let path = self.common_dir.join("packed-refs");
+        let path = super::paths::packed_refs_path(&self.common_dir);
         let stamp = Self::packed_refs_stamp(&path);
         let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
         if guard.stamp == stamp {
@@ -546,7 +546,7 @@ impl RefStore for FilesRefStore {
 
         let mut packed_lock = None;
         if self.needs_packed_lock(&updates) {
-            let packed_path = self.common_dir.join("packed-refs");
+            let packed_path = super::paths::packed_refs_path(&self.common_dir);
             let lock = lock_path_for_ref(&packed_path);
             if fs::OpenOptions::new()
                 .write(true)
@@ -558,7 +558,7 @@ impl RefStore for FilesRefStore {
                     let _ = fs::remove_file(acquired);
                 }
                 return Err(RefStoreError::LockHeld {
-                    name: "packed-refs".to_owned(),
+                    name: super::paths::PACKED_REFS.to_owned(),
                 });
             }
             packed_lock = Some(lock);
