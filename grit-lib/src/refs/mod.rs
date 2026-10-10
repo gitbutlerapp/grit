@@ -1832,11 +1832,6 @@ pub struct BranchCommitRefUpdate<'a> {
     pub reflog_message: &'a str,
 }
 
-/// Verify a branch tip matches `expected` before committing a new OID.
-///
-/// # Errors
-///
-/// Returns [`Error::RefNotFound`] or [`Error::RefStale`] when the CAS check fails.
 pub fn verify_branch_commit_cas(
     expected: Option<ObjectId>,
     current: Option<ObjectId>,
@@ -2005,6 +2000,42 @@ impl BranchCommitRefLock {
         })
     }
 
+    /// Append branch and `HEAD` reflog entries while holding the lock from [`Self::acquire`].
+    ///
+    /// Intended to run before worktree checkout so reflog I/O failures do not leave the
+    /// index or working tree ahead of `HEAD`.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O or reflog failures; the ref lock is aborted and any branch reflog line
+    /// written in this call is truncated.
+    pub fn write_reflogs(
+        &mut self,
+        git_dir: &Path,
+        update: &BranchCommitRefUpdate<'_>,
+        reflog_old: &ObjectId,
+        config: &ConfigSet,
+    ) -> Result<()> {
+        write_branch_commit_reflogs(git_dir, self, update, reflog_old, config)
+    }
+
+    /// Write the new OID into the held lock file and rename it over the branch ref.
+    ///
+    /// Call after the worktree matches `update.new_oid` when splitting reflog work from checkout.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O failures; the ref lock is aborted unless the rename succeeds.
+    pub fn finish_ref_commit(
+        mut self,
+        git_dir: &Path,
+        update: &BranchCommitRefUpdate<'_>,
+    ) -> Result<()> {
+        finish_branch_commit_ref_lock_files(git_dir, &mut self, update)?;
+        self.disarmed = true;
+        Ok(())
+    }
+
     /// Write reflogs and commit the branch ref while holding the lock from [`Self::acquire`].
     ///
     /// # Errors
@@ -2017,7 +2048,8 @@ impl BranchCommitRefLock {
         reflog_old: &ObjectId,
         config: &ConfigSet,
     ) -> Result<()> {
-        complete_branch_commit_ref_lock_files(git_dir, &mut self, update, reflog_old, config)?;
+        write_branch_commit_reflogs(git_dir, &mut self, update, reflog_old, config)?;
+        finish_branch_commit_ref_lock_files(git_dir, &mut self, update)?;
         self.disarmed = true;
         Ok(())
     }
@@ -2031,7 +2063,7 @@ impl Drop for BranchCommitRefLock {
     }
 }
 
-fn complete_branch_commit_ref_lock_files(
+fn write_branch_commit_reflogs(
     git_dir: &Path,
     lock: &mut BranchCommitRefLock,
     update: &BranchCommitRefUpdate<'_>,
@@ -2077,6 +2109,14 @@ fn complete_branch_commit_ref_lock_files(
         }
     }
 
+    Ok(())
+}
+
+fn finish_branch_commit_ref_lock_files(
+    git_dir: &Path,
+    lock: &mut BranchCommitRefLock,
+    update: &BranchCommitRefUpdate<'_>,
+) -> Result<()> {
     test_branch_ref_pause_before_commit();
 
     let storage_dir = ref_storage_dir(git_dir, update.branch_ref);
@@ -2088,7 +2128,10 @@ fn complete_branch_commit_ref_lock_files(
         let mut file = fs::OpenOptions::new().write(true).open(&lock.lock_path)?;
         file.write_all(content.as_bytes())?;
     }
-    fs::rename(&lock.lock_path, &path)?;
+    fs::rename(&lock.lock_path, &path).map_err(|err| {
+        abort_loose_ref_lock(&lock.lock_path);
+        err
+    })?;
     Ok(())
 }
 
