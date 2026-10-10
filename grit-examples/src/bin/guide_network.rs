@@ -34,7 +34,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let remote_repo = Repository::open(&remote_git_dir, None)?;
     let refs_on_remote = list_refs_from_git_dir(
         &remote_git_dir,
-        &remote_repo.odb,
+        Some(&remote_repo.odb),
         &ListRefsOptions::default(),
     )
     .map_err(grit_lib::error::Error::from)?;

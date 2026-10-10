@@ -34,6 +34,8 @@ pub struct IngestPackOptions {
     pub fix_thin: bool,
     /// Worker threads for index-pack hashing (`None`/`Some(0)` → read `pack.threads` or all CPUs).
     pub threads: Option<usize>,
+    /// Skip the post-index full-pack verify pass (safe for packs already validated on the wire).
+    pub skip_post_index_verify: bool,
 }
 
 impl IngestPackOptions {
@@ -200,7 +202,9 @@ pub fn install_pack_path(
             .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
             .collect();
         write_v2_pack_index_with_trailer(&stage_idx, &entries, &trailer, hb)?;
-        verify_pack_and_collect(&stage_idx)?;
+        if !opts.skip_post_index_verify {
+            verify_pack_and_collect(&stage_idx)?;
+        }
         std::fs::rename(&stage_pack, &final_pack).map_err(Error::Io)?;
         std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
             let _ = std::fs::remove_file(&final_pack);

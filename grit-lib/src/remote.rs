@@ -375,9 +375,7 @@ impl Remote {
             RemoteUrl::Bundle(path) => list_refs_from_bundle(path, opts),
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git = local_git_dir_from_url(&self.fetch_url, git_dir, work_tree)?;
-                let remote_odb =
-                    Odb::new(&remote_git.join("objects")).with_config_git_dir(remote_git.clone());
-                list_refs_from_git_dir(&remote_git, &remote_odb, opts)
+                list_refs_from_git_dir(&remote_git, None, opts)
             }
             wire => self.list_refs_wire(wire, git_dir, odb.as_ref(), opts, http_factory, repo),
         }
@@ -858,16 +856,11 @@ fn finalize_list_refs_output(
         }
         entries.extend(peel_lines);
     }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
     if list_refs_includes_head(opts) {
         if let Some(sym) = head_symref {
             if ref_matches_list_opts("HEAD", opts) {
-                let head_oid = entries
-                    .iter()
-                    .find(|e| e.name == sym)
-                    .map(|e| e.oid)
-                    .or(None);
-                if let Some(oid) = head_oid {
+                if let Some(oid) = entries.iter().find(|e| e.name == sym).map(|e| e.oid) {
                     entries.insert(
                         0,
                         RemoteRef {
@@ -966,9 +959,11 @@ fn list_refs_from_bundle(path: &Path, opts: &ListRefsOptions) -> RemoteResult<Ve
 /// Returns [`RemoteError::Library`] on I/O or ref resolution failures.
 pub fn list_refs_from_git_dir(
     git_dir: &Path,
-    odb: &Odb,
+    odb: Option<&Odb>,
     opts: &ListRefsOptions,
 ) -> RemoteResult<Vec<RemoteRef>> {
+    let mut lazy_odb: Option<Odb> = None;
+
     let mut entries = Vec::new();
     if list_refs_includes_head(opts) {
         if let Ok(head_oid) = crate::refs::resolve_ref(git_dir, "HEAD") {
@@ -1008,7 +1003,14 @@ pub fn list_refs_from_git_dir(
             if opts.peel && name.starts_with("refs/tags/") {
                 let peel_name = format!("{name}^{{}}");
                 if ref_matches_list_opts(&peel_name, opts) {
-                    if let Some(peeled) = peel_tag(odb, &oid) {
+                    let peel_odb = match odb {
+                        Some(o) => o,
+                        None => lazy_odb.get_or_insert_with(|| {
+                            Odb::new(&git_dir.join("objects"))
+                                .with_config_git_dir(git_dir.to_path_buf())
+                        }),
+                    };
+                    if let Some(peeled) = peel_tag(peel_odb, &oid) {
                         entries.push(RemoteRef {
                             name: peel_name,
                             oid: peeled,
@@ -1020,7 +1022,7 @@ pub fn list_refs_from_git_dir(
         }
     }
 
-    entries.sort_by(|a, b| {
+    entries.sort_unstable_by(|a, b| {
         if a.name == "HEAD" {
             std::cmp::Ordering::Less
         } else if b.name == "HEAD" {

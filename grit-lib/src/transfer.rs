@@ -128,6 +128,8 @@ pub struct FetchOptions {
     pub index_pack_threads: Option<usize>,
     /// When true, spool the negotiated pack to disk and return without index-pack or ref updates.
     pub pack_spool_only: bool,
+    /// Override the HTTP `Git-Protocol` header for this fetch (`None` → client default, usually v2).
+    pub http_protocol_version: Option<u8>,
 }
 
 /// Identity and message for clone reflog entries written by the library.
@@ -233,6 +235,101 @@ pub use crate::pack_objects::{
     build_pack, build_pack_from_send_list, reachable_closure, PackBuildOptions, PackObjects,
     PackObjectsOptions, PackStats,
 };
+
+pub(crate) fn collect_objects_for_commits_only(
+    odb: &Odb,
+    commits: &[ObjectId],
+    stop: Option<&HashSet<ObjectId>>,
+) -> Result<Vec<ObjectId>> {
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut ordered: Vec<ObjectId> = Vec::new();
+    let mut queue: VecDeque<ObjectId> = VecDeque::new();
+
+    let enqueue = |oid: ObjectId,
+                   queue: &mut VecDeque<ObjectId>,
+                   visited: &mut HashSet<ObjectId>,
+                   ordered: &mut Vec<ObjectId>|
+     -> bool {
+        if stop.is_some_and(|s| s.contains(&oid)) {
+            return false;
+        }
+        if visited.insert(oid) {
+            ordered.push(oid);
+            queue.push_back(oid);
+            true
+        } else {
+            false
+        }
+    };
+
+    for &c in commits {
+        enqueue(c, &mut queue, &mut visited, &mut ordered);
+    }
+
+    while let Some(oid) = queue.pop_front() {
+        let obj = odb.read(&oid)?;
+        match obj.kind {
+            ObjectKind::Commit => {
+                let commit = parse_commit(&obj.data)?;
+                enqueue(commit.tree, &mut queue, &mut visited, &mut ordered);
+            }
+            ObjectKind::Tree => {
+                for entry in parse_tree(&obj.data)? {
+                    if entry.mode == 0o160000 {
+                        continue;
+                    }
+                    enqueue(entry.oid, &mut queue, &mut visited, &mut ordered);
+                }
+            }
+            ObjectKind::Tag => {
+                let tag = parse_tag(&obj.data)?;
+                enqueue(tag.object, &mut queue, &mut visited, &mut ordered);
+            }
+            ObjectKind::Blob => {}
+        }
+    }
+    Ok(ordered)
+}
+
+pub(crate) fn build_pack_push_fast(
+    local_git_dir: &Path,
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    use crate::merge_base::{walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit};
+
+    let repo = crate::repo::Repository::open(local_git_dir, None)?;
+    let hide: Vec<ObjectId> = haves.to_vec();
+    let mut commit_set: HashSet<ObjectId> = HashSet::new();
+    for &want in wants {
+        let (_, commits) = walk_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[want],
+            &hide,
+            ReachableWalkLimit::Unlimited,
+        )?;
+        commit_set.extend(commits);
+    }
+    let commits: Vec<ObjectId> = commit_set.into_iter().collect();
+
+    let mut exclude: HashSet<ObjectId> = HashSet::new();
+    for &tip in haves {
+        exclude.insert(tip);
+        let obj = odb.read(&tip)?;
+        if obj.kind == ObjectKind::Commit {
+            let commit = parse_commit(&obj.data)?;
+            exclude.insert(commit.tree);
+        }
+    }
+    // Only pack objects attached to the new commits themselves (no parent walks).
+    let empty_haves = HashSet::new();
+    let empty_name_hashes = HashMap::new();
+    collect_objects_for_commits_only(odb, &commits, Some(&exclude)).and_then(|send| {
+        build_pack_from_send_list(odb, &send, &empty_haves, opts, &empty_name_hashes)
+    })
+}
 
 pub(crate) use crate::pack_objects::build_pack_for_local_fetch;
 
@@ -577,96 +674,6 @@ fn collect_reachable_excluding_peer(
     Ok(ordered)
 }
 
-/// The pack object type code for a Git object kind (PACK v2 base types).
-fn pack_type_code(kind: ObjectKind) -> u8 {
-    match kind {
-        ObjectKind::Commit => 1,
-        ObjectKind::Tree => 2,
-        ObjectKind::Blob => 3,
-        ObjectKind::Tag => 4,
-    }
-}
-
-/// Append a PACK object header: 3-bit type + variable-length size (little-endian
-/// 7-bit groups, MSB = continuation). Lifted from the CLI pack writer.
-fn encode_pack_object_header(buf: &mut Vec<u8>, type_code: u8, payload_len: usize) {
-    let mut size = payload_len;
-    let first = ((type_code & 0x7) << 4) | (size & 0x0f) as u8;
-    size >>= 4;
-    if size > 0 {
-        buf.push(first | 0x80);
-        while size > 0 {
-            let b = (size & 0x7f) as u8;
-            size >>= 7;
-            buf.push(if size > 0 { b | 0x80 } else { b });
-        }
-    } else {
-        buf.push(first);
-    }
-}
-
-/// Serialize `oids` as a PACK v2 stream of whole (non-delta) objects, terminated
-/// by the trailing pack checksum at the repository hash width.
-pub(crate) fn serialize_pack(
-    odb: &Odb,
-    oids: &[ObjectId],
-    opts: &PackBuildOptions,
-) -> Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    buf.extend_from_slice(b"PACK");
-    buf.extend_from_slice(&2u32.to_be_bytes());
-    let count = u32::try_from(oids.len())
-        .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
-    buf.extend_from_slice(&count.to_be_bytes());
-
-    for oid in oids {
-        let obj = odb.read(oid)?;
-        write_whole_pack_object(&mut buf, odb, *oid, obj.kind, &obj.data, opts)?;
-    }
-
-    append_pack_trailer(&mut buf, odb.hash_algo());
-    Ok(buf)
-}
-
-/// Write one whole (non-delta) pack object, reusing on-disk bytes when allowed.
-fn write_whole_pack_object(
-    buf: &mut Vec<u8>,
-    odb: &Odb,
-    oid: ObjectId,
-    kind: ObjectKind,
-    data: &[u8],
-    opts: &PackBuildOptions,
-) -> Result<()> {
-    if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
-        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
-            buf.extend_from_slice(&raw);
-            return Ok(());
-        }
-    }
-    encode_pack_object_header(buf, pack_type_code(kind), data.len());
-    write_zlib(buf, data)
-}
-
-/// Append the trailing pack checksum: the hash of everything written so far, at
-/// the repository's hash width (SHA-1 → 20 bytes, SHA-256 → 32 bytes).
-fn append_pack_trailer(buf: &mut Vec<u8>, algo: HashAlgo) {
-    buf.extend_from_slice(algo.digest(&*buf).as_bytes());
-}
-
-/// Append whole objects from `odb` to an in-progress pack (header + body, no trailer).
-pub(crate) fn append_whole_objects_from_odb(
-    buf: &mut Vec<u8>,
-    odb: &Odb,
-    oids: &[ObjectId],
-) -> Result<()> {
-    let opts = PackBuildOptions::default();
-    for oid in oids {
-        let obj = odb.read(oid)?;
-        write_whole_pack_object(buf, odb, *oid, obj.kind, &obj.data, &opts)?;
-    }
-    Ok(())
-}
-
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
 /// `git index-pack --fix-thin`.
 /// Expand a thin on-disk pack, returning the path to the pack bytes to index.
@@ -892,7 +899,7 @@ pub fn fetch_local(
     // 1. Enumerate remote refs (with HEAD symref for the default branch).
     let remote_entries = crate::remote::list_refs_from_git_dir(
         remote_git_dir,
-        &remote_odb,
+        Some(&remote_odb),
         &crate::remote::ListRefsOptions {
             symrefs: true,
             ..Default::default()

@@ -1338,6 +1338,7 @@ pub fn fetch_remote(
                 &crate::index_pack::IngestPackOptions {
                     fix_thin: true,
                     threads: opts.index_pack_threads,
+                    ..Default::default()
                 },
             )?
             .object_ids;

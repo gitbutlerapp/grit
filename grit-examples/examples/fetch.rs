@@ -15,7 +15,7 @@ fn main() -> grit_lib::error::Result<()> {
 
     let refs = list_refs_from_git_dir(
         &remote_git,
-        &remote_odb,
+        Some(&remote_odb),
         &ListRefsOptions {
             heads: true,
             ..Default::default()

@@ -205,7 +205,7 @@ pub fn remote_default_branch_local(remote_git_dir: &Path) -> Result<Option<Strin
 
     let entries = crate::remote::list_refs_from_git_dir(
         remote_git_dir,
-        &remote_odb,
+        Some(&remote_odb),
         &crate::remote::ListRefsOptions {
             symrefs: true,
             ..Default::default()

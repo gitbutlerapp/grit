@@ -35,7 +35,8 @@ use crate::objects::{parse_tag, HashAlgo, ObjectId, ObjectKind};
 use crate::pkt_line::{self, Packet};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::transfer::{
-    build_pack, open_odb, PackBuildOptions, PushOptions, PushOutcome, PushRefSpec,
+    build_pack, build_pack_push_fast, open_odb, PackBuildOptions, PushOptions, PushOutcome,
+    PushRefSpec,
 };
 use crate::transport::Connection;
 
@@ -155,7 +156,7 @@ pub fn push_remote(
     conn.writer().write_all(&commands)?;
     conn.writer().flush()?;
 
-    if let Some(pack) = build_push_pack(&plan, &local_odb, &adv)? {
+    if let Some(pack) = build_push_pack(&plan, local_git_dir, &local_odb, &adv)? {
         net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
@@ -465,6 +466,7 @@ fn build_command_block(
 /// push paths so the wire bytes are identical regardless of transport.
 fn build_push_pack(
     plan: &PushPlan,
+    local_git_dir: &Path,
     local_odb: &crate::odb::Odb,
     adv: &AdvertisedState,
 ) -> Result<Option<Vec<u8>>> {
@@ -492,6 +494,12 @@ fn build_push_pack(
         pack_opts.delta = false;
         pack_opts.reuse_deltas = false;
         pack_opts.thin = false;
+        // Negotiation `.have` lines name individual objects, not ref tips; using
+        // them as hide roots makes the commit walk treat most of history as
+        // visible and defeats the fast push path.
+        let hide_tips: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
+        return build_pack_push_fast(local_git_dir, local_odb, &wants, &hide_tips, &pack_opts)
+            .map(Some);
     }
     build_pack(local_odb, &wants, &haves, &pack_opts).map(Some)
 }

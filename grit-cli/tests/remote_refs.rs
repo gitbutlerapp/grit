@@ -146,6 +146,21 @@ fn remote_refs_file_url_matches_git_ls_remote_human() {
 }
 
 #[test]
+fn remote_refs_configured_name_ending_in_git_matches_git_ls_remote() {
+    let (_tmp, bare) = bare_fixture_with_annotated_tag();
+    let url = bare.to_str().unwrap();
+    let client = tempfile::tempdir().unwrap();
+    git(
+        Some(client.path()),
+        &["init", "-q", "-b", "main", client.path().to_str().unwrap()],
+    );
+    git(Some(client.path()), &["remote", "add", "upstream.git", url]);
+    let git_map = parse_git_ls_remote(&git(Some(client.path()), &["ls-remote", "upstream.git"]));
+    let (stdout, _) = grit_in(client.path(), &["remote", "refs", "upstream.git"]);
+    assert_eq!(parse_git_ls_remote(&stdout), git_map);
+}
+
+#[test]
 fn remote_refs_relative_path_matches_git_ls_remote() {
     let (tmp, bare) = bare_fixture_with_annotated_tag();
     let upstream = tmp.path().join("upstream");

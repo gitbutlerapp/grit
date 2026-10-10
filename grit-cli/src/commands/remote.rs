@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, OutputMode};
+use crate::stdio;
 
 /// Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).
 #[derive(Serialize)]
@@ -70,13 +71,20 @@ impl HumanRender for RemoteOutcome {
             }
             RemoteOutcome::Add { name, url } => println!("Added remote {name} → {url}"),
             RemoteOutcome::Refs { lines, .. } => {
+                let mut out = String::with_capacity(lines.len().saturating_mul(52));
                 for line in lines {
                     if line.symref {
-                        println!("ref: {}\t{}", line.oid, line.name);
+                        use std::fmt::Write as _;
+                        let _ = writeln!(out, "ref: {}\t{}", line.oid, line.name);
                     } else {
-                        println!("{}\t{}", line.oid, line.name);
+                        use std::fmt::Write as _;
+                        let _ = writeln!(out, "{}\t{}", line.oid, line.name);
                     }
                 }
+                use std::io::Write as _;
+                let mut stdout = std::io::BufWriter::new(std::io::stdout());
+                let _ = stdio::io_result(stdout.write_all(out.as_bytes()));
+                let _ = stdio::io_result(stdout.flush());
             }
         }
     }
@@ -134,37 +142,39 @@ pub fn run_refs(
     heads: bool,
     tags: bool,
     prefixes: Vec<String>,
+    mode: OutputMode,
 ) -> Result<RemoteOutcome> {
     let opts = ListRefsOptions {
         prefixes,
         heads,
         tags,
         peel: true,
+        // Match `git ls-remote` on smart HTTP: use the ref advertisement from the
+        // initial `info/refs` GET instead of a v2 `ls-refs` POST when both work.
+        protocol_version: Some(0),
         ..Default::default()
     };
     let factory = DefaultHttpClientFactory;
-    let raw =
-        if looks_like_url_or_path(remote_or_url) || local_path_argument(remote_or_url).is_some() {
-            let remote =
-                Remote::from_url(remote_or_url).map_err(|e| anyhow::Error::msg(e.to_string()))?;
-            remote
-                .list_refs(None, &opts, Some(&factory))
-                .map_err(|e| anyhow::Error::msg(e.to_string()))?
-        } else {
-            let repo = context::discover().ok();
-            let config = repo
-                .as_ref()
-                .map(|r| {
-                    ConfigSet::load(&crate::context::environment(), Some(&r.git_dir), true)
-                        .context("could not load config")
-                })
-                .transpose()?;
-            let remote = resolve_remote_or_url(config.as_ref(), remote_or_url)?;
-            remote
-                .list_refs(repo.as_ref(), &opts, Some(&factory))
-                .map_err(|e| anyhow::Error::msg(e.to_string()))?
-        };
-    let (refs, lines) = map_remote_refs(&raw);
+    let repo = if remote_or_url.contains("://") {
+        None
+    } else {
+        context::discover().ok()
+    };
+    let config = repo
+        .as_ref()
+        .map(|r| {
+            ConfigSet::load(&crate::context::environment(), Some(&r.git_dir), true)
+                .context("could not load config")
+        })
+        .transpose()?;
+    let remote = resolve_remote_or_url(config.as_ref(), remote_or_url)?;
+    let raw = remote
+        .list_refs(repo.as_ref(), &opts, Some(&factory))
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let (refs, lines) = match mode {
+        OutputMode::Human => (Vec::new(), remote_ref_lines(&raw)),
+        _ => map_remote_refs(&raw),
+    };
     Ok(RemoteOutcome::Refs { refs, lines })
 }
 
@@ -209,15 +219,7 @@ fn looks_like_url_or_path(s: &str) -> bool {
         || s.ends_with(".bundle")
 }
 
-fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine>) {
-    let mut peel_by_tag: HashMap<String, String> = HashMap::new();
-    peel_by_tag.reserve(raw.len() / 8);
-    for entry in raw {
-        if let Some(base) = entry.name.strip_suffix("^{}") {
-            peel_by_tag.insert(base.to_owned(), entry.oid.to_hex());
-        }
-    }
-
+fn remote_ref_lines(raw: &[RemoteRef]) -> Vec<RemoteRefLine> {
     let mut lines: Vec<RemoteRefLine> = Vec::with_capacity(raw.len() + 1);
     lines.extend(raw.iter().flat_map(|entry| {
         let mut out = Vec::new();
@@ -237,7 +239,19 @@ fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine
         });
         out
     }));
-    lines.sort_by(|a, b| a.name.cmp(&b.name).then(a.symref.cmp(&b.symref)));
+    lines
+}
+
+fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine>) {
+    let mut peel_by_tag: HashMap<String, String> = HashMap::new();
+    peel_by_tag.reserve(raw.len() / 8);
+    for entry in raw {
+        if let Some(base) = entry.name.strip_suffix("^{}") {
+            peel_by_tag.insert(base.to_owned(), entry.oid.to_hex());
+        }
+    }
+
+    let lines = remote_ref_lines(raw);
 
     let refs: Vec<RemoteRefEntry> = raw
         .iter()

@@ -549,7 +549,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
                 tags,
                 prefixes,
             }) => emit_with_markdown(
-                &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes)?,
+                &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes, opts.mode)?,
                 opts,
             ),
         },
