@@ -5,11 +5,14 @@
 //! back to the originating old line. Both an exact map (via the configured diff
 //! algorithm, honoring the indent heuristic) and a fuzzy fallback (for lines a
 //! parent rewrote) are provided. No I/O, no repository access — strings in,
-//! mappings out. The `grit` CLI's `compute_blame` drives the per-commit walk and
-//! calls these.
+//! mappings out. [`compute_blame`] and [`blame_file`] drive the per-commit walk and
+//! call these helpers.
+
+use std::ops::RangeInclusive;
 
 use similar::Algorithm as SimilarAlgorithm;
 
+/// Diff algorithm used when mapping lines between blob revisions during blame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlameDiffAlgorithm {
     Myers,
@@ -19,6 +22,7 @@ pub enum BlameDiffAlgorithm {
 }
 
 impl BlameDiffAlgorithm {
+    /// Map this blame diff setting to a [`similar::Algorithm`] instance.
     pub fn to_similar(self) -> SimilarAlgorithm {
         match self {
             // The `similar` crate doesn't expose histogram/minimal directly.
@@ -32,6 +36,7 @@ impl BlameDiffAlgorithm {
     }
 }
 
+/// Parse a config-style diff algorithm name (`myers`, `histogram`, …).
 pub fn parse_diff_algorithm_name(name: &str) -> Option<BlameDiffAlgorithm> {
     match name.to_ascii_lowercase().as_str() {
         "myers" | "default" => Some(BlameDiffAlgorithm::Myers),
@@ -42,6 +47,7 @@ pub fn parse_diff_algorithm_name(name: &str) -> Option<BlameDiffAlgorithm> {
     }
 }
 
+/// Whether Myers blame should drop a trailing equal-line match (Git tie-break parity).
 pub fn should_drop_tail_match_for_myers(
     diff_algorithm: BlameDiffAlgorithm,
     parent_idx: usize,
@@ -65,7 +71,7 @@ pub fn should_drop_tail_match_for_myers(
     parent_lines.iter().filter(|line| **line == tail).count() >= 2
 }
 
-/// Map each line in `new` to its origin in `old` (if any).
+/// Map each line in `new` to its origin line index in `old` (if any).
 pub fn build_line_map(
     old: &[&str],
     new: &[&str],
@@ -106,6 +112,46 @@ pub fn build_line_map(
     result
 }
 
+/// Recover line mappings by exact text match when Myers left a line unresolved.
+///
+/// Used during blame to follow moved but unchanged lines without pairing rewrites.
+pub fn build_exact_relocate_line_map(
+    old: &[&str],
+    new: &[&str],
+    exact_map: &[Option<usize>],
+) -> Vec<Option<usize>> {
+    let mut fuzzy_map = exact_map.to_vec();
+    let mut used_old = vec![0usize; old.len()];
+    for old_idx in fuzzy_map.iter().flatten() {
+        if *old_idx < used_old.len() {
+            used_old[*old_idx] += 1;
+        }
+    }
+
+    for new_idx in 0..fuzzy_map.len() {
+        if fuzzy_map[new_idx].is_some() {
+            continue;
+        }
+        let mut best: Option<(usize, usize, usize)> = None;
+        for old_idx in 0..old.len() {
+            if old[old_idx] != new[new_idx] {
+                continue;
+            }
+            let candidate = (used_old[old_idx], old_idx.abs_diff(new_idx), old_idx);
+            if best.is_none_or(|b| candidate < b) {
+                best = Some(candidate);
+            }
+        }
+        if let Some((_, _, old_idx)) = best {
+            fuzzy_map[new_idx] = Some(old_idx);
+            used_old[old_idx] += 1;
+        }
+    }
+
+    fuzzy_map
+}
+
+/// Like [`build_line_map`], but recover additional correspondences for moved/rewritten lines.
 pub fn build_fuzzy_line_map(
     old: &[&str],
     new: &[&str],
@@ -437,21 +483,20 @@ fn line_similarity_and_lcs(a: &str, b: &str) -> (f64, usize) {
 // Walks history from a starting commit, diffs successive blob versions (via the
 // line-mapping helpers above), and attributes each final-image line to the
 // commit that last touched it. Honors `.git/info/grafts`, ignored revisions
-// (`--ignore-rev`), copy/rename detection (`-C`/`-M`), reverse blame, textconv
-// filters, and `--contents`/worktree overlays. This is the domain core driven by
-// the `grit blame` / `git annotate` CLI; arg parsing, output formatting, color,
-// and tty/progress stay in the CLI.
+// copy/rename detection when configured, textconv filters, and graft parents.
+// [`blame_file`] is the repository-level entry point; the `grit blame` command
+// renders its result.
 // ---------------------------------------------------------------------------
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::crlf::{
-    convert_to_git, convert_to_worktree_eager, get_file_attrs, load_gitattributes,
-    load_gitattributes_from_index, ConversionConfig, GitAttributes,
+    convert_to_worktree_eager, get_file_attrs, load_gitattributes, load_gitattributes_from_index,
+    ConversionConfig, GitAttributes,
 };
 use crate::error::{Error as LibError, Result};
 use crate::objects::{parse_commit, parse_tree, CommitData, Object, ObjectId, ObjectKind};
@@ -472,22 +517,24 @@ type CopySourceBlameCache = (
 /// [`Repository::set_promisor_hydrate_hook`].
 pub type PromisorHydrateHook = fn(&Repository, ObjectId);
 
-/// A single line attribution.
+/// A single line attribution produced by [`compute_blame`].
 #[derive(Debug, Clone)]
 pub struct BlameLine {
+    /// Commit that last modified this line.
     pub oid: ObjectId,
     /// 1-based line number in the final file.
     pub final_lineno: usize,
-    /// 1-based line number in the originating commit.
+    /// 1-based line number in the originating commit's version of the file.
     pub orig_lineno: usize,
+    /// Text of the line in the final file.
     pub content: String,
-    /// Source filename (differs from target when -C detects a copy).
+    /// Source path when copy detection attributed the line from another file.
     pub source_file: Option<String>,
-    /// True when this line was forced through an ignored revision.
+    /// Line attribution passed through an ignored revision.
     pub ignored: bool,
-    /// True when this line could not be blamed past an ignored revision.
+    /// Line could not be blamed past an ignored revision.
     pub unblamable: bool,
-    /// Line comes from `--contents` and does not match the blamed revision (git: "External file").
+    /// Line content came from an external overlay rather than the blamed blob.
     pub external_contents: bool,
 }
 
@@ -545,16 +592,20 @@ struct TrackedLine {
     source_path: Option<String>,
 }
 
+/// Cached config and attributes for optional textconv during blame.
 #[derive(Debug, Clone)]
 pub struct BlameTextconvContext {
+    /// Repository configuration snapshot.
     pub config: ConfigSet,
     conversion: ConversionConfig,
+    /// Parsed `.gitattributes` rules for the repository.
     pub attrs: GitAttributes,
     diff_attrs: Vec<DiffAttrRule>,
     filter_process: std::sync::Arc<crate::repo_caches::RepoCaches>,
 }
 
 impl BlameTextconvContext {
+    /// Build textconv context from the open repository (config, attributes, filters).
     pub fn new(repo: &Repository) -> Self {
         let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
@@ -626,6 +677,7 @@ fn load_diff_attr_rules(repo: &Repository) -> Vec<DiffAttrRule> {
     rules
 }
 
+/// Read an object for blame, optionally invoking a promisor hydration hook on miss.
 pub fn read_object_for_blame(
     odb: &Odb,
     oid: &ObjectId,
@@ -801,8 +853,10 @@ fn read_blob_content_for_blame(
     Ok(String::from_utf8_lossy(&converted).into_owned())
 }
 
+/// Walk history and attribute each line in a blob at `start_oid` to a commit.
+///
+/// Lower-level building block; prefer [`blame_file`] for repository callers.
 #[expect(clippy::too_many_arguments)]
-/// Core blame: walk history (all parents at merges unless `first_parent_only`), diff blobs, attribute lines.
 pub fn compute_blame(
     odb: &Odb,
     start_oid: ObjectId,
@@ -1357,6 +1411,7 @@ pub fn compute_blame(
                 // Build mapping: cur_line_idx → Option<parent_line_idx>
                 let mut line_map =
                     build_line_map(&par_lines, &cur_lines, diff_algorithm, indent_heuristic);
+                line_map = build_exact_relocate_line_map(&par_lines, &cur_lines, &line_map);
                 if is_ignored {
                     line_map = build_fuzzy_line_map(&par_lines, &cur_lines, &line_map);
                 }
@@ -1435,6 +1490,22 @@ pub fn compute_blame(
                             } else {
                                 t.ignored
                             };
+                            if parent_idx < t.current_idx
+                                && !is_ignored
+                                && par_lines.len() == cur_lines.len()
+                            {
+                                result.push(BlameLine {
+                                    oid: current_oid,
+                                    final_lineno: t.final_lineno,
+                                    orig_lineno: t.current_idx + 1,
+                                    content: final_lines[t.final_lineno - 1].clone(),
+                                    source_file: None,
+                                    ignored: t.ignored,
+                                    unblamable: false,
+                                    external_contents: false,
+                                });
+                                continue;
+                            }
                             still_pending.push(TrackedLine {
                                 final_lineno: t.final_lineno,
                                 current_idx: parent_idx,
@@ -1682,523 +1753,164 @@ fn commit_parents_for_blame(
     Ok(get_commit(odb, oid, cache)?.parents)
 }
 
-/// `annotate-tests.sh` "blame huge graft": octopus graft with 29 parents on commit `00` and a
-/// two-line `0`/`0` file. Full xdiff parity with git for that many parents is not yet implemented;
-/// match git's porcelain attribution (lines from commits `01` and `10`).
-pub fn apply_annotate_huge_graft_fixup(
-    odb: &Odb,
-    start_oid: ObjectId,
-    file_path: &str,
-    grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    blame_lines: &mut [BlameLine],
-) -> Result<()> {
-    if file_path != "file" {
-        return Ok(());
-    }
-    let Some(parents) = grafts.get(&start_oid) else {
-        return Ok(());
-    };
-    if parents.len() != 29 {
-        return Ok(());
-    }
-    if blame_lines.len() != 2 {
-        return Ok(());
-    }
-    if blame_lines[0].content != "0" || blame_lines[1].content != "0" {
-        return Ok(());
-    }
-
-    let mut oid_01 = None;
-    let mut oid_10 = None;
-    for p in parents {
-        let obj = read_object_for_blame(odb, p, None)?;
-        let c = parse_commit(&obj.data)?;
-        let msg = c.message.trim();
-        if msg == "01" {
-            oid_01 = Some(*p);
-        }
-        if msg == "10" {
-            oid_10 = Some(*p);
-        }
-    }
-    let (Some(o1), Some(o2)) = (oid_01, oid_10) else {
-        return Ok(());
-    };
-
-    blame_lines[0].oid = o1;
-    blame_lines[0].orig_lineno = 1;
-    blame_lines[1].oid = o2;
-    blame_lines[1].orig_lineno = 2;
-    Ok(())
+/// Options for [`blame_file`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlameOptions {
+    /// Commit to blame at. When `None`, uses the current `HEAD` commit.
+    pub start: Option<ObjectId>,
+    /// When set, only include lines whose 1-based final line number lies in this range.
+    pub line_range: Option<RangeInclusive<usize>>,
 }
 
-pub fn load_graft_parents(git_dir: &Path) -> HashMap<ObjectId, Vec<ObjectId>> {
-    let graft_path = git_dir.join("info/grafts");
-    let Ok(contents) = fs::read_to_string(&graft_path) else {
-        return HashMap::new();
-    };
-    let mut grafts = HashMap::new();
-    // Git `read_graft_line`: each non-empty line is `commit parent1 parent2 ...` (parents optional).
-    // Upstream `annotate-tests.sh` uses `printf "%s " $graft` → one line of many OIDs: first is the
-    // grafted commit, the rest are its synthetic parents (`git/commit.c`).
-    for raw_line in contents.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let mut fields = line.split_whitespace();
-        let Some(commit_hex) = fields.next() else {
-            continue;
-        };
-        let Ok(commit_oid) = commit_hex.parse::<ObjectId>() else {
-            continue;
-        };
-        let mut parents = Vec::new();
-        let mut valid = true;
-        for parent_hex in fields {
-            match parent_hex.parse::<ObjectId>() {
-                Ok(parent_oid) => parents.push(parent_oid),
-                Err(_) => {
-                    valid = false;
-                    break;
-                }
-            }
-        }
-        if valid {
-            grafts.insert(commit_oid, parents);
-        }
-    }
-    grafts
+/// One blamed line returned by [`blame_file`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameAttributedLine {
+    /// Commit that last modified this line.
+    pub commit: ObjectId,
+    /// 1-based line number in the commit where this line originated.
+    pub original_line: usize,
+    /// 1-based line number in the blamed revision's file.
+    pub final_line: usize,
+    /// Line text in the blamed revision.
+    pub content: String,
 }
 
-pub fn peel_to_commit_oid(odb: &Odb, mut oid: ObjectId) -> Result<Option<ObjectId>> {
-    loop {
-        let obj = read_object_for_blame(odb, &oid, None)?;
-        match obj.kind {
-            ObjectKind::Commit => return Ok(Some(oid)),
-            ObjectKind::Tag => {
-                let tag = crate::objects::parse_tag(&obj.data)?;
-                oid = tag.object;
-            }
-            _ => return Ok(None),
-        }
-    }
+/// Metadata for a commit referenced by [`BlameResult::lines`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameCommitInfo {
+    /// Author identity line (`Name <email> <epoch> <tz>`).
+    pub author: String,
+    /// Author timestamp (Unix seconds).
+    pub author_time: i64,
+    /// First line of the commit message.
+    pub summary: String,
 }
 
-#[expect(clippy::too_many_arguments)]
-pub fn build_uncommitted_blame(
-    odb: &Odb,
-    start_oid: ObjectId,
-    file_path: &str,
-    content: &str,
-    ignore_revs: &HashSet<ObjectId>,
-    diff_algorithm: BlameDiffAlgorithm,
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-    copy_depth: usize,
-    first_parent_only: bool,
-    grafts: &HashMap<ObjectId, Vec<ObjectId>>,
-    indent_heuristic: bool,
-) -> Result<Vec<BlameLine>> {
-    let zero = crate::diff::zero_oid();
-    let final_lines = content_lines(content);
-
-    let mut by_content_source: Option<CopySourceBlameCache> = None;
-    if copy_depth >= 2 {
-        let head_obj = read_object_for_blame(odb, &start_oid, None)?;
-        let head_commit = parse_commit(&head_obj.data)?;
-        if let Some((source_path, source_blame)) = find_copy_source_blame(
-            odb,
-            start_oid,
-            &head_commit.tree,
-            file_path,
-            &final_lines,
-            ignore_revs,
-            diff_algorithm,
-            textconv_ctx,
-            use_textconv,
-            copy_depth,
-            true,
-            first_parent_only,
-            grafts,
-            indent_heuristic,
-        )? {
-            let mut by_content: HashMap<String, Vec<BlameLine>> = HashMap::new();
-            for line in source_blame {
-                by_content
-                    .entry(line.content.clone())
-                    .or_default()
-                    .push(line);
-            }
-            by_content_source = Some((source_path, by_content, HashMap::new()));
-        }
-    }
-
-    let mut result = Vec::with_capacity(final_lines.len());
-    for (idx, line) in final_lines.iter().enumerate() {
-        if let Some((source_path, by_content, used)) = by_content_source.as_mut() {
-            let used_key = (*line).to_owned();
-            let used_count = used.get(&used_key).copied().unwrap_or(0);
-            if let Some(pb) = by_content
-                .get(*line)
-                .and_then(|candidates| candidates.get(used_count))
-            {
-                used.insert(used_key, used_count + 1);
-                result.push(BlameLine {
-                    oid: pb.oid,
-                    final_lineno: idx + 1,
-                    orig_lineno: pb.orig_lineno,
-                    content: (*line).to_string(),
-                    source_file: pb.source_file.clone().or_else(|| Some(source_path.clone())),
-                    ignored: pb.ignored,
-                    unblamable: pb.unblamable,
-                    external_contents: false,
-                });
-                continue;
-            }
-        }
-
-        result.push(BlameLine {
-            oid: zero,
-            final_lineno: idx + 1,
-            orig_lineno: idx + 1,
-            content: (*line).to_string(),
-            source_file: None,
-            ignored: false,
-            unblamable: false,
-            external_contents: false,
-        });
-    }
-
-    Ok(result)
+/// Full blame result for one file at one revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameResult {
+    /// Blamed lines in final-line order (after any line-range filter).
+    pub lines: Vec<BlameAttributedLine>,
+    /// Commit metadata keyed by object id for every line in `lines`.
+    pub commits: HashMap<ObjectId, BlameCommitInfo>,
 }
 
-fn read_commit_lines_for_blame(
-    odb: &Odb,
-    commit: &CommitData,
-    file_path: &str,
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-) -> Result<Vec<String>> {
-    let Some((blob_oid, blob_mode)) = resolve_path_in_tree_entry(odb, &commit.tree, file_path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let content = read_blob_content_for_blame(
-        odb,
-        &blob_oid,
-        file_path,
-        blob_mode,
-        textconv_ctx,
-        use_textconv,
+/// Blame `path` at `options.start` (or `HEAD`) and return per-line attributions.
+///
+/// `path` is repository-relative when the repository has a work tree.
+///
+/// # Errors
+///
+/// Returns an error when `HEAD` is unborn, the revision or path cannot be resolved,
+/// or object data cannot be read.
+pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Result<BlameResult> {
+    let start_oid = resolve_blame_start(repo, options.start)?;
+    let file_path = normalize_blame_path(repo, path);
+    let config = repo.config().map(|cfg| (*cfg).clone()).unwrap_or_default();
+    let grafts = crate::rev_parse::load_graft_parents(&repo.git_dir);
+    let diff_algorithm = config
+        .get("diff.algorithm")
+        .as_ref()
+        .and_then(|name| parse_diff_algorithm_name(name))
+        .unwrap_or(BlameDiffAlgorithm::Myers);
+    let indent_heuristic = config
+        .get_bool("diff.indentHeuristic")
+        .and_then(|v| v.ok())
+        .unwrap_or(false);
+    let ignore_revs = HashSet::new();
+
+    let raw = compute_blame(
+        &repo.odb,
+        start_oid,
+        &file_path,
+        &ignore_revs,
+        diff_algorithm,
+        None,
+        false,
+        0,
+        false,
+        &grafts,
+        indent_heuristic,
     )?;
-    Ok(content_lines(&content)
-        .iter()
-        .map(|line| (*line).to_string())
-        .collect())
-}
 
-#[expect(clippy::too_many_arguments)]
-pub fn compute_reverse_blame(
-    odb: &Odb,
-    range_start: ObjectId,
-    range_end: ObjectId,
-    file_path: &str,
-    diff_algorithm: BlameDiffAlgorithm,
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-    _first_parent_only: bool,
-) -> Result<Vec<BlameLine>> {
-    let mut commit_cache: HashMap<ObjectId, CommitData> = HashMap::new();
-    let mut chain_rev = vec![range_end];
-    let mut cur = range_end;
-    while cur != range_start {
-        let commit = get_commit(odb, cur, &mut commit_cache)?;
-        let next_parent = commit.parents.first().copied();
-        let Some(parent) = next_parent else {
-            return Err(LibError::Message(
-                "--reverse range end is not reachable from start".to_string(),
-            ));
-        };
-        cur = parent;
-        chain_rev.push(cur);
-    }
-    chain_rev.reverse();
-
-    let start_commit = get_commit(odb, range_start, &mut commit_cache)?;
-    let mut prev_lines =
-        read_commit_lines_for_blame(odb, &start_commit, file_path, textconv_ctx, use_textconv)?;
-
-    if prev_lines.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut active: Vec<(usize, usize, ObjectId, String)> = prev_lines
-        .iter()
-        .enumerate()
-        .map(|(idx, line)| (idx + 1, idx, range_start, line.clone()))
+    let mut lines: Vec<BlameAttributedLine> = raw
+        .into_iter()
+        .map(|line| BlameAttributedLine {
+            commit: line.oid,
+            original_line: line.orig_lineno,
+            final_line: line.final_lineno,
+            content: line.content,
+        })
         .collect();
-    let mut result = Vec::with_capacity(active.len());
 
-    for oid in chain_rev.iter().skip(1) {
-        let commit = get_commit(odb, *oid, &mut commit_cache)?;
-        let cur_lines =
-            read_commit_lines_for_blame(odb, &commit, file_path, textconv_ctx, use_textconv)?;
-
-        let old_refs: Vec<&str> = prev_lines.iter().map(|s| s.as_str()).collect();
-        let new_refs: Vec<&str> = cur_lines.iter().map(|s| s.as_str()).collect();
-        let new_to_old = build_line_map(&old_refs, &new_refs, diff_algorithm, false);
-        let mut old_to_new = vec![None; prev_lines.len()];
-        for (new_idx, old_idx_opt) in new_to_old.iter().enumerate() {
-            if let Some(old_idx) = *old_idx_opt {
-                if old_idx < old_to_new.len() && old_to_new[old_idx].is_none() {
-                    old_to_new[old_idx] = Some(new_idx);
-                }
-            }
-        }
-
-        let mut next_active = Vec::new();
-        for (final_lineno, prev_idx, last_oid, content) in active.drain(..) {
-            if let Some(next_idx) = old_to_new.get(prev_idx).and_then(|idx| *idx) {
-                next_active.push((final_lineno, next_idx, *oid, content));
-            } else {
-                result.push(BlameLine {
-                    oid: last_oid,
-                    final_lineno,
-                    orig_lineno: final_lineno,
-                    content,
-                    source_file: None,
-                    ignored: false,
-                    unblamable: false,
-                    external_contents: false,
-                });
-            }
-        }
-
-        active = next_active;
-        prev_lines = cur_lines;
-        if active.is_empty() {
-            break;
-        }
+    if let Some(range) = &options.line_range {
+        lines.retain(|line| range.contains(&line.final_line));
     }
 
-    for (final_lineno, _idx, last_oid, content) in active {
-        result.push(BlameLine {
-            oid: last_oid,
-            final_lineno,
-            orig_lineno: final_lineno,
-            content,
-            source_file: None,
-            ignored: false,
-            unblamable: false,
-            external_contents: false,
-        });
+    let mut commits = HashMap::new();
+    for line in &lines {
+        commits
+            .entry(line.commit)
+            .or_insert_with(|| load_blame_commit_info(&repo.odb, line.commit));
     }
 
-    result.sort_by_key(|line| line.final_lineno);
-    Ok(result)
+    Ok(BlameResult { lines, commits })
 }
 
-pub fn apply_final_content_overlay(
-    odb: &Odb,
-    start_oid: ObjectId,
-    file_path: &str,
-    base_blame: &[BlameLine],
-    final_text: &str,
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-) -> Result<Option<Vec<BlameLine>>> {
-    let head_commit_obj = read_object_for_blame(odb, &start_oid, None)?;
-    let head_commit = parse_commit(&head_commit_obj.data)?;
-    let Some((head_blob_oid, head_mode)) =
-        resolve_path_in_tree_entry(odb, &head_commit.tree, file_path)?
-    else {
-        return Ok(None);
-    };
-    if !is_regular_mode(head_mode) {
-        return Ok(None);
+fn resolve_blame_start(repo: &Repository, start: Option<ObjectId>) -> Result<ObjectId> {
+    if let Some(oid) = start {
+        return Ok(oid);
     }
-
-    let head_content = read_blob_content_for_blame(
-        odb,
-        &head_blob_oid,
-        file_path,
-        head_mode,
-        textconv_ctx,
-        use_textconv,
-    )?;
-    let head_lines = content_lines(&head_content);
-    let final_lines = content_lines(final_text);
-    if head_lines == final_lines {
-        return Ok(None);
+    use crate::state::{resolve_head, HeadState};
+    match resolve_head(&repo.git_dir)? {
+        HeadState::Detached { oid } => Ok(oid),
+        HeadState::Branch { oid: Some(oid), .. } => Ok(oid),
+        HeadState::Branch { oid: None, .. } | HeadState::Invalid => Err(LibError::Message(
+            "cannot blame: HEAD does not point to a commit".to_string(),
+        )),
     }
-
-    let map = build_line_map(&head_lines, &final_lines, BlameDiffAlgorithm::Myers, false);
-    let zero = crate::diff::zero_oid();
-
-    let mut by_head_line: HashMap<usize, &BlameLine> = HashMap::new();
-    for line in base_blame {
-        by_head_line.insert(line.final_lineno, line);
-    }
-
-    let mut overlaid = Vec::with_capacity(final_lines.len());
-    for (new_idx, content) in final_lines.iter().enumerate() {
-        if let Some(old_idx) = map.get(new_idx).copied().flatten() {
-            if let Some(existing) = by_head_line.get(&(old_idx + 1)) {
-                overlaid.push(BlameLine {
-                    oid: existing.oid,
-                    final_lineno: new_idx + 1,
-                    orig_lineno: existing.orig_lineno,
-                    content: (*content).to_string(),
-                    source_file: existing.source_file.clone(),
-                    ignored: existing.ignored,
-                    unblamable: existing.unblamable,
-                    external_contents: false,
-                });
-                continue;
-            }
-        }
-
-        overlaid.push(BlameLine {
-            oid: zero,
-            final_lineno: new_idx + 1,
-            orig_lineno: new_idx + 1,
-            content: (*content).to_string(),
-            source_file: None,
-            ignored: false,
-            unblamable: false,
-            external_contents: true,
-        });
-    }
-
-    Ok(Some(overlaid))
 }
 
-pub fn apply_worktree_overlay(
-    repo: &Repository,
-    odb: &Odb,
-    start_oid: ObjectId,
-    file_path: &str,
-    base_blame: &[BlameLine],
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-) -> Result<Option<Vec<BlameLine>>> {
-    let Some(work_tree) = repo.work_tree.as_deref() else {
-        return Ok(None);
-    };
-    let abs_path = work_tree.join(file_path);
-    if !abs_path.exists() {
-        return Ok(None);
-    }
-    let raw_worktree = std::fs::read(&abs_path)?;
-    let raw_worktree_text = String::from_utf8_lossy(&raw_worktree).into_owned();
-
-    let head_commit_obj = read_object_for_blame(odb, &start_oid, None)?;
-    let head_commit = parse_commit(&head_commit_obj.data)?;
-    let Some((head_blob_oid, head_mode)) =
-        resolve_path_in_tree_entry(odb, &head_commit.tree, file_path)?
-    else {
-        return Ok(None);
-    };
-    if !is_regular_mode(head_mode) {
-        return Ok(None);
-    }
-
-    let head_content = read_blob_content_for_blame(
-        odb,
-        &head_blob_oid,
-        file_path,
-        head_mode,
-        textconv_ctx,
-        use_textconv,
-    )?;
-    let worktree_content =
-        read_worktree_content_for_blame(&abs_path, file_path, textconv_ctx, use_textconv)?;
-    let has_textconv = use_textconv
-        && textconv_ctx
-            .and_then(|ctx| resolve_textconv_command(ctx, file_path))
-            .is_some();
-
-    if head_content == worktree_content {
-        return Ok(None);
-    }
-    if !has_textconv && head_content == raw_worktree_text {
-        return Ok(None);
-    }
-
-    let head_lines = content_lines(&head_content);
-    let wt_lines = content_lines(&worktree_content);
-    let map = build_line_map(&head_lines, &wt_lines, BlameDiffAlgorithm::Myers, false);
-    let zero = crate::diff::zero_oid();
-
-    let mut by_head_line: HashMap<usize, &BlameLine> = HashMap::new();
-    for line in base_blame {
-        by_head_line.insert(line.final_lineno, line);
-    }
-
-    let mut overlaid = Vec::with_capacity(wt_lines.len());
-    for (new_idx, content) in wt_lines.iter().enumerate() {
-        if let Some(old_idx) = map.get(new_idx).copied().flatten() {
-            if let Some(existing) = by_head_line.get(&(old_idx + 1)) {
-                overlaid.push(BlameLine {
-                    oid: existing.oid,
-                    final_lineno: new_idx + 1,
-                    orig_lineno: existing.orig_lineno,
-                    content: (*content).to_string(),
-                    source_file: existing.source_file.clone(),
-                    ignored: existing.ignored,
-                    unblamable: existing.unblamable,
-                    external_contents: false,
-                });
-                continue;
-            }
-        }
-
-        overlaid.push(BlameLine {
-            oid: zero,
-            final_lineno: new_idx + 1,
-            orig_lineno: new_idx + 1,
-            content: (*content).to_string(),
-            source_file: None,
-            ignored: false,
-            unblamable: false,
-            external_contents: false,
-        });
-    }
-
-    Ok(Some(overlaid))
-}
-
-fn read_worktree_content_for_blame(
-    abs_path: &Path,
-    rel_path: &str,
-    textconv_ctx: Option<&BlameTextconvContext>,
-    use_textconv: bool,
-) -> Result<String> {
-    let bytes = std::fs::read(abs_path)?;
-
-    // Normalize worktree content to git-internal form first (CRLF/text attrs).
-    let normalized = if let Some(ctx) = textconv_ctx {
-        let attrs = get_file_attrs(&ctx.attrs, rel_path, false, &ctx.config);
-        convert_to_git(&bytes, rel_path, &ctx.conversion, &attrs).map_err(LibError::Filter)?
+fn normalize_blame_path(repo: &Repository, path: &str) -> String {
+    if let Some(work_tree) = repo.work_tree.as_deref() {
+        crate::pathspec::normalize_worktree_file_path(path, work_tree, None)
     } else {
-        bytes.clone()
-    };
-
-    if !use_textconv {
-        return Ok(String::from_utf8_lossy(&normalized).into_owned());
+        path.to_string()
     }
+}
 
-    let Some(ctx) = textconv_ctx else {
-        return Ok(String::from_utf8_lossy(&normalized).into_owned());
+fn load_blame_commit_info(odb: &Odb, oid: ObjectId) -> BlameCommitInfo {
+    let fallback = BlameCommitInfo {
+        author: String::new(),
+        author_time: 0,
+        summary: String::new(),
     };
-    let Some(command) = resolve_textconv_command(ctx, rel_path) else {
-        return Ok(String::from_utf8_lossy(&normalized).into_owned());
+    let Ok(obj) = read_object_for_blame(odb, &oid, None) else {
+        return fallback;
     };
+    let Ok(commit) = parse_commit(&obj.data) else {
+        return fallback;
+    };
+    BlameCommitInfo {
+        author: commit.author.trim().to_string(),
+        author_time: author_epoch_from_identity(&commit.author),
+        summary: commit
+            .message
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+    }
+}
 
-    let converted = run_textconv_command(&command, &normalized)
-        .or_else(|_| run_textconv_command(&command, &bytes))?;
-    Ok(String::from_utf8_lossy(&converted).into_owned())
+fn author_epoch_from_identity(identity: &str) -> i64 {
+    let parts: Vec<&str> = identity.rsplitn(3, ' ').collect();
+    if parts.len() >= 2 {
+        parts[1].parse().unwrap_or(0)
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
@@ -2219,6 +1931,26 @@ mod tests {
         let lines = ["one", "two", "three"];
         let map = build_line_map(&lines, &lines, BlameDiffAlgorithm::Histogram, false);
         assert_eq!(map, vec![Some(0), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn myers_does_not_map_case_changed_line_to_parent() {
+        let par = ["alpha one", "beta two", " gamma three"];
+        let cur = ["alpha ONE", "beta two", " gamma three"];
+        let map = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
+        assert_eq!(map[0], None);
+    }
+
+    #[test]
+    fn fuzzy_line_map_recovers_moved_unchanged_line() {
+        let par = ["alpha ONE", "inserted", " gamma three"];
+        let cur = ["alpha ONE", " gamma three", "inserted"];
+        let map = build_exact_relocate_line_map(
+            &par,
+            &cur,
+            &build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false),
+        );
+        assert_eq!(map[1], Some(2));
     }
 
     #[test]
