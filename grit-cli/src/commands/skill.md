@@ -1,6 +1,6 @@
 ---
 name: grit
-description: Use the grit CLI for version control in Git repositories — status, diffs, commits, branches, merges, cherry-picks, fetch/pull/push and tags — with JSON output for scripts and agents. Use when a task involves committing, branching, syncing with a remote or reading history and `grit` is installed.
+description: Use the grit CLI for version control in Git repositories — status, diffs, commits, branches, merges, cherry-picks, reverts, fetch/pull/push and tags — with JSON output for scripts and agents. Use when a task involves committing, branching, syncing with a remote or reading history and `grit` is installed.
 ---
 
 # grit
@@ -60,13 +60,14 @@ $ grit commit -m "Explain what changed and why"
 | Delete a merged branch | `grit branch -d <name>` |
 | Delete regardless | `grit branch -D <name>` |
 
-`grit switch`, `grit merge`, `grit pick` and `grit pull` refuse to run with uncommitted changes. Commit first. They also refuse rather than overwrite an untracked file.
+`grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run with uncommitted changes. Commit first. They also refuse rather than overwrite an untracked file.
 
 ## Combining work
 
 - `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`).
 - `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
-- On a conflict both commands list the conflicting files, exit 1 and change nothing. grit can't resolve conflicts yet; to finish, run `git merge <branch>` (or `git cherry-pick <commit>`), fix the files and commit.
+- `grit revert <commit>` undoes one non-merge commit with a new inverse commit (`Revert "…"` message).
+- On a conflict these commands list the conflicting files, exit 1 and change nothing. grit can't resolve conflicts yet; to finish, run `git merge <branch>`, `git cherry-pick <commit>`, or `git revert <commit>`, fix the files and commit.
 
 ## Remotes
 
@@ -97,7 +98,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## What grit doesn't do
 
-grit has no equivalent of `rebase`, `stash`, `reset`, `revert`, partial staging, interactive commands, annotated or signed tags, or conflict resolution. Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
+grit has no equivalent of `rebase`, `stash`, `reset`, partial staging, interactive commands, annotated or signed tags, or conflict resolution. Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
 
 ## More
 

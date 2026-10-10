@@ -12,7 +12,7 @@ use crate::fixture::{
     prepare_restore_iteration, scratch_dir,
 };
 use crate::hot_path_fixture::{
-    load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_switch,
+    load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
     setup_pick_merge_fixture, setup_pick_series_fixture, setup_switch_fixture,
     touch_paths_for_size, HotPathMeta, HotPathRepoSpec,
 };
@@ -62,6 +62,7 @@ pub enum PrepareKind {
     PickReset,
     MergeReset,
     PickSeriesReset,
+    RevertReset,
     CommitIteration,
     RestoreReset,
 }
@@ -108,6 +109,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::PickReset => "prepare-pick",
         PrepareKind::MergeReset => "prepare-merge",
         PrepareKind::PickSeriesReset => "prepare-pick-series",
+        PrepareKind::RevertReset => "prepare-revert",
         PrepareKind::CommitIteration => "prepare-commit",
         PrepareKind::RestoreReset => "prepare-restore",
     };
@@ -603,6 +605,10 @@ pub fn run_prepare_pick_series(git: &Path) -> Result<()> {
     prepare_pick_series(git, &scratch_dir())
 }
 
+pub fn run_prepare_revert(git: &Path) -> Result<()> {
+    prepare_revert(git, &scratch_dir())
+}
+
 fn chain_shell(program: &Path, invocations: &[Vec<String>]) -> String {
     invocations
         .iter()
@@ -644,6 +650,17 @@ fn pick_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
         vec!["pick".into(), meta.pick_commit.clone()],
         vec![
             "cherry-pick".into(),
+            "--no-edit".into(),
+            meta.pick_commit.clone(),
+        ],
+    )
+}
+
+fn revert_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    (
+        vec!["revert".into(), meta.pick_commit.clone()],
+        vec![
+            "revert".into(),
             "--no-edit".into(),
             meta.pick_commit.clone(),
         ],
@@ -750,6 +767,29 @@ pub fn run_hot_path_suite(
                 git_argv: git_pick,
                 driver: Driver::Cli,
                 prepare_kind: Some(PrepareKind::PickReset),
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &repo_pick,
+        )?);
+
+        let (grit_revert, git_revert) = revert_argv(&meta_pick);
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("revert-{size}{fs_suffix}"),
+                group: "pick".into(),
+                fixture: fixture.clone(),
+                description: format!(
+                    "revert one commit touching {touch} paths (topic tip vs git revert --no-edit)"
+                ),
+                grit_argv: grit_revert,
+                git_argv: git_revert,
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::RevertReset),
                 grit_via_shell: false,
                 git_via_shell: false,
             },

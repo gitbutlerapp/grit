@@ -499,6 +499,13 @@ pub fn prepare_pick(git: &Path, repo: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn prepare_revert(git: &Path, repo: &Path) -> Result<()> {
+    let meta = load_meta(repo)?;
+    run_git(git, repo, &["checkout", "-q", &meta.topic_branch])?;
+    run_git(git, repo, &["reset", "-q", "--hard", &meta.pick_commit])?;
+    Ok(())
+}
+
 pub fn prepare_merge(git: &Path, repo: &Path) -> Result<()> {
     prepare_pick(git, repo)
 }

@@ -107,6 +107,7 @@ Reports use `"schema_version": 1`. All times in scenario stats are **millisecond
 | `switch-{N}` | switch | Two branches differing in ~50 paths; `git switch -q X && switch -q Y` vs `grit switch X && switch Y` |
 | `switch-wide-{N}` | switch | ~10% path delta including directory deletions; same switch pattern |
 | `pick-{N}` | pick | One commit touching ~2000 paths (scaled down for small `N`); `git cherry-pick` vs `grit pick`; reset between runs |
+| `revert-{N}` | pick | Same fixture as pick; `git revert --no-edit` vs `grit revert` on the topic tip; reset between runs |
 | `merge-{N}` | merge | Same topology as pick; `git merge -q --no-edit` vs `grit merge` |
 | `pick-series-{N}` | pick | 20 commits: `git cherry-pick base..topic` vs 20 sequential `grit pick` (upper bound — process startup) |
 

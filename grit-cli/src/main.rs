@@ -239,6 +239,11 @@ enum Command {
         /// Commit to pick (any revision spec — full / short oid, branch, HEAD~2, …).
         commit: String,
     },
+    /// Undo a commit with a new inverse commit.
+    Revert {
+        /// Commit to revert (any revision spec — full / short oid, branch, HEAD~2, …).
+        commit: String,
+    },
     /// Restore working tree and/or index paths.
     Restore {
         /// Paths to restore (pathspecs).
@@ -556,6 +561,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         Command::Switch { name, create } => emit(&commands::switch::run(&name, create)?, opts),
         Command::Merge { branch } => emit(&commands::merge::run(&branch)?, opts),
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts),
+        Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts),
         Command::Restore {
             paths,
             staged,
