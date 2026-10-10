@@ -4874,7 +4874,50 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
 }
 
 fn wants_bitmap_rev_list(options: &RevListOptions) -> bool {
-    options.objects && (options.use_bitmap_index || options.count)
+    options.use_bitmap_index || options.count
+}
+
+fn try_commit_graph_count_only(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<RevListResult>> {
+    if !options.count || options.objects || !options.use_commit_graph {
+        return Ok(None);
+    }
+    if !crate::rev_parse::load_graft_parents(&repo.git_dir).is_empty() {
+        return Ok(None);
+    }
+    let Some(chain) = CommitGraphChain::try_load_with_caches(
+        &repo.git_dir.join("objects"),
+        Some(repo.caches().as_ref()),
+    )
+    .ok()
+    .flatten() else {
+        return Ok(None);
+    };
+    let shallow = load_shallow_boundaries(&repo.git_dir);
+    let Some(n) = chain.count_reachable_commits(include, exclude, false, &shallow) else {
+        return Ok(None);
+    };
+    Ok(Some(RevListResult {
+        commits: Vec::new(),
+        objects: Vec::new(),
+        omitted_objects: Vec::new(),
+        missing_objects: Vec::new(),
+        boundary_commits: Vec::new(),
+        left_right_map: HashMap::new(),
+        cherry_equivalent: HashSet::new(),
+        per_commit_object_counts: Vec::new(),
+        object_walk_tips: Vec::new(),
+        objects_print_commit: Vec::new(),
+        object_segments: Vec::new(),
+        bitmap_object_format: false,
+        reachable_commit_count: Some(n),
+        reachable_non_commit_object_count: None,
+        tip_annotated_tag_by_commit: HashMap::new(),
+    }))
 }
 
 fn try_rev_list_accelerated(
@@ -4889,48 +4932,15 @@ fn try_rev_list_accelerated(
         return Ok(None);
     }
 
-    if options.count
-        && !options.objects
-        && options.use_commit_graph
-        && crate::rev_parse::load_graft_parents(&repo.git_dir).is_empty()
-    {
-        if let Some(chain) = CommitGraphChain::try_load_with_caches(
-            &repo.git_dir.join("objects"),
-            Some(repo.caches().as_ref()),
-        )
-        .ok()
-        .flatten()
-        {
-            let shallow = load_shallow_boundaries(&repo.git_dir);
-            if let Some(n) = chain.count_reachable_commits(include, exclude, false, &shallow) {
-                return Ok(Some(RevListResult {
-                    commits: Vec::new(),
-                    objects: Vec::new(),
-                    omitted_objects: Vec::new(),
-                    missing_objects: Vec::new(),
-                    boundary_commits: Vec::new(),
-                    left_right_map: HashMap::new(),
-                    cherry_equivalent: HashSet::new(),
-                    per_commit_object_counts: Vec::new(),
-                    object_walk_tips: Vec::new(),
-                    objects_print_commit: Vec::new(),
-                    object_segments: Vec::new(),
-                    bitmap_object_format: false,
-                    reachable_commit_count: Some(n),
-                    reachable_non_commit_object_count: None,
-                    tip_annotated_tag_by_commit: HashMap::new(),
-                }));
-            }
-        }
-    }
-
     if !wants_bitmap_rev_list(options) || !bitmap_filter_supported(options.filter.as_ref()) {
-        return Ok(None);
+        return try_commit_graph_count_only(repo, include, exclude, options);
     }
 
     let index = match repo.odb.with_pack_read_context(|| BitmapIndex::open(repo)) {
         Ok(Some(index)) => index,
-        Ok(None) => return Ok(None),
+        Ok(None) => {
+            return try_commit_graph_count_only(repo, include, exclude, options);
+        }
         Err(e) => {
             return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
         }
@@ -4949,7 +4959,9 @@ fn try_rev_list_accelerated(
         options.missing_action,
     ) {
         Ok(set) => set,
-        Err(BitmapWalkError::Unsupported(_)) => return Ok(None),
+        Err(BitmapWalkError::Unsupported(_)) => {
+            return try_commit_graph_count_only(repo, include, exclude, options);
+        }
         Err(BitmapWalkError::Bitmap(e)) => {
             return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
         }
@@ -5011,7 +5023,8 @@ fn try_rev_list_accelerated(
         object_segments: Vec::new(),
         bitmap_object_format: true,
         reachable_commit_count: options.count.then_some(commit_count),
-        reachable_non_commit_object_count: options.count.then_some(non_commit_count),
+        reachable_non_commit_object_count: (options.count && options.objects)
+            .then_some(non_commit_count),
         tip_annotated_tag_by_commit: HashMap::new(),
     }))
 }

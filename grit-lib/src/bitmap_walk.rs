@@ -140,15 +140,6 @@ impl ReachableSet {
         self.extended_set
             .retain(|oid| !other.extended_set.contains(oid));
     }
-
-    fn merge(&mut self, other: Self) {
-        self.bits.or_assign(&other.bits);
-        for (oid, kind) in other.extended {
-            if self.extended_set.insert(oid) {
-                self.extended.push((oid, kind));
-            }
-        }
-    }
 }
 
 /// Returns `true` when `filter` can be applied via type bitmaps (mirrors Git `can_filter_bitmap`).
@@ -292,23 +283,7 @@ fn find_objects_union(
             extended_set: HashSet::new(),
         });
     }
-    let mut acc = find_objects(
-        repo,
-        index,
-        &tips[0..1],
-        missing,
-        ignore_stored_commit_bitmaps,
-    )?;
-    for tip in &tips[1..] {
-        acc.merge(find_objects(
-            repo,
-            index,
-            std::slice::from_ref(tip),
-            missing,
-            ignore_stored_commit_bitmaps,
-        )?);
-    }
-    Ok(acc)
+    find_objects(repo, index, tips, missing, ignore_stored_commit_bitmaps)
 }
 
 fn find_objects(

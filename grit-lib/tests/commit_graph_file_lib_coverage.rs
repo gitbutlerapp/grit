@@ -130,7 +130,7 @@ fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<Object
 }
 
 #[test]
-fn octopus_graph_commit_returns_none_and_validates_edges() {
+fn octopus_graph_commit_decodes_extra_edge_parents() {
     let (_dir, repo, merge, sorted) = octopus_merge_graph();
     let mut infos = HashMap::new();
     for oid in &sorted {

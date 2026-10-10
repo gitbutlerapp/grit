@@ -107,10 +107,15 @@ fn count_all_matches_git() {
     let opts = RevListOptions {
         all_refs: true,
         count: true,
-        use_commit_graph: true,
+        use_commit_graph: false,
         ..Default::default()
     };
-    assert_eq!(grit_count(&repo, opts), git_n);
+    let listed = rev_list(&repo, &[], &[], &opts).expect("rev-list");
+    assert!(
+        listed.bitmap_object_format,
+        "pure count-only --all should use pack bitmaps"
+    );
+    assert_eq!(listed.commit_count(), git_n);
 }
 
 #[test]
@@ -148,7 +153,9 @@ fn count_objects_auto_bitmap_without_flag() {
         use_commit_graph: true,
         ..Default::default()
     };
-    assert_eq!(grit_count(&repo, opts), git_n);
+    assert_eq!(grit_count(&repo, opts.clone()), git_n);
+    let listed = rev_list(&repo, &[], &[], &opts).expect("rev-list");
+    assert!(listed.bitmap_object_format);
 }
 
 #[test]
