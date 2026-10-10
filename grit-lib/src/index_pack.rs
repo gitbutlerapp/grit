@@ -17,6 +17,15 @@ use crate::pack_map::PackData;
 use crate::transfer::fix_thin_pack_path;
 use crate::unpack_objects::{pack_index_records_with_threads, PackIndexRecord};
 
+/// Result of installing a pack under `objects/pack/`.
+#[derive(Debug, Clone)]
+pub struct IngestedPack {
+    /// Object ids recorded in the new pack index.
+    pub object_ids: HashSet<ObjectId>,
+    /// Absolute path to the published `pack-*.pack` file.
+    pub pack_path: PathBuf,
+}
+
 /// Options controlling how a received pack is ingested.
 #[derive(Debug, Clone, Default)]
 pub struct IngestPackOptions {
@@ -47,14 +56,17 @@ impl IngestPackOptions {
 
 /// Ingest a pack received from fetch/clone by installing it under `objects/pack/`.
 ///
-/// Returns the set of object ids recorded in the pack index.
+/// Returns the installed pack identity and indexed object ids.
 pub fn ingest_received_pack(
     pack: Vec<u8>,
     odb: &Odb,
     opts: &IngestPackOptions,
-) -> Result<HashSet<ObjectId>> {
+) -> Result<IngestedPack> {
     if pack.is_empty() {
-        return Ok(HashSet::new());
+        return Ok(IngestedPack {
+            object_ids: HashSet::new(),
+            pack_path: PathBuf::new(),
+        });
     }
     if pack.len() < 12 || &pack[0..4] != b"PACK" {
         return Err(Error::CorruptObject(
@@ -73,7 +85,7 @@ pub fn ingest_received_pack_path(
     pack_path: PathBuf,
     odb: &Odb,
     opts: &IngestPackOptions,
-) -> Result<HashSet<ObjectId>> {
+) -> Result<IngestedPack> {
     if !pack_path.is_file() {
         return Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -90,7 +102,7 @@ pub fn install_pack_bytes(
     pack: Vec<u8>,
     odb: &Odb,
     opts: &IngestPackOptions,
-) -> Result<HashSet<ObjectId>> {
+) -> Result<IngestedPack> {
     odb.require_files_primary("index_pack")?;
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
@@ -99,7 +111,7 @@ pub fn install_pack_bytes(
     let tmp = pack_dir.join(format!("tmp_install_{}_{seq}", std::process::id()));
     std::fs::write(&tmp, &pack).map_err(Error::Io)?;
     match install_pack_path(&tmp, odb, opts) {
-        Ok(oids) => Ok(oids),
+        Ok(ingested) => Ok(ingested),
         Err(e) => {
             let _ = std::fs::remove_file(&tmp);
             Err(e)
@@ -115,7 +127,7 @@ pub fn install_pack_path(
     pack_path: &Path,
     odb: &Odb,
     opts: &IngestPackOptions,
-) -> Result<HashSet<ObjectId>> {
+) -> Result<IngestedPack> {
     odb.require_files_primary("index_pack")?;
     let mut owned = pack_path.to_path_buf();
     if opts.fix_thin {
@@ -144,7 +156,7 @@ pub fn install_pack_path(
 
     cleanup_stale_install_stage(&stage);
 
-    let install_result = (|| -> Result<HashSet<ObjectId>> {
+    let install_result = (|| -> Result<IngestedPack> {
         std::fs::create_dir_all(&stage).map_err(Error::Io)?;
         drop(pack_data);
         if std::fs::rename(&owned, &stage_pack).is_err() {
@@ -173,7 +185,10 @@ pub fn install_pack_path(
             Error::Io(e)
         })?;
         let _ = std::fs::remove_dir(&stage);
-        Ok(oids)
+        Ok(IngestedPack {
+            object_ids: oids,
+            pack_path: final_pack.clone(),
+        })
     })();
 
     if install_result.is_err() {
@@ -182,9 +197,9 @@ pub fn install_pack_path(
         let _ = std::fs::remove_file(&idx_path);
         let _ = std::fs::remove_file(&owned);
     }
-    let oids = install_result?;
+    let ingested = install_result?;
     odb.invalidate_packs();
-    Ok(oids)
+    Ok(ingested)
 }
 
 fn cleanup_stale_install_stage(stage: &Path) {

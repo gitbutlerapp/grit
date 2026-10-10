@@ -1461,14 +1461,15 @@ fn ingest_negotiated_pack(
     local_odb: &crate::odb::Odb,
     pack: Vec<u8>,
 ) -> Result<HashSet<ObjectId>> {
-    crate::index_pack::ingest_received_pack(
+    Ok(crate::index_pack::ingest_received_pack(
         pack,
         local_odb,
         &crate::index_pack::IngestPackOptions {
             fix_thin: true,
             ..Default::default()
         },
-    )
+    )?
+    .object_ids)
 }
 
 /// Identity string for fetch/clone reflog entries (`Name <email> epoch tz`).

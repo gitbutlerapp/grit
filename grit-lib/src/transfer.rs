@@ -376,16 +376,24 @@ pub fn build_pack(
     // Objects reachable from wants but not from haves, in discovery order. A
     // missing want IS an error (we were asked to pack an object we don't have).
     let send = collect_reachable_excluding(odb, wants, &have_closure, false, &empty_shallow)?;
+    build_pack_from_send_list(odb, &send, &have_closure, opts)
+}
 
+/// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
+///
+/// # Errors
+///
+/// Same as [`build_pack`].
+pub fn build_pack_from_send_list(
+    odb: &Odb,
+    send: &[ObjectId],
+    have_closure: &HashSet<ObjectId>,
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
     if !opts.delta {
-        // Phase-1 behavior: whole objects only. Correct and minimal in object
-        // count, not byte-optimal.
-        return serialize_pack(odb, &send, opts);
+        return serialize_pack(odb, send, opts);
     }
-
-    // Delta path: pick blob deltas (within the pack, and — when `thin` — against
-    // bases the peer already holds), then serialize OFS/REF-delta entries.
-    let plan = plan_deltas(odb, &send, &have_closure, opts)?;
+    let plan = plan_deltas(odb, send, have_closure, opts)?;
     serialize_pack_with_deltas(odb, &plan, opts)
 }
 
@@ -1411,7 +1419,8 @@ pub fn fetch_local(
                 fix_thin: true,
                 ..Default::default()
             },
-        )?;
+        )?
+        .object_ids;
     }
 
     if opts.initial_remote_fetch && !remote_shallow.is_empty() && !opts.dry_run {

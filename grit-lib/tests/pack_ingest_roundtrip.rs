@@ -743,7 +743,10 @@ fn ingest_received_pack_matches_install_sha1() {
         let tmp2 = tempfile::tempdir().expect("odb2");
         let odb2 = Odb::new(tmp2.path().join("objects").as_path());
         let via_ingest = ingest_received_pack(fx.bytes.clone(), &odb2, opts).expect("ingest");
-        assert_eq!(via_install, via_ingest, "oid sets differ for {opts:?}");
+        assert_eq!(
+            via_install.object_ids, via_ingest.object_ids,
+            "oid sets differ for {opts:?}"
+        );
     }
 }
 

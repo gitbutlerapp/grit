@@ -1368,7 +1368,8 @@ pub fn http_fetch(
                     fix_thin: true,
                     ..Default::default()
                 },
-            )?;
+            )?
+            .object_ids;
         }
     }
 
@@ -1578,7 +1579,8 @@ fn http_fetch_v2(
                     fix_thin: true,
                     ..Default::default()
                 },
-            )?;
+            )?
+            .object_ids;
         }
     }
 
