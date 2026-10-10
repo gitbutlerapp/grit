@@ -502,6 +502,14 @@ fn incremental_layer_with_bitmap_and_rev_sidecars_v2() {
         !has_zero_bitmap,
         "incremental layer must not create a zero-byte .bitmap sidecar"
     );
+    let has_rev = fs::read_dir(&midx_d)
+        .expect("midx.d")
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name().to_string_lossy().ends_with(".rev"));
+    assert!(
+        has_rev,
+        "incremental layer with write_rev_sidecar should emit a .rev sidecar"
+    );
     verify_midx(&objects).expect("verify");
     let _ = repo;
 }

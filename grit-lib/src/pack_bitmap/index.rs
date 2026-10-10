@@ -1,12 +1,12 @@
 //! Parsed pack or MIDX reachability bitmap index.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::diagnostics::Warning;
 use crate::ewah_bitmap::{Bitmap, EwahView};
-use crate::midx::{midx_checksum_hex, resolve_tip_midx_path};
+use crate::midx::resolve_midx_bitmap_layer;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::pack::PackIndex;
 use crate::pack_map::PackData;
@@ -353,15 +353,15 @@ fn try_open_bitmap(
     repo: &Repository,
 ) -> Result<Option<Arc<BitmapIndex>>, BitmapError> {
     let pack_dir = objects_dir.join("pack");
-    if resolve_tip_midx_path(&pack_dir).is_some() {
-        if let Ok(hex) = midx_checksum_hex(objects_dir) {
-            let bitmap_path = pack_dir.join(format!("multi-pack-index-{hex}.bitmap"));
-            if bitmap_path.is_file() {
-                match open_bitmap_file(&bitmap_path, objects_dir, BitmapSource::Midx, repo) {
-                    Ok(idx) => return Ok(Some(Arc::new(idx))),
-                    Err(err) => warn_bitmap(repo, &bitmap_path, &err),
-                }
-            }
+    if let Some((bitmap_path, midx_path)) = resolve_midx_bitmap_layer(&pack_dir) {
+        match open_bitmap_file(
+            &bitmap_path,
+            objects_dir,
+            BitmapSource::Midx { midx_path },
+            repo,
+        ) {
+            Ok(idx) => return Ok(Some(Arc::new(idx))),
+            Err(err) => warn_bitmap(repo, &bitmap_path, &err),
         }
     }
     let mut pack_indexes =
@@ -395,7 +395,7 @@ fn try_open_bitmap(
 
 enum BitmapSource {
     Pack { index: Arc<PackIndex> },
-    Midx,
+    Midx { midx_path: PathBuf },
 }
 
 fn warn_bitmap(repo: &Repository, path: &Path, err: &BitmapError) {
@@ -454,7 +454,7 @@ fn open_bitmap_file(
     let order = match &source {
         BitmapSource::Pack { index } => BitmapOrder::load_pack(objects_dir, Arc::clone(index))
             .map_err(|_| BitmapError::Corrupt)?,
-        BitmapSource::Midx => BitmapOrder::load_midx(objects_dir)
+        BitmapSource::Midx { midx_path } => BitmapOrder::load_midx_file(midx_path)
             .map_err(|_| BitmapError::Corrupt)?
             .ok_or(BitmapError::Corrupt)?,
     };
@@ -515,7 +515,7 @@ fn open_bitmap_file(
 
 fn verify_source_checksum(
     source: &BitmapSource,
-    objects_dir: &Path,
+    _objects_dir: &Path,
     header_checksum: &[u8],
     hash_len: usize,
 ) -> Result<(), BitmapError> {
@@ -530,10 +530,8 @@ fn verify_source_checksum(
                 return Err(BitmapError::PackChecksumMismatch);
             }
         }
-        BitmapSource::Midx => {
-            let pack_dir = objects_dir.join("pack");
-            let midx_path = resolve_tip_midx_path(&pack_dir).ok_or(BitmapError::Corrupt)?;
-            let midx_bytes = std::fs::read(&midx_path).map_err(BitmapError::io)?;
+        BitmapSource::Midx { midx_path } => {
+            let midx_bytes = std::fs::read(midx_path).map_err(BitmapError::io)?;
             if midx_bytes.len() < hash_len {
                 return Err(BitmapError::PackChecksumMismatch);
             }

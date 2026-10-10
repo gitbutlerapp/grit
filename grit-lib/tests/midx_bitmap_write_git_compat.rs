@@ -8,8 +8,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::midx::{
-    midx_checksum_hex, write_multi_pack_index_with_options, MidxBitmapWriteOutcome,
-    WriteMultiPackIndexOptions,
+    compact_multi_pack_index, midx_checksum_hex, resolve_midx_bitmap_layer,
+    write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::pack_bitmap::BitmapIndex;
@@ -17,7 +17,10 @@ use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions};
 use grit_test_support::{HashAlgo, RepoFixture};
 
-use midx_support::{assert_git_midx_verify, git_available, pack_objects_layer};
+use midx_support::{
+    assert_git_midx_verify, git_available, grit_write_midx, multi_pack_repo, pack_objects_layer,
+    read_chain_hashes,
+};
 
 fn git_ok(repo: &RepoFixture, args: &[&str]) {
     let out = repo.git(args);
@@ -319,6 +322,112 @@ fn incremental_layer_writes_no_placeholder() {
         MidxBitmapWriteOutcome::SkippedIncrementalLayer
     );
     midx_support::assert_no_zero_byte_midx_bitmaps(&pack_dir);
+}
+
+fn extend_chain_with_incremental_layers(repo: &RepoFixture, pack_dir: &Path) -> Option<Vec<String>> {
+    for i in 0..4 {
+        std::fs::write(
+            repo.path().join(format!("chain-{i}.txt")),
+            format!("chain {i}\n"),
+        )
+        .unwrap();
+        git_ok(repo, &["add", &format!("chain-{i}.txt")]);
+        git_ok(repo, &["commit", "-q", "-m", &format!("chain {i}")]);
+        assert!(pack_objects_layer(repo.path(), 300 + i));
+        write_multi_pack_index_with_options(
+            pack_dir,
+            &WriteMultiPackIndexOptions {
+                incremental: true,
+                version: Some(2),
+                ..Default::default()
+            },
+        )
+        .expect("incremental layer");
+    }
+    read_chain_hashes(pack_dir)
+}
+
+#[test]
+fn grit_opens_bitmap_after_compact_through_chain_tip() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let Some((fixture, objects, _)) = multi_pack_repo(HashAlgo::Sha1, 2) else {
+        eprintln!("SKIP: fixture");
+        return;
+    };
+    let pack_dir = objects.join("pack");
+    grit_write_midx(&pack_dir, &WriteMultiPackIndexOptions::default());
+    let Some(chain) = extend_chain_with_incremental_layers(&fixture, &pack_dir) else {
+        eprintln!("SKIP: no chain");
+        return;
+    };
+    if chain.len() < 2 {
+        eprintln!("SKIP: chain too short");
+        return;
+    }
+    let from = chain[0].clone();
+    let to = chain[chain.len() - 1].clone();
+    compact_multi_pack_index(&pack_dir, &from, &to, true, true, Some(2)).expect("compact tip");
+    let (bitmap_path, midx_path) = resolve_midx_bitmap_layer(&pack_dir).expect("split bitmap");
+    assert!(
+        bitmap_path.starts_with(pack_dir.join("multi-pack-index.d")),
+        "expected bitmap under multi-pack-index.d, got {}",
+        bitmap_path.display()
+    );
+    assert!(midx_path.is_file());
+    assert!(bitmap_path.metadata().unwrap().len() > 32);
+    let repo = open_repo(fixture.path());
+    let index = BitmapIndex::open(&repo)
+        .expect("open")
+        .expect("MIDX bitmap after compact-through-tip");
+    assert!(index.selected_commit_count() > 0);
+    verify_all_commit_bitmaps(&repo, &index);
+}
+
+#[test]
+fn grit_opens_bitmap_on_compacted_layer_when_upper_chain_has_no_bitmap() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let Some((fixture, objects, _)) = multi_pack_repo(HashAlgo::Sha1, 2) else {
+        eprintln!("SKIP: fixture");
+        return;
+    };
+    let pack_dir = objects.join("pack");
+    grit_write_midx(&pack_dir, &WriteMultiPackIndexOptions::default());
+    let Some(chain) = extend_chain_with_incremental_layers(&fixture, &pack_dir) else {
+        eprintln!("SKIP: no chain");
+        return;
+    };
+    if chain.len() < 3 {
+        eprintln!("SKIP: chain too short");
+        return;
+    }
+    let from = chain[0].clone();
+    let to = chain[chain.len() - 2].clone();
+    compact_multi_pack_index(&pack_dir, &from, &to, true, true, Some(2)).expect("compact mid");
+    std::fs::write(fixture.path().join("upper.txt"), b"upper\n").unwrap();
+    git_ok(&fixture, &["add", "upper.txt"]);
+    git_ok(&fixture, &["commit", "-q", "-m", "upper"]);
+    assert!(pack_objects_layer(fixture.path(), 400));
+    write_multi_pack_index_with_options(
+        &pack_dir,
+        &WriteMultiPackIndexOptions {
+            incremental: true,
+            version: Some(2),
+            write_bitmap: true,
+            ..Default::default()
+        },
+    )
+    .expect("upper incremental without bitmap sidecar");
+    let repo = open_repo(fixture.path());
+    let index = BitmapIndex::open(&repo)
+        .expect("open")
+        .expect("bitmap from compacted layer below upper chain");
+    assert!(index.selected_commit_count() > 0);
 }
 
 #[test]

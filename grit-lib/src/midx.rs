@@ -1082,6 +1082,62 @@ pub fn resolve_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
 /// Resolve a specific MIDX layer file by its lowercase hex checksum. Searches the
 /// incremental chain (`multi-pack-index.d/multi-pack-index-<hash>.midx`) and the
 /// single-file root MIDX. Returns `None` when no layer matches that checksum.
+/// Sidecar path `multi-pack-index-<hash>.<ext>` in the same directory as `midx_path`.
+pub fn midx_sidecar_path_for_midx_file(midx_path: &Path, ext: &str) -> Result<PathBuf> {
+    if let Some(name) = midx_path.file_name().and_then(|s| s.to_str()) {
+        if let Some(hash_part) = name
+            .strip_prefix("multi-pack-index-")
+            .and_then(|r| r.strip_suffix(".midx"))
+        {
+            let parent = midx_path.parent().ok_or_else(|| {
+                Error::CorruptObject("MIDX path has no parent directory".to_owned())
+            })?;
+            return Ok(parent.join(format!("multi-pack-index-{hash_part}.{ext}")));
+        }
+    }
+    let hash_hex = midx_checksum_hex_from_path(midx_path)?;
+    let parent = midx_path
+        .parent()
+        .ok_or_else(|| Error::CorruptObject("MIDX path has no parent directory".to_owned()))?;
+    Ok(parent.join(format!("multi-pack-index-{hash_hex}.{ext}")))
+}
+
+/// Newest chain layer (or root MIDX) that has a non-empty `.bitmap` sidecar beside its MIDX file.
+///
+/// When the tip incremental layer has no bitmap, an older compacted layer's sidecar under
+/// `multi-pack-index.d/` is returned so readers match Git's split-layout layout.
+#[must_use]
+pub fn resolve_midx_bitmap_layer(pack_dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    let is_real_bitmap =
+        |path: &Path| path.is_file() && path.metadata().ok().is_some_and(|m| m.len() > 32);
+
+    if let Ok(chain) = read_chain_layer_hashes(pack_dir) {
+        if !chain.is_empty() {
+            let midx_d = midx_d_dir(pack_dir);
+            for hash in chain.iter().rev() {
+                let midx_path = midx_d.join(format!("multi-pack-index-{hash}.midx"));
+                if !midx_path.is_file() {
+                    continue;
+                }
+                let bitmap_path = midx_d.join(format!("multi-pack-index-{hash}.bitmap"));
+                if is_real_bitmap(&bitmap_path) {
+                    return Some((bitmap_path, midx_path));
+                }
+            }
+        }
+    }
+
+    let root = pack_dir.join("multi-pack-index");
+    if root.is_file() {
+        let hash_hex = midx_checksum_hex_from_path(&root).ok()?;
+        let bitmap_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.bitmap"));
+        if is_real_bitmap(&bitmap_path) {
+            return Some((bitmap_path, root));
+        }
+    }
+    None
+}
+
 pub fn resolve_midx_layer_path(pack_dir: &Path, checksum: &str) -> Option<std::path::PathBuf> {
     let checksum = checksum.to_ascii_lowercase();
     if let Ok(hashes) = read_chain_layer_hashes(pack_dir) {
@@ -1232,7 +1288,7 @@ fn clear_stale_split_layers(pack_dir: &Path, keep: &[String]) -> Result<()> {
         let Some((hash_part, _ext)) = rest.split_once('.') else {
             continue;
         };
-        if hash_part.len() == 40 && !keep.contains(hash_part) {
+        if (hash_part.len() == 40 || hash_part.len() == 64) && !keep.contains(hash_part) {
             let _ = fs::remove_file(ent.path());
         }
     }
@@ -2283,7 +2339,12 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
     let Some(path) = resolve_tip_midx_path(&pack_dir) else {
         return Ok(None);
     };
-    let data = fs::read(&path).map_err(Error::Io)?;
+    load_midx_reuse_tables_from_path(&path)
+}
+
+/// Load reuse tables from one on-disk MIDX layer (`multi-pack-index` or `multi-pack-index.d/…midx`).
+pub fn load_midx_reuse_tables_from_path(midx_path: &Path) -> Result<Option<MidxReuseTables>> {
+    let data = fs::read(midx_path).map_err(Error::Io)?;
     let hash_len = midx_hash_len(&data);
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
@@ -2313,7 +2374,7 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
             order
         } else {
             let hash_hex = hex::encode(&data[data.len().saturating_sub(hash_len)..]);
-            let rev_path = path
+            let rev_path = midx_path
                 .parent()
                 .map(|p| p.join(format!("multi-pack-index-{hash_hex}.rev")))
                 .unwrap_or_else(|| PathBuf::from(format!("multi-pack-index-{hash_hex}.rev")));
