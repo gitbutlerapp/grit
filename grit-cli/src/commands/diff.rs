@@ -155,9 +155,9 @@ pub fn outcome_from_tree_entries(
     let changes = entries
         .into_iter()
         .map(|e| {
-            let (old_text, old_bin) = old_side_text(&repo.odb, &e)?;
-            let (new_text, new_bin) = new_side_text(&repo.odb, &e, None)?;
-            Ok(file_change(e, old_text, new_text, old_bin || new_bin))
+            let (old_bytes, old_bin) = old_side_bytes(&repo.odb, &e)?;
+            let (new_bytes, new_bin) = new_side_bytes(&repo.odb, &e, None)?;
+            Ok(file_change(e, old_bytes, new_bytes, old_bin || new_bin))
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(outcome_from_changes(changes))
