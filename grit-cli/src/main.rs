@@ -69,6 +69,45 @@ enum RemoteAction {
     },
 }
 
+/// Subcommands of `grit stash`.
+#[derive(Debug, Subcommand)]
+enum StashAction {
+    /// Save local changes to the stash and reset the working tree.
+    Push {
+        /// Stash message.
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        /// Include untracked files in the stash.
+        #[arg(short = 'u', long = "include-untracked")]
+        include_untracked: bool,
+    },
+    /// List stash entries.
+    List,
+    /// Show the summary or patch for a stash entry.
+    Show {
+        /// Stash index (`0` is newest) or `stash@{n}`.
+        index: Option<String>,
+        /// Show the full patch instead of a diffstat.
+        #[arg(short = 'p', long = "patch")]
+        patch: bool,
+    },
+    /// Apply a stash entry without removing it.
+    Apply {
+        /// Stash index (`0` is newest) or `stash@{n}`.
+        index: Option<String>,
+    },
+    /// Apply a stash entry and remove it when there are no conflicts.
+    Pop {
+        /// Stash index (`0` is newest) or `stash@{n}`.
+        index: Option<String>,
+    },
+    /// Remove a stash entry without applying it.
+    Drop {
+        /// Stash index (`0` is newest) or `stash@{n}`.
+        index: Option<String>,
+    },
+}
+
 /// Subcommands of `grit bundle`.
 #[derive(Debug, Subcommand)]
 enum BundleAction {
@@ -213,6 +252,17 @@ enum Command {
     Pick {
         /// Commit to pick (any revision spec — full / short oid, branch, HEAD~2, …).
         commit: String,
+    },
+    /// Save or restore shelved work.
+    Stash {
+        /// Stash message (bare `grit stash` / `grit stash push`).
+        #[arg(short = 'm', long = "message", global = true)]
+        message: Option<String>,
+        /// Include untracked files (bare `grit stash` / `grit stash push`).
+        #[arg(short = 'u', long = "include-untracked", global = true)]
+        include_untracked: bool,
+        #[command(subcommand)]
+        action: Option<StashAction>,
     },
     /// Restore working tree and/or index paths.
     Restore {
@@ -517,6 +567,49 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         Command::Switch { name, create } => emit(&commands::switch::run(&name, create)?, opts),
         Command::Merge { branch } => emit(&commands::merge::run(&branch)?, opts),
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts),
+        Command::Stash {
+            action,
+            message,
+            include_untracked,
+        } => match action {
+            None => emit(
+                &commands::stash::run_push(message, include_untracked)?,
+                opts,
+            ),
+            Some(StashAction::Push {
+                message: push_message,
+                include_untracked: push_untracked,
+            }) => emit(
+                &commands::stash::run_push(
+                    push_message.or(message),
+                    include_untracked || push_untracked,
+                )?,
+                opts,
+            ),
+            Some(StashAction::List) => emit_with_markdown(&commands::stash::run_list()?, opts),
+            Some(StashAction::Show { index, patch }) => {
+                emit_with_markdown(&commands::stash::run_show(index, patch)?, opts)
+            }
+            Some(StashAction::Apply { index }) => {
+                let outcome = commands::stash::run_apply(index)?;
+                emit_with_markdown(&outcome, opts)?;
+                if outcome.conflicts {
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
+            Some(StashAction::Pop { index }) => {
+                let outcome = commands::stash::run_pop(index)?;
+                emit_with_markdown(&outcome, opts)?;
+                if outcome.conflicts {
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
+            Some(StashAction::Drop { index }) => {
+                emit_with_markdown(&commands::stash::run_drop(index)?, opts)
+            }
+        },
         Command::Restore {
             paths,
             staged,
