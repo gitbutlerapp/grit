@@ -277,6 +277,134 @@ fn update_reject_only_blocks_one_ref() {
 }
 
 #[test]
+fn all_update_rejects_skip_post_receive_and_post_update() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "."]);
+    write_executable_hook(
+        &bare.join("hooks").join("pre-receive"),
+        "#!/bin/sh\ncat >/dev/null\nexit 0\n",
+    );
+    write_executable_hook(&bare.join("hooks").join("update"), "#!/bin/sh\nexit 1\n");
+    let post_log = bare.join("post-receive-log");
+    write_executable_hook(
+        &bare.join("hooks").join("post-receive"),
+        &format!("#!/bin/sh\ncat >'{log}'\n", log = post_log.display()),
+    );
+    let post_update_log = bare.join("post-update-log");
+    write_executable_hook(
+        &bare.join("hooks").join("post-update"),
+        &format!(
+            "#!/bin/sh\necho ran >'{log}'\n",
+            log = post_update_log.display()
+        ),
+    );
+    let repo = open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("f"), "x\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    let pack = pack_for_commit(&source, oid);
+    let body = push_body(None, oid, "refs/heads/main", &pack);
+
+    let (outcome, _) = serve_push(&repo, &body);
+    assert_eq!(outcome.updates[0].error.as_deref(), Some("hook declined"));
+    assert!(
+        outcome
+            .hooks
+            .iter()
+            .all(|h| h.name != "post-receive" && h.name != "post-update"),
+        "post hooks must not run when no ref applied: {:?}",
+        outcome.hooks
+    );
+    assert!(!post_log.exists());
+    assert!(!post_update_log.exists());
+}
+
+#[test]
+fn recording_runner_update_and_post_update_omit_push_options_and_quarantine() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    let runner = RecordingRunner::always_success();
+    for _ in 0..4 {
+        runner.push_response(RecordedResponse::Output {
+            stdout: Vec::new(),
+            code: 0,
+        });
+    }
+
+    let repo = open_bare_with_runner(&bare, runner.clone());
+    std::fs::write(
+        bare.join("config"),
+        "[receive]\n\tadvertisePushOptions = true\n\
+         [hook \"pr\"]\n\tcommand = cat\n\tevent = pre-receive\n\
+         [hook \"up\"]\n\tcommand = cat\n\tevent = update\n\
+         [hook \"post\"]\n\tcommand = cat\n\tevent = post-receive\n\
+         [hook \"pu\"]\n\tcommand = true\n\tevent = post-update\n",
+    )
+    .expect("config");
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("f"), "x\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    let pack = pack_for_commit(&source, oid);
+
+    let mut body = pkt_line(&format!(
+        "{} {} refs/heads/main\0report-status push-options\n",
+        "0000000000000000000000000000000000000000",
+        oid.to_hex()
+    ));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("ci.skip\n"));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pack);
+
+    let (outcome, _) = serve_push(&repo, &body);
+    assert!(outcome.updates[0].error.is_none(), "{:?}", outcome.updates);
+
+    let specs = runner.specs();
+    assert_eq!(specs.len(), 4, "pre, update, post-receive, post-update");
+    let pre = &specs[0].env.set;
+    assert!(pre.iter().any(|(k, _)| k == "GIT_PUSH_OPTION_COUNT"));
+    assert!(pre.iter().any(|(k, _)| k == "GIT_QUARANTINE_PATH"));
+    let update = &specs[1].env.set;
+    assert!(
+        !update.iter().any(|(k, _)| k == "GIT_PUSH_OPTION_COUNT"),
+        "update hook must not receive push options"
+    );
+    assert!(
+        !update.iter().any(|(k, _)| k == "GIT_QUARANTINE_PATH"),
+        "update hook runs after migrate"
+    );
+    let post = &specs[2].env.set;
+    assert!(post.iter().any(|(k, _)| k == "GIT_PUSH_OPTION_COUNT"));
+    assert!(
+        !post.iter().any(|(k, _)| k == "GIT_QUARANTINE_PATH"),
+        "post-receive runs after migrate"
+    );
+    let post_update = &specs[3].env.set;
+    assert!(
+        !post_update
+            .iter()
+            .any(|(k, _)| k == "GIT_PUSH_OPTION_COUNT"),
+        "post-update must not receive push options"
+    );
+    assert!(
+        !post_update.iter().any(|(k, _)| k == "GIT_QUARANTINE_PATH"),
+        "post-update must not receive quarantine env"
+    );
+}
+
+#[test]
 fn post_receive_sees_applied_updates() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let bare = tmp.path().join("bare");

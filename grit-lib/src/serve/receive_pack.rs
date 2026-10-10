@@ -179,22 +179,19 @@ pub fn receive_pack(
 
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
     let mut quarantine = if needs_pack {
-        ReceiveQuarantine::create(&repo.odb, &repo.git_dir).ok()
+        Some(ReceiveQuarantine::create(&repo.odb, &repo.git_dir)?)
     } else {
         None
     };
 
     let unpack_error = if needs_pack {
+        let Some(q) = quarantine.as_ref() else {
+            return Err(ServeError::Protocol("pack push requires quarantine".into()));
+        };
         match read_push_pack(input, max_input) {
-            Ok(pack) => {
-                let ingest_odb = quarantine
-                    .as_ref()
-                    .map(ReceiveQuarantine::odb)
-                    .unwrap_or_else(|| repo.odb.clone());
-                ingest_pushed_pack(&ingest_odb, &pack, cfg.as_ref(), max_input)
-                    .err()
-                    .map(|e| e.to_string())
-            }
+            Ok(pack) => ingest_pushed_pack(&q.odb(), &pack, cfg.as_ref(), max_input)
+                .err()
+                .map(|e| e.to_string()),
             Err(msg) => Some(msg),
         }
     } else {
@@ -423,7 +420,8 @@ fn apply_commands_with_hooks(
     }
 
     let algo = repo.odb.hash_algo();
-    let mut pre_hook_env_owned = push_option_env_owned(&request.push_options);
+    let push_option_env = push_option_env_owned(&request.push_options);
+    let mut pre_hook_env_owned = push_option_env.clone();
     if let Some(q) = quarantine.as_ref() {
         pre_hook_env_owned.extend(q.hook_env());
     }
@@ -431,8 +429,9 @@ fn apply_commands_with_hooks(
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    let post_hook_env_owned = push_option_env_owned(&request.push_options);
-    let post_hook_env: Vec<(&str, &str)> = post_hook_env_owned
+    let update_hook_env: &[(&str, &str)] = &[];
+    let post_receive_env_owned = push_option_env;
+    let post_receive_env: Vec<(&str, &str)> = post_receive_env_owned
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
@@ -473,7 +472,7 @@ fn apply_commands_with_hooks(
         let new_hex = cmd.new.map(|o| o.to_hex()).unwrap_or(zero.clone());
         let args = [cmd.refname.as_str(), old_hex.as_str(), new_hex.as_str()];
         let (update_result, update_out) =
-            run_hook_in_git_dir(repo, "update", &args, None, &post_hook_env);
+            run_hook_in_git_dir(repo, "update", &args, None, update_hook_env);
         relay_hook_sideband(&mut sideband_out, &update_out)?;
         hook_records.push(hook_record("update", &update_result));
         if matches!(update_result, HookResult::Failed(_)) {
@@ -505,24 +504,29 @@ fn apply_commands_with_hooks(
         .filter(|(_, r)| r.error.is_none())
         .map(|(c, _)| c)
         .collect();
-    let post_stdin = commands_stdin(&successful, algo);
-    let (post_result, post_out) = run_hook_in_git_dir(
-        repo,
-        "post-receive",
-        &[],
-        Some(post_stdin.as_bytes()),
-        &post_hook_env,
-    );
-    relay_hook_sideband(&mut sideband_out, &post_out)?;
-    hook_records.push(hook_record("post-receive", &post_result));
+    if !successful.is_empty() {
+        let post_stdin = commands_stdin(&successful, algo);
+        let (post_result, post_out) = run_hook_in_git_dir(
+            repo,
+            "post-receive",
+            &[],
+            Some(post_stdin.as_bytes()),
+            &post_receive_env,
+        );
+        relay_hook_sideband(&mut sideband_out, &post_out)?;
+        hook_records.push(hook_record("post-receive", &post_result));
 
-    let mut post_update_args: Vec<&str> = Vec::new();
-    for result in results.iter().filter(|r| r.error.is_none()) {
-        post_update_args.push(result.refname.as_str());
-    }
-    if !post_update_args.is_empty() {
-        let (pu_result, pu_out) =
-            run_hook_in_git_dir(repo, "post-update", &post_update_args, None, &post_hook_env);
+        let mut post_update_args: Vec<&str> = Vec::new();
+        for result in results.iter().filter(|r| r.error.is_none()) {
+            post_update_args.push(result.refname.as_str());
+        }
+        let (pu_result, pu_out) = run_hook_in_git_dir(
+            repo,
+            "post-update",
+            &post_update_args,
+            None,
+            update_hook_env,
+        );
         relay_hook_sideband(&mut sideband_out, &pu_out)?;
         hook_records.push(hook_record("post-update", &pu_result));
     }

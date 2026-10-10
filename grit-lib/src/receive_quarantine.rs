@@ -6,6 +6,7 @@
 //! `GIT_QUARANTINE_PATH`. On success the quarantine contents are migrated into
 //! the main store; on failure the directory is removed.
 
+use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -84,7 +85,7 @@ impl ReceiveQuarantine {
     #[must_use]
     pub fn hook_env(&self) -> Vec<(String, String)> {
         let quarantine = abs_or_path(&self.path);
-        let main = abs_or_path(&self.main_objects);
+        let main = format_alternate_object_directories(&abs_or_path(&self.main_objects));
         vec![
             ("GIT_OBJECT_DIRECTORY".to_owned(), quarantine.clone()),
             ("GIT_ALTERNATE_OBJECT_DIRECTORIES".to_owned(), main),
@@ -128,6 +129,36 @@ fn abs_or_path(path: &Path) -> String {
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .into_owned()
+}
+
+/// Format one path for `GIT_ALTERNATE_OBJECT_DIRECTORIES` (Git `env_append` quoting).
+fn format_alternate_object_directories(path: &str) -> String {
+    match quote_git_env_path(path) {
+        Cow::Borrowed(p) => p.to_owned(),
+        Cow::Owned(p) => p,
+    }
+}
+
+fn quote_git_env_path(path: &str) -> Cow<'_, str> {
+    if !path.contains(':') && !path.contains('"') {
+        return Cow::Borrowed(path);
+    }
+    let mut out = String::from('"');
+    for ch in path.chars() {
+        match ch {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            c if c.is_control() => {
+                let b = c as u32;
+                out.push_str(&format!("\\{b:03o}"));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    Cow::Owned(out)
 }
 
 fn remove_quarantine_dir(path: &Path) -> Result<()> {
@@ -234,6 +265,27 @@ mod tests {
         assert_eq!(source.hash_algo(), crate::objects::HashAlgo::Sha256);
         let q = ReceiveQuarantine::create(&source, &git_dir).expect("quarantine");
         assert_eq!(q.odb().hash_algo(), crate::objects::HashAlgo::Sha256);
+    }
+
+    #[test]
+    fn alternate_env_quotes_paths_containing_colons() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let main = tmp.path().join("obj:ects");
+        std::fs::create_dir_all(&main).unwrap();
+        let git_dir = tmp.path().join("repo.git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let source = Odb::new(&main).with_config_git_dir(git_dir.clone());
+        let q = ReceiveQuarantine::create(&source, &git_dir).expect("quarantine");
+        let alt = q
+            .hook_env()
+            .into_iter()
+            .find(|(k, _)| k == "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+            .map(|(_, v)| v)
+            .expect("alt env");
+        assert!(
+            alt.starts_with('"') && alt.ends_with('"'),
+            "colon in path must be quoted: {alt}"
+        );
     }
 
     #[test]
