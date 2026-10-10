@@ -166,12 +166,17 @@ fn init_emits_json() -> TestResult {
     let scratch = Scratch::new("init")?;
     let v = gs_json(scratch.path(), &["init", "."]);
     assert_eq!(v["initialized"], Value::Bool(true));
+    assert_eq!(v["reinitialized"], Value::Null);
     assert_eq!(v["bare"], Value::Bool(false));
     assert_eq!(v["branch"], "main");
     assert!(
         v["path"].as_str().unwrap().ends_with(".git"),
         "path should be the .git dir: {v}"
     );
+
+    let again = gs_json(scratch.path(), &["init", "."]);
+    assert_eq!(again["initialized"], Value::Bool(false));
+    assert_eq!(again["reinitialized"], Value::Bool(true));
     Ok(())
 }
 
@@ -628,6 +633,146 @@ fn show_human_has_commit_header_and_diff() -> TestResult {
     assert!(out.stdout.contains("Author: Test User <test@example.com>"));
     assert!(out.stdout.contains("    the subject"));
     assert!(out.stdout.contains("a.txt"));
+    Ok(())
+}
+
+#[test]
+fn rfc3339_author_date_matches_git_for_negative_subhour_tz() -> TestResult {
+    const WHEN: &str = "1700000000 -0030";
+    let scratch = Scratch::new("tz-negative-subhour")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "x\n");
+    gs_ok(&repo, &["add"]);
+
+    let commit_out = Command::new(GS)
+        .current_dir(&repo)
+        .args(["commit", "tz test"])
+        .env("GIT_AUTHOR_NAME", "Test User")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test User")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_AUTHOR_DATE", WHEN)
+        .env("GIT_COMMITTER_DATE", WHEN)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("spawn gs");
+    assert!(
+        commit_out.status.success(),
+        "commit failed: {}",
+        String::from_utf8_lossy(&commit_out.stderr)
+    );
+
+    let git_iso = Command::new("git")
+        .current_dir(&repo)
+        .args(["log", "-1", "--format=%aI"])
+        .output()
+        .expect("git log");
+    assert!(git_iso.status.success());
+    let expected = String::from_utf8_lossy(&git_iso.stdout).trim().to_owned();
+    assert_eq!(expected, "2023-11-14T21:43:20-00:30");
+
+    let log = gs_json(&repo, &["log"]);
+    assert_eq!(log["commits"][0]["author_date"], expected);
+
+    let show = gs_json(&repo, &["show"]);
+    assert_eq!(show["commit"]["author"]["date"], expected);
+    assert_eq!(show["commit"]["committer"]["date"], expected);
+    Ok(())
+}
+
+#[test]
+fn log_json_includes_author_and_rfc3339_date() -> TestResult {
+    let scratch = Scratch::new("log-fields")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "x\n");
+    gs_ok(&repo, &["commit", "hello"]);
+
+    let v = gs_json(&repo, &["log"]);
+    let commit = &v["commits"][0];
+    assert_eq!(commit["subject"], "hello");
+    assert_eq!(commit["author"], "test");
+    assert!(commit["author_date"]
+        .as_str()
+        .is_some_and(|d| d.contains('T')));
+    assert!(commit["relative_date"].as_str().is_some());
+    Ok(())
+}
+
+#[test]
+fn merge_conflict_json_is_structured() -> TestResult {
+    let scratch = Scratch::new("merge-conflict")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("f"), "a\n");
+    gs_ok(&repo, &["commit", "base"]);
+    gs_ok(&repo, &["switch", "-c", "side"]);
+    write_file(&repo.join("f"), "s\n");
+    gs_ok(&repo, &["commit", "side"]);
+    gs_ok(&repo, &["switch", "main"]);
+    write_file(&repo.join("f"), "m\n");
+    gs_ok(&repo, &["commit", "main"]);
+
+    let out = gs(&repo, ["--json", "merge", "side"]);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout)?;
+    assert_eq!(v["kind"], "conflict");
+    assert_eq!(v["error"], "merge has conflicts");
+    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    Ok(())
+}
+
+#[test]
+fn bad_filter_and_missing_revision_errors_are_clean() -> TestResult {
+    let scratch = Scratch::new("clean-errors")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+
+    let out = gs(&repo, ["--json", "--filter", ".commits[", "log"]);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout)?;
+    let err = v["error"].as_str().unwrap();
+    assert!(!err.contains("File {"), "leaked Debug: {err}");
+    assert!(err.contains("syntax error"), "{err}");
+
+    let out = gs(&repo, ["show", "nonexistent", "--json"]);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout)?;
+    assert_eq!(v["error"], "revision 'nonexistent' not found");
+
+    let out = gs(&repo, ["switch", "nonexistent", "--json"]);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout)?;
+    assert_eq!(v["error"], "no branch named 'nonexistent'");
+    Ok(())
+}
+
+#[test]
+fn clap_usage_error_emits_json_on_stdout() -> TestResult {
+    let scratch = Scratch::new("clap-json")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+
+    let out = gs(&repo, ["--json", "switch"]);
+    assert_eq!(out.status, Some(2), "{}", out.dump());
+    assert!(out.stderr.is_empty(), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout).expect("JSON on stdout");
+    let err = v["error"].as_str().expect("error string");
+    assert!(
+        err.contains("<NAME>"),
+        "JSON error must name the missing argument: {err}"
+    );
+    assert!(
+        err.contains("required arguments were not provided"),
+        "JSON error must retain clap's required-argument context: {err}"
+    );
     Ok(())
 }
 

@@ -81,11 +81,16 @@ pub fn run() -> Result<ShortlogOutcome> {
     };
 
     let ahead = context::commits_ahead_of(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     Ok(ShortlogOutcome {
         branch: branch_name.to_owned(),
         target: Some(target.display_name),
         ahead: ahead.total,
-        commits: ahead.commits.iter().map(CommitJson::from_summary).collect(),
+        commits: ahead
+            .commits
+            .iter()
+            .map(|c| CommitJson::from_summary(c, now))
+            .collect(),
         commit_rows: ahead.commits,
     })
 }

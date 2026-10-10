@@ -79,12 +79,12 @@ Example:
     "author": {
       "name": "Ada Lovelace",
       "email": "ada@example.com",
-      "date": "2026-10-07 14:54:02 +0000"
+      "date": "2026-10-07T14:54:02Z"
     },
     "committer": {
       "name": "Ada Lovelace",
       "email": "ada@example.com",
-      "date": "2026-10-07 14:54:02 +0000"
+      "date": "2026-10-07T14:54:02Z"
     },
     "subject": "second",
     "message": "second"

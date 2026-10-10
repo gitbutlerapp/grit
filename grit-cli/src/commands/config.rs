@@ -30,6 +30,11 @@ pub enum ConfigOutcome {
 pub struct ConfigEntry {
     pub key: String,
     pub value: Option<String>,
+    /// Which config layer this entry came from (`system`, `global`, `local`, …).
+    pub scope: String,
+    /// Source file, when the entry is file-backed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 impl HumanRender for ConfigOutcome {
@@ -127,6 +132,8 @@ fn list_values(global: bool) -> Result<ConfigOutcome> {
         .map(|entry| ConfigEntry {
             key: entry.key.clone(),
             value: entry.value.clone(),
+            scope: entry.scope.to_string(),
+            file: entry.file.as_ref().map(|p| p.display().to_string()),
         })
         .collect();
     Ok(ConfigOutcome::List { entries })

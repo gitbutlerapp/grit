@@ -2486,9 +2486,13 @@ fn resolve_base(
             if let Ok(oid) = resolve_index_path(repo, spec) {
                 return Ok(oid);
             }
+            return Err(RevParseError::AmbiguousArgument {
+                spec: spec.to_owned(),
+            }
+            .into());
         }
-        return Err(RevParseError::AmbiguousArgument {
-            spec: spec.to_owned(),
+        return Err(RevParseError::InvalidObjectName {
+            name: spec.to_owned(),
         }
         .into());
     }

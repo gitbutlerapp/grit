@@ -275,7 +275,11 @@ pub fn run() -> Result<StatusOutcome> {
     let (branch, detached, head, target, ahead_total, ahead_commits, header) =
         resolve_header(&repo, &model.head, merging, &in_progress)?;
     let ahead = ahead_total;
-    let commits = ahead_commits.iter().map(CommitJson::from_summary).collect();
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
+    let commits = ahead_commits
+        .iter()
+        .map(|c| CommitJson::from_summary(c, now))
+        .collect();
 
     let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
     let unstaged: Vec<ChangeJson> = model.unstaged.iter().map(change_json).collect();

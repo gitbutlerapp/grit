@@ -97,7 +97,7 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | `action` | string | `get`, `set`, `unset`, or `list`. |
 | `key` | string | Configuration key for `get`, `set`, or `unset`. |
 | `value` | string | Value for `get` or `set`. |
-| `entries` | array | For `list`, each entry with `key` and optional `value`. |
+| `entries` | array | For `list`, each entry with `key`, optional `value`, `scope` (`system`, `global`, `local`, …), and optional `file` path. Later entries in the merged list override earlier ones for the same key. |
 
 Reading a value:
 
@@ -115,7 +115,12 @@ Listing values:
 {
   "action": "list",
   "entries": [
-    { "key": "user.name", "value": "Ada Lovelace" }
+    {
+      "key": "user.name",
+      "value": "Ada Lovelace",
+      "scope": "global",
+      "file": "/home/ada/.gitconfig"
+    }
   ]
 }
 ```

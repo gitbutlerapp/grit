@@ -5,9 +5,12 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+mod cli_messages;
 mod commands;
 mod context;
+mod dates;
 mod diagnostics;
+mod json_error;
 mod json_filter;
 mod markdown;
 mod output;
@@ -300,7 +303,23 @@ struct ServeArgs {
 
 fn main() {
     stdio::configure();
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) if err.use_stderr() => {
+            let json = std::env::args().any(|a| a == "--json");
+            if json {
+                let opts = OutputOptions {
+                    mode: OutputMode::Json,
+                    filter: extract_filter_flag(),
+                };
+                let message = clap_json_error_message(&err);
+                output::emit_error(&anyhow::anyhow!(message), &opts);
+                std::process::exit(err.exit_code());
+            }
+            err.exit();
+        }
+        Err(err) => err.exit(),
+    };
     let opts = OutputOptions {
         mode: if cli.json {
             OutputMode::Json
@@ -312,7 +331,11 @@ fn main() {
         filter: cli.filter.clone(),
     };
     if let Err(err) = opts.validate() {
-        eprintln!("error: {err:#}");
+        if opts.mode == OutputMode::Json {
+            output::emit_error(&err, &opts);
+        } else {
+            eprintln!("error: {err:#}");
+        }
         std::process::exit(1);
     }
     if let Err(err) = reject_non_human_plumbing(&cli, &opts) {
@@ -331,6 +354,53 @@ fn main() {
         };
         std::process::exit(code);
     }
+}
+
+/// Format a clap usage error for `--json`: keep missing-argument detail, omit Usage/help.
+fn clap_json_error_message(err: &clap::Error) -> String {
+    let raw = err.to_string();
+    let mut lines = raw.lines();
+    let Some(first) = lines.next() else {
+        return "invalid arguments".to_owned();
+    };
+    let first = first
+        .strip_prefix("error: ")
+        .or_else(|| first.strip_prefix("error:"))
+        .unwrap_or(first)
+        .trim();
+    let mut out = vec![first.to_owned()];
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Usage:") || trimmed.starts_with("For more information") {
+            break;
+        }
+        if trimmed.is_empty() {
+            if out.len() > 1 {
+                break;
+            }
+            continue;
+        }
+        out.push(line.to_owned());
+    }
+    let message = out.join("\n").trim().to_owned();
+    if message.is_empty() {
+        "invalid arguments".to_owned()
+    } else {
+        message
+    }
+}
+
+fn extract_filter_flag() -> Option<String> {
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if arg == "--filter" {
+            return args.next();
+        }
+        if let Some(expr) = arg.strip_prefix("--filter=") {
+            return Some(expr.to_owned());
+        }
+    }
+    None
 }
 
 /// Run the selected subcommand and render its outcome.

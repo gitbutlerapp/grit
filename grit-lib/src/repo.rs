@@ -2764,12 +2764,10 @@ fn parse_gitfile(content: &str, base: &Path) -> Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] on filesystem failures.
-fn write_fresh_git_directory(
+/// Ensure standard git directory layout without overwriting `HEAD`, `config`, or refs.
+fn ensure_git_directory_layout(
     git_dir: &Path,
     bare: bool,
-    initial_branch: &str,
-    template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     skip_hooks_and_info: bool,
 ) -> Result<()> {
@@ -2797,6 +2795,18 @@ fn write_fresh_git_directory(
             fs::write(&tables_list, "")?;
         }
     }
+    Ok(())
+}
+
+fn write_fresh_git_directory(
+    git_dir: &Path,
+    bare: bool,
+    initial_branch: &str,
+    template_dir: Option<&Path>,
+    ref_storage: crate::ref_storage::RefStorageFormat,
+    skip_hooks_and_info: bool,
+) -> Result<()> {
+    ensure_git_directory_layout(git_dir, bare, ref_storage, skip_hooks_and_info)?;
 
     if let Some(tmpl) = template_dir {
         if tmpl.is_dir() {
@@ -3009,14 +3019,19 @@ pub fn init_repository(
         fs::create_dir_all(path)?;
     }
     fs::create_dir_all(&git_dir)?;
-    write_fresh_git_directory(
-        &git_dir,
-        bare,
-        initial_branch,
-        template_dir,
-        ref_storage,
-        skip_hooks_info,
-    )?;
+    let existing = git_dir.join("config").is_file() && git_dir.join("HEAD").is_file();
+    if existing {
+        ensure_git_directory_layout(&git_dir, bare, ref_storage, skip_hooks_info)?;
+    } else {
+        write_fresh_git_directory(
+            &git_dir,
+            bare,
+            initial_branch,
+            template_dir,
+            ref_storage,
+            skip_hooks_info,
+        )?;
+    }
 
     let work_tree = if bare { None } else { Some(path) };
     Repository::open(&git_dir, work_tree)

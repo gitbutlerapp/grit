@@ -55,7 +55,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `commits` | array | Up to ten commits, newest first, each with `oid` and `subject`. |
+| `commits` | array | Up to ten commits, newest first. Each entry has `oid`, `subject`, `author` (same display as human log), `author_date` (RFC 3339), and `relative_date` (e.g. `3 days ago`). |
 | `next` | string or null | Full commit id to pass to `--before` for the next page, or `null` when there is no more history. |
 
 Example:
@@ -65,11 +65,17 @@ Example:
   "commits": [
     {
       "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
-      "subject": "second"
+      "subject": "second",
+      "author": "ada",
+      "author_date": "2026-10-07T14:54:02Z",
+      "relative_date": "2 days ago"
     },
     {
       "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
-      "subject": "initial"
+      "subject": "initial",
+      "author": "ada",
+      "author_date": "2026-10-05T09:12:00Z",
+      "relative_date": "4 days ago"
     }
   ],
   "next": null

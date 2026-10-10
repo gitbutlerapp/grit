@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
 use crate::context::{self, subject_line};
+use crate::dates::rfc3339_from_identity_when;
 use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 
@@ -96,7 +97,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
     // Resolve the name, then peel through any (annotated) tag objects to the
     // underlying commit. `resolve_revision` resolves branches/HEAD/sha and
     // lightweight tags to a commit, but yields the tag *object* for annotated tags.
-    let resolved = grit_lib::rev_parse::resolve_revision(&repo, &target)
+    let resolved = grit_lib::rev_parse::resolve_revision_without_index_dwim(&repo, &target)
         .with_context(|| format!("could not resolve '{target}'"))?;
     let commit_oid = peel_to_commit(&repo, resolved)?;
     let data = context::read_commit(&repo, &commit_oid)?;
@@ -221,42 +222,9 @@ impl Person {
         Self {
             name: name.trim().to_owned(),
             email: email.trim_end_matches('>').to_owned(),
-            date: format_date(when),
+            date: rfc3339_from_identity_when(when),
         }
     }
-}
-
-/// Format `"<epoch> <tz>"` as `YYYY-MM-DD HH:MM:SS ±HHMM` in the recorded zone.
-fn format_date(when: &str) -> String {
-    let mut parts = when.split_whitespace();
-    let Some(epoch) = parts.next().and_then(|s| s.parse::<i64>().ok()) else {
-        return when.trim().to_owned();
-    };
-    let tz = parts.next().unwrap_or("+0000");
-    let offset = tz_offset_seconds(tz);
-    let Ok(dt) = time::OffsetDateTime::from_unix_timestamp(epoch + offset) else {
-        return when.trim().to_owned();
-    };
-    let Ok(fmt) = time::format_description::parse_borrowed::<1>(
-        "[year]-[month]-[day] [hour]:[minute]:[second]",
-    ) else {
-        return when.trim().to_owned();
-    };
-    match dt.format(&fmt) {
-        Ok(s) => format!("{s} {tz}"),
-        Err(_) => when.trim().to_owned(),
-    }
-}
-
-/// Parse a `±HHMM` timezone offset into seconds.
-fn tz_offset_seconds(tz: &str) -> i64 {
-    if tz.len() < 5 {
-        return 0;
-    }
-    let sign = if tz.starts_with('-') { -1 } else { 1 };
-    let hours: i64 = tz[1..3].parse().unwrap_or(0);
-    let minutes: i64 = tz[3..5].parse().unwrap_or(0);
-    sign * (hours * 3600 + minutes * 60)
 }
 
 // --- Human rendering --------------------------------------------------------

@@ -19,7 +19,9 @@ use grit_lib::diff::{DiffEntry, DiffStatus};
 use serde::Serialize;
 use std::io::{ErrorKind, Write as _};
 
+use crate::cli_messages::human_error_message;
 use crate::context::CommitSummary;
+use crate::json_error::structured_json_payload;
 use crate::json_filter::apply_json_filter;
 use crate::stdio;
 use crate::ui::entry_path;
@@ -140,10 +142,7 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
         eprintln!("error: {filter_err:#}");
         return;
     }
-    let human = err
-        .downcast_ref::<grit_lib::error::Error>()
-        .map(grit_lib::error::Error::git_stderr_message)
-        .unwrap_or_else(|| format!("{err:#}"));
+    let human = human_error_message(err);
     match opts.mode {
         OutputMode::Human => {
             if human.starts_with("fatal:") || human.starts_with("error:") {
@@ -156,7 +155,10 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
             println!("**Error:** {human}");
         }
         OutputMode::Json => {
-            let payload = if let Some(expr) = opts.filter.as_deref() {
+            let payload = if let Some(structured) = structured_json_payload(err) {
+                serde_json::to_value(structured)
+                    .unwrap_or_else(|_| serde_json::json!({ "error": human.clone() }))
+            } else if let Some(expr) = opts.filter.as_deref() {
                 let full = serde_json::json!({ "error": human.clone() });
                 match apply_json_filter(&full, expr) {
                     Ok(filtered) => filtered,
@@ -209,19 +211,29 @@ fn markdown_scalar(value: &serde_json::Value) -> String {
 // here (not in grit-lib) so the JSON schema stays decoupled from internal types.
 // ---------------------------------------------------------------------------
 
-/// A commit in JSON output: full hex `oid` and its `subject` line.
+/// A commit in JSON output: full hex `oid`, subject, author, and dates.
 #[derive(Serialize)]
 pub struct CommitJson {
     pub oid: String,
     pub subject: String,
+    /// Author display name (email local-part when present, matching human log).
+    pub author: String,
+    /// Author timestamp in RFC 3339.
+    pub author_date: String,
+    /// Relative author date (e.g. `3 days ago`), when `now` is supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relative_date: Option<String>,
 }
 
 impl CommitJson {
     /// Build from a [`CommitSummary`] (status/shortlog ahead-lists).
-    pub fn from_summary(commit: &CommitSummary) -> Self {
+    pub fn from_summary(commit: &CommitSummary, now: i64) -> Self {
         Self {
             oid: commit.oid.to_hex(),
             subject: commit.subject.clone(),
+            author: commit.author.clone(),
+            author_date: commit.author_date.clone(),
+            relative_date: Some(crate::context::relative_date_from(commit.timestamp, now)),
         }
     }
 }

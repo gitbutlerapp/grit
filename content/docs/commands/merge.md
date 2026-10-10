@@ -78,6 +78,22 @@ Example:
 }
 ```
 
+On failure because of conflicts, stdout is a single JSON object (exit code 1):
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `error` | string | Short summary (`merge has conflicts`). |
+| `kind` | string | `conflict`. |
+| `conflicts` | array | Sorted paths with unresolved conflicts. |
+
+```json
+{
+  "error": "merge has conflicts",
+  "kind": "conflict",
+  "conflicts": ["src/lib.rs"]
+}
+```
+
 ## See also
 
 [grit pull](../pull/), [grit pick](../pick/), [grit branch](../branch/)

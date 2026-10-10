@@ -13,6 +13,7 @@ use grit_lib::repo::Repository;
 use std::path::PathBuf;
 use time::OffsetDateTime;
 
+use crate::dates::{identity_when_suffix, rfc3339_from_identity_when};
 use crate::diagnostics;
 
 /// Build the process [`Environment`] for repository discovery and config loading.
@@ -47,6 +48,8 @@ pub struct CommitSummary {
     pub author: String,
     /// Author date as a Unix timestamp (for relative-date rendering).
     pub timestamp: i64,
+    /// Author date in RFC 3339.
+    pub author_date: String,
 }
 
 /// Discover the repository containing the current directory.
@@ -153,6 +156,7 @@ pub fn commits_ahead_of(
             subject: subject_line(&commit.message),
             author,
             timestamp,
+            author_date: rfc3339_from_identity_when(identity_when_suffix(&commit.author)),
         });
     }
 

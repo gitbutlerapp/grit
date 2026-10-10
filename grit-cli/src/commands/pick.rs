@@ -64,11 +64,14 @@ pub fn run(commit: &str) -> Result<PickOutcome> {
             oid: oid.to_hex(),
             subject: context::subject_line(&source.message),
         }),
-        ReplayOutcome::Conflicts { paths } => bail!(
-            "pick has conflicts in:\n  {}\n\nNothing was changed. grit can't resolve conflicts yet — run `git cherry-pick {short}` to resolve them.",
-            paths.join("\n  "),
-        ),
-        ReplayOutcome::Empty => bail!("{short} is empty (its tree matches its parent) — nothing to pick"),
+        ReplayOutcome::Conflicts { mut paths } => {
+            paths.sort();
+            paths.dedup();
+            Err(crate::json_error::operation_conflict("pick", paths))
+        }
+        ReplayOutcome::Empty => {
+            bail!("{short} is empty (its tree matches its parent) — nothing to pick")
+        }
         ReplayOutcome::AlreadyApplied => {
             bail!("{short} is already applied on this branch — nothing to pick")
         }

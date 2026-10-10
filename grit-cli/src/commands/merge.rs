@@ -180,10 +180,7 @@ pub fn integrate(
             .map(|k| String::from_utf8_lossy(k).into_owned())
             .collect();
         paths.sort();
-        bail!(
-            "merge has conflicts in:\n  {}\n\nNothing was changed. grit can't resolve conflicts yet — run `git merge {label}` to resolve them.",
-            paths.join("\n  ")
-        );
+        return Err(crate::json_error::operation_conflict("merge", paths));
     }
 
     let mut index = merged.index;

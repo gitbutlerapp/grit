@@ -73,6 +73,8 @@ Example:
 }
 ```
 
+On failure because of conflicts, stdout is a single JSON object (exit code 1) with `error`, `kind` (`conflict`), and `conflicts` (sorted paths), same shape as [`grit merge`](../merge/).
+
 ## See also
 
 [grit merge](../merge/), [grit log](../log/)

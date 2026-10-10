@@ -64,7 +64,8 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `initialized` | boolean | Whether the repository was created successfully. |
+| `initialized` | boolean | `true` when a new repository was created. |
+| `reinitialized` | boolean | `true` when an existing repository was reinitialized in place (omitted when `false`). |
 | `path` | string | Repository directory (the `.git` directory for a normal repository). |
 | `bare` | boolean | Whether the repository is bare. |
 | `branch` | string | Initial branch name. |

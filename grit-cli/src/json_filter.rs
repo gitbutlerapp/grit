@@ -49,17 +49,34 @@ pub fn apply_json_filter(input: &Value, filter: &str) -> Result<Value> {
     let arena = Arena::default();
     let modules = loader
         .load(&arena, program)
-        .map_err(|errs| anyhow::anyhow!("invalid filter {filter:?}: {errs:?}"))?;
+        .map_err(|_| anyhow::anyhow!("invalid filter `{filter}`: filter syntax error"))?;
     let compiled = Compiler::default()
         .with_funs(funs)
         .compile(modules)
-        .map_err(|errs| anyhow::anyhow!("invalid filter {filter:?}: {errs:?}"))?;
+        .map_err(|errs| {
+            let detail = errs
+                .into_iter()
+                .flat_map(|(_, undefined)| {
+                    undefined
+                        .into_iter()
+                        .map(|(name, _)| name.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let detail = if detail.is_empty() {
+                "syntax error".to_owned()
+            } else {
+                detail
+            };
+            anyhow::anyhow!("invalid filter `{filter}`: filter syntax error ({detail})")
+        })?;
     let ctx = Ctx::<data::JustLut<Val>>::new(&compiled.lut, Vars::new([]));
     let out = compiled.id.run((ctx, input_val)).map(unwrap_valr);
 
     let mut results = Vec::new();
     for item in out {
-        let val = item.map_err(|e| anyhow::anyhow!("filter {filter:?}: {e}"))?;
+        let val = item.map_err(|e| anyhow::anyhow!("invalid filter `{filter}`: {e}"))?;
         let json =
             serde_json::from_str(&val.to_string()).context("converting filter output to JSON")?;
         results.push(json);
@@ -90,6 +107,16 @@ mod tests {
         let input = json!({"branch": "main", "clean": true, "head": null});
         let out = apply_json_filter(&input, "{branch, clean}").unwrap();
         assert_eq!(out, json!({"branch": "main", "clean": true}));
+    }
+
+    #[test]
+    fn bad_filter_reports_syntax_error_not_debug() {
+        let input = json!({"commits": []});
+        let err = apply_json_filter(&input, ".commits[").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(!msg.contains("File {"), "must not leak jaq Debug: {msg}");
+        assert!(msg.contains("invalid filter"), "{msg}");
+        assert!(msg.contains("syntax error"), "{msg}");
     }
 
     #[test]

@@ -73,6 +73,9 @@ pub fn run(before: Option<String>) -> Result<LogOutcome> {
     let result = rev_list(&repo, std::slice::from_ref(&start), &[], &opts)
         .with_context(|| format!("could not list commits from {start}"))?;
 
+    let env = repo.environment();
+    let now = context::wall_clock_now(env).unix_timestamp();
+
     let commit_rows = result
         .commits
         .iter()
@@ -85,10 +88,16 @@ pub fn run(before: Option<String>) -> Result<LogOutcome> {
                 subject: subject_line(&commit.message),
                 author,
                 timestamp,
+                author_date: crate::dates::rfc3339_from_identity_when(
+                    crate::dates::identity_when_suffix(&commit.author),
+                ),
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let commits = commit_rows.iter().map(CommitJson::from_summary).collect();
+    let commits = commit_rows
+        .iter()
+        .map(|row| CommitJson::from_summary(row, now))
+        .collect();
 
     let next = result
         .commits
