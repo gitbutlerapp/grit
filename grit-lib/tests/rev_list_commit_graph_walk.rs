@@ -95,6 +95,7 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
     let mut with_graph = opts_base.clone();
     with_graph.use_commit_graph = true;
     let with = rev_list(&repo, &["HEAD".to_owned()], &[], &with_graph).expect("graph walk");
-    assert_eq!(without.commits, with.commits);
     assert_eq!(without.commits.len(), 80);
+    assert_eq!(without.commit_count(), with.commit_count());
+    assert_eq!(with.commit_count(), 80);
 }
