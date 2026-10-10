@@ -322,8 +322,18 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack_bitmap::BitmapIndex` | struct | Memory-mapped pack or MIDX reachability bitmap (Git BITM v1). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) |
 | `grit_lib::pack_bitmap::BitmapIndexCache` | struct | Repository-scoped cache slot for BitmapIndex::open. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndexCache.html) |
 | `grit_lib::pack_bitmap::CommitReachabilityBitmap` | struct | Decoded reachability set for one commit (bits index pack/MIDX object positions). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.CommitReachabilityBitmap.html) |
+| `grit_lib::pack_bitmap::PackBitmapWriteError` | enum | Failure while writing a pack reachability bitmap. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.PackBitmapWriteError.html) |
+| `grit_lib::pack_bitmap::PackBitmapWriteOptions` | struct | Options controlling pack bitmap generation (caller-supplied; not read from the environment). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriteOptions.html) |
+| `grit_lib::pack_bitmap::PackBitmapWriter` | struct | Writes .bitmap sidecars for pack indexes produced by all-into-one repacks. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriter.html) |
 | `grit_lib::pack_bitmap::TypeBitmap` | struct | Borrowed type filter bitmap (commits, trees, blobs, or tags). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.TypeBitmap.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
+| `grit_lib::pack_objects` | module | Negotiation-driven pack-objects: enumerate wants minus haves, delta search, stream PACK v2. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/index.html) |
+| `grit_lib::pack_objects::PackBuildOptions` | struct | Options controlling pack-objects output (also used by build_pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html) |
+| `grit_lib::pack_objects::PackBuildOptions` | struct | Identity and message for clone reflog entries written by the library. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/../pack_objects/struct.PackBuildOptions.html) |
+| `grit_lib::pack_objects::PackObjects` | struct | Streaming pack-objects builder over an Odb. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackObjects.html) |
+| `grit_lib::pack_objects::PackObjectsOptions` | struct | Extended options for PackObjects. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackObjectsOptions.html) |
+| `grit_lib::pack_objects::PackProgress` | enum | Progress hook for long pack builds. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/enum.PackProgress.html) |
+| `grit_lib::pack_objects::PackStats` | struct | Counters reported after a successful pack write. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackStats.html) |
 | `grit_lib::pack_receive` | module | Stream side-band pack data from fetch/clone into memory or a pack temp file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/index.html) |
 | `grit_lib::pack_receive::PackReceiveTarget` | enum | Where demuxed pack bytes are stored. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/enum.PackReceiveTarget.html) |
 | `grit_lib::pack_receive::TempPackReceive` | struct | A temp pack file under objects/pack/ for streaming clone/fetch receive. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/struct.TempPackReceive.html) |
@@ -412,6 +422,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::push_submodules::PushRecurseSubmodules` | enum | How git push should recurse into submodules. | [API](https://docs.rs/grit-lib/latest/grit_lib/push_submodules/enum.PushRecurseSubmodules.html) |
 | `grit_lib::quote_path` | module | C-style path quoting compatible with Git’s quote.c / core.quotepath. | [API](https://docs.rs/grit-lib/latest/grit_lib/quote_path/index.html) |
 | `grit_lib::receive_pack` | module | Receive-pack configuration and pack-header helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/receive_pack/index.html) |
+| `grit_lib::receive_quarantine` | module | Temporary object directories for receive-pack (Git quarantine). | [API](https://docs.rs/grit-lib/latest/grit_lib/receive_quarantine/index.html) |
+| `grit_lib::receive_quarantine::ReceiveQuarantine` | struct | A receive-pack quarantine directory under the repository’s objects/. | [API](https://docs.rs/grit-lib/latest/grit_lib/receive_quarantine/struct.ReceiveQuarantine.html) |
 | `grit_lib::ref_exclusions` | module | Reference exclusion rules for rev-list / rev-parse (--exclude, --exclude-hidden). | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_exclusions/index.html) |
 | `grit_lib::ref_exclusions::RefExclusions` | struct | Patterns that exclude refs from --all / glob expansion, including hidden-ref config. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_exclusions/struct.RefExclusions.html) |
 | `grit_lib::ref_namespace` | module | Git GIT_NAMESPACE handling: map logical ref names to storage under refs/namespaces/.../. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_namespace/index.html) |
@@ -502,6 +514,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::rev_parse_error::RevParseError` | enum | Failure modes when resolving revision specs, upstream/push refs, paths, and reflogs. | [API](https://docs.rs/grit-lib/latest/grit_lib/rev_parse_error/enum.RevParseError.html) |
 | `grit_lib::revision` | module | Revision machinery: rev-parse, rev-list, name-rev, commit-graph. | [API](https://docs.rs/grit-lib/latest/grit_lib/revision/index.html) |
 | `grit_lib::serve` | module | Server side of the Git wire protocol: answering fetches and accepting pushes. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/index.html) |
+| `grit_lib::serve::HookRunRecord` | struct | One server-side hook invocation during receive-pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/struct.HookRunRecord.html) |
 | `grit_lib::serve::ProtocolVersion` | enum | Wire protocol version requested by the client. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/enum.ProtocolVersion.html) |
 | `grit_lib::serve::ReceiveOutcome` | struct | What a push session did. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/struct.ReceiveOutcome.html) |
 | `grit_lib::serve::ReceivePolicy` | struct | Which ref updates the server refuses. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/struct.ReceivePolicy.html) |
@@ -538,10 +551,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::terminal` | module | Cross-platform terminal capability detection for ANSI color output. | [API](https://docs.rs/grit-lib/latest/grit_lib/terminal/index.html) |
 | `grit_lib::textconv_cache` | module | Git-compatible diff.<driver>.cachetextconv storage under refs/notes/textconv/<driver>. | [API](https://docs.rs/grit-lib/latest/grit_lib/textconv_cache/index.html) |
 | `grit_lib::transfer` | module | Embedder-facing transfer (fetch / push) result & option types, plus the negotiation-driven pack builder. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/index.html) |
-| `grit_lib::transfer::CloneReflog` | struct | Identity and message for clone reflog entries written by the library. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.CloneReflog.html) |
 | `grit_lib::transfer::FetchOptions` | struct | Options controlling a fetch. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOptions.html) |
 | `grit_lib::transfer::FetchOutcome` | struct | The structured result of a fetch, ready for the embedder’s ref-store apply. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOutcome.html) |
-| `grit_lib::transfer::PackBuildOptions` | struct | Options controlling build_pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PackBuildOptions.html) |
 | `grit_lib::transfer::PushOptions` | struct | Options controlling a push. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOptions.html) |
 | `grit_lib::transfer::PushOutcome` | struct | The structured result of a push. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOutcome.html) |
 | `grit_lib::transfer::PushRefSpec` | struct | A single ref update requested by a push. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushRefSpec.html) |

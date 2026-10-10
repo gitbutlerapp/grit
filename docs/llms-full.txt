@@ -483,7 +483,7 @@ These options work on any command (and on `grit` itself when you pass no subcomm
 | Option | Description |
 | --- | --- |
 | `--json` | Print one JSON object instead of human-readable text. Errors become `{"error": "..."}`. |
-| `--markdown` | Print a Markdown field list instead of human-readable text (for agents). Mutually exclusive with `--json`. |>>>>>>> Current commit: docs: regenerate site for remote refs and global --markdown
+| `--markdown` | Print a Markdown field list instead of human-readable text (for agents). Mutually exclusive with `--json`. |
 | `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. |
 | `-h`, `--help` | Print help for `grit` or for a command. |
 | `-V`, `--version` | Print the version of `grit`. |
@@ -2675,7 +2675,9 @@ The server side of fetch and clone. It speaks the Git wire protocol on stdin and
 
 `<directory>` is the repository to serve: a bare repository, a working tree, or a path that names one once `.git` is added. Unlike other commands, `grit upload-pack` doesn't search parent directories, so it serves exactly the repository it was given.
 
-It supports Git protocol versions 0, 1 and 2, chosen by the client through the `GIT_PROTOCOL` environment variable. Refs matching `uploadpack.hideRefs` or `transfer.hideRefs` are not shown to clients. Shallow clones and partial-clone filters are not supported yet.
+It supports Git protocol versions 0, 1 and 2, chosen by the client through the `GIT_PROTOCOL` environment variable. Refs matching `uploadpack.hideRefs` or `transfer.hideRefs` are not shown to clients.
+
+Shallow and deepen requests (`deepen`, `deepen-since`, `deepen-not`, `deepen-relative`, client `shallow` lines) are honored in protocol v0/v1 and in v2 `fetch` (including the `shallow-info` section and sideband-all framing). Partial-clone filters (`filter blob:none`, `blob:limit=<n>`, `tree:<depth>`, and combinations) follow `uploadpack.allowFilter` and `uploadpackfilter.*` policy. Protocol v2 `want-ref` is available when `uploadpack.allowRefInWant` is set. Optional `want` rules follow `uploadpack.allowTipSha1InWant` and `uploadpack.allowReachableSha1InWant`.
 
 ## Options
 
@@ -3164,8 +3166,18 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack_bitmap::BitmapIndex` | struct | Memory-mapped pack or MIDX reachability bitmap (Git BITM v1). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) |
 | `grit_lib::pack_bitmap::BitmapIndexCache` | struct | Repository-scoped cache slot for BitmapIndex::open. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndexCache.html) |
 | `grit_lib::pack_bitmap::CommitReachabilityBitmap` | struct | Decoded reachability set for one commit (bits index pack/MIDX object positions). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.CommitReachabilityBitmap.html) |
+| `grit_lib::pack_bitmap::PackBitmapWriteError` | enum | Failure while writing a pack reachability bitmap. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.PackBitmapWriteError.html) |
+| `grit_lib::pack_bitmap::PackBitmapWriteOptions` | struct | Options controlling pack bitmap generation (caller-supplied; not read from the environment). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriteOptions.html) |
+| `grit_lib::pack_bitmap::PackBitmapWriter` | struct | Writes .bitmap sidecars for pack indexes produced by all-into-one repacks. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriter.html) |
 | `grit_lib::pack_bitmap::TypeBitmap` | struct | Borrowed type filter bitmap (commits, trees, blobs, or tags). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.TypeBitmap.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
+| `grit_lib::pack_objects` | module | Negotiation-driven pack-objects: enumerate wants minus haves, delta search, stream PACK v2. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/index.html) |
+| `grit_lib::pack_objects::PackBuildOptions` | struct | Options controlling pack-objects output (also used by build_pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html) |
+| `grit_lib::pack_objects::PackBuildOptions` | struct | Identity and message for clone reflog entries written by the library. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/../pack_objects/struct.PackBuildOptions.html) |
+| `grit_lib::pack_objects::PackObjects` | struct | Streaming pack-objects builder over an Odb. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackObjects.html) |
+| `grit_lib::pack_objects::PackObjectsOptions` | struct | Extended options for PackObjects. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackObjectsOptions.html) |
+| `grit_lib::pack_objects::PackProgress` | enum | Progress hook for long pack builds. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/enum.PackProgress.html) |
+| `grit_lib::pack_objects::PackStats` | struct | Counters reported after a successful pack write. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackStats.html) |
 | `grit_lib::pack_receive` | module | Stream side-band pack data from fetch/clone into memory or a pack temp file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/index.html) |
 | `grit_lib::pack_receive::PackReceiveTarget` | enum | Where demuxed pack bytes are stored. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/enum.PackReceiveTarget.html) |
 | `grit_lib::pack_receive::TempPackReceive` | struct | A temp pack file under objects/pack/ for streaming clone/fetch receive. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/struct.TempPackReceive.html) |
@@ -3254,6 +3266,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::push_submodules::PushRecurseSubmodules` | enum | How git push should recurse into submodules. | [API](https://docs.rs/grit-lib/latest/grit_lib/push_submodules/enum.PushRecurseSubmodules.html) |
 | `grit_lib::quote_path` | module | C-style path quoting compatible with Git’s quote.c / core.quotepath. | [API](https://docs.rs/grit-lib/latest/grit_lib/quote_path/index.html) |
 | `grit_lib::receive_pack` | module | Receive-pack configuration and pack-header helpers. | [API](https://docs.rs/grit-lib/latest/grit_lib/receive_pack/index.html) |
+| `grit_lib::receive_quarantine` | module | Temporary object directories for receive-pack (Git quarantine). | [API](https://docs.rs/grit-lib/latest/grit_lib/receive_quarantine/index.html) |
+| `grit_lib::receive_quarantine::ReceiveQuarantine` | struct | A receive-pack quarantine directory under the repository’s objects/. | [API](https://docs.rs/grit-lib/latest/grit_lib/receive_quarantine/struct.ReceiveQuarantine.html) |
 | `grit_lib::ref_exclusions` | module | Reference exclusion rules for rev-list / rev-parse (--exclude, --exclude-hidden). | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_exclusions/index.html) |
 | `grit_lib::ref_exclusions::RefExclusions` | struct | Patterns that exclude refs from --all / glob expansion, including hidden-ref config. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_exclusions/struct.RefExclusions.html) |
 | `grit_lib::ref_namespace` | module | Git GIT_NAMESPACE handling: map logical ref names to storage under refs/namespaces/.../. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_namespace/index.html) |
@@ -3344,6 +3358,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::rev_parse_error::RevParseError` | enum | Failure modes when resolving revision specs, upstream/push refs, paths, and reflogs. | [API](https://docs.rs/grit-lib/latest/grit_lib/rev_parse_error/enum.RevParseError.html) |
 | `grit_lib::revision` | module | Revision machinery: rev-parse, rev-list, name-rev, commit-graph. | [API](https://docs.rs/grit-lib/latest/grit_lib/revision/index.html) |
 | `grit_lib::serve` | module | Server side of the Git wire protocol: answering fetches and accepting pushes. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/index.html) |
+| `grit_lib::serve::HookRunRecord` | struct | One server-side hook invocation during receive-pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/struct.HookRunRecord.html) |
 | `grit_lib::serve::ProtocolVersion` | enum | Wire protocol version requested by the client. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/enum.ProtocolVersion.html) |
 | `grit_lib::serve::ReceiveOutcome` | struct | What a push session did. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/struct.ReceiveOutcome.html) |
 | `grit_lib::serve::ReceivePolicy` | struct | Which ref updates the server refuses. | [API](https://docs.rs/grit-lib/latest/grit_lib/serve/struct.ReceivePolicy.html) |
@@ -3380,10 +3395,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::terminal` | module | Cross-platform terminal capability detection for ANSI color output. | [API](https://docs.rs/grit-lib/latest/grit_lib/terminal/index.html) |
 | `grit_lib::textconv_cache` | module | Git-compatible diff.<driver>.cachetextconv storage under refs/notes/textconv/<driver>. | [API](https://docs.rs/grit-lib/latest/grit_lib/textconv_cache/index.html) |
 | `grit_lib::transfer` | module | Embedder-facing transfer (fetch / push) result & option types, plus the negotiation-driven pack builder. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/index.html) |
-| `grit_lib::transfer::CloneReflog` | struct | Identity and message for clone reflog entries written by the library. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.CloneReflog.html) |
 | `grit_lib::transfer::FetchOptions` | struct | Options controlling a fetch. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOptions.html) |
 | `grit_lib::transfer::FetchOutcome` | struct | The structured result of a fetch, ready for the embedder’s ref-store apply. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOutcome.html) |
-| `grit_lib::transfer::PackBuildOptions` | struct | Options controlling build_pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PackBuildOptions.html) |
 | `grit_lib::transfer::PushOptions` | struct | Options controlling a push. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOptions.html) |
 | `grit_lib::transfer::PushOutcome` | struct | The structured result of a push. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOutcome.html) |
 | `grit_lib::transfer::PushRefSpec` | struct | A single ref update requested by a push. | [API](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushRefSpec.html) |
@@ -3981,7 +3994,7 @@ Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a te
 - [`Bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.Bundle.html) (`open`, `verify`, `unbundle`) and [`read_header`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.read_header.html) parse v2/v3 headers and leave the stream at the `PACK` magic.
 - `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
 - `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
-- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles using [`transfer::build_pack`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.build_pack.html) for the pack stream.
+- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles using [`build_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack.html) for the pack stream.
 
 Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).
 
@@ -4218,6 +4231,28 @@ git -C /path/to/repo fsck --strict
 ```
 
 When run without arguments the binary uses a temporary repository (fine for `cargo run`, not for fsck demos).
+
+# https://grit-scm.com/docs/library/pack-bitmaps/index.md
+
+# Pack reachability bitmaps
+
+> Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).
+
+Git can attach a **reachability bitmap** to a pack (or multi-pack-index) so rev-list and fetch paths avoid walking the full object graph. grit-lib implements the on-disk **BITM v1** format: type bitmaps, XOR-compressed commit entries, optional name-hash cache, and optional lookup table.
+
+## Reading
+
+[`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) on a [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) loads the preferred bitmap (MIDX over pack when both exist). Decoded commit reachability sets, per-kind type filters, and optional name-hash cache entries are available on the opened index (see rustdoc on [`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html)).
+
+## Writing
+
+[`PackBitmapWriter`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriter.html) and [`Repository::write_pack_bitmap`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) build a `.bitmap` for an **existing** pack index whose objects are closed under reachability from the repository’s refs—the shape produced by an all-into-one repack. Options are passed explicitly as [`PackBitmapWriteOptions`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriteOptions.html); [`ConfigSet::pack_bitmap_write_options`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) maps Git’s `pack.writeBitmapHashCache`, `pack.writeBitmapLookupTable`, and `pack.preferBitmapTips` when you want config-driven defaults.
+
+If no `.rev` sidecar exists, the writer creates one first so object order matches Git’s pack-offset order. Output is deterministic for identical inputs. A pack that is not closed under reachability returns [`PackBitmapWriteError::NotClosed`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.PackBitmapWriteError.html).
+
+## Compatibility
+
+Integration tests in `grit-lib` round-trip against the system `git` binary (`rev-list --test-bitmap`, `--use-bitmap-index` counts). Name hashes use [`pack_name_hash`](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/fn.pack_name_hash.html) (v1) recorded during tree walks.
 
 # https://grit-scm.com/docs/library/refs/index.md
 
