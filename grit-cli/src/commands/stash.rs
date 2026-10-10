@@ -20,10 +20,7 @@ use crate::output::{HumanRender, MarkdownRender};
 /// Result of `grit stash push` (or bare `grit stash`).
 pub enum StashPushOutcome {
     /// Local changes were saved to the stash.
-    Saved {
-        oid: String,
-        message: String,
-    },
+    Saved { oid: String, message: String },
     /// Working tree and index already matched `HEAD`; nothing was saved.
     Nothing,
 }
@@ -55,7 +52,7 @@ impl HumanRender for StashPushOutcome {
                 if message.is_empty() {
                     println!("Saved working directory and index state {short}");
                 } else {
-                    println!("Saved working directory and index state On {message} {short}");
+                    println!("Saved working directory and index state {message} {short}");
                 }
             }
         }

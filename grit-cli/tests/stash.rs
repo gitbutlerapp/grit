@@ -69,7 +69,14 @@ fn stash_push_pop_roundtrip() {
     fs::write(dir.join("f.txt"), "changed\n").expect("modify");
     let (code, stdout, stderr) = grit(&dir, &["stash", "push", "-m", "wip"]);
     assert_eq!(code, 0, "stderr={stderr}");
-    assert!(stdout.contains("Saved") || stderr.is_empty());
+    assert!(
+        stdout.contains("Saved working directory and index state On main: wip"),
+        "stdout={stdout}"
+    );
+    assert!(
+        !stdout.contains("On On"),
+        "must not double the On prefix: {stdout}"
+    );
 
     let porcelain = git(&dir, &["status", "--porcelain"]);
     assert!(porcelain.trim().is_empty(), "clean after push");

@@ -46,7 +46,7 @@ Save work in progress:
 
 ```console
 $ grit stash -m "wip feature"
-Saved working directory and index state On wip feature a1b2c3d
+Saved working directory and index state On main: wip feature a1b2c3d
 ```
 
 List entries:
@@ -153,7 +153,7 @@ Diffstat (default):
 }
 ```
 
-With `--patch`, a `patch` object with the same shape as [`grit diff`](diff/) is included instead of `stat`.
+With `--patch`, a `patch` object with the same shape as [`grit diff`](../diff/) is included instead of `stat`.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
