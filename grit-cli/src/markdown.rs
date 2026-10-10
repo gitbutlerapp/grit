@@ -118,6 +118,7 @@ fn render_file_patch(file: &FileDiff) -> String {
         out.push('\n');
         for line in &hunk.lines {
             out.push_str(&render_patch_line(line));
+            out.push('\n');
         }
     }
     out.trim_end_matches('\n').to_owned()
@@ -158,4 +159,130 @@ fn render_patch_line(line: &Line) -> String {
 
 fn segments_text(segments: &[Segment]) -> String {
     segments.iter().map(|s| s.text.as_str()).collect()
+}
+
+/// Branch list: current branch marked, others plain.
+pub fn print_branch_list(branches: &[crate::commands::branch::BranchEntry]) {
+    if branches.is_empty() {
+        println!("No branches yet.");
+        return;
+    }
+    println!("## Branches");
+    for branch in branches {
+        if branch.current {
+            println!("- **`{}`** (current)", branch.name);
+        } else {
+            println!("- `{}`", branch.name);
+        }
+    }
+}
+
+/// Config entries as a two-column table.
+pub fn print_config_entries(entries: &[crate::commands::config::ConfigEntry]) {
+    if entries.is_empty() {
+        println!("No config entries.");
+        return;
+    }
+    println!("| Key | Value |");
+    println!("| --- | --- |");
+    for entry in entries {
+        let value = entry.value.as_deref().unwrap_or("");
+        println!("| `{}` | {} |", entry.key, escape_table_cell(value));
+    }
+}
+
+fn escape_table_cell(s: &str) -> String {
+    s.replace('|', "\\|")
+}
+
+/// Remotes as a two-column table.
+pub fn print_remote_list(remotes: &[crate::commands::remote::RemoteEntry]) {
+    if remotes.is_empty() {
+        println!("No remotes. Add one with: `grit remote add <name> <url>`.");
+        return;
+    }
+    println!("| Name | URL |");
+    println!("| --- | --- |");
+    for remote in remotes {
+        println!("| `{}` | {} |", remote.name, escape_table_cell(&remote.url));
+    }
+}
+
+/// Tag names with short oids.
+pub fn print_tag_list(tags: &[crate::commands::tag::TagEntry]) {
+    if tags.is_empty() {
+        println!("No tags yet.");
+        return;
+    }
+    println!("## Tags");
+    for tag in tags {
+        let short = tag.oid.get(..7).unwrap_or(&tag.oid);
+        println!("- `{}` (`{short}`)", tag.name);
+    }
+}
+
+/// Fetch ref updates as bullets (`ref` · old → new).
+pub fn print_fetch_updates(
+    remote: &str,
+    updates: &[crate::commands::fetch::FetchUpdate],
+    updated: usize,
+) {
+    if updates.is_empty() && updated == 0 {
+        println!("Already up to date with `{remote}`.");
+        return;
+    }
+    println!("## Updates from `{remote}`");
+    for update in updates {
+        let from = update.old_oid.as_deref().map(short_hex).unwrap_or("new");
+        let to = update
+            .new_oid
+            .as_deref()
+            .map(short_hex)
+            .unwrap_or("deleted");
+        println!("- `{}` · `{from}` → `{to}`", update.ref_name);
+    }
+    if updated > 0 {
+        println!();
+        println!(
+            "Fetched **{updated}** update{}.",
+            if updated == 1 { "" } else { "s" }
+        );
+    }
+}
+
+fn short_hex(oid: &str) -> &str {
+    oid.get(..7).unwrap_or(oid)
+}
+
+/// Per-ref push results.
+pub fn print_push_results(
+    remote: &str,
+    branch: &str,
+    results: &[crate::commands::push::PushRefResult],
+) {
+    if results.is_empty() {
+        println!("No refs pushed to `{remote}`.");
+        return;
+    }
+    println!("## Push to `{remote}`");
+    for result in results {
+        let target = format!("{remote} {}", result.ref_name);
+        match result.status.as_str() {
+            "ok" => println!(
+                "- **`{}`** · pushed `{branch}` → `{target}`",
+                result.ref_name
+            ),
+            "up_to_date" => println!(
+                "- **`{}`** · `{target}` already up to date",
+                result.ref_name
+            ),
+            _ => {
+                let reason = result.reason.as_deref().unwrap_or("rejected");
+                println!(
+                    "- **`{}`** · rejected `{target}`: {reason}",
+                    result.ref_name
+                );
+            }
+        }
+    }
 }

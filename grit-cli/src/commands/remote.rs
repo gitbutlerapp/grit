@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::context;
+use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).
@@ -116,7 +117,14 @@ impl MarkdownRender for RemoteOutcome {
     }
 }
 
-impl MarkdownRender for RemoteOutcome {}
+impl MarkdownRender for RemoteOutcome {
+    fn render_markdown(&self) {
+        match self {
+            RemoteOutcome::List { remotes } => markdown::print_remote_list(remotes),
+            RemoteOutcome::Add { name, url } => println!("Added remote `{name}` → {url}."),
+        }
+    }
+}
 
 /// `Some((name, url))` adds a remote; `None` lists them.
 pub fn run_list_or_add(add: Option<(String, String)>) -> Result<RemoteOutcome> {

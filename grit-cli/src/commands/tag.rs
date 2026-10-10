@@ -14,6 +14,7 @@ use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
 
 use crate::context;
+use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
@@ -58,7 +59,18 @@ impl HumanRender for TagOutcome {
     }
 }
 
-impl MarkdownRender for TagOutcome {}
+impl MarkdownRender for TagOutcome {
+    fn render_markdown(&self) {
+        match self {
+            TagOutcome::List { tags } => markdown::print_tag_list(tags),
+            TagOutcome::Create { name, oid } => {
+                let short = oid.get(..7).unwrap_or(oid.as_str());
+                println!("Created tag `{name}` at `{short}`.");
+            }
+            TagOutcome::Delete { name } => println!("Deleted tag `{name}`."),
+        }
+    }
+}
 
 /// Run `grit tag` with the parsed CLI arguments.
 ///

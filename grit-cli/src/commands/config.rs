@@ -12,6 +12,7 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use serde::Serialize;
 
 use crate::context;
+use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit config`, tagged by `action`.
@@ -50,7 +51,18 @@ impl HumanRender for ConfigOutcome {
     }
 }
 
-impl MarkdownRender for ConfigOutcome {}
+impl MarkdownRender for ConfigOutcome {
+    fn render_markdown(&self) {
+        match self {
+            ConfigOutcome::Get { key, value } => {
+                println!("`{key}` = {value}");
+            }
+            ConfigOutcome::List { entries } => markdown::print_config_entries(entries),
+            ConfigOutcome::Set { key, value } => println!("Set `{key}` = {value}."),
+            ConfigOutcome::Unset { key } => println!("Unset `{key}`."),
+        }
+    }
+}
 
 /// Run `grit config`.
 ///

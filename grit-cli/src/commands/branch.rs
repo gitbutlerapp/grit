@@ -12,6 +12,7 @@ use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
 
 use crate::context;
+use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit branch`, tagged by `action` (`list` / `create` / `delete`).
@@ -66,7 +67,19 @@ impl HumanRender for BranchOutcome {
     }
 }
 
-impl MarkdownRender for BranchOutcome {}
+impl MarkdownRender for BranchOutcome {
+    fn render_markdown(&self) {
+        match self {
+            BranchOutcome::List { branches, .. } => markdown::print_branch_list(branches),
+            BranchOutcome::Create { name } => println!("Created branch `{name}`."),
+            BranchOutcome::Delete {
+                name, short_oid, ..
+            } => {
+                println!("Deleted branch `{name}` (was `{short_oid}`).");
+            }
+        }
+    }
+}
 
 /// List, create, or delete a branch depending on `name` and the delete flags.
 pub fn run(name: Option<String>, delete: bool, force_delete: bool) -> Result<BranchOutcome> {

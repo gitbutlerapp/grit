@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use crate::commands::auth;
 use crate::context;
+use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 use grit_lib::fetch::NoProgress;
 use grit_lib::remote::{DefaultHttpClientFactory, Remote, DEFAULT_REMOTE};
@@ -60,7 +61,11 @@ impl HumanRender for PushOutcome {
     }
 }
 
-impl MarkdownRender for PushOutcome {}
+impl MarkdownRender for PushOutcome {
+    fn render_markdown(&self) {
+        markdown::print_push_results(&self.remote, &self.branch, &self.results);
+    }
+}
 
 pub fn run(tags: bool) -> Result<PushOutcome> {
     let repo = context::discover()?;
