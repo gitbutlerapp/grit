@@ -1,6 +1,6 @@
 //! Shared ref-update semantics for in-memory simulation and commit application.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diff::zero_oid;
 use crate::objects::ObjectId;
@@ -8,6 +8,7 @@ use crate::reflog::ReflogEntry;
 use crate::refs::SYMREF_MAXDEPTH;
 
 use super::error::RefStoreError;
+use super::semantics::format_reflog_identity;
 use super::transaction::expected_matches;
 use super::types::{RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
 
@@ -157,19 +158,29 @@ fn append_reflog_entry(
         .push(entry);
 }
 
-fn format_reflog_identity(identity: &str, time: time::OffsetDateTime) -> String {
-    if identity.chars().any(|c| c.is_ascii_digit()) {
-        return identity.to_owned();
+/// Ref names that must be locked for a batch (update targets plus symref peel targets).
+pub(crate) fn ref_lock_names_for_updates(
+    state: &RefBatchState,
+    updates: &[RefUpdate],
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for update in updates {
+        if update.flags.log_only {
+            continue;
+        }
+        names.insert(update.name.clone());
+        if should_deref_symref(state, update) {
+            if let Ok(target) = symref_peel_write_target(&state.refs, &update.name) {
+                names.insert(target);
+            }
+        }
+        if should_deref_symref_update(state, update) {
+            if let Ok(target) = symref_peel_write_target(&state.refs, &update.name) {
+                names.insert(target);
+            }
+        }
     }
-    let offset = time.offset().whole_seconds();
-    let hours = offset / 3600;
-    let minutes = (offset.abs() % 3600) / 60;
-    format!(
-        "{identity} {} {:+03}{:02}",
-        time.unix_timestamp(),
-        hours,
-        minutes
-    )
+    names
 }
 
 fn reflog_old_oid_before(state: &RefBatchState, update: &RefUpdate) -> ObjectId {

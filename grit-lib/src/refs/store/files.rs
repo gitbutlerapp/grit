@@ -16,7 +16,7 @@ use crate::refs::{
     Ref,
 };
 
-use super::apply::{apply_update, simulate_batch_apply, RefBatchState};
+use super::apply::{apply_update, ref_lock_names_for_updates, simulate_batch_apply, RefBatchState};
 use super::error::RefStoreError;
 use super::routing::{resolve_common_dir, route_ref_storage_with_namespace, RefStorageRoute};
 use super::transaction::{expected_matches, RefTransaction};
@@ -219,6 +219,12 @@ impl FilesRefStore {
         })
     }
 
+    fn loose_ref_file_exists(&self, refname: &str) -> Result<bool> {
+        let route = self.route(refname);
+        let path = route.storage_dir.join(&route.storage_name);
+        Ok(path.is_file())
+    }
+
     fn route(&self, refname: &str) -> RefStorageRoute {
         route_ref_storage_with_namespace(&self.git_dir, refname, self.namespace_prefix.as_deref())
     }
@@ -363,7 +369,7 @@ impl FilesRefStore {
         {
             let b = before.refs.get(name);
             let a = after.refs.get(name);
-            if b == a {
+            if b == a && (a.is_none() || !held_locks.contains_key(name)) {
                 continue;
             }
             let lock = held_locks.get(name).ok_or_else(|| {
@@ -442,11 +448,36 @@ impl RefStore for FilesRefStore {
             });
         }
 
+        let preliminary = self
+            .load_batch_state()
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+        verify_create_conflicts(&preliminary.refs, &updates)?;
+        let lock_names = ref_lock_names_for_updates(&preliminary, &updates);
+
+        let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
+        for name in &lock_names {
+            let (_, _, lock) = self.ref_lock_paths(name);
+            if let Some(parent) = lock.parent() {
+                fs::create_dir_all(parent).map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            }
+            if let Err(err) = self.acquire_ref_lock(&lock, name) {
+                for acquired in ref_locks.values() {
+                    let _ = fs::remove_file(acquired);
+                }
+                return Err(err);
+            }
+            ref_locks.insert(name.clone(), lock);
+        }
+
         let state = self
             .load_batch_state()
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        verify_create_conflicts(&state.refs, &updates)?;
-        simulate_batch_apply(&state, &updates)?;
+        if let Err(err) = simulate_batch_apply(&state, &updates) {
+            for acquired in ref_locks.values() {
+                let _ = fs::remove_file(acquired);
+            }
+            return Err(err);
+        }
 
         let extras: BTreeSet<String> = updates.iter().map(|u| u.name.clone()).collect();
         let skip = HashSet::new();
@@ -457,12 +488,17 @@ impl RefStore for FilesRefStore {
             if state.refs.contains_key(&update.name) {
                 continue;
             }
-            crate::refs::verify_refname_available_for_create(
+            if let Err(reason) = crate::refs::verify_refname_available_for_create(
                 &self.git_dir,
                 &update.name,
                 &extras,
                 &skip,
-            )?;
+            ) {
+                for acquired in ref_locks.values() {
+                    let _ = fs::remove_file(acquired);
+                }
+                return Err(reason.into());
+            }
         }
 
         let before_commit = state.snapshot();
@@ -470,10 +506,24 @@ impl RefStore for FilesRefStore {
         for update in &updates {
             apply_update(&mut after_commit, update)?;
         }
-        let changed = changed_ref_names(&before_commit.refs, &after_commit.refs);
+        let mut changed = changed_ref_names(&before_commit.refs, &after_commit.refs);
+        for update in &updates {
+            if update.flags.log_only || update.new_value.is_none() {
+                continue;
+            }
+            if before_commit.refs.contains_key(&update.name)
+                && !self
+                    .loose_ref_file_exists(&update.name)
+                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+            {
+                changed.insert(update.name.clone());
+            }
+        }
 
-        let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
         for name in &changed {
+            if ref_locks.contains_key(name) {
+                continue;
+            }
             let (_, _, lock) = self.ref_lock_paths(name);
             if let Some(parent) = lock.parent() {
                 fs::create_dir_all(parent).map_err(|e| RefStoreError::Corrupt(e.to_string()))?;

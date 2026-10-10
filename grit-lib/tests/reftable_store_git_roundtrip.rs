@@ -149,3 +149,62 @@ fn reftable_store_git_roundtrip() {
         "stack sees git-written ref"
     );
 }
+
+#[test]
+fn reftable_reflog_identity_with_digits_in_name_visible_to_git() {
+    if !require_reftable_git() {
+        return;
+    }
+    let root = git_init_reftable_repo("main");
+    let worktree = root.path();
+    let git_dir = worktree.join(".git");
+    let store = ReftableRefStore::open(git_dir.clone()).expect("open store");
+    let oid_a = oid(1);
+    let oid_b = oid(2);
+    let time = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+    let identity = "Alice2 <alice@example.com>";
+
+    let seed = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/heads/digit-name".to_owned(),
+            new_value: Some(RawRef::Direct(oid_a)),
+            expected: Expected::Missing,
+            reflog: None,
+            flags: RefUpdateFlags::default(),
+        })
+        .expect("seed txn");
+    store
+        .prepare(seed)
+        .expect("seed prepare")
+        .commit()
+        .expect("seed commit");
+
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "refs/heads/digit-name".to_owned(),
+            new_value: Some(RawRef::Direct(oid_b)),
+            expected: Expected::Any,
+            reflog: Some(ReflogUpdate {
+                identity: identity.to_owned(),
+                message: String::new(),
+                time,
+            }),
+            flags: RefUpdateFlags::default(),
+        })
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+
+    let out = git(worktree, &["reflog", "show", "refs/heads/digit-name"]);
+    assert!(
+        out.contains("1700000000"),
+        "git reflog must include unix timestamp: {out}"
+    );
+    assert!(
+        out.contains("Alice2"),
+        "git reflog must include author name: {out}"
+    );
+}
