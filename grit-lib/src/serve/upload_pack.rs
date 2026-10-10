@@ -194,7 +194,7 @@ fn serve_v0(
         request.filter.as_ref(),
         shallow_resp.as_ref(),
     )?;
-    write_pack(output, &pack, sideband)
+    write_v0_pack(output, &pack, sideband)
 }
 
 fn write_v0_advertisement(
@@ -655,7 +655,7 @@ fn fetch_v2(
         shallow_resp.as_ref(),
     )?;
     write_fetch_line(output, "packfile", sideband_all)?;
-    write_pack(output, &pack, sideband_all)
+    write_v2_packfile_body(output, &pack)
 }
 
 fn build_response_pack(
@@ -763,12 +763,19 @@ fn commit_closure(
     Ok(seen)
 }
 
-fn write_pack(output: &mut dyn Write, pack: &[u8], sideband_all: bool) -> Result<()> {
-    if sideband_all {
+fn write_v0_pack(output: &mut dyn Write, pack: &[u8], side_band_64k: bool) -> Result<()> {
+    if side_band_64k {
         crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, pack)?;
         write_flush(output)
     } else {
         output.write_all(pack)?;
         Ok(())
     }
+}
+
+/// Protocol v2 `packfile` section body is always side-band-64k framed on band 1,
+/// independent of the `sideband-all` capability (which only affects other sections).
+fn write_v2_packfile_body(output: &mut dyn Write, pack: &[u8]) -> Result<()> {
+    crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, pack)?;
+    write_flush(output)
 }

@@ -790,6 +790,7 @@ fn read_stateless_response_stream<R: Read>(
     let mut unshallow = Vec::new();
 
     let mut replay_payload: Option<Vec<u8>> = None;
+    let mut shallow_section_flush_skipped = false;
     if expect_shallow {
         loop {
             match pkt_line::read_packet(r)? {
@@ -820,7 +821,14 @@ fn read_stateless_response_stream<R: Read>(
         } else {
             match read_pkt_payload(r)? {
                 Some(p) => p,
-                None => break,
+                None => {
+                    // v0 deepen: server may flush once between shallow lines and pack.
+                    if expect_shallow && !got_pack && !shallow_section_flush_skipped {
+                        shallow_section_flush_skipped = true;
+                        continue;
+                    }
+                    break;
+                }
             }
         };
         if payload.is_empty() {
@@ -879,6 +887,18 @@ fn read_stateless_response_stream<R: Read>(
             return Err(Error::Message(format!("remote upload-pack error: {err}")));
         }
         if line == "NAK" {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("shallow ") {
+            if let Ok(oid) = ObjectId::from_hex(rest.trim()) {
+                shallow.push(oid);
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("unshallow ") {
+            if let Ok(oid) = ObjectId::from_hex(rest.trim()) {
+                unshallow.push(oid);
+            }
             continue;
         }
         if let Some(ack) = parse_ack(line) {

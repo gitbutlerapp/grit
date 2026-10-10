@@ -6,7 +6,6 @@
 
 #![cfg(all(feature = "http-ureq", unix))]
 
-use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -213,6 +212,66 @@ fn append_pkt_flush(buf: &mut Vec<u8>) {
 }
 
 /// Stateless v2 `command=fetch` POST with a `filter` argument (exercises ERR when disallowed).
+fn post_v2_fetch_raw(post_url: &str, want: &str, sideband_all: bool) -> Vec<u8> {
+    let mut body = Vec::new();
+    append_pkt_line(&mut body, "command=fetch");
+    append_pkt_line(&mut body, "agent=git/2.43.0");
+    append_pkt_line(&mut body, "object-format=sha1");
+    body.extend(b"0001");
+    append_pkt_line(&mut body, "thin-pack");
+    append_pkt_line(&mut body, "no-progress");
+    append_pkt_line(&mut body, "include-tag");
+    append_pkt_line(&mut body, "ofs-delta");
+    if sideband_all {
+        append_pkt_line(&mut body, "sideband-all");
+    }
+    append_pkt_line(&mut body, &format!("want {want}"));
+    append_pkt_line(&mut body, "done");
+    append_pkt_flush(&mut body);
+
+    let out = ureq::post(post_url)
+        .header("Content-Type", "application/x-git-upload-pack-request")
+        .header("Accept", "application/x-git-upload-pack-result")
+        .header("Git-Protocol", "version=2")
+        .send(&body)
+        .expect("POST upload-pack");
+    assert_eq!(out.status(), 200, "HTTP status for v2 fetch");
+    out.into_body().read_to_vec().expect("response body")
+}
+
+/// After the plain `packfile` section header, v2 requires band-1 side-band-64k
+/// framing even when `sideband-all` was not negotiated.
+fn v2_packfile_body_is_sideband_framed(resp: &[u8]) -> bool {
+    let mut i = 0usize;
+    let mut seen_packfile_header = false;
+    while i + 4 <= resp.len() {
+        let Ok(len_str) = std::str::from_utf8(&resp[i..i + 4]) else {
+            break;
+        };
+        let Ok(len) = usize::from_str_radix(len_str, 16) else {
+            break;
+        };
+        if len < 4 {
+            i += 4;
+            continue;
+        }
+        if i + len > resp.len() {
+            break;
+        }
+        let payload = &resp[i + 4..i + len];
+        i += len;
+        let line = String::from_utf8_lossy(payload).trim_end().to_owned();
+        if line == "packfile" {
+            seen_packfile_header = true;
+            continue;
+        }
+        if seen_packfile_header {
+            return payload.first() == Some(&1) && payload.len() >= 5 && &payload[1..5] == b"PACK";
+        }
+    }
+    false
+}
+
 fn post_v2_filter_fetch(post_url: &str, want: &str) -> String {
     let mut body = Vec::new();
     append_pkt_line(&mut body, "command=fetch");
@@ -506,4 +565,36 @@ fn want_ref_v2_fetch_over_http() {
     assert!(git_cmd.output().unwrap().status.success());
 
     compare_to_git_reference(&grit_w, &git_w);
+}
+
+#[test]
+fn v2_packfile_sideband_without_sideband_all() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let (grit_bare, _git_bare) = setup_bare_pair(tmp.path());
+    let tip = git(Some(&grit_bare), &["rev-parse", "refs/heads/main"])
+        .trim()
+        .to_owned();
+    let Some(port) = free_port() else {
+        return;
+    };
+    let srv_root = tmp.path().join("http-root");
+    std::fs::create_dir_all(&srv_root).unwrap();
+    std::fs::create_dir_all(srv_root.join("repo.git")).unwrap();
+    std::fs::rename(&grit_bare, srv_root.join("repo.git")).unwrap();
+    let Some(child) = spawn_http_server(&server_bin, &srv_root, port) else {
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        return;
+    }
+    let post_url = format!("http://127.0.0.1:{port}/repo.git/git-upload-pack");
+    let resp = post_v2_fetch_raw(&post_url, &tip, false);
+    assert!(
+        v2_packfile_body_is_sideband_framed(&resp),
+        "v2 packfile section must be side-band framed without sideband-all"
+    );
 }
