@@ -95,7 +95,7 @@ jobs:
             grit-${{ matrix.target }}.tar.gz
 
   # Windows ships the `grit` CLI (the `grit-cli` crate), installed via
-  # `irm grit-scm.com/install.ps1 | iex` (see docs/install.ps1).
+  # `irm grit-scm.com/install.ps1 | iex` (see site/public/install.ps1).
   build-windows:
     strategy:
       matrix:

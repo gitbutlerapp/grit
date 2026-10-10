@@ -152,7 +152,7 @@ SSH remotes do not use the GitHub device-flow token; they can still block on SSH
 | **grit-lib API** | [docs.rs/grit-lib](https://docs.rs/grit-lib) | Rust library reference when embedding grit in your own binary. |
 | **Library guide** | [Library guide](../library/) | Narrative Rust workflows on top of `grit-lib`. |
 
-Site generation keeps `docs/llms.txt` and `docs/llms-full.txt` in the repository in sync with [site.toml](https://github.com/gitbutlerapp/grit/blob/main/content/docs/site.toml); after local doc edits, run `make docs`.
+[llms.txt](https://grit-scm.com/llms.txt), [llms-full.txt](https://grit-scm.com/llms-full.txt), the two one-file bundles ([grit-cli.md](https://grit-scm.com/docs/grit-cli.md) and [grit-lib.md](https://grit-scm.com/docs/grit-lib.md)) and every Markdown twin are built from the same sources as the HTML pages on each deploy, so they never drift from the docs.
 
 ## See also
 

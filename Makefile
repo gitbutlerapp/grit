@@ -7,8 +7,8 @@
 #   make clippy       - lint all crates (warnings fail CI)
 #   make fmt          - format all crates
 #   make doc          - build API docs (rustdoc warnings fail)
-#   make docs         - build the static documentation site
-#   make docs-check   - verify site output and external links
+#   make docs         - preview grit-scm.com locally (Next.js dev server in site/)
+#   make docs-check   - same checks as the Site workflow: content, links, tests, build
 #   make gate         - pre-integration gate (fmt, clippy, rustdoc, workspace tests)
 #   make coverage     - llvm-cov on grit-lib with per-module floor ratchet
 #   make clean        - remove build artifacts
@@ -48,14 +48,17 @@ gate:
 clean:
 	$(CARGO) clean
 
-docs:
-	RUSTDOCFLAGS="-D warnings" $(CARGO) doc -p grit-lib --no-deps
-	python3 scripts/site.py
+site/node_modules: site/package-lock.json
+	cd site && npm ci
+	@touch site/node_modules
 
-docs-check:
-	RUSTDOCFLAGS="-D warnings" $(CARGO) doc -p grit-lib --no-deps
-	python3 scripts/site.py --check
-	python3 scripts/linkcheck.py
+docs: site/node_modules
+	$(CARGO) doc -p grit-lib --no-deps
+	cd site && npm run dev
+
+docs-check: site/node_modules
+	$(CARGO) doc -p grit-lib --no-deps
+	cd site && GRIT_SITE_STRICT=1 npm run check && npm test && npm run typecheck && GRIT_SITE_STRICT=1 npm run build
 
 coverage:
 	@mkdir -p target/llvm-cov

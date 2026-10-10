@@ -1,0 +1,89 @@
+name: Site
+
+# grit-scm.com: the Next.js app in site/, built from content/ (Markdown),
+# grit-examples/ (included examples), grit-lib rustdoc (`rustdoc:` links and the
+# API map) and grit-utils/baselines/ (benchmark tables). Pull requests get the
+# full check and build; every push to main deploys to production on Vercel.
+on:
+  push:
+    branches: [main]
+    paths: &site-paths
+      - content/**
+      - site/**
+      - grit-examples/**
+      - grit-lib/**
+      - grit-utils/baselines/**
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/site.yml
+  pull_request:
+    paths: *site-paths
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight build or deploy; the newest commit has everything.
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: site
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Missing rustdoc, unresolved `rustdoc:` links and broken links fail the build.
+      GRIT_SITE_STRICT: "1"
+      DEPLOY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VERCEL_TOKEN != '' }}
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: site
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build grit-lib rustdoc
+        working-directory: .
+        run: cargo doc -p grit-lib --no-deps
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - run: npm ci
+
+      - name: Check content (manifest, fences, includes, rustdoc links, internal links)
+        run: npm run check
+
+      - run: npm test
+
+      - run: npm run typecheck
+
+      - name: Build
+        if: env.DEPLOY != 'true'
+        run: |
+          npm run build
+          if [ "${{ github.event_name }}" = push ]; then
+            echo "::warning::VERCEL_TOKEN secret is not set; built the site but did not deploy."
+          fi
+
+      - name: Deploy to Vercel (production)
+        if: env.DEPLOY == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          npx --yes vercel@63 pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes vercel@63 build --prod --token="$VERCEL_TOKEN"
+          npx --yes vercel@63 deploy --prebuilt --prod --token="$VERCEL_TOKEN"

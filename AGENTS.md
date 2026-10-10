@@ -91,28 +91,36 @@ Detail: **TESTING.md** and ROADMAP testing items.
 
 Build and maintain the **documentation site** (usage docs, library guide, benchmarks) and **`grit-lib` rustdoc**; ship doc updates in the **same change** as the code they describe. Published CLI and guide pages live at [grit-scm.com/docs](https://grit-scm.com/docs/).
 
-**Generator.** Markdown sources under `content/docs/` and `content/blog/` are rendered by **`make docs`**, which runs [`scripts/site.py`](scripts/site.py) (`scripts/docs.py` for the site, `scripts/blog.py` for the blog). Output is committed under `docs/docs/` and `docs/blog/`.
+**How the site works.** [grit-scm.com](https://grit-scm.com) is a Next.js app in **`site/`**, deployed to Vercel on every push to `main` by the [`Site`](.github/workflows/site.yml) workflow. It reads the Markdown in **`content/docs/`** and **`content/blog/`** at build time. **There is no generated HTML to commit and nothing to regenerate:** edit the Markdown (and code) in your change, and the deploy picks it up. Everything derived is built for you:
+
+- **CLI docs** come straight from `content/docs/commands/<cmd>.md`.
+- **Library docs** pull compiled examples from **`grit-examples`** (`<!-- include: grit-examples/... -->`), resolve **`rustdoc:grit_lib::…`** links against fresh rustdoc, and generate the **API map** from rustdoc, so a renamed or removed public item fails the build instead of leaving a dead link.
+- **Benchmarks** tables are generated from the committed **`grit-bench`** baselines.
+- **Agent outputs** (each page's `index.md` twin, `/llms.txt`, `/llms-full.txt`, `/docs/grit-cli.md`, `/docs/grit-lib.md`) and **share cards** are built from the same sources.
 
 | Command | What it does |
 | --- | --- |
-| **`make docs`** | Regenerate the static site (runs `cargo doc -p grit-lib --no-deps` first so `rustdoc:` links resolve). |
-| **`make docs-check`** | Same as CI **docs** job: staleness check for generated HTML, then internal link/anchor validation. |
+| **`make docs`** | Preview the site at http://localhost:3000 (builds `grit-lib` rustdoc, then `npm run dev` in `site/`). Edits to `content/` show up on reload. |
+| **`make docs-check`** | Same as the CI **Site** workflow: content check (manifest, code fence languages, includes, `rustdoc:` links, internal links and anchors), site tests, type check, production build. |
 | **`make doc`** | Workspace API reference with **`RUSTDOCFLAGS="-D warnings"`** (same as CI **rustdoc** job and the rustdoc stage of **`make gate`**). |
 
-**Commit both** edited Markdown under `content/` **and** the regenerated HTML under `docs/`.
+Quick check while editing docs: **`cd site && npm run check`** (seconds; needs `cargo doc -p grit-lib --no-deps` once for `rustdoc:` links). Site code (layouts, styles) lives in `site/app`, `site/components` and `site/lib`; agents normally only touch `content/`.
 
 #### Adding docs for a change
 
-| If you changed… | Update | Then run |
-| --- | --- | --- |
-| A **`grit` command**, flag, default, human/`--markdown` output, or **`--json` field** | [`content/docs/commands/<cmd>.md`](content/docs/commands/) following [`content/docs/commands/README.md`](content/docs/commands/README.md) (real terminal and JSON examples, JSON field table). Update [`content/docs/tutorial.md`](content/docs/tutorial.md) when the tutorial uses the command. | **`make docs`** |
-| A **public `grit-lib` API** (types, methods, behavior) | Rustdoc on the item. For guided workflows, add or edit a page under [`content/docs/library/`](content/docs/library/) and/or a compiled example in **`grit-examples`** referenced with `<!-- include: grit-examples/... -->` (see [`content/docs/library-quickstart.md`](content/docs/library-quickstart.md)). | **`make doc`** when rustdoc-only; **`make docs`** when site pages or includes change. |
-| **Performance** (Criterion, hot paths, or **`grit-bench`** scenarios) | Refresh committed baseline JSON per **ROADMAP.md** item 2 (`grit-bench … --format json --output grit-utils/baselines/…`). List paths in **`[benchmarks].baseline`** in [`content/docs/site.toml`](content/docs/site.toml). Edit prose in [`content/docs/benchmarks.md`](content/docs/benchmarks.md) outside `<!-- grit:benchmark-tables -->` when methodology or narrative changes. | **`make docs`** |
-| A **new site page** (guide, topic, or command) | Register it in [`content/docs/site.toml`](content/docs/site.toml) (`[[section.page]]`, `[section.commands]`, or `directory = "library"`). Every `.md` under `content/docs/` must appear in the manifest. | **`make docs`** |
+| If you changed… | Update |
+| --- | --- |
+| A **`grit` command**, flag, default, human/`--markdown` output, or **`--json` field** | [`content/docs/commands/<cmd>.md`](content/docs/commands/) following [`content/docs/commands/README.md`](content/docs/commands/README.md) (real terminal and JSON examples, JSON field table). Update [`content/docs/tutorial.md`](content/docs/tutorial.md) when the tutorial uses the command. |
+| A **public `grit-lib` API** (types, methods, behavior) | Rustdoc on the item (the API map and `rustdoc:` links follow automatically). For guided workflows, add or edit a page under [`content/docs/library/`](content/docs/library/) and/or a compiled example in **`grit-examples`** referenced with `<!-- include: grit-examples/... -->` (see [`content/docs/library-quickstart.md`](content/docs/library-quickstart.md)). When you rename or remove an item, fix the `rustdoc:` links `npm run check` reports. |
+| **Performance** (Criterion, hot paths, or **`grit-bench`** scenarios) | Refresh committed baseline JSON per **ROADMAP.md** item 2 (`grit-bench … --format json --output grit-utils/baselines/…`). List paths in **`[benchmarks].baseline`** in [`content/docs/site.toml`](content/docs/site.toml). Edit prose in [`content/docs/benchmarks.md`](content/docs/benchmarks.md) outside `<!-- grit:benchmark-tables -->` when methodology or narrative changes. |
+| A **new site page** (guide, topic, or command) | Register it in [`content/docs/site.toml`](content/docs/site.toml) (`[[section.page]]`, `[section.commands]`, or `directory = "library"`). Every `.md` under `content/docs/` must appear in the manifest. |
+| A **blog post** | Add `content/blog/<slug>.md` with `title`, `date` (`YYYY-MM-DD`) and `summary` front matter. |
+
+Every code fence needs a language (`console` for terminal sessions with `$` prompts, `bash` for scripts, `rust`, `json`, `toml`, `text`): the site lays out and highlights code by language.
 
 **What CI enforces**
 
-- **`docs` job** — **`make docs-check`** (fails if `docs/docs/` or `docs/blog/` is stale vs sources), **`scripts/linkcheck.py`** (internal links and `#` anchors), and **`python3 -m unittest discover scripts/tests`** (manifest rules, command URLs, `rustdoc:` link resolution, benchmark table generation).
+- **`Site` workflow** ([`site.yml`](.github/workflows/site.yml)) — on PRs and on `main` pushes touching `content/`, `site/`, `grit-examples/`, `grit-lib/` or `grit-utils/baselines/`: **`make docs-check`** equivalents in strict mode, then (on `main`) the production deploy. A failing check means the live site stays on the last good deploy, so fix it promptly.
 - **`rustdoc` job** — workspace **`cargo doc`** with **`-D warnings`** (**`make doc`**).
 - **`test` job** — **`every_command_is_documented`** in `grit-cli/src/main.rs` (every clap flag and subcommand is mentioned on its command page).
 
@@ -182,9 +190,10 @@ grit/
 ├── grit-examples/         # Example programs built on grit-lib
 ├── grit-test-support/     # Shared test helpers
 ├── grit-utils/            # grit-bench and other maintenance tools
-├── content/blog/          # Blog sources (rendered by scripts/blog.py)
-├── content/docs/          # Site sources (site.toml, commands/, library/; rendered by make docs)
-├── docs/                  # Generated site (docs/docs/, docs/blog/) + static assets
+├── content/blog/          # Blog posts (Markdown)
+├── content/docs/          # Docs sources (site.toml, commands/, library/)
+├── site/                  # grit-scm.com: Next.js app built from content/ (deployed to Vercel)
+├── docs/                  # Retired GitHub Pages copy of the old site; do not edit (removed after the DNS move)
 ├── scripts/               # Repo maintenance scripts
 ├── ROADMAP.md             # Ordered work plan (snapshot)
 └── TESTING.md             # Rust test strategy
@@ -199,7 +208,7 @@ Aligns with **how work is judged** above:
 - [ ] **Speed** — benchmarks before/after vs `git` for hot-path or performance work.
 - [ ] **Library hygiene** — typed errors, no lib printing/globals/shell-out; **`grit-cli`** adds **`--json`** and **`--markdown`** when touched.
 - [ ] **Rust tests** + **coverage tests** for new/changed public API.
-- [ ] **Docs** — follow **Adding docs for a change** above; run **`make docs`** / **`make doc`** as needed; when the site changed, **`make docs-check`** matches CI.
+- [ ] **Docs** — follow **Adding docs for a change** above; **`cd site && npm run check`** passes (or **`make docs-check`** for the full CI equivalent); **`make doc`** when rustdoc changed.
 - [ ] **`make gate`** passes (fmt, clippy **`-D warnings`**, workspace rustdoc **`-D warnings`**, **`cargo test --workspace`** — see **TESTING.md**).
 
 ## Rust style and idioms

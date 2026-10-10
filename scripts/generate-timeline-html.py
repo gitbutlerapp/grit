@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/timeline.html: hourly stacked bars (grit vs grit-lib) and commits by day.
+"""Generate site/public/timeline.html: hourly stacked bars (grit vs grit-lib) and commits by day.
 
 Runs full ``git log HEAD`` with ``--format='%H %ct %s' --stat --no-merges`` (no ``--since``),
 then keeps commits whose committer epoch ``%ct`` is on or after the configured UTC start.
@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "docs" / "timeline.html"
+OUT = REPO / "site" / "public" / "timeline.html"
 
 # Inclusive start of the timeline window (UTC). Data shown from this instant through “now”.
 TIMELINE_START_UTC = datetime(2026, 4, 1, 0, 0, 0, tzinfo=timezone.utc)

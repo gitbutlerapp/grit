@@ -27,4 +27,4 @@ Closing fences stay untagged: ` ``` ` on its own line.
 6. **Markdown output** — only when the command (or global flags) includes `--markdown`. Do not add this section until the flag exists.
 7. **See also** — links to related command pages.
 
-After editing, run `python3 scripts/docs.py` and commit the generated HTML under `docs/docs/`.
+There is no generated HTML to commit: the site is built from these files on deploy. Preview with `make docs` and validate with `cd site && npm run check`.

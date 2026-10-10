@@ -54,25 +54,13 @@ jobs:
             target/llvm-cov/html
             target/llvm-cov/lcov.info
 
-  docs:
-    name: docs
+  scripts:
+    name: scripts
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-
-      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
-        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: docs
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - run: make docs-check
-
+      # Coverage floors and upstream mapping checks. The site has its own workflow (site.yml).
       - run: python3 -m unittest discover scripts/tests
 
   fmt:

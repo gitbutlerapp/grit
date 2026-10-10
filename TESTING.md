@@ -83,14 +83,14 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 | Job | What it runs | Reproduce locally |
 | --- | --- | --- |
-| **docs** | Site staleness, link check, and docs generator tests (see below) | `make docs-check && python3 -m unittest discover scripts/tests` |
+| **scripts** | Python tests for repo scripts (coverage floors, upstream mapping) | `python3 -m unittest discover scripts/tests` |
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
 | **coverage** | `make coverage` (llvm-cov on `grit-lib`, floor ratchet) | `make coverage` |
 | **test** | `cargo test -p grit-lib -p grit-cli`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
 
-Each job uses **`ubuntu-latest`** (the **docs** job uses **`timeout-minutes: 2`**; **coverage** uses **30**; the others use **15**), and the jobs run in parallel.
+Each job uses **`ubuntu-latest`** (the **scripts** job uses **`timeout-minutes: 5`**; **coverage** uses **30**; the others use **15**), and the jobs run in parallel. The website has its own workflow, **[`site.yml`](.github/workflows/site.yml)** (see below).
 
 ## Coverage
 
@@ -229,12 +229,16 @@ Detailed rows for remaining t1405 cases and other plan steps are filled in as la
 
 ### Documentation site and rustdoc jobs
 
-**`docs`** runs two steps (same as **`make docs-check`** plus generator unit tests):
+The website (grit-scm.com) is the Next.js app in **`site/`**, built from **`content/`** at deploy time; no generated HTML is committed. The **[`Site`](.github/workflows/site.yml)** workflow runs on pull requests and on pushes to **`main`** that touch the site's inputs (`content/`, `site/`, `grit-examples/`, `grit-lib/`, `grit-utils/baselines/`), with **`GRIT_SITE_STRICT=1`**:
 
-1. **`make docs-check`** — builds `grit-lib` rustdoc (`RUSTDOCFLAGS="-D warnings" cargo doc -p grit-lib --no-deps`), renders docs and blog with **`scripts/site.py --check`** (fails if committed **`docs/docs/`** or **`docs/blog/`** differs from a fresh render), then **`scripts/linkcheck.py`** (internal `href`/`src` paths and `#` fragment anchors under **`docs/`**).
-2. **`python3 -m unittest discover scripts/tests`** — manifest and sidebar rules, stable command URLs, **`rustdoc:`** link expansion against local **`target/doc`**, and benchmark table generation from committed **`grit-bench`** JSON (see [`AGENTS.md`](AGENTS.md) **Adding docs for a change**).
+1. **`cargo doc -p grit-lib --no-deps`** — local rustdoc, used to resolve **`rustdoc:`** links to docs.rs and to generate the API map.
+2. **`npm run check`** — loads every page: manifest rules (every Markdown file listed in **`content/docs/site.toml`**), code fences with a language, includes, benchmark baselines, **`rustdoc:`** paths that must exist, and every internal link and `#` anchor in docs and blog.
+3. **`npm test`** (vitest: content model, layouts, highlighting, agent Markdown outputs) and **`npm run typecheck`**.
+4. **`npm run build`** on pull requests; on **`main`**, **`vercel build`** + **`vercel deploy --prebuilt --prod`** to the **`grit-scm`** project (Vercel team *Side Projects*).
 
-**`rustdoc`** — **`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features`** (same as **`make doc`** and the rustdoc stage of **`make gate`**). This is the full workspace API surface; the **docs** job only needs **`grit-lib`** rustdoc to validate site links.
+Reproduce locally with **`make docs-check`**; preview with **`make docs`** (dev server at http://localhost:3000).
+
+**`rustdoc`** — **`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features`** (same as **`make doc`** and the rustdoc stage of **`make gate`**). This is the full workspace API surface; the **Site** workflow only needs **`grit-lib`** rustdoc to resolve site links.
 
 **CLI page contract** — the **`test`** job runs **`every_command_is_documented`** in **`grit-cli/src/main.rs`**: every subcommand has a page under **`content/docs/commands/`**, and each page documents every flag and nested subcommand (see the template in **`content/docs/commands/README.md`**).
 

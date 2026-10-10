@@ -1,0 +1,90 @@
+/* Homepage and blog: each section is a commit, a graph rail on the left. */
+.rs {
+  --rail: clamp(48px, 8vw, 120px);
+  max-width: 1200px; margin: 0 auto; padding: 0 clamp(20px, 4vw, 56px); min-height: 100vh;
+
+  .topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; padding: 24px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; text-decoration: none; }
+  .brand::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); }
+  .nav { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; font-size: 15px; }
+  .nav a { text-decoration: none; }
+  .nav .pill { background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 999px; }
+
+  .commit { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); }
+  .commit + .commit { border-top: 1px solid var(--line); }
+  .rail { position: relative; }
+  .rail > span { position: absolute; display: block; }
+  .line { left: 20px; top: 0; bottom: 0; width: 3px; background: var(--ink); }
+  .line.from-head { top: 110px; }
+  .line.stub { bottom: auto; height: 46px; }
+  .dot { left: 15px; top: 48px; width: 13px; height: 13px; border-radius: 50%; background: var(--ink); }
+  .head-dot { left: 8px; top: 96px; width: 27px; height: 27px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--ink); }
+  .head-dot.small { left: 13px; top: 41px; width: 17px; height: 17px; box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--ink); }
+  .branch-out, .branch-in { left: 20px; width: 22px; height: 22px; border-right: 3px solid var(--accent); }
+  .branch-out { top: 16px; border-top: 3px solid var(--accent); border-top-right-radius: 14px; }
+  .branch-in { bottom: 16px; border-bottom: 3px solid var(--accent); border-bottom-right-radius: 14px; }
+  .branch-line { left: 39px; top: 36px; bottom: 36px; width: 3px; background: var(--accent); }
+  .branch-dot { left: 34px; top: 62px; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); }
+  .root-dot { left: 14px; top: 44px; width: 15px; height: 15px; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 3px var(--ink); }
+
+  .hero { padding: 56px 0 80px; }
+  .refs { display: flex; flex-wrap: wrap; gap: 14px; font: 14px var(--mono); color: var(--muted); }
+  .refs a { text-decoration: none; }
+  .refs .ref { color: var(--accent); }
+  h1 { margin: 20px 0 0; font-size: clamp(96px, 18vw, 240px); line-height: .85; letter-spacing: -.06em; font-weight: 700; }
+  .post-hero h1 { font-size: clamp(44px, 7vw, 88px); line-height: .95; letter-spacing: -.045em; max-width: 16ch; text-wrap: balance; }
+  .tagline { margin: 24px 0 0; font-size: clamp(26px, 3.4vw, 40px); line-height: 1.1; letter-spacing: -.025em; font-weight: 500; }
+  .lede { max-width: 600px; margin: 20px 0 0; font-size: clamp(17px, 1.6vw, 20px); line-height: 1.5; color: var(--soft); text-wrap: pretty; }
+  .install { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 36px; font-size: 15px; }
+  .install code { font-family: var(--mono); border-radius: 10px; max-width: 100%; overflow-x: auto; white-space: nowrap; }
+  .install .primary { background: var(--ink); color: var(--bg); padding: 16px 20px; }
+  .install .secondary { padding: 14px 20px; border: 2px solid var(--ink); }
+
+  .body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 24px 56px; padding: 40px 0; }
+  .body.branched { gap: 32px 56px; padding: 48px 0; }
+  .sha { font: 13px var(--mono); color: var(--muted); }
+  .sha.hot, .branched .sha { color: var(--accent); }
+  .sha a { color: inherit; }
+  h2 { margin: 12px 0 0; font-size: clamp(32px, 4vw, 44px); line-height: 1; letter-spacing: -.03em; }
+  .body p { margin: 0; font-size: 19px; line-height: 1.55; color: var(--soft); text-wrap: pretty; }
+  .body h2 + p { margin-top: 20px; }
+  .body .code { margin: 0; border: 0; border-radius: 14px; padding: 24px 26px; }
+
+  .entry { padding: 36px 0 40px; }
+  .entry h2 { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.05; }
+  .entry h2 a { text-decoration: none; }
+  .entry p { max-width: 680px; margin: 14px 0 0; font-size: 18px; line-height: 1.55; color: var(--soft); text-wrap: pretty; }
+
+  .post-body { display: grid; grid-template-columns: minmax(0, 720px) minmax(0, 1fr); gap: 56px; padding: 48px 0 64px; }
+  .content { font-size: 19px; line-height: 1.65; color: var(--soft); }
+  .content > :first-child { margin-top: 0; }
+  .content h2 { margin: 2.2em 0 .5em; font-size: clamp(26px, 3vw, 34px); line-height: 1.1; letter-spacing: -.025em; color: var(--ink); }
+  .content h3 { margin: 1.8em 0 .4em; font-size: 22px; letter-spacing: -.015em; color: var(--ink); }
+  .content p { margin: 0 0 1.1em; text-wrap: pretty; }
+  .content ul, .content ol { margin: 0 0 1.1em; padding-left: 1.2em; }
+  .content li { margin: .3em 0; }
+  .content li::marker { color: var(--accent); }
+  .content a { color: var(--ink); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  .content strong { color: var(--ink); }
+  .content :not(pre) > code { font: .86em var(--mono); background: var(--chip); border-radius: 6px; padding: .1em .35em; }
+  .content .code { margin: 1.4em 0; border-radius: 14px; padding: 22px 26px; }
+  .content blockquote { margin: 1.4em 0; padding: .1em 0 .1em 20px; border-left: 3px solid var(--accent); color: var(--ink); font-size: 21px; line-height: 1.45; }
+  .content .table { margin: 1.4em 0; overflow-x: auto; }
+  .content table { width: 100%; border-collapse: collapse; font-size: 16px; line-height: 1.5; }
+  .content th { text-align: left; font: 13px var(--mono); color: var(--muted); font-weight: 500; padding: 0 16px 10px 0; border-bottom: 1px solid var(--line); }
+  .content td { padding: 12px 16px 12px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .toc { position: sticky; top: 24px; align-self: start; font: 13px/1.5 var(--mono); color: var(--muted); }
+  .toc h2 { margin: 0 0 12px; font: inherit; color: var(--accent); }
+  .toc ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+  .toc li { margin: 0 0 8px; padding-left: 14px; }
+  .toc a { text-decoration: none; }
+  .toc-level-3 { padding-left: 28px; }
+
+  .footer { padding: 40px 0 64px; }
+  .footer .links { display: flex; flex-wrap: wrap; gap: 28px; margin-top: 14px; font-size: 17px; }
+
+  @media (max-width: 900px) {
+    .post-body { display: block; }
+    .toc { display: none; }
+  }
+}
