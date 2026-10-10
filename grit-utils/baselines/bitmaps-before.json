@@ -286,7 +286,7 @@
       },
       "ratio": 0.0,
       "grit_failure": {
-        "kind": "command_failed",
+        "kind": "memory_cap",
         "message": "measure-rss failed: Error: benchmark command failed with exit status: 137"
       }
     }
