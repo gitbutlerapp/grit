@@ -82,6 +82,10 @@ pub fn run_refstore_conformance(factory: StoreFactory) {
     symbolic_iteration_peel(&factory);
     direct_update_reflog_oids(&factory);
     delete_with_reflog_oids(&factory);
+    symref_deref_delete(&factory);
+    symref_no_deref_delete(&factory);
+    symref_unborn_referent_created(&factory);
+    batch_apply_rejected_leaves_store_unchanged(&factory);
     empty_reflog_exists(&factory);
     prefix_iteration_order(&factory);
     abort_leaves_state_unchanged(&factory);
@@ -349,6 +353,122 @@ fn delete_with_reflog_oids(factory: &StoreFactory) {
     let entry = last.expect("entry");
     assert_eq!(entry.old_oid, oid(5));
     assert!(entry.new_oid.is_zero());
+}
+
+fn symref_deref_delete(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/target", oid(1));
+    seed_symref(store.as_ref(), "refs/heads/sym", "refs/heads/target");
+
+    let txn = RefTransaction::new()
+        .update(update("refs/heads/sym", None, Expected::Any))
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+
+    assert_eq!(
+        store.read_raw("refs/heads/sym").expect("sym"),
+        Some(RawRef::Symbolic("refs/heads/target".to_owned()))
+    );
+    assert_eq!(store.read_raw("refs/heads/target").expect("target"), None);
+}
+
+fn symref_no_deref_delete(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/target", oid(1));
+    seed_symref(store.as_ref(), "refs/heads/sym", "refs/heads/target");
+
+    let mut upd = update("refs/heads/sym", None, Expected::Any);
+    upd.flags.no_deref = true;
+    let txn = RefTransaction::new().update(upd).expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+
+    assert_eq!(store.read_raw("refs/heads/sym").expect("sym"), None);
+    assert_eq!(
+        store.read_raw("refs/heads/target").expect("target"),
+        Some(RawRef::Direct(oid(1)))
+    );
+}
+
+fn symref_unborn_referent_created(factory: &StoreFactory) {
+    let store = factory();
+    seed_symref(store.as_ref(), "HEAD", "refs/heads/unborn");
+
+    let txn = RefTransaction::new()
+        .update(update("HEAD", Some(RawRef::Direct(oid(7))), Expected::Any))
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+
+    assert_eq!(
+        store.read_raw("HEAD").expect("head"),
+        Some(RawRef::Symbolic("refs/heads/unborn".to_owned()))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/unborn").expect("unborn"),
+        Some(RawRef::Direct(oid(7)))
+    );
+
+    let txn2 = RefTransaction::new()
+        .update(update(
+            "refs/heads/first",
+            Some(RawRef::Direct(oid(1))),
+            Expected::Missing,
+        ))
+        .expect("first")
+        .update(update("HEAD", Some(RawRef::Direct(oid(8))), Expected::Any))
+        .expect("head");
+    store
+        .prepare(txn2)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+    assert_eq!(
+        store.read_raw("refs/heads/first").expect("first"),
+        Some(RawRef::Direct(oid(1)))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/unborn").expect("unborn"),
+        Some(RawRef::Direct(oid(8)))
+    );
+}
+
+fn batch_apply_rejected_leaves_store_unchanged(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/target", oid(1));
+    seed_symref(store.as_ref(), "refs/heads/sym", "refs/heads/target");
+
+    let txn = RefTransaction::new()
+        .update(update("refs/heads/sym", None, Expected::Any))
+        .expect("delete")
+        .update(update(
+            "refs/heads/target",
+            Some(RawRef::Direct(oid(2))),
+            Expected::Exists,
+        ))
+        .expect("update");
+    assert!(matches!(
+        prepare_err(store.as_ref(), txn),
+        RefStoreError::ExpectedMismatch { .. }
+    ));
+    assert_eq!(
+        store.read_raw("refs/heads/target").expect("target"),
+        Some(RawRef::Direct(oid(1)))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/sym").expect("sym"),
+        Some(RawRef::Symbolic("refs/heads/target".to_owned()))
+    );
 }
 
 fn empty_reflog_exists(factory: &StoreFactory) {
