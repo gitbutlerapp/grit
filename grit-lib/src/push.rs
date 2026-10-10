@@ -480,22 +480,20 @@ fn build_push_pack(
 
     let mut haves: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
     haves.extend_from_slice(&adv.advertised_haves);
-    // Send a thin, delta-compressed pack: the haves are everything the remote
-    // already advertised, so blob deltas may reference those peer-held bases
-    // without re-sending them (thin), and OFS_DELTA is used only when the server
-    // advertised the `ofs-delta` capability.
-    build_pack(
-        local_odb,
-        &wants,
-        &haves,
-        &PackBuildOptions {
-            thin: true,
-            delta: true,
-            use_ofs_delta: adv.server_ofs_delta,
-            ..PackBuildOptions::default()
-        },
-    )
-    .map(Some)
+    let mut pack_opts = PackBuildOptions {
+        thin: true,
+        delta: true,
+        use_ofs_delta: adv.server_ofs_delta,
+        ..PackBuildOptions::default()
+    };
+    // Small pushes (typical empty-commit series) spend more time planning deltas
+    // than a whole-object pack costs to build and send.
+    if wants.len() <= 128 {
+        pack_opts.delta = false;
+        pack_opts.reuse_deltas = false;
+        pack_opts.thin = false;
+    }
+    build_pack(local_odb, &wants, &haves, &pack_opts).map(Some)
 }
 
 /// A client-side push decision for one ref, plus what to send over the wire.
