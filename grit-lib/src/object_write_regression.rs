@@ -195,7 +195,7 @@ fn write_tree_unchanged_index_writes_and_freshens_nothing() {
     }
     cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
 
-    let metrics = odb.hot_path_test_metrics();
+    let metrics = odb.hot_path_metrics();
     crate::write_tree::test_reset_tree_write_count(&odb);
     metrics.reset_freshen_calls();
     metrics.set_freshen_counting(true);
@@ -271,7 +271,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
     index.add_or_replace(entry);
     repo.write_index(&mut index).unwrap();
 
-    let metrics = repo.odb.hot_path_test_metrics();
+    let metrics = repo.odb.hot_path_metrics();
     crate::write_tree::test_reset_tree_write_count(&repo.odb);
     metrics.reset_freshen_calls();
     metrics.set_freshen_counting(true);
@@ -351,7 +351,7 @@ fn stage_one_modified_file_hashes_one_blob() {
     fs::write(&target_abs, b"v2:changed").unwrap();
     pin_mtime(&target_abs, INDEX_MTIME.0 + 1, INDEX_MTIME.1);
 
-    let metrics = repo.odb.hot_path_test_metrics();
+    let metrics = repo.odb.hot_path_metrics();
     metrics.reset_blob_content_reads();
     metrics.set_blob_counting(true);
     let staged = stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
@@ -376,7 +376,7 @@ fn pack_signature_not_restatted_per_object() {
     )
     .unwrap();
     let _scope = HotPathMetricsScope::install(Arc::clone(&repo.odb.hot_path_test_metrics));
-    let metrics = repo.odb.hot_path_test_metrics();
+    let metrics = repo.odb.hot_path_metrics();
     let wt = repo.work_tree.as_ref().unwrap();
     let mut index = build_flat_index(PACK_REGRESSION_ENTRIES, 2);
     materialize_index_worktree(&repo, &index, "pack:");

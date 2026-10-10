@@ -85,6 +85,8 @@ pub struct CommitGraphLayer {
     base_chunk_size: usize,
     /// OID width in bytes implied by the header hash version (20 for SHA-1, 32 for SHA-256).
     hash_len: usize,
+    extra_edges_off: Option<usize>,
+    extra_edges_end: Option<usize>,
 }
 
 /// OID width for a commit-graph header hash-version byte (`body[5]`).
@@ -294,6 +296,7 @@ impl CommitGraphLayer {
         let mut bloom_data_range = None;
         let mut base_graphs_off = None;
         let mut extra_edges_off = None;
+        let mut extra_edges_end = None;
         let mut chunk_offsets: Vec<usize> = Vec::new();
         let mut toc_entries: Vec<(u32, usize)> = Vec::with_capacity(num_chunks);
 
@@ -319,7 +322,38 @@ impl CommitGraphLayer {
                 CHUNK_GENERATION_DATA => generation_off = Some(off),
                 CHUNK_GENERATION_DATA_OVERFLOW => generation_overflow_off = Some(off),
                 CHUNK_BLOOM_INDEXES => bloom_idx_off = Some(off),
-                CHUNK_EXTRA_EDGES => extra_edges_off = Some(off),
+                CHUNK_EXTRA_EDGES => {
+                    extra_edges_off = Some(off);
+                    extra_edges_end = Some(if i + 1 < num_chunks {
+                        let e2 = toc_start
+                            .checked_add((i + 1).checked_mul(12).ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?)
+                            .ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?;
+                        parse_toc_offset(
+                            body.len(),
+                            body[e2 + 4..e2 + 12].try_into().map_err(|_| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?,
+                        )?
+                    } else {
+                        let term = toc_start
+                            .checked_add(num_chunks.checked_mul(12).ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?)
+                            .ok_or_else(|| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?;
+                        parse_toc_offset(
+                            body.len(),
+                            body[term + 4..term + 12].try_into().map_err(|_| {
+                                Error::CorruptObject("commit-graph bad TOC".to_owned())
+                            })?,
+                        )?
+                    });
+                }
                 CHUNK_BASE_GRAPHS => base_graphs_off = Some(off),
                 CHUNK_BLOOM_DATA => {
                     let end = if i + 1 < num_chunks {
@@ -609,6 +643,8 @@ impl CommitGraphLayer {
             bloom_disabled: false,
             base_chunk_size,
             hash_len,
+            extra_edges_off,
+            extra_edges_end,
         })
     }
 
@@ -630,6 +666,52 @@ impl CommitGraphLayer {
     /// [`GRAPH_EXTRA_EDGES_NEEDED`]); the time is the low 34 bits of the trailing
     /// generation/commit-time field. Each record is `hash_len + 16` bytes:
     /// root-tree OID, two 4-byte parent words, then an 8-byte gen/time field.
+    fn parent_global_positions(&self, lex_index: u32) -> Option<Vec<u32>> {
+        let (p1, p2, _) = self.cdat_record(lex_index)?;
+        let mut out = Vec::new();
+        if p1 == GRAPH_PARENT_NONE {
+            return Some(out);
+        }
+        if p1 & GRAPH_EXTRA_EDGES_NEEDED != 0 {
+            return None;
+        }
+        out.push(p1);
+        if p2 == GRAPH_PARENT_NONE {
+            return Some(out);
+        }
+        if p2 & GRAPH_EXTRA_EDGES_NEEDED != 0 {
+            let start = (p2 & !GRAPH_EXTRA_EDGES_NEEDED) as usize;
+            let edge_off = self.extra_edges_off?;
+            let edge_end = self.extra_edges_end?;
+            let edge_len = edge_end.saturating_sub(edge_off);
+            if start.saturating_mul(4) >= edge_len {
+                return None;
+            }
+            let mut idx = start;
+            loop {
+                if idx.saturating_mul(4).saturating_add(4) > edge_len {
+                    return None;
+                }
+                let ev = u32::from_be_bytes(
+                    self.body[edge_off + idx * 4..edge_off + idx * 4 + 4]
+                        .try_into()
+                        .ok()?,
+                );
+                let parent = ev & !GRAPH_LAST_EDGE;
+                if parent != GRAPH_PARENT_NONE && parent & GRAPH_EXTRA_EDGES_NEEDED == 0 {
+                    out.push(parent);
+                }
+                if ev & GRAPH_LAST_EDGE != 0 {
+                    break;
+                }
+                idx += 1;
+            }
+            return Some(out);
+        }
+        out.push(p2);
+        Some(out)
+    }
+
     fn cdat_record(&self, lex_index: u32) -> Option<(u32, u32, i64)> {
         if lex_index >= self.num_commits {
             return None;
@@ -1174,24 +1256,91 @@ impl CommitGraphChain {
     }
 
     /// Commit parents and committer time read straight from the commit-graph file
-    /// (no object decompression). Returns `None` when `oid` is not in the graph,
-    /// or is an octopus merge (>2 parents — stored in the EXTRA_EDGES chunk, which
-    /// this reader does not decode); callers fall back to reading the object.
+    /// (no object decompression). Returns `None` when `oid` is not in the graph.
     pub fn graph_commit(&self, oid: &ObjectId) -> Option<(Vec<ObjectId>, i64)> {
         let (layer_idx, lex) = self.find_commit(oid)?;
-        let (p1, p2, commit_time) = self.layers[layer_idx].cdat_record(lex)?;
-        if p1 == GRAPH_PARENT_NONE {
-            return Some((Vec::new(), commit_time));
+        let (_, _, commit_time) = self.layers[layer_idx].cdat_record(lex)?;
+        let parents = self.parent_global_positions(oid)?;
+        let oids = parents
+            .into_iter()
+            .filter_map(|pos| self.oid_at_global_position(pos))
+            .collect();
+        Some((oids, commit_time))
+    }
+
+    /// Parent commit positions in global graph order (CDAT + EXTRA_EDGES), or `None` if `oid`
+    /// is not in the chain.
+    #[must_use]
+    pub fn parent_global_positions(&self, oid: &ObjectId) -> Option<Vec<u32>> {
+        let (layer_idx, lex) = self.find_commit(oid)?;
+        self.layers[layer_idx].parent_global_positions(lex)
+    }
+
+    /// Count commits reachable from `tips` minus those reachable from `hide`, using only
+    /// commit-graph parent links (no object reads). Returns `None` when any tip is missing
+    /// from the graph or parent data cannot be decoded from the file.
+    #[must_use]
+    pub fn count_reachable_commits(
+        &self,
+        tips: &[ObjectId],
+        hide: &[ObjectId],
+        first_parent_only: bool,
+        shallow: &std::collections::HashSet<ObjectId>,
+    ) -> Option<usize> {
+        let total = self.total_commits() as usize;
+        if total == 0 {
+            return None;
         }
-        let parent1 = self.oid_at_global_position(p1)?;
-        if p2 == GRAPH_PARENT_NONE {
-            return Some((vec![parent1], commit_time));
+        let mut marked = vec![false; total];
+        self.mark_reachable_commits(tips, first_parent_only, shallow, &mut marked)?;
+        if !hide.is_empty() {
+            let mut hide_mark = vec![false; total];
+            self.mark_reachable_commits(hide, first_parent_only, shallow, &mut hide_mark)?;
+            for (seen, hidden) in marked.iter_mut().zip(hide_mark) {
+                if hidden {
+                    *seen = false;
+                }
+            }
         }
-        if p2 & GRAPH_EXTRA_EDGES_NEEDED != 0 {
-            return None; // octopus merge — fall back to the object
+        Some(marked.iter().filter(|&&b| b).count())
+    }
+
+    fn mark_reachable_commits(
+        &self,
+        tips: &[ObjectId],
+        first_parent_only: bool,
+        shallow: &std::collections::HashSet<ObjectId>,
+        marked: &mut [bool],
+    ) -> Option<()> {
+        let mut stack: Vec<u32> = Vec::new();
+        for tip in tips {
+            stack.push(self.global_position(tip)?);
         }
-        let parent2 = self.oid_at_global_position(p2)?;
-        Some((vec![parent1, parent2], commit_time))
+        while let Some(pos) = stack.pop() {
+            let idx = pos as usize;
+            if idx >= marked.len() || marked[idx] {
+                continue;
+            }
+            marked[idx] = true;
+            let oid = self.oid_at_global_position(pos)?;
+            let parents = if shallow.contains(&oid) {
+                Vec::new()
+            } else {
+                self.parent_global_positions(&oid)?
+            };
+            let parents = if first_parent_only {
+                parents.into_iter().take(1).collect::<Vec<_>>()
+            } else {
+                parents
+            };
+            for p in parents {
+                if (p as usize) >= marked.len() {
+                    return None;
+                }
+                stack.push(p);
+            }
+        }
+        Some(())
     }
 
     /// All commit OIDs in the chain (oldest base first, then newer layers).

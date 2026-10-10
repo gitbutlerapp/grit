@@ -152,12 +152,15 @@ impl ReachableSet {
 }
 
 /// Returns `true` when `filter` can be applied via type bitmaps (mirrors Git `can_filter_bitmap`).
-fn filter_supported(filter: Option<&ObjectFilter>) -> bool {
+#[must_use]
+pub fn bitmap_filter_supported(filter: Option<&ObjectFilter>) -> bool {
     match filter {
         None => true,
         Some(ObjectFilter::SparseOid(_)) => false,
         Some(ObjectFilter::TreeDepth(depth)) if *depth > 0 => false,
-        Some(ObjectFilter::Combine(parts)) => parts.iter().all(|p| filter_supported(Some(p))),
+        Some(ObjectFilter::Combine(parts)) => {
+            parts.iter().all(|p| bitmap_filter_supported(Some(p)))
+        }
         Some(ObjectFilter::BlobNone)
         | Some(ObjectFilter::BlobLimit(_))
         | Some(ObjectFilter::TreeDepth(0))
@@ -235,7 +238,7 @@ impl BitmapIndex {
         {
             return Err(BitmapWalkUnsupported.into());
         }
-        if !filter_supported(query.filter) {
+        if !bitmap_filter_supported(query.filter) {
             return Err(BitmapWalkUnsupported.into());
         }
 
