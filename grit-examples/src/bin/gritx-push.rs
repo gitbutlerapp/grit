@@ -82,7 +82,7 @@ fn run() -> Result<()> {
         ..Default::default()
     };
 
-    let outcome = remote::push(&git_dir, &r, std::slice::from_ref(&spec), &opts)?;
+    let outcome = remote::push(&repo, &r, std::slice::from_ref(&spec), &opts)?;
 
     let mut rejected = false;
     for res in &outcome.results {

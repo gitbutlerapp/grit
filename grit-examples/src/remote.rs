@@ -1,47 +1,21 @@
 //! Default-remote discovery, authentication selection, and transport dispatch
 //! shared by the `gritx-fetch` and `gritx-push` examples.
 //!
-//! The interesting part — and the reason these two examples exist — is that the
-//! authentication a Git remote needs is implied entirely by its URL scheme:
-//!
-//! * `http(s)://` — smart HTTP. Credentials come from the configured
-//!   `credential.helper` programs (e.g. `osxkeychain`, `cache`, `store`), filled
-//!   on a `401` and retried as HTTP Basic. We wire grit-lib's
-//!   [`HelperCredentialProvider`] into the HTTP client so this happens
-//!   automatically (and fails with a typed error, never a TTY prompt).
-//! * `ssh://` / `git@host:path` — SSH. Authentication is SSH's own job (keys or
-//!   an agent), handled by the `ssh` child process; grit-lib does nothing.
-//! * `git://` — the anonymous Git daemon protocol. No authentication.
-//! * `file://` / a local path — a local repository. No authentication.
-//!
-//! [`resolve_remote`] picks the default remote and classifies its URL;
-//! [`describe_auth`] renders the human "here's the auth I'll use" line; and the
-//! [`fetch`]/[`push`] helpers run the operation over the matching transport.
+//! Operations go through [`grit_lib::remote::Remote`] — the same dispatcher the
+//! `grit` CLI uses.
 
 use std::path::Path;
-use std::path::PathBuf;
 
 use anyhow::Context as _;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
-use grit_lib::credentials::HelperCredentialProvider;
-use grit_lib::fetch::fetch_remote;
 use grit_lib::fetch::NoProgress;
-use grit_lib::push::push_http;
-use grit_lib::push::push_remote;
-use grit_lib::transfer;
+use grit_lib::remote::{DefaultHttpClientFactory, Remote, RemoteUrl};
 use grit_lib::transfer::FetchOptions;
 use grit_lib::transfer::FetchOutcome;
 use grit_lib::transfer::PushOptions;
 use grit_lib::transfer::PushOutcome;
 use grit_lib::transfer::PushRefSpec;
-use grit_lib::transport::http::http_fetch;
-use grit_lib::transport::http::ureq_client::UreqHttpClient;
-use grit_lib::transport::ConnectOptions;
-use grit_lib::transport::GitDaemonTransport;
-use grit_lib::transport::Service;
-use grit_lib::transport::SshTransport;
-use grit_lib::transport::Transport as _;
 
 /// How a remote URL is reached, and therefore what authentication it implies.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -59,15 +33,12 @@ pub enum RemoteKind {
 impl RemoteKind {
     /// Classify a remote URL by scheme.
     pub fn classify(url: &str) -> Self {
-        if url.starts_with("http://") || url.starts_with("https://") {
-            Self::Http
-        } else if url.starts_with("git://") {
-            Self::GitDaemon
-        } else if grit_lib::transport::is_ssh_url(url) {
-            Self::Ssh
-        } else {
-            // `file://...` or a bare path.
-            Self::Local
+        match RemoteUrl::try_from(url) {
+            Ok(RemoteUrl::Http(_) | RemoteUrl::Https(_)) => Self::Http,
+            Ok(RemoteUrl::Git(_)) => Self::GitDaemon,
+            Ok(RemoteUrl::Ssh(_)) => Self::Ssh,
+            Ok(RemoteUrl::Local(_) | RemoteUrl::File(_)) => Self::Local,
+            Err(_) => Self::Local,
         }
     }
 
@@ -84,11 +55,12 @@ impl RemoteKind {
 
 /// A resolved remote: its name, the URL to use, the transport kind, and the
 /// fetch refspecs configured for it.
-pub struct Remote {
+pub struct RemoteInfo {
     pub name: String,
     pub url: String,
     pub kind: RemoteKind,
     pub fetch_refspecs: Vec<String>,
+    pub remote: Remote,
 }
 
 /// Pick the remote name: an explicit argument, else the current branch's
@@ -109,40 +81,31 @@ fn default_remote_name(config: &ConfigSet, git_dir: &Path, explicit: Option<&str
     "origin".to_owned()
 }
 
-/// Resolve the remote to operate on. `for_push` selects `remote.<name>.pushurl`
-/// when present (Git prefers it for pushing), otherwise `remote.<name>.url`.
+/// Resolve the remote to operate on.
 pub fn resolve_remote(
     config: &ConfigSet,
     git_dir: &Path,
     explicit: Option<&str>,
-    for_push: bool,
-) -> Result<Remote> {
+    _for_push: bool,
+) -> Result<RemoteInfo> {
     let name = default_remote_name(config, git_dir, explicit);
-    let url = for_push
-        .then(|| config.get(&format!("remote.{name}.pushurl")))
-        .flatten()
-        .or_else(|| config.get(&format!("remote.{name}.url")))
-        .filter(|u| !u.trim().is_empty())
-        .with_context(|| {
-            format!("remote '{name}' has no configured URL (set remote.{name}.url)")
-        })?;
-    let mut fetch_refspecs = config.get_all(&format!("remote.{name}.fetch"));
-    fetch_refspecs.retain(|s| !s.trim().is_empty());
-    if fetch_refspecs.is_empty() {
-        fetch_refspecs = vec![format!("+refs/heads/*:refs/remotes/{name}/*")];
-    }
+    let remote = Remote::from_config(config, &name)
+        .with_context(|| format!("remote '{name}' has no configured URL"))?;
+    let url = remote.fetch_url().to_url_string();
     let kind = RemoteKind::classify(&url);
-    Ok(Remote {
+    let fetch_refspecs = remote.fetch_refspecs.clone();
+    Ok(RemoteInfo {
         name,
         url,
         kind,
         fetch_refspecs,
+        remote,
     })
 }
 
 /// Human-readable description of the authentication that will be used — the
 /// "discovery" the examples are meant to show.
-pub fn describe_auth(config: &ConfigSet, remote: &Remote) -> String {
+pub fn describe_auth(config: &ConfigSet, remote: &RemoteInfo) -> String {
     match remote.kind {
         RemoteKind::Http => {
             let helpers = http_credential_helpers(config, &remote.url);
@@ -163,10 +126,7 @@ pub fn describe_auth(config: &ConfigSet, remote: &Remote) -> String {
     }
 }
 
-/// The `credential.helper` values that apply to `url` — the section-default
-/// `credential.helper` (applies to every URL) plus any URL-scoped
-/// `credential.<pattern>.helper` matched with Git's urlmatch rules. This mirrors
-/// what [`HelperCredentialProvider`] will actually consult.
+/// The `credential.helper` values that apply to `url`.
 fn http_credential_helpers(config: &ConfigSet, url: &str) -> Vec<String> {
     let mut helpers: Vec<String> = Vec::new();
     let push = |val: &str, helpers: &mut Vec<String>| {
@@ -175,11 +135,9 @@ fn http_credential_helpers(config: &ConfigSet, url: &str) -> Vec<String> {
             helpers.push(val);
         }
     };
-    // Section-default `credential.helper` (urlmatch only reports URL-scoped keys).
     for val in config.get_all("credential.helper") {
         push(&val, &mut helpers);
     }
-    // URL-scoped `credential.<pattern>.helper`.
     for (var, val, _scope) in
         grit_lib::config::get_urlmatch_all_in_section(config.entries(), "credential", url)
     {
@@ -203,90 +161,29 @@ fn ssh_command() -> String {
         .unwrap_or_else(|| "ssh".to_owned())
 }
 
-fn local_git_dir(url: &str, git_dir: &Path) -> PathBuf {
-    grit_lib::transport_path::resolve_local_remote_git_dir(url, git_dir, None)
+/// Run a fetch from `remote` into `repo` via [`Remote::fetch`].
+pub fn fetch(
+    repo: &grit_lib::repo::Repository,
+    remote: &RemoteInfo,
+    opts: &FetchOptions,
+) -> Result<FetchOutcome> {
+    let factory = DefaultHttpClientFactory;
+    remote
+        .remote
+        .fetch(repo, opts.clone(), &mut NoProgress, Some(&factory))
+        .map_err(|e| anyhow::Error::msg(e.to_string()))
 }
 
-/// Build an HTTP client honoring the repo's request-shaping config
-/// (`http.proxy`, `http.cookieFile`/`saveCookies`, `http.extraHeader`) and wired
-/// with a config-driven [`HelperCredentialProvider`] so `credential.helper`
-/// programs satisfy a `401`. Falls back to a plain client if config can't load.
-fn http_client(git_dir: &Path, git_protocol: Option<&str>) -> UreqHttpClient {
-    let client = match ConfigSet::load(
-        &grit_lib::environment::Environment::capture_process(),
-        Some(git_dir),
-        true,
-    ) {
-        Ok(config) => {
-            let provider = HelperCredentialProvider::new(config.clone());
-            match UreqHttpClient::from_config(&config) {
-                Ok(c) => c.with_credential_provider(Box::new(provider)),
-                Err(_) => UreqHttpClient::with_credentials(Box::new(provider)),
-            }
-        }
-        Err(_) => UreqHttpClient::new(),
-    };
-    match git_protocol {
-        Some(v) => client.with_git_protocol(v.to_owned()),
-        None => client,
-    }
-}
-
-/// Run a fetch from `remote` into `git_dir` over the matching transport,
-/// requesting protocol v2 for the wire transports.
-pub fn fetch(git_dir: &Path, remote: &Remote, opts: &FetchOptions) -> Result<FetchOutcome> {
-    let v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
-    let outcome = match remote.kind {
-        RemoteKind::Http => {
-            let client = http_client(git_dir, Some("version=2"));
-            http_fetch(&client, git_dir, &remote.url, opts, &mut NoProgress)?
-        }
-        RemoteKind::GitDaemon => {
-            let mut conn =
-                GitDaemonTransport::new().connect(&remote.url, Service::UploadPack, &v2)?;
-            fetch_remote(git_dir, &mut *conn, opts, &mut NoProgress)?
-        }
-        RemoteKind::Ssh => {
-            let mut conn = SshTransport::new().connect(&remote.url, Service::UploadPack, &v2)?;
-            fetch_remote(git_dir, &mut *conn, opts, &mut NoProgress)?
-        }
-        RemoteKind::Local => {
-            transfer::fetch_local(git_dir, &local_git_dir(&remote.url, git_dir), opts)?
-        }
-    };
-    Ok(outcome)
-}
-
-/// Run a push of `refs` to `remote` from `git_dir` over the matching transport.
-/// Push uses protocol v0/v1 (Git has no v2 receive-pack).
+/// Run a push of `refs` to `remote` from `repo` via [`Remote::push`].
 pub fn push(
-    git_dir: &Path,
-    remote: &Remote,
+    repo: &grit_lib::repo::Repository,
+    remote: &RemoteInfo,
     refs: &[PushRefSpec],
     opts: &PushOptions,
 ) -> Result<PushOutcome> {
-    let v0 = ConnectOptions::default();
-    let outcome = match remote.kind {
-        RemoteKind::Http => {
-            // No `version=2` header: smart-HTTP receive-pack is v0/v1.
-            let client = http_client(git_dir, None);
-            push_http(&client, git_dir, &remote.url, refs, opts, &mut NoProgress)?
-        }
-        RemoteKind::GitDaemon => {
-            let mut conn =
-                GitDaemonTransport::new().connect(&remote.url, Service::ReceivePack, &v0)?;
-            push_remote(git_dir, &mut *conn, refs, opts, &mut NoProgress)?
-        }
-        RemoteKind::Ssh => {
-            let mut conn = SshTransport::new().connect(&remote.url, Service::ReceivePack, &v0)?;
-            push_remote(git_dir, &mut *conn, refs, opts, &mut NoProgress)?
-        }
-        RemoteKind::Local => {
-            transfer::push_local(git_dir, &local_git_dir(&remote.url, git_dir), refs, opts)?
-        }
-    };
-    Ok(outcome)
+    let factory = DefaultHttpClientFactory;
+    remote
+        .remote
+        .push(repo, refs, opts.clone(), &mut NoProgress, Some(&factory))
+        .map_err(|e| anyhow::Error::msg(e.to_string()))
 }

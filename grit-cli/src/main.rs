@@ -9,7 +9,6 @@ mod commands;
 mod context;
 mod diagnostics;
 mod json_filter;
-mod net;
 mod output;
 mod ref_name_messages;
 mod stdio;
@@ -49,6 +48,20 @@ enum RemoteAction {
         name: String,
         /// The remote's URL or path.
         url: String,
+    },
+    /// List references on a remote (like `git ls-remote`).
+    Refs {
+        /// Configured remote name or a literal URL/path.
+        remote_or_url: String,
+        /// Only show refs under `refs/heads/`.
+        #[arg(long)]
+        heads: bool,
+        /// Only show refs under `refs/tags/`.
+        #[arg(long)]
+        tags: bool,
+        /// Optional ref prefixes (same rules as `git ls-remote`).
+        #[arg(value_name = "PREFIX")]
+        prefixes: Vec<String>,
     },
 }
 
@@ -281,10 +294,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts),
         Command::Clone { url, dir } => emit(&commands::clone::run(&url, dir, opts.mode)?, opts),
-        Command::Remote { action } => {
-            let add = action.map(|RemoteAction::Add { name, url }| (name, url));
-            emit(&commands::remote::run(add)?, opts)
-        }
+        Command::Remote { action } => match action {
+            None => emit(&commands::remote::run_list_or_add(None)?, opts),
+            Some(RemoteAction::Add { name, url }) => {
+                emit(&commands::remote::run_list_or_add(Some((name, url)))?, opts)
+            }
+            Some(RemoteAction::Refs {
+                remote_or_url,
+                heads,
+                tags,
+                prefixes,
+            }) => emit(
+                &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes)?,
+                opts,
+            ),
+        },
         Command::Log { before } => emit(&commands::log::run(before)?, opts),
         Command::Diff { commit } => emit(&commands::diff::run(commit)?, opts),
         Command::Show { object } => emit(&commands::show::run(object)?, opts),
@@ -364,7 +388,7 @@ mod tests {
 
     /// Options every command accepts; they're documented once on the docs
     /// overview page rather than on each command's page.
-    const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "filter"];
+    const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "markdown", "filter"];
 
     /// Required `##` sections on every command page, in order. `Markdown output`
     /// may appear after `JSON output` when the command supports `--markdown`.

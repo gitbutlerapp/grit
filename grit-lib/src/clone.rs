@@ -14,6 +14,7 @@ use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::ObjectId;
 use crate::refs;
 use crate::remote::{HttpClientFactory, Remote, DEFAULT_REMOTE};
+use crate::ref_storage::RefStorageFormat;
 use crate::repo::{init_repository, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode};
 use crate::transport_path::{
@@ -142,7 +143,14 @@ pub fn clone(
     }
 
     let repo =
-        init_repository(&opts.dest, false, &opts.initial_branch, None, "files").map_err(|e| {
+        init_repository(
+            &opts.dest,
+            false,
+            &opts.initial_branch,
+            None,
+            RefStorageFormat::default(),
+        )
+        .map_err(|e| {
             CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
         })?;
 

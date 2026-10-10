@@ -12,7 +12,9 @@ use grit_lib::state::{resolve_head, HeadState};
 
 use crate::commands::merge::{self, MergeOutcome};
 use crate::context;
-use crate::net;
+use grit_lib::fetch::NoProgress;
+use grit_lib::remote::{DefaultHttpClientFactory, Remote, DEFAULT_REMOTE};
+use grit_lib::transfer::{FetchOptions, TagMode};
 
 pub fn run() -> Result<MergeOutcome> {
     let repo = context::discover()?;
@@ -38,10 +40,21 @@ pub fn run() -> Result<MergeOutcome> {
     let remote = config
         .get(&format!("branch.{short_name}.remote"))
         .filter(|r| !r.trim().is_empty())
-        .unwrap_or_else(|| net::DEFAULT_REMOTE.to_owned());
+        .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
 
-    let refspecs = net::fetch_refspecs(&config, &remote);
-    net::fetch(&repo, &config, &remote, refspecs)?;
+    let factory = DefaultHttpClientFactory;
+    Remote::from_config(&config, &remote)
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?
+        .fetch(
+            &repo,
+            FetchOptions {
+                tags: TagMode::Following,
+                ..Default::default()
+            },
+            &mut NoProgress,
+            Some(&factory),
+        )
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
 
     // Which upstream tracking ref to integrate.
     let upstream_branch = config

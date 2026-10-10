@@ -50,6 +50,9 @@ impl OutputOptions {
         if self.filter.is_some() && self.mode != OutputMode::Json {
             bail!("--filter requires --json");
         }
+        if self.mode == OutputMode::Markdown && self.filter.is_some() {
+            bail!("--filter cannot be used with --markdown");
+        }
         Ok(())
     }
 }

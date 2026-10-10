@@ -24,9 +24,8 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::credentials::{Credential, CredentialProvider, HelperCredentialProvider};
+use grit_lib::remote::http_client::{HttpClient, UreqHttpClient};
 use grit_lib::repo::Repository;
-use grit_lib::transport::http::ureq_client::UreqHttpClient;
-use grit_lib::transport::http::HttpClient;
 use serde::Serialize;
 
 use crate::output::HumanRender;
