@@ -128,7 +128,7 @@ pub fn run(object: Option<String>) -> Result<ShowOutcome> {
 }
 
 /// Reduce a full diff to a per-file insertion/deletion summary.
-fn diffstat(diff: &DiffOutcome) -> DiffStat {
+pub(crate) fn diffstat(diff: &DiffOutcome) -> DiffStat {
     let mut files = Vec::new();
     let mut insertions = 0;
     let mut deletions = 0;
@@ -338,7 +338,7 @@ impl HumanRender for ShowOutcome {
 }
 
 /// Render the diffstat, mirroring `git show --stat`.
-fn render_stat(stat: &DiffStat, color: bool) {
+pub(crate) fn render_stat(stat: &DiffStat, color: bool) {
     if stat.files.is_empty() {
         return;
     }
@@ -475,7 +475,7 @@ fn message_body(full: &str, subject: &str) -> String {
     }
 }
 
-fn render_markdown_stat(stat: &DiffStat) {
+pub(crate) fn render_markdown_stat(stat: &DiffStat) {
     if stat.files.is_empty() {
         return;
     }
