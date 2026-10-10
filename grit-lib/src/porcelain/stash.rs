@@ -26,6 +26,8 @@ use crate::index::{Index, IndexEntry, MODE_GITLINK, MODE_SYMLINK};
 use crate::index::MODE_EXECUTABLE;
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId};
 use crate::odb::Odb;
+use crate::reflog::{read_reflog, truncate_last_reflog_line};
+use crate::refs::{delete_ref, write_ref};
 use crate::repo::Repository;
 use crate::state::resolve_head;
 
@@ -734,4 +736,69 @@ pub fn apply_stash(
     }
 
     Ok(has_conflicts)
+}
+
+const STASH_REF: &str = "refs/stash";
+
+/// Remove one stash commit from `refs/stash` when it is the reflog tip.
+///
+/// # Returns
+///
+/// `true` when the stash entry was removed.
+///
+/// # Errors
+///
+/// Propagates ref and reflog update failures.
+pub fn drop_stash_commit(git_dir: &Path, stash_oid: &ObjectId) -> Result<bool> {
+    let entries = read_reflog(git_dir, STASH_REF)?;
+    if entries.is_empty() {
+        return Ok(false);
+    }
+    let Some(tip) = entries.last() else {
+        return Ok(false);
+    };
+    if tip.new_oid != *stash_oid {
+        return Ok(false);
+    }
+    if entries.len() == 1 {
+        truncate_last_reflog_line(git_dir, STASH_REF)?;
+        delete_ref(git_dir, STASH_REF)?;
+    } else {
+        let prev = entries[entries.len() - 2].new_oid;
+        truncate_last_reflog_line(git_dir, STASH_REF)?;
+        write_ref(git_dir, STASH_REF, &prev)?;
+    }
+    Ok(true)
+}
+
+/// Apply and drop the merge autostash recorded in `MERGE_AUTOSTASH`, matching `git commit` after
+/// `git merge --autostash`.
+///
+/// # Returns
+///
+/// `true` when applying the autostash left index/worktree conflicts (the stash entry is kept).
+///
+/// # Errors
+///
+/// Propagates stash apply, index, and I/O failures.
+pub fn apply_merge_autostash(repo: &Repository) -> Result<bool> {
+    let path = repo.git_dir.join("MERGE_AUTOSTASH");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(false);
+    };
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        let _ = fs::remove_file(&path);
+        return Ok(false);
+    }
+    let stash_oid = ObjectId::from_hex(trimmed)?;
+    let work_tree = repo.work_tree.as_deref().ok_or_else(|| {
+        Error::Message("cannot apply merge autostash in a bare repository".into())
+    })?;
+    let conflicts = apply_stash(repo, work_tree, &stash_oid, false, true)?;
+    let _ = fs::remove_file(&path);
+    if !conflicts {
+        let _ = drop_stash_commit(&repo.git_dir, &stash_oid)?;
+    }
+    Ok(conflicts)
 }

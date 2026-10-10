@@ -1015,6 +1015,22 @@ pub fn rerere_post_commit(repo: &Repository) -> Result<Vec<RerereEvent>> {
     Ok(events)
 }
 
+/// Clear rerere merge tracking after a concluded merge commit (matches an empty `MERGE_RR` file).
+///
+/// Records postimages via [`rerere_post_commit`] first, then truncates `MERGE_RR`.
+///
+/// # Errors
+///
+/// Propagates rerere and I/O failures.
+pub fn finish_merge_rerere(repo: &Repository) -> Result<Vec<RerereEvent>> {
+    let events = rerere_post_commit(repo)?;
+    let path = merge_rr_path(&repo.git_dir);
+    if path.exists() {
+        fs::write(&path, &[])?;
+    }
+    Ok(events)
+}
+
 /// `git rerere clear` — drop unresolved preimages tracked in `MERGE_RR`, remove `MERGE_RR`.
 pub fn rerere_clear(git_dir: &Path) -> Result<()> {
     let merge_rr = read_merge_rr(git_dir)?;

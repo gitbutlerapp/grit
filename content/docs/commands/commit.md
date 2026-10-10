@@ -22,7 +22,9 @@ The author and committer come from the `user.name` and `user.email` settings (se
 
 When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new commit object the same way Git does: OpenPGP and X.509 via your configured `gpg`/`gpgsm` program, or SSH via `ssh-keygen -Y sign` when `gpg.format` is `ssh`. Signing uses `user.signingkey` and the same `gpg.*` settings Git reads. [`grit merge`](../merge/) and [`grit pick`](../pick/) honor the same policy when they create commits.
 
-`grit commit` fails when there's nothing to commit, and when HEAD is detached rather than on a branch.
+`grit commit` fails when there's nothing to commit, when HEAD is detached rather than on a branch, and when the index still has **unmerged** paths (for example after a merge conflict). Resolve conflicts, stage the result with [`grit add`](../add/), then commit again.
+
+When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
 
 ## Options
 

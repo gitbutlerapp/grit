@@ -19,6 +19,7 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog;
+use crate::repo::Repository;
 
 /// The current state of HEAD.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -621,6 +622,60 @@ pub fn read_merge_msg(git_dir: &Path) -> Result<Option<String>> {
     }
 }
 
+/// Remove merge-in-progress sentinel files after a successful merge commit.
+///
+/// Prefer [`finish_merge_state`] for merge commits; it also restores autostash and clears rerere.
+///
+/// # Parameters
+///
+/// - `git_dir` — path to the `.git` directory.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] if a present sentinel file cannot be removed.
+pub fn clear_merge_state(git_dir: &Path) -> Result<()> {
+    for name in merge_completion_sentinels() {
+        let path = git_dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(Error::Io)?;
+        }
+    }
+    Ok(())
+}
+
+/// Sentinel filenames Git removes when a merge concludes with `git commit`.
+#[must_use]
+pub fn merge_completion_sentinels() -> &'static [&'static str] {
+    &[
+        "MERGE_HEAD",
+        "MERGE_MSG",
+        "MERGE_MODE",
+        "MERGE_LOG",
+        "AUTO_MERGE",
+        "SQUASH_MSG",
+        "MERGE_AUTOSTASH",
+    ]
+}
+
+/// Complete merge auxiliary state after a successful merge commit.
+///
+/// Applies `MERGE_AUTOSTASH` (when present), clears rerere merge records, then removes merge
+/// sentinel files via [`clear_merge_state`].
+///
+/// # Returns
+///
+/// `true` when applying the merge autostash left conflicts (the autostash entry is kept).
+///
+/// # Errors
+///
+/// Propagates autostash apply, rerere, and I/O failures.
+pub fn finish_merge_state(repo: &Repository) -> Result<bool> {
+    let autostash_conflicts = crate::porcelain::stash::apply_merge_autostash(repo)?;
+    let _ = crate::rerere::finish_merge_rerere(repo)?;
+    clear_merge_state(&repo.git_dir)?;
+    Ok(autostash_conflicts)
+}
+
 /// Read CHERRY_PICK_HEAD when it contains a valid 40-hex OID; `None` if missing, empty, or invalid
 /// (Git ignores malformed `CHERRY_PICK_HEAD` for the "commit $abbrev" line; sequencer still applies).
 pub fn read_cherry_pick_head(git_dir: &Path) -> Result<Option<ObjectId>> {
@@ -684,4 +739,27 @@ fn read_single_oid_file(path: &Path) -> Result<Option<ObjectId>> {
 pub fn upstream_tracking(_git_dir: &Path, _branch: &str) -> Result<Option<(usize, usize)>> {
     // TODO: Implement ahead/behind counting once config + rev-list integration is ready.
     Ok(None)
+}
+
+#[cfg(test)]
+mod merge_sentinel_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::{clear_merge_state, merge_completion_sentinels};
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn clear_merge_state_removes_every_completion_sentinel() {
+        let tmp = TempDir::new().unwrap();
+        let git = tmp.path().join(".git");
+        fs::create_dir_all(&git).unwrap();
+        for name in merge_completion_sentinels() {
+            fs::write(git.join(name), b"x").unwrap();
+        }
+        clear_merge_state(&git).unwrap();
+        for name in merge_completion_sentinels() {
+            assert!(!git.join(name).exists(), "expected {name} to be removed");
+        }
+    }
 }
