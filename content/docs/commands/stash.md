@@ -91,8 +91,7 @@ When something was stashed:
 ```json
 {
   "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-  "message": "WIP on main: wip feature",
-  "stashed": true
+  "message": "WIP on main: wip feature"
 }
 ```
 
@@ -106,30 +105,29 @@ When there was nothing to save:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `stashed` | boolean | Whether a new stash entry was created. |
-| `oid` | string | Full object id of the stash commit (when `stashed` is true). |
-| `message` | string | Reflog message Git would show after the colon (when `stashed` is true). |
+| `oid` | string | Full object id of the stash commit (success object only). |
+| `message` | string | Reflog message Git would show after the colon (success object only). |
+| `stashed` | boolean | Present and `false` only on the empty-worktree result. |
 
 ### `grit stash list`
 
+The JSON value is a top-level array (newest entry first):
+
 ```json
-{
-  "entries": [
-    {
-      "index": 0,
-      "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-      "message": "WIP on main: second"
-    }
-  ]
-}
+[
+  {
+    "index": 0,
+    "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
+    "message": "WIP on main: second"
+  }
+]
 ```
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `entries` | array | Stash entries, newest first. |
-| `entries[].index` | number | Index matching `stash@{index}`. |
-| `entries[].oid` | string | Full stash commit id. |
-| `entries[].message` | string | Reflog message. |
+| `index` | number | Index matching `stash@{index}`. |
+| `oid` | string | Full stash commit id. |
+| `message` | string | Reflog message. |
 
 ### `grit stash show`
 
