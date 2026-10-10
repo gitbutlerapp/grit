@@ -429,29 +429,20 @@ fn write_fake_ssh(grit_bin: &Path, dir: &Path) -> Option<PathBuf> {
     let script = dir.join("fake-ssh.sh");
     let body = format!(
         r#"#!/bin/sh
-cmd=
-for arg do
+for arg in "$@"; do
   case "$arg" in
-    git-upload-pack|git-upload-pack\ *)
-      cmd=$arg
-      break
+    git-upload-pack\ *)
+      path="${{arg#git-upload-pack }}"
+      path="${{path#\'}}"; path="${{path%\'}}"
+      path="${{path#\"}}"; path="${{path%\"}}"
+      exec "{grit}" upload-pack "$path"
       ;;
   esac
 done
-case "$cmd" in
-  git-upload-pack\ *)
-    path="${{cmd#git-upload-pack }}"
-    ;;
-  git-upload-pack)
-    path=$2
-    ;;
-  *)
-    path=
-    ;;
-esac
-path="${{path#\'}}"; path="${{path%\'}}"
-path="${{path#\"}}"; path="${{path%\"}}"
-if test -n "$path"; then
+if test "$1" = git-upload-pack && test -n "$2"; then
+  path="$2"
+  path="${{path#\'}}"; path="${{path%\'}}"
+  path="${{path#\"}}"; path="${{path%\"}}"
   exec "{grit}" upload-pack "$path"
 fi
 exec "$@"
@@ -481,8 +472,10 @@ fn shallow_clone_over_ssh_wrapper_matches_git() {
     let grit_dest = tmp.path().join("grit-ssh");
     let git_dest = tmp.path().join("git-ref");
     for (url, dest) in [(&grit_url, &grit_dest), (&git_url, &git_dest)] {
-        let out = Command::new("git")
+        let out = Command::new("timeout")
             .args([
+                "60",
+                "git",
                 "-c",
                 &format!("core.sshCommand={}", script.display()),
                 "clone",

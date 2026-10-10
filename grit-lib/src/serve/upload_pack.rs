@@ -96,6 +96,36 @@ fn serve_v0(
         return Err(ServeError::NotOurRef(*bad));
     }
 
+    let shallow_req = ShallowRequest {
+        client_shallow: request.client_shallow.clone(),
+        depth: request.deepen,
+        deepen_since: None,
+        deepen_not: Vec::new(),
+        deepen_relative: request.deepen_relative,
+    };
+    let shallow_resp = if request.is_shallow() {
+        compute_shallow_response(repo, &request.wants, &shallow_req)?
+    } else {
+        Default::default()
+    };
+    let mut shallow_info_sent = false;
+    // Stateful v0 (SSH): after `deepen` the client waits for shallow lines before haves.
+    if request.is_shallow() && !opts.stateless_rpc {
+        if request.deepen == Some(INFINITE_DEPTH) {
+            write_v0_unshallow_info(output, &shallow_resp.unshallow)?;
+        } else {
+            for oid in &shallow_resp.shallow {
+                write_line(output, &format!("shallow {}", oid.to_hex()))?;
+            }
+            for oid in &shallow_resp.unshallow {
+                write_line(output, &format!("unshallow {}", oid.to_hex()))?;
+            }
+            write_flush(output)?;
+        }
+        output.flush()?;
+        shallow_info_sent = true;
+    }
+
     let mut stash: Option<Packet> = None;
     if opts.stateless_rpc && request.is_shallow() {
         let next = read_packet_stash(input, &mut stash)?;
@@ -166,29 +196,20 @@ fn serve_v0(
         }
     }
 
-    match common.last() {
-        Some(last) if detailed => write_line(output, &format!("ACK {}", last.to_hex()))?,
-        Some(_) => {}
-        None => write_line(output, "NAK")?,
+    match (common.last(), detailed) {
+        (Some(last), true) => write_line(output, &format!("ACK {} ready", last.to_hex()))?,
+        (Some(last), false) => write_line(output, &format!("ACK {}", last.to_hex()))?,
+        (None, _) => write_line(output, "NAK")?,
     }
+    output.flush()?;
     let sideband = request.caps.contains("side-band-64k");
-    let shallow_req = ShallowRequest {
-        client_shallow: request.client_shallow.clone(),
-        depth: request.deepen,
-        deepen_since: None,
-        deepen_not: Vec::new(),
-        deepen_relative: request.deepen_relative,
-    };
-    let shallow_resp = if request.is_shallow() {
-        compute_shallow_response(repo, &request.wants, &shallow_req)?
-    } else {
-        Default::default()
-    };
-    if request.is_shallow() {
+    if request.is_shallow() && !shallow_info_sent {
         if request.deepen == Some(INFINITE_DEPTH) {
             write_v0_unshallow_info(output, &shallow_resp.unshallow)?;
         } else {
-            write_v0_shallow_info(output, &shallow_resp.shallow)?;
+            for oid in &shallow_resp.shallow {
+                write_line(output, &format!("shallow {}", oid.to_hex()))?;
+            }
             for oid in &shallow_resp.unshallow {
                 write_line(output, &format!("unshallow {}", oid.to_hex()))?;
             }
@@ -381,13 +402,19 @@ fn serve_v2(
         check_object_format(repo, request.object_format.as_deref())?;
         match request.command.as_str() {
             "ls-refs" => ls_refs(repo, output, &request.args, opts)?,
-            "fetch" => fetch_v2(repo, output, &request.args, opts)?,
+            "fetch" => {
+                let finished = fetch_v2(repo, output, &request.args, opts)?;
+                output.flush()?;
+                // A `fetch` with `done` completes the upload-pack session (pack sent).
+                // Further reads would deadlock the client (notably SSH clone/fetch).
+                if finished || opts.stateless_rpc {
+                    return Ok(());
+                }
+                continue;
+            }
             other => return Err(ServeError::UnknownCommand(other.to_owned())),
         }
         output.flush()?;
-        if opts.stateless_rpc {
-            return Ok(());
-        }
     }
 }
 
@@ -495,12 +522,13 @@ fn ls_refs(
     write_flush(output)
 }
 
+/// Returns `true` when the fetch ended with a pack (`done` was set).
 fn fetch_v2(
     repo: &Repository,
     output: &mut dyn Write,
     args: &[String],
     opts: &ServeOptions,
-) -> Result<()> {
+) -> Result<bool> {
     let mut wants = Vec::new();
     let mut haves = Vec::new();
     let mut done = false;
@@ -571,7 +599,8 @@ fn fetch_v2(
     if let Some(spec) = filter_spec {
         if !policy.allow_filter {
             write_line(output, "ERR filter not allowed by uploadpack.allowFilter")?;
-            return write_flush(output);
+            write_flush(output)?;
+            return Ok(false);
         }
         policy.parse_filter(&config, &spec)?;
     }
@@ -597,7 +626,8 @@ fn fetch_v2(
         for oid in &common {
             write_v2_fetch_line(output, &format!("ACK {}", oid.to_hex()), sideband_all)?;
         }
-        return write_flush(output);
+        write_flush(output)?;
+        return Ok(false);
     }
 
     let shallow_req = ShallowRequest {
@@ -634,7 +664,7 @@ fn fetch_v2(
             true,
             &shallow_resp.pack_shallow_grafts,
             &shallow_resp.have_shallow_grafts,
-        )
+        )?;
     } else {
         stream_response_pack(
             repo,
@@ -646,8 +676,9 @@ fn fetch_v2(
             true,
             &HashSet::new(),
             &HashSet::new(),
-        )
+        )?;
     }
+    Ok(true)
 }
 
 fn read_packet_stash(input: &mut dyn Read, stash: &mut Option<Packet>) -> Result<Option<Packet>> {

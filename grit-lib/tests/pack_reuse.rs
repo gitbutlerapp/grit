@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::objects::ObjectId;
-use grit_lib::pack::{packed_full_object_slice, read_local_pack_indexes_cached};
-use grit_lib::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackProgress};
+use grit_lib::pack::packed_full_object_slice;
+use grit_lib::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackProgress, PackStats};
 use grit_lib::repo::Repository;
 use grit_test_support::{HashAlgo, RepoFixture};
 
@@ -122,29 +122,38 @@ fn build_history(repo: &RepoFixture) {
     git_ok(repo, &["repack", "-adb"]);
 }
 
-fn stream_clone_pack(repo: &Repository, wants: &[ObjectId], haves: &[ObjectId]) -> Vec<u8> {
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        use_ofs_delta: true,
-        thin: false,
-        ..PackBuildOptions::default()
-    };
+fn stream_clone_pack(
+    repo: &Repository,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    opts: &PackBuildOptions,
+) -> (Vec<u8>, PackStats) {
     let mut buf = Vec::new();
     let mut progress = |_ev: PackProgress| {};
-    write_upload_pack_stream(
+    let stats = write_upload_pack_stream(
         repo,
         wants,
         haves,
         &HashSet::new(),
         &HashSet::new(),
         None,
-        &opts,
+        opts,
         &mut progress,
         &mut buf,
     )
     .expect("stream pack");
-    buf
+    (buf, stats)
+}
+
+fn assert_verbatim_blob_in_pack(objects: &Path, pack: &[u8], blob: &ObjectId) {
+    let verbatim = packed_full_object_slice(objects, blob)
+        .expect("lookup")
+        .expect("reusable slice");
+    assert!(
+        pack.windows(verbatim.len())
+            .any(|w| w == verbatim.as_slice()),
+        "pack must contain verbatim reused bytes for {blob}"
+    );
 }
 
 #[test]
@@ -154,20 +163,22 @@ fn full_clone_reuses_pack_and_git_index_pack_strict_ok() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, None).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let pack = stream_clone_pack(&repo, &[tip], &[]);
+    let opts = PackBuildOptions {
+        delta: true,
+        use_bitmaps: true,
+        use_ofs_delta: true,
+        thin: false,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
-    let objects = fx.path().join(".git").join("objects");
-    let indexes = read_local_pack_indexes_cached(&objects).expect("indexes");
-    assert!(!indexes.is_empty(), "expected a source pack");
-    let blob = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD:a.txt"]).stdout.trim()).unwrap();
-    let verbatim = packed_full_object_slice(&objects, &blob)
-        .expect("lookup")
-        .expect("reusable slice");
     assert!(
-        pack.windows(verbatim.len())
-            .any(|w| w == verbatim.as_slice()),
-        "clone pack must contain verbatim reused bytes from the source pack"
+        stats.verbatim_reuse_bytes > 0,
+        "expected verbatim reuse: {stats:?}"
     );
+    let objects = fx.path().join(".git").join("objects");
+    let blob = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD:a.txt"]).stdout.trim()).unwrap();
+    assert_verbatim_blob_in_pack(&objects, &pack, &blob);
 }
 
 #[test]
@@ -178,9 +189,20 @@ fn partial_reuse_with_gaps_rewrites_ofs_delta() {
     let repo = Repository::open(&git_dir, None).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
-    let pack = stream_clone_pack(&repo, &[tip], &[parent]);
+    let opts = PackBuildOptions {
+        delta: true,
+        use_bitmaps: true,
+        use_ofs_delta: true,
+        thin: false,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[parent], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, Some(fx.path()));
     git_fsck(&fx);
+    assert!(
+        stats.verbatim_reuse_bytes > 0 || stats.pack_ofs_fixup_objects > 0,
+        "expected reuse or OFS rewrite: {stats:?}"
+    );
 }
 
 #[test]
@@ -194,8 +216,17 @@ fn midx_preferred_pack_reuse() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, None).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let pack = stream_clone_pack(&repo, &[tip], &[]);
+    let opts = PackBuildOptions {
+        delta: true,
+        use_bitmaps: true,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
+    assert!(
+        stats.verbatim_reuse_bytes > 0,
+        "expected pack reuse: {stats:?}"
+    );
 }
 
 #[test]
@@ -208,8 +239,21 @@ fn extended_objects_appended() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, None).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let pack = stream_clone_pack(&repo, &[tip], &[]);
+    let opts = PackBuildOptions {
+        delta: true,
+        use_bitmaps: true,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
+    assert!(
+        stats.verbatim_reuse_bytes > 0,
+        "expected reuse of packed history: {stats:?}"
+    );
+    assert!(
+        stats.pack_bytes > stats.verbatim_reuse_bytes,
+        "extended loose objects must add newly encoded bytes beyond reuse: {stats:?}"
+    );
 }
 
 #[test]
@@ -223,8 +267,20 @@ fn sha256_reuse() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, None).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let pack = stream_clone_pack(&repo, &[tip], &[]);
+    let opts = PackBuildOptions {
+        delta: true,
+        use_bitmaps: true,
+        ..PackBuildOptions::default()
+    };
+    let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha256, false, None);
+    assert!(
+        stats.verbatim_reuse_bytes > 0,
+        "expected sha256 reuse: {stats:?}"
+    );
+    let objects = git_dir.join("objects");
+    let blob = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD:f"]).stdout.trim()).unwrap();
+    assert_verbatim_blob_in_pack(&objects, &pack, &blob);
 }
 
 #[test]
@@ -244,7 +300,7 @@ fn thin_pack_ref_delta_conversion() {
     };
     let mut buf = Vec::new();
     let mut progress = |_ev: PackProgress| {};
-    write_upload_pack_stream(
+    let stats = write_upload_pack_stream(
         &repo,
         &[tip],
         &[parent],
@@ -257,4 +313,8 @@ fn thin_pack_ref_delta_conversion() {
     )
     .expect("thin pack");
     git_index_pack_strict(&buf, HashAlgo::Sha1, true, Some(fx.path()));
+    assert!(
+        stats.pack_ref_from_ofs_objects > 0 || stats.verbatim_reuse_bytes > 0,
+        "expected thin REF conversion or delta reuse: {stats:?}"
+    );
 }

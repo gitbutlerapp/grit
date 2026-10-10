@@ -12,7 +12,7 @@ use flate2::Compression;
 use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
 use crate::hash::HashingWriter;
-use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -153,6 +153,14 @@ pub struct PackStats {
     pub pack_bytes: u64,
     /// Objects written as `OFS_DELTA` or `REF_DELTA`.
     pub delta_count: u32,
+    /// Pack body bytes copied verbatim from an existing on-disk pack (reuse path).
+    pub verbatim_reuse_bytes: u64,
+    /// Objects emitted via verbatim pack reuse (whole or delta copy/rewrite).
+    pub verbatim_reuse_objects: u32,
+    /// Delta entries whose OFS base distance was rewritten for the output pack.
+    pub pack_ofs_fixup_objects: u32,
+    /// OFS deltas converted to REF deltas for thin packs.
+    pub pack_ref_from_ofs_objects: u32,
 }
 
 /// Progress hook for long pack builds.
@@ -452,6 +460,10 @@ fn write_whole_object_pack_stream(
         object_count: count,
         pack_bytes: counted.bytes(),
         delta_count: 0,
+        verbatim_reuse_bytes: 0,
+        verbatim_reuse_objects: 0,
+        pack_ofs_fixup_objects: 0,
+        pack_ref_from_ofs_objects: 0,
     })
 }
 
@@ -470,12 +482,16 @@ pub(crate) fn write_delta_pack_stream(
     let counted = ByteCountWriter::new(w);
     let mut hasher = HashingWriter::new(algo, counted);
     write_pack_header(&mut hasher, count)?;
-    write_planned_entries(&mut hasher, odb, plan, opts, 12, reuse)?;
+    let reuse_stats = write_planned_entries(&mut hasher, odb, plan, opts, 12, reuse)?;
     let (counted, _) = hasher.finish().map_err(Error::Io)?;
     Ok(PackStats {
         object_count: count,
         pack_bytes: counted.bytes(),
         delta_count,
+        verbatim_reuse_bytes: reuse_stats.verbatim_reuse_bytes,
+        verbatim_reuse_objects: reuse_stats.verbatim_reuse_objects,
+        pack_ofs_fixup_objects: reuse_stats.pack_ofs_fixup_objects,
+        pack_ref_from_ofs_objects: reuse_stats.pack_ref_from_ofs_objects,
     })
 }
 
@@ -513,12 +529,12 @@ fn write_planned_entries(
     opts: &PackBuildOptions,
     pack_body_start: u64,
     mut reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
-) -> Result<()> {
+) -> Result<crate::pack_reuse::ReuseWriteStats> {
     let algo = odb.hash_algo();
     let payloads: HashMap<ObjectId, &[u8]> = plan
         .entries
         .iter()
-        .map(|e| (e.oid, e.data.as_slice()))
+        .filter_map(|e| e.data.as_ref().map(|d| (e.oid, d.as_slice())))
         .collect();
     let mut oid_to_offset: HashMap<ObjectId, u64> = HashMap::new();
     let mut delta_index_by_base: HashMap<ObjectId, DeltaIndex> = HashMap::new();
@@ -535,13 +551,28 @@ fn write_planned_entries(
                 }
             }
             let mut chunk = Vec::new();
-            write_whole_pack_object(&mut chunk, odb, entry.oid, entry.kind, &entry.data, opts)?;
+            let payload = match &entry.data {
+                Some(d) => d.as_slice(),
+                None => {
+                    let obj = odb.read(&entry.oid)?;
+                    write_whole_pack_object(
+                        &mut chunk, odb, entry.oid, entry.kind, &obj.data, opts,
+                    )?;
+                    w.write_all(&chunk).map_err(Error::Io)?;
+                    body_written += chunk.len() as u64;
+                    oid_to_offset.insert(entry.oid, start);
+                    continue;
+                }
+            };
+            write_whole_pack_object(&mut chunk, odb, entry.oid, entry.kind, payload, opts)?;
             w.write_all(&chunk).map_err(Error::Io)?;
             body_written += chunk.len() as u64;
             oid_to_offset.insert(entry.oid, start);
             continue;
         }
-        let base_oid = entry.base.expect("base set above");
+        let Some(base_oid) = entry.base else {
+            continue;
+        };
         let in_pack_offset = oid_to_offset.get(&base_oid).copied();
         if let Some(reuse) = reuse.as_mut() {
             if let Some(n) =
@@ -562,12 +593,73 @@ fn write_planned_entries(
                 })?;
                 encode_pack_object_header(&mut chunk, 6, delta_len);
                 encode_ofs_delta_distance(&mut chunk, dist);
+                if let Some(reuse) = reuse.as_mut() {
+                    reuse.record_ofs_fixup();
+                }
             } else {
                 encode_pack_object_header(&mut chunk, 7, delta_len);
                 chunk.extend_from_slice(base_oid.as_bytes());
             }
             chunk.extend_from_slice(&pack_bytes[*zlib_start..*zlib_end]);
+            if let Some(reuse) = reuse.as_mut() {
+                reuse.record_verbatim_zlib((zlib_end - zlib_start) as u64);
+            }
         } else {
+            let target_data = match &entry.data {
+                Some(d) => d.as_slice(),
+                None => {
+                    let obj = odb.read(&entry.oid)?;
+                    if obj.data.is_empty() {
+                        return Err(Error::CorruptObject(
+                            "delta entry missing payload".to_owned(),
+                        ));
+                    }
+                    // Fresh delta against a whole object: read once for encoding.
+                    let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
+                        d.to_vec()
+                    } else {
+                        odb.read(&base_oid)?.data
+                    };
+                    let delta =
+                        if obj.data.starts_with(&base_data) && obj.data.len() > base_data.len() {
+                            encode_prefix_extension_delta(&base_data, &obj.data)?
+                        } else {
+                            let base_ref = payloads
+                                .get(&base_oid)
+                                .copied()
+                                .unwrap_or(base_data.as_slice());
+                            delta_index_by_base
+                                .entry(base_oid)
+                                .or_insert_with(|| DeltaIndex::new(base_ref))
+                                .encode(&obj.data, 0)
+                                .ok_or_else(|| {
+                                    Error::CorruptObject(
+                                        "failed to encode pack delta for object".into(),
+                                    )
+                                })?
+                        };
+                    if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                        let dist = start.checked_sub(base_off).ok_or_else(|| {
+                            Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                        })?;
+                        encode_pack_object_header(&mut chunk, 6, delta.len());
+                        encode_ofs_delta_distance(&mut chunk, dist);
+                    } else {
+                        encode_pack_object_header(&mut chunk, 7, delta.len());
+                        if base_oid.as_bytes().len() != algo.len() {
+                            return Err(Error::CorruptObject(
+                                "ref-delta base oid width mismatch".to_owned(),
+                            ));
+                        }
+                        chunk.extend_from_slice(base_oid.as_bytes());
+                    }
+                    write_zlib(&mut chunk, &delta)?;
+                    w.write_all(&chunk).map_err(Error::Io)?;
+                    body_written += chunk.len() as u64;
+                    oid_to_offset.insert(entry.oid, start);
+                    continue;
+                }
+            };
             let delta = if let Some(reused) = &entry.reused_delta {
                 reused.clone()
             } else {
@@ -576,8 +668,8 @@ fn write_planned_entries(
                 } else {
                     odb.read(&base_oid)?.data
                 };
-                if entry.data.starts_with(&base_data) && entry.data.len() > base_data.len() {
-                    encode_prefix_extension_delta(&base_data, &entry.data)?
+                if target_data.starts_with(&base_data) && target_data.len() > base_data.len() {
+                    encode_prefix_extension_delta(&base_data, target_data)?
                 } else {
                     let base_ref = payloads
                         .get(&base_oid)
@@ -586,7 +678,7 @@ fn write_planned_entries(
                     delta_index_by_base
                         .entry(base_oid)
                         .or_insert_with(|| DeltaIndex::new(base_ref))
-                        .encode(&entry.data, 0)
+                        .encode(target_data, 0)
                         .ok_or_else(|| {
                             Error::CorruptObject("failed to encode pack delta for object".into())
                         })?
@@ -613,7 +705,7 @@ fn write_planned_entries(
         body_written += chunk.len() as u64;
         oid_to_offset.insert(entry.oid, start);
     }
-    Ok(())
+    Ok(reuse.as_mut().map(|r| r.take_stats()).unwrap_or_default())
 }
 
 /// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
@@ -784,7 +876,7 @@ fn write_whole_pack_object(
     data: &[u8],
     opts: &PackBuildOptions,
 ) -> Result<()> {
-    if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
+    if opts.reuse_objects {
         if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
             buf.extend_from_slice(&raw);
             return Ok(());
@@ -818,9 +910,8 @@ pub(crate) fn append_whole_objects_from_odb(
 struct PlannedEntry {
     oid: ObjectId,
     kind: ObjectKind,
-    /// Object payload, kept so the serializer can re-hash/compress without a
-    /// second odb read.
-    data: Vec<u8>,
+    /// Payload when needed for delta planning; `None` for whole objects read at write time.
+    data: Option<Vec<u8>>,
     /// `Some(base_oid)` when this entry is a (blob) delta against `base_oid`.
     /// The base may be an in-pack object or — for thin packs — an external base
     /// present only on the peer.
@@ -879,12 +970,14 @@ pub(crate) fn plan_deltas(
     opts: &PackBuildOptions,
     blob_name_hashes: &HashMap<ObjectId, u32>,
 ) -> Result<DeltaPlan> {
-    // Load every object once. The plan keeps payloads so the serializer needn't
-    // re-read; for the typical pack sizes this is the same data the whole-object
-    // path would touch anyway.
-    let mut objects: HashMap<ObjectId, Object> = HashMap::new();
+    let mut kinds: HashMap<ObjectId, ObjectKind> = HashMap::new();
+    let mut blob_data: HashMap<ObjectId, Vec<u8>> = HashMap::new();
     for &oid in send {
-        objects.insert(oid, odb.read(&oid)?);
+        let obj = odb.read(&oid)?;
+        kinds.insert(oid, obj.kind);
+        if obj.kind == ObjectKind::Blob && !obj.data.is_empty() {
+            blob_data.insert(oid, obj.data);
+        }
     }
 
     let in_pack: HashSet<ObjectId> = send.iter().copied().collect();
@@ -904,16 +997,12 @@ pub(crate) fn plan_deltas(
     let mut external_bases: HashSet<ObjectId> = HashSet::new();
 
     // On-disk delta reuse runs even with `--window=0` (no new deltas), matching Git pack-objects.
-    if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 {
+    if opts.reuse_deltas {
         let objects_dir = odb.objects_dir();
-        let candidates = crate::pack::collect_packed_delta_reuse_for_send(
-            objects_dir,
-            &in_pack,
-            &in_pack,
-            &objects,
-        )?;
+        let candidates =
+            crate::pack::collect_packed_delta_reuse_for_send(objects_dir, &in_pack, &in_pack)?;
         for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
-            if objects[&t].data.is_empty() {
+            if blob_data.get(&t).is_some_and(|d| d.is_empty()) {
                 continue;
             }
             if base != t && in_pack.contains(&base) && islands.in_same_island(&t, &base) {
@@ -934,14 +1023,10 @@ pub(crate) fn plan_deltas(
 
     if opts.window > 0 && opts.max_depth > 0 {
         // Blobs in the pack, smallest-first (size-sorted window proximity).
-        let mut blobs: Vec<ObjectId> = send
-            .iter()
-            .copied()
-            .filter(|oid| objects[oid].kind == ObjectKind::Blob && !objects[oid].data.is_empty())
-            .collect();
+        let mut blobs: Vec<ObjectId> = blob_data.keys().copied().collect();
         blobs.sort_by(|a, b| {
-            let sa = objects[a].data.len();
-            let sb = objects[b].data.len();
+            let sa = blob_data[a].len();
+            let sb = blob_data[b].len();
             sa.cmp(&sb).then_with(|| {
                 blob_name_hashes
                     .get(a)
@@ -976,7 +1061,7 @@ pub(crate) fn plan_deltas(
             if reuse_delta_bases.contains(&t) {
                 continue;
             }
-            let t_data = &objects[&t].data;
+            let t_data = &blob_data[&t];
 
             // (base, common, base_len, external). When islands are active the
             // selection additionally prefers a base in a dominating island via
@@ -990,7 +1075,7 @@ pub(crate) fn plan_deltas(
                 if !islands.in_same_island(&t, &b) {
                     continue;
                 }
-                let b_data = &objects[&b].data;
+                let b_data = &blob_data[&b];
                 if b_data.len() <= t_data.len() {
                     continue;
                 }
@@ -1051,11 +1136,7 @@ pub(crate) fn plan_deltas(
                 delta_to_base.insert(t, base);
                 if external {
                     external_bases.insert(base);
-                    if let Some(d) = external_blob_data.get(&base) {
-                        objects
-                            .entry(base)
-                            .or_insert_with(|| Object::new(ObjectKind::Blob, d.clone()));
-                    }
+                    let _ = external_blob_data.get(&base);
                 }
             }
         }
@@ -1081,11 +1162,12 @@ pub(crate) fn plan_deltas(
     // the base has not yet been written.
     let mut entries: Vec<PlannedEntry> = Vec::with_capacity(send.len());
     for &oid in send {
-        let obj = &objects[&oid];
+        let kind = kinds[&oid];
+        let data = blob_data.get(&oid).cloned();
         entries.push(PlannedEntry {
             oid,
-            kind: obj.kind,
-            data: obj.data.clone(),
+            kind,
+            data,
             base: delta_to_base.get(&oid).copied(),
             reused_delta: None,
             reused_delta_zlib: reused_zlib.get(&oid).cloned(),

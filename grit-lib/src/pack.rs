@@ -2844,15 +2844,18 @@ pub fn collect_packed_delta_reuse_for_send(
     objects_dir: &Path,
     send: &HashSet<ObjectId>,
     in_pack: &HashSet<ObjectId>,
-    resolved: &HashMap<ObjectId, Object>,
 ) -> Result<HashMap<ObjectId, OnDiskReuseZlibEntry>> {
-    let _ = resolved;
     let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_oldest_first(&mut indexes);
 
+    let hash_width = send
+        .iter()
+        .next()
+        .map(|oid| oid.as_bytes().len())
+        .unwrap_or(20);
     let pack_bytes_by_index: Vec<(Arc<PackIndex>, Arc<PackData>)> = indexes
         .iter()
-        .filter(|idx| idx.hash_bytes() == 20)
+        .filter(|idx| idx.hash_bytes() == hash_width)
         .map(|idx| read_pack_bytes_cached(&idx.pack_path).map(|bytes| (Arc::clone(idx), bytes)))
         .collect::<Result<Vec<_>>>()?;
 
@@ -2901,7 +2904,7 @@ pub fn collect_packed_delta_reuse_for_send(
 
     let mut results = HashMap::new();
     for (oid, slot) in on_disk {
-        if !chain_ok.get(&oid).copied().unwrap_or(false) || !resolved.contains_key(&oid) {
+        if !chain_ok.get(&oid).copied().unwrap_or(false) || !send.contains(&oid) {
             continue;
         }
         results.insert(
@@ -3039,8 +3042,7 @@ pub(crate) fn pack_entry_raw_end(
 /// - `objects_dir` — the repository's `objects/` directory.
 /// - `oid` — the object to look up.
 ///
-/// Returns `None` when the object is loose only, stored as a delta, or the repository uses a
-/// hash width other than SHA-1.
+/// Returns `None` when the object is loose only or stored as a delta in every candidate pack.
 ///
 /// # Errors
 ///
@@ -3050,7 +3052,7 @@ pub fn packed_full_object_slice(objects_dir: &Path, oid: &ObjectId) -> Result<Op
     let mut indexes = read_local_pack_indexes_cached(objects_dir)?;
     sort_pack_indexes_newest_first(&mut indexes);
     for idx in &indexes {
-        if idx.hash_bytes() != 20 {
+        if idx.hash_bytes() != oid.as_bytes().len() {
             continue;
         }
         let Some(entry_offset) = idx.find_offset(oid) else {
