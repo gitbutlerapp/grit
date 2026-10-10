@@ -152,26 +152,20 @@ impl ReftableRefStore {
             .and_then(|rec| record_to_raw(&rec)))
     }
 
-    fn merged_refs_for_stack(store_git_dir: &Path) -> Result<BTreeMap<String, RawRef>> {
-        let stack = ReftableStack::open(store_git_dir)?;
+    fn merged_refs_from_locked_stack(
+        git_dir: &Path,
+        stack: &ReftableStack,
+    ) -> Result<BTreeMap<String, RawRef>> {
         let mut map = BTreeMap::new();
         for rec in stack.read_refs()? {
             if let Some(raw) = record_to_raw(&rec) {
                 map.insert(rec.name, raw);
             }
         }
-        Ok(map)
-    }
-
-    fn merged_refs_for_prepare(
-        git_dir: &Path,
-        store_git_dir: &Path,
-    ) -> Result<BTreeMap<String, RawRef>> {
-        let mut refs = Self::merged_refs_for_stack(store_git_dir)?;
         if let Some(head) = read_head_file_raw(git_dir)? {
-            refs.insert("HEAD".to_owned(), head);
+            map.insert("HEAD".to_owned(), head);
         }
-        Ok(refs)
+        Ok(map)
     }
 }
 
@@ -492,17 +486,17 @@ impl RefStore for ReftableRefStore {
 
         let mut stacks = Vec::new();
         for (store_git_dir, group) in grouped {
-            let refs = Self::merged_refs_for_prepare(&self.git_dir, &store_git_dir)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-            verify_create_conflicts(&refs, &group)?;
-            simulate_batch_apply(&refs, &group)?;
-            let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
             let mut stack = ReftableStack::open(&store_git_dir)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             let lock = stack
                 .acquire_tables_list_lock_for_store()
                 .map_err(map_reftable_err)?;
             stack.reload_table_names();
+            let refs = Self::merged_refs_from_locked_stack(&self.git_dir, &stack)
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            verify_create_conflicts(&refs, &group)?;
+            simulate_batch_apply(&refs, &group)?;
+            let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
             let opts = read_write_options(&store_git_dir);
             stacks.push(LockedStackBatch {
                 _store_git_dir: store_git_dir,
