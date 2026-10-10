@@ -2423,6 +2423,7 @@ fn ensure_valid_ownership(
 
 #[cfg(not(unix))]
 fn ensure_valid_ownership(
+    _environment: &Environment,
     _gitfile: Option<&Path>,
     _worktree: Option<&Path>,
     _gitdir: &Path,
