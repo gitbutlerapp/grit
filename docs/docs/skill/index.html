@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -217,16 +223,16 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="pager"><a href="../update/">← grit update</a><a href="../completions/">grit completions →</a></div>
 </main><aside class="col ink-col" aria-label="Examples">
 <div class="label">Examples</div>
-<div class="ex"><div class="cap"><span>Install the skill in the current project</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> mkdir -p .agents/skills/grit</span>
-<span class="cmd"><span class="k">$</span> grit skill &gt; .agents/skills/grit/SKILL.md</span></code></pre></div><div class="ex"><div class="cap"><span>Read the start of it</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit skill | head -4</span>
+<div class="ex"><div class="cap"><span>Install the skill in the current project</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">mkdir</span> <span class="a">-p</span> .agents/skills/grit</span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> skill <span class="k">&gt;</span> .agents/skills/grit/SKILL.md</span></code></pre></div><div class="ex"><div class="cap"><span>Read the start of it</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> skill <span class="k">|</span> <span class="f">head</span> <span class="a">-4</span></span>
 <span class="out">---</span>
 <span class="out">name: grit</span>
 <span class="out">description: Use the grit CLI for version control in Git repositories — status, diffs, commits, branches, merges, cherry-picks, fetch/pull/push and tags — with JSON output for scripts and agents. Use when a task involves committing, branching, syncing with a remote or reading history and `grit` is installed.</span>
 <span class="out">---</span></code></pre></div><div class="ex"><div class="cap"><span>Example (with <code>content</code> shortened)</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;name&quot;</span>: &quot;grit&quot;,
-  <span class="k">&quot;version&quot;</span>: &quot;0.5.2&quot;,
-  <span class="k">&quot;path&quot;</span>: &quot;.agents/skills/grit/SKILL.md&quot;,
-  <span class="k">&quot;content&quot;</span>: &quot;---\nname: grit\ndescription: Use the grit CLI for version control …&quot;
+  <span class="k">&quot;name&quot;</span>: <span class="s">&quot;grit&quot;</span>,
+  <span class="k">&quot;version&quot;</span>: <span class="s">&quot;0.5.2&quot;</span>,
+  <span class="k">&quot;path&quot;</span>: <span class="s">&quot;.agents/skills/grit/SKILL.md&quot;</span>,
+  <span class="k">&quot;content&quot;</span>: <span class="s">&quot;---\nname: grit\ndescription: Use the grit CLI for version control …&quot;</span>
 }</code></pre></div><div class="ex"><div class="cap"><span>Pass <a href="../global-options/"><code>--markdown</code></a> to print the full <code>SKILL.md</code> text on stdout (same bytes as human mode, suitable for saving or parsing)</span></div><pre class="code"><code><span class="out">---
 name: grit
 description: Use the grit CLI for version control …

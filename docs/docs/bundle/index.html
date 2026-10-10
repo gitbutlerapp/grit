@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -227,34 +233,34 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="pager"><a href="../auth/">← grit auth</a><a href="../update/">grit update →</a></div>
 </main><aside class="col ink-col" aria-label="Examples">
 <div class="label">Examples</div>
-<div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit bundle create backup.bundle main</span>
+<div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> bundle create backup.bundle main</span>
 <span class="out">Wrote bundle backup.bundle (1 refs).</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit bundle verify backup.bundle</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> bundle verify backup.bundle</span>
 <span class="out">backup.bundle is valid</span>
 <span class="out">The bundle uses this hash algorithm: sha1</span>
 <span class="out">The bundle contains 1 refs:</span>
 <span class="out">f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit bundle list backup.bundle</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> bundle list backup.bundle</span>
 <span class="out">f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main</span></code></pre></div><div class="ex"><div class="cap"><span>--json output</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;path&quot;</span>: &quot;backup.bundle&quot;,
-  <span class="k">&quot;ok&quot;</span>: true,
-  <span class="k">&quot;hash_algorithm&quot;</span>: &quot;sha1&quot;,
+  <span class="k">&quot;path&quot;</span>: <span class="s">&quot;backup.bundle&quot;</span>,
+  <span class="k">&quot;ok&quot;</span>: <span class="n">true</span>,
+  <span class="k">&quot;hash_algorithm&quot;</span>: <span class="s">&quot;sha1&quot;</span>,
   <span class="k">&quot;references&quot;</span>: [
     {
-      <span class="k">&quot;name&quot;</span>: &quot;refs/heads/main&quot;,
-      <span class="k">&quot;oid&quot;</span>: &quot;f4e623f540cd491f8856e9487a3da5f8242307f0&quot;
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;refs/heads/main&quot;</span>,
+      <span class="k">&quot;oid&quot;</span>: <span class="s">&quot;f4e623f540cd491f8856e9487a3da5f8242307f0&quot;</span>
     }
   ],
   <span class="k">&quot;prerequisites&quot;</span>: [],
   <span class="k">&quot;missing_prerequisites&quot;</span>: []
 }</code></pre></div><div class="ex"><div class="cap"><span>--json output</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;path&quot;</span>: &quot;backup.bundle&quot;,
+  <span class="k">&quot;path&quot;</span>: <span class="s">&quot;backup.bundle&quot;</span>,
   <span class="k">&quot;references&quot;</span>: [
     {
-      <span class="k">&quot;name&quot;</span>: &quot;refs/heads/main&quot;,
-      <span class="k">&quot;oid&quot;</span>: &quot;f4e623f540cd491f8856e9487a3da5f8242307f0&quot;
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;refs/heads/main&quot;</span>,
+      <span class="k">&quot;oid&quot;</span>: <span class="s">&quot;f4e623f540cd491f8856e9487a3da5f8242307f0&quot;</span>
     }
   ]
 }</code></pre></div>

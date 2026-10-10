@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -223,95 +229,95 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <span class="c">//! Source for the library guide &quot;Objects&quot; page (included in the docs site).</span>
 
 <span class="k">use</span> grit_lib::objects::{
-    parse_commit, parse_tree, serialize_commit, serialize_tree, CommitData, ObjectKind, TreeEntry,
+    parse_commit, parse_tree, serialize_commit, serialize_tree, <span class="t">CommitData</span>, <span class="t">ObjectKind</span>, <span class="t">TreeEntry</span>,
 };
-<span class="k">use</span> grit_lib::repo::{init_repository, Repository};
-<span class="k">use</span> std::path::{Path, PathBuf};
+<span class="k">use</span> grit_lib::repo::{init_repository, <span class="t">Repository</span>};
+<span class="k">use</span> std::path::{<span class="t">Path</span>, <span class="t">PathBuf</span>};
 
-<span class="k">fn</span> write_demo_objects(
-    repo: &amp;Repository,
-) -&gt; Result&lt;
+<span class="k">fn</span> <span class="f">write_demo_objects</span>(
+    repo: &amp;<span class="t">Repository</span>,
+) -&gt; <span class="t">Result</span>&lt;
     (
-        grit_lib::objects::ObjectId,
-        grit_lib::objects::ObjectId,
-        grit_lib::objects::ObjectId,
+        grit_lib::objects::<span class="t">ObjectId</span>,
+        grit_lib::objects::<span class="t">ObjectId</span>,
+        grit_lib::objects::<span class="t">ObjectId</span>,
     ),
-    grit_lib::error::Error,
+    grit_lib::error::<span class="t">Error</span>,
 &gt; {
-    <span class="k">let</span> blob_data = b&quot;hello from the library guide\n&quot;;
-    <span class="k">let</span> blob_oid = repo.odb.write(ObjectKind::Blob, blob_data)?;
+    <span class="k">let</span> blob_data = <span class="s">b&quot;hello from the library guide\n&quot;</span>;
+    <span class="k">let</span> blob_oid = repo.odb.<span class="f">write</span>(<span class="t">ObjectKind</span>::<span class="t">Blob</span>, blob_data)?;
 
-    <span class="k">let</span> tree_entries = vec![TreeEntry {
-        mode: 0o100644,
-        name: b&quot;README&quot;.to_vec(),
+    <span class="k">let</span> tree_entries = <span class="f">vec!</span>[<span class="t">TreeEntry</span> {
+        mode: <span class="n">0o100644</span>,
+        name: <span class="s">b&quot;README&quot;</span>.<span class="f">to_vec</span>(),
         oid: blob_oid,
     }];
     <span class="k">let</span> tree_oid = repo
         .odb
-        .write(ObjectKind::Tree, &amp;serialize_tree(&amp;tree_entries))?;
+        .<span class="f">write</span>(<span class="t">ObjectKind</span>::<span class="t">Tree</span>, &amp;<span class="f">serialize_tree</span>(&amp;tree_entries))?;
 
-    <span class="k">let</span> commit = CommitData {
+    <span class="k">let</span> commit = <span class="t">CommitData</span> {
         tree: tree_oid,
-        parents: Vec::new(),
-        author: &quot;Ada Lovelace &lt;ada@example.com&gt; 0 +0000&quot;.to_owned(),
-        committer: &quot;Ada Lovelace &lt;ada@example.com&gt; 0 +0000&quot;.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: &quot;Library guide objects example\n&quot;.to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
+        parents: <span class="t">Vec</span>::<span class="f">new</span>(),
+        author: <span class="s">&quot;Ada Lovelace &lt;ada@example.com&gt; 0 +0000&quot;</span>.<span class="f">to_owned</span>(),
+        committer: <span class="s">&quot;Ada Lovelace &lt;ada@example.com&gt; 0 +0000&quot;</span>.<span class="f">to_owned</span>(),
+        author_raw: <span class="t">Vec</span>::<span class="f">new</span>(),
+        committer_raw: <span class="t">Vec</span>::<span class="f">new</span>(),
+        encoding: <span class="t">None</span>,
+        message: <span class="s">&quot;Library guide objects example\n&quot;</span>.<span class="f">to_owned</span>(),
+        raw_message: <span class="t">None</span>,
+        extra_headers: <span class="t">Vec</span>::<span class="f">new</span>(),
     };
     <span class="k">let</span> commit_oid = repo
         .odb
-        .write(ObjectKind::Commit, &amp;serialize_commit(&amp;commit))?;
+        .<span class="f">write</span>(<span class="t">ObjectKind</span>::<span class="t">Commit</span>, &amp;<span class="f">serialize_commit</span>(&amp;commit))?;
 
-    <span class="k">let</span> tree_obj = repo.odb.read(&amp;tree_oid)?;
-    <span class="k">let</span> entries = parse_tree(&amp;tree_obj.data)?;
-    assert_eq!(entries[0].oid, blob_oid);
+    <span class="k">let</span> tree_obj = repo.odb.<span class="f">read</span>(&amp;tree_oid)?;
+    <span class="k">let</span> entries = <span class="f">parse_tree</span>(&amp;tree_obj.data)?;
+    <span class="f">assert_eq!</span>(entries[<span class="n">0</span>].oid, blob_oid);
 
-    <span class="k">let</span> commit_obj = repo.odb.read(&amp;commit_oid)?;
-    <span class="k">let</span> parsed = parse_commit(&amp;commit_obj.data)?;
-    assert_eq!(parsed.tree, tree_oid);
+    <span class="k">let</span> commit_obj = repo.odb.<span class="f">read</span>(&amp;commit_oid)?;
+    <span class="k">let</span> parsed = <span class="f">parse_commit</span>(&amp;commit_obj.data)?;
+    <span class="f">assert_eq!</span>(parsed.tree, tree_oid);
 
-    Ok((blob_oid, tree_oid, commit_oid))
+    <span class="t">Ok</span>((blob_oid, tree_oid, commit_oid))
 }
 
-<span class="k">fn</span> open_repo(root: &amp;Path) -&gt; Result&lt;Repository, grit_lib::error::Error&gt; {
-    <span class="k">let</span> git_dir = <span class="k">if</span> root.join(&quot;.git&quot;).is_dir() {
-        root.join(&quot;.git&quot;)
+<span class="k">fn</span> <span class="f">open_repo</span>(root: &amp;<span class="t">Path</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">Repository</span>, grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> git_dir = <span class="k">if</span> root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>).<span class="f">is_dir</span>() {
+        root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>)
     } <span class="k">else</span> {
-        root.to_path_buf()
+        root.<span class="f">to_path_buf</span>()
     };
-    <span class="k">let</span> work_tree = <span class="k">if</span> root.join(&quot;.git&quot;).is_dir() {
-        Some(root)
+    <span class="k">let</span> work_tree = <span class="k">if</span> root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>).<span class="f">is_dir</span>() {
+        <span class="t">Some</span>(root)
     } <span class="k">else</span> {
-        None
+        <span class="t">None</span>
     };
-    Repository::open(&amp;git_dir, work_tree)
+    <span class="t">Repository</span>::<span class="f">open</span>(&amp;git_dir, work_tree)
 }
 
-<span class="k">fn</span> main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
-    <span class="k">let</span> repo = <span class="k">if</span> <span class="k">let</span> Some(root) = std::env::args().nth(1).map(PathBuf::from) {
-        open_repo(&amp;root)?
+<span class="k">fn</span> <span class="f">main</span>() -&gt; <span class="t">Result</span>&lt;(), grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> repo = <span class="k">if</span> <span class="k">let</span> <span class="t">Some</span>(root) = std::env::<span class="f">args</span>().<span class="f">nth</span>(<span class="n">1</span>).<span class="f">map</span>(<span class="t">PathBuf</span>::from) {
+        <span class="f">open_repo</span>(&amp;root)?
     } <span class="k">else</span> {
-        <span class="k">let</span> temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
-        init_repository(
-            temp.path(),
-            <span class="k">false</span>,
-            &quot;main&quot;,
-            None,
-            grit_lib::RefStorageFormat::Files,
+        <span class="k">let</span> temp = tempfile::<span class="f">tempdir</span>().<span class="f">map_err</span>(grit_lib::error::<span class="t">Error</span>::<span class="t">Io</span>)?;
+        <span class="f">init_repository</span>(
+            temp.<span class="f">path</span>(),
+            <span class="n">false</span>,
+            <span class="s">&quot;main&quot;</span>,
+            <span class="t">None</span>,
+            grit_lib::<span class="t">RefStorageFormat</span>::<span class="t">Files</span>,
         )?;
-        open_repo(temp.path())?
+        <span class="f">open_repo</span>(temp.<span class="f">path</span>())?
     };
 
-    <span class="k">let</span> (blob_oid, tree_oid, commit_oid) = write_demo_objects(&amp;repo)?;
-    println!(&quot;{commit_oid}&quot;);
-    println!(&quot;blob={blob_oid} tree={tree_oid}&quot;);
-    Ok(())
-}</code></pre></div><div class="ex"><div class="cap"><span>Objects land on disk in standard loose format. System Git can read them</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> cargo run --bin guide_objects /path/to/repo</span>
-<span class="cmd"><span class="k">$</span> git -C /path/to/repo fsck --strict</span></code></pre></div></aside></div></div>
+    <span class="k">let</span> (blob_oid, tree_oid, commit_oid) = <span class="f">write_demo_objects</span>(&amp;repo)?;
+    <span class="f">println!</span>(<span class="s">&quot;{commit_oid}&quot;</span>);
+    <span class="f">println!</span>(<span class="s">&quot;blob={blob_oid} tree={tree_oid}&quot;</span>);
+    <span class="t">Ok</span>(())
+}</code></pre></div><div class="ex"><div class="cap"><span>Objects land on disk in standard loose format. System Git can read them</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">cargo</span> run <span class="a">--bin</span> guide_objects /path/to/repo</span>
+<span class="cmd"><span class="p">$</span> <span class="f">git</span> <span class="a">-C</span> /path/to/repo fsck <span class="a">--strict</span></span></code></pre></div></aside></div></div>
 </div>
 <script type="application/json" id="docs-index">[["Docs","How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.",""],["Install grit","Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.","install/"],["Tutorial","Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.","tutorial/"],["Library quick start","Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.","library-quickstart/"],["Global options","Options that apply to every grit command.","global-options/"],["Scripting with grit","Use --json and --filter to build scripts on top of grit.","scripting/"],["Agent guide","Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.","agents/"],["grit init","Create a new, empty repository.","init/"],["grit clone","Copy a remote repository into a new directory.","clone/"],["grit status","Show where you are and what's changed. This is what plain grit runs.","status/"],["grit config","Read, set, list or remove configuration values.","config/"],["grit add","Stage changes. With no paths, stages everything.","add/"],["grit commit","Stage every change and record a new commit.","commit/"],["grit diff","Show uncommitted changes, or the change a commit introduced.","diff/"],["grit log","Show recent commits, newest first, a page at a time.","log/"],["grit shortlog","List the commits on this branch that aren't on the target branch yet.","shortlog/"],["grit show","Show a commit, tag or branch, and a summary of what it changed.","show/"],["grit branch","List branches, or create or delete one.","branch/"],["grit switch","Switch to another branch, or create one and switch to it.","switch/"],["grit merge","Merge another branch into the current one.","merge/"],["grit pick","Copy a single commit onto the current branch.","pick/"],["grit tag","List tags, or create or delete one. A new tag points at the current commit.","tag/"],["grit remote","List remotes, add one, or list refs on a remote.","remote/"],["grit fetch","Download new commits, branches and tags from a remote.","fetch/"],["grit pull","Fetch from the remote and bring the current branch up to date.","pull/"],["grit push","Publish the current branch, or your tags, to a remote.","push/"],["grit auth","Sign in to GitHub so HTTPS pushes and fetches just work.","auth/"],["grit bundle","Create, verify, and list git bundle files for offline transfer.","bundle/"],["grit update","Update grit to the latest release.","update/"],["grit skill","Print an agent skill that explains how to use grit.","skill/"],["grit completions","Generate shell completion scripts for bash, zsh, and fish.","completions/"],["grit upload-pack","Serve a fetch or clone of a repository over stdin and stdout.","upload-pack/"],["grit receive-pack","Accept a push to a repository over stdin and stdout.","receive-pack/"],["grit manager","A credential helper that stores passwords and tokens in the Windows Credential Manager.","manager/"],["Library guide","Use grit-lib from Rust — the same engine that powers the grit CLI.","library/"],["grit-lib API map","Generated index of public grit-lib modules and key types with docs.rs links.","library/api-map/"],["Reachability bitmaps","Query pack and MIDX commit bitmaps for fast object reachability and counting.","library/bitmaps/"],["Diff","Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.","library/diff/"],["Embedding grit-lib","Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.","library/embedding/"],["Network","Remote dispatch, fetch, push, and ls-remote over every transport.","library/network/"],["Object stores","Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.","library/object-stores/"],["Objects","ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.","library/objects/"],["Pack reachability bitmaps","Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).","library/pack-bitmaps/"],["Refs","Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.","library/refs/"],["Repository","Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.","library/repository/"],["Revwalk","Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.","library/revwalk/"],["Index","Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.","library/staging/"],["Benchmarks","Grit vs Git on realistic workloads, from the committed grit-bench baseline.","benchmarks/"]]</script>
 <script>

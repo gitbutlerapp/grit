@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -230,90 +236,90 @@ Integration test <code>guide_network</code> builds bare and consumer repos with 
 <span class="c">//! Source for the library guide &quot;Network&quot; page (included in the docs site).</span>
 
 <span class="k">use</span> grit_examples::remote;
-<span class="k">use</span> grit_lib::config::ConfigSet;
-<span class="k">use</span> grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
+<span class="k">use</span> grit_lib::config::<span class="t">ConfigSet</span>;
+<span class="k">use</span> grit_lib::objects::{parse_commit, serialize_commit, <span class="t">CommitData</span>, <span class="t">ObjectKind</span>};
 <span class="k">use</span> grit_lib::refs;
-<span class="k">use</span> grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
-<span class="k">use</span> grit_lib::repo::Repository;
-<span class="k">use</span> grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
+<span class="k">use</span> grit_lib::remote::{list_refs_from_git_dir, <span class="t">ListRefsOptions</span>};
+<span class="k">use</span> grit_lib::repo::<span class="t">Repository</span>;
+<span class="k">use</span> grit_lib::transfer::{<span class="t">FetchOptions</span>, <span class="t">PushOptions</span>, <span class="t">PushRefSpec</span>, <span class="t">TagMode</span>};
 <span class="k">use</span> grit_lib::transport_path::resolve_local_remote_git_dir;
-<span class="k">use</span> std::path::Path;
+<span class="k">use</span> std::path::<span class="t">Path</span>;
 
-<span class="k">fn</span> main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
-    <span class="k">let</span> consumer = std::env::args().nth(1).ok_or_else(|| {
-        grit_lib::error::Error::Message(&quot;usage: guide_network &lt;consumer-repo&gt;&quot;.to_owned())
+<span class="k">fn</span> <span class="f">main</span>() -&gt; <span class="t">Result</span>&lt;(), grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> consumer = std::env::<span class="f">args</span>().<span class="f">nth</span>(<span class="n">1</span>).<span class="f">ok_or_else</span>(|| {
+        grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(<span class="s">&quot;usage: guide_network &lt;consumer-repo&gt;&quot;</span>.<span class="f">to_owned</span>())
     })?;
-    <span class="k">let</span> consumer = Path::new(&amp;consumer);
-    <span class="k">let</span> repo = Repository::discover(Some(consumer))?;
-    <span class="k">let</span> git_dir = repo.git_dir.clone();
-    <span class="k">let</span> work_tree = repo.work_tree.clone();
-    <span class="k">let</span> config = ConfigSet::load(
-        &amp;grit_lib::environment::Environment::capture_process(),
-        Some(&amp;git_dir),
-        <span class="k">true</span>,
+    <span class="k">let</span> consumer = <span class="t">Path</span>::<span class="f">new</span>(&amp;consumer);
+    <span class="k">let</span> repo = <span class="t">Repository</span>::<span class="f">discover</span>(<span class="t">Some</span>(consumer))?;
+    <span class="k">let</span> git_dir = repo.git_dir.<span class="f">clone</span>();
+    <span class="k">let</span> work_tree = repo.work_tree.<span class="f">clone</span>();
+    <span class="k">let</span> config = <span class="t">ConfigSet</span>::<span class="f">load</span>(
+        &amp;grit_lib::environment::<span class="t">Environment</span>::<span class="f">capture_process</span>(),
+        <span class="t">Some</span>(&amp;git_dir),
+        <span class="n">true</span>,
     )?;
 
-    <span class="k">let</span> remote_info = remote::resolve_remote(&amp;config, &amp;git_dir, Some(&quot;origin&quot;), <span class="k">false</span>)
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+    <span class="k">let</span> remote_info = remote::<span class="f">resolve_remote</span>(&amp;config, &amp;git_dir, <span class="t">Some</span>(<span class="s">&quot;origin&quot;</span>), <span class="n">false</span>)
+        .<span class="f">map_err</span>(|e| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(e.<span class="f">to_string</span>()))?;
 
     <span class="k">let</span> remote_git_dir =
-        resolve_local_remote_git_dir(&amp;remote_info.url, &amp;git_dir, work_tree.as_deref());
-    <span class="k">let</span> remote_repo = Repository::open(&amp;remote_git_dir, None)?;
-    <span class="k">let</span> refs_on_remote = list_refs_from_git_dir(
+        <span class="f">resolve_local_remote_git_dir</span>(&amp;remote_info.url, &amp;git_dir, work_tree.<span class="f">as_deref</span>());
+    <span class="k">let</span> remote_repo = <span class="t">Repository</span>::<span class="f">open</span>(&amp;remote_git_dir, <span class="t">None</span>)?;
+    <span class="k">let</span> refs_on_remote = <span class="f">list_refs_from_git_dir</span>(
         &amp;remote_git_dir,
         &amp;remote_repo.odb,
-        &amp;ListRefsOptions::default(),
+        &amp;<span class="t">ListRefsOptions</span>::<span class="f">default</span>(),
     )
-    .map_err(grit_lib::error::Error::from)?;
-    eprintln!(
-        &quot;ls-remote: {} ref(s) on {}&quot;,
-        refs_on_remote.len(),
-        remote_git_dir.display()
+    .<span class="f">map_err</span>(grit_lib::error::<span class="t">Error</span>::from)?;
+    <span class="f">eprintln!</span>(
+        <span class="s">&quot;ls-remote: {} ref(s) on {}&quot;</span>,
+        refs_on_remote.<span class="f">len</span>(),
+        remote_git_dir.<span class="f">display</span>()
     );
 
-    <span class="k">let</span> fetch_opts = FetchOptions {
-        refspecs: remote_info.fetch_refspecs.clone(),
-        tags: TagMode::Following,
-        ..Default::default()
+    <span class="k">let</span> fetch_opts = <span class="t">FetchOptions</span> {
+        refspecs: remote_info.fetch_refspecs.<span class="f">clone</span>(),
+        tags: <span class="t">TagMode</span>::<span class="t">Following</span>,
+        ..<span class="t">Default</span>::<span class="f">default</span>()
     };
-    remote::fetch(&amp;repo, &amp;remote_info, &amp;fetch_opts)
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+    remote::<span class="f">fetch</span>(&amp;repo, &amp;remote_info, &amp;fetch_opts)
+        .<span class="f">map_err</span>(|e| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(e.<span class="f">to_string</span>()))?;
 
-    <span class="k">let</span> tracking = refs::resolve_ref(&amp;git_dir, &quot;refs/remotes/origin/main&quot;)?;
-    refs::write_ref(&amp;git_dir, &quot;refs/heads/main&quot;, &amp;tracking)?;
+    <span class="k">let</span> tracking = refs::<span class="f">resolve_ref</span>(&amp;git_dir, <span class="s">&quot;refs/remotes/origin/main&quot;</span>)?;
+    refs::<span class="f">write_ref</span>(&amp;git_dir, <span class="s">&quot;refs/heads/main&quot;</span>, &amp;tracking)?;
 
-    <span class="k">let</span> parent_obj = repo.odb.read(&amp;tracking)?;
-    <span class="k">let</span> parent = parse_commit(&amp;parent_obj.data)?;
-    <span class="k">let</span> commit = CommitData {
+    <span class="k">let</span> parent_obj = repo.odb.<span class="f">read</span>(&amp;tracking)?;
+    <span class="k">let</span> parent = <span class="f">parse_commit</span>(&amp;parent_obj.data)?;
+    <span class="k">let</span> commit = <span class="t">CommitData</span> {
         tree: parent.tree,
-        parents: vec![tracking],
-        author: parent.author.clone(),
-        committer: parent.committer.clone(),
-        author_raw: parent.author_raw.clone(),
-        committer_raw: parent.committer_raw.clone(),
-        encoding: parent.encoding.clone(),
-        message: &quot;library guide network example\n&quot;.to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
+        parents: <span class="f">vec!</span>[tracking],
+        author: parent.author.<span class="f">clone</span>(),
+        committer: parent.committer.<span class="f">clone</span>(),
+        author_raw: parent.author_raw.<span class="f">clone</span>(),
+        committer_raw: parent.committer_raw.<span class="f">clone</span>(),
+        encoding: parent.encoding.<span class="f">clone</span>(),
+        message: <span class="s">&quot;library guide network example\n&quot;</span>.<span class="f">to_owned</span>(),
+        raw_message: <span class="t">None</span>,
+        extra_headers: <span class="t">Vec</span>::<span class="f">new</span>(),
     };
     <span class="k">let</span> new_oid = repo
         .odb
-        .write(ObjectKind::Commit, &amp;serialize_commit(&amp;commit))?;
-    refs::write_ref(&amp;git_dir, &quot;refs/heads/main&quot;, &amp;new_oid)?;
+        .<span class="f">write</span>(<span class="t">ObjectKind</span>::<span class="t">Commit</span>, &amp;<span class="f">serialize_commit</span>(&amp;commit))?;
+    refs::<span class="f">write_ref</span>(&amp;git_dir, <span class="s">&quot;refs/heads/main&quot;</span>, &amp;new_oid)?;
 
-    <span class="k">let</span> spec = PushRefSpec {
-        src: Some(new_oid),
-        dst: &quot;refs/heads/main&quot;.to_owned(),
-        force: <span class="k">false</span>,
-        delete: <span class="k">false</span>,
-        expected_old: None,
-        expect_absent: <span class="k">false</span>,
+    <span class="k">let</span> spec = <span class="t">PushRefSpec</span> {
+        src: <span class="t">Some</span>(new_oid),
+        dst: <span class="s">&quot;refs/heads/main&quot;</span>.<span class="f">to_owned</span>(),
+        force: <span class="n">false</span>,
+        delete: <span class="n">false</span>,
+        expected_old: <span class="t">None</span>,
+        expect_absent: <span class="n">false</span>,
     };
-    remote::push(&amp;repo, &amp;remote_info, &amp;[spec], &amp;PushOptions::default())
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+    remote::<span class="f">push</span>(&amp;repo, &amp;remote_info, &amp;[spec], &amp;<span class="t">PushOptions</span>::<span class="f">default</span>())
+        .<span class="f">map_err</span>(|e| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(e.<span class="f">to_string</span>()))?;
 
-    println!(&quot;{new_oid}&quot;);
-    Ok(())
+    <span class="f">println!</span>(<span class="s">&quot;{new_oid}&quot;</span>);
+    <span class="t">Ok</span>(())
 }</code></pre></div></aside></div></div>
 </div>
 <script type="application/json" id="docs-index">[["Docs","How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.",""],["Install grit","Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.","install/"],["Tutorial","Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.","tutorial/"],["Library quick start","Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.","library-quickstart/"],["Global options","Options that apply to every grit command.","global-options/"],["Scripting with grit","Use --json and --filter to build scripts on top of grit.","scripting/"],["Agent guide","Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.","agents/"],["grit init","Create a new, empty repository.","init/"],["grit clone","Copy a remote repository into a new directory.","clone/"],["grit status","Show where you are and what's changed. This is what plain grit runs.","status/"],["grit config","Read, set, list or remove configuration values.","config/"],["grit add","Stage changes. With no paths, stages everything.","add/"],["grit commit","Stage every change and record a new commit.","commit/"],["grit diff","Show uncommitted changes, or the change a commit introduced.","diff/"],["grit log","Show recent commits, newest first, a page at a time.","log/"],["grit shortlog","List the commits on this branch that aren't on the target branch yet.","shortlog/"],["grit show","Show a commit, tag or branch, and a summary of what it changed.","show/"],["grit branch","List branches, or create or delete one.","branch/"],["grit switch","Switch to another branch, or create one and switch to it.","switch/"],["grit merge","Merge another branch into the current one.","merge/"],["grit pick","Copy a single commit onto the current branch.","pick/"],["grit tag","List tags, or create or delete one. A new tag points at the current commit.","tag/"],["grit remote","List remotes, add one, or list refs on a remote.","remote/"],["grit fetch","Download new commits, branches and tags from a remote.","fetch/"],["grit pull","Fetch from the remote and bring the current branch up to date.","pull/"],["grit push","Publish the current branch, or your tags, to a remote.","push/"],["grit auth","Sign in to GitHub so HTTPS pushes and fetches just work.","auth/"],["grit bundle","Create, verify, and list git bundle files for offline transfer.","bundle/"],["grit update","Update grit to the latest release.","update/"],["grit skill","Print an agent skill that explains how to use grit.","skill/"],["grit completions","Generate shell completion scripts for bash, zsh, and fish.","completions/"],["grit upload-pack","Serve a fetch or clone of a repository over stdin and stdout.","upload-pack/"],["grit receive-pack","Accept a push to a repository over stdin and stdout.","receive-pack/"],["grit manager","A credential helper that stores passwords and tokens in the Windows Credential Manager.","manager/"],["Library guide","Use grit-lib from Rust — the same engine that powers the grit CLI.","library/"],["grit-lib API map","Generated index of public grit-lib modules and key types with docs.rs links.","library/api-map/"],["Reachability bitmaps","Query pack and MIDX commit bitmaps for fast object reachability and counting.","library/bitmaps/"],["Diff","Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.","library/diff/"],["Embedding grit-lib","Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.","library/embedding/"],["Network","Remote dispatch, fetch, push, and ls-remote over every transport.","library/network/"],["Object stores","Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.","library/object-stores/"],["Objects","ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.","library/objects/"],["Pack reachability bitmaps","Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).","library/pack-bitmaps/"],["Refs","Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.","library/refs/"],["Repository","Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.","library/repository/"],["Revwalk","Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.","library/revwalk/"],["Index","Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.","library/staging/"],["Benchmarks","Grit vs Git on realistic workloads, from the committed grit-bench baseline.","benchmarks/"]]</script>

@@ -747,13 +747,20 @@ def pager(site: Site, current: str) -> str:
     return f'<div class="pager">{prev_link}{next_link}</div>'
 
 
-def _tokens(text: str, pattern: re.Pattern[str], classify) -> str:
-    """Escape ``text``, wrapping each ``pattern`` match in the span ``classify`` picks."""
+def _tokens(text: str, pattern: re.Pattern[str]) -> str:
+    """Escape ``text``, wrapping each ``pattern`` match in a span named after its group.
+
+    Group names are the CSS classes: ``c`` comment, ``s`` string, ``n`` number or
+    literal, ``k`` keyword, ``t`` type, ``f`` function or macro, ``a`` attribute
+    or lifetime. Groups whose names start with ``_`` are helpers and ignored.
+    """
     out: list[str] = []
     pos = 0
     for match in pattern.finditer(text):
+        if match.start() == match.end():
+            continue
         out.append(html.escape(text[pos : match.start()]))
-        cls = classify(match)
+        cls = next((name for name, value in match.groupdict().items() if value and not name.startswith("_")), "")
         piece = html.escape(match.group(0))
         out.append(f'<span class="{cls}">{piece}</span>' if cls else piece)
         pos = match.end()
@@ -762,27 +769,79 @@ def _tokens(text: str, pattern: re.Pattern[str], classify) -> str:
 
 
 RUST_TOKEN = re.compile(
-    r"(?P<comment>//[^\n]*)"
-    r"|(?P<char>'(?:\\.|[^'\\\n])')"
-    r'|(?P<string>"(?:\\.|[^"\\])*")'
-    r"|(?P<kw>\b(?:as|async|await|break|const|continue|crate|dyn|else|enum|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|unsafe|use|where|while)\b)"
+    r"(?P<c>//[^\n]*|/\*.*?\*/)"
+    r'|(?P<s>b?r(?P<_hash>#*)".*?"(?P=_hash)|b?"(?:\\.|[^"\\])*"|b?\'(?:\\.|[^\'\\\n])\')'
+    r"|(?P<a>#!?\[[^\]\n]*\]|'[A-Za-z_]\w*\b(?!'))"
+    r"|(?P<n>\b(?:0x[0-9A-Fa-f_]+|0b[01_]+|0o[0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)"
+    r"(?:_?(?:[iu](?:8|16|32|64|128|size)|f32|f64))?\b|\b(?:true|false)\b)"
+    r"|(?P<k>\b(?:as|async|await|break|const|continue|crate|dyn|else|enum|extern|fn|for|if|impl|in|let|loop"
+    r"|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|type|unsafe|use|where|while)\b)"
+    r"|(?P<f>\b[a-z_]\w*!|\b[a-z_]\w*(?=\s*(?:::<[^>\n]*>)?\())"
+    r"|(?P<t>\b[A-Z][A-Za-z0-9_]*\b)",
+    re.S,
 )
-JSON_KEY = re.compile(r'"(?:\\.|[^"\\])*"(?=\s*:)')
+JSON_TOKEN = re.compile(
+    r'(?P<k>"(?:\\.|[^"\\])*"(?=\s*:))'
+    r'|(?P<s>"(?:\\.|[^"\\])*")'
+    r"|(?P<n>-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|\b(?:true|false|null)\b)"
+)
+TOML_TOKEN = re.compile(
+    r"(?P<c>#[^\n]*)"
+    r"|(?P<k>^[ \t]*\[\[?[^\]\n]+\]\]?)"
+    r"|(?P<t>^[ \t]*[\w.\-\"]+(?=[ \t]*=))"
+    r'|(?P<s>"""[\s\S]*?"""|"(?:\\.|[^"\\\n])*"|\'[^\'\n]*\')'
+    r"|(?P<n>\b(?:true|false)\b|[+-]?\b\d[\d_]*(?:\.\d+)?\b)",
+    re.M,
+)
+# One shell command line: command words get ``f``, flags ``a``, quoted text
+# ``s``, variables ``t``, operators ``k``, trailing comments ``c``.
+SHELL_TOKEN = re.compile(
+    r"(?P<c>(?<!\S)#[^\n]*)"
+    r'|(?P<s>"(?:\\.|[^"\\])*"?|\'[^\']*\'?)'
+    r"|(?P<t>\$\{[^}]*\}|\$\(|\$\w+)"
+    r"|(?P<k>&&|\|\||>>|[|;<>]|\))"
+    r"|(?P<a>(?<!\S)--?[A-Za-z0-9][\w-]*(?:=[^\s]*)?)"
+    r"|(?P<_word>[^\s|;&<>\"'$()]+)"
+)
 
 
 def highlight_rust(text: str) -> str:
-    def classify(m: re.Match[str]) -> str:
-        if m.group("comment"):
-            return "c"
-        if m.group("kw"):
-            return "k"
-        return ""
-
-    return _tokens(text, RUST_TOKEN, classify)
+    # Lines starting with `# ` are doctest scaffolding rustdoc hides; hide them too.
+    shown = "\n".join(line for line in text.split("\n") if not re.match(r"#(?: |$)", line.lstrip()))
+    return _tokens(shown, RUST_TOKEN)
 
 
 def highlight_json(text: str) -> str:
-    return _tokens(text, JSON_KEY, lambda _m: "k")
+    return _tokens(text, JSON_TOKEN)
+
+
+def highlight_toml(text: str) -> str:
+    return _tokens(text, TOML_TOKEN)
+
+
+def highlight_command(line: str) -> str:
+    """Highlight one shell command; the first word of each pipeline stage is the command."""
+    out: list[str] = []
+    pos = 0
+    expect_command = True
+    for match in SHELL_TOKEN.finditer(line):
+        out.append(html.escape(line[pos : match.start()]))
+        piece = html.escape(match.group(0))
+        kind = match.lastgroup or ""
+        if kind == "_word":
+            cls = "f" if expect_command else ""
+            # `VAR=value cmd` keeps waiting for the command word.
+            expect_command = expect_command and "=" in match.group(0)
+        else:
+            cls = kind
+            if kind == "k":
+                expect_command = match.group(0) in ("&&", "||", "|", ";")
+            elif kind != "t":
+                expect_command = False
+        out.append(f'<span class="{cls}">{piece}</span>' if cls else piece)
+        pos = match.end()
+    out.append(html.escape(line[pos:]))
+    return "".join(out)
 
 
 def _quote_state(line: str, quote: str | None) -> str | None:
@@ -800,43 +859,42 @@ def _quote_state(line: str, quote: str | None) -> str | None:
     return quote
 
 
-def highlight_console(text: str) -> str:
-    """``$`` lines are commands (accent prompt); everything else is output."""
+def _shell_lines(text: str, *, prompted: bool) -> str:
+    """Highlight shell text. With ``prompted``, only ``$`` lines are commands and
+    the rest is output (a console transcript); otherwise every line is a command
+    and gets a ``$`` prompt (a script)."""
     out: list[str] = []
     quote: str | None = None
     continued = False
     for line in text.split("\n"):
-        if quote or continued:
-            out.append(f'<span class="cmd">{html.escape(line)}</span>')
-        elif line.startswith("$"):
-            out.append(f'<span class="cmd"><span class="k">$</span>{html.escape(line[1:])}</span>')
-        else:
-            out.append(f'<span class="out">{html.escape(line)}</span>')
+        if quote:
+            # Inside a multi-line quoted argument.
+            out.append(f'<span class="cmd"><span class="s">{html.escape(line)}</span></span>')
+        elif continued:
+            out.append(f'<span class="cmd">{highlight_command(line)}</span>')
+        elif prompted and line.startswith("$"):
+            out.append(f'<span class="cmd"><span class="p">$</span>{highlight_command(line[1:])}</span>')
+        elif prompted or not line.strip():
+            out.append(f'<span class="out">{html.escape(line)}</span>' if line else "")
             continue
+        elif line.lstrip().startswith("#"):
+            out.append(f'<span class="c">{html.escape(line)}</span>')
+            continue
+        else:
+            out.append(f'<span class="cmd"><span class="p">$</span> {highlight_command(line)}</span>')
         quote = _quote_state(line, quote)
         continued = quote is None and line.endswith("\\")
     return "\n".join(out)
+
+
+def highlight_console(text: str) -> str:
+    """``$`` lines are commands (accent prompt); everything else is output."""
+    return _shell_lines(text, prompted=True)
 
 
 def highlight_shell(text: str) -> str:
     """Shell scripts: every command gets a ``$`` prompt; comments are muted."""
-    out: list[str] = []
-    quote: str | None = None
-    continued = False
-    for line in text.split("\n"):
-        if quote or continued:
-            out.append(f'<span class="cmd">{html.escape(line)}</span>')
-        elif not line.strip():
-            out.append("")
-            continue
-        elif line.lstrip().startswith("#"):
-            out.append(f'<span class="out">{html.escape(line)}</span>')
-            continue
-        else:
-            out.append(f'<span class="cmd"><span class="k">$</span> {html.escape(line)}</span>')
-        quote = _quote_state(line, quote)
-        continued = quote is None and line.endswith("\\")
-    return "\n".join(out)
+    return _shell_lines(text, prompted=False)
 
 
 PRE_RE = re.compile(r'<pre data-lang="(?P<lang>[^"]*)"><code>(?P<code>.*?)</code></pre>', re.S)
@@ -858,6 +916,8 @@ def code_block(lang: str, code: str) -> str:
         inner = highlight_json(text)
     elif base == "rust":
         inner = highlight_rust(text)
+    elif base == "toml":
+        inner = highlight_toml(text)
     elif base == "text":
         inner = f'<span class="out">{html.escape(text)}</span>'
     else:
@@ -1369,9 +1429,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}

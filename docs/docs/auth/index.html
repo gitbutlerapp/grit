@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -208,9 +214,9 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="content"><div class="synopsis" id="synopsis"><div>grit auth</div><div>grit auth logout</div></div><h2 id="description">Description</h2><p>Signs you in to GitHub and saves the token, so that <a href="../push/"><code>grit push</code></a>, <a href="../fetch/"><code>grit fetch</code></a> and <a href="../clone/"><code>grit clone</code></a> work with private repositories over HTTPS.</p>
 <p><code>grit auth</code> uses GitHub&#x27;s device flow. It prints a web address and a short code. Open <code>https://github.com/login/device</code> in your browser, enter the code and approve access. <code>grit</code> waits until you do, then saves the token with your credential helper. Every request goes straight to github.com.</p>
 <p>A credential helper has to be configured to store the token. On Windows, if none is set, <code>grit</code> uses its built-in one (<a href="../manager/"><code>grit manager</code></a>). Elsewhere, set one with <a href="../config/"><code>grit config</code></a>:</p>
-<pre class="code"><code><span class="cmd"><span class="k">$</span> grit config --global credential.helper osxkeychain   # macOS</span>
-<span class="cmd"><span class="k">$</span> grit config --global credential.helper libsecret     # Linux</span>
-<span class="cmd"><span class="k">$</span> grit config --global credential.helper store         # a plain-text file, any system</span></code></pre>
+<pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> config <span class="a">--global</span> credential.helper osxkeychain   <span class="c"># macOS</span></span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> config <span class="a">--global</span> credential.helper libsecret     <span class="c"># Linux</span></span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> config <span class="a">--global</span> credential.helper store         <span class="c"># a plain-text file, any system</span></span></code></pre>
 <p><code>grit auth logout</code> removes the saved GitHub token from your credential helper.</p>
 <p><code>grit</code> signs in with its own GitHub OAuth app. To use a different one, set its client id in the <code>GRIT_GITHUB_CLIENT_ID</code> environment variable or the <code>grit.githubClientId</code> setting.</p>
 <h2 id="options">Options</h2><div class="table"><table class="rows rows-2"><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>logout</code></td><td>Remove the saved GitHub token.</td></tr></tbody></table></div>
@@ -223,26 +229,26 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="pager"><a href="../push/">← grit push</a><a href="../bundle/">grit bundle →</a></div>
 </main><aside class="col ink-col" aria-label="Examples">
 <div class="label">Examples</div>
-<div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit auth</span>
+<div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> auth</span>
 <span class="out">To authorize grit, open this page in your browser:</span>
-<span class="out"></span>
+
 <span class="out">    https://github.com/login/device</span>
-<span class="out"></span>
+
 <span class="out">and enter the code:</span>
-<span class="out"></span>
+
 <span class="out">    1A2B-3C4D</span>
-<span class="out"></span>
+
 <span class="out">Waiting for you to authorize… (press Ctrl-C to cancel)</span>
-<span class="out"></span>
+
 <span class="out">✓ Signed in to GitHub — token stored for github.com.</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit auth logout</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> auth logout</span>
 <span class="out">✓ Signed out of GitHub — removed the stored token for github.com.</span></code></pre></div><div class="ex"><div class="cap"><span>After sign-in</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;authenticated&quot;</span>: true,
-  <span class="k">&quot;host&quot;</span>: &quot;github.com&quot;
+  <span class="k">&quot;authenticated&quot;</span>: <span class="n">true</span>,
+  <span class="k">&quot;host&quot;</span>: <span class="s">&quot;github.com&quot;</span>
 }</code></pre></div><div class="ex"><div class="cap"><span>--json output</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;logged_out&quot;</span>: true,
-  <span class="k">&quot;host&quot;</span>: &quot;github.com&quot;
+  <span class="k">&quot;logged_out&quot;</span>: <span class="n">true</span>,
+  <span class="k">&quot;host&quot;</span>: <span class="s">&quot;github.com&quot;</span>
 }</code></pre></div>
 <div class="see-also" id="see-also"><span>See also</span><a href="../push/">grit push</a><a href="../config/">grit config</a><a href="../manager/">grit manager</a></div>
 </aside></div></div>

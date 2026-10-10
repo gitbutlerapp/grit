@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -216,28 +222,27 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <li>Extra read sources from <code>OdbBuilder::push_read_source</code></li>
 <li>Alternate object directories when <code>OdbBuilder::alternates</code> is true (<code>info/alternates</code>, environment alternates, submodule object dirs)</li>
 </ol>
-<h2 id="building-a-custom-repository">Building a custom repository</h2><pre class="code"><code><span class="k">use</span> std::sync::Arc;
+<h2 id="building-a-custom-repository">Building a custom repository</h2><pre class="code"><code><span class="k">use</span> std::sync::<span class="t">Arc</span>;
 
-<span class="k">use</span> grit_lib::environment::RepositoryOptions;
-<span class="k">use</span> grit_lib::objects::{HashAlgo, ObjectKind};
-<span class="k">use</span> grit_lib::odb::store::MemoryStore;
-<span class="k">use</span> grit_lib::odb::OdbBuilder;
-<span class="k">use</span> grit_lib::repo::{init_repository, Repository};
+<span class="k">use</span> grit_lib::environment::<span class="t">RepositoryOptions</span>;
+<span class="k">use</span> grit_lib::objects::{<span class="t">HashAlgo</span>, <span class="t">ObjectKind</span>};
+<span class="k">use</span> grit_lib::odb::store::<span class="t">MemoryStore</span>;
+<span class="k">use</span> grit_lib::odb::<span class="t">OdbBuilder</span>;
+<span class="k">use</span> grit_lib::repo::{init_repository, <span class="t">Repository</span>};
 
-<span class="k">let</span> dir = tempfile::tempdir()?;
-init_repository(dir.path(), <span class="k">false</span>, &quot;main&quot;, None, &quot;files&quot;)?;
-<span class="k">let</span> git_dir = dir.path().join(&quot;.git&quot;);
-<span class="k">let</span> store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-<span class="k">let</span> repo = Repository::open_with_odb(
-    &amp;RepositoryOptions::empty(),
+<span class="k">let</span> dir = tempfile::<span class="f">tempdir</span>()?;
+<span class="f">init_repository</span>(dir.<span class="f">path</span>(), <span class="n">false</span>, <span class="s">&quot;main&quot;</span>, <span class="t">None</span>, <span class="s">&quot;files&quot;</span>)?;
+<span class="k">let</span> git_dir = dir.<span class="f">path</span>().<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>);
+<span class="k">let</span> store = <span class="t">Arc</span>::<span class="f">new</span>(<span class="t">MemoryStore</span>::<span class="f">new</span>(<span class="t">HashAlgo</span>::<span class="t">Sha1</span>));
+<span class="k">let</span> repo = <span class="t">Repository</span>::<span class="f">open_with_odb</span>(
+    &amp;<span class="t">RepositoryOptions</span>::<span class="f">empty</span>(),
     &amp;git_dir,
-    Some(dir.path()),
-    OdbBuilder::files(git_dir.join(&quot;objects&quot;))
-        .primary(store)
-        .alternates(<span class="k">false</span>),
+    <span class="t">Some</span>(dir.<span class="f">path</span>()),
+    <span class="t">OdbBuilder</span>::<span class="f">files</span>(git_dir.<span class="f">join</span>(<span class="s">&quot;objects&quot;</span>))
+        .<span class="f">primary</span>(store)
+        .<span class="f">alternates</span>(<span class="n">false</span>),
 )?;
-<span class="k">let</span> _blob = repo.odb.write(ObjectKind::Blob, b&quot;hello&quot;)?;
-# Ok::&lt;(), grit_lib::error::Error&gt;(())</code></pre>
+<span class="k">let</span> _blob = repo.odb.<span class="f">write</span>(<span class="t">ObjectKind</span>::<span class="t">Blob</span>, <span class="s">b&quot;hello&quot;</span>)?;</code></pre>
 <p>Filesystem-only maintenance (<code>Odb::gc</code>, <code>Odb::write_commit_graph</code>, <code>Odb::pack_store</code>, pack install, MIDX write) returns <a href="https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html"><code>Error::UnsupportedObjectStore</code></a> when the primary is not the default files backend. Use <code>Odb::files_objects_dir</code> when you need the on-disk <code>objects/</code> path only for files-backed repos.</p>
 <h2 id="conformance-tests">Conformance tests</h2><p>The workspace crate <code>grit_test_support::odb_conformance</code> provides shared read/write suites. Run them from an integration test in your crate (see <a href="https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs"><code>grit-lib/tests/odb_conformance_memory.rs</code></a>) to validate a custom backend before wiring it through <a href="https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html"><code>OdbBuilder</code></a>.</p>
 </div>
@@ -248,48 +253,48 @@ init_repository(dir.path(), <span class="k">false</span>, &quot;main&quot;, None
 <span class="c">//! then exports objects as loose files for interoperability with system Git.</span>
 
 <span class="k">use</span> std::env;
-<span class="k">use</span> std::path::PathBuf;
+<span class="k">use</span> std::path::<span class="t">PathBuf</span>;
 
 <span class="k">use</span> grit_examples::packfile_kv;
 
-<span class="k">fn</span> main() -&gt; grit_lib::error::Result&lt;()&gt; {
-    <span class="k">let</span> (root, _tmpdir) = <span class="k">match</span> env::args().nth(1) {
-        Some(path) =&gt; (PathBuf::from(path), None),
-        None =&gt; {
-            <span class="k">let</span> dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
-            <span class="k">let</span> root = dir.path().to_path_buf();
-            (root, Some(dir))
+<span class="k">fn</span> <span class="f">main</span>() -&gt; grit_lib::error::<span class="t">Result</span>&lt;()&gt; {
+    <span class="k">let</span> (root, _tmpdir) = <span class="k">match</span> env::<span class="f">args</span>().<span class="f">nth</span>(<span class="n">1</span>) {
+        <span class="t">Some</span>(path) =&gt; (<span class="t">PathBuf</span>::<span class="f">from</span>(path), <span class="t">None</span>),
+        <span class="t">None</span> =&gt; {
+            <span class="k">let</span> dir = tempfile::<span class="f">tempdir</span>().<span class="f">map_err</span>(grit_lib::error::<span class="t">Error</span>::<span class="t">Io</span>)?;
+            <span class="k">let</span> root = dir.<span class="f">path</span>().<span class="f">to_path_buf</span>();
+            (root, <span class="t">Some</span>(dir))
         }
     };
-    <span class="k">let</span> log = packfile_kv::run_custom_object_store_demo(&amp;root)?;
+    <span class="k">let</span> log = packfile_kv::<span class="f">run_custom_object_store_demo</span>(&amp;root)?;
     <span class="k">for</span> oid <span class="k">in</span> log {
-        println!(&quot;{oid}&quot;);
+        <span class="f">println!</span>(<span class="s">&quot;{oid}&quot;</span>);
     }
-    Ok(())
+    <span class="t">Ok</span>(())
 }</code></pre></div><div class="ex-head"><span>Example · sqlite-object-store.rs</span><a href="https://github.com/gitbutlerapp/grit/blob/main/grit-examples/examples/sqlite-object-store.rs">full source ↗</a></div><div class="ex-title" id="example-sqlite-object-database">Example: SQLite object database</div><div class="ex"><div class="cap"><span>For embedders who want indexed lookup without maintaining a separate <code>objects/</code> shard tree, <code>grit_examples::sqlite_odb</code> provides <a href="https://github.com/gitbutlerapp/grit/blob/main/grit-examples/src/sqlite_odb.rs"><code>SqliteOdbStore</code></a>: each object is a row keyed by raw object id with zlib-compressed canonical store bytes (the same on-disk payload as a loose object file). The demo commits through a SQLite primary, walks history, then exports loose objects so system <code>git fsck</code> and <code>git log</code> succeed</span></div><pre class="code"><code><span class="c">//! SQLite object store wired through [`OdbBuilder::primary`].</span>
 <span class="c">//!</span>
 <span class="c">//! Writes a small commit graph in SQLite, walks history with [`rev_list`],</span>
 <span class="c">//! then exports objects as loose files for interoperability with system Git.</span>
 
 <span class="k">use</span> std::env;
-<span class="k">use</span> std::path::PathBuf;
+<span class="k">use</span> std::path::<span class="t">PathBuf</span>;
 
 <span class="k">use</span> grit_examples::sqlite_odb;
 
-<span class="k">fn</span> main() -&gt; grit_lib::error::Result&lt;()&gt; {
-    <span class="k">let</span> (root, _tmpdir) = <span class="k">match</span> env::args().nth(1) {
-        Some(path) =&gt; (PathBuf::from(path), None),
-        None =&gt; {
-            <span class="k">let</span> dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
-            <span class="k">let</span> root = dir.path().to_path_buf();
-            (root, Some(dir))
+<span class="k">fn</span> <span class="f">main</span>() -&gt; grit_lib::error::<span class="t">Result</span>&lt;()&gt; {
+    <span class="k">let</span> (root, _tmpdir) = <span class="k">match</span> env::<span class="f">args</span>().<span class="f">nth</span>(<span class="n">1</span>) {
+        <span class="t">Some</span>(path) =&gt; (<span class="t">PathBuf</span>::<span class="f">from</span>(path), <span class="t">None</span>),
+        <span class="t">None</span> =&gt; {
+            <span class="k">let</span> dir = tempfile::<span class="f">tempdir</span>().<span class="f">map_err</span>(grit_lib::error::<span class="t">Error</span>::<span class="t">Io</span>)?;
+            <span class="k">let</span> root = dir.<span class="f">path</span>().<span class="f">to_path_buf</span>();
+            (root, <span class="t">Some</span>(dir))
         }
     };
-    <span class="k">let</span> log = sqlite_odb::run_sqlite_object_store_demo(&amp;root)?;
+    <span class="k">let</span> log = sqlite_odb::<span class="f">run_sqlite_object_store_demo</span>(&amp;root)?;
     <span class="k">for</span> oid <span class="k">in</span> log {
-        println!(&quot;{oid}&quot;);
+        <span class="f">println!</span>(<span class="s">&quot;{oid}&quot;</span>);
     }
-    Ok(())
+    <span class="t">Ok</span>(())
 }</code></pre></div></aside></div></div>
 </div>
 <script type="application/json" id="docs-index">[["Docs","How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.",""],["Install grit","Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.","install/"],["Tutorial","Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.","tutorial/"],["Library quick start","Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.","library-quickstart/"],["Global options","Options that apply to every grit command.","global-options/"],["Scripting with grit","Use --json and --filter to build scripts on top of grit.","scripting/"],["Agent guide","Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.","agents/"],["grit init","Create a new, empty repository.","init/"],["grit clone","Copy a remote repository into a new directory.","clone/"],["grit status","Show where you are and what's changed. This is what plain grit runs.","status/"],["grit config","Read, set, list or remove configuration values.","config/"],["grit add","Stage changes. With no paths, stages everything.","add/"],["grit commit","Stage every change and record a new commit.","commit/"],["grit diff","Show uncommitted changes, or the change a commit introduced.","diff/"],["grit log","Show recent commits, newest first, a page at a time.","log/"],["grit shortlog","List the commits on this branch that aren't on the target branch yet.","shortlog/"],["grit show","Show a commit, tag or branch, and a summary of what it changed.","show/"],["grit branch","List branches, or create or delete one.","branch/"],["grit switch","Switch to another branch, or create one and switch to it.","switch/"],["grit merge","Merge another branch into the current one.","merge/"],["grit pick","Copy a single commit onto the current branch.","pick/"],["grit tag","List tags, or create or delete one. A new tag points at the current commit.","tag/"],["grit remote","List remotes, add one, or list refs on a remote.","remote/"],["grit fetch","Download new commits, branches and tags from a remote.","fetch/"],["grit pull","Fetch from the remote and bring the current branch up to date.","pull/"],["grit push","Publish the current branch, or your tags, to a remote.","push/"],["grit auth","Sign in to GitHub so HTTPS pushes and fetches just work.","auth/"],["grit bundle","Create, verify, and list git bundle files for offline transfer.","bundle/"],["grit update","Update grit to the latest release.","update/"],["grit skill","Print an agent skill that explains how to use grit.","skill/"],["grit completions","Generate shell completion scripts for bash, zsh, and fish.","completions/"],["grit upload-pack","Serve a fetch or clone of a repository over stdin and stdout.","upload-pack/"],["grit receive-pack","Accept a push to a repository over stdin and stdout.","receive-pack/"],["grit manager","A credential helper that stores passwords and tokens in the Windows Credential Manager.","manager/"],["Library guide","Use grit-lib from Rust — the same engine that powers the grit CLI.","library/"],["grit-lib API map","Generated index of public grit-lib modules and key types with docs.rs links.","library/api-map/"],["Reachability bitmaps","Query pack and MIDX commit bitmaps for fast object reachability and counting.","library/bitmaps/"],["Diff","Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.","library/diff/"],["Embedding grit-lib","Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.","library/embedding/"],["Network","Remote dispatch, fetch, push, and ls-remote over every transport.","library/network/"],["Object stores","Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.","library/object-stores/"],["Objects","ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.","library/objects/"],["Pack reachability bitmaps","Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).","library/pack-bitmaps/"],["Refs","Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.","library/refs/"],["Repository","Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.","library/repository/"],["Revwalk","Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.","library/revwalk/"],["Index","Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.","library/staging/"],["Benchmarks","Grit vs Git on realistic workloads, from the committed grit-bench baseline.","benchmarks/"]]</script>

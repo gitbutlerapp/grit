@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -222,100 +228,100 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <span class="c">//!</span>
 <span class="c">//! Source for the library guide &quot;Diff&quot; page (included in the docs site).</span>
 
-<span class="k">use</span> grit_lib::diff::{diff_index_to_worktree, diff_trees, unified_diff, DiffEntry, DiffStatus};
-<span class="k">use</span> grit_lib::objects::{parse_commit, ObjectId};
-<span class="k">use</span> grit_lib::repo::Repository;
+<span class="k">use</span> grit_lib::diff::{diff_index_to_worktree, diff_trees, unified_diff, <span class="t">DiffEntry</span>, <span class="t">DiffStatus</span>};
+<span class="k">use</span> grit_lib::objects::{parse_commit, <span class="t">ObjectId</span>};
+<span class="k">use</span> grit_lib::repo::<span class="t">Repository</span>;
 <span class="k">use</span> grit_lib::state::resolve_head;
-<span class="k">use</span> std::path::{Path, PathBuf};
+<span class="k">use</span> std::path::{<span class="t">Path</span>, <span class="t">PathBuf</span>};
 
-<span class="k">fn</span> open_repo(root: &amp;Path) -&gt; Result&lt;Repository, grit_lib::error::Error&gt; {
-    <span class="k">let</span> git_dir = <span class="k">if</span> root.join(&quot;.git&quot;).is_dir() {
-        root.join(&quot;.git&quot;)
+<span class="k">fn</span> <span class="f">open_repo</span>(root: &amp;<span class="t">Path</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">Repository</span>, grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> git_dir = <span class="k">if</span> root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>).<span class="f">is_dir</span>() {
+        root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>)
     } <span class="k">else</span> {
-        root.to_path_buf()
+        root.<span class="f">to_path_buf</span>()
     };
-    <span class="k">let</span> work_tree = <span class="k">if</span> root.join(&quot;.git&quot;).is_dir() {
-        Some(root)
+    <span class="k">let</span> work_tree = <span class="k">if</span> root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>).<span class="f">is_dir</span>() {
+        <span class="t">Some</span>(root)
     } <span class="k">else</span> {
-        None
+        <span class="t">None</span>
     };
-    Repository::open(&amp;git_dir, work_tree)
+    <span class="t">Repository</span>::<span class="f">open</span>(&amp;git_dir, work_tree)
 }
 
-<span class="k">fn</span> tree_oid(repo: &amp;Repository, commit: &amp;ObjectId) -&gt; Result&lt;ObjectId, grit_lib::error::Error&gt; {
-    <span class="k">let</span> obj = repo.odb.read(commit)?;
-    Ok(parse_commit(&amp;obj.data)?.tree)
+<span class="k">fn</span> <span class="f">tree_oid</span>(repo: &amp;<span class="t">Repository</span>, commit: &amp;<span class="t">ObjectId</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">ObjectId</span>, grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> obj = repo.odb.<span class="f">read</span>(commit)?;
+    <span class="t">Ok</span>(<span class="f">parse_commit</span>(&amp;obj.data)?.tree)
 }
 
-<span class="k">fn</span> print_name_status(entries: &amp;[DiffEntry]) {
+<span class="k">fn</span> <span class="f">print_name_status</span>(entries: &amp;[<span class="t">DiffEntry</span>]) {
     <span class="k">for</span> entry <span class="k">in</span> entries {
-        <span class="k">let</span> letter = entry.status.letter();
-        <span class="k">let</span> path = entry.path();
-        <span class="k">if</span> entry.status == DiffStatus::Renamed {
-            <span class="k">if</span> <span class="k">let</span> (Some(old), Some(new)) = (&amp;entry.old_path, &amp;entry.new_path) {
-                println!(&quot;{letter}\t{old}\t{new}&quot;);
+        <span class="k">let</span> letter = entry.status.<span class="f">letter</span>();
+        <span class="k">let</span> path = entry.<span class="f">path</span>();
+        <span class="k">if</span> entry.status == <span class="t">DiffStatus</span>::<span class="t">Renamed</span> {
+            <span class="k">if</span> <span class="k">let</span> (<span class="t">Some</span>(old), <span class="t">Some</span>(new)) = (&amp;entry.old_path, &amp;entry.new_path) {
+                <span class="f">println!</span>(<span class="s">&quot;{letter}\t{old}\t{new}&quot;</span>);
                 <span class="k">continue</span>;
             }
         }
-        println!(&quot;{letter}\t{path}&quot;);
+        <span class="f">println!</span>(<span class="s">&quot;{letter}\t{path}&quot;</span>);
     }
 }
 
-<span class="k">fn</span> main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
-    <span class="k">let</span> root = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| grit_lib::error::Error::Message(&quot;missing repository path&quot;.into()))?;
-    <span class="k">let</span> repo = open_repo(&amp;root)?;
+<span class="k">fn</span> <span class="f">main</span>() -&gt; <span class="t">Result</span>&lt;(), grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> root = std::env::<span class="f">args</span>()
+        .<span class="f">nth</span>(<span class="n">1</span>)
+        .<span class="f">map</span>(<span class="t">PathBuf</span>::from)
+        .<span class="f">or_else</span>(|| std::env::<span class="f">current_dir</span>().<span class="f">ok</span>())
+        .<span class="f">ok_or_else</span>(|| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(<span class="s">&quot;missing repository path&quot;</span>.<span class="f">into</span>()))?;
+    <span class="k">let</span> repo = <span class="f">open_repo</span>(&amp;root)?;
 
-    <span class="k">let</span> head = resolve_head(&amp;repo.git_dir)?;
+    <span class="k">let</span> head = <span class="f">resolve_head</span>(&amp;repo.git_dir)?;
     <span class="k">let</span> new_commit = head
-        .oid()
-        .cloned()
-        .ok_or_else(|| grit_lib::error::Error::Message(&quot;HEAD has no commit&quot;.into()))?;
-    <span class="k">let</span> new_obj = repo.odb.read(&amp;new_commit)?;
-    <span class="k">let</span> new_commit_data = parse_commit(&amp;new_obj.data)?;
+        .<span class="f">oid</span>()
+        .<span class="f">cloned</span>()
+        .<span class="f">ok_or_else</span>(|| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(<span class="s">&quot;HEAD has no commit&quot;</span>.<span class="f">into</span>()))?;
+    <span class="k">let</span> new_obj = repo.odb.<span class="f">read</span>(&amp;new_commit)?;
+    <span class="k">let</span> new_commit_data = <span class="f">parse_commit</span>(&amp;new_obj.data)?;
     <span class="k">let</span> parent = new_commit_data
         .parents
-        .first()
-        .copied()
-        .ok_or_else(|| grit_lib::error::Error::Message(&quot;need a commit with a parent&quot;.into()))?;
+        .<span class="f">first</span>()
+        .<span class="f">copied</span>()
+        .<span class="f">ok_or_else</span>(|| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(<span class="s">&quot;need a commit with a parent&quot;</span>.<span class="f">into</span>()))?;
 
-    <span class="k">let</span> old_tree = tree_oid(&amp;repo, &amp;parent)?;
+    <span class="k">let</span> old_tree = <span class="f">tree_oid</span>(&amp;repo, &amp;parent)?;
     <span class="k">let</span> new_tree = new_commit_data.tree;
 
-    <span class="k">let</span> tree_changes = diff_trees(&amp;repo.odb, Some(&amp;old_tree), Some(&amp;new_tree), &quot;&quot;)?;
-    println!(&quot;tree_diff_begin&quot;);
-    print_name_status(&amp;tree_changes);
-    println!(&quot;tree_diff_end&quot;);
+    <span class="k">let</span> tree_changes = <span class="f">diff_trees</span>(&amp;repo.odb, <span class="t">Some</span>(&amp;old_tree), <span class="t">Some</span>(&amp;new_tree), <span class="s">&quot;&quot;</span>)?;
+    <span class="f">println!</span>(<span class="s">&quot;tree_diff_begin&quot;</span>);
+    <span class="f">print_name_status</span>(&amp;tree_changes);
+    <span class="f">println!</span>(<span class="s">&quot;tree_diff_end&quot;</span>);
 
-    <span class="k">if</span> <span class="k">let</span> Some(wt) = repo.work_tree.as_deref() {
-        <span class="k">let</span> <span class="k">mut</span> index = repo.load_index()?;
-        <span class="k">let</span> wt_changes = diff_index_to_worktree(&amp;repo.odb, &amp;<span class="k">mut</span> index, wt, <span class="k">false</span>, <span class="k">false</span>)?;
-        println!(&quot;index_worktree_dirty={}&quot;, !wt_changes.is_empty());
+    <span class="k">if</span> <span class="k">let</span> <span class="t">Some</span>(wt) = repo.work_tree.<span class="f">as_deref</span>() {
+        <span class="k">let</span> <span class="k">mut</span> index = repo.<span class="f">load_index</span>()?;
+        <span class="k">let</span> wt_changes = <span class="f">diff_index_to_worktree</span>(&amp;repo.odb, &amp;<span class="k">mut</span> index, wt, <span class="n">false</span>, <span class="n">false</span>)?;
+        <span class="f">println!</span>(<span class="s">&quot;index_worktree_dirty={}&quot;</span>, !wt_changes.<span class="f">is_empty</span>());
     }
 
-    <span class="k">if</span> <span class="k">let</span> (Some(entry),) = (tree_changes.first(),) {
-        <span class="k">if</span> entry.status == DiffStatus::Modified {
-            <span class="k">let</span> old_blob = repo.odb.read(&amp;entry.old_oid)?.data;
-            <span class="k">let</span> new_blob = repo.odb.read(&amp;entry.new_oid)?.data;
-            <span class="k">let</span> old_text = String::from_utf8_lossy(&amp;old_blob);
-            <span class="k">let</span> new_text = String::from_utf8_lossy(&amp;new_blob);
-            <span class="k">let</span> old_path = entry.old_path.as_deref().unwrap_or(entry.path());
-            <span class="k">let</span> new_path = entry.new_path.as_deref().unwrap_or(entry.path());
-            <span class="k">let</span> patch = unified_diff(&amp;old_text, &amp;new_text, old_path, new_path, 3, <span class="k">false</span>, <span class="k">false</span>);
+    <span class="k">if</span> <span class="k">let</span> (<span class="t">Some</span>(entry),) = (tree_changes.<span class="f">first</span>(),) {
+        <span class="k">if</span> entry.status == <span class="t">DiffStatus</span>::<span class="t">Modified</span> {
+            <span class="k">let</span> old_blob = repo.odb.<span class="f">read</span>(&amp;entry.old_oid)?.data;
+            <span class="k">let</span> new_blob = repo.odb.<span class="f">read</span>(&amp;entry.new_oid)?.data;
+            <span class="k">let</span> old_text = <span class="t">String</span>::<span class="f">from_utf8_lossy</span>(&amp;old_blob);
+            <span class="k">let</span> new_text = <span class="t">String</span>::<span class="f">from_utf8_lossy</span>(&amp;new_blob);
+            <span class="k">let</span> old_path = entry.old_path.<span class="f">as_deref</span>().<span class="f">unwrap_or</span>(entry.<span class="f">path</span>());
+            <span class="k">let</span> new_path = entry.new_path.<span class="f">as_deref</span>().<span class="f">unwrap_or</span>(entry.<span class="f">path</span>());
+            <span class="k">let</span> patch = <span class="f">unified_diff</span>(&amp;old_text, &amp;new_text, old_path, new_path, <span class="n">3</span>, <span class="n">false</span>, <span class="n">false</span>);
             <span class="k">let</span> hunk_lines = patch
-                .lines()
-                .filter(|l| l.starts_with(&#x27;-&#x27;) || l.starts_with(&#x27;+&#x27;))
-                .count();
-            println!(&quot;blob_unified_hunk_lines={hunk_lines}&quot;);
+                .<span class="f">lines</span>()
+                .<span class="f">filter</span>(|l| l.<span class="f">starts_with</span>(<span class="s">&#x27;-&#x27;</span>) || l.<span class="f">starts_with</span>(<span class="s">&#x27;+&#x27;</span>))
+                .<span class="f">count</span>();
+            <span class="f">println!</span>(<span class="s">&quot;blob_unified_hunk_lines={hunk_lines}&quot;</span>);
         }
     }
 
-    Ok(())
-}</code></pre></div><div class="ex"><div class="cap"><span>Requires a repository whose <code>HEAD</code> has a parent (at least two commits)</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> cargo run --bin guide_diff /path/to/repo</span>
-<span class="cmd"><span class="k">$</span> git -C /path/to/repo diff --name-status HEAD~1 HEAD</span></code></pre></div></aside></div></div>
+    <span class="t">Ok</span>(())
+}</code></pre></div><div class="ex"><div class="cap"><span>Requires a repository whose <code>HEAD</code> has a parent (at least two commits)</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">cargo</span> run <span class="a">--bin</span> guide_diff /path/to/repo</span>
+<span class="cmd"><span class="p">$</span> <span class="f">git</span> <span class="a">-C</span> /path/to/repo diff <span class="a">--name-status</span> HEAD~1 HEAD</span></code></pre></div></aside></div></div>
 </div>
 <script type="application/json" id="docs-index">[["Docs","How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.",""],["Install grit","Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.","install/"],["Tutorial","Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.","tutorial/"],["Library quick start","Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.","library-quickstart/"],["Global options","Options that apply to every grit command.","global-options/"],["Scripting with grit","Use --json and --filter to build scripts on top of grit.","scripting/"],["Agent guide","Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.","agents/"],["grit init","Create a new, empty repository.","init/"],["grit clone","Copy a remote repository into a new directory.","clone/"],["grit status","Show where you are and what's changed. This is what plain grit runs.","status/"],["grit config","Read, set, list or remove configuration values.","config/"],["grit add","Stage changes. With no paths, stages everything.","add/"],["grit commit","Stage every change and record a new commit.","commit/"],["grit diff","Show uncommitted changes, or the change a commit introduced.","diff/"],["grit log","Show recent commits, newest first, a page at a time.","log/"],["grit shortlog","List the commits on this branch that aren't on the target branch yet.","shortlog/"],["grit show","Show a commit, tag or branch, and a summary of what it changed.","show/"],["grit branch","List branches, or create or delete one.","branch/"],["grit switch","Switch to another branch, or create one and switch to it.","switch/"],["grit merge","Merge another branch into the current one.","merge/"],["grit pick","Copy a single commit onto the current branch.","pick/"],["grit tag","List tags, or create or delete one. A new tag points at the current commit.","tag/"],["grit remote","List remotes, add one, or list refs on a remote.","remote/"],["grit fetch","Download new commits, branches and tags from a remote.","fetch/"],["grit pull","Fetch from the remote and bring the current branch up to date.","pull/"],["grit push","Publish the current branch, or your tags, to a remote.","push/"],["grit auth","Sign in to GitHub so HTTPS pushes and fetches just work.","auth/"],["grit bundle","Create, verify, and list git bundle files for offline transfer.","bundle/"],["grit update","Update grit to the latest release.","update/"],["grit skill","Print an agent skill that explains how to use grit.","skill/"],["grit completions","Generate shell completion scripts for bash, zsh, and fish.","completions/"],["grit upload-pack","Serve a fetch or clone of a repository over stdin and stdout.","upload-pack/"],["grit receive-pack","Accept a push to a repository over stdin and stdout.","receive-pack/"],["grit manager","A credential helper that stores passwords and tokens in the Windows Credential Manager.","manager/"],["Library guide","Use grit-lib from Rust — the same engine that powers the grit CLI.","library/"],["grit-lib API map","Generated index of public grit-lib modules and key types with docs.rs links.","library/api-map/"],["Reachability bitmaps","Query pack and MIDX commit bitmaps for fast object reachability and counting.","library/bitmaps/"],["Diff","Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.","library/diff/"],["Embedding grit-lib","Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.","library/embedding/"],["Network","Remote dispatch, fetch, push, and ls-remote over every transport.","library/network/"],["Object stores","Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.","library/object-stores/"],["Objects","ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.","library/objects/"],["Pack reachability bitmaps","Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).","library/pack-bitmaps/"],["Refs","Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.","library/refs/"],["Repository","Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.","library/repository/"],["Revwalk","Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.","library/revwalk/"],["Index","Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.","library/staging/"],["Benchmarks","Grit vs Git on realistic workloads, from the committed grit-bench baseline.","benchmarks/"]]</script>
 <script>

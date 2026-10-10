@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -225,7 +231,7 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <li><code>main</code></li>
 </ol>
 <p>To compare against something else, set it for the repository:</p>
-<pre class="code"><code><span class="cmd"><span class="k">$</span> grit config target.branch origin/develop</span></code></pre>
+<pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> config target.branch origin/develop</span></code></pre>
 <h2 id="options">Options</h2><p><code>grit status</code> takes no options beyond the <a href="../global-options/">global ones</a>.</p>
 <h2 id="json-output">JSON output</h2><p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
 <div class="table"><table class="rows rows-3"><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>branch</code></td><td>string or null</td><td>Current branch, or <code>null</code> when HEAD is detached.</td></tr><tr><td><code>detached</code></td><td>boolean</td><td>Whether HEAD is detached.</td></tr><tr><td><code>head</code></td><td>string or null</td><td>Full id of the current commit, or <code>null</code> before the first commit.</td></tr><tr><td><code>target</code></td><td>string or null</td><td>Target branch, or <code>null</code> when none was found.</td></tr><tr><td><code>ahead</code></td><td>number</td><td>Commits on the branch that the target does not have.</td></tr><tr><td><code>commits</code></td><td>array</td><td>Newest of those commits, up to ten, each with <code>oid</code> and <code>subject</code>.</td></tr><tr><td><code>staged</code></td><td>array</td><td>Staged changes with <code>path</code> and <code>status</code>.</td></tr><tr><td><code>unstaged</code></td><td>array</td><td>Unstaged changes with <code>path</code> and <code>status</code>.</td></tr><tr><td><code>untracked</code></td><td>array</td><td>Paths of untracked files.</td></tr><tr><td><code>clean</code></td><td>boolean</td><td><code>true</code> when there is nothing to commit and nothing untracked.</td></tr><tr><td><code>merging</code></td><td>boolean</td><td><code>true</code> when a merge is in progress (<code>MERGE_HEAD</code> exists).</td></tr><tr><td><code>in_progress</code></td><td>array</td><td>Stable operation ids while work is paused (for example <code>merge</code>, <code>rebase</code>). Omitted when empty.</td></tr><tr><td><code>conflicts</code></td><td>array</td><td>Paths with unmerged index stages. Omitted when empty.</td></tr></tbody></table></div>
@@ -235,49 +241,49 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="pager"><a href="../clone/">← grit clone</a><a href="../config/">grit config →</a></div>
 </main><aside class="col ink-col" aria-label="Examples">
 <div class="label">Examples</div>
-<div class="ex"><div class="cap"><span>A branch with work in progress</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit</span>
+<div class="ex"><div class="cap"><span>A branch with work in progress</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span></span>
 <span class="out">On feature  ·  2 ahead of origin/main</span>
-<span class="out"></span>
+
 <span class="out">  cf18394  ada  2 hours ago  Say hi</span>
 <span class="out">  9a1c2e0  ada  3 hours ago  Add a greeting test</span>
-<span class="out"></span>
+
 <span class="out">Staged</span>
 <span class="out">  +  new           notes.md</span>
-<span class="out"></span>
+
 <span class="out">Changed (not staged)</span>
 <span class="out">  ~  modified      main.rs</span>
-<span class="out"></span>
+
 <span class="out">Untracked</span>
 <span class="out">  ?  untracked     scratch.txt</span>
-<span class="out"></span>
-<span class="out">→ grit add &lt;file&gt; to stage  ·  grit commit &quot;message&quot; to commit</span></code></pre></div><div class="ex"><div class="cap"><span>Everything committed and pushed</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit st</span>
+
+<span class="out">→ grit add &lt;file&gt; to stage  ·  grit commit &quot;message&quot; to commit</span></code></pre></div><div class="ex"><div class="cap"><span>Everything committed and pushed</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> st</span>
 <span class="out">On main  ·  even with origin/main</span>
-<span class="out"></span>
-<span class="out">Nothing to commit — working tree clean.</span></code></pre></div><div class="ex"><div class="cap"><span>Merge in progress with a conflict</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit status</span>
+
+<span class="out">Nothing to commit — working tree clean.</span></code></pre></div><div class="ex"><div class="cap"><span>Merge in progress with a conflict</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> status</span>
 <span class="out">On main  ·  merging — resolve conflicts</span>
-<span class="out"></span>
+
 <span class="out">Staged</span>
 <span class="out">  !  conflict      f</span>
-<span class="out"></span>
-<span class="out">→ resolve conflicts, then grit commit &quot;message&quot;</span></code></pre></div><div class="ex"><div class="cap"><span>Check from a script whether the working tree is clean</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit status --json --filter .clean</span>
+
+<span class="out">→ resolve conflicts, then grit commit &quot;message&quot;</span></code></pre></div><div class="ex"><div class="cap"><span>Check from a script whether the working tree is clean</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> status <span class="a">--json</span> <span class="a">--filter</span> .clean</span>
 <span class="out">true</span></code></pre></div><div class="ex"><div class="cap"><span>--json output</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;branch&quot;</span>: &quot;feature&quot;,
-  <span class="k">&quot;detached&quot;</span>: false,
-  <span class="k">&quot;head&quot;</span>: &quot;cf18394a62c3f845bd9c44927a5a55e014b2a99d&quot;,
-  <span class="k">&quot;target&quot;</span>: &quot;origin/main&quot;,
-  <span class="k">&quot;ahead&quot;</span>: 2,
+  <span class="k">&quot;branch&quot;</span>: <span class="s">&quot;feature&quot;</span>,
+  <span class="k">&quot;detached&quot;</span>: <span class="n">false</span>,
+  <span class="k">&quot;head&quot;</span>: <span class="s">&quot;cf18394a62c3f845bd9c44927a5a55e014b2a99d&quot;</span>,
+  <span class="k">&quot;target&quot;</span>: <span class="s">&quot;origin/main&quot;</span>,
+  <span class="k">&quot;ahead&quot;</span>: <span class="n">2</span>,
   <span class="k">&quot;commits&quot;</span>: [
-    { <span class="k">&quot;oid&quot;</span>: &quot;cf18394a62c3f845bd9c44927a5a55e014b2a99d&quot;, <span class="k">&quot;subject&quot;</span>: &quot;Say hi&quot; },
-    { <span class="k">&quot;oid&quot;</span>: &quot;9a1c2e0d4b6f8a1c3e5d7f9b0a2c4e6d8f0a1b3c&quot;, <span class="k">&quot;subject&quot;</span>: &quot;Add a greeting test&quot; }
+    { <span class="k">&quot;oid&quot;</span>: <span class="s">&quot;cf18394a62c3f845bd9c44927a5a55e014b2a99d&quot;</span>, <span class="k">&quot;subject&quot;</span>: <span class="s">&quot;Say hi&quot;</span> },
+    { <span class="k">&quot;oid&quot;</span>: <span class="s">&quot;9a1c2e0d4b6f8a1c3e5d7f9b0a2c4e6d8f0a1b3c&quot;</span>, <span class="k">&quot;subject&quot;</span>: <span class="s">&quot;Add a greeting test&quot;</span> }
   ],
   <span class="k">&quot;staged&quot;</span>: [
-    { <span class="k">&quot;path&quot;</span>: &quot;notes.md&quot;, <span class="k">&quot;status&quot;</span>: &quot;added&quot; }
+    { <span class="k">&quot;path&quot;</span>: <span class="s">&quot;notes.md&quot;</span>, <span class="k">&quot;status&quot;</span>: <span class="s">&quot;added&quot;</span> }
   ],
   <span class="k">&quot;unstaged&quot;</span>: [
-    { <span class="k">&quot;path&quot;</span>: &quot;main.rs&quot;, <span class="k">&quot;status&quot;</span>: &quot;modified&quot; }
+    { <span class="k">&quot;path&quot;</span>: <span class="s">&quot;main.rs&quot;</span>, <span class="k">&quot;status&quot;</span>: <span class="s">&quot;modified&quot;</span> }
   ],
-  <span class="k">&quot;untracked&quot;</span>: [&quot;scratch.txt&quot;],
-  <span class="k">&quot;clean&quot;</span>: false
+  <span class="k">&quot;untracked&quot;</span>: [<span class="s">&quot;scratch.txt&quot;</span>],
+  <span class="k">&quot;clean&quot;</span>: <span class="n">false</span>
 }</code></pre></div><div class="ex"><div class="cap"><span>Pass <a href="../global-options/"><code>--markdown</code></a> for headed sections that mirror the status screen</span></div><pre class="code"><code><span class="out">On **`feature`** · **2** ahead of `origin/main`
 
 - `cf18394` Say hi (ada, 1 hour ago)

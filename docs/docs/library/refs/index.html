@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -221,105 +227,105 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <span class="c">//!</span>
 <span class="c">//! Source for the library guide &quot;Refs&quot; page (included in the docs site).</span>
 
-<span class="k">use</span> grit_lib::objects::ObjectId;
+<span class="k">use</span> grit_lib::objects::<span class="t">ObjectId</span>;
 <span class="k">use</span> grit_lib::reflog::read_reflog;
-<span class="k">use</span> grit_lib::refs::{<span class="k">self</span>, Ref};
-<span class="k">use</span> grit_lib::repo::Repository;
+<span class="k">use</span> grit_lib::refs::{<span class="k">self</span>, <span class="t">Ref</span>};
+<span class="k">use</span> grit_lib::repo::<span class="t">Repository</span>;
 <span class="k">use</span> grit_lib::state::resolve_head;
-<span class="k">use</span> std::path::{Path, PathBuf};
+<span class="k">use</span> std::path::{<span class="t">Path</span>, <span class="t">PathBuf</span>};
 
-<span class="k">const</span> DEMO_BRANCH: &amp;str = &quot;refs/heads/library-guide-demo&quot;;
+<span class="k">const</span> <span class="t">DEMO_BRANCH</span>: &amp;str = <span class="s">&quot;refs/heads/library-guide-demo&quot;</span>;
 
-<span class="k">fn</span> open_repo(root: &amp;Path) -&gt; Result&lt;Repository, grit_lib::error::Error&gt; {
-    <span class="k">let</span> git_dir = <span class="k">if</span> root.join(&quot;.git&quot;).is_dir() {
-        root.join(&quot;.git&quot;)
+<span class="k">fn</span> <span class="f">open_repo</span>(root: &amp;<span class="t">Path</span>) -&gt; <span class="t">Result</span>&lt;<span class="t">Repository</span>, grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> git_dir = <span class="k">if</span> root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>).<span class="f">is_dir</span>() {
+        root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>)
     } <span class="k">else</span> {
-        root.to_path_buf()
+        root.<span class="f">to_path_buf</span>()
     };
-    <span class="k">let</span> work_tree = <span class="k">if</span> root.join(&quot;.git&quot;).is_dir() {
-        Some(root)
+    <span class="k">let</span> work_tree = <span class="k">if</span> root.<span class="f">join</span>(<span class="s">&quot;.git&quot;</span>).<span class="f">is_dir</span>() {
+        <span class="t">Some</span>(root)
     } <span class="k">else</span> {
-        None
+        <span class="t">None</span>
     };
-    Repository::open(&amp;git_dir, work_tree)
+    <span class="t">Repository</span>::<span class="f">open</span>(&amp;git_dir, work_tree)
 }
 
-<span class="k">fn</span> main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
-    <span class="k">let</span> root = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| grit_lib::error::Error::Message(&quot;missing repository path&quot;.into()))?;
-    <span class="k">let</span> repo = open_repo(&amp;root)?;
+<span class="k">fn</span> <span class="f">main</span>() -&gt; <span class="t">Result</span>&lt;(), grit_lib::error::<span class="t">Error</span>&gt; {
+    <span class="k">let</span> root = std::env::<span class="f">args</span>()
+        .<span class="f">nth</span>(<span class="n">1</span>)
+        .<span class="f">map</span>(<span class="t">PathBuf</span>::from)
+        .<span class="f">or_else</span>(|| std::env::<span class="f">current_dir</span>().<span class="f">ok</span>())
+        .<span class="f">ok_or_else</span>(|| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(<span class="s">&quot;missing repository path&quot;</span>.<span class="f">into</span>()))?;
+    <span class="k">let</span> repo = <span class="f">open_repo</span>(&amp;root)?;
     <span class="k">let</span> git_dir = &amp;repo.git_dir;
 
-    <span class="k">let</span> head = resolve_head(git_dir)?;
+    <span class="k">let</span> head = <span class="f">resolve_head</span>(git_dir)?;
     <span class="k">match</span> &amp;head {
-        grit_lib::state::HeadState::Branch { refname, oid, .. } =&gt; {
-            println!(&quot;head_symbolic={refname}&quot;);
-            <span class="k">if</span> <span class="k">let</span> Some(oid) = oid {
-                println!(&quot;head_oid={}&quot;, oid.to_hex());
+        grit_lib::state::<span class="t">HeadState</span>::<span class="t">Branch</span> { refname, oid, .. } =&gt; {
+            <span class="f">println!</span>(<span class="s">&quot;head_symbolic={refname}&quot;</span>);
+            <span class="k">if</span> <span class="k">let</span> <span class="t">Some</span>(oid) = oid {
+                <span class="f">println!</span>(<span class="s">&quot;head_oid={}&quot;</span>, oid.<span class="f">to_hex</span>());
             }
         }
-        grit_lib::state::HeadState::Detached { oid } =&gt; {
-            println!(&quot;head_detached={}&quot;, oid.to_hex());
+        grit_lib::state::<span class="t">HeadState</span>::<span class="t">Detached</span> { oid } =&gt; {
+            <span class="f">println!</span>(<span class="s">&quot;head_detached={}&quot;</span>, oid.<span class="f">to_hex</span>());
         }
-        grit_lib::state::HeadState::Invalid =&gt; println!(&quot;head_invalid=1&quot;),
+        grit_lib::state::<span class="t">HeadState</span>::<span class="t">Invalid</span> =&gt; <span class="f">println!</span>(<span class="s">&quot;head_invalid=1&quot;</span>),
     }
 
-    <span class="k">let</span> head_file = refs::read_ref_file(&amp;git_dir.join(&quot;HEAD&quot;))?;
-    <span class="k">if</span> <span class="k">let</span> Ref::Symbolic(target) = head_file {
-        println!(&quot;head_file_symbolic={target}&quot;);
+    <span class="k">let</span> head_file = refs::<span class="f">read_ref_file</span>(&amp;git_dir.<span class="f">join</span>(<span class="s">&quot;HEAD&quot;</span>))?;
+    <span class="k">if</span> <span class="k">let</span> <span class="t">Ref</span>::<span class="t">Symbolic</span>(target) = head_file {
+        <span class="f">println!</span>(<span class="s">&quot;head_file_symbolic={target}&quot;</span>);
     }
 
-    <span class="k">for</span> (name, oid) <span class="k">in</span> refs::list_refs(git_dir, &quot;refs/heads/&quot;)? {
-        println!(&quot;branch {name} {}&quot;, oid.to_hex());
+    <span class="k">for</span> (name, oid) <span class="k">in</span> refs::<span class="f">list_refs</span>(git_dir, <span class="s">&quot;refs/heads/&quot;</span>)? {
+        <span class="f">println!</span>(<span class="s">&quot;branch {name} {}&quot;</span>, oid.<span class="f">to_hex</span>());
     }
-    <span class="k">for</span> (name, oid) <span class="k">in</span> refs::list_refs(git_dir, &quot;refs/tags/&quot;)? {
-        println!(&quot;tag {name} {}&quot;, oid.to_hex());
+    <span class="k">for</span> (name, oid) <span class="k">in</span> refs::<span class="f">list_refs</span>(git_dir, <span class="s">&quot;refs/tags/&quot;</span>)? {
+        <span class="f">println!</span>(<span class="s">&quot;tag {name} {}&quot;</span>, oid.<span class="f">to_hex</span>());
     }
 
-    <span class="k">let</span> storage = <span class="k">if</span> grit_lib::reftable::is_reftable_repo(git_dir) {
-        &quot;reftable&quot;
+    <span class="k">let</span> storage = <span class="k">if</span> grit_lib::reftable::<span class="f">is_reftable_repo</span>(git_dir) {
+        <span class="s">&quot;reftable&quot;</span>
     } <span class="k">else</span> {
-        &quot;files&quot;
+        <span class="s">&quot;files&quot;</span>
     };
-    println!(&quot;ref_storage={storage}&quot;);
+    <span class="f">println!</span>(<span class="s">&quot;ref_storage={storage}&quot;</span>);
 
     <span class="k">let</span> target = head
-        .oid()
-        .cloned()
-        .ok_or_else(|| grit_lib::error::Error::Message(&quot;HEAD has no commit&quot;.into()))?;
+        .<span class="f">oid</span>()
+        .<span class="f">cloned</span>()
+        .<span class="f">ok_or_else</span>(|| grit_lib::error::<span class="t">Error</span>::<span class="t">Message</span>(<span class="s">&quot;HEAD has no commit&quot;</span>.<span class="f">into</span>()))?;
 
-    <span class="k">let</span> old = refs::resolve_ref(git_dir, DEMO_BRANCH).ok();
-    refs::write_ref(git_dir, DEMO_BRANCH, &amp;target)?;
+    <span class="k">let</span> old = refs::<span class="f">resolve_ref</span>(git_dir, <span class="t">DEMO_BRANCH</span>).<span class="f">ok</span>();
+    refs::<span class="f">write_ref</span>(git_dir, <span class="t">DEMO_BRANCH</span>, &amp;target)?;
 
-    <span class="k">let</span> zero = ObjectId::zero();
-    <span class="k">let</span> old_oid = old.as_ref().unwrap_or(&amp;zero);
-    <span class="k">let</span> identity = &quot;Library Guide &lt;guide@grit-scm.com&gt; 1735689600 +0000&quot;;
-    refs::append_reflog(
+    <span class="k">let</span> zero = <span class="t">ObjectId</span>::<span class="f">zero</span>();
+    <span class="k">let</span> old_oid = old.<span class="f">as_ref</span>().<span class="f">unwrap_or</span>(&amp;zero);
+    <span class="k">let</span> identity = <span class="s">&quot;Library Guide &lt;guide@grit-scm.com&gt; 1735689600 +0000&quot;</span>;
+    refs::<span class="f">append_reflog</span>(
         git_dir,
-        DEMO_BRANCH,
+        <span class="t">DEMO_BRANCH</span>,
         old_oid,
         &amp;target,
         identity,
-        &quot;library guide refs example&quot;,
-        <span class="k">true</span>,
+        <span class="s">&quot;library guide refs example&quot;</span>,
+        <span class="n">true</span>,
     )?;
 
-    println!(&quot;demo_ref={DEMO_BRANCH}&quot;);
-    println!(&quot;demo_oid={}&quot;, target.to_hex());
+    <span class="f">println!</span>(<span class="s">&quot;demo_ref={DEMO_BRANCH}&quot;</span>);
+    <span class="f">println!</span>(<span class="s">&quot;demo_oid={}&quot;</span>, target.<span class="f">to_hex</span>());
 
-    <span class="k">let</span> entries = read_reflog(git_dir, DEMO_BRANCH)?;
-    <span class="k">if</span> <span class="k">let</span> Some(last) = entries.last() {
-        println!(&quot;demo_reflog_new={}&quot;, last.new_oid.to_hex());
-        println!(&quot;demo_reflog_message={}&quot;, last.message);
+    <span class="k">let</span> entries = <span class="f">read_reflog</span>(git_dir, <span class="t">DEMO_BRANCH</span>)?;
+    <span class="k">if</span> <span class="k">let</span> <span class="t">Some</span>(last) = entries.<span class="f">last</span>() {
+        <span class="f">println!</span>(<span class="s">&quot;demo_reflog_new={}&quot;</span>, last.new_oid.<span class="f">to_hex</span>());
+        <span class="f">println!</span>(<span class="s">&quot;demo_reflog_message={}&quot;</span>, last.message);
     }
 
-    Ok(())
-}</code></pre></div><div class="ex"><div class="cap"><span>Run against any repository with at least one commit</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> cargo run --bin guide_refs /path/to/repo</span>
-<span class="cmd"><span class="k">$</span> git -C /path/to/repo rev-parse refs/heads/library-guide-demo</span>
-<span class="cmd"><span class="k">$</span> git -C /path/to/repo reflog show refs/heads/library-guide-demo</span></code></pre></div></aside></div></div>
+    <span class="t">Ok</span>(())
+}</code></pre></div><div class="ex"><div class="cap"><span>Run against any repository with at least one commit</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">cargo</span> run <span class="a">--bin</span> guide_refs /path/to/repo</span>
+<span class="cmd"><span class="p">$</span> <span class="f">git</span> <span class="a">-C</span> /path/to/repo rev-parse refs/heads/library-guide-demo</span>
+<span class="cmd"><span class="p">$</span> <span class="f">git</span> <span class="a">-C</span> /path/to/repo reflog show refs/heads/library-guide-demo</span></code></pre></div></aside></div></div>
 </div>
 <script type="application/json" id="docs-index">[["Docs","How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.",""],["Install grit","Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.","install/"],["Tutorial","Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.","tutorial/"],["Library quick start","Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.","library-quickstart/"],["Global options","Options that apply to every grit command.","global-options/"],["Scripting with grit","Use --json and --filter to build scripts on top of grit.","scripting/"],["Agent guide","Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.","agents/"],["grit init","Create a new, empty repository.","init/"],["grit clone","Copy a remote repository into a new directory.","clone/"],["grit status","Show where you are and what's changed. This is what plain grit runs.","status/"],["grit config","Read, set, list or remove configuration values.","config/"],["grit add","Stage changes. With no paths, stages everything.","add/"],["grit commit","Stage every change and record a new commit.","commit/"],["grit diff","Show uncommitted changes, or the change a commit introduced.","diff/"],["grit log","Show recent commits, newest first, a page at a time.","log/"],["grit shortlog","List the commits on this branch that aren't on the target branch yet.","shortlog/"],["grit show","Show a commit, tag or branch, and a summary of what it changed.","show/"],["grit branch","List branches, or create or delete one.","branch/"],["grit switch","Switch to another branch, or create one and switch to it.","switch/"],["grit merge","Merge another branch into the current one.","merge/"],["grit pick","Copy a single commit onto the current branch.","pick/"],["grit tag","List tags, or create or delete one. A new tag points at the current commit.","tag/"],["grit remote","List remotes, add one, or list refs on a remote.","remote/"],["grit fetch","Download new commits, branches and tags from a remote.","fetch/"],["grit pull","Fetch from the remote and bring the current branch up to date.","pull/"],["grit push","Publish the current branch, or your tags, to a remote.","push/"],["grit auth","Sign in to GitHub so HTTPS pushes and fetches just work.","auth/"],["grit bundle","Create, verify, and list git bundle files for offline transfer.","bundle/"],["grit update","Update grit to the latest release.","update/"],["grit skill","Print an agent skill that explains how to use grit.","skill/"],["grit completions","Generate shell completion scripts for bash, zsh, and fish.","completions/"],["grit upload-pack","Serve a fetch or clone of a repository over stdin and stdout.","upload-pack/"],["grit receive-pack","Accept a push to a repository over stdin and stdout.","receive-pack/"],["grit manager","A credential helper that stores passwords and tokens in the Windows Credential Manager.","manager/"],["Library guide","Use grit-lib from Rust — the same engine that powers the grit CLI.","library/"],["grit-lib API map","Generated index of public grit-lib modules and key types with docs.rs links.","library/api-map/"],["Reachability bitmaps","Query pack and MIDX commit bitmaps for fast object reachability and counting.","library/bitmaps/"],["Diff","Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.","library/diff/"],["Embedding grit-lib","Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.","library/embedding/"],["Network","Remote dispatch, fetch, push, and ls-remote over every transport.","library/network/"],["Object stores","Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.","library/object-stores/"],["Objects","ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.","library/objects/"],["Pack reachability bitmaps","Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).","library/pack-bitmaps/"],["Refs","Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.","library/refs/"],["Repository","Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.","library/repository/"],["Revwalk","Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.","library/revwalk/"],["Index","Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.","library/staging/"],["Benchmarks","Grit vs Git on realistic workloads, from the committed grit-bench baseline.","benchmarks/"]]</script>
 <script>

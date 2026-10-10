@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -205,35 +211,35 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 </div></div><div class="step-code intro"></div><div class="step"><span class="num">01</span><div class="content"><h2 id="add-the-dependency">Add the dependency</h2>
 
 <p>Use the <a href="https://crates.io/crates/grit-lib">latest version on crates.io</a> if the number above is stale.</p>
-</div></div><div class="step-code"><div class="ex"><div class="cap"><span>In your crate</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> cargo add grit-lib</span></code></pre></div><div class="ex"><div class="cap"><span>Or add to <code>Cargo.toml</code></span></div><pre class="code"><code>[dependencies]
-grit-lib = &quot;0.5.0&quot;</code></pre></div></div><div class="step"><span class="num">02</span><div class="content"><h2 id="example-program">Example program</h2><p>Save as <code>src/main.rs</code> (or copy from <code>grit-examples</code> in the Grit repo):</p>
+</div></div><div class="step-code"><div class="ex"><div class="cap"><span>In your crate</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">cargo</span> add grit-lib</span></code></pre></div><div class="ex"><div class="cap"><span>Or add to <code>Cargo.toml</code></span></div><pre class="code"><code><span class="k">[dependencies]</span>
+<span class="t">grit-lib</span> = <span class="s">&quot;0.5.0&quot;</span></code></pre></div></div><div class="step"><span class="num">02</span><div class="content"><h2 id="example-program">Example program</h2><p>Save as <code>src/main.rs</code> (or copy from <code>grit-examples</code> in the Grit repo):</p>
 
 </div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="c">//! Minimal grit-lib program: discover a repository and print HEAD&#x27;s commit id.</span>
 <span class="c">//!</span>
 <span class="c">//! Source for the library quick start in the docs; kept in sync via an include directive.</span>
 
-<span class="k">use</span> grit_lib::objects::{parse_commit, ObjectKind};
-<span class="k">use</span> grit_lib::repo::Repository;
+<span class="k">use</span> grit_lib::objects::{parse_commit, <span class="t">ObjectKind</span>};
+<span class="k">use</span> grit_lib::repo::<span class="t">Repository</span>;
 
-<span class="k">fn</span> main() -&gt; Result&lt;(), Box&lt;<span class="k">dyn</span> std::error::Error&gt;&gt; {
-    <span class="k">let</span> repo = Repository::discover(None)?;
-    <span class="k">let</span> head = grit_lib::refs::resolve_ref(&amp;repo.git_dir, &quot;HEAD&quot;)?;
-    <span class="k">let</span> object = repo.odb.read(&amp;head)?;
-    <span class="k">if</span> object.kind != ObjectKind::Commit {
-        <span class="k">return</span> Err(&quot;HEAD is not a commit&quot;.into());
+<span class="k">fn</span> <span class="f">main</span>() -&gt; <span class="t">Result</span>&lt;(), <span class="t">Box</span>&lt;<span class="k">dyn</span> std::error::<span class="t">Error</span>&gt;&gt; {
+    <span class="k">let</span> repo = <span class="t">Repository</span>::<span class="f">discover</span>(<span class="t">None</span>)?;
+    <span class="k">let</span> head = grit_lib::refs::<span class="f">resolve_ref</span>(&amp;repo.git_dir, <span class="s">&quot;HEAD&quot;</span>)?;
+    <span class="k">let</span> object = repo.odb.<span class="f">read</span>(&amp;head)?;
+    <span class="k">if</span> object.kind != <span class="t">ObjectKind</span>::<span class="t">Commit</span> {
+        <span class="k">return</span> <span class="t">Err</span>(<span class="s">&quot;HEAD is not a commit&quot;</span>.<span class="f">into</span>());
     }
-    <span class="k">let</span> commit = parse_commit(&amp;object.data)?;
-    println!(&quot;{head}&quot;);
-    <span class="k">let</span> subject = commit.message.lines().next().unwrap_or(&quot;&quot;);
-    <span class="k">if</span> !subject.is_empty() {
-        println!(&quot;{subject}&quot;);
+    <span class="k">let</span> commit = <span class="f">parse_commit</span>(&amp;object.data)?;
+    <span class="f">println!</span>(<span class="s">&quot;{head}&quot;</span>);
+    <span class="k">let</span> subject = commit.message.<span class="f">lines</span>().<span class="f">next</span>().<span class="f">unwrap_or</span>(<span class="s">&quot;&quot;</span>);
+    <span class="k">if</span> !subject.<span class="f">is_empty</span>() {
+        <span class="f">println!</span>(<span class="s">&quot;{subject}&quot;</span>);
     }
-    Ok(())
+    <span class="t">Ok</span>(())
 }</code></pre></div></div><div class="step"><span class="num">03</span><div class="content"><h2 id="run-it">Run it</h2><p>From the root of any Git repository with at least one commit:</p>
 
 
 <p>The first line is the full object id of <code>HEAD</code>; the second is the first line of the commit message.</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> cargo run</span></code></pre></div><div class="ex"><div class="cap"><span>Example output (your commit id will differ)</span></div><pre class="code"><code><span class="out">217c6f9a1b2c3d4e5f6789012345678901234567
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">cargo</span> run</span></code></pre></div><div class="ex"><div class="cap"><span>Example output (your commit id will differ)</span></div><pre class="code"><code><span class="out">217c6f9a1b2c3d4e5f6789012345678901234567
 Start the project</span></code></pre></div></div><div class="step"><span class="num">04</span><div class="content"><h2 id="next-steps">Next steps</h2><ul>
 <li><a href="../library/">Library guide overview</a> — longer-form guides for objects, refs, diff, and network code.</li>
 <li><a href="https://docs.rs/grit-lib">grit-lib on docs.rs</a> — API reference for <code>Repository</code> and the rest of the public surface.</li>

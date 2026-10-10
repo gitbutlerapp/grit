@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -217,48 +223,48 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="pager"><a href="../shortlog/">← grit shortlog</a><a href="../branch/">grit branch →</a></div>
 </main><aside class="col ink-col" aria-label="Examples">
 <div class="label">Examples</div>
-<div class="ex"><div class="cap"><span>Show the latest commit</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit show</span>
+<div class="ex"><div class="cap"><span>Show the latest commit</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> show</span>
 <span class="out">branch feature</span>
 <span class="out">commit cf18394a62c3f845bd9c44927a5a55e014b2a99d</span>
 <span class="out">Author: Ada Lovelace &lt;ada@example.com&gt;</span>
 <span class="out">Date:   2026-10-07 10:00:00 +0000</span>
-<span class="out"></span>
+
 <span class="out">    Say hi</span>
-<span class="out"></span>
+
 <span class="out"> main.rs |   4 +++-</span>
-<span class="out"> 1 file changed, 3 insertions(+), 1 deletion(-)</span></code></pre></div><div class="ex"><div class="cap"><span>Show what a tag points at</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit show v0.1</span></code></pre></div><div class="ex"><div class="cap"><span>Get the subject of a commit</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit show HEAD~1 --json --filter .commit.subject</span>
+<span class="out"> 1 file changed, 3 insertions(+), 1 deletion(-)</span></code></pre></div><div class="ex"><div class="cap"><span>Show what a tag points at</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> show v0.1</span></code></pre></div><div class="ex"><div class="cap"><span>Get the subject of a commit</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> show HEAD~1 <span class="a">--json</span> <span class="a">--filter</span> .commit.subject</span>
 <span class="out">&quot;Start the project&quot;</span></code></pre></div><div class="ex"><div class="cap"><span>--json output</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;kind&quot;</span>: &quot;branch&quot;,
-  <span class="k">&quot;ref_name&quot;</span>: &quot;feature&quot;,
+  <span class="k">&quot;kind&quot;</span>: <span class="s">&quot;branch&quot;</span>,
+  <span class="k">&quot;ref_name&quot;</span>: <span class="s">&quot;feature&quot;</span>,
   <span class="k">&quot;commit&quot;</span>: {
-    <span class="k">&quot;oid&quot;</span>: &quot;92501f188ae0815af09a0cef6e121eddda4113cf&quot;,
-    <span class="k">&quot;parents&quot;</span>: [&quot;919c45f33de5e5c0bd05f8ffb089f697f4644976&quot;],
+    <span class="k">&quot;oid&quot;</span>: <span class="s">&quot;92501f188ae0815af09a0cef6e121eddda4113cf&quot;</span>,
+    <span class="k">&quot;parents&quot;</span>: [<span class="s">&quot;919c45f33de5e5c0bd05f8ffb089f697f4644976&quot;</span>],
     <span class="k">&quot;author&quot;</span>: {
-      <span class="k">&quot;name&quot;</span>: &quot;Ada Lovelace&quot;,
-      <span class="k">&quot;email&quot;</span>: &quot;ada@example.com&quot;,
-      <span class="k">&quot;date&quot;</span>: &quot;2026-10-07 14:54:02 +0000&quot;
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Ada Lovelace&quot;</span>,
+      <span class="k">&quot;email&quot;</span>: <span class="s">&quot;ada@example.com&quot;</span>,
+      <span class="k">&quot;date&quot;</span>: <span class="s">&quot;2026-10-07 14:54:02 +0000&quot;</span>
     },
     <span class="k">&quot;committer&quot;</span>: {
-      <span class="k">&quot;name&quot;</span>: &quot;Ada Lovelace&quot;,
-      <span class="k">&quot;email&quot;</span>: &quot;ada@example.com&quot;,
-      <span class="k">&quot;date&quot;</span>: &quot;2026-10-07 14:54:02 +0000&quot;
+      <span class="k">&quot;name&quot;</span>: <span class="s">&quot;Ada Lovelace&quot;</span>,
+      <span class="k">&quot;email&quot;</span>: <span class="s">&quot;ada@example.com&quot;</span>,
+      <span class="k">&quot;date&quot;</span>: <span class="s">&quot;2026-10-07 14:54:02 +0000&quot;</span>
     },
-    <span class="k">&quot;subject&quot;</span>: &quot;second&quot;,
-    <span class="k">&quot;message&quot;</span>: &quot;second&quot;
+    <span class="k">&quot;subject&quot;</span>: <span class="s">&quot;second&quot;</span>,
+    <span class="k">&quot;message&quot;</span>: <span class="s">&quot;second&quot;</span>
   },
   <span class="k">&quot;stat&quot;</span>: {
     <span class="k">&quot;files&quot;</span>: [
       {
-        <span class="k">&quot;path&quot;</span>: &quot;README.md&quot;,
-        <span class="k">&quot;status&quot;</span>: &quot;modified&quot;,
-        <span class="k">&quot;insertions&quot;</span>: 1,
-        <span class="k">&quot;deletions&quot;</span>: 0,
-        <span class="k">&quot;binary&quot;</span>: false
+        <span class="k">&quot;path&quot;</span>: <span class="s">&quot;README.md&quot;</span>,
+        <span class="k">&quot;status&quot;</span>: <span class="s">&quot;modified&quot;</span>,
+        <span class="k">&quot;insertions&quot;</span>: <span class="n">1</span>,
+        <span class="k">&quot;deletions&quot;</span>: <span class="n">0</span>,
+        <span class="k">&quot;binary&quot;</span>: <span class="n">false</span>
       }
     ],
-    <span class="k">&quot;files_changed&quot;</span>: 1,
-    <span class="k">&quot;insertions&quot;</span>: 1,
-    <span class="k">&quot;deletions&quot;</span>: 0
+    <span class="k">&quot;files_changed&quot;</span>: <span class="n">1</span>,
+    <span class="k">&quot;insertions&quot;</span>: <span class="n">1</span>,
+    <span class="k">&quot;deletions&quot;</span>: <span class="n">0</span>
   }
 }</code></pre></div><div class="ex"><div class="cap"><span>Pass <a href="../global-options/"><code>--markdown</code></a> for headings, commit metadata, message body, and a diffstat table</span></div><pre class="code"><code><span class="out"># Commit `b52cca6`
 

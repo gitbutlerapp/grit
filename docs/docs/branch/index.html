@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -218,29 +224,29 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <div class="pager"><a href="../show/">← grit show</a><a href="../switch/">grit switch →</a></div>
 </main><aside class="col ink-col" aria-label="Examples">
 <div class="label">Examples</div>
-<div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit branch</span>
+<div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> branch</span>
 <span class="out">  feature</span>
 <span class="out">* main</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit branch experiment</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> branch experiment</span>
 <span class="out">Created branch experiment</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit branch -d experiment</span>
-<span class="out">Deleted branch experiment (was cf18394).</span></code></pre></div><div class="ex"><div class="cap"><span>Deleting a branch with unmerged work</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit branch -d spike</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> branch <span class="a">-d</span> experiment</span>
+<span class="out">Deleted branch experiment (was cf18394).</span></code></pre></div><div class="ex"><div class="cap"><span>Deleting a branch with unmerged work</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> branch <span class="a">-d</span> spike</span>
 <span class="out">error: the branch &#x27;spike&#x27; is not fully merged.</span>
 <span class="out">If you are sure you want to delete it, run &#x27;grit branch -D spike&#x27;</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit branch -D spike</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> branch <span class="a">-D</span> spike</span>
 <span class="out">Deleted branch spike (was a7020c2).</span></code></pre></div><div class="ex"><div class="cap"><span>Listing branches</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;action&quot;</span>: &quot;list&quot;,
-  <span class="k">&quot;current&quot;</span>: &quot;main&quot;,
+  <span class="k">&quot;action&quot;</span>: <span class="s">&quot;list&quot;</span>,
+  <span class="k">&quot;current&quot;</span>: <span class="s">&quot;main&quot;</span>,
   <span class="k">&quot;branches&quot;</span>: [
-    { <span class="k">&quot;name&quot;</span>: &quot;feature&quot;, <span class="k">&quot;current&quot;</span>: false },
-    { <span class="k">&quot;name&quot;</span>: &quot;main&quot;, <span class="k">&quot;current&quot;</span>: true }
+    { <span class="k">&quot;name&quot;</span>: <span class="s">&quot;feature&quot;</span>, <span class="k">&quot;current&quot;</span>: <span class="n">false</span> },
+    { <span class="k">&quot;name&quot;</span>: <span class="s">&quot;main&quot;</span>, <span class="k">&quot;current&quot;</span>: <span class="n">true</span> }
   ]
 }</code></pre></div><div class="ex"><div class="cap"><span>Creating a branch</span><a href="../scripting/">Scripting →</a></div><pre class="code"><code>{
-  <span class="k">&quot;action&quot;</span>: &quot;create&quot;,
-  <span class="k">&quot;name&quot;</span>: &quot;experiment&quot;
+  <span class="k">&quot;action&quot;</span>: <span class="s">&quot;create&quot;</span>,
+  <span class="k">&quot;name&quot;</span>: <span class="s">&quot;experiment&quot;</span>
 }</code></pre></div>
 <div class="see-also" id="see-also"><span>See also</span><a href="../switch/">grit switch</a><a href="../merge/">grit merge</a></div>
 </aside></div></div>

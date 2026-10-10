@@ -77,9 +77,23 @@ label = "Missing"
         main, aside = html_out.split('<aside class="col ink-col"', 1)
         self.assertIn('class="synopsis"', main)
         self.assertNotIn("<h2 id=\"examples\">", main)
-        self.assertIn('<span class="k">$</span> grit commit', aside)
+        self.assertIn('<span class="p">$</span> <span class="f">grit</span> commit', aside)
         self.assertIn("--json output", aside)
         self.assertIn('class="see-also"', aside)
+
+    def test_code_highlighting_marks_tokens_by_language(self) -> None:
+        rust = docs.highlight_rust('#[derive(Debug)]\nfn main() { let s: &\'a str = "x"; println!("{s}"); Repo::open(1)?; }\n# hidden')
+        for marked in ('<span class="a">#[derive(Debug)]</span>', '<span class="k">fn</span>', '<span class="f">main</span>',
+                       '<span class="a">&#x27;a</span>', '<span class="s">&quot;x&quot;</span>', '<span class="f">println!</span>',
+                       '<span class="t">Repo</span>', '<span class="n">1</span>'):
+            self.assertIn(marked, rust)
+        self.assertNotIn("hidden", rust)
+        console = docs.highlight_console('$ grit log --json | head -3\nabc123 output')
+        self.assertIn('<span class="f">grit</span>', console)
+        self.assertIn('<span class="a">--json</span>', console)
+        self.assertIn('<span class="f">head</span>', console)
+        self.assertIn('<span class="out">abc123 output</span>', console)
+        self.assertIn('<span class="k">&quot;a&quot;</span>: <span class="n">1</span>', docs.highlight_json('{"a": 1}'))
 
     def test_library_guide_puts_included_example_in_ink_column(self) -> None:
         site = docs.load_site(content_dir=self.content)

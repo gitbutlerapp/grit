@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -205,31 +211,31 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 </div></div><div class="step-code intro"><p class="meta">Regenerated on 2026-10-07 by running the listed commands with <code>grit</code> built from this repository (<code>cargo build --release -p grit-cli</code>), with <code>NO_COLOR=1</code> and author identity <code>Ada Lovelace &lt;ada@example.com&gt;</code>.</p></div><div class="step"><span class="num">01</span><div class="content"><h2 id="tell-grit-who-you-are">Tell grit who you are</h2><p>Every commit records an author. Set your name and email once, in your global config:</p>
 
 <p><code>grit</code> reads and writes the same config files as Git, so if you&#x27;ve already set these up for Git, you can skip this step.</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit config --global user.name &quot;Ada Lovelace&quot;</span>
-<span class="cmd"><span class="k">$</span> grit config --global user.email ada@example.com</span></code></pre></div></div><div class="step"><span class="num">02</span><div class="content"><h2 id="create-a-repository">Create a repository</h2>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> config <span class="a">--global</span> user.name <span class="s">&quot;Ada Lovelace&quot;</span></span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> config <span class="a">--global</span> user.email ada@example.com</span></code></pre></div></div><div class="step"><span class="num">02</span><div class="content"><h2 id="create-a-repository">Create a repository</h2>
 <p>To work on an existing project instead, copy it with <a href="../clone/"><code>grit clone</code></a> and skip ahead to the next section:</p>
 
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit init project</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> init project</span>
 <span class="out">Initialized empty repository in /workspace/project/.git</span>
-<span class="cmd"><span class="k">$</span> cd project</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit clone https://github.com/gitbutlerapp/grit.git</span></code></pre></div></div><div class="step"><span class="num">03</span><div class="content"><h2 id="your-home-base-grit-status">Your home base: grit status</h2><p>Running <code>grit</code> with no arguments shows where you are and what&#x27;s changed. Add a couple of files and look:</p>
+<span class="cmd"><span class="p">$</span> <span class="f">cd</span> project</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> clone https://github.com/gitbutlerapp/grit.git</span></code></pre></div></div><div class="step"><span class="num">03</span><div class="content"><h2 id="your-home-base-grit-status">Your home base: grit status</h2><p>Running <code>grit</code> with no arguments shows where you are and what&#x27;s changed. Add a couple of files and look:</p>
 
 <p>The last line always suggests the next step. You&#x27;ll come back to this screen a lot; <a href="../status/"><code>grit status</code></a> (or <code>grit st</code>) shows the same thing.</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> echo &quot;# Notes&quot; &gt; README.md</span>
-<span class="cmd"><span class="k">$</span> echo &quot;fn main() {}&quot; &gt; main.rs</span>
-<span class="cmd"><span class="k">$</span> grit</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">echo</span> <span class="s">&quot;# Notes&quot;</span> <span class="k">&gt;</span> README.md</span>
+<span class="cmd"><span class="p">$</span> <span class="f">echo</span> <span class="s">&quot;fn main() {}&quot;</span> <span class="k">&gt;</span> main.rs</span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span></span>
 <span class="out">On main — no commits yet</span>
-<span class="out"></span>
+
 <span class="out">Untracked</span>
 <span class="out">  ?  untracked     README.md</span>
 <span class="out">  ?  untracked     main.rs</span>
-<span class="out"></span>
+
 <span class="out">→ grit add &lt;file&gt; to stage</span></code></pre></div></div><div class="step"><span class="num">04</span><div class="content"><h2 id="record-a-commit">Record a commit</h2><p><a href="../commit/"><code>grit commit</code></a> stages every change in the working tree and records it in one step:</p>
 
 <p>There is no separate staging step to remember. <a href="../add/"><code>grit add</code></a> exists for when you want to stage particular files and check them in <code>grit status</code> first, but <code>grit commit</code> always records every change.</p>
 
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit commit &quot;Start the project&quot;</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> commit <span class="s">&quot;Start the project&quot;</span></span>
 <span class="out">[main 310fdb0] Start the project</span>
-<span class="out">2 changes committed</span></code></pre></div><div class="ex"><div class="cap"><span>Look at the history with <a href="../log/"><code>grit log</code></a></span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit log</span>
+<span class="out">2 changes committed</span></code></pre></div><div class="ex"><div class="cap"><span>Look at the history with <a href="../log/"><code>grit log</code></a></span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> log</span>
 <span class="out">  310fdb0  ada  just now  Start the project</span></code></pre></div></div><div class="step"><span class="num">05</span><div class="content"><h2 id="work-on-a-branch">Work on a branch</h2>
 <p>Make a change and look at it with <a href="../diff/"><code>grit diff</code></a> before committing:</p>
 
@@ -237,34 +243,34 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 
 <p><a href="../show/"><code>grit show</code></a> displays a commit, its message and the files it changed. With no argument, it shows the latest commit:</p>
 
-</div></div><div class="step-code"><div class="ex"><div class="cap"><span>Create a branch and switch to it with <a href="../switch/"><code>grit switch -c</code></a></span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit switch -c feature</span>
-<span class="out">Created and switched to branch feature</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> printf &#x27;fn main() {\n    println!(&quot;hi&quot;);\n}\n&#x27; &gt; main.rs</span>
-<span class="cmd"><span class="k">$</span> grit diff</span>
-<span class="out"></span>
+</div></div><div class="step-code"><div class="ex"><div class="cap"><span>Create a branch and switch to it with <a href="../switch/"><code>grit switch -c</code></a></span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> switch <span class="a">-c</span> feature</span>
+<span class="out">Created and switched to branch feature</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">printf</span> <span class="s">&#x27;fn main() {\n    println!(&quot;hi&quot;);\n}\n&#x27;</span> <span class="k">&gt;</span> main.rs</span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> diff</span>
+
 <span class="out">main.rs</span>
 <span class="out">@@ -1 +1 @@</span>
 <span class="out"> 1    │ - fn main() {}</span>
 <span class="out">    1 │ + fn main() {</span>
 <span class="out">    2 │ +     println!(&quot;hi&quot;);</span>
-<span class="out">    3 │ + }</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit commit &quot;Say hi&quot;</span>
+<span class="out">    3 │ + }</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> commit <span class="s">&quot;Say hi&quot;</span></span>
 <span class="out">[feature 2e409e2] Say hi</span>
-<span class="out">1 change committed</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit show</span>
+<span class="out">1 change committed</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> show</span>
 <span class="out">branch feature</span>
 <span class="out">commit 2e409e26f8b370ea1928a8fb93dcf2e025418e1f</span>
 <span class="out">Author: Ada Lovelace &lt;ada@example.com&gt;</span>
 <span class="out">Date:   2026-10-07 14:55:47 +0000</span>
-<span class="out"></span>
+
 <span class="out">    Say hi</span>
-<span class="out"></span>
+
 <span class="out"> main.rs |   4 +++-</span>
 <span class="out"> 1 file changed, 3 insertions(+), 1 deletion(-)</span></code></pre></div></div><div class="step"><span class="num">06</span><div class="content"><h2 id="merge-it-back">Merge it back</h2><p>Switch back to <code>main</code> and <a href="../merge/">merge</a> the branch in. Nothing else has happened on <code>main</code>, so <code>grit</code> just moves <code>main</code> forward:</p>
 
 
 <p><code>grit branch -d</code> refuses to delete a branch whose commits haven&#x27;t been merged into the branch you&#x27;re on. Use <code>-D</code> when you really mean it.</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit switch main</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> switch main</span>
 <span class="out">Switched to branch main</span>
-<span class="cmd"><span class="k">$</span> grit merge feature</span>
-<span class="out">Fast-forwarded feature → 2e409e2</span></code></pre></div><div class="ex"><div class="cap"><span>The branch is done, so <a href="../branch/">delete it</a></span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> grit branch -d feature</span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> merge feature</span>
+<span class="out">Fast-forwarded feature → 2e409e2</span></code></pre></div><div class="ex"><div class="cap"><span>The branch is done, so <a href="../branch/">delete it</a></span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> branch <span class="a">-d</span> feature</span>
 <span class="out">Deleted branch feature (was 2e409e2).</span></code></pre></div></div><div class="step"><span class="num">07</span><div class="content"><h2 id="share-it-with-a-remote">Share it with a remote</h2><p>A remote is another copy of the repository, usually on a server. Add one called <code>origin</code> with <a href="../remote/"><code>grit remote add</code></a>, then <a href="../push/">push</a>:</p>
 
 <p><code>grit push</code> sends the current branch to a branch with the same name on <code>origin</code>, creating it if needed. There are no upstream flags to set. For GitHub over HTTPS, <a href="../auth/"><code>grit auth</code></a> signs you in, and <code>grit</code> offers to run it if a push fails for lack of credentials.</p>
@@ -272,22 +278,22 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 
 <p>If someone pushed before you, <code>grit push</code> is rejected and tells you what to do:</p>
 
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit remote add origin https://github.com/ada/project.git</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> remote add origin https://github.com/ada/project.git</span>
 <span class="out">Added remote origin → https://github.com/ada/project.git</span>
-<span class="cmd"><span class="k">$</span> grit push</span>
-<span class="out">  pushed main → origin refs/heads/main</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit pull</span>
-<span class="out">Merged origin/main into the current branch (91275a2)</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit push</span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> push</span>
+<span class="out">  pushed main → origin refs/heads/main</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> pull</span>
+<span class="out">Merged origin/main into the current branch (91275a2)</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> push</span>
 <span class="out">  rejected origin refs/heads/main: not a fast-forward — run `grit pull` first</span></code></pre></div></div><div class="step"><span class="num">08</span><div class="content"><h2 id="tag-a-release">Tag a release</h2><p><a href="../tag/"><code>grit tag</code></a> marks the current commit, and <code>grit push --tags</code> publishes your tags:</p>
 
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit tag v0.1</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> tag v0.1</span>
 <span class="out">Created tag v0.1</span>
-<span class="cmd"><span class="k">$</span> grit push --tags</span>
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> push <span class="a">--tags</span></span>
 <span class="out">  pushed --tags → origin refs/tags/v0.1</span></code></pre></div></div><div class="step"><span class="num">09</span><div class="content"><h2 id="when-things-conflict">When things conflict</h2><p><code>grit merge</code>, <code>grit pull</code> and <code>grit pick</code> never leave a half-finished merge behind. If the two sides change the same lines, <code>grit</code> lists the conflicting files and leaves your branch and working tree as they were. To resolve the conflict, run the merge with <code>git</code>, fix the files and commit. Conflict resolution in <code>grit</code> itself is on the roadmap.</p>
 <p><code>grit</code> also refuses to switch branches, merge or pull while you have uncommitted changes, so work in progress can&#x27;t get mixed into a merge. Commit first.</p>
 </div></div><div class="step-code"></div><div class="step"><span class="num">10</span><div class="content"><h2 id="scripting">Scripting</h2><p>Every command takes <code>--json</code> and prints a single JSON object, which is handy for scripts and agents. <code>--filter</code> picks out the part you need:</p>
 
 <p>See <a href="../scripting/">Scripting with grit</a> for details, and each command&#x27;s page for its JSON fields.</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit status --json --filter &#x27;{branch, clean}&#x27;</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> status <span class="a">--json</span> <span class="a">--filter</span> <span class="s">&#x27;{branch, clean}&#x27;</span></span>
 <span class="out">{</span>
 <span class="out">  &quot;branch&quot;: &quot;main&quot;,</span>
 <span class="out">  &quot;clean&quot;: true</span>

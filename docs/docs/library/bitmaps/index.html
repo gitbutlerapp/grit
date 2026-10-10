@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -219,94 +225,94 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <span class="c">//! Usage: `cargo run --example count_reachable -- &lt;repo&gt; &lt;commit&gt;`</span>
 
 <span class="k">use</span> std::env;
-<span class="k">use</span> std::process::ExitCode;
-<span class="k">use</span> std::sync::Arc;
+<span class="k">use</span> std::process::<span class="t">ExitCode</span>;
+<span class="k">use</span> std::sync::<span class="t">Arc</span>;
 
-<span class="k">use</span> grit_lib::bitmap_walk::{BitmapWalkError, ReachabilityQuery};
-<span class="k">use</span> grit_lib::objects::ObjectId;
-<span class="k">use</span> grit_lib::pack_bitmap::BitmapIndex;
-<span class="k">use</span> grit_lib::repo::Repository;
-<span class="k">use</span> grit_lib::rev_list::MissingAction;
+<span class="k">use</span> grit_lib::bitmap_walk::{<span class="t">BitmapWalkError</span>, <span class="t">ReachabilityQuery</span>};
+<span class="k">use</span> grit_lib::objects::<span class="t">ObjectId</span>;
+<span class="k">use</span> grit_lib::pack_bitmap::<span class="t">BitmapIndex</span>;
+<span class="k">use</span> grit_lib::repo::<span class="t">Repository</span>;
+<span class="k">use</span> grit_lib::rev_list::<span class="t">MissingAction</span>;
 <span class="k">use</span> grit_lib::rev_parse::resolve_revision_for_range_end;
 
-<span class="k">fn</span> main() -&gt; ExitCode {
-    <span class="k">let</span> <span class="k">mut</span> args = env::args().skip(1);
-    <span class="k">let</span> Some(repo_path) = args.next() <span class="k">else</span> {
-        eprintln!(&quot;usage: count_reachable &lt;repo&gt; &lt;commit&gt;&quot;);
-        <span class="k">return</span> ExitCode::from(2);
+<span class="k">fn</span> <span class="f">main</span>() -&gt; <span class="t">ExitCode</span> {
+    <span class="k">let</span> <span class="k">mut</span> args = env::<span class="f">args</span>().<span class="f">skip</span>(<span class="n">1</span>);
+    <span class="k">let</span> <span class="t">Some</span>(repo_path) = args.<span class="f">next</span>() <span class="k">else</span> {
+        <span class="f">eprintln!</span>(<span class="s">&quot;usage: count_reachable &lt;repo&gt; &lt;commit&gt;&quot;</span>);
+        <span class="k">return</span> <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">2</span>);
     };
-    <span class="k">let</span> Some(rev) = args.next() <span class="k">else</span> {
-        eprintln!(&quot;usage: count_reachable &lt;repo&gt; &lt;commit&gt;&quot;);
-        <span class="k">return</span> ExitCode::from(2);
-    };
-
-    <span class="k">let</span> repo = <span class="k">match</span> Repository::discover(Some(repo_path.as_ref())) {
-        Ok(r) =&gt; r,
-        Err(err) =&gt; {
-            eprintln!(&quot;open repository: {err}&quot;);
-            <span class="k">return</span> ExitCode::from(1);
-        }
-    };
-    <span class="k">let</span> commit: ObjectId = <span class="k">match</span> resolve_revision_for_range_end(&amp;repo, &amp;rev) {
-        Ok(oid) =&gt; oid,
-        Err(err) =&gt; {
-            eprintln!(&quot;resolve {rev}: {err}&quot;);
-            <span class="k">return</span> ExitCode::from(1);
-        }
+    <span class="k">let</span> <span class="t">Some</span>(rev) = args.<span class="f">next</span>() <span class="k">else</span> {
+        <span class="f">eprintln!</span>(<span class="s">&quot;usage: count_reachable &lt;repo&gt; &lt;commit&gt;&quot;</span>);
+        <span class="k">return</span> <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">2</span>);
     };
 
-    <span class="k">let</span> index: Arc&lt;BitmapIndex&gt; = <span class="k">match</span> BitmapIndex::open(&amp;repo) {
-        Ok(Some(idx)) =&gt; idx,
-        Ok(None) =&gt; {
-            eprintln!(&quot;no reachability bitmap in this repository&quot;);
-            <span class="k">return</span> ExitCode::from(1);
+    <span class="k">let</span> repo = <span class="k">match</span> <span class="t">Repository</span>::<span class="f">discover</span>(<span class="t">Some</span>(repo_path.<span class="f">as_ref</span>())) {
+        <span class="t">Ok</span>(r) =&gt; r,
+        <span class="t">Err</span>(err) =&gt; {
+            <span class="f">eprintln!</span>(<span class="s">&quot;open repository: {err}&quot;</span>);
+            <span class="k">return</span> <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">1</span>);
         }
-        Err(err) =&gt; {
-            eprintln!(&quot;open bitmap: {err}&quot;);
-            <span class="k">return</span> ExitCode::from(1);
+    };
+    <span class="k">let</span> commit: <span class="t">ObjectId</span> = <span class="k">match</span> <span class="f">resolve_revision_for_range_end</span>(&amp;repo, &amp;rev) {
+        <span class="t">Ok</span>(oid) =&gt; oid,
+        <span class="t">Err</span>(err) =&gt; {
+            <span class="f">eprintln!</span>(<span class="s">&quot;resolve {rev}: {err}&quot;</span>);
+            <span class="k">return</span> <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">1</span>);
         }
     };
 
-    <span class="k">let</span> query = ReachabilityQuery {
+    <span class="k">let</span> index: <span class="t">Arc</span>&lt;<span class="t">BitmapIndex</span>&gt; = <span class="k">match</span> <span class="t">BitmapIndex</span>::<span class="f">open</span>(&amp;repo) {
+        <span class="t">Ok</span>(<span class="t">Some</span>(idx)) =&gt; idx,
+        <span class="t">Ok</span>(<span class="t">None</span>) =&gt; {
+            <span class="f">eprintln!</span>(<span class="s">&quot;no reachability bitmap in this repository&quot;</span>);
+            <span class="k">return</span> <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">1</span>);
+        }
+        <span class="t">Err</span>(err) =&gt; {
+            <span class="f">eprintln!</span>(<span class="s">&quot;open bitmap: {err}&quot;</span>);
+            <span class="k">return</span> <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">1</span>);
+        }
+    };
+
+    <span class="k">let</span> query = <span class="t">ReachabilityQuery</span> {
         wants: &amp;[commit],
         haves: &amp;[],
-        filter: None,
+        filter: <span class="t">None</span>,
     };
-    <span class="k">match</span> index.reachability(&amp;repo, query, MissingAction::Error) {
-        Ok(set) =&gt; {
-            println!(&quot;reachable objects: {}&quot;, set.count());
-            println!(
-                &quot;  commits: {}&quot;,
-                set.count_by_kind(grit_lib::objects::ObjectKind::Commit)
-                    .unwrap_or(0)
+    <span class="k">match</span> index.<span class="f">reachability</span>(&amp;repo, query, <span class="t">MissingAction</span>::<span class="t">Error</span>) {
+        <span class="t">Ok</span>(set) =&gt; {
+            <span class="f">println!</span>(<span class="s">&quot;reachable objects: {}&quot;</span>, set.<span class="f">count</span>());
+            <span class="f">println!</span>(
+                <span class="s">&quot;  commits: {}&quot;</span>,
+                set.<span class="f">count_by_kind</span>(grit_lib::objects::<span class="t">ObjectKind</span>::<span class="t">Commit</span>)
+                    .<span class="f">unwrap_or</span>(<span class="n">0</span>)
             );
-            println!(
-                &quot;  trees: {}&quot;,
-                set.count_by_kind(grit_lib::objects::ObjectKind::Tree)
-                    .unwrap_or(0)
+            <span class="f">println!</span>(
+                <span class="s">&quot;  trees: {}&quot;</span>,
+                set.<span class="f">count_by_kind</span>(grit_lib::objects::<span class="t">ObjectKind</span>::<span class="t">Tree</span>)
+                    .<span class="f">unwrap_or</span>(<span class="n">0</span>)
             );
-            println!(
-                &quot;  blobs: {}&quot;,
-                set.count_by_kind(grit_lib::objects::ObjectKind::Blob)
-                    .unwrap_or(0)
+            <span class="f">println!</span>(
+                <span class="s">&quot;  blobs: {}&quot;</span>,
+                set.<span class="f">count_by_kind</span>(grit_lib::objects::<span class="t">ObjectKind</span>::<span class="t">Blob</span>)
+                    .<span class="f">unwrap_or</span>(<span class="n">0</span>)
             );
-            println!(
-                &quot;  tags: {}&quot;,
-                set.count_by_kind(grit_lib::objects::ObjectKind::Tag)
-                    .unwrap_or(0)
+            <span class="f">println!</span>(
+                <span class="s">&quot;  tags: {}&quot;</span>,
+                set.<span class="f">count_by_kind</span>(grit_lib::objects::<span class="t">ObjectKind</span>::<span class="t">Tag</span>)
+                    .<span class="f">unwrap_or</span>(<span class="n">0</span>)
             );
-            ExitCode::SUCCESS
+            <span class="t">ExitCode</span>::<span class="t">SUCCESS</span>
         }
-        Err(BitmapWalkError::Unsupported(_)) =&gt; {
-            eprintln!(&quot;bitmap walk unsupported for this query (use rev-list without bitmaps)&quot;);
-            ExitCode::from(1)
+        <span class="t">Err</span>(<span class="t">BitmapWalkError</span>::<span class="t">Unsupported</span>(_)) =&gt; {
+            <span class="f">eprintln!</span>(<span class="s">&quot;bitmap walk unsupported for this query (use rev-list without bitmaps)&quot;</span>);
+            <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">1</span>)
         }
-        Err(err) =&gt; {
-            eprintln!(&quot;bitmap walk failed: {err}&quot;);
-            ExitCode::from(1)
+        <span class="t">Err</span>(err) =&gt; {
+            <span class="f">eprintln!</span>(<span class="s">&quot;bitmap walk failed: {err}&quot;</span>);
+            <span class="t">ExitCode</span>::<span class="f">from</span>(<span class="n">1</span>)
         }
     }
-}</code></pre></div><div class="ex"><div class="cap"><span>Run against a repository with a pack bitmap (<code>git repack -adb</code>)</span></div><pre class="code"><code><span class="cmd"><span class="k">$</span> cargo run --example count_reachable -- /path/to/repo HEAD</span></code></pre></div></aside></div></div>
+}</code></pre></div><div class="ex"><div class="cap"><span>Run against a repository with a pack bitmap (<code>git repack -adb</code>)</span></div><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">cargo</span> run <span class="a">--example</span> count_reachable -- /path/to/repo HEAD</span></code></pre></div></aside></div></div>
 </div>
 <script type="application/json" id="docs-index">[["Docs","How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.",""],["Install grit","Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.","install/"],["Tutorial","Fifteen minutes with grit. Create a repository, record some changes, work on a branch, and share it with a remote.","tutorial/"],["Library quick start","Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.","library-quickstart/"],["Global options","Options that apply to every grit command.","global-options/"],["Scripting with grit","Use --json and --filter to build scripts on top of grit.","scripting/"],["Agent guide","Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.","agents/"],["grit init","Create a new, empty repository.","init/"],["grit clone","Copy a remote repository into a new directory.","clone/"],["grit status","Show where you are and what's changed. This is what plain grit runs.","status/"],["grit config","Read, set, list or remove configuration values.","config/"],["grit add","Stage changes. With no paths, stages everything.","add/"],["grit commit","Stage every change and record a new commit.","commit/"],["grit diff","Show uncommitted changes, or the change a commit introduced.","diff/"],["grit log","Show recent commits, newest first, a page at a time.","log/"],["grit shortlog","List the commits on this branch that aren't on the target branch yet.","shortlog/"],["grit show","Show a commit, tag or branch, and a summary of what it changed.","show/"],["grit branch","List branches, or create or delete one.","branch/"],["grit switch","Switch to another branch, or create one and switch to it.","switch/"],["grit merge","Merge another branch into the current one.","merge/"],["grit pick","Copy a single commit onto the current branch.","pick/"],["grit tag","List tags, or create or delete one. A new tag points at the current commit.","tag/"],["grit remote","List remotes, add one, or list refs on a remote.","remote/"],["grit fetch","Download new commits, branches and tags from a remote.","fetch/"],["grit pull","Fetch from the remote and bring the current branch up to date.","pull/"],["grit push","Publish the current branch, or your tags, to a remote.","push/"],["grit auth","Sign in to GitHub so HTTPS pushes and fetches just work.","auth/"],["grit bundle","Create, verify, and list git bundle files for offline transfer.","bundle/"],["grit update","Update grit to the latest release.","update/"],["grit skill","Print an agent skill that explains how to use grit.","skill/"],["grit completions","Generate shell completion scripts for bash, zsh, and fish.","completions/"],["grit upload-pack","Serve a fetch or clone of a repository over stdin and stdout.","upload-pack/"],["grit receive-pack","Accept a push to a repository over stdin and stdout.","receive-pack/"],["grit manager","A credential helper that stores passwords and tokens in the Windows Credential Manager.","manager/"],["Library guide","Use grit-lib from Rust — the same engine that powers the grit CLI.","library/"],["grit-lib API map","Generated index of public grit-lib modules and key types with docs.rs links.","library/api-map/"],["Reachability bitmaps","Query pack and MIDX commit bitmaps for fast object reachability and counting.","library/bitmaps/"],["Diff","Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.","library/diff/"],["Embedding grit-lib","Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.","library/embedding/"],["Network","Remote dispatch, fetch, push, and ls-remote over every transport.","library/network/"],["Object stores","Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.","library/object-stores/"],["Objects","ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.","library/objects/"],["Pack reachability bitmaps","Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).","library/pack-bitmaps/"],["Refs","Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.","library/refs/"],["Repository","Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.","library/repository/"],["Revwalk","Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.","library/revwalk/"],["Index","Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.","library/staging/"],["Benchmarks","Grit vs Git on realistic workloads, from the committed grit-bench baseline.","benchmarks/"]]</script>
 <script>

@@ -85,9 +85,15 @@ h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
 .content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
 .content table.rows-2 td:first-child{width:230px}
 .content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.content .code code{background:none;padding:0;border-radius:0;color:inherit;font:inherit}
 .code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
 .code code{font:inherit}
-.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.code .cmd{color:var(--bg)}.code .out{color:var(--ink-muted)}
+.code .p,.code .k{color:var(--accent)}
+.code .c{color:var(--ink-muted);font-style:italic}
+.code .s{color:#b7c98f}.code .n{color:#e8b96d}.code .t{color:#86c3b8}
+.code .f{color:#f3d8a2}.code .a{color:#c8a6d8}
+.code .cmd .f{color:var(--bg);font-weight:700}.code .cmd .a{color:#e8b96d}
 .synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
 .pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
 .pager a{text-decoration:none}
@@ -214,17 +220,17 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <p>Plain <code>grit</code> with no subcommand is the same as <a href="../status/"><code>grit status</code></a>; <code>--json</code> works there too:</p>
 
 <p>See <a href="../scripting/">Scripting with grit</a> for more <code>--filter</code> patterns. Per-command keys are documented under <a href="../global-options/">The grit CLI</a> command pages.</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit status --json --filter &#x27;{branch, clean}&#x27;</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> status <span class="a">--json</span> <span class="a">--filter</span> <span class="s">&#x27;{branch, clean}&#x27;</span></span>
 <span class="out">{</span>
 <span class="out">  &quot;branch&quot;: &quot;main&quot;,</span>
 <span class="out">  &quot;clean&quot;: false</span>
 <span class="out">}</span>
-<span class="out"></span>
-<span class="cmd"><span class="k">$</span> grit log --json --filter &#x27;.commits[].subject&#x27;</span>
+
+<span class="cmd"><span class="p">$</span> <span class="f">grit</span> log <span class="a">--json</span> <span class="a">--filter</span> <span class="s">&#x27;.commits[].subject&#x27;</span></span>
 <span class="out">[</span>
 <span class="out">  &quot;Say hi&quot;,</span>
 <span class="out">  &quot;Start the project&quot;</span>
-<span class="out">]</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit --json --filter &#x27;{branch, clean}&#x27;</span>
+<span class="out">]</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> <span class="a">--json</span> <span class="a">--filter</span> <span class="s">&#x27;{branch, clean}&#x27;</span></span>
 <span class="out">{</span>
 <span class="out">  &quot;branch&quot;: &quot;main&quot;,</span>
 <span class="out">  &quot;clean&quot;: false</span>
@@ -234,19 +240,19 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 
 <p>In <strong>human</strong> mode, errors print to <strong>stderr</strong> and stdout stays empty:</p>
 
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit commit --json</span>
-<span class="out">{&quot;error&quot;:&quot;provide a commit message, e.g. grit commit \&quot;what changed\&quot;&quot;}</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit status --json --filter &#x27;invalid!!!&#x27;</span>
-<span class="out">{&quot;error&quot;:&quot;invalid filter \&quot;invalid!!!\&quot;: [(File { code: \&quot;invalid!!!\&quot;, path: () }, Parse([(Nothing, \&quot;!!!\&quot;)]))]&quot;}</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit commit</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> commit <span class="a">--json</span></span>
+<span class="out">{&quot;error&quot;:&quot;provide a commit message, e.g. grit commit \&quot;what changed\&quot;&quot;}</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> status <span class="a">--json</span> <span class="a">--filter</span> <span class="s">&#x27;invalid!!!&#x27;</span></span>
+<span class="out">{&quot;error&quot;:&quot;invalid filter \&quot;invalid!!!\&quot;: [(File { code: \&quot;invalid!!!\&quot;, path: () }, Parse([(Nothing, \&quot;!!!\&quot;)]))]&quot;}</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> commit</span>
 <span class="out">error: provide a commit message, e.g. grit commit &quot;what changed&quot;</span></code></pre></div></div><div class="step"><span class="num">03</span><div class="content"><h2 id="exit-codes">Exit codes</h2><div class="table"><table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody><tr><td><strong>0</strong></td><td>Success (including some jq filters that evaluate to <code>null</code> when a path is missing).</td></tr><tr><td><strong>1</strong></td><td>Command failed (missing repo, rejected push, validation error, and similar). With <code>--json</code>, stdout still contains <code>{&quot;error&quot;: &quot;…&quot;}</code>.</td></tr><tr><td><strong>2</strong></td><td>Usage error (unknown option or subcommand). Clap prints help to stderr; there is no JSON error object on stdout.</td></tr></tbody></table></div>
 
 
 <p><a href="../push/"><code>grit push</code></a> can exit <strong>1</strong> even after printing a full JSON outcome when a ref was rejected (same idea as Git: the outcome is reported, but the operation failed).</p>
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit --nope</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> <span class="a">--nope</span></span>
 <span class="out">error: unexpected argument &#x27;--nope&#x27; found</span>
-<span class="out"></span>
+
 <span class="out">Usage: grit [OPTIONS] [COMMAND]</span>
-<span class="out"></span>
-<span class="out">For more information, try &#x27;--help&#x27;.</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit status --filter &#x27;.branch&#x27;</span>
+
+<span class="out">For more information, try &#x27;--help&#x27;.</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> status <span class="a">--filter</span> <span class="s">&#x27;.branch&#x27;</span></span>
 <span class="out">error: --filter requires --json</span></code></pre></div></div><div class="step"><span class="num">04</span><div class="content"><h2 id="color-and-terminal-detection">Color and terminal detection</h2><p>Human output uses ANSI color only when <strong>stdout is a terminal</strong>, the environment supports ANSI (<code>grit_lib::terminal::ansi_supported()</code>), and <strong><code>NO_COLOR</code> is unset</strong> (<a href="https://no-color.org">no-color.org</a>). Piped or redirected stdout is plain text; set <code>NO_COLOR=1</code> to force plain text on a TTY.</p>
 <p>JSON mode never depends on color; always pass <code>--json</code> for machines.</p>
 </div></div><div class="step-code"></div><div class="step"><span class="num">05</span><div class="content"><h2 id="stay-non-interactive">Stay non-interactive</h2><p><code>grit</code> does <strong>not</strong> open an external editor for commit messages. <a href="../commit/"><code>grit commit</code></a> requires a message on the command line (positional or <code>-m</code>); there is no <code>$GIT_EDITOR</code> path.</p>
@@ -259,11 +265,11 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
 <p>These speak binary or line protocols on stdin/stdout and have <strong>no</strong> <code>--json</code> mode: <a href="../manager/"><code>grit manager</code></a>, <a href="../upload-pack/"><code>grit upload-pack</code></a>, <a href="../receive-pack/"><code>grit receive-pack</code></a>. Agents should not wrap them as JSON commands.</p>
 <p><code>-V</code> / <code>--version</code> prints a version string and does not emit JSON even if <code>--json</code> is passed:</p>
 
-</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit auth logout --json</span>
+</div></div><div class="step-code"><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> auth logout <span class="a">--json</span></span>
 <span class="out">{</span>
 <span class="out">  &quot;logged_out&quot;: false,</span>
 <span class="out">  &quot;host&quot;: &quot;github.com&quot;</span>
-<span class="out">}</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="k">$</span> grit --json --version</span>
+<span class="out">}</span></code></pre></div><div class="ex"><pre class="code"><code><span class="cmd"><span class="p">$</span> <span class="f">grit</span> <span class="a">--json</span> <span class="a">--version</span></span>
 <span class="out">grit 0.5.1</span></code></pre></div></div><div class="step"><span class="num">06</span><div class="content"><h2 id="credentials-https-github">Credentials (HTTPS GitHub)</h2><p>For <code>https://github.com</code> remotes, sign in once with <a href="../auth/"><code>grit auth</code></a>. Grit uses GitHub&#x27;s device flow, then stores an access token through your configured <strong><code>credential.helper</code></strong> (same mechanism as Git). Override the OAuth app id with <code>GRIT_GITHUB_CLIENT_ID</code> or <code>grit config --global grit.githubClientId …</code>.</p>
 <p>Sign out with <code>grit auth logout</code>. You need a credential helper configured (for example <code>grit config --global credential.helper store</code> on Linux — see the <a href="../auth/"><code>grit auth</code></a> page).</p>
 <p>SSH remotes do not use the GitHub device-flow token; they can still block on SSH prompts (see the SSH row above).</p>
