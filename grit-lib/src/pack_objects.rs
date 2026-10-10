@@ -393,6 +393,25 @@ pub fn build_pack_from_send_list(
     serialize_pack_with_deltas(odb, &plan, opts)
 }
 
+/// Object list for a local fetch (remote source, local have boundary).
+pub(crate) fn send_list_for_local_fetch(
+    source_odb: &Odb,
+    have_odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    have_shallow: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let have_closure = reachable_closure(have_odb, haves, &HashSet::new(), true, have_shallow)?;
+    collect_reachable_excluding(
+        source_odb,
+        wants,
+        &have_closure,
+        false,
+        source_shallow,
+    )
+}
+
 /// Build a pack for local fetch: enumerate haves on `have_odb`, read payloads from `source_odb`.
 pub(crate) fn build_pack_for_local_fetch(
     source_odb: &Odb,

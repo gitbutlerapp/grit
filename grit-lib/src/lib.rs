@@ -175,6 +175,7 @@ pub mod index_pack;
 pub mod init_filesystem;
 pub mod interpret_trailers;
 pub mod line_log;
+pub(crate) mod local_object_copy;
 pub mod mailmap;
 pub mod merge_base;
 pub mod merge_diff;

@@ -236,6 +236,77 @@ pub use crate::pack_objects::{
 
 pub(crate) use crate::pack_objects::build_pack_for_local_fetch;
 
+
+/// Copy objects for a local fetch: link remote packfiles when possible, then pack any remainder.
+#[allow(clippy::too_many_arguments)]
+fn copy_objects_for_local_fetch(
+    remote_git_dir: &Path,
+    local_git_dir: &Path,
+    remote_odb: &Odb,
+    local_odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    have_shallow: &HashSet<ObjectId>,
+    allow_bulk_link: bool,
+    opts: &PackBuildOptions,
+) -> Result<HashSet<ObjectId>> {
+    use crate::local_object_copy::{
+        linked_object_set, refresh_local_odb_after_link, try_satisfy_via_object_link,
+    };
+    use crate::pack_objects::send_list_for_local_fetch;
+
+    let send = send_list_for_local_fetch(
+        remote_odb,
+        local_odb,
+        wants,
+        haves,
+        source_shallow,
+        have_shallow,
+    )?;
+
+    let remote_objects = remote_git_dir.join("objects");
+    let local_objects = local_git_dir.join("objects");
+    if !opts.thin
+        && allow_bulk_link
+        && try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, &send)?
+    {
+        return Ok(linked_object_set(local_odb, &send));
+    }
+
+    let still_missing: Vec<ObjectId> = send
+        .iter()
+        .copied()
+        .filter(|oid| !local_odb.exists(oid))
+        .collect();
+    if still_missing.is_empty() {
+        return Ok(linked_object_set(local_odb, &send));
+    }
+
+    let pack = build_pack_for_local_fetch(
+        remote_odb,
+        &still_missing,
+        local_odb,
+        haves,
+        source_shallow,
+        have_shallow,
+        opts,
+    )?;
+    let ingested = crate::index_pack::ingest_received_pack(
+        pack,
+        local_odb,
+        &crate::index_pack::IngestPackOptions {
+            fix_thin: true,
+            ..Default::default()
+        },
+    )?;
+    refresh_local_odb_after_link(local_odb);
+    let mut out = linked_object_set(local_odb, &send);
+    out.extend(ingested.object_ids);
+    Ok(out)
+}
+
+
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
 /// `git index-pack --fix-thin`.
 /// Expand a thin on-disk pack, returning the path to the pack bytes to index.
@@ -580,24 +651,18 @@ pub fn fetch_local(
     if !wants.is_empty() && !opts.dry_run {
         let remote_cfg = config_for_git_dir(remote_git_dir);
         let pack_opts = PackBuildOptions::for_local_copy(remote_cfg.as_ref());
-        let pack = build_pack_for_local_fetch(
+        pack_oids = copy_objects_for_local_fetch(
+            remote_git_dir,
+            local_git_dir,
             &remote_odb,
-            &wants,
             &local_odb,
+            &wants,
             &haves,
             &remote_shallow,
             &local_shallow,
+            true,
             &pack_opts,
         )?;
-        pack_oids = crate::index_pack::ingest_received_pack(
-            pack,
-            &local_odb,
-            &crate::index_pack::IngestPackOptions {
-                fix_thin: true,
-                ..Default::default()
-            },
-        )?
-        .object_ids;
     }
 
     if opts.initial_remote_fetch && !remote_shallow.is_empty() && !opts.dry_run {
