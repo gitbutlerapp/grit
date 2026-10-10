@@ -148,6 +148,7 @@ mod ewah_bitmap;
 pub mod ewah_bench {
     include!("ewah_bench_api.rs");
 }
+pub mod bitmap_walk;
 pub mod fetch;
 pub mod fetch_head;
 pub mod fetch_negotiator;

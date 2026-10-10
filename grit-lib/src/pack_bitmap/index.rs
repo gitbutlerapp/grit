@@ -67,6 +67,17 @@ impl TypeBitmap<'_> {
             .map_err(|_| BitmapError::InvalidEwah)?;
         Ok(scratch.get(position as usize))
     }
+
+    /// Decompress this type index into `dest`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BitmapError::InvalidEwah`] when the embedded EWAH cannot be read.
+    pub(crate) fn expand_into_bitmap(&self, dest: &mut Bitmap) -> Result<(), BitmapError> {
+        self.view
+            .expand_into(dest)
+            .map_err(|_| BitmapError::InvalidEwah)
+    }
 }
 
 /// Memory-mapped pack or MIDX reachability bitmap (Git `BITM` v1).

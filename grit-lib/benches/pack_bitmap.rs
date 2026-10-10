@@ -10,9 +10,11 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use grit_lib::bitmap_walk::ReachabilityQuery;
 use grit_lib::objects::ObjectId;
 use grit_lib::pack_bitmap::BitmapIndex;
 use grit_lib::repo::Repository;
+use grit_lib::rev_list::MissingAction;
 
 struct PackBitmapFixture {
     repo: Repository,
@@ -120,6 +122,23 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                 .expect("open")
                 .expect("bitmap present");
             black_box(index.commit_bitmap(&fx.sample_commit));
+        });
+    });
+    group.bench_function("reachability_count_all", |b| {
+        b.iter(|| {
+            let repo = Repository::open(&bare, None).expect("open repo");
+            let index = BitmapIndex::open(&repo)
+                .expect("open")
+                .expect("bitmap present");
+            let query = ReachabilityQuery {
+                wants: &[fx.sample_commit],
+                haves: &[],
+                filter: None,
+            };
+            let set = index
+                .reachability(&repo, query, MissingAction::Error)
+                .expect("reachability");
+            black_box(set.count());
         });
     });
     group.finish();

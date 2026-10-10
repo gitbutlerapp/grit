@@ -66,6 +66,7 @@ files = [
     "pack_bitmap/error.rs",
     "pack_bitmap/index.rs",
     "pack_bitmap/order.rs",
+    "bitmap_walk.rs",
 ]
 minimum = 86.3
 
