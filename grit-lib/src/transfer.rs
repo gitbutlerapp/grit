@@ -15,12 +15,12 @@
 //! Push *result* reporting reuses [`crate::push_report::PushRefResult`] /
 //! [`crate::push_report::PushRefStatus`] rather than redefining it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::hash;
-use crate::objects::{parse_tag, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
@@ -236,6 +236,29 @@ pub use crate::pack_objects::{
 
 pub(crate) use crate::pack_objects::build_pack_for_local_fetch;
 
+fn pack_build_options_for_send(
+    source_odb: &Odb,
+    oids: &[ObjectId],
+    base: &PackBuildOptions,
+) -> PackBuildOptions {
+    if oids.is_empty() || oids.len() > 512 {
+        return *base;
+    }
+    let commits_tags_only = oids.iter().all(|oid| {
+        source_odb
+            .read(oid)
+            .map(|obj| matches!(obj.kind, ObjectKind::Commit | ObjectKind::Tag))
+            .unwrap_or(false)
+    });
+    if !commits_tags_only {
+        return *base;
+    }
+    let mut fast = *base;
+    fast.delta = false;
+    fast.reuse_deltas = false;
+    fast.thin = false;
+    fast
+}
 
 /// Copy objects for a local fetch: link remote packfiles when possible, then pack any remainder.
 #[allow(clippy::too_many_arguments)]
@@ -248,33 +271,34 @@ fn copy_objects_for_local_fetch(
     haves: &[ObjectId],
     source_shallow: &HashSet<ObjectId>,
     have_shallow: &HashSet<ObjectId>,
-    allow_bulk_link: bool,
+    try_pack_link: bool,
     opts: &PackBuildOptions,
 ) -> Result<HashSet<ObjectId>> {
     use crate::local_object_copy::{
-        linked_object_set, refresh_local_odb_after_link, try_satisfy_via_object_link,
+        link_loose_objects_for_oids, linked_object_set, refresh_local_odb_after_link,
+        try_satisfy_via_object_link,
     };
-    use crate::pack_objects::send_list_for_local_fetch;
 
-    let send = send_list_for_local_fetch(
+    let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
+    let send = collect_reachable_excluding_peer(
         remote_odb,
-        local_odb,
         wants,
-        haves,
+        local_odb,
+        &have_tips,
+        false,
         source_shallow,
-        have_shallow,
     )?;
 
     let remote_objects = remote_git_dir.join("objects");
     let local_objects = local_git_dir.join("objects");
     if !opts.thin
-        && allow_bulk_link
-        && try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, &send)?
+        && try_pack_link
+        && try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, &send, false)?
     {
         return Ok(linked_object_set(local_odb, &send));
     }
 
-    let still_missing: Vec<ObjectId> = send
+    let mut still_missing: Vec<ObjectId> = send
         .iter()
         .copied()
         .filter(|oid| !local_odb.exists(oid))
@@ -283,6 +307,21 @@ fn copy_objects_for_local_fetch(
         return Ok(linked_object_set(local_odb, &send));
     }
 
+    // Hard-link loose objects only for incremental transfers; initial clones should
+    // install a pack (or pack link), not thousands of loose files.
+    if !haves.is_empty() {
+        let linked_loose =
+            link_loose_objects_for_oids(&remote_objects, &local_objects, &still_missing)?;
+        if linked_loose > 0 {
+            refresh_local_odb_after_link(local_odb);
+            still_missing.retain(|oid| !local_odb.exists(oid));
+        }
+        if still_missing.is_empty() {
+            return Ok(linked_object_set(local_odb, &send));
+        }
+    }
+
+    let pack_opts = pack_build_options_for_send(remote_odb, &still_missing, opts);
     let pack = build_pack_for_local_fetch(
         remote_odb,
         &still_missing,
@@ -290,7 +329,7 @@ fn copy_objects_for_local_fetch(
         haves,
         source_shallow,
         have_shallow,
-        opts,
+        &pack_opts,
     )?;
     let ingested = crate::index_pack::ingest_received_pack(
         pack,
@@ -306,7 +345,154 @@ fn copy_objects_for_local_fetch(
     Ok(out)
 }
 
+/// Copy objects for a local push: link source packfiles into the remote when possible, then pack any remainder.
+#[allow(clippy::too_many_arguments)]
+fn copy_objects_for_local_push(
+    local_git_dir: &Path,
+    remote_git_dir: &Path,
+    local_odb: &Odb,
+    remote_odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    have_shallow: &HashSet<ObjectId>,
+    opts: &PackBuildOptions,
+) -> Result<()> {
+    use crate::local_object_copy::{link_loose_objects_for_oids, refresh_local_odb_after_link};
 
+    let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
+    let send = collect_reachable_excluding_peer(
+        local_odb,
+        wants,
+        remote_odb,
+        &have_tips,
+        false,
+        source_shallow,
+    )?;
+
+    let local_objects = local_git_dir.join("objects");
+    let remote_objects = remote_git_dir.join("objects");
+
+    let mut still_missing: Vec<ObjectId> = send
+        .iter()
+        .copied()
+        .filter(|oid| !remote_odb.exists(oid))
+        .collect();
+    if still_missing.is_empty() {
+        return Ok(());
+    }
+
+    if !haves.is_empty() {
+        let linked_loose =
+            link_loose_objects_for_oids(&local_objects, &remote_objects, &still_missing)?;
+        if linked_loose > 0 {
+            refresh_local_odb_after_link(remote_odb);
+            still_missing.retain(|oid| !remote_odb.exists(oid));
+        }
+        if still_missing.is_empty() {
+            return Ok(());
+        }
+    }
+
+    let pack_opts = pack_build_options_for_send(local_odb, &still_missing, opts);
+    let pack = build_pack_for_local_fetch(
+        local_odb,
+        &still_missing,
+        remote_odb,
+        haves,
+        source_shallow,
+        have_shallow,
+        &pack_opts,
+    )?;
+    crate::index_pack::ingest_received_pack(
+        pack,
+        remote_odb,
+        &crate::index_pack::IngestPackOptions {
+            fix_thin: true,
+            ..Default::default()
+        },
+    )?;
+    refresh_local_odb_after_link(remote_odb);
+    Ok(())
+}
+
+/// BFS over `roots` collecting every reachable object (commits, trees, blobs,
+/// tag targets) that is not in `exclude`, returned in discovery order with no
+/// duplicates.
+///
+/// Discovery order keeps commits before the trees/blobs they introduce, which
+/// is a reasonable, deterministic pack ordering.
+fn collect_reachable_excluding_peer(
+    source_odb: &Odb,
+    roots: &[ObjectId],
+    peer_odb: &Odb,
+    peer_boundary: &HashSet<ObjectId>,
+    skip_missing: bool,
+    shallow_grafts: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut ordered: Vec<ObjectId> = Vec::new();
+    let mut queue: VecDeque<ObjectId> = VecDeque::new();
+
+    let at_boundary = |oid: ObjectId| peer_boundary.contains(&oid) || peer_odb.exists(&oid);
+
+    let enqueue = |oid: ObjectId,
+                   queue: &mut VecDeque<ObjectId>,
+                   visited: &mut HashSet<ObjectId>,
+                   ordered: &mut Vec<ObjectId>|
+     -> bool {
+        if at_boundary(oid) {
+            return false;
+        }
+        if visited.insert(oid) {
+            ordered.push(oid);
+            queue.push_back(oid);
+            true
+        } else {
+            false
+        }
+    };
+
+    for &root in roots {
+        enqueue(root, &mut queue, &mut visited, &mut ordered);
+    }
+
+    while let Some(oid) = queue.pop_front() {
+        let obj = match source_odb.read(&oid) {
+            Ok(o) => o,
+            Err(_) if skip_missing => continue,
+            Err(e) => return Err(e),
+        };
+        match obj.kind {
+            ObjectKind::Commit => {
+                let commit = parse_commit(&obj.data)?;
+                if !shallow_grafts.contains(&oid) {
+                    for parent in commit.parents {
+                        enqueue(parent, &mut queue, &mut visited, &mut ordered);
+                    }
+                }
+                enqueue(commit.tree, &mut queue, &mut visited, &mut ordered);
+            }
+            ObjectKind::Tree => {
+                for entry in parse_tree(&obj.data)? {
+                    if entry.mode == 0o160000 {
+                        continue;
+                    }
+                    enqueue(entry.oid, &mut queue, &mut visited, &mut ordered);
+                }
+            }
+            ObjectKind::Tag => {
+                let tag = parse_tag(&obj.data)?;
+                enqueue(tag.object, &mut queue, &mut visited, &mut ordered);
+            }
+            ObjectKind::Blob => {}
+        }
+    }
+
+    Ok(ordered)
+}
+
+/// The pack object type code for a Git object kind (PACK v2 base types).
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
 /// `git index-pack --fix-thin`.
 /// Expand a thin on-disk pack, returning the path to the pack bytes to index.
@@ -616,16 +802,18 @@ pub fn fetch_local(
     let mut tag_shallow = local_shallow.clone();
     tag_shallow.extend(remote_shallow.iter().copied());
 
-    apply_tag_mode(
-        opts.tags,
-        &remote_refs,
-        &remote_odb,
-        &tag_shallow,
-        &negatives,
-        &mut matched,
-        &mut matched_oids,
-        &mut seen_remote_ref,
-    )?;
+    if matches!(opts.tags, TagMode::All | TagMode::Following) {
+        apply_tag_mode(
+            opts.tags,
+            &remote_refs,
+            &remote_odb,
+            &tag_shallow,
+            &negatives,
+            &mut matched,
+            &mut matched_oids,
+            &mut seen_remote_ref,
+        )?;
+    }
 
     // 3. Determine wants (matched oids not present locally) and haves (current
     //    local tracking-ref tips) and copy the minimal object set.
@@ -660,7 +848,7 @@ pub fn fetch_local(
             &haves,
             &remote_shallow,
             &local_shallow,
-            true,
+            opts.initial_remote_fetch,
             &pack_opts,
         )?;
     }
@@ -698,6 +886,8 @@ pub fn fetch_local(
         )?;
     }
 
+    let packed = crate::refs::PackedRefs::load(local_git_dir)?;
+
     for m in &matched {
         let Some(local_ref) = &m.local_ref else {
             // dst empty: fetched but not stored. Report as a no-store update.
@@ -712,7 +902,9 @@ pub fn fetch_local(
             continue;
         };
 
-        let old = crate::refs::resolve_ref(local_git_dir, local_ref).ok();
+        let old = crate::refs::resolve_ref_cached(local_git_dir, local_ref, &packed)
+            .ok()
+            .flatten();
         let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
 
         let write = matches!(
@@ -867,24 +1059,39 @@ pub fn push_local(
         });
     }
 
-    // Second pass: apply accepted updates (copy objects, then move/delete refs).
+    let push_wants: Vec<ObjectId> = decisions
+        .iter()
+        .filter(|d| d.apply && !opts.dry_run)
+        .filter_map(|d| match &d.action {
+            PushAction::Update(src) => Some(*src),
+            _ => None,
+        })
+        .collect();
+    if !push_wants.is_empty() && !opts.dry_run {
+        let local_cfg = config_for_git_dir(local_git_dir);
+        let pack_opts = PackBuildOptions::for_local_push(local_cfg.as_ref());
+        let empty_shallow = HashSet::new();
+        let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
+        copy_objects_for_local_push(
+            local_git_dir,
+            remote_git_dir,
+            &local_odb,
+            &remote_odb,
+            &push_wants,
+            &remote_have_tips,
+            &empty_shallow,
+            &remote_shallow,
+            &pack_opts,
+        )?;
+    }
+
+    // Second pass: apply accepted ref updates (objects were copied above).
     for d in &mut decisions {
         if !d.apply || opts.dry_run {
             continue;
         }
         match &d.action {
             PushAction::Update(src) => {
-                let local_cfg = config_for_git_dir(local_git_dir);
-                let pack_opts = PackBuildOptions::for_local_push(local_cfg.as_ref());
-                let pack = build_pack(&local_odb, &[*src], &remote_have_tips, &pack_opts)?;
-                crate::index_pack::ingest_received_pack(
-                    pack,
-                    &remote_odb,
-                    &crate::index_pack::IngestPackOptions {
-                        fix_thin: true,
-                        ..Default::default()
-                    },
-                )?;
                 crate::refs::write_ref(remote_git_dir, &d.result.remote_ref, src)?;
             }
             PushAction::Delete => {
@@ -927,6 +1134,7 @@ struct PushDecision {
 }
 
 /// Decide the status of a single [`PushRefSpec`] without mutating either repo.
+
 fn decide_push(
     spec: &PushRefSpec,
     local_odb: &Odb,

@@ -12,10 +12,29 @@ use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::pack;
 
+/// Refuse symlinks and non-regular files (matches `git clone --local` safety).
+fn ensure_linkable_regular_file(src: &Path) -> Result<()> {
+    let meta = fs::symlink_metadata(src).map_err(Error::Io)?;
+    if meta.file_type().is_symlink() {
+        return Err(Error::PathError(format!(
+            "refusing to link symlink object store entry {}",
+            src.display()
+        )));
+    }
+    if !meta.is_file() {
+        return Err(Error::PathError(format!(
+            "refusing to link non-regular object store entry {}",
+            src.display()
+        )));
+    }
+    Ok(())
+}
+
 fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
     if dst.exists() {
         return Ok(());
     }
+    ensure_linkable_regular_file(src)?;
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).map_err(Error::Io)?;
     }
@@ -109,17 +128,53 @@ pub(crate) fn try_satisfy_via_object_link(
     local_objects: &Path,
     local_odb: &Odb,
     needed: &[ObjectId],
+    link_loose: bool,
 ) -> Result<bool> {
     if needed.is_empty() {
         return Ok(true);
     }
     let linked_packs = link_remote_pack_files(remote_objects, local_objects)?;
-    let linked_loose = link_loose_objects(remote_objects, local_objects)?;
+    let linked_loose = if link_loose {
+        link_loose_objects(remote_objects, local_objects)?
+    } else {
+        0
+    };
     if linked_packs == 0 && linked_loose == 0 {
         return Ok(false);
     }
     refresh_local_odb_after_link(local_odb);
     Ok(needed.iter().all(|oid| local_odb.exists(oid)))
+}
+
+/// Hard-link or copy loose object files for `oids` from `source_objects` into `dest_objects`.
+///
+/// Skips oids that are not stored loose at the source. Returns how many files were linked.
+pub(crate) fn link_loose_objects_for_oids(
+    source_objects: &Path,
+    dest_objects: &Path,
+    oids: &[ObjectId],
+) -> Result<usize> {
+    let mut linked = 0usize;
+    for oid in oids {
+        let hex = oid.to_hex();
+        if hex.len() < 2 {
+            continue;
+        }
+        let (shard, rest) = hex.split_at(2);
+        let src = source_objects.join(shard).join(rest);
+        if !src.is_file() {
+            continue;
+        }
+        let dst_shard = dest_objects.join(shard);
+        fs::create_dir_all(&dst_shard).map_err(Error::Io)?;
+        let dst = dst_shard.join(rest);
+        if dst.exists() {
+            continue;
+        }
+        hard_link_or_copy(&src, &dst)?;
+        linked += 1;
+    }
+    Ok(linked)
 }
 
 /// Oids newly visible in `local_odb` after linking (subset of `needed`).
@@ -179,5 +234,30 @@ mod tests {
             .unwrap();
         let tip = ObjectId::from_hex(String::from_utf8_lossy(&rev.stdout).trim()).unwrap();
         assert!(local_odb.exists(&tip));
+    }
+
+    #[test]
+    fn hard_link_rejects_symlink_in_pack_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src_pack = tmp.path().join("src/pack");
+        fs::create_dir_all(&src_pack).unwrap();
+        let evil = src_pack.join("evil.keep");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink("elsewhere", &evil).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            return;
+        }
+        let dst_pack = tmp.path().join("dst/pack");
+        fs::create_dir_all(&dst_pack).unwrap();
+        let dst = dst_pack.join("evil.keep");
+        let err = hard_link_or_copy(&evil, &dst).unwrap_err();
+        assert!(
+            matches!(err, Error::PathError(_)),
+            "expected PathError, got {err:?}"
+        );
     }
 }

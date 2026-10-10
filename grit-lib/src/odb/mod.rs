@@ -1042,6 +1042,20 @@ impl Odb {
             == Some(true)
     }
 
+    /// Whether every object in `oids` is stored in an on-disk packfile (not loose).
+    pub(crate) fn all_on_disk_in_packs(&self, oids: &[ObjectId]) -> Result<bool> {
+        if oids.is_empty() {
+            return Ok(false);
+        }
+        let indexes = pack::read_local_pack_indexes_cached(self.objects_dir())?;
+        if indexes.is_empty() {
+            return Ok(false);
+        }
+        Ok(oids
+            .iter()
+            .all(|oid| indexes.iter().any(|idx| idx.find_offset(oid).is_some())))
+    }
+
     /// Run `f` with this [`Odb`]'s [`PackStore`] for `objects_dir` (primary or alternate).
     fn with_pack_store_for<R>(&self, objects_dir: &Path, f: impl FnOnce() -> R) -> R {
         let store = self.pack_store_for(objects_dir);
