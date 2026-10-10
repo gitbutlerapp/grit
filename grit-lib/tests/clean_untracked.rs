@@ -23,6 +23,7 @@ fn commit_req(message: &str) -> CommitRequest {
         committer: id,
         allow_empty: false,
         sign_override: None,
+        amend: false,
     }
 }
 
