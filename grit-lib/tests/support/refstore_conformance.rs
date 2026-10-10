@@ -77,8 +77,12 @@ pub fn run_refstore_conformance(factory: StoreFactory) {
     delete_missing_ref(&factory);
     df_conflict_in_batch(&factory);
     df_conflict_against_store(&factory);
-    symref_deref_reflog(&factory);
-    symref_no_deref_reflog(&factory);
+    symref_deref_state_and_reflog(&factory);
+    symref_no_deref_state_and_reflog(&factory);
+    symbolic_iteration_peel(&factory);
+    direct_update_reflog_oids(&factory);
+    delete_with_reflog_oids(&factory);
+    empty_reflog_exists(&factory);
     prefix_iteration_order(&factory);
     abort_leaves_state_unchanged(&factory);
     concurrent_prepare_lock_held(&factory);
@@ -201,14 +205,14 @@ fn df_conflict_against_store(factory: &StoreFactory) {
     ));
 }
 
-fn symref_deref_reflog(factory: &StoreFactory) {
+fn symref_deref_state_and_reflog(factory: &StoreFactory) {
     let store = factory();
     seed_direct(store.as_ref(), "refs/heads/target", oid(10));
     seed_symref(store.as_ref(), "refs/heads/sym", "refs/heads/target");
 
     let mut upd = update(
         "refs/heads/sym",
-        Some(RawRef::Symbolic("refs/heads/target".to_owned())),
+        Some(RawRef::Direct(oid(12))),
         Expected::Any,
     );
     upd.reflog = Some(sample_log());
@@ -219,6 +223,15 @@ fn symref_deref_reflog(factory: &StoreFactory) {
         .commit()
         .expect("commit");
 
+    assert_eq!(
+        store.read_raw("refs/heads/sym").expect("sym"),
+        Some(RawRef::Symbolic("refs/heads/target".to_owned()))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/target").expect("target"),
+        Some(RawRef::Direct(oid(12)))
+    );
+
     let mut last: Option<ReflogEntry> = None;
     store
         .for_each_reflog_entry("refs/heads/sym", true, &mut |e| {
@@ -228,17 +241,17 @@ fn symref_deref_reflog(factory: &StoreFactory) {
         .expect("reflog");
     let entry = last.expect("entry");
     assert_eq!(entry.old_oid, oid(10));
-    assert_eq!(entry.new_oid, oid(10));
+    assert_eq!(entry.new_oid, oid(12));
 }
 
-fn symref_no_deref_reflog(factory: &StoreFactory) {
+fn symref_no_deref_state_and_reflog(factory: &StoreFactory) {
     let store = factory();
     seed_direct(store.as_ref(), "refs/heads/t2", oid(11));
     seed_symref(store.as_ref(), "refs/heads/s2", "refs/heads/t2");
 
     let mut upd = update(
         "refs/heads/s2",
-        Some(RawRef::Symbolic("refs/heads/t2".to_owned())),
+        Some(RawRef::Direct(oid(12))),
         Expected::Any,
     );
     upd.reflog = Some(sample_log());
@@ -250,6 +263,15 @@ fn symref_no_deref_reflog(factory: &StoreFactory) {
         .commit()
         .expect("commit");
 
+    assert_eq!(
+        store.read_raw("refs/heads/s2").expect("s2"),
+        Some(RawRef::Direct(oid(12)))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/t2").expect("t2"),
+        Some(RawRef::Direct(oid(11)))
+    );
+
     let mut last: Option<ReflogEntry> = None;
     store
         .for_each_reflog_entry("refs/heads/s2", true, &mut |e| {
@@ -259,7 +281,94 @@ fn symref_no_deref_reflog(factory: &StoreFactory) {
         .expect("reflog");
     let entry = last.expect("entry");
     assert!(entry.old_oid.is_zero());
+    assert_eq!(entry.new_oid, oid(12));
+}
+
+fn symbolic_iteration_peel(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/main", oid(1));
+    seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
+
+    let mut peeled = None;
+    store
+        .for_each_ref("HEAD", &mut |entry| {
+            peeled = entry.peeled;
+            ControlFlow::Break(())
+        })
+        .expect("iter");
+    assert_eq!(peeled, Some(oid(1)));
+}
+
+fn direct_update_reflog_oids(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/r", oid(1));
+
+    let mut upd = update("refs/heads/r", Some(RawRef::Direct(oid(2))), Expected::Any);
+    upd.reflog = Some(sample_log());
+    let txn = RefTransaction::new().update(upd).expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+
+    let mut last: Option<ReflogEntry> = None;
+    store
+        .for_each_reflog_entry("refs/heads/r", true, &mut |e| {
+            last = Some(e.clone());
+            ControlFlow::Break(())
+        })
+        .expect("reflog");
+    let entry = last.expect("entry");
+    assert_eq!(entry.old_oid, oid(1));
+    assert_eq!(entry.new_oid, oid(2));
+}
+
+fn delete_with_reflog_oids(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/del", oid(5));
+
+    let mut upd = update("refs/heads/del", None, Expected::Any);
+    upd.reflog = Some(sample_log());
+    let txn = RefTransaction::new().update(upd).expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+
+    assert_eq!(store.read_raw("refs/heads/del").expect("read"), None);
+
+    let mut last: Option<ReflogEntry> = None;
+    store
+        .for_each_reflog_entry("refs/heads/del", true, &mut |e| {
+            last = Some(e.clone());
+            ControlFlow::Break(())
+        })
+        .expect("reflog");
+    let entry = last.expect("entry");
+    assert_eq!(entry.old_oid, oid(5));
     assert!(entry.new_oid.is_zero());
+}
+
+fn empty_reflog_exists(factory: &StoreFactory) {
+    let store = factory();
+    store.create_reflog("refs/heads/empty").expect("create");
+    assert!(store.reflog_exists("refs/heads/empty").expect("exists"));
+
+    store
+        .replace_reflog("refs/heads/empty2", Vec::new())
+        .expect("replace empty");
+    assert!(store.reflog_exists("refs/heads/empty2").expect("exists2"));
+
+    let mut count = 0usize;
+    store
+        .for_each_reflog_entry("refs/heads/empty2", false, &mut |_| {
+            count += 1;
+            ControlFlow::Continue(())
+        })
+        .expect("iter empty");
+    assert_eq!(count, 0);
 }
 
 fn prefix_iteration_order(factory: &StoreFactory) {
