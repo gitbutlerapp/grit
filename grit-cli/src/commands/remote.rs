@@ -135,15 +135,6 @@ pub fn run_refs(
     tags: bool,
     prefixes: Vec<String>,
 ) -> Result<RemoteOutcome> {
-    let repo = context::discover().ok();
-    let config = repo
-        .as_ref()
-        .map(|r| {
-            ConfigSet::load(&crate::context::environment(), Some(&r.git_dir), true)
-                .context("could not load config")
-        })
-        .transpose()?;
-    let remote = resolve_remote_or_url(config.as_ref(), remote_or_url)?;
     let opts = ListRefsOptions {
         prefixes,
         heads,
@@ -152,9 +143,27 @@ pub fn run_refs(
         ..Default::default()
     };
     let factory = DefaultHttpClientFactory;
-    let raw = remote
-        .list_refs(repo.as_ref(), &opts, Some(&factory))
-        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let raw =
+        if looks_like_url_or_path(remote_or_url) || local_path_argument(remote_or_url).is_some() {
+            let remote =
+                Remote::from_url(remote_or_url).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+            remote
+                .list_refs(None, &opts, Some(&factory))
+                .map_err(|e| anyhow::Error::msg(e.to_string()))?
+        } else {
+            let repo = context::discover().ok();
+            let config = repo
+                .as_ref()
+                .map(|r| {
+                    ConfigSet::load(&crate::context::environment(), Some(&r.git_dir), true)
+                        .context("could not load config")
+                })
+                .transpose()?;
+            let remote = resolve_remote_or_url(config.as_ref(), remote_or_url)?;
+            remote
+                .list_refs(repo.as_ref(), &opts, Some(&factory))
+                .map_err(|e| anyhow::Error::msg(e.to_string()))?
+        };
     let (refs, lines) = map_remote_refs(&raw);
     Ok(RemoteOutcome::Refs { refs, lines })
 }
@@ -202,33 +211,32 @@ fn looks_like_url_or_path(s: &str) -> bool {
 
 fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine>) {
     let mut peel_by_tag: HashMap<String, String> = HashMap::new();
+    peel_by_tag.reserve(raw.len() / 8);
     for entry in raw {
         if let Some(base) = entry.name.strip_suffix("^{}") {
             peel_by_tag.insert(base.to_owned(), entry.oid.to_hex());
         }
     }
 
-    let mut lines: Vec<RemoteRefLine> = raw
-        .iter()
-        .flat_map(|entry| {
-            let mut out = Vec::new();
-            if let Some(target) = &entry.symref_target {
-                if entry.name == "HEAD" {
-                    out.push(RemoteRefLine {
-                        oid: target.clone(),
-                        name: entry.name.clone(),
-                        symref: true,
-                    });
-                }
+    let mut lines: Vec<RemoteRefLine> = Vec::with_capacity(raw.len() + 1);
+    lines.extend(raw.iter().flat_map(|entry| {
+        let mut out = Vec::new();
+        if let Some(target) = &entry.symref_target {
+            if entry.name == "HEAD" {
+                out.push(RemoteRefLine {
+                    oid: target.clone(),
+                    name: entry.name.clone(),
+                    symref: true,
+                });
             }
-            out.push(RemoteRefLine {
-                oid: entry.oid.to_hex(),
-                name: entry.name.clone(),
-                symref: false,
-            });
-            out
-        })
-        .collect();
+        }
+        out.push(RemoteRefLine {
+            oid: entry.oid.to_hex(),
+            name: entry.name.clone(),
+            symref: false,
+        });
+        out
+    }));
     lines.sort_by(|a, b| a.name.cmp(&b.name).then(a.symref.cmp(&b.symref)));
 
     let refs: Vec<RemoteRefEntry> = raw
