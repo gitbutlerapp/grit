@@ -1694,6 +1694,13 @@ mod tests {
     }
 
     #[test]
+    fn extra_headers_without_commit_signatures_drops_gpgsig_block() {
+        let extra = b"mergetag foo\ngpgsig -----BEGIN PGP SIGNATURE-----\n ABC\n -----END PGP SIGNATURE-----\n";
+        let stripped = extra_headers_without_commit_signatures(extra);
+        assert_eq!(stripped, b"mergetag foo\n");
+    }
+
+    #[test]
     fn parse_signed_buffer_splits_appended_tag_signature() {
         // A signed tag appends the armored signature directly after the body
         // with no `gpgsig` header and no per-line indentation.

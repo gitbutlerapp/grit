@@ -107,3 +107,187 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
 
     git_out(root, &["fsck", "--strict"]);
 }
+
+fn count_commit_signature_headers(raw: &str) -> usize {
+    let header = raw.split("\n\n").next().unwrap_or(raw);
+    header
+        .lines()
+        .filter(|line| line.starts_with("gpgsig ") || line.starts_with("gpgsig-sha256 "))
+        .count()
+}
+
+#[test]
+fn amend_unsigned_drops_signed_tip_signature() {
+    if !ssh_keygen_available() {
+        eprintln!("skipping: ssh-keygen not available");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let key = root.join("key");
+    let allowed = root.join("allowed_signers");
+
+    Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+        .arg(&key)
+        .status()
+        .expect("ssh-keygen");
+
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "gpg.format", "ssh"]);
+    git(
+        root,
+        &[
+            "config",
+            "user.signingkey",
+            &key.with_extension("pub").to_string_lossy(),
+        ],
+    );
+    git(root, &["config", "commit.gpgsign", "true"]);
+    let pub_key = std::fs::read_to_string(key.with_extension("pub")).expect("read pub");
+    std::fs::write(&allowed, format!("t@example.com {pub_key}")).expect("allowed_signers");
+    git(
+        root,
+        &[
+            "config",
+            "gpg.ssh.allowedSignersFile",
+            &allowed.to_string_lossy(),
+        ],
+    );
+
+    std::fs::write(root.join("a"), b"a\n").expect("write");
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+
+    let ident = "T <t@example.com> 1700000000 +0000".to_owned();
+    create_commit(
+        &repo,
+        &CommitRequest {
+            message: "signed tip".to_owned(),
+            author: ident.clone(),
+            committer: ident.clone(),
+            allow_empty: false,
+            sign_override: None,
+            amend: false,
+        },
+        &mut NullProgress,
+    )
+    .expect("signed create");
+
+    let before = git_out(root, &["cat-file", "-p", "HEAD"]);
+    assert_eq!(count_commit_signature_headers(&before), 1);
+
+    create_commit(
+        &repo,
+        &CommitRequest {
+            message: "signed tip amended".to_owned(),
+            author: ident.clone(),
+            committer: ident.clone(),
+            allow_empty: false,
+            sign_override: Some(false),
+            amend: true,
+        },
+        &mut NullProgress,
+    )
+    .expect("unsigned amend");
+
+    let after = git_out(root, &["cat-file", "-p", "HEAD"]);
+    assert_eq!(
+        count_commit_signature_headers(&after),
+        0,
+        "unsigned amend must drop the old gpgsig header"
+    );
+    git_out(root, &["fsck", "--strict"]);
+}
+
+#[test]
+fn amend_resigns_with_single_fresh_signature() {
+    if !ssh_keygen_available() {
+        eprintln!("skipping: ssh-keygen not available");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let key = root.join("key");
+    let allowed = root.join("allowed_signers");
+
+    Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+        .arg(&key)
+        .status()
+        .expect("ssh-keygen");
+
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "gpg.format", "ssh"]);
+    git(
+        root,
+        &[
+            "config",
+            "user.signingkey",
+            &key.with_extension("pub").to_string_lossy(),
+        ],
+    );
+    git(root, &["config", "commit.gpgsign", "true"]);
+    let pub_key = std::fs::read_to_string(key.with_extension("pub")).expect("read pub");
+    std::fs::write(&allowed, format!("t@example.com {pub_key}")).expect("allowed_signers");
+    git(
+        root,
+        &[
+            "config",
+            "gpg.ssh.allowedSignersFile",
+            &allowed.to_string_lossy(),
+        ],
+    );
+
+    std::fs::write(root.join("a"), b"a\n").expect("write");
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+
+    let ident = "T <t@example.com> 1700000000 +0000".to_owned();
+    create_commit(
+        &repo,
+        &CommitRequest {
+            message: "signed tip".to_owned(),
+            author: ident.clone(),
+            committer: ident.clone(),
+            allow_empty: false,
+            sign_override: None,
+            amend: false,
+        },
+        &mut NullProgress,
+    )
+    .expect("signed create");
+
+    std::fs::write(root.join("a"), b"b\n").expect("write");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(
+        &repo,
+        &CommitRequest {
+            message: "signed amend".to_owned(),
+            author: ident.clone(),
+            committer: ident,
+            allow_empty: false,
+            sign_override: None,
+            amend: true,
+        },
+        &mut NullProgress,
+    )
+    .expect("signed amend");
+
+    let after = git_out(root, &["cat-file", "-p", "HEAD"]);
+    assert_eq!(
+        count_commit_signature_headers(&after),
+        1,
+        "signed amend must carry exactly one signature header"
+    );
+    assert_eq!(git_out(root, &["log", "-1", "--format=%G?"]), "G");
+    git_out(root, &["fsck", "--strict"]);
+}

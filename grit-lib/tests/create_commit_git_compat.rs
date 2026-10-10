@@ -180,6 +180,14 @@ fn author_signature(root: &Path) -> String {
     git_out(root, &["log", "-1", "--format=%an%ae%at"])
 }
 
+fn assert_amend_reflog(root: &Path, subject: &str) {
+    let reflog = git_out(root, &["reflog", "-1", "HEAD"]);
+    assert!(
+        reflog.contains(&format!("commit (amend): {subject}")),
+        "reflog: {reflog:?}"
+    );
+}
+
 #[test]
 fn amend_rewrites_tip() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -196,6 +204,7 @@ fn amend_rewrites_tip() {
     stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
     create_commit(&repo, &commit_req("second"), &mut NullProgress).expect("commit");
     let old_second = git_out(root, &["rev-parse", "HEAD"]);
+    let author_before = author_signature(root);
 
     std::fs::write(root.join("a.txt"), b"3\n").unwrap();
     stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
@@ -204,11 +213,8 @@ fn amend_rewrites_tip() {
     fsck(root);
     assert_eq!(git_out(root, &["rev-parse", "HEAD^"]), first);
     assert_ne!(git_out(root, &["rev-parse", "HEAD"]), old_second);
-    let reflog = git_out(root, &["reflog", "-1", "HEAD"]);
-    assert!(
-        reflog.contains("commit (amend): second amended"),
-        "reflog: {reflog:?}"
-    );
+    assert_eq!(author_signature(root), author_before);
+    assert_amend_reflog(root, "second amended");
 }
 
 #[test]
@@ -245,16 +251,14 @@ fn amend_with_new_message() {
     let repo = Repository::discover(Some(root)).expect("open");
     stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
     create_commit(&repo, &commit_req("old subject"), &mut NullProgress).expect("commit");
+    let author_before = author_signature(root);
 
     create_commit(&repo, &amend_req("new subject"), &mut NullProgress).expect("amend");
 
     fsck(root);
     assert_eq!(git_out(root, &["log", "-1", "--format=%s"]), "new subject");
-    let reflog = git_out(root, &["reflog", "-1", "HEAD"]);
-    assert!(
-        reflog.contains("commit (amend): new subject"),
-        "reflog: {reflog:?}"
-    );
+    assert_eq!(author_signature(root), author_before);
+    assert_amend_reflog(root, "new subject");
 }
 
 #[test]
@@ -284,6 +288,7 @@ fn amend_root_commit() {
         .expect("git rev-parse HEAD^");
     assert!(!out.status.success(), "root amend must not gain a parent");
     assert_eq!(git_out(root, &["log", "-1", "--format=%s"]), "root plus b");
+    assert_amend_reflog(root, "root plus b");
 }
 
 #[test]
