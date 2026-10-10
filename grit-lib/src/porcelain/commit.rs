@@ -13,7 +13,7 @@ use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::signing::{should_sign_commit, sign_serialized_commit, GpgConfig};
-use crate::state::{clear_merge_state, read_merge_heads, resolve_head, HeadState};
+use crate::state::{finish_merge_state, read_merge_heads, resolve_head, HeadState};
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 use std::fs;
 use std::path::Path;
@@ -198,7 +198,7 @@ pub fn create_commit(
     )?;
 
     if concluding_merge {
-        clear_merge_state(&repo.git_dir)?;
+        let _ = finish_merge_state(&repo)?;
     }
 
     let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &commit_env);

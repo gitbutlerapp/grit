@@ -1,5 +1,6 @@
 //! Merge-in-progress commit behavior checked against the system `git` binary.
 
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -224,5 +225,126 @@ fn create_commit_concludes_merge_when_resolved_as_ours() {
     assert!(
         !repo.git_dir.join("MERGE_HEAD").exists(),
         "MERGE_HEAD should be cleared after merge commit"
+    );
+}
+
+#[test]
+fn create_commit_applies_merge_autostash_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+
+    std::fs::write(root.join("f"), b"base\n").unwrap();
+    std::fs::write(root.join("g"), b"base-g\n").unwrap();
+    git(root, &["add", "f", "g"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    std::fs::write(root.join("f"), b"side\n").unwrap();
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    std::fs::write(root.join("f"), b"main\n").unwrap();
+    git(root, &["commit", "-qam", "main"]);
+
+    std::fs::write(root.join("g"), b"local-g\n").unwrap();
+    let merge_out = Command::new("git")
+        .current_dir(root)
+        .args(["merge", "--autostash", "side"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git merge --autostash");
+    assert!(!merge_out.status.success(), "expected merge conflict");
+    assert!(
+        root.join(".git/MERGE_AUTOSTASH").exists(),
+        "merge --autostash should record MERGE_AUTOSTASH"
+    );
+
+    git(root, &["checkout", "--ours", "--", "f"]);
+    git(root, &["add", "f"]);
+
+    let repo = Repository::discover(Some(root)).expect("open");
+    create_commit(
+        &repo,
+        &commit_req("merge with autostash"),
+        &mut NullProgress,
+    )
+    .expect("merge commit");
+
+    assert!(
+        !root.join(".git/MERGE_AUTOSTASH").exists(),
+        "MERGE_AUTOSTASH must be removed after merge commit"
+    );
+    assert_eq!(
+        git_out(root, &["show", "HEAD:g"]),
+        "base-g",
+        "committed tree should still reflect ours for g"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("g")).unwrap(),
+        "local-g\n",
+        "autostash should restore unstaged local change to g"
+    );
+    let status = git_out(root, &["status", "--short"]);
+    assert!(
+        status.contains(" M g") || status.starts_with("M g"),
+        "g should be unstaged modified after autostash restore: {status:?}"
+    );
+}
+
+#[test]
+fn create_commit_clears_merge_rerere_state_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    git(root, &["config", "rerere.enabled", "true"]);
+
+    std::fs::write(root.join("f"), b"base\n").unwrap();
+    git(root, &["add", "f"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    std::fs::write(root.join("f"), b"side\n").unwrap();
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    std::fs::write(root.join("f"), b"main\n").unwrap();
+    git(root, &["commit", "-qam", "main"]);
+
+    let merge_out = Command::new("git")
+        .current_dir(root)
+        .args(["merge", "side"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git merge");
+    assert!(!merge_out.status.success(), "expected merge conflict");
+    git(root, &["rerere"]);
+
+    git(root, &["checkout", "--ours", "--", "f"]);
+    git(root, &["add", "f"]);
+
+    let repo = Repository::discover(Some(root)).expect("open");
+    create_commit(&repo, &commit_req("merge with rerere"), &mut NullProgress)
+        .expect("merge commit");
+
+    let merge_rr_len = fs::metadata(root.join(".git/MERGE_RR"))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    assert_eq!(
+        merge_rr_len, 0,
+        "MERGE_RR should be empty after merge commit like git"
+    );
+    let rerere_status = git_out(root, &["rerere", "status"]);
+    assert!(
+        rerere_status.is_empty(),
+        "git rerere status should be empty, got: {rerere_status:?}"
     );
 }

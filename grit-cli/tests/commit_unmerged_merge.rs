@@ -143,6 +143,14 @@ fn commit_during_unresolved_merge_fails_human_and_json() -> TestResult {
         json.dump()
     );
 
+    let markdown = gs(root, ["--markdown", "commit", "-m", "oops"]);
+    assert_ne!(markdown.status, Some(0), "{}", markdown.dump());
+    assert!(
+        markdown.stderr.contains("unmerged") || markdown.stdout.contains("unmerged"),
+        "markdown output should mention unmerged paths: {}",
+        markdown.dump()
+    );
+
     assert!(
         root.join(".git/MERGE_HEAD").exists(),
         "MERGE_HEAD must remain after failed commit"
