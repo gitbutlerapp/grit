@@ -15,9 +15,13 @@ use similar::Algorithm as SimilarAlgorithm;
 /// Diff algorithm used when mapping lines between blob revisions during blame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlameDiffAlgorithm {
+    /// Default line diff (Myers); used when config does not specify an algorithm.
     Myers,
+    /// Histogram-style blame diff (mapped to patience in the `similar` crate).
     Histogram,
+    /// Patience diff for blame line correspondence.
     Patience,
+    /// Minimal / LCS-style diff for blame line correspondence.
     Minimal,
 }
 
@@ -149,6 +153,63 @@ pub fn build_exact_relocate_line_map(
     }
 
     fuzzy_map
+}
+
+/// When parent and child have the same line count, decide which mapped lines were
+/// repositioned in the child commit (blame stays on that commit) vs shifted as a
+/// block (blame passes to the parent). Matches system `git blame` on rotations
+/// and swaps.
+fn blame_reposition_on_current_commit(line_map: &[Option<usize>]) -> Vec<bool> {
+    let n = line_map.len();
+    let pairs: Vec<(usize, usize)> = line_map
+        .iter()
+        .enumerate()
+        .filter_map(|(child, parent)| parent.map(|p| (child, p)))
+        .collect();
+
+    let mut in_lis = vec![false; n];
+    if !pairs.is_empty() {
+        let len = pairs.len();
+        let mut lis_len = vec![1usize; len];
+        let mut pred = vec![usize::MAX; len];
+        for i in 0..len {
+            for j in 0..i {
+                if pairs[j].1 < pairs[i].1 && lis_len[j] + 1 > lis_len[i] {
+                    lis_len[i] = lis_len[j] + 1;
+                    pred[i] = j;
+                }
+            }
+        }
+        let max_lis = *lis_len.iter().max().unwrap_or(&1);
+        let end = (0..len)
+            .filter(|&i| lis_len[i] == max_lis)
+            .max_by_key(|&i| pairs[i].1)
+            .unwrap_or(0);
+
+        let mut cur = end;
+        loop {
+            in_lis[pairs[cur].0] = true;
+            if pred[cur] == usize::MAX {
+                break;
+            }
+            cur = pred[cur];
+        }
+    }
+
+    let mut blame_current = vec![false; n];
+    for (child_idx, parent_idx) in line_map
+        .iter()
+        .enumerate()
+        .filter_map(|(c, p)| p.map(|p| (c, p)))
+    {
+        if parent_idx == child_idx {
+            continue;
+        }
+        if !in_lis[child_idx] {
+            blame_current[child_idx] = true;
+        }
+    }
+    blame_current
 }
 
 /// Like [`build_line_map`], but recover additional correspondences for moved/rewritten lines.
@@ -476,17 +537,6 @@ fn line_similarity_and_lcs(a: &str, b: &str) -> (f64, usize) {
     let sim = (2.0 * lcs as f64) / (a_chars.len() as f64 + b_chars.len() as f64);
     (sim, lcs)
 }
-
-// ---------------------------------------------------------------------------
-// Per-commit blame attribution engine.
-//
-// Walks history from a starting commit, diffs successive blob versions (via the
-// line-mapping helpers above), and attributes each final-image line to the
-// commit that last touched it. Honors `.git/info/grafts`, ignored revisions
-// copy/rename detection when configured, textconv filters, and graft parents.
-// [`blame_file`] is the repository-level entry point; the `grit blame` command
-// renders its result.
-// ---------------------------------------------------------------------------
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
@@ -1415,6 +1465,9 @@ pub fn compute_blame(
                 if is_ignored {
                     line_map = build_fuzzy_line_map(&par_lines, &cur_lines, &line_map);
                 }
+                let reposition_blame = (par_lines.len() == cur_lines.len())
+                    .then(|| blame_reposition_on_current_commit(&line_map))
+                    .unwrap_or_default();
                 let mut inserted_copy_source: Option<CopySourceBlameCache> = None;
                 if copy_depth >= 3 {
                     if let Some((source_path, source_blame)) = find_copy_source_blame(
@@ -1490,9 +1543,11 @@ pub fn compute_blame(
                             } else {
                                 t.ignored
                             };
-                            if parent_idx < t.current_idx
+                            if reposition_blame
+                                .get(t.current_idx)
+                                .copied()
+                                .unwrap_or(false)
                                 && !is_ignored
-                                && par_lines.len() == cur_lines.len()
                             {
                                 result.push(BlameLine {
                                     oid: current_oid,
@@ -1939,6 +1994,32 @@ mod tests {
         let cur = ["alpha ONE", "beta two", " gamma three"];
         let map = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
         assert_eq!(map[0], None);
+    }
+
+    #[test]
+    fn reposition_blame_flags_rotated_head_line_only() {
+        let par = ["a", "b", "c", "d"];
+        let cur = ["d", "a", "b", "c"];
+        let map = build_exact_relocate_line_map(
+            &par,
+            &cur,
+            &build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false),
+        );
+        let blame = blame_reposition_on_current_commit(&map);
+        assert_eq!(blame, vec![true, false, false, false]);
+    }
+
+    #[test]
+    fn reposition_blame_swapped_inserted_line_in_three_line_file() {
+        let par = ["alpha ONE", "inserted", " gamma three"];
+        let cur = ["alpha ONE", " gamma three", "inserted"];
+        let map = build_exact_relocate_line_map(
+            &par,
+            &cur,
+            &build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false),
+        );
+        let blame = blame_reposition_on_current_commit(&map);
+        assert_eq!(blame, vec![false, false, true]);
     }
 
     #[test]

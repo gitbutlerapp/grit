@@ -209,6 +209,28 @@ fn build_blame_fixture() -> (tempfile::TempDir, Repository, String) {
 }
 
 #[test]
+fn blame_matches_git_porcelain_after_rotate_line_to_head() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "f.txt";
+    std::fs::write(root.join(file), "a\nb\nc\nd\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "init"]);
+
+    std::fs::write(root.join(file), "d\na\nb\nc\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "move"]);
+
+    let repo = Repository::discover(Some(root)).expect("open");
+    let dir = repo.work_tree.as_deref().expect("worktree");
+    assert_blame_matches(&repo, dir, file, None, None);
+}
+
+#[test]
 fn blame_matches_git_porcelain_at_head_rev_and_line_range() {
     let (_tmp, repo, mid_rev) = build_blame_fixture();
     let dir = repo.work_tree.as_deref().expect("worktree");
