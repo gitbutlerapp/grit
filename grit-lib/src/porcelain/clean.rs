@@ -105,8 +105,11 @@ pub fn clean_untracked(
         let paths_to_add = if rel.ends_with('/') {
             let trimmed = rel.trim_end_matches('/');
             let abs = work_tree.join(trimmed);
-            if nested_git_worktree_descendant_under(&abs) {
-                expand_clean_paths_skipping_nested_repos(work_tree, trimmed)?
+            if nested_git_worktree_descendant_under(&abs)
+                || (!opts.include_ignored
+                    && dir_preserves_ignored_descendants(repo, &index, &rules, work_tree, &abs)?)
+            {
+                expand_collapsed_dir_paths(repo, &index, &rules, opts.include_ignored, trimmed)?
             } else {
                 vec![rel]
             }
@@ -286,6 +289,57 @@ fn highest_empty_untracked_dir(
     Ok(Some(format!("{rel}/")))
 }
 
+/// True when `dir_abs` contains ignored paths that `git clean` without `-x` would keep.
+fn dir_preserves_ignored_descendants(
+    repo: &Repository,
+    index: &Index,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    dir_abs: &Path,
+) -> Result<bool> {
+    walk_dir_preserves_ignored(repo, index, rules, work_tree, dir_abs)
+}
+
+fn walk_dir_preserves_ignored(
+    repo: &Repository,
+    index: &Index,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    abs: &Path,
+) -> Result<bool> {
+    if is_nested_git_worktree(abs) {
+        return Ok(false);
+    }
+    let entries: Vec<_> = match fs::read_dir(abs) {
+        Ok(e) => e.filter_map(|e| e.ok()).collect(),
+        Err(_) => return Ok(false),
+    };
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            if is_nested_git_worktree(&path) {
+                continue;
+            }
+            if walk_dir_preserves_ignored(repo, index, rules, work_tree, &path)? {
+                return Ok(true);
+            }
+        } else {
+            let rel = crate::git_path::strip_worktree_prefix(&path, work_tree).unwrap_or(name);
+            let (ignored, _) = rules
+                .ignore_mut()
+                .check_path(repo, Some(index), &rel, false)?;
+            if ignored {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 fn nested_git_worktree_descendant_under(dir_abs: &Path) -> bool {
     if !dir_abs.is_dir() {
         return false;
@@ -309,20 +363,44 @@ fn nested_git_worktree_descendant_under(dir_abs: &Path) -> bool {
     false
 }
 
-/// When a collapsed directory contains a nested repository, enumerate removable paths
-/// inside it without deleting nested-repo subtrees (matches `git clean` skipping).
-fn expand_clean_paths_skipping_nested_repos(
-    work_tree: &Path,
+/// Expand a collapsed untracked directory into the paths `git clean` would remove,
+/// skipping nested repositories and (unless `include_ignored`) ignored files.
+fn expand_collapsed_dir_paths(
+    repo: &Repository,
+    index: &Index,
+    rules: &WorktreeRules,
+    include_ignored: bool,
     dir_rel: &str,
 ) -> Result<Vec<String>> {
+    let work_tree = repo
+        .work_tree
+        .as_ref()
+        .ok_or_else(|| Error::Message("clean requires a working tree".into()))?;
     let mut paths = Vec::new();
-    walk_expand_clean(&work_tree.join(dir_rel), dir_rel, &mut paths)?;
+    walk_expand_collapsed_dir(
+        repo,
+        index,
+        rules,
+        include_ignored,
+        &work_tree.join(dir_rel),
+        dir_rel,
+        &mut paths,
+    )?;
     paths.sort();
     paths.dedup();
     Ok(paths)
 }
 
-fn walk_expand_clean(abs: &Path, rel: &str, out: &mut Vec<String>) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn walk_expand_collapsed_dir(
+    repo: &Repository,
+    index: &Index,
+    rules: &WorktreeRules,
+    include_ignored: bool,
+    abs: &Path,
+    rel: &str,
+    out: &mut Vec<String>,
+) -> Result<()> {
     if is_nested_git_worktree(abs) {
         return Ok(());
     }
@@ -330,6 +408,8 @@ fn walk_expand_clean(abs: &Path, rel: &str, out: &mut Vec<String>) -> Result<()>
         Ok(e) => e.filter_map(|e| e.ok()).collect(),
         Err(_) => return Ok(()),
     };
+
+    let mut child_dirs = Vec::new();
     for entry in entries {
         let name = entry.file_name().to_string_lossy().to_string();
         if name == ".git" {
@@ -342,19 +422,64 @@ fn walk_expand_clean(abs: &Path, rel: &str, out: &mut Vec<String>) -> Result<()>
             format!("{rel}/{name}")
         };
         if child_abs.is_dir() {
-            if is_nested_git_worktree(&child_abs) {
-                continue;
-            }
-            if nested_git_worktree_descendant_under(&child_abs) {
-                walk_expand_clean(&child_abs, &child_rel, out)?;
-            } else {
-                out.push(format!("{child_rel}/"));
-            }
-        } else {
+            child_dirs.push((child_rel, child_abs));
+        } else if removable_untracked_path(repo, index, rules, include_ignored, &child_rel)? {
             out.push(child_rel);
         }
     }
+
+    for (child_rel, child_abs) in child_dirs {
+        if is_nested_git_worktree(&child_abs) {
+            continue;
+        }
+        let before = out.len();
+        walk_expand_collapsed_dir(
+            repo,
+            index,
+            rules,
+            include_ignored,
+            &child_abs,
+            &child_rel,
+            out,
+        )?;
+        if out.len() == before
+            && empty_untracked_directory(&child_abs)
+            && removable_untracked_path(
+                repo,
+                index,
+                rules,
+                include_ignored,
+                &format!("{child_rel}/"),
+            )?
+        {
+            out.push(format!("{child_rel}/"));
+        }
+    }
     Ok(())
+}
+
+fn empty_untracked_directory(abs: &Path) -> bool {
+    fs::read_dir(abs)
+        .map(|d| d.filter_map(|e| e.ok()).all(|e| e.file_name() == ".git"))
+        .unwrap_or(false)
+}
+
+fn removable_untracked_path(
+    repo: &Repository,
+    index: &Index,
+    rules: &WorktreeRules,
+    include_ignored: bool,
+    rel: &str,
+) -> Result<bool> {
+    if include_ignored {
+        return Ok(true);
+    }
+    let is_dir = rel.ends_with('/');
+    let check_path = rel.trim_end_matches('/');
+    let (ignored, _) = rules
+        .ignore_mut()
+        .check_path(repo, Some(index), check_path, is_dir)?;
+    Ok(!ignored)
 }
 
 fn has_tracked_under_index(index: &Index, rel_dir: &str) -> bool {

@@ -324,6 +324,79 @@ fn nested_empty_directories_removed_at_highest_level_like_git() {
 }
 
 #[test]
+fn collapsed_dir_preserves_ignored_files_like_git() {
+    let grit_root = tempfile::tempdir().expect("grit");
+    init_tracked_repo(grit_root.path());
+    fs::write(grit_root.path().join(".gitignore"), b"ignored.log\n").unwrap();
+    grit_lib::porcelain::add::stage(
+        &Repository::discover(Some(grit_root.path())).unwrap(),
+        &grit_lib::porcelain::add::StageOptions::default(),
+        &mut NullProgress,
+    )
+    .unwrap();
+    create_commit(
+        &Repository::discover(Some(grit_root.path())).unwrap(),
+        &commit_req("ignore"),
+        &mut NullProgress,
+    )
+    .unwrap();
+    fs::create_dir_all(grit_root.path().join("mixed")).unwrap();
+    fs::write(grit_root.path().join("mixed/untracked.txt"), b"u\n").unwrap();
+    fs::write(grit_root.path().join("mixed/ignored.log"), b"i\n").unwrap();
+
+    let git_root = tempfile::tempdir().expect("git");
+    init_tracked_repo(git_root.path());
+    fs::write(git_root.path().join(".gitignore"), b"ignored.log\n").unwrap();
+    git(git_root.path(), &["add", ".gitignore"]);
+    git(git_root.path(), &["commit", "-m", "ignore"]);
+    fs::create_dir_all(git_root.path().join("mixed")).unwrap();
+    fs::write(git_root.path().join("mixed/untracked.txt"), b"u\n").unwrap();
+    fs::write(git_root.path().join("mixed/ignored.log"), b"i\n").unwrap();
+
+    let repo = Repository::discover(Some(grit_root.path())).expect("open");
+    let preview = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: true,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("dry run");
+    let grit_preview: BTreeSet<String> = preview
+        .removed
+        .iter()
+        .map(|p| normalize_clean_path(p))
+        .collect();
+    assert_eq!(
+        grit_preview,
+        git_clean_preview(git_root.path(), &[]),
+        "preview must match git clean -nd"
+    );
+
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("force clean");
+
+    git_clean_force(git_root.path(), &[]);
+
+    assert!(grit_root.path().join("mixed/ignored.log").exists());
+    assert!(git_root.path().join("mixed/ignored.log").exists());
+    assert_eq!(
+        worktree_file_set(grit_root.path()),
+        worktree_file_set(git_root.path())
+    );
+}
+
+#[test]
 fn nested_repo_directory_is_untouched() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
