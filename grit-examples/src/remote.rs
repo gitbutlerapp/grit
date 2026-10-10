@@ -37,7 +37,7 @@ impl RemoteKind {
             Ok(RemoteUrl::Http(_) | RemoteUrl::Https(_)) => Self::Http,
             Ok(RemoteUrl::Git(_)) => Self::GitDaemon,
             Ok(RemoteUrl::Ssh(_)) => Self::Ssh,
-            Ok(RemoteUrl::Local(_) | RemoteUrl::File(_)) => Self::Local,
+            Ok(RemoteUrl::Local(_) | RemoteUrl::File(_) | RemoteUrl::Bundle(_)) => Self::Local,
             Err(_) => Self::Local,
         }
     }
