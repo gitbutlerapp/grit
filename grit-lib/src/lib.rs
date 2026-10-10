@@ -185,6 +185,7 @@ pub mod notes;
 pub mod objects;
 pub mod odb;
 pub mod pack;
+pub mod pack_bitmap;
 mod pack_index;
 pub(crate) mod pack_index_build;
 mod pack_map;
