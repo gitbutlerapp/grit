@@ -61,3 +61,9 @@ The workspace crate `grit_test_support::odb_conformance` provides shared read/wr
 `grit-examples` ships a single-file `PackfileKvStore` in `grit_examples::packfile_kv` (zlib records plus an in-memory index rebuilt on open) and a walkthrough that commits through a custom primary, walks history, and exports loose objects for system Git:
 
 <!-- include: grit-examples/examples/custom-object-store.rs -->
+
+## Example: SQLite object database
+
+For embedders who want indexed lookup without maintaining a separate `objects/` shard tree, `grit_examples::sqlite_odb` provides [`SqliteOdbStore`](https://github.com/gitbutlerapp/grit/blob/main/grit-examples/src/sqlite_odb.rs): each object is a row keyed by raw object id with zlib-compressed canonical store bytes (the same on-disk payload as a loose object file). The demo commits through a SQLite primary, walks history, then exports loose objects so system `git fsck` and `git log` succeed:
+
+<!-- include: grit-examples/examples/sqlite-object-store.rs -->
