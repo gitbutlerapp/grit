@@ -2,9 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
-use grit_lib::bundle::{self, BundleRef, BundleVerifyReport, WriteBundleOptions};
-use grit_lib::error::Error as LibError;
+use anyhow::{bail, Result};
+use grit_lib::bundle::{Bundle, BundleError, BundleVerifyReport};
+use grit_lib::bundle_remote;
+use grit_lib::objects::ObjectId;
 use serde::Serialize;
 
 use crate::context;
@@ -41,11 +42,11 @@ pub struct BundleRefJson {
     pub oid: String,
 }
 
-impl From<&BundleRef> for BundleRefJson {
-    fn from(r: &BundleRef) -> Self {
+impl From<(&str, ObjectId)> for BundleRefJson {
+    fn from((name, oid): (&str, ObjectId)) -> Self {
         Self {
-            name: r.name.clone(),
-            oid: r.oid.to_hex(),
+            name: name.to_owned(),
+            oid: oid.to_hex(),
         }
     }
 }
@@ -136,52 +137,81 @@ pub fn run_create(path: PathBuf, revs: Vec<String>) -> Result<BundleCreateOutcom
     if revs.is_empty() {
         bail!("at least one revision is required");
     }
-    let options = WriteBundleOptions {
-        positive_specs: revs,
-        ..Default::default()
-    };
-    bundle::write_bundle(&repo, &path, &options).map_err(map_bundle_lib_error)?;
-    let (header, _) = bundle::read_bundle_file(&path).context("read created bundle")?;
+    let refs = bundle_remote::write_bundle_from_rev_specs(&repo, &path, &revs)
+        .map_err(map_lib_error)?;
     Ok(BundleCreateOutcome {
         path: path.display().to_string(),
-        refs: header.references.len(),
+        refs,
     })
 }
 
 /// Verify a bundle file (optional repository for prerequisite checks).
 pub fn run_verify(path: PathBuf) -> Result<BundleVerifyOutcome> {
     let repo = context::discover().ok();
-    let report = bundle::verify_bundle(repo.as_ref(), &path).map_err(map_bundle_lib_error)?;
-    Ok(report_to_outcome(&path, report))
+    let bundle = Bundle::open(&path).map_err(map_bundle_error)?;
+    let report = match repo.as_ref() {
+        Some(r) => bundle.verify(r).map_err(map_bundle_error)?,
+        None => BundleVerifyReport::default(),
+    };
+    Ok(report_to_outcome(&path, &bundle, report))
 }
 
 /// List refs contained in a bundle.
 pub fn run_list(path: PathBuf) -> Result<BundleListOutcome> {
-    let (header, _) = bundle::read_bundle_file(&path).map_err(map_bundle_lib_error)?;
+    let bundle = Bundle::open(&path).map_err(map_bundle_error)?;
     Ok(BundleListOutcome {
         path: path.display().to_string(),
-        references: header.references.iter().map(BundleRefJson::from).collect(),
+        references: bundle
+            .header()
+            .refs
+            .iter()
+            .map(|(name, oid)| BundleRefJson::from((name.as_str(), *oid)))
+            .collect(),
     })
 }
 
-fn report_to_outcome(path: &Path, report: BundleVerifyReport) -> BundleVerifyOutcome {
+fn report_to_outcome(
+    path: &Path,
+    bundle: &Bundle,
+    report: BundleVerifyReport,
+) -> BundleVerifyOutcome {
+    let header = bundle.header();
     BundleVerifyOutcome {
         path: path.display().to_string(),
-        ok: report.ok,
-        hash_algorithm: report.hash_algo.name().to_owned(),
-        references: report.references.iter().map(BundleRefJson::from).collect(),
-        prerequisites: report.prerequisites.iter().map(|o| o.to_hex()).collect(),
+        ok: report.is_ok(),
+        hash_algorithm: header.object_format.name().to_owned(),
+        references: header
+            .refs
+            .iter()
+            .map(|(name, oid)| BundleRefJson::from((name.as_str(), *oid)))
+            .collect(),
+        prerequisites: header
+            .prerequisites
+            .iter()
+            .map(|(oid, _)| oid.to_hex())
+            .collect(),
         missing_prerequisites: report
             .missing_prerequisites
             .iter()
-            .map(|o| o.to_hex())
+            .map(|(oid, _)| oid.to_hex())
             .collect(),
     }
 }
 
-fn map_bundle_lib_error(err: LibError) -> anyhow::Error {
+fn map_bundle_error(err: BundleError) -> anyhow::Error {
     match err {
-        LibError::BundleMissingPrerequisites => anyhow::Error::new(MissingPrerequisites),
+        BundleError::MissingPrerequisite { .. } | BundleError::PrerequisitesNotConnected => {
+            anyhow::Error::new(MissingPrerequisites)
+        }
+        other => anyhow::Error::msg(other.to_string()),
+    }
+}
+
+fn map_lib_error(err: grit_lib::error::Error) -> anyhow::Error {
+    match err {
+        grit_lib::error::Error::BundleMissingPrerequisites => {
+            anyhow::Error::new(MissingPrerequisites)
+        }
         other => other.into(),
     }
 }

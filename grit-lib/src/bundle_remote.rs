@@ -1,9 +1,11 @@
 //! Fetch and remote helpers for on-disk bundle files (clone / `grit fetch` from a `.bundle`).
 
 use std::collections::HashSet;
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::Path;
 
-use crate::bundle::{Bundle, BundleError};
+use crate::bundle::{Bundle, BundleError, BundleSpec};
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
@@ -23,6 +25,89 @@ pub fn is_bundle_path(path: &Path) -> bool {
         return false;
     };
     bytes.starts_with(V2_SIGNATURE) || bytes.starts_with(V3_SIGNATURE)
+}
+
+/// Write a bundle file from revision arguments (supports `A..B` ranges like `git bundle create`).
+///
+/// # Errors
+///
+/// Propagates rev-list, ref resolution, and bundle write failures.
+pub fn write_bundle_from_rev_specs(
+    repo: &Repository,
+    path: &Path,
+    rev_tokens: &[String],
+) -> Result<usize> {
+    let (positive_specs, negative_specs) = split_revision_specs_for_bundle(rev_tokens);
+    if positive_specs.is_empty() {
+        return Err(Error::Message("at least one revision is required".into()));
+    }
+    let rev_opts = crate::rev_list::RevListOptions {
+        boundary: true,
+        objects: true,
+        ..Default::default()
+    };
+    let revs = crate::rev_list::rev_list(
+        repo,
+        &positive_specs,
+        &negative_specs,
+        &rev_opts,
+    )?;
+
+    let mut include: Vec<(ObjectId, String)> = Vec::new();
+    for spec in &positive_specs {
+        if let Ok(oid) = crate::rev_parse::resolve_revision(repo, spec) {
+            if revs.commits.contains(&oid) || revs.objects.iter().any(|(o, _)| *o == oid) {
+                let name = display_ref_for_spec(repo, spec, oid)?;
+                if !include.iter().any(|(_, n)| n == &name) {
+                    include.push((oid, name));
+                }
+            }
+        }
+    }
+    if include.is_empty() {
+        for oid in &revs.commits {
+            include.push((
+                *oid,
+                format!("refs/heads/bundle-tip/{}", oid.to_hex()),
+            ));
+        }
+    }
+    if include.is_empty() {
+        return Err(map_bundle_err(BundleError::EmptyRefs));
+    }
+
+    let spec = BundleSpec {
+        include,
+        exclude: revs.boundary_commits.clone(),
+        filter: None,
+    };
+    let file = File::create(path).map_err(Error::Io)?;
+    let mut out = BufWriter::new(file);
+    crate::bundle::write_bundle(repo, &spec, &mut out).map_err(map_bundle_err)?;
+    let bundle = Bundle::open(path).map_err(map_bundle_err)?;
+    Ok(bundle.header().refs.len())
+}
+
+fn display_ref_for_spec(repo: &Repository, spec: &str, _oid: ObjectId) -> Result<String> {
+    if spec.starts_with("refs/") {
+        return Ok(spec.to_owned());
+    }
+    let resolve = |name: &str| crate::refs::resolve_ref(&repo.git_dir, name).ok();
+    let (count, _) = crate::worktree_ref::resolve_ref_dwim(resolve, spec);
+    if count == 1 {
+        for rule in [
+            "{0}",
+            "refs/{0}",
+            "refs/heads/{0}",
+            "refs/remotes/{0}",
+        ] {
+            let candidate = rule.replace("{0}", spec);
+            if crate::refs::resolve_ref(&repo.git_dir, &candidate).is_ok() {
+                return Ok(candidate);
+            }
+        }
+    }
+    Ok(format!("refs/heads/{}", spec.trim_start_matches("heads/")))
 }
 
 /// Split CLI revision tokens into positive and negative specs for bundle creation.
