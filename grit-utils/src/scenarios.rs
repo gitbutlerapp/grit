@@ -314,6 +314,41 @@ pub fn run_diff_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
+/// Commits listed by the log benchmark fixture (`create_repo_with_history`).
+pub const LOG_BENCH_COMMIT_COUNT: usize = 100;
+
+/// `grit log` pages in the log benchmark (10 commits per page).
+pub const LOG_BENCH_GRIT_PAGE_COUNT: usize = 10;
+
+/// Grit subprocesses in one full log benchmark run (one `grit log` per page).
+#[must_use]
+pub fn log_bench_expected_grit_invocations() -> usize {
+    LOG_BENCH_GRIT_PAGE_COUNT
+}
+
+/// Regression guard: shell must page without an extra timed probe `grit log`.
+pub fn validate_log_bench_grit_shell(script: &str, grit: &Path) -> Result<(), String> {
+    if script.contains("/dev/null") {
+        return Err("log benchmark must not run a timed probe grit log".into());
+    }
+    let grit_q = shell_quote(&grit.to_string_lossy());
+    if !script.contains(&format!("seq 1 {LOG_BENCH_GRIT_PAGE_COUNT}")) {
+        return Err("log benchmark shell missing page loop bound".into());
+    }
+    if !script.contains(&format!("page=$({grit_q} log)")) {
+        return Err("log benchmark shell missing first-page grit log".into());
+    }
+    if !script.contains(&format!("page=$({grit_q} log --before=\"$before\")")) {
+        return Err("log benchmark shell missing paged grit log".into());
+    }
+    Ok(())
+}
+
+/// Shell script hyperfine runs for the grit side of the log benchmark.
+pub fn log_bench_grit_shell(grit: &Path) -> String {
+    grit_log_pages_shell(grit, LOG_BENCH_GRIT_PAGE_COUNT)
+}
+
 /// Last 100 commits, one line each (`git log -100 --oneline` vs paged `grit log`).
 pub fn run_log_suite(
     hyperfine: &Path,
@@ -323,12 +358,10 @@ pub fn run_log_suite(
     sizes: &[usize],
     timestamp: time::OffsetDateTime,
 ) -> Result<BenchReport> {
-    const COMMITS: usize = 100;
-    const PAGES: usize = 10;
     let mut scenarios = Vec::new();
     for &size in sizes {
-        let repo = create_repo_with_history(git, size, COMMITS)?;
-        let grit_cmd = grit_log_pages_shell(grit, PAGES);
+        let repo = create_repo_with_history(git, size, LOG_BENCH_COMMIT_COUNT)?;
+        let grit_cmd = log_bench_grit_shell(grit);
         scenarios.push(run_scenario(
             hyperfine,
             git,
@@ -339,7 +372,7 @@ pub fn run_log_suite(
                 group: "log".into(),
                 fixture: format!("synthetic-{size}"),
                 description: format!(
-                    "last {COMMITS} commits one line each (git log -100 --oneline, grit log pages)"
+                    "last {LOG_BENCH_COMMIT_COUNT} commits one line each (git log -100 --oneline, grit log pages)"
                 ),
                 grit_argv: sh_script(grit_cmd),
                 git_argv: vec!["log".into(), "-100".into(), "--oneline".into()],
@@ -357,19 +390,36 @@ pub fn run_log_suite(
 fn grit_log_pages_shell(grit: &Path, pages: usize) -> String {
     let grit_q = shell_quote(&grit.to_string_lossy());
     format!(
-        r#"{grit_q} log >/dev/null 2>&1 || exit 1
+        r#"set -eu
 before=""
 for _ in $(seq 1 {pages}); do
   if [ -z "$before" ]; then
-    page=$({grit_q} log)
+    page=$({grit_q} log) || exit $?
   else
-    page=$({grit_q} log --before="$before")
+    page=$({grit_q} log --before="$before") || exit $?
   fi
   printf '%s\n' "$page" | awk '!/^→/ && !/^$/ {{print}}'
   before=$(printf '%s\n' "$page" | sed -n 's/^→ more: grit log --before=//p')
   [ -z "$before" ] && break
 done"#
     )
+}
+
+#[cfg(test)]
+mod log_bench_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn log_bench_shell_has_no_probe_and_ten_grit_invocations() {
+        let grit = Path::new("/opt/grit/grit");
+        let script = log_bench_grit_shell(grit);
+        validate_log_bench_grit_shell(&script, grit).expect("shell shape");
+        assert_eq!(
+            log_bench_expected_grit_invocations(),
+            LOG_BENCH_GRIT_PAGE_COUNT
+        );
+    }
 }
 
 /// Stage-all benchmark for each file count (`git add -A` vs `grit add`).
