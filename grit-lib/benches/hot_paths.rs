@@ -8,8 +8,8 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use hot_paths_fixture::{
-    bench_apply_stash, bench_checkout_between_trees, bench_pick_path, bench_stage_scan,
-    HotPathsFixture,
+    bench_apply_stash, bench_checkout_between_trees, bench_pick_path, bench_push_stash,
+    bench_stage_scan, HotPathsFixture,
 };
 
 fn bench_index_mutate(c: &mut Criterion) {
@@ -53,6 +53,19 @@ fn bench_checkout(c: &mut Criterion) {
             });
         }
     }
+    group.finish();
+}
+
+fn bench_push_stash_group(c: &mut Criterion) {
+    let fx = HotPathsFixture::large();
+    let mut group = c.benchmark_group("push_stash");
+    group.bench_function("stash_push_L", |b| {
+        b.iter_batched(
+            || fx.reset_worktree_to_head(),
+            |_| bench_push_stash(fx),
+            BatchSize::SmallInput,
+        );
+    });
     group.finish();
 }
 
@@ -109,6 +122,7 @@ criterion_group!(
     targets = bench_index_mutate,
     bench_checkout,
     bench_staging_scan,
+    bench_push_stash_group,
     bench_apply_stash_group,
     bench_pick_paths
 );

@@ -191,7 +191,14 @@ fn grit_stash_apply_at_3k_matches_git_without_index() {
     let grit_repo =
         Repository::open(&grit_dir.path().join(".git"), Some(grit_dir.path())).expect("grit open");
     let stash_oid = ObjectId::from_hex(&stash_oid_hex).expect("stash oid");
-    apply_stash(&grit_repo, grit_dir.path(), &stash_oid, false, false).expect("stash apply");
+    apply_stash(
+        &grit_repo,
+        grit_dir.path(),
+        &stash_oid,
+        false,
+        "Test <t@example.com> 0 +0000",
+    )
+    .expect("stash apply");
 
     let git_dir = tempfile::tempdir().expect("git copy");
     copy_repo(base.path(), git_dir.path());

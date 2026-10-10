@@ -14,7 +14,7 @@ use grit_lib::merge_trees::{
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::staging::stage_worktree_changes;
-use grit_lib::porcelain::stash::apply_stash;
+use grit_lib::porcelain::stash::{apply_stash, push_stash, StashCreateOptions};
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -317,9 +317,26 @@ fn write_tree_commit(
         .expect("write commit")
 }
 
+pub fn bench_push_stash(fx: &HotPathsFixture) {
+    fx.modify_worktree_files(50);
+    let options = StashCreateOptions {
+        message: None,
+        include_untracked: false,
+        identity: BENCH_IDENT.to_owned(),
+    };
+    let _ = push_stash(&fx.repo, &options).expect("push_stash");
+}
+
 pub fn bench_apply_stash(fx: &HotPathsFixture, stash_oid: &ObjectId) {
     let wt = fx.repo.work_tree.as_ref().expect("work tree");
-    let _ = apply_stash(&fx.repo, wt, stash_oid, false, false).expect("apply_stash");
+    let _ = apply_stash(
+        &fx.repo,
+        wt,
+        stash_oid,
+        false,
+        "Bench <bench@example.com> 0 +0000",
+    )
+    .expect("apply_stash");
 }
 
 pub fn bench_pick_path(fx: &HotPathsFixture, path_count: usize) {

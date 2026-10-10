@@ -471,6 +471,36 @@ pub enum Error {
     #[error("commit already at HEAD")]
     ReplaySourceAtHead,
 
+    /// Stash commit object has fewer parents or an invalid shape for apply/show.
+    #[error("corrupt stash commit: {0}")]
+    CorruptStash(&'static str),
+
+    /// `stash@{{n}}` is out of range for the current stash reflog.
+    #[error("stash entry stash@{{{n}}} not found")]
+    StashNotFound { n: usize },
+
+    /// [`create_stash`](crate::porcelain::stash::create_stash) requires at least one commit.
+    #[error("cannot stash without a commit")]
+    StashNoInitialCommit,
+
+    /// HEAD does not resolve while applying a stash entry.
+    #[error("missing HEAD while applying stash")]
+    StashMissingHead,
+
+    /// Applying a stash would overwrite locally modified worktree content.
+    #[error(
+        "your local changes to the following files would be overwritten by stash apply: {paths}"
+    )]
+    StashWouldOverwriteLocalChanges { paths: String },
+
+    /// The index could not be written after a successful stash apply.
+    #[error("writing index after stash apply: {0}")]
+    StashIndexWrite(String),
+
+    /// A symlink blob in a stash commit is not valid UTF-8.
+    #[error("symlink target is not UTF-8")]
+    StashSymlinkNotUtf8,
+
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
     Midx(#[from] MidxError),
