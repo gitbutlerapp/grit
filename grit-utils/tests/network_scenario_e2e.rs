@@ -71,8 +71,8 @@ fn network_scenario_smoke_end_to_end() {
     let scenarios = report["scenarios"].as_array().expect("scenarios array");
     assert_eq!(
         scenarios.len(),
-        8,
-        "expected eight smoke network scenarios (clone×3, fetch, push, ls-remote, server compare)"
+        15,
+        "expected fifteen smoke scenarios (clone×3, fetch incr/noop×3, push×2, ls-remote×3, server compare)"
     );
     for scenario in scenarios {
         let ratio = scenario["ratio"].as_f64().expect("ratio");

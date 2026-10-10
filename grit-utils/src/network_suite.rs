@@ -16,6 +16,14 @@ use crate::network_fixture::{
     ensure_fixture, file_url, install_http_repo, load_meta, NetworkBenchMeta, NetworkFixtureKind,
     NetworkProfile, REPO_NAME,
 };
+
+fn refresh_http_mirror(git: &Path, bare: &Path) -> Result<()> {
+    let http_root = network_http_root(bare);
+    if http_root.is_dir() {
+        install_http_repo(git, bare, &http_root)?;
+    }
+    Ok(())
+}
 use crate::network_http::{GitHttpBackendServer, GritHttpServer};
 use crate::scenarios::RunConfig;
 use crate::schema::{BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION};
@@ -53,6 +61,9 @@ pub fn run_network_suite(
     let many_refs = ensure_fixture(git, profile, NetworkFixtureKind::ManyRefs)?;
     let _large = ensure_fixture(git, profile, NetworkFixtureKind::LargeBlobs)?;
 
+    clear_network_sidecars(&deep)?;
+    clear_network_sidecars(&many_refs)?;
+
     let mut scenarios = Vec::new();
 
     for transport in [
@@ -72,35 +83,52 @@ pub fn run_network_suite(
         )?);
     }
 
-    scenarios.extend(run_fetch_scenarios(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        profile,
-        &deep,
+    for transport in [
         TransportKind::File,
-    )?);
+        TransportKind::GitHttpBackend,
+        TransportKind::GritHttp,
+    ] {
+        scenarios.extend(run_fetch_scenarios(
+            hyperfine,
+            git,
+            grit,
+            http_server,
+            cfg,
+            profile,
+            &deep,
+            transport,
+        )?);
+    }
 
-    scenarios.extend(run_push_scenarios(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        profile,
-        &deep,
-        TransportKind::File,
-    )?);
+    for transport in [TransportKind::File, TransportKind::GritHttp] {
+        scenarios.extend(run_push_scenarios(
+            hyperfine,
+            git,
+            grit,
+            http_server,
+            cfg,
+            profile,
+            &deep,
+            transport,
+        )?);
+    }
 
-    scenarios.extend(run_ls_remote_scenarios(
-        hyperfine,
-        git,
-        grit,
-        cfg,
-        profile,
-        &many_refs,
+    for transport in [
         TransportKind::File,
-    )?);
+        TransportKind::GitHttpBackend,
+        TransportKind::GritHttp,
+    ] {
+        scenarios.extend(run_ls_remote_scenarios(
+            hyperfine,
+            git,
+            grit,
+            http_server,
+            cfg,
+            profile,
+            &many_refs,
+            transport,
+        )?);
+    }
 
     scenarios.push(run_server_side_clone_comparison(
         hyperfine,
@@ -175,10 +203,12 @@ fn run_clone_scenarios(
     Ok(vec![scenario])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_fetch_scenarios(
     hyperfine: &Path,
     git: &Path,
     grit: &Path,
+    http_server: Option<&Path>,
     cfg: &RunConfig,
     profile: NetworkProfile,
     bare: &Path,
@@ -186,7 +216,8 @@ fn run_fetch_scenarios(
 ) -> Result<Vec<ScenarioResult>> {
     let meta = load_meta(bare)?;
     ensure_client_repo(git, bare, &meta)?;
-    let (url, _, _) = resolve_transport_url(git, grit, None, bare, transport)?;
+    let (url, _git_http, _grit_http) =
+        resolve_transport_url(git, grit, http_server, bare, transport)?;
     configure_remote(git, &meta.client_repo, &url)?;
 
     let mut out = Vec::new();
@@ -237,10 +268,12 @@ fn run_fetch_scenarios(
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_push_scenarios(
     hyperfine: &Path,
     git: &Path,
     grit: &Path,
+    http_server: Option<&Path>,
     cfg: &RunConfig,
     profile: NetworkProfile,
     bare: &Path,
@@ -248,7 +281,8 @@ fn run_push_scenarios(
 ) -> Result<Vec<ScenarioResult>> {
     let meta = load_meta(bare)?;
     ensure_client_repo(git, bare, &meta)?;
-    let (url, _, _) = resolve_transport_url(git, grit, None, bare, transport)?;
+    let (url, _git_http, _grit_http) =
+        resolve_transport_url(git, grit, http_server, bare, transport)?;
     configure_remote(git, &meta.client_repo, &url)?;
 
     let prepare = prepare_network_command(cfg, git, bare, "prepare-network-push");
@@ -275,17 +309,20 @@ fn run_push_scenarios(
     Ok(vec![scenario])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_ls_remote_scenarios(
     hyperfine: &Path,
     git: &Path,
     grit: &Path,
+    http_server: Option<&Path>,
     cfg: &RunConfig,
     profile: NetworkProfile,
     bare: &Path,
     transport: TransportKind,
 ) -> Result<Vec<ScenarioResult>> {
     let meta = load_meta(bare)?;
-    let (url, _, _) = resolve_transport_url(git, grit, None, bare, transport)?;
+    let (url, _git_http, _grit_http) =
+        resolve_transport_url(git, grit, http_server, bare, transport)?;
     let scenario = run_paired_cli_scenario(
         hyperfine,
         git,
@@ -466,6 +503,16 @@ fn run_paired_cli_scenario(
     })
 }
 
+fn clear_network_sidecars(bare: &Path) -> Result<()> {
+    let meta = load_meta(bare)?;
+    for sidecar in [&meta.client_repo, &meta.clone_dest] {
+        if sidecar.exists() {
+            remove_dir_robust(sidecar);
+        }
+    }
+    Ok(())
+}
+
 fn prepare_network_command(cfg: &RunConfig, git: &Path, bare: &Path, sub: &str) -> String {
     shell_command(
         &cfg.prepare_bin,
@@ -625,15 +672,20 @@ pub fn prepare_network_fetch_incr(git: &Path, bare: &Path) -> Result<()> {
     for i in 0..meta.incremental_fetch_commits {
         append_empty_commit_on_bare(git, bare, &format!("bench-fetch-incr-{i}"))?;
     }
-    Ok(())
+    refresh_http_mirror(git, bare)
 }
 
 /// Client and server both at the same tip (no-op fetch).
 pub fn prepare_network_fetch_noop(git: &Path, bare: &Path) -> Result<()> {
     let meta = load_meta(bare)?;
     ensure_client_repo(git, bare, &meta)?;
-    let tip = run_git_output(git, Some(bare), &["rev-parse", "HEAD"])?;
-    run_git_cmd(git, Some(&meta.client_repo), &["reset", "--hard", &tip])?;
+    refresh_http_mirror(git, bare)?;
+    run_git_cmd(git, Some(&meta.client_repo), &["fetch", "-q", "origin"])?;
+    run_git_cmd(
+        git,
+        Some(&meta.client_repo),
+        &["reset", "--hard", "origin/main"],
+    )?;
     Ok(())
 }
 
@@ -664,7 +716,7 @@ pub fn prepare_network_push(git: &Path, bare: &Path) -> Result<()> {
             ],
         )?;
     }
-    Ok(())
+    refresh_http_mirror(git, bare)
 }
 
 /// Advance `refs/heads/main` on a bare repo with an empty commit (same tree).

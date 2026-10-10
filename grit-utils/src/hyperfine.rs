@@ -122,6 +122,9 @@ pub fn run_hyperfine(hyperfine: &Path, run: &HyperfineRun) -> Result<HyperfineRe
     if let Some(name) = &run.command_name {
         cmd.arg("--command-name").arg(name);
     }
+    if std::env::var_os("GRIT_BENCH_HYPERFINE_SHOW_OUTPUT").is_some() {
+        cmd.arg("--show-output");
+    }
     // hyperfine 2.x requires an explicit shell when the command uses `&&` (our `cd … && …` wrapper).
     cmd.arg("--shell=default");
     cmd.arg(command);

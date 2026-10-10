@@ -151,7 +151,7 @@ pub fn network_cache_root() -> PathBuf {
 
 fn ready_marker(profile: NetworkProfile, kind: NetworkFixtureKind) -> PathBuf {
     let name = match kind {
-        NetworkFixtureKind::DeepHistory => format!("deep-history-{}.ready", profile.suffix()),
+        NetworkFixtureKind::DeepHistory => format!("deep-history-{}.ready-v2", profile.suffix()),
         NetworkFixtureKind::ManyRefs => format!("many-refs-{}.ready", profile.suffix()),
         NetworkFixtureKind::LargeBlobs => format!("large-blobs-{}.ready", profile.suffix()),
     };
@@ -208,6 +208,7 @@ fn build_deep_history(git: &Path, profile: NetworkProfile, dest: &Path) -> Resul
         Some(dest),
         &["symbolic-ref", "HEAD", "refs/heads/main"],
     )?;
+    run_git(git, Some(dest), &["repack", "-a", "-d", "-f", "-q"])?;
 
     write_meta(
         git,
@@ -427,6 +428,11 @@ fn write_meta(
         fetch_base_oid: fetch_base,
     };
     fs::write(meta_path(bare), serde_json::to_string_pretty(&meta)?)?;
+    for sidecar in [&meta.client_repo, &meta.clone_dest] {
+        if sidecar.exists() {
+            remove_dir_robust(sidecar);
+        }
+    }
     Ok(())
 }
 
