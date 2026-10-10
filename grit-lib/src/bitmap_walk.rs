@@ -506,8 +506,11 @@ fn walk_tree(
     mark_index_or_extended(index, bits, extended, extended_set, tree, ObjectKind::Tree);
     let entries = parse_tree(&object.data)?;
     for entry in entries {
-        let is_tree = entry.mode == 0o040000 || entry.mode == 0o160000;
-        if is_tree {
+        // Submodule gitlinks name commits in another object store; do not walk them.
+        if entry.mode == 0o160000 {
+            continue;
+        }
+        if entry.mode == 0o040000 {
             walk_tree(
                 repo,
                 index,
@@ -594,7 +597,8 @@ fn apply_filter_one(
         ObjectFilter::TreeDepth(0) => {
             clear_type(index, &mut set.bits, ObjectKind::Tree);
             clear_type(index, &mut set.bits, ObjectKind::Blob);
-            set.extended.clear();
+            set.extended
+                .retain(|(_, kind)| !matches!(kind, ObjectKind::Tree | ObjectKind::Blob));
             rebuild_extended_set(set);
         }
         ObjectFilter::ObjectType(kind) => {

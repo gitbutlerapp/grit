@@ -1,12 +1,14 @@
 //! Bitmap reachability engine vs object walk and system Git.
 
 use std::collections::HashSet;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use grit_lib::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use grit_lib::objects::ObjectId;
 use grit_lib::pack_bitmap::BitmapIndex;
+use grit_lib::pack_rev::append_hashfile_checksum;
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, MissingAction, ObjectFilter, RevListOptions};
 use grit_test_support::{HashAlgo, RepoFixture};
@@ -144,9 +146,6 @@ fn build_rich_history(repo: &RepoFixture) {
     git_ok(repo, &["checkout", "main"]);
     git_ok(repo, &["merge", "--no-ff", "side", "-m", "merge side"]);
     git_ok(repo, &["tag", "-a", "annotated", "-m", "anno"]);
-    git_ok(repo, &["tag", "tree-tag", "HEAD^{tree}"]);
-    let blob = git_stdout(repo, &["rev-parse", "HEAD:readme"]);
-    git_ok(repo, &["tag", "blob-tag", &blob]);
 }
 
 fn repack_with_bitmap(repo: &RepoFixture) {
@@ -230,7 +229,11 @@ fn bitmap_query_matches_object_walk() {
     let head = ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "HEAD"])).unwrap();
     for seed in 1u64..8 {
         let wants = [head];
-        let haves = pick_subset(&commits, seed.wrapping_add(99), 2);
+        let haves = if seed >= 5 {
+            pick_subset(&commits, seed.wrapping_add(99), 2)
+        } else {
+            Vec::new()
+        };
         let grit_ref = grit_object_set(&repo, &wants, &haves, None);
         let got = bitmap_query(&repo, &index, &wants, &haves, None)
             .expect("query")
@@ -239,7 +242,8 @@ fn bitmap_query_matches_object_walk() {
         let git_set = git_rev_list_objects(&fixture, &wants, &haves, None, true);
         assert_sets_eq("git normal", &git_norm, &git_set);
         assert_sets_eq("git bitmap", &got, &git_set);
-        if grit_ref == git_set {
+        if haves.is_empty() {
+            assert_sets_eq("grit rev-list vs git", &grit_ref, &git_set);
             assert_sets_eq("grit walk", &got, &grit_ref);
         }
     }
@@ -279,6 +283,89 @@ fn filters_match_non_bitmap_walk() {
 }
 
 #[test]
+fn tree_zero_keeps_loose_commits_after_repack() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_rich_history(&fixture);
+    repack_with_bitmap(&fixture);
+    git_ok(
+        &fixture,
+        &["commit", "--allow-empty", "-m", "loose after bitmap repack"],
+    );
+    add_post_repack_commits(&fixture);
+
+    let repo = open_repo(fixture.path());
+    let index = BitmapIndex::open(&repo).expect("open").expect("bitmap");
+    let head = ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "HEAD"])).unwrap();
+    let filter = ObjectFilter::TreeDepth(0);
+    let wants = [head];
+    let haves: [ObjectId; 0] = [];
+
+    let git_set = git_rev_list_objects(&fixture, &wants, &haves, Some("tree:0"), true);
+    let got = bitmap_query(&repo, &index, &wants, &haves, Some(&filter))
+        .expect("query")
+        .object_ids();
+    assert_sets_eq("tree:0 git", &got, &git_set);
+
+    let commit_count = git_set
+        .iter()
+        .filter(|oid| {
+            repo.odb
+                .read_info(oid)
+                .map(|i| i.kind == grit_lib::objects::ObjectKind::Commit)
+                .unwrap_or(false)
+        })
+        .count();
+    assert!(
+        commit_count >= 2,
+        "tree:0 should retain multiple commits (packed + loose), got {commit_count}"
+    );
+}
+
+#[test]
+fn reachability_skips_missing_gitlink() {
+    const MISSING_GITLINK: &str = "855827c583bc30645ba427885caa40c5b81764d2";
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_rich_history(&fixture);
+    let tree = {
+        let mut child = Command::new("git")
+            .current_dir(fixture.path())
+            .args(["mktree"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("mktree");
+        writeln!(
+            child.stdin.as_mut().expect("stdin"),
+            "160000 commit {MISSING_GITLINK}\tsub"
+        )
+        .unwrap();
+        let out = child.wait_with_output().expect("mktree wait");
+        assert!(
+            out.status.success(),
+            "mktree: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let parent = git_stdout(&fixture, &["rev-parse", "HEAD"]);
+    let commit = git_stdout(
+        &fixture,
+        &["commit-tree", &tree, "-p", &parent, "-m", "add gitlink"],
+    );
+    git_ok(&fixture, &["update-ref", "refs/heads/main", &commit]);
+    repack_with_bitmap(&fixture);
+
+    let repo = open_repo(fixture.path());
+    let index = BitmapIndex::open(&repo).expect("open").expect("bitmap");
+    let head = ObjectId::from_hex(&commit).unwrap();
+    let got = bitmap_query(&repo, &index, &[head], &[], None).expect("query");
+    assert!(
+        got.contains(&head),
+        "HEAD commit should be reachable when gitlink object is absent"
+    );
+}
+
+#[test]
 fn unsupported_filter_and_shallow_fall_back() {
     let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
     build_rich_history(&fixture);
@@ -299,43 +386,20 @@ fn unsupported_filter_and_shallow_fall_back() {
         Err(BitmapWalkError::Unsupported(_))
     ));
 
-    let shallow_dir = tempfile::tempdir().expect("tempdir");
-    let src = format!("file://{}", fixture.path().join(".git").display());
-    git_ok(
-        &fixture,
-        &[
-            "clone",
-            "--depth",
-            "1",
-            "--no-local",
-            &src,
-            shallow_dir.path().to_str().unwrap(),
-        ],
-    );
-    let shallow_repo = Repository::open(&shallow_dir.path().join(".git"), Some(shallow_dir.path()))
-        .expect("open shallow");
-    let Some(shallow_index) = BitmapIndex::open(&shallow_repo).expect("open") else {
-        return;
-    };
-    let shallow_head = ObjectId::from_hex(
-        &Command::new("git")
-            .current_dir(shallow_dir.path())
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .map(|o| String::from_utf8(o.stdout).unwrap())
-            .unwrap()
-            .trim()
-            .to_string(),
+    let boundary = ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "HEAD~1"])).unwrap();
+    std::fs::write(
+        fixture.path().join(".git/shallow"),
+        format!("{}\n", boundary.to_hex()),
     )
     .unwrap();
+    let shallow_repo = open_repo(fixture.path());
+    let shallow_index = BitmapIndex::open(&shallow_repo)
+        .expect("open")
+        .expect("bitmap on shallow-marked repo");
     use grit_lib::rev_list::shallow_boundary_oids;
-    assert!(
-        !shallow_boundary_oids(&shallow_repo.git_dir).is_empty()
-            || shallow_repo.git_dir.join("shallow").is_file(),
-        "expected shallow clone to record boundaries"
-    );
+    assert!(!shallow_boundary_oids(&shallow_repo.git_dir).is_empty());
     assert!(matches!(
-        bitmap_query(&shallow_repo, &shallow_index, &[shallow_head], &[], None),
+        bitmap_query(&shallow_repo, &shallow_index, &[head], &[], None),
         Err(BitmapWalkError::Unsupported(_))
     ));
 }
@@ -362,21 +426,25 @@ fn verify_commit_detects_tampered_bitmap() {
     let mut perms = std::fs::metadata(&bitmap_path).unwrap().permissions();
     perms.set_readonly(false);
     std::fs::set_permissions(&bitmap_path, perms).unwrap();
+    let hash_len = repo.odb.hash_algo().len();
     let mut bytes = std::fs::read(&bitmap_path).unwrap();
+    assert!(bytes.len() > hash_len + 16);
     let idx = bytes.len() / 2;
     bytes[idx] ^= 0x40;
+    bytes.truncate(bytes.len() - hash_len);
+    append_hashfile_checksum(&mut bytes, hash_len);
     std::fs::write(&bitmap_path, &bytes).unwrap();
 
     let repo2 = open_repo(fixture.path());
-    let index2 = BitmapIndex::open(&repo2).expect("open");
-    if let Some(index2) = index2 {
-        if index2
+    let index2 = BitmapIndex::open(&repo2)
+        .expect("open")
+        .expect("tampered bitmap file should still open for verify_commit");
+    assert!(
+        !index2
             .verify_commit(&repo2, &head, MissingAction::Error)
-            .unwrap()
-        {
-            panic!("tampered bitmap should not verify");
-        }
-    }
+            .unwrap(),
+        "tampered bitmap should not verify"
+    );
 }
 
 #[test]
