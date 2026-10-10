@@ -187,3 +187,42 @@ fn create_commit_concludes_resolved_merge_with_two_parents() {
         String::from_utf8_lossy(&fsck.stderr)
     );
 }
+
+#[test]
+fn create_commit_concludes_merge_when_resolved_as_ours() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let repo = init_conflict_merge(root);
+
+    git(root, &["checkout", "--ours", "--", "f"]);
+    git(root, &["add", "f"]);
+
+    let side_tip = ObjectId::from_hex(&git_out(root, &["rev-parse", "side"])).expect("side oid");
+    let main_before = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("main oid");
+    let main_tree_before = git_out(root, &["rev-parse", "HEAD^{tree}"]);
+
+    create_commit(&repo, &commit_req("resolve as ours"), &mut NullProgress)
+        .expect("merge commit with unchanged tree vs first parent");
+
+    let parents_line = git_out(root, &["rev-list", "--parents", "-1", "HEAD"]);
+    let parts: Vec<&str> = parents_line.split_whitespace().collect();
+    assert_eq!(
+        parts.len(),
+        3,
+        "merge commit should have two parents like git: {parents_line}"
+    );
+    assert_eq!(parts[1], main_before.to_hex());
+    assert_eq!(parts[2], side_tip.to_hex());
+
+    let tree_at_head = git_out(root, &["rev-parse", "HEAD^{tree}"]);
+    assert_eq!(
+        tree_at_head, main_tree_before,
+        "ours resolution should keep the first-parent tree"
+    );
+    assert_eq!(git_out(root, &["show", "HEAD:f"]), "main");
+
+    assert!(
+        !repo.git_dir.join("MERGE_HEAD").exists(),
+        "MERGE_HEAD should be cleared after merge commit"
+    );
+}

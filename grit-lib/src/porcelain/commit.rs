@@ -90,6 +90,7 @@ pub fn create_commit(
         return Err(Error::IndexUnmerged);
     }
     let merge_heads = read_merge_heads(&repo.git_dir)?;
+    let concluding_merge = !merge_heads.is_empty();
     let index_path = repo.git_dir.join("index");
     let commit_env = CommitHookEnv {
         index_file: Some(index_path.as_path()),
@@ -110,9 +111,11 @@ pub fn create_commit(
         if parent_tree.is_none() && is_empty_tree_oid(&repo.odb, &tree) {
             return Err(Error::NothingToCommit);
         }
-        if let Some(ref old) = parent_tree {
-            if old == &tree {
-                return Err(Error::NothingToCommit);
+        if !concluding_merge {
+            if let Some(ref old) = parent_tree {
+                if old == &tree {
+                    return Err(Error::NothingToCommit);
+                }
             }
         }
     }
@@ -139,7 +142,6 @@ pub fn create_commit(
         message.push('\n');
     }
 
-    let concluding_merge = !merge_heads.is_empty();
     let mut parents: Vec<ObjectId> = parent.into_iter().collect();
     for merge_head in merge_heads {
         if !parents.iter().any(|p| p == &merge_head) {
