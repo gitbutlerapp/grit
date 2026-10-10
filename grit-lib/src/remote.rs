@@ -224,10 +224,11 @@ impl Remote {
             .filter(|u| !u.trim().is_empty())
             .ok_or(RemoteError::NoUrl)?;
         let fetch_url = url_rewrite::rewrite_fetch_url(config, &raw_url);
-        let push_url = config
+        let push_source = config
             .get(&format!("remote.{name}.pushurl"))
             .filter(|u| !u.trim().is_empty())
-            .map(|u| url_rewrite::rewrite_push_url(config, u.as_str()));
+            .unwrap_or_else(|| raw_url.clone());
+        let push_url = url_rewrite::rewrite_push_url(config, push_source.as_str());
         let mut fetch_refspecs = config.get_all(&format!("remote.{name}.fetch"));
         fetch_refspecs.retain(|s| !s.trim().is_empty());
         if fetch_refspecs.is_empty() {
@@ -236,9 +237,7 @@ impl Remote {
         Ok(Self {
             name: Some(name.to_owned()),
             fetch_url: RemoteUrl::try_from(fetch_url.as_str())?,
-            push_url: push_url
-                .map(|u| RemoteUrl::try_from(u.as_str()))
-                .transpose()?,
+            push_url: Some(RemoteUrl::try_from(push_url.as_str())?),
             fetch_refspecs,
         })
     }
@@ -678,7 +677,13 @@ fn list_refs_includes_head(opts: &ListRefsOptions) -> bool {
 
 fn list_ref_prefixes(opts: &ListRefsOptions) -> Vec<String> {
     if !opts.prefixes.is_empty() {
-        return opts.prefixes.clone();
+        if opts.heads && !opts.tags {
+            return vec!["refs/heads/".to_owned()];
+        }
+        if opts.tags && !opts.heads {
+            return vec!["refs/tags/".to_owned()];
+        }
+        return vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()];
     }
     let mut out = Vec::new();
     let all = !opts.heads && !opts.tags;
@@ -1127,5 +1132,35 @@ mod tests {
             .unwrap();
         let remote = Remote::from_config(&cfg, "origin").unwrap();
         assert!(matches!(remote.fetch_url(), RemoteUrl::Https(_)));
+    }
+
+    #[test]
+    fn push_insteadof_applied_when_pushurl_absent() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("url.ssh://push.example/.pushInsteadOf", "short:")
+            .unwrap();
+        cfg.add_command_override("remote.origin.url", "short:org/repo.git")
+            .unwrap();
+        let remote = Remote::from_config(&cfg, "origin").unwrap();
+        assert_eq!(
+            remote.push_url().to_url_string(),
+            "ssh://push.example/org/repo.git"
+        );
+        assert_eq!(remote.fetch_url().to_url_string(), "short:org/repo.git");
+    }
+
+    #[test]
+    fn list_ref_prefixes_broad_for_ls_remote_patterns() {
+        let opts = super::ListRefsOptions {
+            prefixes: vec!["main".to_owned()],
+            ..Default::default()
+        };
+        let prefixes = super::list_ref_prefixes(&opts);
+        assert_eq!(
+            prefixes,
+            vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()]
+        );
+        assert!(super::ref_matches_list_opts("refs/heads/main", &opts));
+        assert!(!super::ref_matches_list_opts("refs/heads/topic", &opts));
     }
 }
