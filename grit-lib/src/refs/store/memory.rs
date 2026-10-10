@@ -20,14 +20,24 @@ use super::{
     RefUpdateFlags, ReflogUpdate,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct MemoryRefStoreInner {
     refs: BTreeMap<String, RawRef>,
     reflogs: BTreeMap<String, Vec<ReflogEntry>>,
     prepared: Option<PreparedBatch>,
 }
 
-#[derive(Debug)]
+impl MemoryRefStoreInner {
+    fn snapshot_for_apply(&self) -> Self {
+        Self {
+            refs: self.refs.clone(),
+            reflogs: self.reflogs.clone(),
+            prepared: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct PreparedBatch {
     lock_name: String,
     updates: Vec<RefUpdate>,
@@ -124,18 +134,8 @@ impl RefStore for MemoryRefStore {
             });
         }
 
-        for update in &updates {
-            let actual = inner.refs.get(&update.name);
-            if !expected_matches(actual, &update.expected) {
-                return Err(RefStoreError::ExpectedMismatch {
-                    name: update.name.clone(),
-                    expected: update.expected.clone(),
-                    actual: actual.cloned(),
-                });
-            }
-        }
-
         verify_create_conflicts(&inner.refs, &updates)?;
+        simulate_batch_apply(&inner, &updates)?;
 
         let lock_name = updates
             .first()
@@ -220,9 +220,12 @@ impl PreparedRefTransaction for MemoryPrepared<'_> {
         let Some(batch) = inner.prepared.take() else {
             return Ok(());
         };
-        for update in batch.updates {
-            apply_update(&mut inner, &update)?;
+        let mut trial = inner.snapshot_for_apply();
+        for update in &batch.updates {
+            apply_update(&mut trial, update)?;
         }
+        inner.refs = trial.refs;
+        inner.reflogs = trial.reflogs;
         self.committed = true;
         Ok(())
     }
@@ -262,13 +265,34 @@ fn apply_update(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> StoreRes
     Ok(())
 }
 
+fn simulate_batch_apply(inner: &MemoryRefStoreInner, updates: &[RefUpdate]) -> StoreResult<()> {
+    let mut trial = inner.snapshot_for_apply();
+    for update in updates {
+        let actual = trial.refs.get(&update.name);
+        if !expected_matches(actual, &update.expected) {
+            return Err(RefStoreError::ExpectedMismatch {
+                name: update.name.clone(),
+                expected: update.expected.clone(),
+                actual: actual.cloned(),
+            });
+        }
+        apply_update(&mut trial, update)?;
+    }
+    Ok(())
+}
+
 fn apply_ref_change(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> StoreResult<()> {
     if update.flags.log_only {
         return Ok(());
     }
     match &update.new_value {
         None => {
-            inner.refs.remove(&update.name);
+            if should_deref_symref(inner, update) {
+                let target = symref_peel_write_target(&inner.refs, &update.name)?;
+                inner.refs.remove(&target);
+            } else {
+                inner.refs.remove(&update.name);
+            }
         }
         Some(new_value) => {
             if should_deref_symref_update(inner, update) {
@@ -287,14 +311,13 @@ fn apply_ref_change(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> Stor
     Ok(())
 }
 
+fn should_deref_symref(inner: &MemoryRefStoreInner, update: &RefUpdate) -> bool {
+    !update.flags.no_deref && matches!(inner.refs.get(&update.name), Some(RawRef::Symbolic(_)))
+}
+
 fn should_deref_symref_update(inner: &MemoryRefStoreInner, update: &RefUpdate) -> bool {
-    if update.flags.no_deref {
-        return false;
-    }
-    matches!(
-        (inner.refs.get(&update.name), update.new_value.as_ref()),
-        (Some(RawRef::Symbolic(_)), Some(RawRef::Direct(_)))
-    )
+    should_deref_symref(inner, update)
+        && matches!(update.new_value.as_ref(), Some(RawRef::Direct(_)))
 }
 
 fn symref_peel_write_target(
@@ -309,10 +332,7 @@ fn symref_peel_write_target(
     resolve_symref_peel_target(refs, first)
 }
 
-fn resolve_symref_peel_target(
-    refs: &BTreeMap<String, RawRef>,
-    start: &str,
-) -> StoreResult<String> {
+fn resolve_symref_peel_target(refs: &BTreeMap<String, RawRef>, start: &str) -> StoreResult<String> {
     let mut name = start.to_owned();
     let mut depth = 0;
     loop {
@@ -325,7 +345,7 @@ fn resolve_symref_peel_target(
                 name = next.clone();
                 depth += 1;
             }
-            None => return Err(RefStoreError::Corrupt(format!("ref not found: {name}"))),
+            None => return Ok(name),
         }
     }
 }
