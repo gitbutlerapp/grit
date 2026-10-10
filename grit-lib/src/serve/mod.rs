@@ -14,7 +14,9 @@
 mod receive_pack;
 mod upload_pack;
 
-pub use receive_pack::{receive_pack, ReceiveOutcome, ReceivePolicy, RefUpdateResult};
+pub use receive_pack::{
+    receive_pack, HookRunRecord, ReceiveOutcome, ReceivePolicy, RefUpdateResult,
+};
 pub use upload_pack::upload_pack;
 
 use crate::objects::{ObjectId, ObjectKind};

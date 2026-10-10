@@ -212,6 +212,7 @@ pub mod push_report;
 pub mod push_submodules;
 pub mod quote_path;
 pub mod receive_pack;
+pub mod receive_quarantine;
 pub mod ref_exclusions;
 pub mod ref_namespace;
 pub mod ref_storage;

@@ -8,9 +8,11 @@ use super::{
     write_line, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
+use crate::hooks::{run_hook_in_git_dir, HookResult};
 use crate::index_pack::{ingest_received_pack, IngestPackOptions};
 use crate::objects::ObjectId;
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
+use crate::receive_quarantine::ReceiveQuarantine;
 use crate::repo::Repository;
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
 
@@ -93,6 +95,17 @@ pub struct RefUpdateResult {
     pub error: Option<String>,
 }
 
+/// One server-side hook invocation during receive-pack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookRunRecord {
+    /// Hook name (`pre-receive`, `update`, `post-receive`, or `post-update`).
+    pub name: String,
+    /// Whether an executable hook ran (missing hooks are skipped).
+    pub ran: bool,
+    /// Exit code when [`Self::ran`] is true.
+    pub exit_code: Option<i32>,
+}
+
 /// What a push session did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReceiveOutcome {
@@ -100,6 +113,10 @@ pub struct ReceiveOutcome {
     pub unpack_error: Option<String>,
     /// One entry per ref update the client requested, in request order.
     pub updates: Vec<RefUpdateResult>,
+    /// Hook runs performed for this push, in execution order.
+    pub hooks: Vec<HookRunRecord>,
+    /// Push options delivered to hooks via `GIT_PUSH_OPTION_*`.
+    pub push_options: Vec<String>,
 }
 
 /// Serve one push session: advertise refs, read the ref updates and pack, store
@@ -109,8 +126,10 @@ pub struct ReceiveOutcome {
 /// packs (below `receive.unpacklimit`) and [`crate::index_pack::ingest_received_pack`]
 /// otherwise, matching Git receive-pack. Updates are checked against `policy` and
 /// against the value the client expected each ref to have; with the `atomic`
-/// capability either every update is applied or none is. Server-side hooks are
-/// not run.
+/// capability either every update is applied or none is. Server-side hooks run
+/// through the repository [`CommandRunner`](crate::command_runner::CommandRunner)
+/// (`pre-receive`, `update`, `post-receive`, `post-update`) with push options and
+/// quarantined object ingestion matching Git receive-pack.
 ///
 /// # Parameters
 ///
@@ -152,14 +171,25 @@ pub fn receive_pack(
         return Ok(ReceiveOutcome::default());
     };
 
+    let cfg = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let max_input = max_input_size_from_config(cfg.as_ref());
+    let sideband = request.caps.contains("side-band-64k");
+
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
+    let mut quarantine = if needs_pack {
+        Some(ReceiveQuarantine::create(&repo.odb, &repo.git_dir)?)
+    } else {
+        None
+    };
+
     let unpack_error = if needs_pack {
-        let cfg = repo
-            .config()
-            .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
-        let max_input = max_input_size_from_config(cfg.as_ref());
+        let Some(q) = quarantine.as_ref() else {
+            return Err(ServeError::Protocol("pack push requires quarantine".into()));
+        };
         match read_push_pack(input, max_input) {
-            Ok(pack) => ingest_pushed_pack(repo, &pack, cfg.as_ref(), max_input)
+            Ok(pack) => ingest_pushed_pack(&q.odb(), &pack, cfg.as_ref(), max_input)
                 .err()
                 .map(|e| e.to_string()),
             Err(msg) => Some(msg),
@@ -168,18 +198,28 @@ pub fn receive_pack(
         None
     };
 
-    let updates = match &unpack_error {
-        Some(_) => request
+    let mut hook_records = Vec::new();
+    let updates = if unpack_error.is_some() {
+        request
             .commands
             .iter()
             .map(|c| c.refused("unpacker error"))
-            .collect(),
-        None => apply_commands(repo, &request, opts, policy),
+            .collect()
+    } else {
+        apply_commands_with_hooks(
+            repo,
+            &request,
+            opts,
+            policy,
+            quarantine.as_mut(),
+            sideband.then_some(&mut *output),
+            &mut hook_records,
+        )?
     };
 
     if request.caps.contains("report-status") || request.caps.contains("report-status-v2") {
         let report = build_report(unpack_error.as_deref(), &updates)?;
-        if request.caps.contains("side-band-64k") {
+        if sideband {
             crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, &report)?;
             write_flush(output)?;
         } else {
@@ -191,6 +231,8 @@ pub fn receive_pack(
     Ok(ReceiveOutcome {
         unpack_error,
         updates,
+        hooks: hook_records,
+        push_options: request.push_options.clone(),
     })
 }
 
@@ -201,6 +243,16 @@ fn write_advertisement(
     opts: &ServeOptions,
 ) -> Result<()> {
     let mut caps: Vec<String> = CAPABILITIES.iter().map(|c| (*c).to_owned()).collect();
+    let config = repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    if config
+        .get_bool("receive.advertisepushoptions")
+        .and_then(|r| r.ok())
+        .unwrap_or(false)
+    {
+        caps.push("push-options".to_owned());
+    }
     caps.push(format!("object-format={}", repo.odb.hash_algo().name()));
     if !opts.agent.is_empty() {
         caps.push(format!("agent={}", opts.agent));
@@ -256,6 +308,7 @@ impl Command {
 struct PushRequest {
     commands: Vec<Command>,
     caps: HashSet<String>,
+    push_options: Vec<String>,
 }
 
 /// Read the command list up to its flush. Returns `None` when the client sent
@@ -300,23 +353,42 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
     if commands.is_empty() {
         return Ok(None);
     }
+    let mut push_options = Vec::new();
     if caps.contains("push-options") {
-        return Err(ServeError::Protocol(
-            "push options were requested but are not supported".into(),
-        ));
+        loop {
+            match read_packet(input)? {
+                None | Some(Packet::Flush) => break,
+                Some(Packet::Data(line)) => {
+                    push_options.push(line);
+                }
+                Some(other) => {
+                    return Err(ServeError::Protocol(format!(
+                        "unexpected packet in push options: {other:?}"
+                    )))
+                }
+            }
+        }
     }
     let format = caps.iter().find_map(|c| c.strip_prefix("object-format="));
     check_object_format(repo, format)?;
-    Ok(Some(PushRequest { commands, caps }))
+    Ok(Some(PushRequest {
+        commands,
+        caps,
+        push_options,
+    }))
 }
 
-/// Check every command, then apply the accepted ones.
-fn apply_commands(
+/// Validate, run hooks, migrate quarantine objects, and apply ref updates.
+fn apply_commands_with_hooks(
     repo: &Repository,
     request: &PushRequest,
     opts: &ServeOptions,
     policy: &ReceivePolicy,
-) -> Vec<RefUpdateResult> {
+    quarantine: Option<&mut ReceiveQuarantine>,
+    mut sideband_out: Option<&mut dyn Write>,
+    hook_records: &mut Vec<HookRunRecord>,
+) -> Result<Vec<RefUpdateResult>> {
+    let lookup_odb = quarantine.as_ref().map(|q| q.odb());
     let current_branch = if repo.is_bare() {
         None
     } else {
@@ -325,19 +397,94 @@ fn apply_commands(
     let mut results: Vec<RefUpdateResult> = request
         .commands
         .iter()
-        .map(
-            |c| match check_command(repo, c, opts, policy, current_branch.as_deref()) {
+        .map(|c| {
+            match check_command(
+                repo,
+                lookup_odb.as_ref(),
+                c,
+                opts,
+                policy,
+                current_branch.as_deref(),
+            ) {
                 Some(reason) => c.refused(reason),
                 None => c.accepted(),
-            },
-        )
+            }
+        })
         .collect();
 
     if request.caps.contains("atomic") && results.iter().any(|r| r.error.is_some()) {
         for r in results.iter_mut().filter(|r| r.error.is_none()) {
             r.error = Some("atomic transaction failed".to_owned());
         }
-        return results;
+        return Ok(results);
+    }
+
+    let algo = repo.odb.hash_algo();
+    let push_option_env = push_option_env_owned(&request.push_options);
+    let mut pre_hook_env_owned = push_option_env.clone();
+    if let Some(q) = quarantine.as_ref() {
+        pre_hook_env_owned.extend(q.hook_env());
+    }
+    let pre_hook_env: Vec<(&str, &str)> = pre_hook_env_owned
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let update_hook_env: &[(&str, &str)] = &[];
+    let post_receive_env_owned = push_option_env;
+    let post_receive_env: Vec<(&str, &str)> = post_receive_env_owned
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    let all_cmds: Vec<&Command> = request.commands.iter().collect();
+    let pre_stdin = commands_stdin(&all_cmds, algo);
+    let (pre_result, pre_out) = run_hook_in_git_dir(
+        repo,
+        "pre-receive",
+        &[],
+        Some(pre_stdin.as_bytes()),
+        &pre_hook_env,
+    );
+    relay_hook_sideband(&mut sideband_out, &pre_out)?;
+    hook_records.push(hook_record("pre-receive", &pre_result));
+    if matches!(pre_result, HookResult::Failed(_)) {
+        for r in results.iter_mut().filter(|r| r.error.is_none()) {
+            r.error = Some("pre-receive hook declined".to_owned());
+        }
+        return Ok(results);
+    }
+
+    if results.iter().all(|r| r.error.is_some()) {
+        return Ok(results);
+    }
+
+    if let Some(q) = quarantine {
+        q.migrate().map_err(ServeError::Repository)?;
+        repo.odb.invalidate_packs();
+    }
+
+    for (cmd, result) in request.commands.iter().zip(results.iter_mut()) {
+        if result.error.is_some() {
+            continue;
+        }
+        let zero = null_oid_hex(algo);
+        let old_hex = cmd.old.map(|o| o.to_hex()).unwrap_or_else(|| zero.clone());
+        let new_hex = cmd.new.map(|o| o.to_hex()).unwrap_or(zero.clone());
+        let args = [cmd.refname.as_str(), old_hex.as_str(), new_hex.as_str()];
+        let (update_result, update_out) =
+            run_hook_in_git_dir(repo, "update", &args, None, update_hook_env);
+        relay_hook_sideband(&mut sideband_out, &update_out)?;
+        hook_records.push(hook_record("update", &update_result));
+        if matches!(update_result, HookResult::Failed(_)) {
+            result.error = Some("hook declined".to_owned());
+        }
+    }
+
+    if request.caps.contains("atomic") && results.iter().any(|r| r.error.is_some()) {
+        for r in results.iter_mut().filter(|r| r.error.is_none()) {
+            r.error = Some("atomic transaction failed".to_owned());
+        }
+        return Ok(results);
     }
 
     for result in results.iter_mut().filter(|r| r.error.is_none()) {
@@ -349,12 +496,103 @@ fn apply_commands(
             result.error = Some(format!("failed to update ref: {e}"));
         }
     }
-    results
+
+    let successful: Vec<&Command> = request
+        .commands
+        .iter()
+        .zip(results.iter())
+        .filter(|(_, r)| r.error.is_none())
+        .map(|(c, _)| c)
+        .collect();
+    if !successful.is_empty() {
+        let post_stdin = commands_stdin(&successful, algo);
+        let (post_result, post_out) = run_hook_in_git_dir(
+            repo,
+            "post-receive",
+            &[],
+            Some(post_stdin.as_bytes()),
+            &post_receive_env,
+        );
+        relay_hook_sideband(&mut sideband_out, &post_out)?;
+        hook_records.push(hook_record("post-receive", &post_result));
+
+        let mut post_update_args: Vec<&str> = Vec::new();
+        for result in results.iter().filter(|r| r.error.is_none()) {
+            post_update_args.push(result.refname.as_str());
+        }
+        let (pu_result, pu_out) = run_hook_in_git_dir(
+            repo,
+            "post-update",
+            &post_update_args,
+            None,
+            update_hook_env,
+        );
+        relay_hook_sideband(&mut sideband_out, &pu_out)?;
+        hook_records.push(hook_record("post-update", &pu_result));
+    }
+
+    Ok(results)
+}
+
+fn hook_record(name: &str, result: &HookResult) -> HookRunRecord {
+    HookRunRecord {
+        name: name.to_owned(),
+        ran: result.was_executed(),
+        exit_code: match result {
+            HookResult::Failed(code) => Some(*code),
+            HookResult::Success => Some(0),
+            HookResult::NotFound => None,
+        },
+    }
+}
+
+fn push_option_env_owned(options: &[String]) -> Vec<(String, String)> {
+    let mut pairs = vec![(
+        "GIT_PUSH_OPTION_COUNT".to_owned(),
+        options.len().to_string(),
+    )];
+    for (i, opt) in options.iter().enumerate() {
+        pairs.push((format!("GIT_PUSH_OPTION_{i}"), opt.clone()));
+    }
+    pairs
+}
+
+fn commands_stdin(commands: &[&Command], algo: crate::objects::HashAlgo) -> String {
+    let zero = null_oid_hex(algo);
+    commands
+        .iter()
+        .map(|c| {
+            format!(
+                "{} {} {}\n",
+                c.old.map(|o| o.to_hex()).unwrap_or_else(|| zero.clone()),
+                c.new.map(|o| o.to_hex()).unwrap_or_else(|| zero.clone()),
+                c.refname
+            )
+        })
+        .collect()
+}
+
+fn null_oid_hex(algo: crate::objects::HashAlgo) -> String {
+    ObjectId::null(algo).to_hex()
+}
+
+fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, captured: &[u8]) -> Result<()> {
+    let Some(w) = out.as_mut() else {
+        return Ok(());
+    };
+    if captured.is_empty() {
+        return Ok(());
+    }
+    for chunk in captured.chunks(65515) {
+        crate::pkt_line::write_sideband_packet(*w, 2, chunk).map_err(ServeError::Io)?;
+    }
+    Ok(())
 }
 
 /// Decide whether one command may be applied. Returns the refusal reason.
 fn check_command(
     repo: &Repository,
+    lookup: Option<&crate::odb::Odb>,
     cmd: &Command,
     opts: &ServeOptions,
     policy: &ReceivePolicy,
@@ -381,7 +619,8 @@ fn check_command(
         }
         return None;
     };
-    if !repo.odb.exists(&new) {
+    let odb = lookup.unwrap_or(&repo.odb);
+    if !odb.exists(&new) {
         return Some("missing necessary objects");
     }
     if is_current_branch && policy.deny_current_branch {
@@ -447,7 +686,7 @@ fn read_push_pack(
 
 /// Store a pushed pack using unpack-objects or index-pack, per Git limits.
 fn ingest_pushed_pack(
-    repo: &Repository,
+    odb: &crate::odb::Odb,
     pack: &[u8],
     cfg: &ConfigSet,
     max_input: Option<u64>,
@@ -456,7 +695,7 @@ fn ingest_pushed_pack(
         let mut cursor = std::io::Cursor::new(pack);
         unpack_objects(
             &mut cursor,
-            &repo.odb,
+            odb,
             &UnpackOptions {
                 quiet: true,
                 strict: true,
@@ -467,7 +706,7 @@ fn ingest_pushed_pack(
     } else {
         ingest_received_pack(
             pack.to_vec(),
-            &repo.odb,
+            odb,
             &IngestPackOptions {
                 fix_thin: true,
                 ..Default::default()
