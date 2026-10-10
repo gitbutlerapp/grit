@@ -56,6 +56,8 @@ struct Args {
 #[derive(Clone)]
 struct AppState {
     root: PathBuf,
+    /// Repository open/config options captured from the server process at startup.
+    repository_options: grit_protocol::RepositoryOptions,
     /// The expected `Authorization: Basic …` header value when basic auth is
     /// required (`Some` iff `--require-auth` was given), precomputed once.
     expected_auth: Option<String>,
@@ -216,16 +218,21 @@ async fn info_refs(
 
     let content_type = format!("application/x-{service}-advertisement");
 
+    let repository_options = state.repository_options.clone();
     let advertisement = match service.as_str() {
         "git-upload-pack" => {
             tokio::task::spawn_blocking(move || {
-                grit_protocol::upload_pack::advertise_refs(&repo_path, protocol_version)
+                grit_protocol::upload_pack::advertise_refs(
+                    &repo_path,
+                    protocol_version,
+                    &repository_options,
+                )
             })
             .await
         }
         "git-receive-pack" => {
             tokio::task::spawn_blocking(move || {
-                grit_protocol::receive_pack::advertise_refs(&repo_path)
+                grit_protocol::receive_pack::advertise_refs(&repo_path, &repository_options)
             })
             .await
         }
@@ -270,8 +277,14 @@ async fn upload_pack_rpc(
     };
 
     let request = body.to_vec();
+    let repository_options = state.repository_options.clone();
     match tokio::task::spawn_blocking(move || {
-        grit_protocol::upload_pack::stateless_rpc(&repo_path, &request, protocol_version)
+        grit_protocol::upload_pack::stateless_rpc(
+            &repo_path,
+            &request,
+            protocol_version,
+            &repository_options,
+        )
     })
     .await
     {
@@ -303,8 +316,9 @@ async fn receive_pack_rpc(
     };
 
     let request = body.to_vec();
+    let repository_options = state.repository_options.clone();
     match tokio::task::spawn_blocking(move || {
-        grit_protocol::receive_pack::stateless_rpc(&repo_path, &request)
+        grit_protocol::receive_pack::stateless_rpc(&repo_path, &request, &repository_options)
     })
     .await
     {
@@ -343,8 +357,10 @@ async fn main() -> Result<()> {
         eprintln!("Logging request headers (--log-headers)");
     }
 
+    let repository_options = grit_protocol::repository_options_from_process();
     let state = Arc::new(AppState {
         root,
+        repository_options,
         expected_auth,
         log_headers: args.log_headers,
         set_cookie: args.set_cookie,

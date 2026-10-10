@@ -9,7 +9,9 @@ pub mod upload_pack;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::ConfigSet;
-use grit_lib::environment::RepositoryOptions;
+use grit_lib::environment::Environment;
+
+pub use grit_lib::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use grit_lib::serve::{self, ProtocolVersion, ReceivePolicy, ServeOptions};
 
@@ -32,6 +34,17 @@ pub enum Error {
 
 /// Result alias for protocol handlers.
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Build [`RepositoryOptions`] from the current process environment.
+///
+/// Captures `HOME`, `GIT_CONFIG_*`, and the other variables [`ConfigSet::load`]
+/// uses for global and system config. Call once at server startup and pass the
+/// same options into every handler so receive policy and hide-ref rules match
+/// a `grit receive-pack` / `grit upload-pack` subprocess.
+#[must_use]
+pub fn repository_options_from_process() -> RepositoryOptions {
+    RepositoryOptions::with_environment(Environment::capture_process())
+}
 
 /// Map an explicit smart-HTTP protocol version header to a wire version.
 #[must_use]
@@ -65,9 +78,9 @@ pub(crate) fn run_upload_pack(
     stateless_rpc: bool,
     advertise_refs: bool,
     input: &[u8],
+    repository_options: &RepositoryOptions,
 ) -> Result<Vec<u8>> {
-    let options = RepositoryOptions::empty();
-    let repo = Repository::open_for_serving(repo_path, &options)?;
+    let repo = Repository::open_for_serving(repo_path, repository_options)?;
     let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let hidden_refs = grit_lib::hide_refs::hide_ref_patterns_uploadpack(&config);
     let opts = ServeOptions {
@@ -87,9 +100,9 @@ pub(crate) fn run_receive_pack(
     stateless_rpc: bool,
     advertise_refs: bool,
     input: &[u8],
+    repository_options: &RepositoryOptions,
 ) -> Result<Vec<u8>> {
-    let options = RepositoryOptions::empty();
-    let repo = Repository::open_for_serving(repo_path, &options)?;
+    let repo = Repository::open_for_serving(repo_path, repository_options)?;
     let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let hidden_refs = grit_lib::hide_refs::hide_ref_patterns_receive(&config);
     let opts = ServeOptions {

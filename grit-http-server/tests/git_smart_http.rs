@@ -102,18 +102,26 @@ impl Drop for ServerGuard {
     }
 }
 
-fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Child {
-    Command::new(server_bin)
-        .arg("--root")
+fn spawn_server(server_bin: &Path, root: &Path, port: u16, home: Option<&Path>) -> Child {
+    let mut cmd = Command::new(server_bin);
+    cmd.arg("--root")
         .arg(root)
         .arg("--bind")
         .arg(format!("127.0.0.1:{port}"))
         .env_remove("GUST_BIN")
-        .env("PATH", path_without_cargo_bins())
-        .stdout(Stdio::null())
+        .env("PATH", path_without_cargo_bins());
+    if let Some(home) = home {
+        cmd.env("HOME", home);
+    }
+    cmd.stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("could not spawn grit-http-server")
+}
+
+fn git_expect_failure(dir: &Path, args: &[&str]) {
+    let status = git_cmd(dir, args).status().expect("spawn git");
+    assert!(!status.success(), "git {args:?} should have failed");
 }
 
 #[test]
@@ -144,7 +152,7 @@ fn system_git_clone_fetch_v0_v2_and_push_over_grit_http_server() {
     git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
 
     let port = require_port();
-    let child = spawn_server(&server_bin, &root, port);
+    let child = spawn_server(&server_bin, &root, port, None);
     let _guard = ServerGuard(child);
     assert!(
         wait_ready(port),
@@ -199,4 +207,71 @@ fn system_git_clone_fetch_v0_v2_and_push_over_grit_http_server() {
 
     assert!(git_ok(&bare, &["fsck"]));
     assert!(git_ok(&clone_dir, &["fsck"]));
+}
+
+#[test]
+fn global_receive_deny_non_fast_forward_rejects_force_push() {
+    let server_bin = require_binary("grit-http-server");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let fake_home = tmp.path().join("home");
+    std::fs::create_dir_all(&fake_home).unwrap();
+    std::fs::write(
+        fake_home.join(".gitconfig"),
+        "[receive]\n\tdenyNonFastForwards = true\n",
+    )
+    .unwrap();
+
+    let origin = tmp.path().join("origin");
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(origin.join("a.txt"), "1\n").unwrap();
+    git(&origin, &["add", "a.txt"]);
+    git(&origin, &["commit", "-q", "-m", "c1"]);
+    std::fs::write(origin.join("b.txt"), "2\n").unwrap();
+    git(&origin, &["add", "b.txt"]);
+    git(&origin, &["commit", "-q", "-m", "c2"]);
+
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        &origin,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            bare.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    let advanced_tip = rev_parse(&bare, "refs/heads/main");
+
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port, Some(&fake_home));
+    let _guard = ServerGuard(child);
+    assert!(
+        wait_ready(port),
+        "grit-http-server did not become ready on port {port}"
+    );
+
+    let url = format!("http://127.0.0.1:{port}/project.git");
+    let clone_dir = tmp.path().join("clone");
+    git(
+        &tmp.path(),
+        &[
+            "clone",
+            "-q",
+            url.as_str(),
+            clone_dir.to_str().expect("utf8"),
+        ],
+    );
+    git(&clone_dir, &["reset", "--hard", "HEAD~1"]);
+    git_expect_failure(&clone_dir, &["push", "--force", "origin", "main:main"]);
+    assert_eq!(
+        rev_parse(&bare, "refs/heads/main"),
+        advanced_tip,
+        "non-fast-forward force push must not rewind the served branch"
+    );
 }
