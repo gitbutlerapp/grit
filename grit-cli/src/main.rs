@@ -65,6 +65,29 @@ enum RemoteAction {
     },
 }
 
+/// Subcommands of `grit bundle`.
+#[derive(Debug, Subcommand)]
+enum BundleAction {
+    /// Write a bundle file from revision specs.
+    Create {
+        /// Output bundle path.
+        file: String,
+        /// Commits or ref ranges to include (same rules as `grit log`).
+        #[arg(value_name = "REV")]
+        revs: Vec<String>,
+    },
+    /// Check that a bundle file is well-formed.
+    Verify {
+        /// Bundle file to verify.
+        file: String,
+    },
+    /// List refs recorded in a bundle header.
+    List {
+        /// Bundle file to read.
+        file: String,
+    },
+}
+
 /// Subcommands of `grit auth`.
 #[derive(Debug, Subcommand)]
 enum AuthAction {
@@ -181,6 +204,11 @@ enum Command {
         #[arg(short = 't', long = "tags")]
         tags: bool,
     },
+    /// Create, verify, or list git bundle files.
+    Bundle {
+        #[command(subcommand)]
+        action: BundleAction,
+    },
     /// List tags, or create / delete one. A new tag points at HEAD.
     Tag {
         /// Name of the tag to create. Omit to list tags.
@@ -273,7 +301,15 @@ fn main() {
     }
     if let Err(err) = dispatch(cli, &opts) {
         output::emit_error(&err, &opts);
-        std::process::exit(1);
+        let code = if err
+            .downcast_ref::<commands::bundle::MissingPrerequisites>()
+            .is_some()
+        {
+            commands::bundle::MISSING_PREREQUISITE_EXIT
+        } else {
+            1
+        };
+        std::process::exit(code);
     }
 }
 
@@ -325,6 +361,22 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             delete,
             force_delete,
         } => emit(&commands::branch::run(name, delete, force_delete)?, opts),
+        Command::Bundle { action } => match action {
+            BundleAction::Create { file, revs } => {
+                emit_with_markdown(&commands::bundle::run_create(file.into(), revs)?, opts)
+            }
+            BundleAction::Verify { file } => {
+                let outcome = commands::bundle::run_verify(file.into())?;
+                emit_with_markdown(&outcome, opts)?;
+                if !outcome.ok {
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
+            BundleAction::List { file } => {
+                emit_with_markdown(&commands::bundle::run_list(file.into())?, opts)
+            }
+        },
         Command::Tag { name, delete } => emit(&commands::tag::run(name, delete)?, opts),
         Command::Switch { name, create } => emit(&commands::switch::run(&name, create)?, opts),
         Command::Merge { branch } => emit(&commands::merge::run(&branch)?, opts),

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::fetch::NoProgress;
-use grit_lib::remote::{DefaultHttpClientFactory, Remote, DEFAULT_REMOTE};
+use grit_lib::remote::{DefaultHttpClientFactory, RemoteError, DEFAULT_REMOTE};
 use grit_lib::transfer::{FetchOptions, TagMode};
 use serde::Serialize;
 
@@ -102,8 +102,7 @@ fn fetch_once(
     remote_name: &str,
     factory: &DefaultHttpClientFactory,
 ) -> Result<grit_lib::transfer::FetchOutcome> {
-    let remote =
-        Remote::from_config(config, remote_name).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let remote = crate::commands::remote::resolve_remote_or_url(Some(config), remote_name)?;
     remote
         .fetch(
             repo,
@@ -114,7 +113,17 @@ fn fetch_once(
             &mut NoProgress,
             Some(factory),
         )
-        .map_err(|e| anyhow::Error::msg(e.to_string()))
+        .map_err(map_fetch_remote_error)
+}
+
+fn map_fetch_remote_error(err: RemoteError) -> anyhow::Error {
+    if matches!(
+        &err,
+        RemoteError::Library(grit_lib::error::Error::BundleMissingPrerequisites)
+    ) {
+        return anyhow::Error::new(crate::commands::bundle::MissingPrerequisites);
+    }
+    anyhow::Error::msg(err.to_string())
 }
 
 fn plural(n: usize) -> &'static str {

@@ -3,6 +3,7 @@
 pub mod add;
 pub mod auth;
 pub mod branch;
+pub mod bundle;
 pub mod clone;
 pub mod commit;
 pub mod completions;

@@ -155,7 +155,10 @@ pub fn run_refs(
     Ok(RemoteOutcome::Refs { refs, lines })
 }
 
-fn resolve_remote_or_url(config: Option<&ConfigSet>, remote_or_url: &str) -> Result<Remote> {
+pub(crate) fn resolve_remote_or_url(
+    config: Option<&ConfigSet>,
+    remote_or_url: &str,
+) -> Result<Remote> {
     if let Some(config) = config {
         if remote_names(config).iter().any(|n| n == remote_or_url) {
             return Remote::from_config(config, remote_or_url)
@@ -190,6 +193,7 @@ fn looks_like_url_or_path(s: &str) -> bool {
         || s.starts_with("../")
         || s.contains(':')
         || s.ends_with(".git")
+        || s.ends_with(".bundle")
 }
 
 fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine>) {
