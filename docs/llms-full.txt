@@ -2805,6 +2805,16 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::branch_tracking` | module | Branch vs remote-tracking comparison for status, checkout, and commit (matches git/remote.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/branch_tracking/index.html) |
 | `grit_lib::branch_tracking::AheadBehindMode` | enum | How to compare local HEAD to a remote-tracking ref (AHEAD_BEHIND_FULL vs QUICK). | [API](https://docs.rs/grit-lib/latest/grit_lib/branch_tracking/enum.AheadBehindMode.html) |
 | `grit_lib::branch_tracking::TrackingStat` | enum | Outcome of comparing refs/heads/<branch> to a tracking ref. | [API](https://docs.rs/grit-lib/latest/grit_lib/branch_tracking/enum.TrackingStat.html) |
+| `grit_lib::bundle` | module | Git bundle format (gitformat-bundle). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/index.html) |
+| `grit_lib::bundle::Bundle` | struct | An opened bundle file on disk. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.Bundle.html) |
+| `grit_lib::bundle::BundleError` | enum | Bundle read/write/verify failures. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/enum.BundleError.html) |
+| `grit_lib::bundle::BundleHeader` | struct | Parsed bundle header (everything before the PACK stream). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.BundleHeader.html) |
+| `grit_lib::bundle::BundleSpec` | struct | Input for write_bundle. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.BundleSpec.html) |
+| `grit_lib::bundle::BundleVerifyReport` | struct | Outcome of Bundle::verify. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.BundleVerifyReport.html) |
+| `grit_lib::bundle::BundleVersion` | enum | Supported on-disk bundle header versions. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/enum.BundleVersion.html) |
+| `grit_lib::bundle::BundleWriter` | struct | Incremental writer for bundle bytes (header + pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.BundleWriter.html) |
+| `grit_lib::bundle::FilterSpec` | struct | Wire filter specification carried in v3 @filter= capabilities. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.FilterSpec.html) |
+| `grit_lib::bundle::UnbundledRef` | struct | A single ref entry returned from Bundle::unbundle. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.UnbundledRef.html) |
 | `grit_lib::check_ref_format` | module | Ref-name validation — git check-ref-format rules. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/index.html) |
 | `grit_lib::check_ref_format::RefNameError` | enum | Errors returned by check_refname_format. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/enum.RefNameError.html) |
 | `grit_lib::check_ref_format::RefNameOptions` | struct | Options controlling validation. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/struct.RefNameOptions.html) |
@@ -3731,6 +3741,17 @@ fn main() -> Result<(), grit_lib::error::Error> {
 The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs`.
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
+
+## Bundles
+
+Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a text header (prerequisite commits, ref tips, optional v3 capabilities) with a thin packfile. [`grit_lib::bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/index.html) reads and writes that format for offline transfer and tests:
+
+- [`Bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.Bundle.html) (`open`, `verify`, `unbundle`) and [`read_header`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.read_header.html) parse v2/v3 headers and leave the stream at the `PACK` magic.
+- `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
+- `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
+- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles using [`transfer::build_pack`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.build_pack.html) for the pack stream.
+
+Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).
 
 # https://grit-scm.com/docs/library/object-stores/index.md
 

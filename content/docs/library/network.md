@@ -45,3 +45,14 @@ This example resolves `origin`, lists refs on a **local** bare remote, fetches, 
 The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs`.
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
+
+## Bundles
+
+Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a text header (prerequisite commits, ref tips, optional v3 capabilities) with a thin packfile. [`grit_lib::bundle`](rustdoc:grit_lib::bundle) reads and writes that format for offline transfer and tests:
+
+- [`Bundle`](rustdoc:grit_lib::bundle::Bundle) (`open`, `verify`, `unbundle`) and [`read_header`](rustdoc:grit_lib::bundle::read_header) parse v2/v3 headers and leave the stream at the `PACK` magic.
+- `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
+- `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
+- [`write_bundle`](rustdoc:grit_lib::bundle::write_bundle) builds v2 (SHA-1, no filter) or v3 bundles using [`transfer::build_pack`](rustdoc:grit_lib::transfer::build_pack) for the pack stream.
+
+Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).

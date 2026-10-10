@@ -134,3 +134,14 @@ fn main() -> Result<(), grit_lib::error::Error> {
 The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs`.
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
+
+## Bundles
+
+Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a text header (prerequisite commits, ref tips, optional v3 capabilities) with a thin packfile. [`grit_lib::bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/index.html) reads and writes that format for offline transfer and tests:
+
+- [`Bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.Bundle.html) (`open`, `verify`, `unbundle`) and [`read_header`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.read_header.html) parse v2/v3 headers and leave the stream at the `PACK` magic.
+- `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
+- `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
+- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles using [`transfer::build_pack`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.build_pack.html) for the pack stream.
+
+Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).
