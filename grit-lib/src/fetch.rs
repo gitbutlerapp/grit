@@ -1393,6 +1393,7 @@ pub fn fetch_remote(
 
     let mut updates: Vec<RefUpdate> = Vec::new();
 
+    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     let t_prune = std::time::Instant::now();
     if opts.prune {
         prune_tracking_refs(
@@ -1401,6 +1402,11 @@ pub fn fetch_remote(
             &remote_refs,
             opts.dry_run,
             &mut updates,
+            if opts.dry_run {
+                None
+            } else {
+                Some(&mut store_batch)
+            },
         )?;
     }
     let d_prune = t_prune.elapsed();
@@ -1465,9 +1471,13 @@ pub fn fetch_remote(
                 });
                 continue;
             }
-            let t = std::time::Instant::now();
-            crate::refs::write_ref_cached(local_git_dir, local_ref, &m.oid, &packed)?;
-            d_write += t.elapsed();
+            store_batch.push(crate::refs::store::RefUpdate {
+                name: local_ref.clone(),
+                new_value: Some(crate::refs::store::RawRef::Direct(m.oid)),
+                expected: crate::refs::store::Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            });
             n_written += 1;
         }
 
@@ -1479,6 +1489,12 @@ pub fn fetch_remote(
             mode,
             note: None,
         });
+    }
+
+    if !opts.dry_run && !store_batch.is_empty() {
+        let t = std::time::Instant::now();
+        crate::refs::commit_ref_store_batch(local_git_dir, &store_batch)?;
+        d_write += t.elapsed();
     }
 
     net_trace!(

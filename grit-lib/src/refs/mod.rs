@@ -85,7 +85,7 @@ fn legacy_ref_update_flags(refname: &str) -> RefUpdateFlags {
     flags
 }
 
-fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<()> {
+pub(crate) fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<()> {
     let refname = update.name.clone();
     let store = open_ref_store(git_dir)?;
     let txn = RefTransaction::new()
@@ -97,6 +97,35 @@ fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<()> {
     prepared
         .commit()
         .map_err(|e| map_public_ref_store_error(Error::from(e), &refname))
+}
+
+/// Apply several ref updates in one [`RefStore::prepare`] / commit (all-or-nothing).
+///
+/// Used by batch ref paths (`fetch`, `push`, `receive-pack`, [`crate::gc::update_refs`]).
+///
+/// # Errors
+///
+/// Returns [`Error::RefStore`] for duplicate names, CAS failures, lock conflicts,
+/// and namespace conflicts. Propagates I/O and corrupt-store failures.
+pub fn commit_ref_store_batch(git_dir: &Path, updates: &[RefUpdate]) -> Result<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let label = updates.first().map(|u| u.name.as_str()).unwrap_or("refs");
+    let store = open_ref_store(git_dir)?;
+    let mut txn = RefTransaction::new();
+    for update in updates {
+        let name = update.name.clone();
+        txn = txn
+            .update(update.clone())
+            .map_err(|e| map_public_ref_store_error(Error::from(e), &name))?;
+    }
+    let prepared = store
+        .prepare(txn)
+        .map_err(|e| map_public_ref_store_error(Error::from(e), label))?;
+    prepared
+        .commit()
+        .map_err(|e| map_public_ref_store_error(Error::from(e), label))
 }
 
 fn store_write_value(

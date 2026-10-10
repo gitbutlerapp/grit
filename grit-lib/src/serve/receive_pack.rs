@@ -487,13 +487,30 @@ fn apply_commands_with_hooks(
         return Ok(results);
     }
 
-    for result in results.iter_mut().filter(|r| r.error.is_none()) {
-        let applied = match result.new {
-            Some(new) => crate::refs::write_ref(&repo.git_dir, &result.refname, &new),
-            None => crate::refs::delete_ref(&repo.git_dir, &result.refname),
-        };
-        if let Err(e) = applied {
-            result.error = Some(format!("failed to update ref: {e}"));
+    let pending: Vec<(usize, crate::refs::store::RefUpdate)> = request
+        .commands
+        .iter()
+        .zip(results.iter())
+        .enumerate()
+        .filter(|(_, (_, r))| r.error.is_none())
+        .map(|(idx, (cmd, _))| (idx, receive_command_store_update(cmd)))
+        .collect();
+
+    if request.caps.contains("atomic") {
+        let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
+        if let Err(e) = crate::refs::commit_ref_store_batch(&repo.git_dir, &batch) {
+            let msg = format!("failed to update ref: {e}");
+            for (idx, _) in pending {
+                if results[idx].error.is_none() {
+                    results[idx].error = Some(msg.clone());
+                }
+            }
+        }
+    } else {
+        for (idx, update) in pending {
+            if let Err(e) = crate::refs::commit_store_update(&repo.git_dir, update) {
+                results[idx].error = Some(format!("failed to update ref: {e}"));
+            }
         }
     }
 
@@ -574,6 +591,23 @@ fn commands_stdin(commands: &[&Command], algo: crate::objects::HashAlgo) -> Stri
 
 fn null_oid_hex(algo: crate::objects::HashAlgo) -> String {
     ObjectId::null(algo).to_hex()
+}
+
+fn receive_command_store_update(cmd: &Command) -> crate::refs::store::RefUpdate {
+    let mut flags = crate::refs::store::RefUpdateFlags::default();
+    if cmd.refname == "HEAD" {
+        flags.no_deref = true;
+    }
+    crate::refs::store::RefUpdate {
+        name: cmd.refname.clone(),
+        new_value: cmd.new.map(crate::refs::store::RawRef::Direct),
+        expected: match cmd.old {
+            Some(oid) => crate::refs::store::Expected::Oid(oid),
+            None => crate::refs::store::Expected::Missing,
+        },
+        reflog: None,
+        flags,
+    }
 }
 
 fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, captured: &[u8]) -> Result<()> {

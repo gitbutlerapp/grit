@@ -876,6 +876,7 @@ pub fn fetch_local(
     // (e.g. `refs/remotes/origin/a`) otherwise blocks creating a nested ref the
     // same fetch introduces (`refs/remotes/origin/a/b`) with a "File exists"
     // directory/file conflict (matches `git fetch --prune` ordering).
+    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     if opts.prune {
         prune_tracking_refs(
             local_git_dir,
@@ -883,6 +884,11 @@ pub fn fetch_local(
             &remote_refs,
             opts.dry_run,
             &mut updates,
+            if opts.dry_run {
+                None
+            } else {
+                Some(&mut store_batch)
+            },
         )?;
     }
 
@@ -934,7 +940,13 @@ pub fn fetch_local(
                 });
                 continue;
             }
-            crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
+            store_batch.push(crate::refs::store::RefUpdate {
+                name: local_ref.clone(),
+                new_value: Some(crate::refs::store::RawRef::Direct(m.oid)),
+                expected: crate::refs::store::Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            });
         }
 
         updates.push(RefUpdate {
@@ -945,6 +957,10 @@ pub fn fetch_local(
             mode,
             note: None,
         });
+    }
+
+    if !opts.dry_run && !store_batch.is_empty() {
+        crate::refs::commit_ref_store_batch(local_git_dir, &store_batch)?;
     }
 
     crate::fetch::finish_initial_remote_fetch_layout(
@@ -1085,19 +1101,33 @@ pub fn push_local(
         )?;
     }
 
-    // Second pass: apply accepted ref updates (objects were copied above).
-    for d in &mut decisions {
+    // Second pass: apply accepted ref updates in one store transaction (objects copied above).
+    let mut ref_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
+    for d in &decisions {
         if !d.apply || opts.dry_run {
             continue;
         }
         match &d.action {
             PushAction::Update(src) => {
-                crate::refs::write_ref(remote_git_dir, &d.result.remote_ref, src)?;
+                ref_batch.push(push_store_ref_update(
+                    d.result.remote_ref.as_str(),
+                    Some(*src),
+                    d.result.old_oid,
+                ));
             }
             PushAction::Delete => {
-                crate::refs::delete_ref(remote_git_dir, &d.result.remote_ref)?;
+                ref_batch.push(push_store_ref_update(
+                    d.result.remote_ref.as_str(),
+                    None,
+                    d.result.old_oid,
+                ));
             }
             PushAction::None => {}
+        }
+    }
+    if !opts.dry_run && !ref_batch.is_empty() {
+        if let Err(err) = crate::refs::commit_ref_store_batch(remote_git_dir, &ref_batch) {
+            demote_applied_push_on_ref_store_error(&mut decisions, err);
         }
     }
 
@@ -1113,6 +1143,43 @@ pub fn push_local(
     }
 
     Ok(PushOutcome { results })
+}
+
+fn push_store_ref_update(
+    refname: &str,
+    new_oid: Option<ObjectId>,
+    expected_old: Option<ObjectId>,
+) -> crate::refs::store::RefUpdate {
+    crate::refs::store::RefUpdate {
+        name: refname.to_owned(),
+        new_value: new_oid.map(crate::refs::store::RawRef::Direct),
+        expected: match expected_old {
+            Some(oid) => crate::refs::store::Expected::Oid(oid),
+            None => crate::refs::store::Expected::Any,
+        },
+        reflog: None,
+        flags: Default::default(),
+    }
+}
+
+fn demote_applied_push_on_ref_store_error(decisions: &mut [PushDecision], err: Error) {
+    let message = err.to_string();
+    for d in decisions.iter_mut().filter(|d| d.apply) {
+        d.result.status = match &err {
+            Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch { .. }) => {
+                PushRefStatus::RejectStale
+            }
+            Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { .. }) => {
+                PushRefStatus::RemoteRejected
+            }
+            Error::RefStore(crate::refs::store::RefStoreError::LockHeld { .. }) => {
+                PushRefStatus::RemoteRejected
+            }
+            _ => PushRefStatus::RemoteRejected,
+        };
+        d.result.message = Some(message.clone());
+        d.apply = false;
+    }
 }
 
 /// What a single accepted push update does once applied.
@@ -1590,6 +1657,7 @@ pub(crate) fn prune_tracking_refs(
     remote_refs: &[(String, ObjectId)],
     dry_run: bool,
     updates: &mut Vec<RefUpdate>,
+    mut store_batch: Option<&mut Vec<crate::refs::store::RefUpdate>>,
 ) -> Result<()> {
     // Set of local tracking refs that the current remote justifies.
     let mut live: HashSet<String> = HashSet::new();
@@ -1630,7 +1698,17 @@ pub(crate) fn prune_tracking_refs(
 
     for (name, oid) in pruned {
         if !dry_run {
-            crate::refs::delete_ref(local_git_dir, &name)?;
+            if let Some(batch) = store_batch.as_mut() {
+                batch.push(crate::refs::store::RefUpdate {
+                    name: name.clone(),
+                    new_value: None,
+                    expected: crate::refs::store::Expected::Any,
+                    reflog: None,
+                    flags: Default::default(),
+                });
+            } else {
+                crate::refs::delete_ref(local_git_dir, &name)?;
+            }
         }
         updates.push(RefUpdate {
             remote_ref: String::new(),

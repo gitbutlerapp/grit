@@ -20,9 +20,10 @@ use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::time::SystemTime;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{self, Ref};
 
 /// Result of a loose-object prune.
@@ -260,113 +261,41 @@ pub struct RefTransactionItem {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] describing the first failing CAS check (before any
-/// mutation), or an I/O / ref error if applying a change fails after the checks
-/// passed. The CAS pre-check makes a clean rejection the common failure mode;
-/// an apply-time error can still leave a partially-applied batch (the
-/// pre-checked, conflict-free case), which is the same guarantee Git's files
-/// backend gives outside of `core.refTransaction` hooks.
+/// Returns [`Error::RefStore`] for duplicate ref names, CAS failures, lock
+/// conflicts, and namespace checks. Propagates other ref I/O errors.
 pub fn update_refs(git_dir: &Path, updates: &[RefTransactionItem]) -> Result<()> {
     if updates.is_empty() {
         return Ok(());
     }
-
-    let mut seen = HashSet::new();
-    for item in updates {
-        if !seen.insert(&item.name) {
-            return Err(Error::Message(format!(
-                "ref transaction rejected: multiple updates for ref '{}' not allowed",
-                item.name
-            )));
-        }
-    }
-
-    // Phase 1: verify every CAS expectation against current state. Apply nothing
-    // if any check fails.
-    for item in updates {
-        if let Some(expected) = item.expected_old {
-            let current = crate::refs::resolve_ref(git_dir, &item.name).ok();
-            if current != Some(expected) {
-                return Err(Error::Message(format!(
-                    "ref transaction rejected: '{}' expected {} but found {}",
-                    item.name,
-                    expected,
-                    current
-                        .map(|o| o.to_hex())
-                        .unwrap_or_else(|| "<absent>".to_owned()),
-                )));
-            }
-        }
-    }
-
-    let batch: Vec<crate::refs::RefBatchItem> = updates
+    let store_updates: Vec<RefUpdate> = updates
         .iter()
-        .map(|item| crate::refs::RefBatchItem {
-            name: item.name.clone(),
-            new_oid: item.new_oid,
-        })
+        .map(ref_transaction_item_to_store_update)
         .collect();
-    if let Err(unavail) = crate::refs::verify_ref_transaction_batch(git_dir, &batch) {
-        let refname = match &unavail {
-            crate::refs::RefnameUnavailable::AncestorExists { new_ref, .. }
-            | crate::refs::RefnameUnavailable::DescendantExists { new_ref, .. } => new_ref.clone(),
-            crate::refs::RefnameUnavailable::SameBatch { refname, .. } => refname.clone(),
-        };
-        return Err(Error::Message(format!(
-            "ref transaction rejected: cannot lock ref '{refname}': {}",
-            unavail.lock_message_suffix()
-        )));
-    }
+    refs::commit_ref_store_batch(git_dir, &store_updates)
+}
 
-    if crate::reftable::is_reftable_repo(git_dir) {
-        let rt_updates: Vec<crate::reftable::ReftableTransactionUpdate> = updates
-            .iter()
-            .map(|item| crate::reftable::ReftableTransactionUpdate {
-                refname: item.name.clone(),
-                value: Some(match item.new_oid {
-                    Some(oid) => crate::reftable::RefValue::Val1(oid),
-                    None => crate::reftable::RefValue::Deletion,
-                }),
-                log: None,
-                expected_old: item.expected_old,
-            })
-            .collect();
-        return crate::reftable::reftable_write_transaction(git_dir, rt_updates);
+fn ref_transaction_item_to_store_update(item: &RefTransactionItem) -> RefUpdate {
+    let mut flags = RefUpdateFlags::default();
+    if item.name == "HEAD" {
+        flags.no_deref = true;
     }
-
-    // Phase 2: apply. Re-check CAS immediately before each write so concurrent
-    // updaters cannot both succeed after the initial pre-check (see TESTING.md
-    // gap note for whole-batch lock-all atomicity).
-    for item in updates {
-        if let Some(expected) = item.expected_old {
-            let current = crate::refs::resolve_ref(git_dir, &item.name).ok();
-            if current != Some(expected) {
-                return Err(Error::Message(format!(
-                    "ref transaction rejected: '{}' expected {} but found {}",
-                    item.name,
-                    expected,
-                    current
-                        .map(|o| o.to_hex())
-                        .unwrap_or_else(|| "<absent>".to_owned()),
-                )));
-            }
-        }
-        match (&item.new_oid, item.expected_old) {
-            (Some(oid), Some(expected)) => {
-                crate::refs::write_ref_cas(git_dir, &item.name, oid, expected)?
-            }
-            (Some(oid), None) => crate::refs::write_ref(git_dir, &item.name, oid)?,
-            (None, Some(expected)) => crate::refs::delete_ref_cas(git_dir, &item.name, expected)?,
-            (None, None) => crate::refs::delete_ref(git_dir, &item.name)?,
-        }
+    RefUpdate {
+        name: item.name.clone(),
+        new_value: item.new_oid.map(RawRef::Direct),
+        expected: match item.expected_old {
+            Some(oid) => Expected::Oid(oid),
+            None => Expected::Any,
+        },
+        reflog: None,
+        flags,
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod update_refs_tests {
     use super::*;
+    use crate::error::Error;
+    use crate::refs::store::RefStoreError;
     use crate::repo::init_repository;
     use tempfile::TempDir;
 
@@ -399,11 +328,45 @@ mod update_refs_tests {
             },
         ];
         let err = update_refs(&repo.git_dir, &items).expect_err("duplicate");
-        assert!(
-            err.to_string()
-                .contains("multiple updates for ref 'refs/heads/dup'"),
-            "{err}"
-        );
+        match &err {
+            Error::RefStore(RefStoreError::DuplicateUpdate { name }) => {
+                assert_eq!(name, "refs/heads/dup");
+            }
+            other => panic!("expected DuplicateUpdate, got {other}"),
+        }
+    }
+
+    #[test]
+    fn update_refs_typed_errors() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let git_dir = repo.git_dir;
+        let c1 = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
+        let c2 = sample_oid("1111111111111111111111111111111111111111");
+        refs::write_ref(&git_dir, "refs/heads/cas", &c2).expect("seed");
+
+        let err = update_refs(
+            &git_dir,
+            &[RefTransactionItem {
+                name: "refs/heads/cas".to_owned(),
+                new_oid: Some(c1),
+                expected_old: Some(c1),
+            }],
+        )
+        .expect_err("stale cas");
+        match &err {
+            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
+                assert_eq!(name, "refs/heads/cas");
+            }
+            other => panic!("expected ExpectedMismatch, got {other}"),
+        }
     }
 
     #[test]
@@ -431,7 +394,10 @@ mod update_refs_tests {
             }],
         )
         .expect_err("stale cas");
-        assert!(err.to_string().contains("expected"));
+        assert!(
+            matches!(err, Error::RefStore(RefStoreError::ExpectedMismatch { .. })),
+            "{err}"
+        );
         assert_eq!(
             crate::refs::resolve_ref(&git_dir, "refs/heads/locked-cas").unwrap(),
             c2
