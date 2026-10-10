@@ -394,6 +394,10 @@ pub enum Error {
     #[error(transparent)]
     RefLock(#[from] RefLockError),
 
+    /// Reference store transaction or iteration failure.
+    #[error(transparent)]
+    RefStore(#[from] crate::refs::store::RefStoreError),
+
     /// Filter or EOL conversion failure.
     #[error(transparent)]
     Filter(#[from] FilterError),
