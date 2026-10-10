@@ -626,6 +626,84 @@ fn diff_json_preserves_crlf_no_eof_and_mode() -> TestResult {
     Ok(())
 }
 
+#[cfg(unix)]
+fn gs_in_pseudo_tty(dir: &Path, args: &[&str]) -> CmdOutput {
+    let mut cmd = format!("cd {} && env -u NO_COLOR {}", dir.display(), GS);
+    for arg in args {
+        cmd.push(' ');
+        cmd.push_str(&shell_escape(arg));
+    }
+    let out = Command::new("script")
+        .args(["-qfc", &cmd, "/dev/null"])
+        .output()
+        .expect("spawn script");
+    CmdOutput {
+        status: out.status.code(),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
+}
+
+#[cfg(unix)]
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c))
+    {
+        s.to_owned()
+    } else {
+        format!("'{s}'")
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn diff_color_tty_shows_hunk_range_without_function_context() -> TestResult {
+    let scratch = Scratch::new("difftty")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("top.txt"), "first\nsecond\n");
+    gs_ok(&repo, &["commit", "init"]);
+    write_file(&repo.join("top.txt"), "FIRST\nsecond\n");
+    let out = gs_in_pseudo_tty(&repo, &["diff"]);
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert!(
+        out.stdout.contains('\u{1b}'),
+        "expected ANSI color in PTY output"
+    );
+    assert!(
+        out.stdout.contains("@@ -") && out.stdout.contains(" +"),
+        "expected counted hunk header in PTY output: {}",
+        out.dump()
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(unix)]
+fn diff_binary_mode_only_shows_modes_not_content_message() -> TestResult {
+    let scratch = Scratch::new("diffbinmode")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    std::fs::write(repo.join("bin.dat"), b"a\0b\n")?;
+    gs_ok(&repo, &["commit", "init"]);
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(repo.join("bin.dat"))?.permissions();
+    perms.set_mode(0o100755);
+    fs::set_permissions(repo.join("bin.dat"), perms)?;
+    let out = gs(&repo, ["diff"]);
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert!(out.stdout.contains("old mode 100644"), "{}", out.dump());
+    assert!(out.stdout.contains("new mode 100755"), "{}", out.dump());
+    assert!(
+        !out.stdout.contains("Binary file differs"),
+        "mode-only binary must not claim content diff: {}",
+        out.dump()
+    );
+    Ok(())
+}
+
 #[test]
 fn diff_human_shows_hunk_range_with_function_context() -> TestResult {
     let scratch = Scratch::new("difffctx")?;

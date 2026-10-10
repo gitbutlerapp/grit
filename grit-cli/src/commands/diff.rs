@@ -448,11 +448,6 @@ fn render_file(file: &FileDiff, color: bool) {
     };
     println!("{}", paint(color, "1;4", &header)); // bold + underline
 
-    if file.binary {
-        println!("{}", paint(color, FG_DIM, "Binary file differs"));
-        return;
-    }
-
     if file.old_mode != file.new_mode {
         if let Some(m) = &file.old_mode {
             println!("old mode {m}");
@@ -460,6 +455,14 @@ fn render_file(file: &FileDiff, color: bool) {
         if let Some(m) = &file.new_mode {
             println!("new mode {m}");
         }
+    }
+
+    if file.binary {
+        if file.hunks.is_empty() {
+            return;
+        }
+        println!("{}", paint(color, FG_DIM, "Binary file differs"));
+        return;
     }
 
     // Width of each line-number column = widest number shown.
@@ -492,7 +495,9 @@ fn render_hunk(hunk: &Hunk, width: usize, color: bool) {
         (None, false) => {
             println!("{range}");
         }
-        (None, true) => {}
+        (None, true) => {
+            println!("{}", paint(color, "33", &format!("┄┄ {range}")));
+        }
     }
 
     for line in &hunk.lines {

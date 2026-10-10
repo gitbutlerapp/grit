@@ -221,8 +221,8 @@ fn build_structured_hunks(
         .filter_map(|group| {
             let first = group.first()?;
             let (old_lines, new_lines) = hunk_line_counts(&group);
-            let old_start = unified_hunk_start(first.old_range().start, old_lines);
-            let new_start = unified_hunk_start(first.new_range().start, new_lines);
+            let old_start = unified_side_start(first.old_range().start, old_lines);
+            let new_start = unified_side_start(first.new_range().start, new_lines);
 
             let mut lines = Vec::new();
             for op in &group {
@@ -458,12 +458,15 @@ fn hunk_line_counts(group: &[DiffOp]) -> (usize, usize) {
     (old, new)
 }
 
-/// 1-based unified-diff start, or `0` when that side has zero lines in the hunk (Git `xdiff`).
-fn unified_hunk_start(first_index_0based: usize, line_count: usize) -> usize {
+/// Git unified hunk start for one side (`xdiff` / `git diff`).
+///
+/// When the side has lines in the hunk, start is 1-based. When the count is zero,
+/// start is the 0-based anchor from the diff op (0 only for an empty file).
+fn unified_side_start(anchor_index_0based: usize, line_count: usize) -> usize {
     if line_count == 0 {
-        0
+        anchor_index_0based
     } else {
-        first_index_0based + 1
+        anchor_index_0based + 1
     }
 }
 
@@ -602,6 +605,71 @@ mod tests {
             .find(|l| l.kind == StructuredLineKind::Context && l.segments[0].text == "last")
             .expect("context last");
         assert!(ctx.no_newline_at_eof);
+    }
+
+    fn git_diff_u0(old: &str, new: &str) -> String {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("f.txt");
+        std::fs::write(&path, old).expect("write old");
+        Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git init");
+        for (k, v) in [("user.email", "t@e.com"), ("user.name", "T")] {
+            Command::new("git")
+                .args(["config", k, v])
+                .current_dir(tmp.path())
+                .status()
+                .unwrap();
+        }
+        Command::new("git")
+            .args(["add", "f.txt"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "init"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::fs::write(&path, new).expect("write new");
+        let out = Command::new("git")
+            .args(["diff", "-U0", "f.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git diff");
+        String::from_utf8(out.stdout).expect("utf8")
+    }
+
+    #[test]
+    fn zero_context_insertion_anchor_matches_git() {
+        let old = "a\nb\nc\n";
+        let new = "a\nb\nX\nc\n";
+        let patch = git_diff_u0(old, new);
+        let (g_os, g_ol, g_ns, g_nl) = parse_hunk_header(&patch);
+        let d = structured_text_diff(old, new, StructuredDiffOptions { context_lines: 0 });
+        let h = &d.hunks[0];
+        assert_eq!(
+            (h.old_start, h.old_lines, h.new_start, h.new_lines),
+            (g_os, g_ol, g_ns, g_nl)
+        );
+        assert_eq!((h.old_start, h.old_lines), (2, 0));
+    }
+
+    #[test]
+    fn zero_context_deletion_anchor_matches_git() {
+        let old = "a\nb\nc\n";
+        let new = "a\nc\n";
+        let patch = git_diff_u0(old, new);
+        let (g_os, g_ol, g_ns, g_nl) = parse_hunk_header(&patch);
+        let d = structured_text_diff(old, new, StructuredDiffOptions { context_lines: 0 });
+        let h = &d.hunks[0];
+        assert_eq!(
+            (h.old_start, h.old_lines, h.new_start, h.new_lines),
+            (g_os, g_ol, g_ns, g_nl)
+        );
+        assert_eq!((h.new_start, h.new_lines), (1, 0));
     }
 
     #[test]
