@@ -278,6 +278,7 @@ fn build_many_refs(git: &Path, profile: NetworkProfile, dest: &Path) -> Result<(
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
+    run_git(git, Some(dest), &["pack-refs", "--all", "--prune"])?;
     write_meta(git, profile, NetworkFixtureKind::ManyRefs, dest, ref_count)?;
     Ok(())
 }

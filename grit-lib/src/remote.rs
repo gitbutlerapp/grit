@@ -13,7 +13,7 @@ use thiserror::Error;
 use crate::config::ConfigSet;
 #[cfg(feature = "http-ureq")]
 use crate::credentials::HelperCredentialProvider;
-use crate::error::{Error, Result};
+use crate::error::Error;
 use crate::fetch::{fetch_remote, Progress};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -969,8 +969,6 @@ pub fn list_refs_from_git_dir(
     odb: &Odb,
     opts: &ListRefsOptions,
 ) -> RemoteResult<Vec<RemoteRef>> {
-    use std::collections::BTreeMap;
-
     let mut entries = Vec::new();
     if list_refs_includes_head(opts) {
         if let Ok(head_oid) = crate::refs::resolve_ref(git_dir, "HEAD") {
@@ -991,40 +989,33 @@ pub fn list_refs_from_git_dir(
         }
     }
 
-    let refs_dir_root = resolve_common_git_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-    let mut all_refs: BTreeMap<String, ObjectId> = BTreeMap::new();
-    collect_loose_refs(
-        &refs_dir_root,
-        &refs_dir_root.join("refs"),
-        "refs",
-        &mut all_refs,
-    )
-    .map_err(RemoteError::Library)?;
-    for (name, oid) in read_packed_refs(&refs_dir_root).map_err(RemoteError::Library)? {
-        all_refs.entry(name).or_insert(oid);
-    }
-
-    for (name, oid) in &all_refs {
-        if let Some(branch_tail) = name.strip_prefix("refs/heads/") {
-            if branch_tail.starts_with("refs/") {
+    for prefix in list_ref_prefixes(opts) {
+        let listed = crate::refs::list_refs(git_dir, &prefix).map_err(RemoteError::Library)?;
+        for (name, oid) in listed {
+            if let Some(branch_tail) = name.strip_prefix("refs/heads/") {
+                if branch_tail.starts_with("refs/") {
+                    continue;
+                }
+            }
+            if !ref_matches_list_opts(&name, opts) {
                 continue;
             }
-        }
-        if !ref_matches_list_opts(name, opts) {
-            continue;
-        }
-        entries.push(RemoteRef {
-            name: name.clone(),
-            oid: *oid,
-            symref_target: None,
-        });
-        if opts.peel && name.starts_with("refs/tags/") {
-            if let Some(peeled) = peel_tag(odb, oid) {
-                entries.push(RemoteRef {
-                    name: format!("{name}^{{}}"),
-                    oid: peeled,
-                    symref_target: None,
-                });
+            entries.push(RemoteRef {
+                name: name.clone(),
+                oid,
+                symref_target: None,
+            });
+            if opts.peel && name.starts_with("refs/tags/") {
+                let peel_name = format!("{name}^{{}}");
+                if ref_matches_list_opts(&peel_name, opts) {
+                    if let Some(peeled) = peel_tag(odb, &oid) {
+                        entries.push(RemoteRef {
+                            name: peel_name,
+                            oid: peeled,
+                            symref_target: None,
+                        });
+                    }
+                }
             }
         }
     }
@@ -1038,79 +1029,6 @@ pub fn list_refs_from_git_dir(
             a.name.cmp(&b.name)
         }
     });
-    Ok(entries)
-}
-
-fn resolve_common_git_dir(git_dir: &Path) -> Option<PathBuf> {
-    let raw = std::fs::read_to_string(git_dir.join("commondir")).ok()?;
-    let rel = raw.trim();
-    if rel.is_empty() {
-        return None;
-    }
-    let candidate = if Path::new(rel).is_absolute() {
-        PathBuf::from(rel)
-    } else {
-        git_dir.join(rel)
-    };
-    candidate.canonicalize().ok()
-}
-
-fn collect_loose_refs(
-    git_dir: &Path,
-    path: &Path,
-    relative: &str,
-    out: &mut std::collections::BTreeMap<String, ObjectId>,
-) -> Result<()> {
-    use std::fs;
-    use std::io;
-
-    let read_dir = match fs::read_dir(path) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    for entry in read_dir {
-        let entry = entry?;
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        let next_relative = format!("{relative}/{file_name}");
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            collect_loose_refs(git_dir, &entry.path(), &next_relative, out)?;
-        } else if file_type.is_file() {
-            if let Ok(oid) = crate::refs::resolve_ref(git_dir, &next_relative) {
-                out.insert(next_relative, oid);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn read_packed_refs(git_dir: &Path) -> Result<Vec<(String, ObjectId)>> {
-    use std::fs;
-    use std::io;
-
-    let path = crate::refs::store::paths::packed_refs_path(git_dir);
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    let mut entries = Vec::new();
-    for line in text.lines() {
-        if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let Some(oid_str) = parts.next() else {
-            continue;
-        };
-        let Some(name) = parts.next() else {
-            continue;
-        };
-        if let Ok(oid) = oid_str.parse::<ObjectId>() {
-            entries.push((name.to_owned(), oid));
-        }
-    }
     Ok(entries)
 }
 

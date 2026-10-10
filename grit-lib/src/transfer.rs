@@ -279,6 +279,18 @@ fn copy_objects_for_local_fetch(
         try_satisfy_via_object_link,
     };
 
+    let remote_objects = remote_git_dir.join("objects");
+    let local_objects = local_git_dir.join("objects");
+    // Initial clone: link packfiles before walking the object graph (50k+ commits).
+    if !opts.thin
+        && try_pack_link
+        && haves.is_empty()
+        && !wants.is_empty()
+        && try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, wants, false)?
+    {
+        return Ok(linked_object_set(local_odb, wants));
+    }
+
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
     let send = collect_reachable_excluding_peer(
         remote_odb,
@@ -289,8 +301,6 @@ fn copy_objects_for_local_fetch(
         source_shallow,
     )?;
 
-    let remote_objects = remote_git_dir.join("objects");
-    let local_objects = local_git_dir.join("objects");
     if !opts.thin
         && try_pack_link
         && try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, &send, false)?
@@ -422,6 +432,81 @@ fn copy_objects_for_local_push(
 ///
 /// Discovery order keeps commits before the trees/blobs they introduce, which
 /// is a reasonable, deterministic pack ordering.
+pub(crate) fn collect_reachable_excluding(
+    odb: &Odb,
+    roots: &[ObjectId],
+    exclude: &HashSet<ObjectId>,
+    skip_missing: bool,
+    shallow_grafts: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut ordered: Vec<ObjectId> = Vec::new();
+    let mut queue: VecDeque<ObjectId> = VecDeque::new();
+
+    let enqueue = |oid: ObjectId,
+                   queue: &mut VecDeque<ObjectId>,
+                   visited: &mut HashSet<ObjectId>,
+                   ordered: &mut Vec<ObjectId>|
+     -> bool {
+        if exclude.contains(&oid) {
+            return false;
+        }
+        if visited.insert(oid) {
+            ordered.push(oid);
+            queue.push_back(oid);
+            true
+        } else {
+            false
+        }
+    };
+
+    for &root in roots {
+        enqueue(root, &mut queue, &mut visited, &mut ordered);
+    }
+
+    while let Some(oid) = queue.pop_front() {
+        let obj = match odb.read(&oid) {
+            Ok(o) => o,
+            // A root/have absent from this odb cannot be traversed; with
+            // `skip_missing` it simply contributes nothing (no descent), instead
+            // of failing the whole pack build.
+            Err(_) if skip_missing => continue,
+            Err(e) => return Err(e),
+        };
+        match obj.kind {
+            ObjectKind::Commit => {
+                let commit = parse_commit(&obj.data)?;
+                if !shallow_grafts.contains(&oid) {
+                    for parent in commit.parents {
+                        enqueue(parent, &mut queue, &mut visited, &mut ordered);
+                    }
+                }
+                enqueue(commit.tree, &mut queue, &mut visited, &mut ordered);
+            }
+            ObjectKind::Tree => {
+                for entry in parse_tree(&obj.data)? {
+                    // Skip submodule (gitlink) entries: the commit they name
+                    // lives in another object store and is not part of this pack.
+                    if entry.mode == 0o160000 {
+                        continue;
+                    }
+                    enqueue(entry.oid, &mut queue, &mut visited, &mut ordered);
+                }
+            }
+            ObjectKind::Tag => {
+                let tag = parse_tag(&obj.data)?;
+                enqueue(tag.object, &mut queue, &mut visited, &mut ordered);
+            }
+            ObjectKind::Blob => {}
+        }
+    }
+
+    Ok(ordered)
+}
+
+/// Like [`collect_reachable_excluding`], but treats every object already stored in
+/// `peer_odb` as a boundary (plus explicit `peer_boundary` tips). Used for local
+/// file fetch/push so incremental transfers do not walk full history from `haves`.
 fn collect_reachable_excluding_peer(
     source_odb: &Odb,
     roots: &[ObjectId],
@@ -493,6 +578,95 @@ fn collect_reachable_excluding_peer(
 }
 
 /// The pack object type code for a Git object kind (PACK v2 base types).
+fn pack_type_code(kind: ObjectKind) -> u8 {
+    match kind {
+        ObjectKind::Commit => 1,
+        ObjectKind::Tree => 2,
+        ObjectKind::Blob => 3,
+        ObjectKind::Tag => 4,
+    }
+}
+
+/// Append a PACK object header: 3-bit type + variable-length size (little-endian
+/// 7-bit groups, MSB = continuation). Lifted from the CLI pack writer.
+fn encode_pack_object_header(buf: &mut Vec<u8>, type_code: u8, payload_len: usize) {
+    let mut size = payload_len;
+    let first = ((type_code & 0x7) << 4) | (size & 0x0f) as u8;
+    size >>= 4;
+    if size > 0 {
+        buf.push(first | 0x80);
+        while size > 0 {
+            let b = (size & 0x7f) as u8;
+            size >>= 7;
+            buf.push(if size > 0 { b | 0x80 } else { b });
+        }
+    } else {
+        buf.push(first);
+    }
+}
+
+/// Serialize `oids` as a PACK v2 stream of whole (non-delta) objects, terminated
+/// by the trailing pack checksum at the repository hash width.
+pub(crate) fn serialize_pack(
+    odb: &Odb,
+    oids: &[ObjectId],
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"PACK");
+    buf.extend_from_slice(&2u32.to_be_bytes());
+    let count = u32::try_from(oids.len())
+        .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
+    buf.extend_from_slice(&count.to_be_bytes());
+
+    for oid in oids {
+        let obj = odb.read(oid)?;
+        write_whole_pack_object(&mut buf, odb, *oid, obj.kind, &obj.data, opts)?;
+    }
+
+    append_pack_trailer(&mut buf, odb.hash_algo());
+    Ok(buf)
+}
+
+/// Write one whole (non-delta) pack object, reusing on-disk bytes when allowed.
+fn write_whole_pack_object(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    oid: ObjectId,
+    kind: ObjectKind,
+    data: &[u8],
+    opts: &PackBuildOptions,
+) -> Result<()> {
+    if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
+        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
+            buf.extend_from_slice(&raw);
+            return Ok(());
+        }
+    }
+    encode_pack_object_header(buf, pack_type_code(kind), data.len());
+    write_zlib(buf, data)
+}
+
+/// Append the trailing pack checksum: the hash of everything written so far, at
+/// the repository's hash width (SHA-1 → 20 bytes, SHA-256 → 32 bytes).
+fn append_pack_trailer(buf: &mut Vec<u8>, algo: HashAlgo) {
+    buf.extend_from_slice(algo.digest(&*buf).as_bytes());
+}
+
+/// Append whole objects from `odb` to an in-progress pack (header + body, no trailer).
+pub(crate) fn append_whole_objects_from_odb(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    oids: &[ObjectId],
+) -> Result<()> {
+    let opts = PackBuildOptions::default();
+    for oid in oids {
+        let obj = odb.read(oid)?;
+        write_whole_pack_object(buf, odb, *oid, obj.kind, &obj.data, &opts)?;
+    }
+    Ok(())
+}
+
 /// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
 /// `git index-pack --fix-thin`.
 /// Expand a thin on-disk pack, returning the path to the pack bytes to index.
@@ -1608,7 +1782,10 @@ pub(crate) fn apply_tag_mode(
     // and remote shallow grafts (unioned by the caller). Post-pack pruning via
     // [`crate::fetch::retain_following_tags`] still drops tags whose objects did
     // not arrive. Using the local ODB here would miss every tip on first fetch.
-    let following_closure: HashSet<ObjectId> = if mode == TagMode::Following {
+    let remote_has_tags = remote_refs
+        .iter()
+        .any(|(name, _)| name.starts_with("refs/tags/"));
+    let following_closure: HashSet<ObjectId> = if mode == TagMode::Following && remote_has_tags {
         let roots: Vec<ObjectId> = matched
             .iter()
             .filter(|m| !m.is_tag)
