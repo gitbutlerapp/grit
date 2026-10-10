@@ -680,33 +680,18 @@ fn build_response_pack(
     pack_wants.sort();
     pack_wants.dedup();
 
-    // Client `have` lines include shallow commits being deepened; their missing
-    // parents must still be packed (Git unshallow). Do not treat those haves as
-    // common bases for object exclusion.
-    let pack_haves: Vec<ObjectId> = if let Some(sh) = shallow {
-        common
-            .iter()
-            .filter(|oid| !sh.unshallow.contains(oid))
-            .copied()
-            .collect()
-    } else {
-        common.to_vec()
-    };
-
-    let cfg = crate::config::ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(&repo.git_dir),
-        true,
-    )
-    .unwrap_or_default();
     let pack_opts = PackBuildOptions {
         thin: caps.contains("thin-pack"),
         delta: true,
         use_ofs_delta: caps.contains("ofs-delta"),
-        use_bitmaps: PackBuildOptions::use_bitmaps_for_upload_pack(Some(&cfg)),
         ..PackBuildOptions::default()
     };
-    Ok(build_pack(&repo.odb, &pack_wants, common, &opts)?)
+    Ok(build_pack(
+        &repo.odb,
+        &pack_wants,
+        common,
+        &pack_opts,
+    )?)
 }
 
 /// Annotated tags the client did not ask for but whose target commit is being
