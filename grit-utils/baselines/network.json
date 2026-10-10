@@ -15,7 +15,7 @@
   "tools": {
     "git": "git version 2.43.0",
     "grit": "grit 0.5.4",
-    "grit_commit": "52b3216316294fe4387b9b814620ed8b99fa4dd8"
+    "grit_commit": "a0903b97e1885a9d053dc5ce6b907feb568e90bb"
   },
   "scenarios": [
     {
