@@ -3,7 +3,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use grit_lib::clone::{clone as clone_repo, CloneOptions};
+use grit_lib::environment::Environment;
+use grit_lib::fetch::NoProgress;
 use grit_lib::pack::verify_pack_and_collect;
+use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::repo::init_repository;
 use grit_lib::transfer::{fetch_local, CloneReflog, FetchOptions, TagMode};
 
@@ -253,5 +258,55 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
         fsck.status.success(),
         "git fsck --strict failed: {}",
         String::from_utf8_lossy(&fsck.stderr)
+    );
+}
+
+#[test]
+fn library_clone_api_passes_fsck_and_status() {
+    let upstream = tempfile::tempdir().expect("upstream");
+    assert!(git_in(upstream.path(), &["init", "-q", "-b", "main", "."]));
+    std::fs::write(upstream.path().join("tracked.txt"), b"hello\n").unwrap();
+    git_in(upstream.path(), &["add", "tracked.txt"]);
+    git_in(
+        upstream.path(),
+        &[
+            "-c",
+            "user.email=t@e.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
+
+    let dest = tempfile::tempdir().expect("clone dest");
+    let factory = DefaultHttpClientFactory;
+    let outcome = clone_repo(
+        &CloneOptions {
+            url: upstream.path().to_string_lossy().into_owned(),
+            dest: dest.path().to_path_buf(),
+            environment: Environment::capture_process(),
+            remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
+            initial_branch: "main".to_owned(),
+        },
+        &mut NoProgress,
+        Some(&factory),
+    )
+    .expect("library clone");
+
+    let commit = outcome
+        .repo
+        .odb
+        .read(&outcome.checkout_oid)
+        .expect("commit obj");
+    let parsed = grit_lib::objects::parse_commit(&commit.data).expect("parse commit");
+    checkout_between_trees(&outcome.repo, None, &parsed.tree).expect("checkout");
+
+    assert!(git_in(dest.path(), &["fsck", "--strict"]));
+    let status = git_out(dest.path(), &["status", "--porcelain"]).unwrap_or_default();
+    assert!(
+        status.trim().is_empty(),
+        "expected clean working tree after clone checkout, got:\n{status}"
     );
 }
