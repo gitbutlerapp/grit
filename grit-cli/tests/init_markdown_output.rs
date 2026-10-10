@@ -19,7 +19,7 @@ fn init_markdown_lists_ref_format() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("**ref_format**: reftable"),
+        stdout.contains("ref-format `reftable`"),
         "stdout:\n{stdout}"
     );
 }

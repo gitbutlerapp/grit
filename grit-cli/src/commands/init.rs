@@ -8,7 +8,7 @@ use grit_lib::ref_storage::RefStorageFormat;
 use grit_lib::repo::init_repository;
 use serde::Serialize;
 
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit init`.
 #[derive(Serialize)]
@@ -32,6 +32,20 @@ impl HumanRender for InitOutcome {
         println!(
             "Initialized empty {kind} in {} (ref-format: {})",
             self.path, self.ref_format
+        );
+    }
+}
+
+impl MarkdownRender for InitOutcome {
+    fn render_markdown(&self) {
+        let kind = if self.bare {
+            "bare repository"
+        } else {
+            "repository"
+        };
+        println!(
+            "Initialized empty {kind} at `{}` (default branch `{}`, ref-format `{}`).",
+            self.path, self.branch, self.ref_format
         );
     }
 }

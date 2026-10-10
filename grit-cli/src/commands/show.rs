@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
 use crate::context::{self, subject_line};
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Width budget for the `+`/`-` change bars in the diffstat.
 const BAR_WIDTH: usize = 40;
@@ -260,6 +260,64 @@ fn tz_offset_seconds(tz: &str) -> i64 {
 
 // --- Human rendering --------------------------------------------------------
 
+impl MarkdownRender for ShowOutcome {
+    fn render_markdown(&self) {
+        if let Some(tag) = &self.tag {
+            println!("# Tag `{}`", tag.name);
+            if let Some(tagger) = &tag.tagger {
+                println!();
+                println!("**Tagger:** {} <{}>", tagger.name, tagger.email);
+                println!("**Date:** {}", tagger.date);
+            }
+            if !tag.message.trim().is_empty() {
+                println!();
+                print_markdown_message(&tag.message);
+            }
+            println!();
+        } else if self.kind == "branch" {
+            if let Some(name) = &self.ref_name {
+                println!("# Branch `{name}`");
+                println!();
+            }
+        } else if self.kind == "tag" {
+            if let Some(name) = &self.ref_name {
+                println!("# Tag `{name}`");
+                println!();
+            }
+        }
+
+        let short = self.commit.oid.get(..7).unwrap_or(self.commit.oid.as_str());
+        println!("# Commit `{short}`");
+        println!();
+        println!("**Oid:** `{}`", self.commit.oid);
+        if self.commit.parents.len() > 1 {
+            let parents: Vec<String> = self
+                .commit
+                .parents
+                .iter()
+                .map(|p| format!("`{}`", p.get(..7).unwrap_or(p.as_str())))
+                .collect();
+            println!("**Merge parents:** {}", parents.join(", "));
+        }
+        println!(
+            "**Author:** {} <{}>",
+            self.commit.author.name, self.commit.author.email
+        );
+        println!("**Date:** {}", self.commit.author.date);
+        println!();
+        if !self.commit.subject.is_empty() {
+            println!("## {}", self.commit.subject);
+            println!();
+        }
+        let body = message_body(&self.commit.message, &self.commit.subject);
+        if !body.is_empty() {
+            print_markdown_message(&body);
+            println!();
+        }
+        render_markdown_stat(&self.stat);
+    }
+}
+
 impl HumanRender for ShowOutcome {
     fn render_human(&self) {
         let color = use_color();
@@ -430,6 +488,42 @@ fn print_message(message: &str) {
             println!("    {line}");
         }
     }
+}
+
+fn print_markdown_message(message: &str) {
+    for line in message.lines() {
+        println!("{line}");
+    }
+}
+
+fn message_body(full: &str, subject: &str) -> String {
+    let mut lines = full.lines();
+    let first = lines.next().unwrap_or("");
+    if first == subject {
+        lines.collect::<Vec<_>>().join("\n").trim().to_owned()
+    } else {
+        full.trim().to_owned()
+    }
+}
+
+fn render_markdown_stat(stat: &DiffStat) {
+    if stat.files.is_empty() {
+        return;
+    }
+    println!("## Changes");
+    println!();
+    println!("| File | + | − |");
+    println!("| --- | ---: | ---: |");
+    for file in &stat.files {
+        let path = stat_path(file);
+        if file.binary {
+            println!("| `{path}` | binary | |");
+        } else {
+            println!("| `{path}` | {} | {} |", file.insertions, file.deletions);
+        }
+    }
+    println!();
+    println!("{}", summary_line(stat));
 }
 
 fn use_color() -> bool {

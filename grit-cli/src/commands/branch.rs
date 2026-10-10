@@ -12,7 +12,7 @@ use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit branch`, tagged by `action` (`list` / `create` / `delete`).
 #[derive(Serialize)]
@@ -65,6 +65,8 @@ impl HumanRender for BranchOutcome {
         }
     }
 }
+
+impl MarkdownRender for BranchOutcome {}
 
 /// List, create, or delete a branch depending on `name` and the delete flags.
 pub fn run(name: Option<String>, delete: bool, force_delete: bool) -> Result<BranchOutcome> {

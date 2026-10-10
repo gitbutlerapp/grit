@@ -9,7 +9,8 @@ use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
 use serde::Serialize;
 
 use crate::context::{self, CommitSummary};
-use crate::output::{change_json, ChangeJson, CommitJson, HumanRender};
+use crate::markdown;
+use crate::output::{change_json, ChangeJson, CommitJson, HumanRender, MarkdownRender};
 use crate::ui::{self, PathDisplayContext};
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
@@ -73,6 +74,14 @@ impl HumanRender for StatusOutcome {
     fn render_human(&self) {
         self.render_header();
         self.render_changes();
+        self.render_hints();
+    }
+}
+
+impl MarkdownRender for StatusOutcome {
+    fn render_markdown(&self) {
+        self.render_markdown_header();
+        self.render_markdown_changes();
         self.render_hints();
     }
 }
@@ -158,6 +167,59 @@ impl StatusOutcome {
         if !hints.is_empty() {
             println!("→ {}", hints.join("  ·  "));
         }
+    }
+
+    fn render_markdown_header(&self) {
+        let branch = self.branch.as_deref().unwrap_or_default();
+        let target = self.target.as_deref().unwrap_or_default();
+        match self.header {
+            HeaderKind::AheadOfTarget => {
+                println!("On **`{branch}`** · **{}** ahead of `{target}`", self.ahead);
+                if !self.commit_rows.is_empty() {
+                    println!();
+                    markdown::print_commit_list(
+                        &self.commit_rows[..self.commit_rows.len().min(SHORTLOG_LIMIT)],
+                    );
+                    if self.ahead > SHORTLOG_LIMIT {
+                        println!();
+                        println!("… and {} more commit(s).", self.ahead - SHORTLOG_LIMIT);
+                    }
+                }
+                println!();
+            }
+            HeaderKind::EvenWith => {
+                println!("On **`{branch}`** · even with `{target}`");
+                println!();
+            }
+            HeaderKind::NoTarget => {
+                println!("On **`{branch}`**");
+                println!();
+            }
+            HeaderKind::Unborn => {
+                println!("On **`{branch}`** — no commits yet");
+                println!();
+            }
+            HeaderKind::Detached => {
+                let short = self.head.as_deref().map(short_hex).unwrap_or_default();
+                println!("Detached at `{short}`");
+                println!();
+            }
+            HeaderKind::Invalid => {
+                println!("HEAD is in an unknown state");
+                println!();
+            }
+        }
+    }
+
+    fn render_markdown_changes(&self) {
+        if self.clean {
+            println!("Nothing to commit — working tree clean.");
+            return;
+        }
+        let display = self.path_display.as_ref();
+        markdown::print_change_section("Staged", &self.staged_entries, display);
+        markdown::print_change_section("Changed (not staged)", &self.unstaged_entries, display);
+        markdown::print_untracked(&self.untracked, display);
     }
 }
 

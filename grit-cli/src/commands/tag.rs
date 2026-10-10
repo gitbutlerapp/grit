@@ -14,7 +14,7 @@ use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
 #[derive(Serialize)]
@@ -57,6 +57,8 @@ impl HumanRender for TagOutcome {
         }
     }
 }
+
+impl MarkdownRender for TagOutcome {}
 
 /// Run `grit tag` with the parsed CLI arguments.
 ///

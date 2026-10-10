@@ -24,7 +24,8 @@ use serde::Serialize;
 use similar::{ChangeTag, TextDiff};
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::markdown;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Lines of unchanged context to show around each change.
 const CONTEXT_LINES: usize = 3;
@@ -395,6 +396,12 @@ impl HumanRender for DiffOutcome {
         for file in &self.files {
             render_file(file, color);
         }
+    }
+}
+
+impl MarkdownRender for DiffOutcome {
+    fn render_markdown(&self) {
+        markdown::print_diff_files(&self.files);
     }
 }
 

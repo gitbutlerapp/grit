@@ -65,21 +65,32 @@ pub trait HumanRender {
     fn render_human(&self);
 }
 
-/// Render a command outcome as Markdown for agents (`--markdown`).
-pub trait MarkdownRender {
-    fn render_markdown(&self);
+/// Render a command outcome as agent-friendly Markdown on stdout.
+///
+/// The default implementation lists top-level JSON fields; commands override this
+/// when they have structured human-oriented Markdown (log, diff, status, …).
+pub trait MarkdownRender: Serialize {
+    fn render_markdown(&self)
+    where
+        Self: Sized,
+    {
+        render_value_markdown(self);
+    }
 }
 
 /// Render a command outcome to stdout in the chosen mode.
 ///
 /// Generic (rather than `Box<dyn …>`) because `serde::Serialize` is not
 /// object-safe; each dispatch arm calls this with its concrete outcome type.
-pub fn emit<T: Serialize + HumanRender>(value: &T, opts: &OutputOptions) -> Result<()> {
+pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
+    value: &T,
+    opts: &OutputOptions,
+) -> Result<()> {
     opts.validate()?;
     match opts.mode {
         OutputMode::Human => value.render_human(),
         OutputMode::Json => write_json(value, opts.filter.as_deref())?,
-        OutputMode::Markdown => render_value_markdown(value),
+        OutputMode::Markdown => value.render_markdown(),
     }
     Ok(())
 }

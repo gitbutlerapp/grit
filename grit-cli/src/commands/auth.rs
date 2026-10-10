@@ -28,7 +28,7 @@ use grit_lib::remote::http_client::{HttpClient, UreqHttpClient};
 use grit_lib::repo::Repository;
 use serde::Serialize;
 
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit auth` (sign-in).
 #[derive(Serialize)]
@@ -42,6 +42,8 @@ impl HumanRender for AuthOutcome {
         println!("\n✓ Signed in to GitHub — token stored for {}.", self.host);
     }
 }
+
+impl MarkdownRender for AuthOutcome {}
 
 /// Result of `grit auth logout`.
 #[derive(Serialize)]
@@ -65,6 +67,8 @@ impl HumanRender for LogoutOutcome {
         }
     }
 }
+
+impl MarkdownRender for LogoutOutcome {}
 
 /// GitHub OAuth App client id used for the device flow. This is grit's
 /// registered OAuth App; the device flow uses no client secret, so the id is not

@@ -8,7 +8,8 @@ use grit_lib::rev_list::{rev_list, RevListOptions};
 use serde::Serialize;
 
 use crate::context::{self, subject_line, CommitSummary};
-use crate::output::{CommitJson, HumanRender};
+use crate::markdown;
+use crate::output::{CommitJson, HumanRender, MarkdownRender};
 use crate::ui;
 
 /// How many commits to show per page.
@@ -37,6 +38,20 @@ impl HumanRender for LogOutcome {
         if let Some(next) = &self.next {
             println!();
             println!("→ more: grit log --before={}", short_hex(next));
+        }
+    }
+}
+
+impl MarkdownRender for LogOutcome {
+    fn render_markdown(&self) {
+        if self.commit_rows.is_empty() {
+            println!("No commits yet.");
+            return;
+        }
+        markdown::print_commit_list(&self.commit_rows);
+        if let Some(next) = &self.next {
+            println!();
+            println!("More history: run `grit log --before={}`", short_hex(next));
         }
     }
 }

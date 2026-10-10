@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
-use crate::output::{progress, HumanRender, OutputMode};
+use crate::output::{progress, HumanRender, MarkdownRender, OutputMode};
 
 /// URL of the POSIX-sh installer (used on Unix).
 #[cfg(not(windows))]
@@ -38,6 +38,8 @@ impl HumanRender for UpdateOutcome {
         // The installer's own output is the user-facing feedback; nothing extra.
     }
 }
+
+impl MarkdownRender for UpdateOutcome {}
 
 /// Send the installer's stdout to our stderr in JSON mode so our stdout stays a
 /// single clean object; inherit normally in human mode.

@@ -9,7 +9,7 @@
 //! situations are reported up front, and `git cherry-pick` is the escape hatch.
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::IdentRole;
@@ -46,6 +46,8 @@ impl HumanRender for PickOutcome {
         println!("Picked {src_short} → {new_short} {}", self.subject);
     }
 }
+
+impl MarkdownRender for PickOutcome {}
 
 /// Cherry-pick `commit` onto the current branch.
 ///

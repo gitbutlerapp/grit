@@ -9,12 +9,13 @@ mod commands;
 mod context;
 mod diagnostics;
 mod json_filter;
+mod markdown;
 mod output;
 mod ref_name_messages;
 mod stdio;
 mod ui;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
@@ -299,6 +300,10 @@ fn main() {
         eprintln!("error: {err:#}");
         std::process::exit(1);
     }
+    if let Err(err) = reject_non_human_plumbing(&cli, &opts) {
+        output::emit_error(&err, &opts);
+        std::process::exit(1);
+    }
     if let Err(err) = dispatch(cli, &opts) {
         output::emit_error(&err, &opts);
         let code = if err
@@ -322,6 +327,24 @@ fn main() {
 /// protocol on stdin/stdout — no outcome), and
 /// `push` (which emits its per-ref outcome and then exits non-zero when a ref
 /// was rejected).
+/// Plumbing commands whose stdout is not a command outcome object.
+fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
+    if opts.mode == OutputMode::Human {
+        return Ok(());
+    }
+    let Some(cmd) = &cli.command else {
+        return Ok(());
+    };
+    let name = match cmd {
+        Command::Completions { .. } => "completions",
+        Command::Manager { .. } => "manager",
+        Command::UploadPack { .. } => "upload-pack",
+        Command::ReceivePack { .. } => "receive-pack",
+        _ => return Ok(()),
+    };
+    bail!("`grit {name}` does not support --json or --markdown");
+}
+
 fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
     match cli.command.unwrap_or(Command::Status) {
         Command::Init {

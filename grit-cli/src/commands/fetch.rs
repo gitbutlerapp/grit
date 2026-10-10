@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::commands::auth;
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit fetch`: the refs that changed.
 #[derive(Serialize)]
@@ -48,6 +48,8 @@ impl HumanRender for FetchOutcome {
         }
     }
 }
+
+impl MarkdownRender for FetchOutcome {}
 
 fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)

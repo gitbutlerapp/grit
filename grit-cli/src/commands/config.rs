@@ -12,7 +12,7 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use serde::Serialize;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit config`, tagged by `action`.
 #[derive(Serialize)]
@@ -49,6 +49,8 @@ impl HumanRender for ConfigOutcome {
         }
     }
 }
+
+impl MarkdownRender for ConfigOutcome {}
 
 /// Run `grit config`.
 ///

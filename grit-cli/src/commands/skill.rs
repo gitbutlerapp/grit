@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// The skill text, with `{version}` replaced by the running grit's version.
 const SKILL: &str = include_str!("skill.md");
@@ -27,6 +27,13 @@ pub struct SkillOutcome {
 impl HumanRender for SkillOutcome {
     fn render_human(&self) {
         // Exactly the file, so `grit skill > SKILL.md` works.
+        print!("{}", self.content);
+    }
+}
+
+impl MarkdownRender for SkillOutcome {
+    fn render_markdown(&self) {
+        // Same bytes as human mode so agents can save or parse the skill file.
         print!("{}", self.content);
     }
 }

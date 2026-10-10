@@ -61,6 +61,19 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a branch summary and commit bullets:
+
+```text
+# Branch `feature`
+
+Ahead of `main` by **2** commits.
+
+- `cf18394` Say hi (ada, 1 hour ago)
+- `9a1c2e0` Add a greeting test (ada, 2 hours ago)
+```
+
 ## See also
 
 [grit status](../status/), [grit log](../log/), [grit config](../config/)

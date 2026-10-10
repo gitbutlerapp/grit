@@ -64,6 +64,17 @@ Example (with `content` shortened):
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) to print the full `SKILL.md` text on stdout (same bytes as human mode, suitable for saving or parsing):
+
+```text
+---
+name: grit
+description: Use the grit CLI for version control …
+---
+```
+
 ## See also
 
 [Agent guide](../agents/), [grit update](../update/), [Global options](../global-options/)

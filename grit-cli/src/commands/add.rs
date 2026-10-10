@@ -11,7 +11,7 @@ use grit_lib::repo::Repository;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit add`: how many changes were staged.
 #[derive(Serialize)]
@@ -32,6 +32,8 @@ impl HumanRender for AddOutcome {
         }
     }
 }
+
+impl MarkdownRender for AddOutcome {}
 
 pub fn run(paths: &[String]) -> Result<AddOutcome> {
     let repo = context::discover()?;

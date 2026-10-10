@@ -12,7 +12,7 @@ use grit_lib::remote::DefaultHttpClientFactory;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{progress, HumanRender, OutputMode};
+use crate::output::{progress, HumanRender, MarkdownRender, OutputMode};
 
 /// Result of `grit clone`.
 #[derive(Serialize)]
@@ -29,6 +29,8 @@ impl HumanRender for CloneOutcome {
         println!("Cloned into '{}' on branch {}.", self.path, self.branch);
     }
 }
+
+impl MarkdownRender for CloneOutcome {}
 
 pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutcome> {
     let dir = dir.unwrap_or_else(|| derive_clone_dir(url));

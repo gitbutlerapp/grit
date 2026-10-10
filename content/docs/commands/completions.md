@@ -27,7 +27,7 @@ Release archives also ship pre-generated scripts under `completions/` when you i
 | -------- | ------- |
 | `<shell>` | One of `bash`, `elvish`, `fish`, `powershell`, or `zsh`. |
 
-`grit completions` ignores the global [`--json`](../global-options/) and [`--filter`](../global-options/) flags; stdout is always the raw completion script.
+`grit completions` rejects the global [`--json`](../global-options/) and [`--markdown`](../global-options/) flags; stdout is always the raw completion script.
 
 ## Examples
 
@@ -53,7 +53,11 @@ grit completions fish > ~/.config/fish/completions/grit.fish
 
 ## JSON output
 
-There is no JSON form. `--json` does not change stdout; use the human completion script only.
+There is no JSON form. `--json` and `--markdown` exit with an error; use the human completion script only.
+
+## Markdown output
+
+None. `--markdown` is rejected for the same reason as `--json`.
 
 ## See also
 

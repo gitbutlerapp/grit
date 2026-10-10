@@ -116,6 +116,8 @@ impl MarkdownRender for RemoteOutcome {
     }
 }
 
+impl MarkdownRender for RemoteOutcome {}
+
 /// `Some((name, url))` adds a remote; `None` lists them.
 pub fn run_list_or_add(add: Option<(String, String)>) -> Result<RemoteOutcome> {
     let repo = context::discover()?;

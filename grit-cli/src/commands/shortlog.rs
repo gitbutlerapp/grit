@@ -9,7 +9,8 @@ use crate::context::{self, CommitSummary};
 
 /// Maximum commits to load for `grit shortlog` display (full ahead count is still reported).
 const SHORTLOG_LIST_LIMIT: usize = 100;
-use crate::output::{CommitJson, HumanRender};
+use crate::markdown;
+use crate::output::{CommitJson, HumanRender, MarkdownRender};
 use crate::ui;
 
 /// Result of `grit shortlog`.
@@ -40,6 +41,27 @@ impl HumanRender for ShortlogOutcome {
         for row in ui::commit_rows(&self.commit_rows) {
             println!("{row}");
         }
+    }
+}
+
+impl MarkdownRender for ShortlogOutcome {
+    fn render_markdown(&self) {
+        println!("# Branch `{}`", self.branch);
+        let Some(target) = &self.target else {
+            println!();
+            println!(
+                "No target branch found (tried `target.branch`, `origin/master`, `origin/main`, `master`, `main`)."
+            );
+            return;
+        };
+        println!();
+        println!(
+            "Ahead of `{target}` by **{}** commit{}.",
+            self.ahead,
+            if self.ahead == 1 { "" } else { "s" }
+        );
+        println!();
+        markdown::print_commit_list(&self.commit_rows);
     }
 }
 

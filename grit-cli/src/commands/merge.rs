@@ -5,7 +5,7 @@
 //! half-finished state) — resolving them is out of scope for `grit`.
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::IdentRole;
@@ -94,6 +94,8 @@ impl HumanRender for MergeOutcome {
         }
     }
 }
+
+impl MarkdownRender for MergeOutcome {}
 
 fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)

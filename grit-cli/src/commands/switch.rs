@@ -16,7 +16,7 @@ use grit_lib::state::resolve_head;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit switch`.
 #[derive(Serialize)]
@@ -35,6 +35,8 @@ impl HumanRender for SwitchOutcome {
         }
     }
 }
+
+impl MarkdownRender for SwitchOutcome {}
 
 pub fn run(name: &str, create: bool) -> Result<SwitchOutcome> {
     let repo = context::discover()?;

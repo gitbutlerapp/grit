@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use crate::commands::auth;
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 use grit_lib::fetch::NoProgress;
 use grit_lib::remote::{DefaultHttpClientFactory, Remote, DEFAULT_REMOTE};
 use grit_lib::transfer::PushOptions;
@@ -59,6 +59,8 @@ impl HumanRender for PushOutcome {
         }
     }
 }
+
+impl MarkdownRender for PushOutcome {}
 
 pub fn run(tags: bool) -> Result<PushOutcome> {
     let repo = context::discover()?;

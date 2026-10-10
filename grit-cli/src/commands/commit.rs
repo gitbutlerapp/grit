@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::commands::add;
 use crate::context::{self, subject_line};
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit commit`.
 #[derive(Serialize)]
@@ -35,6 +35,8 @@ impl HumanRender for CommitOutcome {
         );
     }
 }
+
+impl MarkdownRender for CommitOutcome {}
 
 pub fn run(message: Option<String>) -> Result<CommitOutcome> {
     let repo = context::discover()?;
