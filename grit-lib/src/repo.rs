@@ -212,7 +212,7 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
-        let ref_store = caches.open_ref_store(&git_dir)?;
+        let ref_store = caches.open_ref_store(&git_dir, environment.as_ref())?;
 
         Ok(Self {
             git_dir,
@@ -375,7 +375,9 @@ impl Repository {
 
     /// Warm repository caches after discovery (reftable backend flag, optional config arc).
     pub(crate) fn install_config_snapshot(&self, _config: Arc<ConfigSet>) {
-        let _ = self.caches.open_ref_store(&self.git_dir);
+        let _ = self
+            .caches
+            .open_ref_store(&self.git_dir, self.environment.as_ref());
     }
 
     /// Reference storage backend for this repository.
@@ -604,7 +606,7 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
-        let ref_store = caches.open_ref_store(&git_dir)?;
+        let ref_store = caches.open_ref_store(&git_dir, environment.as_ref())?;
 
         let repo = Self {
             git_dir,

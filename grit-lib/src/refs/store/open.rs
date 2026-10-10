@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::environment::Environment;
 use crate::error::Result;
 use crate::ref_storage::RefStorageFormat as OnDiskFormat;
 
@@ -19,11 +20,14 @@ use crate::refs::LogRefsConfig;
 ///
 /// Propagates format detection and backend open failures.
 pub fn open_ref_store(git_dir: &Path) -> Result<Arc<dyn RefStore>> {
-    open_ref_store_uncached(git_dir)
+    open_ref_store_uncached(git_dir, &Environment::empty())
 }
 
 /// Open a ref store without per-repository caching (used by [`RepoCaches`]).
-pub(crate) fn open_ref_store_uncached(git_dir: &Path) -> Result<Arc<dyn RefStore>> {
+pub(crate) fn open_ref_store_uncached(
+    git_dir: &Path,
+    env: &Environment,
+) -> Result<Arc<dyn RefStore>> {
     let format = OnDiskFormat::detect(git_dir)?;
     let store: Arc<dyn RefStore> = match format {
         OnDiskFormat::Files => {
@@ -33,7 +37,7 @@ pub(crate) fn open_ref_store_uncached(git_dir: &Path) -> Result<Arc<dyn RefStore
             Arc::new(FilesRefStore::open(FilesRefStoreConfig {
                 git_dir: git_dir_canon,
                 common_dir,
-                namespace_prefix: crate::ref_namespace::ref_storage_prefix_default(),
+                namespace_prefix: crate::ref_namespace::ref_storage_prefix(env),
                 // Avoid loading full config while config conditionals may call `resolve_ref`.
                 log_refs: LogRefsConfig::Unset,
             }))

@@ -18,8 +18,9 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
-use crate::reflog::read_reflog;
+use crate::reflog::ReflogEntry;
 use crate::refs;
+use crate::refs::store::RawRef;
 use crate::repo::Repository;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
 
@@ -2511,7 +2512,7 @@ fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEn
 
 /// Resolve `@{-N}` to the branch name (e.g. "side"), not to an OID.
 fn resolve_at_minus_to_branch(repo: &Repository, n: usize) -> Result<String> {
-    let entries = read_reflog(&repo.git_dir, "HEAD")?;
+    let entries = read_reflog_for_repo(repo, "HEAD")?;
     let mut count = 0usize;
     for entry in entries.iter().rev() {
         let msg = &entry.message;
@@ -2542,7 +2543,7 @@ fn try_resolve_at_minus(repo: &Repository, spec: &str) -> Result<Option<ObjectId
         _ => return Ok(None),
     };
     // Read HEAD reflog and find the Nth "checkout: moving from X to Y" entry
-    let entries = read_reflog(&repo.git_dir, "HEAD")?;
+    let entries = read_reflog_for_repo(repo, "HEAD")?;
     let mut count = 0usize;
     // Iterate newest-first
     for entry in entries.iter().rev() {
@@ -2681,13 +2682,12 @@ fn resolve_reflog_oid(
     refname_raw: &str,
     index_or_date: ReflogSelector,
 ) -> Result<ObjectId> {
-    let mut entries = read_reflog(&repo.git_dir, refname)?;
+    let mut entries = read_reflog_for_repo(repo, refname)?;
     if refname == "HEAD" {
         if let ReflogSelector::Index(index) = index_or_date {
             if index >= entries.len() {
-                if let Ok(Some(branch_ref)) = crate::refs::read_symbolic_ref(&repo.git_dir, "HEAD")
-                {
-                    if let Ok(branch_entries) = read_reflog(&repo.git_dir, &branch_ref) {
+                if let Ok(Some(RawRef::Symbolic(branch_ref))) = repo.refs().read_raw("HEAD") {
+                    if let Ok(branch_entries) = read_reflog_for_repo(repo, &branch_ref) {
                         if index < branch_entries.len() {
                             entries = branch_entries;
                         }
@@ -2707,7 +2707,7 @@ fn resolve_reflog_oid(
                     // fails. Only when the reflog exists but is empty does `ref@{0}` fall
                     // back to the ref's current value (the `nth == co_cnt` case in
                     // object-name.c).
-                    if !crate::reflog::reflog_exists(&repo.git_dir, refname) {
+                    if !repo.refs().reflog_exists(refname).unwrap_or(false) {
                         return Err(RevParseError::ReflogEmpty {
                             ref_display: display.clone(),
                         }

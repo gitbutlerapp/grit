@@ -189,10 +189,7 @@ impl FilesRefStore {
                     }
                 }
             }
-            if self.namespace_prefix.is_none()
-                && head_matches_prefix(logical_prefix)
-                && base.join("HEAD").is_file()
-            {
+            if head_matches_prefix(logical_prefix) && base.join("HEAD").is_file() {
                 if let Ok(r) = read_ref_file(&base.join("HEAD")) {
                     map.insert("HEAD".to_owned(), ref_to_raw(r));
                 }

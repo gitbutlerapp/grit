@@ -363,7 +363,11 @@ impl RepoCaches {
     /// # Errors
     ///
     /// Propagates backend detection and initialization failures.
-    pub fn open_ref_store(&self, git_dir: &Path) -> Result<Arc<dyn crate::refs::store::RefStore>> {
+    pub fn open_ref_store(
+        &self,
+        git_dir: &Path,
+        env: &Environment,
+    ) -> Result<Arc<dyn crate::refs::store::RefStore>> {
         let key = git_dir
             .canonicalize()
             .unwrap_or_else(|_| git_dir.to_path_buf());
@@ -372,7 +376,7 @@ impl RepoCaches {
                 return Ok(Arc::clone(store));
             }
         }
-        let store = crate::refs::store::open_ref_store_uncached(git_dir)?;
+        let store = crate::refs::store::open_ref_store_uncached(git_dir, env)?;
         if let Ok(mut guard) = self.ref_stores.lock() {
             guard.insert(key, Arc::clone(&store));
         }

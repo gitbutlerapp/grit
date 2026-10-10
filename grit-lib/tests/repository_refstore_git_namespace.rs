@@ -5,9 +5,7 @@ use std::path::PathBuf;
 
 use grit_lib::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::store::{
-    Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags,
-};
+use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
 use grit_lib::repo::Repository;
 
 fn sample_oid() -> ObjectId {
@@ -65,4 +63,22 @@ fn repository_files_refstore_honors_git_namespace_option() {
         "must not write unscoped ref at {}",
         unscoped.display()
     );
+}
+
+#[test]
+fn repository_namespaced_refstore_resolves_global_head() {
+    let (_dir, git_dir) = bare_git_dir();
+    let oid = sample_oid();
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+    let namespaced_main = git_dir.join("refs/namespaces/acme/refs/heads/main");
+    fs::create_dir_all(namespaced_main.parent().expect("parent")).expect("mkdir");
+    fs::write(namespaced_main, format!("{oid}\n")).expect("main");
+
+    let mut env = Environment::empty();
+    env.git_namespace = Some("acme".to_owned());
+    let opts = RepositoryOptions::with_environment(env);
+    let repo = Repository::open_with(&opts, &git_dir, None).expect("open");
+
+    assert_eq!(repo.resolve_ref_name("refs/heads/main").expect("main"), oid);
+    assert_eq!(repo.resolve_ref_name("HEAD").expect("HEAD"), oid);
 }

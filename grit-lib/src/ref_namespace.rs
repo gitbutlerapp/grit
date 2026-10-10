@@ -55,9 +55,23 @@ pub fn storage_ref_name(logical: &str) -> String {
     storage_ref_name_env(&Environment::empty(), logical)
 }
 
+/// Whether `logical` is stored outside the namespace (e.g. global `HEAD` in `$GIT_DIR`).
+#[must_use]
+pub fn ref_skips_namespace_prefix(logical: &str) -> bool {
+    logical == "HEAD"
+        || (!logical.is_empty()
+            && !logical.contains('/')
+            && logical
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c == '-' || c == '_'))
+}
+
 /// Map a logical ref name using an explicit storage prefix (not from environment).
 #[must_use]
 pub fn storage_ref_name_with_prefix(prefix: Option<&str>, logical: &str) -> String {
+    if prefix.is_some() && ref_skips_namespace_prefix(logical) {
+        return logical.to_owned();
+    }
     match prefix {
         Some(p) if logical.starts_with(p) => logical.to_owned(),
         Some(p) => format!("{p}{logical}"),
