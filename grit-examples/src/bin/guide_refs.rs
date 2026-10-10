@@ -60,12 +60,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         println!("tag {name} {}", oid.to_hex());
     }
 
-    let storage = if grit_lib::reftable::is_reftable_repo(git_dir) {
-        "reftable"
-    } else {
-        "files"
-    };
-    println!("ref_storage={storage}");
+    println!("ref_storage={}", repo.refs().format());
 
     let target = head
         .oid()

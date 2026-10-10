@@ -48,6 +48,10 @@ name = "guide_refs"
 path = "src/bin/guide_refs.rs"
 
 [[bin]]
+name = "custom_ref_store"
+path = "src/bin/custom_ref_store.rs"
+
+[[bin]]
 name = "guide_index"
 path = "src/bin/guide_index.rs"
 

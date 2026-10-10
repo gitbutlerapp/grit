@@ -7,6 +7,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 
+pub mod counting_ref_store;
 pub mod packfile_kv;
 pub mod remote;
 pub mod sqlite_odb;
