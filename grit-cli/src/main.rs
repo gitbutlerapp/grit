@@ -191,6 +191,21 @@ enum Command {
         /// Commit to pick (any revision spec — full / short oid, branch, HEAD~2, …).
         commit: String,
     },
+    /// Restore working tree and/or index paths.
+    Restore {
+        /// Paths to restore (pathspecs).
+        #[arg(required = true)]
+        paths: Vec<String>,
+        /// Restore the index from HEAD (or `--source`).
+        #[arg(short = 'S', long = "staged")]
+        staged: bool,
+        /// Restore the working tree (default when `--staged` is absent).
+        #[arg(short = 'W', long = "worktree")]
+        worktree: bool,
+        /// Tree or commit to restore from.
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Download refs and objects from a remote.
     Fetch {
         /// Remote to fetch from (defaults to origin).
@@ -404,6 +419,15 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         Command::Switch { name, create } => emit(&commands::switch::run(&name, create)?, opts),
         Command::Merge { branch } => emit(&commands::merge::run(&branch)?, opts),
         Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts),
+        Command::Restore {
+            paths,
+            staged,
+            worktree,
+            source,
+        } => emit_with_markdown(
+            &commands::restore::run(paths, staged, worktree, source)?,
+            opts,
+        ),
         Command::Fetch { remote } => emit(&commands::fetch::run(remote)?, opts),
         Command::Pull => emit(&commands::pull::run()?, opts),
         Command::Push { tags } => {

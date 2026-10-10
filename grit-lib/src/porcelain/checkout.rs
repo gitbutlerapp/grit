@@ -499,12 +499,12 @@ fn apply_in_place_git_mode_transition(
 }
 
 /// Tracks leading directories already verified or created during one checkout pass.
-struct LeadingDirCache {
+pub(crate) struct LeadingDirCache {
     ready: HashSet<PathBuf>,
 }
 
 impl LeadingDirCache {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             ready: HashSet::new(),
         }
@@ -605,7 +605,7 @@ pub fn write_to_worktree(work_tree: &Path, rel_path: &str, data: &[u8], mode: u3
     write_to_worktree_cached(work_tree, rel_path, data, mode, &mut LeadingDirCache::new())
 }
 
-fn write_to_worktree_cached(
+pub(crate) fn write_to_worktree_cached(
     work_tree: &Path,
     rel_path: &str,
     data: &[u8],

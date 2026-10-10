@@ -53,6 +53,7 @@ Every page also has a Markdown twin: replace `index.html` with `index.md` in its
 | [`grit add`](https://grit-scm.com/docs/add/index.md) | Stage changes. With no paths, stages everything. |
 | [`grit commit`](https://grit-scm.com/docs/commit/index.md) | Stage every change and record a new commit. |
 | [`grit diff`](https://grit-scm.com/docs/diff/index.md) | Show uncommitted changes, or the change a commit introduced. |
+| [`grit restore`](https://grit-scm.com/docs/restore/index.md) | Restore working tree and/or index paths from HEAD, the index, or another revision. |
 
 ### History
 

@@ -367,10 +367,12 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::merging` | module | Merging: merge-base, tree/file merges, rerere, merge-message formatting. | [API](https://docs.rs/grit-lib/latest/grit_lib/merging/index.html) |
 | `grit_lib::midx` | module | Multi-pack-index (MIDX) file writing and minimal reading. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/index.html) |
 | `grit_lib::midx::CompactError` | enum | Failure modes of compact_multi_pack_index, each mapping to one of git’s user-facing diagnostics in cmd_multi_pack_index_compact. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/enum.CompactError.html) |
+| `grit_lib::midx::MidxBitmapWriteOutcome` | enum | Outcome of an optional MIDX reachability bitmap write. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/enum.MidxBitmapWriteOutcome.html) |
 | `grit_lib::midx::MidxBtmpPackRange` | struct | One pack’s slice of the MIDX pseudo-bitmap namespace (BTMP chunk). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxBtmpPackRange.html) |
 | `grit_lib::midx::MidxObjectRef` | struct | A single MIDX-referenced object together with the pack it is attributed to. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxObjectRef.html) |
 | `grit_lib::midx::MidxReuseTables` | struct | OID rows from the active multi-pack-index, plus reverse-index order for pack-reuse bitmap bits. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.MidxReuseTables.html) |
 | `grit_lib::midx::WriteMultiPackIndexOptions` | struct | Options for writing a multi-pack index (extension of the simple writer). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.WriteMultiPackIndexOptions.html) |
+| `grit_lib::midx::WriteMultiPackIndexResult` | struct | Result of write_multi_pack_index_with_options. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx/struct.WriteMultiPackIndexResult.html) |
 | `grit_lib::midx_error` | module | Typed errors for multi-pack-index load and verification. | [API](https://docs.rs/grit-lib/latest/grit_lib/midx_error/index.html) |
 | `grit_lib::midx_error::MidxError` | enum | Unified diff / patch application errors. | [API](https://docs.rs/grit-lib/latest/grit_lib/error/../midx_error/enum.MidxError.html) |
 | `grit_lib::midx_error::MidxError` | enum | A fatal multi-pack-index condition (Git die() after error: lines). | [API](https://docs.rs/grit-lib/latest/grit_lib/midx_error/enum.MidxError.html) |
@@ -430,6 +432,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack_bitmap::BitmapIndex` | struct | Memory-mapped pack or MIDX reachability bitmap (Git BITM v1). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) |
 | `grit_lib::pack_bitmap::BitmapIndexCache` | struct | Repository-scoped cache slot for BitmapIndex::open. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndexCache.html) |
 | `grit_lib::pack_bitmap::CommitReachabilityBitmap` | struct | Decoded reachability set for one commit (bits index pack/MIDX object positions). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.CommitReachabilityBitmap.html) |
+| `grit_lib::pack_bitmap::MidxBitmapWriter` | struct | Writes .bitmap sidecars for multi-pack-index files (MIDX checksum in header). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.MidxBitmapWriter.html) |
 | `grit_lib::pack_bitmap::PackBitmapWriteError` | enum | Failure while writing a pack reachability bitmap. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.PackBitmapWriteError.html) |
 | `grit_lib::pack_bitmap::PackBitmapWriteOptions` | struct | Options controlling pack bitmap generation (caller-supplied; not read from the environment). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriteOptions.html) |
 | `grit_lib::pack_bitmap::PackBitmapWriter` | struct | Writes .bitmap sidecars for pack indexes produced by all-into-one repacks. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriter.html) |
@@ -486,6 +489,10 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::porcelain::rebase` | module | git rebase todo-list model and squash/fixup message assembly. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/rebase/index.html) |
 | `grit_lib::porcelain::rebase::FixupMessageMode` | enum | Whether a fixup -C/fixup -c step uses the replaced commit message verbatim or opens an editor to amend it. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/rebase/enum.FixupMessageMode.html) |
 | `grit_lib::porcelain::rebase::RebaseTodoCmd` | enum | A linear interactive-rebase todo command keyword. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/rebase/enum.RebaseTodoCmd.html) |
+| `grit_lib::porcelain::restore` | module | Restore working tree and/or index paths from the index, HEAD, or another tree (git restore semantics). | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/restore/index.html) |
+| `grit_lib::porcelain::restore::RestoreOptions` | struct | Options for restore_paths, translated from the grit restore CLI. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/restore/struct.RestoreOptions.html) |
+| `grit_lib::porcelain::restore::RestoreOutcome` | struct | Outcome of a restore operation: paths written and paths removed in each target. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/restore/struct.RestoreOutcome.html) |
+| `grit_lib::porcelain::restore::RestoreSource` | enum | Where explicit --source content comes from; default targets use the index or HEAD. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/restore/enum.RestoreSource.html) |
 | `grit_lib::porcelain::revert` | module | git revert pick-engine core. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/revert/index.html) |
 | `grit_lib::porcelain::stage_tracked` | module | Stage modifications and deletions of already-tracked paths (git commit -a / -a staging). | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/stage_tracked/index.html) |
 | `grit_lib::porcelain::stage_tracked::StageTrackedSummary` | struct | Summary of paths updated while staging tracked modifications/deletions. | [API](https://docs.rs/grit-lib/latest/grit_lib/porcelain/stage_tracked/struct.StageTrackedSummary.html) |
@@ -1267,7 +1274,7 @@ Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a te
 - [`Bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.Bundle.html) (`open`, `verify`, `unbundle`) and [`read_header`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.read_header.html) parse v2/v3 headers and leave the stream at the `PACK` magic.
 - `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
 - `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
-- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles with a thin pack stream.
+- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles with a thin pack stream via [`pack_objects::build_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack.html).
 - [`bundle_remote::fetch_from_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle_remote/fn.fetch_from_bundle.html) ingests a bundle and applies fetch refspecs (clone/fetch from a `.bundle` path).
 
 Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).

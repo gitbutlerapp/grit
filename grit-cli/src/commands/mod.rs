@@ -18,6 +18,7 @@ pub mod pick;
 pub mod pull;
 pub mod push;
 pub mod remote;
+pub mod restore;
 pub mod serve;
 pub mod shortlog;
 pub mod show;

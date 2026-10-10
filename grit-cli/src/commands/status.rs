@@ -158,6 +158,9 @@ impl StatusOutcome {
             return;
         }
         let mut hints = Vec::new();
+        if !self.unstaged_entries.is_empty() {
+            hints.push("grit restore <file> to discard worktree changes");
+        }
         if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
             hints.push("grit add <file> to stage");
         }

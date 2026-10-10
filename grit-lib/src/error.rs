@@ -444,6 +444,10 @@ pub enum Error {
     #[error("repository lacks these prerequisite commits")]
     BundleMissingPrerequisites,
 
+    /// A pathspec did not match any file known to Git (index or HEAD tree).
+    #[error("pathspec '{spec}' did not match any file(s) known to git")]
+    PathspecNoMatch { spec: String },
+
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.

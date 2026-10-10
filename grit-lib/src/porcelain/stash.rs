@@ -80,7 +80,7 @@ pub fn flatten_tree_full(
 }
 
 /// Lookup a path in a lexicographically sorted [`flatten_tree_full`] slice.
-fn flat_tree_lookup<'a>(entries: &'a [FlatTreeEntry], path: &str) -> Option<&'a FlatTreeEntry> {
+pub fn flat_tree_lookup<'a>(entries: &'a [FlatTreeEntry], path: &str) -> Option<&'a FlatTreeEntry> {
     entries
         .binary_search_by(|e| e.path.as_str().cmp(path))
         .ok()

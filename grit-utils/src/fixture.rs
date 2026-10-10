@@ -116,6 +116,18 @@ pub fn prepare_commit_iteration(dir: &Path, git: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Modify ~20% of tracked files in the worktree only (for `restore` benchmarks).
+pub fn prepare_restore_iteration(dir: &Path) -> Result<()> {
+    let files = walkdir(dir)?;
+    let modify_count = (files.len() / 5).max(1);
+    for f in files.iter().take(modify_count) {
+        if f.extension().is_some_and(|e| e == "txt") {
+            fs::write(f, "restore bench dirty\n")?;
+        }
+    }
+    Ok(())
+}
+
 /// Modify ~20% of tracked files and reset the index to HEAD with **git** (for `add` benchmarks).
 pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     let files = walkdir(dir)?;

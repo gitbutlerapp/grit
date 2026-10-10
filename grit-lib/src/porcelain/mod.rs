@@ -31,6 +31,7 @@ pub mod log;
 pub mod merge;
 pub mod rebase;
 pub mod replay;
+pub mod restore;
 pub mod revert;
 pub mod stage_tracked;
 pub mod staging;

@@ -49,7 +49,7 @@ Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a te
 - [`Bundle`](rustdoc:grit_lib::bundle::Bundle) (`open`, `verify`, `unbundle`) and [`read_header`](rustdoc:grit_lib::bundle::read_header) parse v2/v3 headers and leave the stream at the `PACK` magic.
 - `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
 - `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
-- [`write_bundle`](rustdoc:grit_lib::bundle::write_bundle) builds v2 (SHA-1, no filter) or v3 bundles with a thin pack stream.
+- [`write_bundle`](rustdoc:grit_lib::bundle::write_bundle) builds v2 (SHA-1, no filter) or v3 bundles with a thin pack stream via [`pack_objects::build_pack`](rustdoc:grit_lib::pack_objects::build_pack).
 - [`bundle_remote::fetch_from_bundle`](rustdoc:grit_lib::bundle_remote::fetch_from_bundle) ingests a bundle and applies fetch refspecs (clone/fetch from a `.bundle` path).
 
 Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).

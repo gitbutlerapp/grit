@@ -7,7 +7,8 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{
-    create_repo, dirty_repo, prepare_add_iteration, prepare_commit_iteration, scratch_dir,
+    create_repo, dirty_repo, prepare_add_iteration, prepare_commit_iteration,
+    prepare_restore_iteration, scratch_dir,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_switch,
@@ -61,6 +62,7 @@ pub enum PrepareKind {
     MergeReset,
     PickSeriesReset,
     CommitIteration,
+    RestoreReset,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -106,6 +108,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::MergeReset => "prepare-merge",
         PrepareKind::PickSeriesReset => "prepare-pick-series",
         PrepareKind::CommitIteration => "prepare-commit",
+        PrepareKind::RestoreReset => "prepare-restore",
     };
     shell_command(
         &cfg.prepare_bin,
@@ -236,6 +239,42 @@ pub fn run_status_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
+/// Restore-all benchmark for each file count (`git restore .` vs `grit restore .`).
+pub fn run_restore_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    sizes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let mut scenarios = Vec::new();
+    for &size in sizes {
+        let repo = create_repo(git, size)?;
+        prepare_restore_iteration(&repo)?;
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("restore-{size}"),
+                group: "restore".into(),
+                fixture: format!("synthetic-{size}"),
+                description: "restore worktree from index after modifying ~20% of files".into(),
+                grit_argv: vec!["restore".into(), ".".into()],
+                git_argv: vec!["restore".into(), ".".into()],
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::RestoreReset),
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
 /// Stage-all benchmark for each file count (`git add -A` vs `grit add`).
 pub fn run_add_suite(
     hyperfine: &Path,
@@ -362,6 +401,10 @@ pub fn run_prepare_add(git: &Path) -> Result<()> {
 
 pub fn run_prepare_commit(git: &Path) -> Result<()> {
     prepare_commit_iteration(&scratch_dir(), git)
+}
+
+pub fn run_prepare_restore(_git: &Path) -> Result<()> {
+    prepare_restore_iteration(&scratch_dir())
 }
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {
