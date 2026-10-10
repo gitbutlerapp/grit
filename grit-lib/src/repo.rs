@@ -1883,7 +1883,8 @@ pub fn validate_repo_format(git_dir: &Path) -> Result<()> {
     validate_repository_format(git_dir)
 }
 
-fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
+/// Validate parsed repository format (version and extensions) before using the repo.
+pub(crate) fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
     if parsed.repo_version > 1 {
         return Err(Error::UnsupportedRepositoryFormatVersion(
             parsed.repo_version,

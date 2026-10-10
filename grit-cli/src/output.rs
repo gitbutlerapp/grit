@@ -31,6 +31,8 @@ pub enum OutputMode {
     Human,
     /// A single machine-readable JSON object on stdout.
     Json,
+    /// Agent-friendly Markdown on stdout.
+    Markdown,
 }
 
 /// Rendering options for a command outcome.
@@ -43,7 +45,7 @@ pub struct OutputOptions {
 }
 
 impl OutputOptions {
-    /// Reject `--filter` without `--json`.
+    /// Reject incompatible output flag combinations.
     pub fn validate(&self) -> Result<()> {
         if self.filter.is_some() && self.mode != OutputMode::Json {
             bail!("--filter requires --json");
@@ -69,6 +71,7 @@ pub fn emit<T: Serialize + HumanRender>(value: &T, opts: &OutputOptions) -> Resu
     match opts.mode {
         OutputMode::Human => value.render_human(),
         OutputMode::Json => write_json(value, opts.filter.as_deref())?,
+        OutputMode::Markdown => render_value_markdown(value),
     }
     Ok(())
 }
@@ -116,6 +119,9 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
                 eprintln!("error: {human}");
             }
         }
+        OutputMode::Markdown => {
+            println!("**Error:** {human}");
+        }
         OutputMode::Json => {
             let payload = if let Some(expr) = opts.filter.as_deref() {
                 let full = serde_json::json!({ "error": human.clone() });
@@ -141,6 +147,27 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
 pub fn progress(mode: OutputMode, msg: &str) {
     if mode == OutputMode::Human {
         eprintln!("{msg}");
+    }
+}
+
+/// Default Markdown rendering: bullet list of top-level JSON fields.
+pub fn render_value_markdown<T: Serialize>(value: &T) {
+    let Ok(serde_json::Value::Object(map)) = serde_json::to_value(value) else {
+        println!("(could not render outcome as Markdown)");
+        return;
+    };
+    for (key, val) in map {
+        println!("- **{key}**: {}", markdown_scalar(&val));
+    }
+}
+
+fn markdown_scalar(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_owned(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 

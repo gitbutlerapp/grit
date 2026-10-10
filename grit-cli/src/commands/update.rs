@@ -43,7 +43,7 @@ impl HumanRender for UpdateOutcome {
 /// single clean object; inherit normally in human mode.
 fn child_stdout(mode: OutputMode) -> Stdio {
     match mode {
-        OutputMode::Json => Stdio::null(),
+        OutputMode::Json | OutputMode::Markdown => Stdio::null(),
         OutputMode::Human => Stdio::inherit(),
     }
 }

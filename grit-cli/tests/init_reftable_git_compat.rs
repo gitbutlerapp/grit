@@ -20,6 +20,7 @@ fn git_supports_reftable() -> bool {
             .args(["init", "-q", "--ref-format=reftable"])
             .env("GIT_CONFIG_GLOBAL", null_device())
             .env("GIT_CONFIG_SYSTEM", null_device())
+            .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false)

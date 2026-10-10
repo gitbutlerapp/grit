@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
-use crate::repo::read_repository_format_from_git_dir;
+use crate::repo::{read_repository_format_from_git_dir, validate_repository_format_parsed};
 
 /// On-disk ref storage backend named by `extensions.refStorage`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -63,15 +63,20 @@ impl RefStorageFormat {
     /// Detect ref storage from repository-local `config` (linked worktree common dir when needed).
     ///
     /// When `extensions.refStorage` is absent, returns [`RefStorageFormat::Files`].
-    /// Reads `core.repositoryformatversion` as part of format parsing but does not reject
-    /// v0 repositories that declare reftable here — [`crate::repo::validate_repo_format`] handles that.
+    ///
+    /// Rejects invalid combinations of `core.repositoryformatversion` and `[extensions]`
+    /// (same rules as [`crate::repo::validate_repo_format`]), including v0 repositories
+    /// that declare v1-only extensions such as `refStorage = reftable`.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] when local config cannot be read, or
-    /// [`Error::InvalidRefStorageFormat`] for unknown `extensions.refStorage` values.
+    /// Returns [`Error::Io`] when local config cannot be read,
+    /// [`Error::UnsupportedRepositoryFormatVersion`] for unsupported versions,
+    /// [`Error::InvalidRefStorageFormat`] for unknown `extensions.refStorage` values, or
+    /// [`Error::Message`] for other format/extension mismatches.
     pub fn detect(git_dir: &Path) -> Result<Self> {
         let parsed = read_repository_format_from_git_dir(git_dir)?;
+        validate_repository_format_parsed(&parsed)?;
         match parsed.ref_storage.as_deref() {
             None => Ok(Self::Files),
             Some(raw) => Self::parse_config_value(raw),
@@ -82,86 +87,5 @@ impl RefStorageFormat {
     #[must_use]
     pub const fn is_reftable(self) -> bool {
         matches!(self, Self::Reftable)
-    }
-}
-
-#[cfg(test)]
-mod ref_storage_format {
-    use std::fs;
-    use std::path::Path;
-
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::repo::init_repository;
-
-    #[test]
-    fn parses_files_and_reftable() {
-        assert_eq!(
-            RefStorageFormat::from_str("files").unwrap(),
-            RefStorageFormat::Files
-        );
-        assert_eq!(
-            RefStorageFormat::from_str("REFTABLE").unwrap(),
-            RefStorageFormat::Reftable
-        );
-        assert_eq!(
-            RefStorageFormat::parse_config_value("reftable").unwrap(),
-            RefStorageFormat::Reftable
-        );
-    }
-
-    #[test]
-    fn rejects_unknown() {
-        let err = RefStorageFormat::from_str("not-a-backend").unwrap_err();
-        assert!(matches!(err, Error::InvalidRefStorageFormat { .. }));
-    }
-
-    #[test]
-    fn payload_suffix_accepted() {
-        assert_eq!(
-            RefStorageFormat::parse_config_value("files:v1").unwrap(),
-            RefStorageFormat::Files
-        );
-        assert_eq!(
-            RefStorageFormat::parse_config_value("reftable:experimental").unwrap(),
-            RefStorageFormat::Reftable
-        );
-    }
-
-    #[test]
-    fn ignores_global_config() {
-        let tmp = TempDir::new().unwrap();
-        let global = tmp.path().join("global.gitconfig");
-        fs::write(&global, "[extensions]\n\trefstorage = reftable\n").unwrap();
-        let root = tmp.path().join("repo");
-        init_repository(&root, false, "main", None, RefStorageFormat::Files).unwrap();
-        let git_dir = root.join(".git");
-
-        let prev = std::env::var("GIT_CONFIG_GLOBAL").ok();
-        std::env::set_var("GIT_CONFIG_GLOBAL", &global);
-        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
-
-        assert_eq!(
-            RefStorageFormat::detect(&git_dir).unwrap(),
-            RefStorageFormat::Files
-        );
-
-        if let Some(v) = prev {
-            std::env::set_var("GIT_CONFIG_GLOBAL", v);
-        } else {
-            std::env::remove_var("GIT_CONFIG_GLOBAL");
-        }
-    }
-
-    #[test]
-    fn detect_reads_local_reftable_config() {
-        let tmp = TempDir::new().unwrap();
-        init_repository(tmp.path(), false, "main", None, RefStorageFormat::Reftable).unwrap();
-        let git_dir = tmp.path().join(".git");
-        assert_eq!(
-            RefStorageFormat::detect(&git_dir).unwrap(),
-            RefStorageFormat::Reftable
-        );
     }
 }

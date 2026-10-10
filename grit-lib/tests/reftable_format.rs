@@ -598,7 +598,7 @@ fn setup_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     fs::create_dir_all(git_dir.join("reftable")).expect("reftable dir");
     fs::write(
         git_dir.join("config"),
-        "[extensions]\n\trefStorage = reftable\n[core]\n\tlogAllRefUpdates = true\n",
+        "[core]\n\trepositoryformatversion = 1\n\tlogAllRefUpdates = true\n[extensions]\n\trefStorage = reftable\n",
     )
     .expect("config");
     fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");

@@ -26,8 +26,11 @@ use output::{emit, OutputMode, OutputOptions};
 #[command(name = "grit", version, about = "A simple Grit-powered CLI")]
 pub(crate) struct Cli {
     /// Emit machine-readable JSON instead of human-readable text.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with = "markdown")]
     json: bool,
+    /// Emit agent-friendly Markdown instead of human-readable text.
+    #[arg(long, global = true, conflicts_with = "json")]
+    markdown: bool,
     /// jq-like expression applied to JSON output (requires `--json`).
     ///
     /// Examples: `.branch`, `.commits[].oid`, `{branch, clean}`.
@@ -244,6 +247,8 @@ fn main() {
     let opts = OutputOptions {
         mode: if cli.json {
             OutputMode::Json
+        } else if cli.markdown {
+            OutputMode::Markdown
         } else {
             OutputMode::Human
         },

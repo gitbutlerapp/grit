@@ -8,6 +8,8 @@
 grit init [--bare] [--ref-format <files|reftable>] [<path>]
 ```
 
+Global options [`--json`](https://grit-scm.com/docs/global-options/index.md) and [`--markdown`](https://grit-scm.com/docs/global-options/index.md) apply.
+
 ## Description
 
 Creates an empty Git repository at `<path>`, or in the current directory when no path is given. The directory is created if it doesn't exist. A normal repository keeps its data in a `.git` directory next to your files. A bare repository has no working tree; the repository data is the directory itself, which is what you want for a repository that other people push to.
@@ -75,6 +77,18 @@ Example:
   "branch": "main",
   "ref_format": "files"
 }
+```
+
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for agent-friendly output (one bullet per field):
+
+```text
+- **initialized**: true
+- **path**: /home/ada/project/.git
+- **bare**: false
+- **branch**: main
+- **ref_format**: reftable
 ```
 
 ## See also
