@@ -912,6 +912,21 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     let added = gs_json(&seed, &["add"]);
     assert_eq!(keys(&added), ["staged"]);
 
+    write_file(&seed.join("drop.txt"), "bye\n");
+    gs_ok(&seed, &["add", "drop.txt"]);
+    gs_ok(&seed, &["commit", "track drop"]);
+    let removed = gs_json(&seed, &["rm", "drop.txt"]);
+    assert_eq!(keys(&removed), ["removed"]);
+    assert_eq!(removed["removed"][0], "drop.txt");
+
+    write_file(&seed.join("from.txt"), "mv\n");
+    gs_ok(&seed, &["add", "from.txt"]);
+    gs_ok(&seed, &["commit", "track from"]);
+    let renamed = gs_json(&seed, &["mv", "from.txt", "to.txt"]);
+    assert_eq!(keys(&renamed), ["from", "to"]);
+    assert_eq!(renamed["from"], "from.txt");
+    assert_eq!(renamed["to"], "to.txt");
+
     let committed = gs_json(&seed, &["commit", "first"]);
     assert_eq!(keys(&committed), ["branch", "changes", "oid", "subject"]);
 

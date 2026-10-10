@@ -153,6 +153,26 @@ enum Command {
         /// Files or directories to stage. Omit to stage all changes.
         paths: Vec<String>,
     },
+    /// Remove tracked paths from the working tree and index.
+    Rm {
+        /// Files or directories to remove.
+        paths: Vec<String>,
+        /// Remove from the index only; keep files in the working tree.
+        #[arg(long)]
+        cached: bool,
+        /// Remove even when paths have local modifications.
+        #[arg(short = 'f', long = "force")]
+        force: bool,
+    },
+    /// Rename or move tracked paths.
+    Mv {
+        /// Source path(s) and final destination (last argument).
+        #[arg(value_name = "PATH")]
+        paths: Vec<String>,
+        /// Replace existing files at the destination.
+        #[arg(short = 'f', long = "force")]
+        force: bool,
+    },
     /// Stage every change and record a new commit.
     Commit {
         /// Commit message (you can also pass it with -m).
@@ -459,6 +479,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         Command::Status => emit(&commands::status::run()?, opts),
         Command::Shortlog => emit(&commands::shortlog::run()?, opts),
         Command::Add { paths } => emit(&commands::add::run(&paths)?, opts),
+        Command::Rm {
+            paths,
+            cached,
+            force,
+        } => emit_with_markdown(&commands::rm::run(&paths, cached, force)?, opts),
+        Command::Mv { paths, force } => {
+            emit_with_markdown(&commands::mv::run(&paths, force)?, opts)
+        }
         Command::Commit {
             message,
             message_flag,
