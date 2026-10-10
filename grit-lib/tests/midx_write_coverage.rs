@@ -247,8 +247,8 @@ fn non_incremental_write_clears_incremental_chain() {
         &pack_dir,
         &WriteMultiPackIndexOptions {
             version: Some(1),
-            write_bitmap_placeholders: true,
-            write_rev_placeholder: true,
+            write_bitmap: true,
+            write_rev_sidecar: true,
             ..Default::default()
         },
     );
@@ -348,8 +348,8 @@ fn bitmap_sidecars_scrubbed_on_fresh_write() {
     grit_write_midx(
         &pack_dir,
         &WriteMultiPackIndexOptions {
-            write_bitmap_placeholders: true,
-            write_rev_placeholder: true,
+            write_bitmap: true,
+            write_rev_sidecar: true,
             version: Some(1),
             ..Default::default()
         },
@@ -379,7 +379,7 @@ fn bitmap_sidecars_scrubbed_on_fresh_write() {
         });
     assert!(
         !stale,
-        "placeholder sidecars from prior write should be scrubbed"
+        "stale MIDX sidecars from prior write should be scrubbed"
     );
     let _ = (repo, objects);
 }
@@ -471,29 +471,36 @@ fn incremental_layer_with_bitmap_and_rev_sidecars_v2() {
     repo.git(&["add", "side.txt"]);
     repo.git(&["commit", "-q", "-m", "side"]);
     assert!(midx_support::pack_objects_layer(repo.path(), 77));
-    write_multi_pack_index_with_options(
+    let result = write_multi_pack_index_with_options(
         &pack_dir,
         &WriteMultiPackIndexOptions {
             incremental: true,
             version: Some(2),
-            write_bitmap_placeholders: true,
-            write_rev_placeholder: true,
+            write_bitmap: true,
+            write_rev_sidecar: true,
             ..Default::default()
         },
     )
     .expect("incremental bitmap layer");
+    assert_eq!(
+        result.bitmap,
+        grit_lib::midx::MidxBitmapWriteOutcome::SkippedIncrementalLayer
+    );
     let midx_d = pack_dir.join("multi-pack-index.d");
-    let has_sidecar = fs::read_dir(&midx_d)
+    let has_zero_bitmap = fs::read_dir(&midx_d)
         .expect("midx.d")
         .filter_map(|e| e.ok())
         .any(|e| {
-            let n = e.file_name();
-            let s = n.to_string_lossy();
-            s.ends_with(".bitmap") || s.ends_with(".rev")
+            let fname = e.file_name();
+            let s = fname.to_string_lossy();
+            if !s.ends_with(".bitmap") {
+                return false;
+            }
+            e.metadata().map(|m| m.len() == 0).unwrap_or(false)
         });
     assert!(
-        has_sidecar,
-        "expected bitmap/rev sidecars on incremental layer"
+        !has_zero_bitmap,
+        "incremental layer must not create a zero-byte .bitmap sidecar"
     );
     verify_midx(&objects).expect("verify");
     let _ = repo;

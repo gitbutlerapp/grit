@@ -98,6 +98,8 @@ pub struct PackBitmapWriteOptions {
     pub lookup_table: bool,
     /// Ref name patterns (`refs/heads/`, …) that prefer tip commits inside each selection window.
     pub prefer_bitmap_tips: Vec<String>,
+    /// When true, every object reachable from ref tips must appear in the bitmap order.
+    pub verify_reachability_closure: bool,
 }
 
 impl Default for PackBitmapWriteOptions {
@@ -107,6 +109,7 @@ impl Default for PackBitmapWriteOptions {
             hash_cache: true,
             lookup_table: false,
             prefer_bitmap_tips: Vec::new(),
+            verify_reachability_closure: true,
         }
     }
 }
@@ -150,6 +153,54 @@ impl PackBitmapWriteError {
     }
 }
 
+/// Writes `.bitmap` sidecars for multi-pack-index files (MIDX checksum in header).
+pub struct MidxBitmapWriter;
+
+impl MidxBitmapWriter {
+    /// Write a reachability bitmap for a MIDX layer that was just serialized to `midx_bytes`.
+    pub fn write_for_midx_layer(
+        repo: &Repository,
+        midx_bytes: &[u8],
+        rid_order: &[u32],
+        midx_checksum: &[u8],
+        bitmap_path: &Path,
+        options: &PackBitmapWriteOptions,
+    ) -> Result<PathBuf, PackBitmapWriteError> {
+        let order = BitmapOrder::from_midx_bytes_and_rid_order(midx_bytes, rid_order)
+            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        write_bitmap_for_order(repo, &order, midx_checksum, bitmap_path, options)
+    }
+
+    /// Write a reachability bitmap for the tip MIDX under `pack_dir`.
+    ///
+    /// The bitmap header checksum must match the MIDX file checksum (`midx_checksum`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PackBitmapWriteError::NotClosed`] when objects reachable from ref
+    /// tips are missing from the MIDX pseudo-pack order.
+    pub fn write(
+        repo: &Repository,
+        _pack_dir: &Path,
+        midx_checksum: &[u8],
+        bitmap_path: &Path,
+        options: &PackBitmapWriteOptions,
+        _now: SystemTime,
+    ) -> Result<PathBuf, PackBitmapWriteError> {
+        if !repo.odb.uses_files_primary() {
+            return Err(PackBitmapWriteError::NotFilesBacked);
+        }
+        let objects_dir = repo
+            .odb
+            .files_objects_dir()
+            .ok_or(PackBitmapWriteError::NotFilesBacked)?;
+        let order = BitmapOrder::load_midx(objects_dir)
+            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+            .ok_or_else(|| PackBitmapWriteError::InvalidPackPath("no MIDX loaded".into()))?;
+        write_bitmap_for_order(repo, &order, midx_checksum, bitmap_path, options)
+    }
+}
+
 /// Writes `.bitmap` sidecars for pack indexes produced by all-into-one repacks.
 pub struct PackBitmapWriter;
 
@@ -182,36 +233,53 @@ impl PackBitmapWriter {
             .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
         let pack_checksum = read_pack_trailer(
             order.pack_index().as_ref().ok_or_else(|| {
-                PackBitmapWriteError::InvalidPackPath("MIDX write unsupported".into())
+                PackBitmapWriteError::InvalidPackPath("pack index missing".into())
             })?,
             repo.odb.hash_algo().len(),
         )?;
-        let roots = collect_referenced_object_roots(&repo.git_dir)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        verify_pack_closure(repo, &order, &roots)?;
-        let tips = commit_tips_from_roots(repo, &roots)?;
-        let needs_bitmap = tip_needs_flags(repo, &tips, &options.prefer_bitmap_tips)?;
-        let hash_cache_len = hash_cache_row_count(&order);
-        let mut name_hashes = vec![0u32; hash_cache_len];
-        let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, &order)?;
-        let selected = select_commits(&commits, &tips, &needs_bitmap);
-        let commit_bitmaps =
-            build_commit_bitmaps(repo, &order, &commits, &selected, &mut name_hashes)?;
-        let (selected_sorted, xor_plan) = plan_xor_compression(repo, &selected, &commit_bitmaps);
         let bitmap_path = bitmap_path_for_index(pack_idx_path);
-        let bytes = assemble_bitmap_bytes(
-            &order,
-            &pack_checksum,
-            options,
-            &type_bitmaps,
-            &selected_sorted,
-            &xor_plan,
-            &name_hashes,
-        )?;
-        write_bitmap_atomically(&bitmap_path, &bytes)?;
-        repo.caches().bitmap_index().set(None);
-        Ok(bitmap_path)
+        write_bitmap_for_order(repo, &order, &pack_checksum, &bitmap_path, options)
     }
+}
+
+/// Shared bitmap writer core (pack order or MIDX pseudo-pack order).
+fn write_bitmap_for_order(
+    repo: &Repository,
+    order: &BitmapOrder,
+    header_checksum: &[u8],
+    bitmap_path: &Path,
+    options: &PackBitmapWriteOptions,
+) -> Result<PathBuf, PackBitmapWriteError> {
+    let roots = collect_referenced_object_roots(&repo.git_dir)
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+    if options.verify_reachability_closure {
+        verify_order_closure(repo, order, &roots)?;
+    }
+    let tips = commit_tips_from_roots(repo, &roots)?;
+    let needs_bitmap = tip_needs_flags(repo, &tips, &options.prefer_bitmap_tips)?;
+    let hash_cache_len = hash_cache_row_count(order);
+    let mut name_hashes = vec![0u32; hash_cache_len];
+    let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, order)?;
+    let mut selected = select_commits(&commits, &tips, &needs_bitmap);
+    let strict = options.verify_reachability_closure;
+    if !strict {
+        selected.retain(|c| order.position_of(c).is_some());
+    }
+    let commit_bitmaps =
+        build_commit_bitmaps(repo, order, &commits, &selected, &mut name_hashes, strict)?;
+    let (selected_sorted, xor_plan) = plan_xor_compression(repo, &selected, &commit_bitmaps);
+    let bytes = assemble_bitmap_bytes(
+        order,
+        header_checksum,
+        options,
+        &type_bitmaps,
+        &selected_sorted,
+        &xor_plan,
+        &name_hashes,
+    )?;
+    write_bitmap_atomically(bitmap_path, &bytes)?;
+    repo.caches().bitmap_index().set(None);
+    Ok(bitmap_path.to_path_buf())
 }
 
 fn bitmap_path_for_index(idx_path: &Path) -> PathBuf {
@@ -419,7 +487,7 @@ fn peel_to_commit(
     }
 }
 
-fn verify_pack_closure(
+fn verify_order_closure(
     repo: &Repository,
     order: &BitmapOrder,
     tips: &[ObjectId],
@@ -551,13 +619,22 @@ fn build_commit_bitmaps(
     _commits: &[CommitRow],
     selected: &[ObjectId],
     name_hashes: &mut [u32],
+    strict_closure: bool,
 ) -> Result<HashMap<ObjectId, Bitmap>, PackBitmapWriteError> {
     let mut topo = selected.to_vec();
     topo.sort_by_key(|a| commit_date(repo, *a));
     let mut computed: HashMap<ObjectId, Bitmap> = HashMap::new();
     for commit in topo {
         let mut bm = seed_from_computed_ancestors(repo, commit, &computed)?;
-        fill_commit_bitmap(repo, order, &mut bm, commit, name_hashes, &computed)?;
+        fill_commit_bitmap(
+            repo,
+            order,
+            &mut bm,
+            commit,
+            name_hashes,
+            &computed,
+            strict_closure,
+        )?;
         computed.insert(commit, bm);
     }
     Ok(computed)
@@ -636,12 +713,16 @@ fn fill_commit_bitmap(
     tip: ObjectId,
     name_hashes: &mut [u32],
     computed: &HashMap<ObjectId, Bitmap>,
+    strict_closure: bool,
 ) -> Result<(), PackBitmapWriteError> {
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     queue.push_back(tip);
     while let Some(oid) = queue.pop_front() {
         let Some(pos) = order.position_of(&oid) else {
-            return Err(PackBitmapWriteError::NotClosed { missing: vec![oid] });
+            if strict_closure {
+                return Err(PackBitmapWriteError::NotClosed { missing: vec![oid] });
+            }
+            continue;
         };
         let p = pos as usize;
         if bitmap.get(p) {
@@ -663,7 +744,15 @@ fn fill_commit_bitmap(
                 for parent in c.parents {
                     queue.push_back(parent);
                 }
-                fill_tree_bitmap(repo, order, bitmap, c.tree, String::new(), name_hashes)?;
+                fill_tree_bitmap(
+                    repo,
+                    order,
+                    bitmap,
+                    c.tree,
+                    String::new(),
+                    name_hashes,
+                    strict_closure,
+                )?;
             }
             ObjectKind::Tree | ObjectKind::Blob | ObjectKind::Tag => {}
         }
@@ -678,11 +767,15 @@ fn fill_tree_bitmap(
     tree_oid: ObjectId,
     prefix: String,
     name_hashes: &mut [u32],
+    strict_closure: bool,
 ) -> Result<(), PackBitmapWriteError> {
     let Some(pos) = order.position_of(&tree_oid) else {
-        return Err(PackBitmapWriteError::NotClosed {
-            missing: vec![tree_oid],
-        });
+        if strict_closure {
+            return Err(PackBitmapWriteError::NotClosed {
+                missing: vec![tree_oid],
+            });
+        }
+        return Ok(());
     };
     let p = pos as usize;
     if bitmap.get(p) {
@@ -705,9 +798,12 @@ fn fill_tree_bitmap(
             format!("{prefix}/{name}")
         };
         let Some(child_pos) = order.position_of(&entry.oid) else {
-            return Err(PackBitmapWriteError::NotClosed {
-                missing: vec![entry.oid],
-            });
+            if strict_closure {
+                return Err(PackBitmapWriteError::NotClosed {
+                    missing: vec![entry.oid],
+                });
+            }
+            continue;
         };
         let cp = child_pos as usize;
         let child = repo
@@ -716,7 +812,15 @@ fn fill_tree_bitmap(
             .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
         match child.kind {
             ObjectKind::Tree => {
-                fill_tree_bitmap(repo, order, bitmap, entry.oid, path, name_hashes)?;
+                fill_tree_bitmap(
+                    repo,
+                    order,
+                    bitmap,
+                    entry.oid,
+                    path,
+                    name_hashes,
+                    strict_closure,
+                )?;
             }
             ObjectKind::Blob => {
                 if !bitmap.get(cp) {

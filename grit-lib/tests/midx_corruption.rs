@@ -556,8 +556,8 @@ fn load_reuse_tables_rejects_bad_ridx_entry() {
     grit_lib::midx::write_multi_pack_index_with_options(
         &pack_dir,
         &WriteMultiPackIndexOptions {
-            write_bitmap_placeholders: true,
-            write_rev_placeholder: false,
+            write_bitmap: true,
+            write_rev_sidecar: false,
             version: Some(1),
             ..Default::default()
         },

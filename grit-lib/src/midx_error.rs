@@ -91,4 +91,8 @@ pub enum MidxError {
     /// An existing MIDX names a pack whose `.pack` file is missing during rewrite.
     #[error("could not load pack {pack_index}")]
     ReferencedPackMissing { pack_index: usize },
+
+    /// Reachability bitmap generation for a MIDX failed.
+    #[error("multi-pack-index bitmap write failed: {detail}")]
+    BitmapWriteFailed { detail: String },
 }

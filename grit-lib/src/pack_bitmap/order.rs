@@ -150,11 +150,24 @@ impl BitmapOrder {
             Some(t) => t,
             None => return Ok(None),
         };
-        Ok(Some(Self::Midx {
+        Ok(Some(Self::from_midx_tables(tables)))
+    }
+
+    pub(crate) fn from_midx_tables(tables: crate::midx::MidxReuseTables) -> Self {
+        Self::Midx {
             oids: tables.oids,
             rid_order: tables.rid_order,
             oid_idx_to_rank: tables.oid_idx_to_rank,
-        }))
+        }
+    }
+
+    /// Build pseudo-pack bitmap order from a freshly written MIDX layer and its RIDX order.
+    pub(crate) fn from_midx_bytes_and_rid_order(
+        midx_data: &[u8],
+        rid_order: &[u32],
+    ) -> Result<Self> {
+        let tables = crate::midx::midx_reuse_tables_from_bytes(midx_data, rid_order)?;
+        Ok(Self::from_midx_tables(tables))
     }
 }
 
