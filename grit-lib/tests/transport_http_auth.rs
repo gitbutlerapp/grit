@@ -307,8 +307,10 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         let local_git = local.join(".git");
 
         let provider = SharedProvider(Arc::new(StaticCredentialProvider::new(USER, "wrong-pass")));
-        let client = UreqHttpClient::with_credentials(Box::new(provider.clone()))
-            .with_git_protocol("version=2");
+        let client = http_client_arc(
+            UreqHttpClient::with_credentials(Box::new(provider.clone()))
+                .with_git_protocol("version=2"),
+        );
         let err = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
             .expect_err("fetch with wrong credentials must fail");
         assert!(
@@ -342,8 +344,9 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
     let local_git = local.join(".git");
 
     let provider = SharedProvider(Arc::new(StaticCredentialProvider::new(USER, PASS)));
-    let client =
-        UreqHttpClient::with_credentials(Box::new(provider.clone())).with_git_protocol("version=2");
+    let client = http_client_arc(
+        UreqHttpClient::with_credentials(Box::new(provider.clone())).with_git_protocol("version=2"),
+    );
     let outcome = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
         .expect("authed fetch with correct credentials must succeed");
 

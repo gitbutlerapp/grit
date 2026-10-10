@@ -1354,11 +1354,12 @@ fn fetch_outcome_identical_git_daemon_and_smart_http() {
     ];
 
     let mut ran = 0usize;
-    for (scenario, opts) in scenarios {
+    const SCENARIOS: usize = 4;
+    for (scenario, opts) in &scenarios {
         let git_name = if scenario.contains("v2") {
-            "git/v2"
+            "git-daemon/v2"
         } else {
-            "git/v1"
+            "git-daemon/v1"
         };
         let http_name = if scenario.contains("v2") {
             "http/v2"
@@ -1376,19 +1377,21 @@ fn fetch_outcome_identical_git_daemon_and_smart_http() {
         ran += 1;
 
         let work = scratch.path().join(format!("work-{scenario}"));
+        std::fs::create_dir_all(&work).expect("work dir for parity scenario");
         build_source_work(&work);
         let (git_handle, git_url) = (git.serve)(&work).expect("git serve");
         let (http_handle, http_url) = (http.serve)(&work).expect("http serve");
 
         let local_git = init_local(&scratch.path().join(format!("local-git-{scenario}")));
         let local_http = init_local(&scratch.path().join(format!("local-http-{scenario}")));
-        let out_git = (git.fetch)(&git_url, &local_git, &opts).expect("git daemon fetch");
-        let out_http = (http.fetch)(&http_url, &local_http, &opts).expect("http fetch");
+        let out_git = (git.fetch)(&git_url, &local_git, opts).expect("git daemon fetch");
+        let out_http = (http.fetch)(&http_url, &local_http, opts).expect("http fetch");
         assert_fetch_outcome_parity(&out_git, &out_http, scenario);
         drop(git_handle);
         drop(http_handle);
     }
-    if ran == 0 {
-        eprintln!("SKIP: git daemon and smart HTTP drivers unavailable for parity check");
-    }
+    assert_eq!(
+        ran, SCENARIOS,
+        "every git-daemon vs smart-HTTP parity scenario must run (got {ran} of {SCENARIOS})"
+    );
 }

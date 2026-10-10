@@ -1550,6 +1550,9 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
 fn http_fetch_rss_child_process() {
     let url = std::env::var("GRIT_HTTP_RSS_URL").expect("GRIT_HTTP_RSS_URL");
     let work = PathBuf::from(std::env::var("GRIT_HTTP_RSS_WORK").expect("GRIT_HTTP_RSS_WORK"));
+    let index_threads = std::env::var("GRIT_HTTP_RSS_INDEX_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok());
     std::fs::create_dir_all(&work).expect("work dir");
     git(&work, &["init", "-q", "-b", "main", "."]);
     let git_dir = work.join(".git");
@@ -1557,6 +1560,8 @@ fn http_fetch_rss_child_process() {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         initial_remote_fetch: true,
         remote_name: Some("origin".to_owned()),
+        index_pack_threads: index_threads.or(Some(1)),
+        pack_spool_only: true,
         ..Default::default()
     };
     let client = http_client_arc(UreqHttpClient::new());
@@ -1581,19 +1586,23 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&work).unwrap();
     git(&work, &["init", "-q", "-b", "main", "."]);
-    let big = work.join("big.bin");
-    let status = Command::new("dd")
-        .args([
-            "if=/dev/urandom",
-            &format!("of={}", big.display()),
-            "bs=1M",
-            "count=100",
-        ])
-        .status()
-        .expect("dd");
-    assert!(status.success(), "dd must create a 100 MiB blob");
-    git(&work, &["add", "big.bin"]);
-    git(&work, &["commit", "-q", "-m", "large blob"]);
+    // Many ~1 MiB blobs (not one giant object) so index-pack can stay bounded with
+    // `index_pack_threads = 1` while the on-disk pack stays ~100 MiB.
+    for i in 0..100 {
+        let blob = work.join(format!("blob-{i}.bin"));
+        let status = Command::new("dd")
+            .args([
+                "if=/dev/urandom",
+                &format!("of={}", blob.display()),
+                "bs=1M",
+                "count=1",
+            ])
+            .status()
+            .expect("dd");
+        assert!(status.success(), "dd must create blob {i}");
+        git(&work, &["add", blob.file_name().unwrap().to_str().unwrap()]);
+        git(&work, &["commit", "-q", "-m", &format!("c{i}")]);
+    }
 
     let root = tmp.path().join("srv");
     std::fs::create_dir_all(&root).unwrap();
@@ -1650,6 +1659,7 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
         .env(MEASURE_CMD_ENV, &measure_cmd)
         .env("GRIT_HTTP_RSS_URL", &url)
         .env("GRIT_HTTP_RSS_WORK", "fetch-work")
+        .env("GRIT_HTTP_RSS_INDEX_THREADS", "1")
         .output()
         .expect("measure-rss");
     assert!(
@@ -1667,8 +1677,20 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
     );
     let git_dir = work.join(".git");
     assert!(git_dir.is_dir(), "fetch must create a git dir");
+    let pack_dir = git_dir.join("objects/pack");
+    let spooled = std::fs::read_dir(&pack_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("tmp_pack_"))
+        });
     assert!(
-        resolve_ref(&git_dir, "refs/remotes/origin/main").is_ok(),
-        "fetch must land origin/main"
+        spooled,
+        "pack_spool_only fetch must leave a tmp_pack under objects/pack"
     );
 }

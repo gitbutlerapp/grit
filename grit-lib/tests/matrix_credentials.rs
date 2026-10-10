@@ -936,8 +936,14 @@ mod http_401 {
 
             let client =
                 UreqHttpClient::with_credentials(Box::new(provider)).with_git_protocol("version=2");
-            let err = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
-                .expect_err("wrong creds from helper must fail typed, not hang");
+            let err = http_fetch(
+                http_client_arc(client),
+                &local_git,
+                &url,
+                &opts,
+                &mut NoProgress,
+            )
+            .expect_err("wrong creds from helper must fail typed, not hang");
             assert!(
                 matches!(err, Error::Auth(_)),
                 "expected Error::Auth for wrong helper creds, got: {err:?}"
@@ -965,8 +971,14 @@ mod http_401 {
 
         let client =
             UreqHttpClient::with_credentials(Box::new(provider)).with_git_protocol("version=2");
-        http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
-            .expect("authed fetch via helper-filled Basic creds must succeed");
+        http_fetch(
+            http_client_arc(client),
+            &local_git,
+            &url,
+            &opts,
+            &mut NoProgress,
+        )
+        .expect("authed fetch via helper-filled Basic creds must succeed");
 
         // The helper supplied a credential on the 401 (a `get` recorded).
         let log = std::fs::read_to_string(&rec).unwrap_or_default();

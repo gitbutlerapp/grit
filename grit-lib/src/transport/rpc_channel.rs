@@ -11,13 +11,10 @@ use std::io::Read;
 use crate::error::Result;
 
 /// A single protocol round over upload-pack or receive-pack.
-#[expect(
-    dead_code,
-    reason = "narrow transport RPC surface; wired in follow-up refactors"
-)]
 pub(crate) trait RpcChannel {
     /// Whether each [`request`](Self::request) is an independent HTTP POST that
     /// must resend prior negotiation state (smart HTTP), vs. one long duplex stream.
+    #[allow(dead_code)]
     fn is_stateless(&self) -> bool;
 
     /// Send `body` and return the server's response bytes as a stream.

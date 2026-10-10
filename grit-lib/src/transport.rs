@@ -117,6 +117,12 @@ pub trait Connection {
     /// teardown (`child.wait()` / socket close) blocks. The default is a no-op
     /// (v0/v1 connections, where the server closes after the single response).
     fn finish_send(&mut self) {}
+
+    /// Smart HTTP stateless RPC (`gitprotocol-http`): each POST carries a full
+    /// command body rather than appending to one duplex stream.
+    fn stateless_rpc(&self) -> bool {
+        false
+    }
 }
 
 /// A factory that connects to a remote and performs the protocol handshake.

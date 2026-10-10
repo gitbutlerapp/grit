@@ -124,6 +124,10 @@ pub struct FetchOptions {
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
     /// When true with [`Self::diagnostics`], fetch paths may emit network trace events.
     pub network_trace: bool,
+    /// Override worker threads for index-pack after a received pack (`None` = config/default).
+    pub index_pack_threads: Option<usize>,
+    /// When true, spool the negotiated pack to disk and return without index-pack or ref updates.
+    pub pack_spool_only: bool,
 }
 
 /// Identity and message for clone reflog entries written by the library.

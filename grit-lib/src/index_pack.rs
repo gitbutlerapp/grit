@@ -133,18 +133,31 @@ pub fn install_pack_path(
     if opts.fix_thin {
         owned = fix_thin_pack_path(&owned, odb)?;
     }
-    let pack_data = PackData::open(&owned)?;
-    let pack: &[u8] = pack_data.deref();
-    if pack.len() < 12 || &pack[0..4] != b"PACK" {
+    let hb = odb.hash_algo().len();
+    let meta = std::fs::metadata(&owned).map_err(Error::Io)?;
+    let len = meta.len();
+    if len < 12 + hb as u64 {
+        return Err(Error::CorruptObject("pack too small".to_owned()));
+    }
+    let mut header = [0u8; 12];
+    {
+        use std::io::Read;
+        let mut f = std::fs::File::open(&owned).map_err(Error::Io)?;
+        f.read_exact(&mut header).map_err(Error::Io)?;
+    }
+    if &header[0..4] != b"PACK" {
         return Err(Error::CorruptObject(
             "received data is not a pack stream".to_owned(),
         ));
     }
-    let hb = odb.hash_algo().len();
-    if pack.len() < 12 + hb {
-        return Err(Error::CorruptObject("pack too small".to_owned()));
+    let mut trailer = vec![0u8; hb];
+    {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = std::fs::File::open(&owned).map_err(Error::Io)?;
+        f.seek(SeekFrom::End(-(hb as i64))).map_err(Error::Io)?;
+        f.read_exact(&mut trailer).map_err(Error::Io)?;
     }
-    let pack_hash = ObjectId::from_bytes(&pack[pack.len() - hb..])?;
+    let pack_hash = ObjectId::from_bytes(&trailer)?;
     let stem = format!("pack-{}", pack_hash.to_hex());
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
@@ -158,7 +171,6 @@ pub fn install_pack_path(
 
     let install_result = (|| -> Result<IngestedPack> {
         std::fs::create_dir_all(&stage).map_err(Error::Io)?;
-        drop(pack_data);
         if std::fs::rename(&owned, &stage_pack).is_err() {
             std::fs::copy(&owned, &stage_pack).map_err(Error::Io)?;
             let _ = std::fs::remove_file(&owned);

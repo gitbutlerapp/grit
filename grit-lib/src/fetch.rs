@@ -323,6 +323,10 @@ fn negotiate_pack(
         let (sh, unsh) = crate::shallow::read_shallow_info_section(&mut conn.reader())?;
         shallow_update.shallow = sh;
         shallow_update.unshallow = unsh;
+    } else if conn.stateless_rpc() {
+        // Stateless HTTP completes a POST for the want block; consume its response
+        // before the first have round posts again (otherwise the next POST drains it).
+        read_ack_round(conn.reader(), &mut negotiator)?;
     }
 
     // Have/ACK exchange: batch haves, flush, read interleaved ACK rounds.
@@ -340,8 +344,9 @@ fn negotiate_pack(
             pending.clear();
             flush_at = next_flush_count(count);
             flushes += 1;
-            // Keep one window ahead: skip reading ACKs after the first flush.
-            if count == INITIAL_FLUSH {
+            // Duplex: keep one window ahead. Stateless: every POST must be read
+            // before the next POST replaces the response.
+            if count == INITIAL_FLUSH && !conn.stateless_rpc() {
                 continue;
             }
             read_ack_round(conn.reader(), &mut negotiator)?;
@@ -780,12 +785,17 @@ fn negotiate_pack_v2(
         }
         // Not ready yet: round 2 sends the remaining haves + `done`, then pack.
         Some(_) => {
+            let haves_round2: &[ObjectId] = if conn.stateless_rpc() {
+                &haves[..]
+            } else {
+                &haves[first_batch..]
+            };
             write_v2_fetch_request(
                 conn.writer(),
                 &object_format,
                 &cap_echo,
                 wants,
-                &haves[first_batch..],
+                haves_round2,
                 sideband_all,
                 deepen,
                 true,
@@ -1308,12 +1318,26 @@ pub fn fetch_remote(
             "fetch_remote: received pack, ingesting via index-pack…"
         );
         if let Some(path) = pack_path {
+            if opts.pack_spool_only {
+                net_trace!(
+                    opts.network_trace,
+                    opts.diagnostics.as_ref(),
+                    "fetch_remote: pack spooled to {} (pack_spool_only)",
+                    path.display()
+                );
+                return Ok(FetchOutcome {
+                    updates: Vec::new(),
+                    default_branch: None,
+                    new_shallow: shallow_update.shallow,
+                    new_unshallow: shallow_update.unshallow,
+                });
+            }
             pack_oids = crate::index_pack::ingest_received_pack_path(
                 path,
                 &local_odb,
                 &crate::index_pack::IngestPackOptions {
                     fix_thin: true,
-                    ..Default::default()
+                    threads: opts.index_pack_threads,
                 },
             )?
             .object_ids;

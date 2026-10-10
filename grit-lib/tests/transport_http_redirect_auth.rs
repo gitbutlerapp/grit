@@ -324,7 +324,7 @@ fn cross_authority_redirect_does_not_forward_cached_basic_auth() {
     client.seed_cached_basic_auth(&fx.gateway_url, "wronguser", "wrongpass");
 
     http_fetch(
-        client.clone(),
+        http_client_arc(client),
         &fx.local_git,
         &fx.gateway_url,
         &fetch_opts(),
@@ -369,7 +369,7 @@ fn cross_authority_redirect_does_not_forward_host_only_cookies() {
         .with_git_protocol("version=2");
 
     http_fetch(
-        client.clone(),
+        http_client_arc(client),
         &fx.local_git,
         &fx.gateway_url,
         &fetch_opts(),
