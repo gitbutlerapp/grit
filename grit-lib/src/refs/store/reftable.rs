@@ -82,7 +82,13 @@ impl ReftableRefStore {
     /// Returns an error when initialization fails.
     pub fn open_ephemeral() -> Result<Self> {
         let root = tempfile::tempdir().map_err(Error::Io)?;
-        init_repository(root.path(), false, "main", None, "reftable")?;
+        init_repository(
+            root.path(),
+            false,
+            "main",
+            None,
+            crate::ref_storage::RefStorageFormat::Reftable,
+        )?;
         let git_dir = root.path().join(".git");
         let store = Self {
             git_dir: git_dir.clone(),

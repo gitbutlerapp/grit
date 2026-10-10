@@ -5,6 +5,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use grit_lib::objects::ObjectId;
+use grit_lib::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReftableRefStore,
 };
@@ -18,7 +19,7 @@ fn oid(byte: u8) -> ObjectId {
 
 fn empty_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     let root = tempfile::tempdir().expect("tempdir");
-    init_repository(root.path(), false, "main", None, "reftable").expect("init");
+    init_repository(root.path(), false, "main", None, RefStorageFormat::Reftable).expect("init");
     let git_dir = root.path().join(".git");
     let store = ReftableRefStore::open(git_dir.clone()).expect("open");
     let txn = RefTransaction::new()
