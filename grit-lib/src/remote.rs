@@ -32,7 +32,17 @@ use crate::url_rewrite;
 #[cfg(feature = "http-ureq")]
 use crate::transport::http::ureq_client::UreqHttpClient;
 
+/// HTTP client types for non-git HTTP (e.g. OAuth) without importing [`crate::transport`] from binaries.
+#[cfg(feature = "http-ureq")]
+pub mod http_client {
+    pub use crate::transport::http::ureq_client::UreqHttpClient;
+    pub use crate::transport::http::HttpClient;
+}
+
 type RemoteResult<T> = std::result::Result<T, RemoteError>;
+
+/// Default remote name when none is configured (`origin`, matching Git).
+pub const DEFAULT_REMOTE: &str = "origin";
 
 /// Errors specific to remote URL resolution and dispatch.
 #[derive(Debug, Error)]
@@ -618,7 +628,7 @@ fn list_refs_http(
             )
             .map_err(RemoteError::Library)?;
         let mut cur = Cursor::new(body);
-        parse_list_refs_v2_response(&mut cur, opts)
+        parse_list_refs_v2_response(&mut cur, opts, head_symref)
     } else {
         list_refs_v0_advertisement(&refs, head_symref.as_deref(), odb, opts)
     }
@@ -653,7 +663,8 @@ fn list_refs_v2_connection(
     conn.writer().write_all(&req).map_err(Error::Io)?;
     conn.writer().flush().map_err(Error::Io)?;
     conn.finish_send();
-    parse_list_refs_v2_response(conn.reader(), opts)
+    let discovery_head = conn.head_symref().map(str::to_owned);
+    parse_list_refs_v2_response(conn.reader(), opts, discovery_head)
 }
 
 fn build_list_refs_v2_request(
@@ -725,6 +736,7 @@ fn list_ref_prefixes(opts: &ListRefsOptions) -> Vec<String> {
 fn parse_list_refs_v2_response(
     reader: &mut dyn Read,
     opts: &ListRefsOptions,
+    mut head_symref: Option<String>,
 ) -> RemoteResult<Vec<RemoteRef>> {
     use crate::fetch::parse_ls_refs_v2_line;
     use crate::pkt_line;
@@ -732,7 +744,6 @@ fn parse_list_refs_v2_response(
     let mut entries: Vec<RemoteRef> = Vec::new();
     let mut peel_map: std::collections::HashMap<String, ObjectId> =
         std::collections::HashMap::new();
-    let mut head_symref: Option<String> = None;
     let mut reader = reader;
     loop {
         match pkt_line::read_packet(&mut reader).map_err(Error::Io)? {
@@ -753,10 +764,18 @@ fn parse_list_refs_v2_response(
                     continue;
                 }
                 if name == "HEAD" {
-                    if let Some(t) =
-                        symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t))
-                    {
+                    let sym = symref_target.filter(|t| {
+                        crate::refs::is_valid_advertised_symref_target(t)
+                    });
+                    if let Some(t) = sym.clone() {
                         head_symref = Some(t);
+                    }
+                    if list_refs_includes_head(opts) && ref_matches_list_opts("HEAD", opts) {
+                        entries.push(RemoteRef {
+                            name: "HEAD".to_owned(),
+                            oid,
+                            symref_target: if opts.symrefs { sym } else { None },
+                        });
                     }
                     continue;
                 }
