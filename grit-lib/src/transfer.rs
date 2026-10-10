@@ -15,12 +15,12 @@
 //! Push *result* reporting reuses [`crate::push_report::PushRefResult`] /
 //! [`crate::push_report::PushRefStatus`] rather than redefining it.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::hash;
-use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{parse_tag, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
@@ -1134,7 +1134,6 @@ struct PushDecision {
 }
 
 /// Decide the status of a single [`PushRefSpec`] without mutating either repo.
-
 fn decide_push(
     spec: &PushRefSpec,
     local_odb: &Odb,
