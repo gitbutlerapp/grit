@@ -114,6 +114,91 @@ fn bundle_verify_and_list_json_schema() {
 }
 
 #[test]
+fn bundle_create_range_matches_git_oracle() {
+    let dir = unique_tmp("range");
+    git(&dir, &["init", "-q", "-b", "main", "."]);
+    git(&dir, &["commit", "--allow-empty", "-qm", "a"]);
+    git(&dir, &["commit", "--allow-empty", "-qm", "b"]);
+
+    let git_bundle = dir.join("git.bundle");
+    git(
+        &dir,
+        &[
+            "bundle",
+            "create",
+            git_bundle.to_str().unwrap(),
+            "HEAD~1..HEAD",
+        ],
+    );
+
+    let grit_bundle = dir.join("grit.bundle");
+    let out = grit(
+        &dir,
+        &[
+            "bundle",
+            "create",
+            grit_bundle.to_str().unwrap(),
+            "HEAD~1..HEAD",
+            "--json",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "grit bundle create range: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let git_heads = Command::new("git")
+        .current_dir(&dir)
+        .args(["bundle", "list-heads", git_bundle.to_str().unwrap()])
+        .output()
+        .expect("git list-heads");
+    assert!(git_heads.status.success());
+    let grit_heads = Command::new("git")
+        .current_dir(&dir)
+        .args(["bundle", "list-heads", grit_bundle.to_str().unwrap()])
+        .output()
+        .expect("grit list-heads");
+    assert!(
+        grit_heads.status.success(),
+        "git list-heads grit bundle: {}",
+        String::from_utf8_lossy(&grit_heads.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&git_heads.stdout).trim(),
+        String::from_utf8_lossy(&grit_heads.stdout).trim()
+    );
+
+    let git_verify = Command::new("git")
+        .current_dir(&dir)
+        .args(["bundle", "verify", grit_bundle.to_str().unwrap()])
+        .output()
+        .expect("verify grit bundle");
+    assert!(
+        git_verify.status.success(),
+        "git bundle verify grit output: {}",
+        String::from_utf8_lossy(&git_verify.stderr)
+    );
+}
+
+#[test]
+fn bundle_verify_rejects_unknown_v3_capability() {
+    let dir = unique_tmp("v3-cap");
+    let tampered = dir.join("tampered.bundle");
+    std::fs::write(
+        &tampered,
+        b"# v3 git bundle\n@object-format=sha1\n@unknown-grit-review=1\n\nPACK",
+    )
+    .expect("write tampered");
+
+    let out = grit(
+        &dir,
+        &["bundle", "verify", tampered.to_str().unwrap(), "--json"],
+    );
+    assert!(!out.status.success());
+}
+
+#[test]
 fn bundle_verify_missing_prerequisite_exit_code() {
     let upstream = unique_tmp("prereq-up");
     git(&upstream, &["init", "-q", "-b", "main", "."]);
