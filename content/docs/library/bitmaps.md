@@ -15,6 +15,10 @@ Git stores optional **reachability bitmaps** alongside pack and multi-pack-index
 
 [`ReachableSet`](rustdoc:grit_lib::bitmap_walk::ReachableSet) exposes `object_ids` for indexed and **extended** (out-of-namespace) objects, and `iter_grouped_by_kind` for oids in Git’s bitmap order (commits, trees, blobs, tags).
 
+## Pack generation
+
+[`build_pack`](rustdoc:grit_lib::pack_objects::build_pack) and [`build_pack_with_shallow_and_filter`](rustdoc:grit_lib::pack_objects::build_pack_with_shallow_and_filter) enumerate objects via [`enumerate_pack_objects`](rustdoc:grit_lib::pack_object_select::enumerate_pack_objects) when [`PackBuildOptions::use_bitmaps`](rustdoc:grit_lib::pack_objects::PackBuildOptions) is true (the default) and a [`BitmapIndex`](rustdoc:grit_lib::pack_bitmap::BitmapIndex) is available. Upload-pack reads `pack.useBitmaps` and `uploadpack.allowBitmaps` through [`PackBuildOptions::use_bitmaps_for_upload_pack`](rustdoc:grit_lib::pack_objects::PackBuildOptions). When bitmap enumeration is unsupported or disabled, grit falls back to the object walk; object sets stay the same.
+
 ## Verifying on-disk bitmaps
 
 [`BitmapIndex::verify_commit`](rustdoc:grit_lib::pack_bitmap::BitmapIndex) compares a stored commit bitmap with a fresh walk (similar to `git rev-list --test-bitmap`).

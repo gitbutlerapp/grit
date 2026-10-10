@@ -14,6 +14,10 @@ Git stores optional **reachability bitmaps** alongside pack and multi-pack-index
 
 [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) exposes `object_ids` for indexed and **extended** (out-of-namespace) objects, and `iter_grouped_by_kind` for oids in Git’s bitmap order (commits, trees, blobs, tags).
 
+## Pack generation
+
+[`build_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack.html) and [`build_pack_with_shallow_and_filter`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack_with_shallow_and_filter.html) enumerate objects via [`enumerate_pack_objects`](https://docs.rs/grit-lib/latest/grit_lib/pack_object_select/fn.enumerate_pack_objects.html) when [`PackBuildOptions::use_bitmaps`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html) is true (the default) and a [`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) is available. Upload-pack reads `pack.useBitmaps` and `uploadpack.allowBitmaps` through [`PackBuildOptions::use_bitmaps_for_upload_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html). When bitmap enumeration is unsupported or disabled, grit falls back to the object walk; object sets stay the same.
+
 ## Verifying on-disk bitmaps
 
 [`BitmapIndex::verify_commit`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) compares a stored commit bitmap with a fresh walk (similar to `git rev-list --test-bitmap`).

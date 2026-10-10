@@ -4,6 +4,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::collections::HashSet;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,14 +13,18 @@ use std::sync::OnceLock;
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::bitmap_walk::ReachabilityQuery;
 use grit_lib::objects::ObjectId;
+use grit_lib::odb::Odb;
 use grit_lib::pack::read_local_pack_indexes;
 use grit_lib::pack_bitmap::{BitmapIndex, PackBitmapWriteOptions, PackBitmapWriter};
+use grit_lib::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::MissingAction;
 
 struct PackBitmapFixture {
     repo: Repository,
     sample_commit: ObjectId,
+    have_commit: ObjectId,
+    odb: Odb,
 }
 
 fn git_git_bare() -> PathBuf {
@@ -81,9 +86,24 @@ fn load_fixture() -> Option<PackBitmapFixture> {
         return None;
     }
     let sample_commit = ObjectId::from_hex(std::str::from_utf8(&out.stdout).ok()?.trim()).ok()?;
+    let have_out = Command::new("git")
+        .current_dir(&bare)
+        .args(["rev-parse", "HEAD~100"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .ok()?;
+    if !have_out.status.success() {
+        return None;
+    }
+    let have_commit =
+        ObjectId::from_hex(std::str::from_utf8(&have_out.stdout).ok()?.trim()).ok()?;
+    let odb = Odb::new(&bare.join("objects")).with_config_git_dir(bare.to_path_buf());
     Some(PackBitmapFixture {
         repo,
         sample_commit,
+        have_commit,
+        odb,
     })
 }
 
@@ -163,6 +183,44 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                     std::time::SystemTime::UNIX_EPOCH,
                 )
                 .expect("write"),
+            );
+        });
+    });
+    group.bench_function("pack_enumerate_walk", |b| {
+        let empty = HashSet::new();
+        b.iter(|| {
+            black_box(
+                enumerate_pack_objects(
+                    &fx.odb,
+                    &[fx.sample_commit],
+                    &[fx.have_commit],
+                    &PackEnumerateOptions {
+                        filter: None,
+                        shallow_grafts: &empty,
+                        use_bitmaps: false,
+                        exclude_objects: None,
+                    },
+                )
+                .expect("enumerate"),
+            );
+        });
+    });
+    group.bench_function("pack_enumerate_bitmap", |b| {
+        let empty = HashSet::new();
+        b.iter(|| {
+            black_box(
+                enumerate_pack_objects(
+                    &fx.odb,
+                    &[fx.sample_commit],
+                    &[fx.have_commit],
+                    &PackEnumerateOptions {
+                        filter: None,
+                        shallow_grafts: &empty,
+                        use_bitmaps: true,
+                        exclude_objects: None,
+                    },
+                )
+                .expect("enumerate"),
             );
         });
     });
