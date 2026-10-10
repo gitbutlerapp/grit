@@ -102,17 +102,38 @@ pub fn clean_untracked(
         if !opts.directories && rel.ends_with('/') {
             continue;
         }
-        if crate::worktree_cwd::cwd_would_be_removed_with_repo_path(
-            work_tree,
-            rel.trim_end_matches('/'),
-            repo.environment(),
-        ) {
-            return Err(Error::Message(format!(
-                "refusing to remove '{rel}' because it contains the current directory"
-            )));
+        let paths_to_add = if rel.ends_with('/') {
+            let trimmed = rel.trim_end_matches('/');
+            let abs = work_tree.join(trimmed);
+            if nested_git_worktree_descendant_under(&abs) {
+                expand_clean_paths_skipping_nested_repos(work_tree, trimmed)?
+            } else {
+                vec![rel]
+            }
+        } else {
+            vec![rel]
+        };
+        for path in paths_to_add {
+            if should_skip_nested_git(work_tree, &path) {
+                continue;
+            }
+            if !opts.directories && path.ends_with('/') {
+                continue;
+            }
+            if crate::worktree_cwd::cwd_would_be_removed_with_repo_path(
+                work_tree,
+                path.trim_end_matches('/'),
+                repo.environment(),
+            ) {
+                return Err(Error::Message(format!(
+                    "refusing to remove '{path}' because it contains the current directory"
+                )));
+            }
+            removed.push(path);
         }
-        removed.push(rel);
     }
+    removed.sort();
+    removed.dedup();
 
     if opts.dry_run {
         return Ok(CleanOutcome { removed });
@@ -149,22 +170,38 @@ fn empty_untracked_directories(
         .map(|p| p.trim_end_matches('/').to_owned())
         .collect();
     let mut found = Vec::new();
-    walk_empty_untracked_dirs(
-        repo,
-        index,
-        work_tree,
-        "",
-        pathspecs,
-        rules,
-        include_ignored,
-        &listed,
-        &mut found,
-    )?;
+    let entries: Vec<_> = fs::read_dir(work_tree)
+        .map_err(Error::Io)?
+        .filter_map(|e| e.ok())
+        .collect();
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".git" {
+            continue;
+        }
+        let child_abs = entry.path();
+        if !child_abs.is_dir() {
+            continue;
+        }
+        if let Some(path) = highest_empty_untracked_dir(
+            repo,
+            index,
+            &child_abs,
+            &name,
+            pathspecs,
+            rules,
+            include_ignored,
+            &listed,
+        )? {
+            found.push(path);
+        }
+    }
     Ok(found)
 }
 
+/// Returns the highest empty untracked directory marker under `abs` (e.g. `outer/` not `outer/inner/`).
 #[allow(clippy::too_many_arguments)]
-fn walk_empty_untracked_dirs(
+fn highest_empty_untracked_dir(
     repo: &Repository,
     index: &Index,
     abs: &Path,
@@ -173,21 +210,20 @@ fn walk_empty_untracked_dirs(
     rules: &WorktreeRules,
     include_ignored: bool,
     listed: &BTreeSet<String>,
-    out: &mut Vec<String>,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if !rel.is_empty() && is_nested_git_worktree(abs) {
-        return Ok(());
+        return Ok(None);
     }
     if !rel.is_empty() && has_tracked_under_index(index, rel) {
-        return Ok(());
+        return Ok(None);
     }
     if !rel.is_empty() && index_gitlink_at(index, rel) {
-        return Ok(());
+        return Ok(None);
     }
 
     let entries: Vec<_> = match fs::read_dir(abs) {
         Ok(e) => e.filter_map(|e| e.ok()).collect(),
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(None),
     };
 
     let mut child_dirs = Vec::new();
@@ -205,13 +241,33 @@ fn walk_empty_untracked_dirs(
             };
             child_dirs.push((child_rel, child_abs));
         } else if !rel.is_empty() {
-            // Non-empty untracked directory; the status walk reports contents.
-            return Ok(());
+            return Ok(None);
         }
     }
 
+    if listed.contains(rel.trim_end_matches('/')) {
+        return Ok(None);
+    }
+
+    if !crate::porcelain::status::status_path_matches(rel, pathspecs)
+        && !crate::porcelain::status::status_path_matches(&format!("{rel}/"), pathspecs)
+    {
+        return Ok(None);
+    }
+
+    let (ignored, _) = rules
+        .ignore_mut()
+        .check_path(repo, Some(index), rel, true)?;
+    if ignored && !include_ignored {
+        return Ok(None);
+    }
+
+    if child_dirs.is_empty() {
+        return Ok(Some(format!("{rel}/")));
+    }
+
     for (child_rel, child_abs) in &child_dirs {
-        walk_empty_untracked_dirs(
+        if highest_empty_untracked_dir(
             repo,
             index,
             child_abs,
@@ -220,33 +276,83 @@ fn walk_empty_untracked_dirs(
             rules,
             include_ignored,
             listed,
-            out,
-        )?;
+        )?
+        .is_none()
+        {
+            return Ok(None);
+        }
     }
 
-    if rel.is_empty() {
+    Ok(Some(format!("{rel}/")))
+}
+
+fn nested_git_worktree_descendant_under(dir_abs: &Path) -> bool {
+    if !dir_abs.is_dir() {
+        return false;
+    }
+    let entries = match fs::read_dir(dir_abs) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if is_nested_git_worktree(&path) {
+            return true;
+        }
+        if nested_git_worktree_descendant_under(&path) {
+            return true;
+        }
+    }
+    false
+}
+
+/// When a collapsed directory contains a nested repository, enumerate removable paths
+/// inside it without deleting nested-repo subtrees (matches `git clean` skipping).
+fn expand_clean_paths_skipping_nested_repos(
+    work_tree: &Path,
+    dir_rel: &str,
+) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    walk_expand_clean(&work_tree.join(dir_rel), dir_rel, &mut paths)?;
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn walk_expand_clean(abs: &Path, rel: &str, out: &mut Vec<String>) -> Result<()> {
+    if is_nested_git_worktree(abs) {
         return Ok(());
     }
-
-    if listed.contains(rel.trim_end_matches('/')) {
-        return Ok(());
-    }
-
-    if !crate::porcelain::status::status_path_matches(rel, pathspecs)
-        && !crate::porcelain::status::status_path_matches(&format!("{rel}/"), pathspecs)
-    {
-        return Ok(());
-    }
-
-    let (ignored, _) = rules
-        .ignore_mut()
-        .check_path(repo, Some(index), rel, true)?;
-    if ignored && !include_ignored {
-        return Ok(());
-    }
-
-    if child_dirs.is_empty() {
-        out.push(format!("{rel}/"));
+    let entries: Vec<_> = match fs::read_dir(abs) {
+        Ok(e) => e.filter_map(|e| e.ok()).collect(),
+        Err(_) => return Ok(()),
+    };
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".git" {
+            continue;
+        }
+        let child_abs = entry.path();
+        let child_rel = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}/{name}")
+        };
+        if child_abs.is_dir() {
+            if is_nested_git_worktree(&child_abs) {
+                continue;
+            }
+            if nested_git_worktree_descendant_under(&child_abs) {
+                walk_expand_clean(&child_abs, &child_rel, out)?;
+            } else {
+                out.push(format!("{child_rel}/"));
+            }
+        } else {
+            out.push(child_rel);
+        }
     }
     Ok(())
 }

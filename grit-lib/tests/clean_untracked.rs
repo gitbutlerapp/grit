@@ -231,6 +231,99 @@ fn include_ignored_matches_git_clean_fdx() {
 }
 
 #[test]
+fn collapsed_parent_with_nested_repo_preserves_nested_and_matches_git() {
+    let grit_root = tempfile::tempdir().expect("grit");
+    init_tracked_repo(grit_root.path());
+    let container = grit_root.path().join("container");
+    fs::create_dir_all(container.join("nested")).unwrap();
+    open_nested_repo(&container.join("nested"));
+    fs::write(container.join("loose.txt"), b"u\n").unwrap();
+
+    let git_root = tempfile::tempdir().expect("git");
+    init_tracked_repo(git_root.path());
+    let git_container = git_root.path().join("container");
+    fs::create_dir_all(git_container.join("nested")).unwrap();
+    open_nested_repo(&git_container.join("nested"));
+    fs::write(git_container.join("loose.txt"), b"u\n").unwrap();
+
+    let repo = Repository::discover(Some(grit_root.path())).expect("open");
+    let preview = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: true,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("dry run");
+    let grit_preview: BTreeSet<String> = preview
+        .removed
+        .iter()
+        .map(|p| normalize_clean_path(p))
+        .collect();
+    assert_eq!(
+        grit_preview,
+        git_clean_preview(git_root.path(), &[]),
+        "preview must match git clean -nd"
+    );
+
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("force clean");
+
+    git_clean_force(git_root.path(), &[]);
+
+    assert!(
+        grit_root.path().join("container/nested/.git").exists(),
+        "nested repository must survive"
+    );
+    assert_eq!(
+        worktree_file_set(grit_root.path()),
+        worktree_file_set(git_root.path())
+    );
+}
+
+#[test]
+fn nested_empty_directories_removed_at_highest_level_like_git() {
+    let grit_root = tempfile::tempdir().expect("grit");
+    init_tracked_repo(grit_root.path());
+    fs::create_dir_all(grit_root.path().join("outer/inner")).unwrap();
+
+    let git_root = tempfile::tempdir().expect("git");
+    init_tracked_repo(git_root.path());
+    fs::create_dir_all(git_root.path().join("outer/inner")).unwrap();
+
+    let repo = Repository::discover(Some(grit_root.path())).expect("open");
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("clean");
+
+    git_clean_force(git_root.path(), &[]);
+
+    assert!(!grit_root.path().join("outer").exists());
+    assert!(!git_root.path().join("outer").exists());
+    assert_eq!(
+        worktree_file_set(grit_root.path()),
+        worktree_file_set(git_root.path())
+    );
+}
+
+#[test]
 fn nested_repo_directory_is_untouched() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
