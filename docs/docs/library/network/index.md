@@ -1,39 +1,35 @@
 # Network
 
-> ls-remote, fetch and push over file:// and smart HTTP, credentials, and progress.
+> Remote dispatch, fetch, push, and ls-remote over every transport.
 
-Network operations in grit-lib are **typed**: you pass option structs, get outcome structs, and wire a [`Progress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) sink for sideband messages. No subprocess `git` on the wire — local, `git://`, SSH, and smart HTTP share the same fetch/push engines.
+Network operations in grit-lib center on [`Remote`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html): a typed URL ([`RemoteUrl`](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html)), configured fetch refspecs, and one dispatcher for **fetch**, **push**, and **list refs**. Wire bytes still flow through the same fetch/push engines as before; `Remote` picks the transport from the URL scheme.
 
-## Transport matrix
+## Remote URL and config
 
-| URL | Fetch | Push | Authentication |
-| --- | --- | --- | --- |
-| `file://` or path | [`fetch_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.fetch_local.html) | [`push_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.push_local.html) | none |
-| `git://` | [`fetch_remote`](https://docs.rs/grit-lib/latest/grit_lib/fetch/fn.fetch_remote.html) over [`GitDaemonTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.GitDaemonTransport.html) | [`push_remote`](https://docs.rs/grit-lib/latest/grit_lib/push/fn.push_remote.html) | none |
-| `ssh` | same over [`SshTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.SshTransport.html) | same | SSH keys/agent |
-| `http(s)` | [`http_fetch`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/fn.http_fetch.html) | [`push_http`](https://docs.rs/grit-lib/latest/grit_lib/push/fn.push_http.html) | [`CredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/trait.CredentialProvider.html) |
+| Scheme / form | [`RemoteUrl`](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html) variant | Transport |
+| --- | --- | --- |
+| Path or `file://` | `Local` / `File` | [`fetch_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.fetch_local.html) / [`push_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.push_local.html) |
+| `git://` | `Git` | [`GitDaemonTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.GitDaemonTransport.html) |
+| `ssh://`, scp-style | `Ssh` | [`SshTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.SshTransport.html) (repo [`CommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/trait.CommandRunner.html)) |
+| `http(s)://` | `Http` / `Https` | [`http_fetch`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/fn.http_fetch.html) / [`push_http`](https://docs.rs/grit-lib/latest/grit_lib/push/fn.push_http.html) |
 
-Wire transports use [`Transport::connect`](https://docs.rs/grit-lib/latest/grit_lib/transport/trait.Transport.html) with [`Service::UploadPack`](https://docs.rs/grit-lib/latest/grit_lib/transport/enum.Service.html) (fetch) or `ReceivePack` (push). Fetch negotiates protocol v2 when possible; push uses v0/v1.
+Parse a literal URL with [`RemoteUrl::try_from`](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html). Load `remote.<name>.url`, optional `pushurl`, and `fetch` refspecs (default `+refs/heads/*:refs/remotes/<name>/*`) via [`Remote::from_config`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html). Config applies [`url_rewrite`](https://docs.rs/grit-lib/latest/grit_lib/url_rewrite/index.html) `insteadOf` / `pushInsteadOf` rules the same way Git does.
 
-Local remotes resolve through [`resolve_local_remote_git_dir`](https://docs.rs/grit-lib/latest/grit_lib/transport_path/fn.resolve_local_remote_git_dir.html) so relative `remote.*.url` values behave like Git (repository root, not process cwd).
+Local paths resolve through [`resolve_local_remote_git_dir`](https://docs.rs/grit-lib/latest/grit_lib/transport_path/fn.resolve_local_remote_git_dir.html) from the repository root, not the process cwd.
 
-## ls-remote
+## list refs
 
-For a **local** git directory (bare repo or `.git`), [`ls_remote`](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/fn.ls_remote.html) lists refs with the same ordering and peeling rules as `git ls-remote` on a filesystem remote. Pass [`ls_remote::Options`](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/struct.Options.html) to filter heads, tags, or patterns. Remote listing over HTTP/SSH is driven by fetch negotiation; local enumeration is the usual first step for `file://` tests and tools.
+[`Remote::list_refs`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) takes [`ListRefsOptions`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.ListRefsOptions.html) (prefixes, heads, tags, symrefs, peel) and returns [`RemoteRef`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.RemoteRef.html) entries in `git ls-remote` order. On disk it uses [`list_refs_from_git_dir`](https://docs.rs/grit-lib/latest/grit_lib/remote/fn.list_refs_from_git_dir.html). Over the wire it uses protocol v2 `ls-refs` when available, otherwise the v0/v1 ref advertisement.
 
-## Fetch and push inputs
+## Fetch and push
 
-[`FetchOptions`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOptions.html) carries refspecs, tag mode ([`TagMode`](https://docs.rs/grit-lib/latest/grit_lib/transfer/enum.TagMode.html)), prune, shallow depth, and related flags. [`FetchOutcome`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOutcome.html) reports ref updates and optional default-branch hints.
+[`Remote::fetch`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) accepts [`FetchOptions`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOptions.html) and a [`Progress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) sink; fetch negotiates protocol v2 when the server supports it. [`Remote::push`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) uses [`PushRefSpec`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushRefSpec.html) and returns [`PushOutcome`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOutcome.html).
 
-Push uses [`PushRefSpec`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushRefSpec.html) entries (source oid, destination ref, force, lease fields) and returns [`PushOutcome`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOutcome.html) with per-ref [`PushRefStatus`](https://docs.rs/grit-lib/latest/grit_lib/push_report/enum.PushRefStatus.html).
+HTTP remotes need an [`HttpClient`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/trait.HttpClient.html). Implement [`HttpClientFactory`](https://docs.rs/grit-lib/latest/grit_lib/remote/trait.HttpClientFactory.html) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/struct.HelperCredentialProvider.html)).
 
 ## Credentials and progress
 
-HTTP smart transport accepts an [`HttpClient`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/trait.HttpClient.html) implementation. With the `http-ureq` feature, `UreqHttpClient::from_config` honors `http.proxy`, cookies, and extra headers from [`ConfigSet`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html). [`SmartHttpTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/struct.SmartHttpTransport.html) wraps any client for combined fetch/push entry points.
-
-[`HelperCredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/struct.HelperCredentialProvider.html) runs configured `credential.helper` programs on `401` and retries with HTTP Basic. It **never** opens a TTY — missing credentials surface as [`Error::Auth`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html).
-
-Pass [`NoProgress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/struct.NoProgress.html) to ignore sideband progress, or implement [`Progress::message`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) to receive raw progress bytes from side-band channel 2.
+[`HelperCredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/struct.HelperCredentialProvider.html) satisfies HTTP `401` responses from configured `credential.helper` programs and never opens a TTY. Pass [`NoProgress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/struct.NoProgress.html) to ignore sideband progress, or implement [`Progress::message`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) for side-band channel 2.
 
 ## Example
 
@@ -46,9 +42,9 @@ This example resolves `origin`, lists refs on a **local** bare remote, fetches, 
 
 use grit_examples::remote;
 use grit_lib::config::ConfigSet;
-use grit_lib::ls_remote::{self, Options as LsRemoteOptions};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
+use grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
 use grit_lib::repo::Repository;
 use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::transport_path::resolve_local_remote_git_dir;
@@ -74,11 +70,12 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let remote_git_dir =
         resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
     let remote_repo = Repository::open(&remote_git_dir, None)?;
-    let refs_on_remote = ls_remote::ls_remote(
+    let refs_on_remote = list_refs_from_git_dir(
         &remote_git_dir,
         &remote_repo.odb,
-        &LsRemoteOptions::default(),
-    )?;
+        &ListRefsOptions::default(),
+    )
+    .map_err(grit_lib::error::Error::from)?;
     eprintln!(
         "ls-remote: {} ref(s) on {}",
         refs_on_remote.len(),
@@ -131,6 +128,6 @@ fn main() -> Result<(), grit_lib::error::Error> {
 }
 ```
 
-The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs`.
+The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs` (slated to thin over [`Remote`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) in a follow-up step).
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.

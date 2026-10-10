@@ -468,7 +468,7 @@ fn v2_ref_prefixes_from_refspecs(refspecs: &[String]) -> Vec<String> {
 /// port of the CLI's `parse_ls_refs_v2_line` (the order of the optional suffixes
 /// is whichever the server emits; we scan for both tokens). Returns `None` for a
 /// malformed line.
-fn parse_ls_refs_v2_line(
+pub(crate) fn parse_ls_refs_v2_line(
     line: &str,
 ) -> Option<(String, ObjectId, Option<String>, Option<ObjectId>)> {
     const SYM: &str = " symref-target:";

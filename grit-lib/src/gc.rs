@@ -187,7 +187,7 @@ fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>>
 /// target), e.g. `main` for a `HEAD` pointing at `refs/heads/main`.
 ///
 /// This is the `git remote show <remote>` default-branch lookup for a local /
-/// `file://` remote. It reuses [`crate::ls_remote::ls_remote`]'s symref handling
+/// `file://` remote. It reuses [`crate::remote::list_refs_from_git_dir`]'s symref handling
 /// to read the remote `HEAD` and strips the `refs/heads/` prefix from its
 /// target. Returns `None` when the remote has no symbolic `HEAD` (e.g. a
 /// detached or absent `HEAD`).
@@ -202,14 +202,15 @@ pub fn remote_default_branch_local(remote_git_dir: &Path) -> Result<Option<Strin
     let remote_odb =
         Odb::new(&remote_git_dir.join("objects")).with_config_git_dir(remote_git_dir.to_path_buf());
 
-    let entries = crate::ls_remote::ls_remote(
+    let entries = crate::remote::list_refs_from_git_dir(
         remote_git_dir,
         &remote_odb,
-        &crate::ls_remote::Options {
-            symref: true,
+        &crate::remote::ListRefsOptions {
+            symrefs: true,
             ..Default::default()
         },
-    )?;
+    )
+    .map_err(crate::error::Error::from)?;
 
     for entry in &entries {
         if entry.name == "HEAD" {

@@ -1228,7 +1228,7 @@ fn encode_ofs_delta_distance(buf: &mut Vec<u8>, mut ofs: u64) {
 ///
 /// This is the local / `file://` fetch path. It:
 ///
-/// 1. Enumerates the remote's refs with [`crate::ls_remote::ls_remote`] and
+/// 1. Enumerates the remote's refs with [`crate::remote::list_refs_from_git_dir`] and
 ///    captures the remote `HEAD` symref for [`FetchOutcome::default_branch`].
 /// 2. Parses `opts.refspecs` with [`crate::refspec`] and, for each remote ref
 ///    that matches a positive refspec (and is not excluded by a negative one),
@@ -1275,14 +1275,15 @@ pub fn fetch_local(
     let remote_odb = open_odb(remote_git_dir);
 
     // 1. Enumerate remote refs (with HEAD symref for the default branch).
-    let remote_entries = crate::ls_remote::ls_remote(
+    let remote_entries = crate::remote::list_refs_from_git_dir(
         remote_git_dir,
         &remote_odb,
-        &crate::ls_remote::Options {
-            symref: true,
+        &crate::remote::ListRefsOptions {
+            symrefs: true,
             ..Default::default()
         },
-    )?;
+    )
+    .map_err(crate::error::Error::from)?;
 
     let mut default_branch = None;
     // remote ref name -> oid (excluding HEAD and peeled `^{}` entries).

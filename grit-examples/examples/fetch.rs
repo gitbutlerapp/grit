@@ -1,8 +1,8 @@
-// API docs: https://docs.rs/grit-lib/latest/grit_lib/ls_remote/fn.ls_remote.html
-use grit_lib::ls_remote::{ls_remote, Options};
+// API docs: https://docs.rs/grit-lib/latest/grit_lib/remote/fn.list_refs_from_git_dir.html
 use grit_lib::objects::{parse_commit, parse_tree, tag_object_line_oid, ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
 use grit_lib::refs::write_ref;
+use grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
 use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
@@ -13,14 +13,15 @@ fn main() -> grit_lib::error::Result<()> {
     let local_odb = Odb::new(&local_git.join("objects"));
     let remote_odb = Odb::new(&remote_git.join("objects"));
 
-    let refs = ls_remote(
+    let refs = list_refs_from_git_dir(
         &remote_git,
         &remote_odb,
-        &Options {
+        &ListRefsOptions {
             heads: true,
-            ..Options::default()
+            ..Default::default()
         },
-    )?;
+    )
+    .map_err(|e| grit_lib::error::Error::from(e))?;
 
     for remote_ref in refs {
         copy_reachable(&remote_odb, &local_odb, remote_ref.oid)?;
