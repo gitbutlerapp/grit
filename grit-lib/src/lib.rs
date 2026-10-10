@@ -142,6 +142,11 @@ pub mod dotfile;
 pub mod environment;
 pub mod error;
 mod ewah_bitmap;
+
+#[doc(hidden)]
+pub mod ewah_bench {
+    include!("ewah_bench_api.rs");
+}
 pub mod fetch;
 pub mod fetch_head;
 pub mod fetch_negotiator;

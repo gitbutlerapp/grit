@@ -111,6 +111,10 @@ harness = false
 name = "delta_encode"
 harness = false
 
+[[bench]]
+name = "ewah"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }
