@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
-use grit_lib::rev_list::ObjectFilter;
 use grit_lib::pack_objects::{build_pack, build_pack_with_shallow_and_filter, PackBuildOptions};
+use grit_lib::rev_list::ObjectFilter;
 use grit_lib::unpack_objects::pack_bytes_to_object_map;
 use grit_test_support::{HashAlgo, RepoFixture};
 
@@ -147,18 +147,17 @@ fn bitmap_and_walk_honor_explicit_shallow_boundary() {
         delta: false,
         ..PackBuildOptions::default()
     };
-    let pack_on = build_pack_with_shallow_and_filter(
-        &odb, &[head], &[], &shallow, None, &opts_on,
-    )
-    .expect("bitmap");
-    let pack_off = build_pack_with_shallow_and_filter(
-        &odb, &[head], &[], &shallow, None, &opts_off,
-    )
-    .expect("walk");
+    let pack_on =
+        build_pack_with_shallow_and_filter(&odb, &[head], &[], &shallow, &shallow, None, &opts_on)
+            .expect("bitmap");
+    let pack_off =
+        build_pack_with_shallow_and_filter(&odb, &[head], &[], &shallow, &shallow, None, &opts_off)
+            .expect("walk");
     let on_set = pack_object_set(&pack_on, &odb);
     let off_set = pack_object_set(&pack_off, &odb);
     assert_eq!(
-        on_set, off_set,
+        on_set,
+        off_set,
         "bitmap path must honor explicit shallow_grafts (got {} vs {} objects)",
         on_set.len(),
         off_set.len()
@@ -255,7 +254,13 @@ fn filters_respected_with_bitmaps() {
         ..PackBuildOptions::default()
     };
     let pack = build_pack_with_shallow_and_filter(
-        &odb, &[head], &[], &empty, Some(&filter), &opts,
+        &odb,
+        &[head],
+        &[],
+        &empty,
+        &empty,
+        Some(&filter),
+        &opts,
     )
     .expect("filtered pack");
     let map = pack_bytes_to_object_map(&pack, &odb).expect("parse");

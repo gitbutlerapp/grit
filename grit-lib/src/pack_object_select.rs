@@ -28,9 +28,13 @@ pub struct PackObjectSelection {
 pub struct PackEnumerateOptions<'a> {
     /// Partial-clone filter applied to the want side (when supported).
     pub filter: Option<&'a ObjectFilter>,
-    /// Shallow graft boundaries: do not walk past these commits. When non-empty,
-    /// bitmap enumeration is skipped and the object walk is used.
+    /// Shallow graft boundaries on the want side: do not walk past these commits
+    /// when enumerating objects to send. When non-empty, bitmap enumeration is
+    /// skipped and the object walk is used.
     pub shallow_grafts: &'a HashSet<ObjectId>,
+    /// Shallow graft boundaries when walking client `haves` to build the peer
+    /// closure. Defaults to [`Self::shallow_grafts`] when unset.
+    pub have_shallow_grafts: Option<&'a HashSet<ObjectId>>,
     /// When false, always use the object walk even if bitmaps exist.
     pub use_bitmaps: bool,
     /// Precomputed peer object closure to subtract from `wants` during a walk
@@ -144,10 +148,11 @@ fn walk_enumeration(
     haves: &[ObjectId],
     opts: &PackEnumerateOptions<'_>,
 ) -> Result<PackObjectSelection> {
+    let have_shallow = opts.have_shallow_grafts.unwrap_or(opts.shallow_grafts);
     let have_closure = if let Some(ex) = opts.exclude_objects {
         ex.clone()
     } else {
-        reachable_closure_walk(odb, haves, &HashSet::new(), true, opts.shallow_grafts)?
+        reachable_closure_walk(odb, haves, &HashSet::new(), true, have_shallow)?
     };
     let (send, blob_name_hashes) = if opts.filter.is_some() {
         rev_list_filtered_objects(odb, wants, haves, opts.filter)?
@@ -244,16 +249,14 @@ fn collect_reachable_excluding_with_name_hashes(
                    visited: &mut HashSet<ObjectId>,
                    ordered: &mut Vec<ObjectId>|
      -> bool {
-        if exclude.contains(&oid) {
+        if !visited.insert(oid) {
             return false;
         }
-        if visited.insert(oid) {
+        if !exclude.contains(&oid) {
             ordered.push(oid);
-            queue.push_back((oid, path));
-            true
-        } else {
-            false
         }
+        queue.push_back((oid, path));
+        true
     };
 
     for &root in roots {

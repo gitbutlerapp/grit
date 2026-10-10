@@ -429,17 +429,26 @@ fn write_fake_ssh(grit_bin: &Path, dir: &Path) -> Option<PathBuf> {
     let script = dir.join("fake-ssh.sh");
     let body = format!(
         r#"#!/bin/sh
-cmd=
-for cmd in "$@"; do :; done
-case "$cmd" in
-  "git-upload-pack "*)
-    path="${{cmd#git-upload-pack }}"
-    path="${{path#\'}}"; path="${{path%\'}}"
-    path="${{path#\"}}"; path="${{path%\"}}"
-    exec "{grit}" upload-pack "$path"
-    ;;
-  *) exec sh -c "$cmd" ;;
-esac
+# Git probes ssh configuration with `-G` before the real upload-pack invocation.
+if [ "$1" = "-G" ]; then
+  exec ssh "$@"
+fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    git-upload-pack)
+      shift
+      exec "{grit}" upload-pack "$1"
+      ;;
+    git-upload-pack\ *)
+      path="${{1#git-upload-pack }}"
+      path="${{path#\'}}"; path="${{path%\'}}"
+      path="${{path#\"}}"; path="${{path%\"}}"
+      exec "{grit}" upload-pack "$path"
+      ;;
+  esac
+  shift
+done
+exec sh -c "$*"
 "#,
         grit = grit_bin.display()
     );
@@ -496,7 +505,7 @@ fn want_ref_v2_fetch_over_http() {
         return;
     };
     let tmp = tempfile::tempdir().unwrap();
-    let (mut grit_bare, git_bare) = setup_bare_pair(tmp.path());
+    let (grit_bare, git_bare) = setup_bare_pair(tmp.path());
     git(
         Some(&grit_bare),
         &["config", "uploadpack.allowRefInWant", "true"],

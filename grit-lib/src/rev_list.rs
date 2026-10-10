@@ -5964,9 +5964,10 @@ fn min_client_shallow_distance(
     let mut best: Option<usize> = None;
     let mut dist: HashMap<ObjectId, usize> = HashMap::new();
     let mut q: VecDeque<(ObjectId, usize)> = VecDeque::new();
+    // Match Git `get_shallows_depth`: commit counts from wanted tips start at 1.
     for &w in wants {
-        dist.insert(w, 0);
-        q.push_back((w, 0));
+        dist.insert(w, 1);
+        q.push_back((w, 1));
     }
     while let Some((oid, d)) = q.pop_front() {
         if client_shallow.contains(&oid) {

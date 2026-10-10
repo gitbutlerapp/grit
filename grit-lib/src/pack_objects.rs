@@ -265,6 +265,7 @@ impl<'a> PackObjects<'a> {
             &crate::pack_object_select::PackEnumerateOptions {
                 filter: None,
                 shallow_grafts: &self.source_shallow,
+                have_shallow_grafts: Some(&self.have_shallow),
                 use_bitmaps: opts.use_bitmaps,
                 exclude_objects: Some(&have_closure),
             },
@@ -327,7 +328,15 @@ pub fn build_pack(
     haves: &[ObjectId],
     opts: &PackBuildOptions,
 ) -> Result<Vec<u8>> {
-    build_pack_with_shallow_and_filter(odb, wants, haves, &HashSet::new(), None, opts)
+    build_pack_with_shallow_and_filter(
+        odb,
+        wants,
+        haves,
+        &HashSet::new(),
+        &HashSet::new(),
+        None,
+        opts,
+    )
 }
 
 /// Build a pack for upload-pack with optional shallow grafts and object filter.
@@ -338,6 +347,7 @@ pub fn build_pack_with_shallow_and_filter(
     odb: &Odb,
     wants: &[ObjectId],
     haves: &[ObjectId],
+    have_shallow: &HashSet<ObjectId>,
     source_shallow: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
@@ -349,6 +359,7 @@ pub fn build_pack_with_shallow_and_filter(
         &crate::pack_object_select::PackEnumerateOptions {
             filter,
             shallow_grafts: source_shallow,
+            have_shallow_grafts: Some(have_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: None,
         },
@@ -367,11 +378,20 @@ pub fn build_pack_for_upload(
     repo: &Repository,
     wants: &[ObjectId],
     haves: &[ObjectId],
+    have_shallow: &HashSet<ObjectId>,
     source_shallow: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
 ) -> Result<Vec<u8>> {
-    build_pack_with_shallow_and_filter(&repo.odb, wants, haves, source_shallow, filter, opts)
+    build_pack_with_shallow_and_filter(
+        &repo.odb,
+        wants,
+        haves,
+        have_shallow,
+        source_shallow,
+        filter,
+        opts,
+    )
 }
 
 /// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
@@ -449,16 +469,14 @@ fn collect_reachable_excluding(
                    visited: &mut HashSet<ObjectId>,
                    ordered: &mut Vec<ObjectId>|
      -> bool {
-        if exclude.contains(&oid) {
+        if !visited.insert(oid) {
             return false;
         }
-        if visited.insert(oid) {
+        if !exclude.contains(&oid) {
             ordered.push(oid);
-            queue.push_back(oid);
-            true
-        } else {
-            false
         }
+        queue.push_back(oid);
+        true
     };
 
     for &root in roots {

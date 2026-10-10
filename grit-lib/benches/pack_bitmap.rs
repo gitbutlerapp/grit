@@ -197,6 +197,7 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                     &PackEnumerateOptions {
                         filter: None,
                         shallow_grafts: &empty,
+                        have_shallow_grafts: None,
                         use_bitmaps: false,
                         exclude_objects: None,
                     },
@@ -216,6 +217,7 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                     &PackEnumerateOptions {
                         filter: None,
                         shallow_grafts: &empty,
+                        have_shallow_grafts: None,
                         use_bitmaps: true,
                         exclude_objects: None,
                     },

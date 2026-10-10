@@ -77,6 +77,8 @@ fn serve_v0(
     config: &ConfigSet,
     policy: &UploadPackPolicy,
 ) -> Result<()> {
+    let config = repo_config(repo);
+    let policy = UploadPackPolicy::from_config(&config);
     let refs = advertised_refs(repo, &opts.hidden_refs)?;
     let head = head_info(repo);
 
@@ -157,9 +159,6 @@ fn serve_v0(
                     write_line(output, "NAK")?;
                 }
                 output.flush()?;
-                // Stateless smart HTTP replays the full want/have transcript in each
-                // POST; flushes separate rounds but `done` may follow later in the
-                // same body. End without a pack only when the request body hits EOF.
             }
             Some(other) => {
                 return Err(ServeError::Protocol(format!(
@@ -169,6 +168,12 @@ fn serve_v0(
         }
     }
 
+    if opts.stateless_rpc {
+        if let Some(ref sh) = shallow_resp {
+            write_v0_shallow_lines(output, sh)?;
+            write_flush(output)?;
+        }
+    }
     match common.last() {
         Some(last) if detailed => write_line(output, &format!("ACK {}", last.to_hex()))?,
         Some(_) => {}
@@ -201,6 +206,7 @@ fn write_v0_advertisement(
     opts: &ServeOptions,
     policy: &UploadPackPolicy,
 ) -> Result<()> {
+    let policy = upload_policy(repo);
     let mut caps: Vec<String> = V0_CAPABILITIES.iter().map(|c| (*c).to_owned()).collect();
     caps.extend(
         policy
@@ -587,6 +593,8 @@ fn fetch_v2(
             wants.push(oid);
         } else if arg == "done" {
             done = true;
+        } else if arg == "deepen-relative" {
+            deepen_relative = true;
         } else if matches!(
             arg.as_str(),
             "thin-pack" | "no-progress" | "include-tag" | "ofs-delta" | "sideband-all"
@@ -687,16 +695,16 @@ fn build_response_pack(
     };
 
     let pack_opts = PackBuildOptions {
-        thin: caps.contains("thin-pack"),
+        thin: input.caps.contains("thin-pack"),
         delta: true,
-        use_ofs_delta: caps.contains("ofs-delta"),
+        use_ofs_delta: input.caps.contains("ofs-delta"),
         ..PackBuildOptions::default()
     };
     let shallow_grafts = shallow
         .map(|s| s.pack_shallow_grafts.clone())
         .unwrap_or_default();
     Ok(build_pack_for_upload(
-        repo,
+        input.repo,
         &pack_wants,
         &pack_haves,
         &shallow_grafts,
