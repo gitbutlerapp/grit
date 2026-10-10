@@ -4,6 +4,7 @@ pub mod bench_env;
 pub mod binary;
 pub mod bitmap_fixture;
 pub mod bitmap_suite;
+pub mod capped_run;
 pub mod compare;
 pub mod fixture;
 pub mod hot_path_fixture;

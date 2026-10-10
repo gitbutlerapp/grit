@@ -28,4 +28,4 @@ shell-words.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["resource"] }
+nix = { workspace = true, features = ["resource", "signal"] }

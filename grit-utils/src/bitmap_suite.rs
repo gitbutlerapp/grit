@@ -1,15 +1,18 @@
 //! Reachability bitmap scenarios on a repacked `git.git` clone.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::binary::{grit_source_commit, tool_version};
 use crate::bitmap_fixture::{bitmap_isolated_env, ensure_bitmaps_git_repo};
+use crate::capped_run::{TerminationKind, EXIT_MEMORY_CAP, EXIT_TIMEOUT};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::odb_fixture::odb_scratch_root;
-use crate::resource::{bench_with_peak_rss, serve_clone_caps, wrap_command_with_timeout};
+use crate::resource::{
+    bench_with_peak_rss, peak_rss_for_command_with_limits, serve_clone_caps,
+    wrap_command_with_serve_caps, CappedCommandError,
+};
 use crate::scenarios::{Driver, Scenario};
 use crate::schema::{BenchFailure, BenchReport, ScenarioResult, ToolVersions, SCHEMA_VERSION};
 use crate::serve_request::SERVE_CLONE_REQUEST_FILE;
@@ -33,6 +36,36 @@ fn sh_redirect_stdin(cmd: &str, input: &Path) -> String {
         "{cmd} < {}",
         shell_words::quote(input.to_string_lossy().as_ref())
     )
+}
+
+fn bench_failure_from_termination(kind: TerminationKind) -> BenchFailure {
+    match kind {
+        TerminationKind::Timeout => BenchFailure {
+            kind: "timeout".into(),
+            message: format!("serve-clone exceeded wall-clock cap (exit {EXIT_TIMEOUT})"),
+        },
+        TerminationKind::MemoryCap {
+            peak_rss_bytes,
+            cap_bytes,
+        } => BenchFailure {
+            kind: "memory_cap".into(),
+            message: format!(
+                "RSS monitor stopped child at {peak_rss_bytes} bytes (cap {cap_bytes})"
+            ),
+        },
+        TerminationKind::CommandFailed { code } => BenchFailure {
+            kind: "command_failed".into(),
+            message: format!("serve-clone command failed with exit code {code}"),
+        },
+        TerminationKind::Success => BenchFailure {
+            kind: "command_failed".into(),
+            message: "expected capped serve-clone failure but command succeeded".into(),
+        },
+    }
+}
+
+fn bench_failure_from_capped_err(err: &CappedCommandError) -> BenchFailure {
+    bench_failure_from_termination(TerminationKind::from_exit_code(err.code))
 }
 
 fn run_scenario(
@@ -69,8 +102,9 @@ fn run_scenario(
     git_stats.peak_rss_bytes = Some(git_rss);
 
     let caps = serve_clone_caps();
-    let grit_command = if scenario.id.contains("serve-clone") {
-        wrap_command_with_timeout(&grit_cmd, caps.timeout)
+    let serve_clone = scenario.id.contains("serve-clone");
+    let grit_hyperfine_cmd = if serve_clone {
+        wrap_command_with_serve_caps(bench_exe, repo, &grit_cmd, caps)
     } else {
         grit_cmd.clone()
     };
@@ -82,16 +116,13 @@ fn run_scenario(
             let (mut grit_stats, grit_rss) = bench_with_peak_rss(
                 hyperfine,
                 bench_exe,
-                &grit_command,
+                &grit_hyperfine_cmd,
                 repo,
                 cfg.warmup,
                 cfg.min_runs,
                 "grit",
                 env.as_deref(),
             )?;
-            if scenario.id.contains("serve-clone") && grit_rss > caps.max_rss_bytes {
-                anyhow::bail!("peak RSS {grit_rss} exceeds cap {}", caps.max_rss_bytes);
-            }
             grit_stats.peak_rss_bytes = Some(grit_rss);
             Ok(grit_stats)
         })();
@@ -101,7 +132,13 @@ fn run_scenario(
                 (stats, ratio, None)
             }
             Err(e) => {
-                let fail = bench_failure_from_error(&e);
+                let fail = e
+                    .downcast_ref::<CappedCommandError>()
+                    .map(bench_failure_from_capped_err)
+                    .unwrap_or_else(|| BenchFailure {
+                        kind: "command_failed".into(),
+                        message: e.to_string(),
+                    });
                 (failed_timing_stats(), 0.0, Some(fail))
             }
         }
@@ -144,6 +181,9 @@ pub fn run_bitmaps_suite(
 ) -> Result<BenchReport> {
     let repo = match repo_override {
         Some(p) => {
+            crate::bitmap_fixture::assert_tag_pinned_fixture_refs(p).context(
+                "bitmap --repo path is not a single-branch tag fixture; delete the cache or omit --repo",
+            )?;
             if !p.join(SERVE_CLONE_REQUEST_FILE).is_file() {
                 crate::serve_request::ensure_serve_clone_request(p)?;
             }
@@ -243,26 +283,6 @@ pub fn run_bitmaps_suite(
     })
 }
 
-fn bench_failure_from_error(err: &anyhow::Error) -> BenchFailure {
-    let msg = err.to_string();
-    if msg.contains("exit status: 137") || msg.contains("signal 9") || msg.contains("Killed") {
-        BenchFailure {
-            kind: "memory_cap".into(),
-            message: msg,
-        }
-    } else if msg.contains("exit status: 124") || msg.contains("timed out") {
-        BenchFailure {
-            kind: "timeout".into(),
-            message: msg,
-        }
-    } else {
-        BenchFailure {
-            kind: "command_failed".into(),
-            message: msg,
-        }
-    }
-}
-
 fn probe_serve_clone_failure(
     bench_exe: &Path,
     repo: &Path,
@@ -274,26 +294,40 @@ fn probe_serve_clone_failure(
     } else {
         shell_command(bench_exe, &scenario.grit_argv)
     };
-    let wrapped = wrap_command_with_timeout(&grit_cmd, caps.timeout);
     let env = bitmap_isolated_env();
-    let full = format!("{env} {wrapped}");
-    let start = std::time::Instant::now();
-    match crate::resource::peak_rss_for_command(&full, repo, bench_exe) {
-        Ok(rss) if rss <= caps.max_rss_bytes => Ok(None),
-        Ok(rss) => Ok(Some(BenchFailure {
-            kind: "memory_cap".into(),
-            message: format!("peak RSS {rss} exceeded cap {}", caps.max_rss_bytes),
-        })),
+    let full = format!("{env} {grit_cmd}");
+    match peak_rss_for_command_with_limits(
+        &full,
+        repo,
+        bench_exe,
+        Some(caps.timeout),
+        Some(caps.max_rss_bytes),
+    ) {
+        Ok(_) => Ok(None),
         Err(e) => {
-            let elapsed = start.elapsed();
-            if elapsed >= caps.timeout.saturating_sub(Duration::from_secs(1)) {
-                Ok(Some(BenchFailure {
-                    kind: "timeout".into(),
-                    message: format!("exceeded {}s cap: {e}", caps.timeout.as_secs()),
-                }))
-            } else {
-                Ok(Some(bench_failure_from_error(&e)))
+            if let Some(cap_err) = e.downcast_ref::<CappedCommandError>() {
+                if cap_err.code == EXIT_MEMORY_CAP {
+                    return Ok(Some(BenchFailure {
+                        kind: "memory_cap".into(),
+                        message: format!(
+                            "RSS monitor enforced cap {} bytes (exit {EXIT_MEMORY_CAP})",
+                            caps.max_rss_bytes
+                        ),
+                    }));
+                }
+                if cap_err.code == EXIT_TIMEOUT {
+                    return Ok(Some(bench_failure_from_termination(
+                        TerminationKind::Timeout,
+                    )));
+                }
+                return Ok(Some(bench_failure_from_termination(
+                    TerminationKind::CommandFailed { code: cap_err.code },
+                )));
             }
+            Ok(Some(BenchFailure {
+                kind: "command_failed".into(),
+                message: e.to_string(),
+            }))
         }
     }
 }

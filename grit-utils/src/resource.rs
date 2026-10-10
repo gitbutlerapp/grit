@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
+use crate::capped_run::{run_capped_shell_command, TerminationKind, EXIT_MEMORY_CAP, EXIT_TIMEOUT};
 use crate::hyperfine::{run_hyperfine, HyperfineResultEntry, HyperfineRun};
 use crate::schema::TimingStats;
 use crate::stats::timing_from_hyperfine;
@@ -13,30 +14,90 @@ use crate::stats::timing_from_hyperfine;
 /// Environment variable carrying the shell command for [`run_measure_rss_cli`].
 pub const MEASURE_CMD_ENV: &str = "GRIT_BENCH_MEASURE_CMD";
 
+/// Optional wall-clock limit for [`run_measure_rss_cli`] / [`run_limited_cli`].
+pub const MEASURE_TIMEOUT_SECS_ENV: &str = "GRIT_BENCH_MEASURE_TIMEOUT_SECS";
+
+/// Optional peak-RSS cap (bytes) for [`run_measure_rss_cli`] / [`run_limited_cli`].
+pub const MEASURE_MAX_RSS_ENV: &str = "GRIT_BENCH_MEASURE_MAX_RSS_BYTES";
+
 /// Hidden CLI entry: run one shell command and print peak RSS (bytes) on stdout.
 ///
 /// Invoked in a fresh process so `getrusage(RUSAGE_CHILDREN)` reflects only this run.
 pub fn run_measure_rss_cli(cwd: &Path) -> Result<()> {
     let command = std::env::var(MEASURE_CMD_ENV).context("GRIT_BENCH_MEASURE_CMD not set")?;
-    let peak = peak_rss_single_child(&command, cwd)?;
-    println!("{peak}");
-    Ok(())
+    let caps = measure_limits_from_env()?;
+    let outcome = run_capped_shell_command(&command, cwd, caps.timeout, caps.max_rss_bytes)?;
+    match outcome.termination {
+        TerminationKind::Success => {
+            println!("{}", outcome.peak_rss_bytes);
+            Ok(())
+        }
+        TerminationKind::Timeout => std::process::exit(EXIT_TIMEOUT),
+        TerminationKind::MemoryCap { .. } => std::process::exit(EXIT_MEMORY_CAP),
+        TerminationKind::CommandFailed { code } => std::process::exit(code),
+    }
+}
+
+/// Hidden CLI entry: run one shell command under timeout/RSS caps (no stdout on success).
+pub fn run_limited_cli(cwd: &Path) -> Result<()> {
+    let command = std::env::var(MEASURE_CMD_ENV).context("GRIT_BENCH_MEASURE_CMD not set")?;
+    let caps = measure_limits_from_env()?;
+    let outcome = run_capped_shell_command(&command, cwd, caps.timeout, caps.max_rss_bytes)?;
+    match outcome.termination {
+        TerminationKind::Success => Ok(()),
+        TerminationKind::Timeout => std::process::exit(EXIT_TIMEOUT),
+        TerminationKind::MemoryCap { .. } => std::process::exit(EXIT_MEMORY_CAP),
+        TerminationKind::CommandFailed { code } => std::process::exit(code),
+    }
+}
+
+struct MeasureLimits {
+    timeout: Option<Duration>,
+    max_rss_bytes: Option<u64>,
+}
+
+fn measure_limits_from_env() -> Result<MeasureLimits> {
+    let timeout = std::env::var(MEASURE_TIMEOUT_SECS_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|s| Duration::from_secs(s.max(1)));
+    let max_rss_bytes = std::env::var(MEASURE_MAX_RSS_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    Ok(MeasureLimits {
+        timeout,
+        max_rss_bytes,
+    })
 }
 
 /// Peak RSS for `command`, measured in a fresh `grit-bench measure-rss` process.
 pub fn peak_rss_for_command(command: &str, cwd: &Path, measure_helper: &Path) -> Result<u64> {
-    let out = Command::new(measure_helper)
-        .arg("measure-rss")
+    peak_rss_for_command_with_limits(command, cwd, measure_helper, None, None)
+}
+
+/// Peak RSS with optional proactive timeout and RSS caps (see [`run_capped_shell_command`]).
+pub fn peak_rss_for_command_with_limits(
+    command: &str,
+    cwd: &Path,
+    measure_helper: &Path,
+    timeout: Option<Duration>,
+    max_rss_bytes: Option<u64>,
+) -> Result<u64> {
+    let mut cmd = Command::new(measure_helper);
+    cmd.arg("measure-rss")
         .arg("--cwd")
         .arg(cwd)
-        .env(MEASURE_CMD_ENV, command)
-        .output()
-        .context("spawn measure-rss helper")?;
+        .env(MEASURE_CMD_ENV, command);
+    if let Some(secs) = timeout.map(|d| d.as_secs().max(1)) {
+        cmd.env(MEASURE_TIMEOUT_SECS_ENV, secs.to_string());
+    }
+    if let Some(cap) = max_rss_bytes {
+        cmd.env(MEASURE_MAX_RSS_ENV, cap.to_string());
+    }
+    let out = cmd.output().context("spawn measure-rss helper")?;
     if !out.status.success() {
-        anyhow::bail!(
-            "measure-rss failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+        let code = out.status.code().unwrap_or(-1);
+        return Err(CappedCommandError { code }.into());
     }
     let text = String::from_utf8_lossy(&out.stdout);
     text.trim()
@@ -44,60 +105,19 @@ pub fn peak_rss_for_command(command: &str, cwd: &Path, measure_helper: &Path) ->
         .context("parse measure-rss stdout as u64")
 }
 
-#[cfg(unix)]
-fn peak_rss_single_child(command: &str, cwd: &Path) -> Result<u64> {
-    use nix::sys::resource::{getrusage, UsageWho};
-    use std::process::Stdio;
-
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c")
-        .arg(command)
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let status = cmd.status().context("run benchmark command for RSS")?;
-    if !status.success() {
-        anyhow::bail!("benchmark command failed with {status}");
-    }
-    let usage = getrusage(UsageWho::RUSAGE_CHILDREN).context("getrusage(RUSAGE_CHILDREN)")?;
-    Ok(rss_bytes_from_nix(usage.max_rss()))
+/// Error from a capped helper process (`measure-rss` / `run-limited`).
+#[derive(Debug, Clone, Copy)]
+pub struct CappedCommandError {
+    pub code: i32,
 }
 
-#[cfg(not(unix))]
-fn peak_rss_single_child(_command: &str, _cwd: &Path) -> Result<u64> {
-    Ok(0)
-}
-
-/// Convert `ru_maxrss` from `getrusage` into bytes (OS-specific units).
-#[cfg(unix)]
-pub(crate) fn rss_bytes_from_nix(raw: i64) -> u64 {
-    let raw = raw.max(0) as u64;
-    #[cfg(target_os = "macos")]
-    {
-        raw
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // Linux and BSD report KiB.
-        raw.saturating_mul(1024)
+impl std::fmt::Display for CappedCommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "capped command exited with code {}", self.code)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rss_bytes_linux_kib_to_bytes() {
-        if cfg!(target_os = "macos") {
-            assert_eq!(rss_bytes_from_nix(4096), 4096);
-        } else {
-            assert_eq!(rss_bytes_from_nix(1024), 1024 * 1024);
-            assert_eq!(rss_bytes_from_nix(1_126_400), 1_153_433_600);
-        }
-    }
-}
+impl std::error::Error for CappedCommandError {}
 
 /// Run hyperfine for timing and sample peak RSS on the last timed run.
 #[allow(clippy::too_many_arguments)]
@@ -180,16 +200,19 @@ pub fn serve_clone_caps() -> ServeCloneCaps {
     }
 }
 
-/// Prefix a shell command with `timeout -s KILL` when running on Unix.
-pub fn wrap_command_with_timeout(command: &str, timeout: Duration) -> String {
-    let secs = timeout.as_secs().max(1);
-    #[cfg(unix)]
-    {
-        format!("timeout -s KILL {secs}s {command}")
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = secs;
-        command.to_string()
-    }
+/// Wrap a benchmark command so hyperfine executes it via `grit-bench run-limited`.
+pub fn wrap_command_with_serve_caps(
+    measure_helper: &Path,
+    cwd: &Path,
+    inner_command: &str,
+    caps: ServeCloneCaps,
+) -> String {
+    let helper = crate::shell::shell_quote(&measure_helper.to_string_lossy());
+    let cwd_q = crate::shell::shell_quote(&cwd.to_string_lossy());
+    let cmd_q = crate::shell::shell_quote(inner_command);
+    format!(
+        "GRIT_BENCH_MEASURE_CMD={cmd_q} GRIT_BENCH_MEASURE_TIMEOUT_SECS={} GRIT_BENCH_MEASURE_MAX_RSS_BYTES={} {helper} run-limited --cwd {cwd_q}",
+        caps.timeout.as_secs().max(1),
+        caps.max_rss_bytes,
+    )
 }

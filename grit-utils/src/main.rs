@@ -98,6 +98,12 @@ enum Cmd {
         #[arg(long)]
         cwd: PathBuf,
     },
+    /// Internal: run one shell command under RSS/time caps (for serve-clone hyperfine)
+    #[command(hide = true)]
+    RunLimited {
+        #[arg(long)]
+        cwd: PathBuf,
+    },
     /// Compare two JSON reports; exit non-zero when ratios differ beyond tolerance
     Compare {
         baseline: PathBuf,
@@ -263,6 +269,9 @@ fn main() -> Result<()> {
         Cmd::MeasureRss { cwd } => {
             return grit_utils::resource::run_measure_rss_cli(cwd);
         }
+        Cmd::RunLimited { cwd } => {
+            return grit_utils::resource::run_limited_cli(cwd);
+        }
         Cmd::Drive { workload } => {
             return run_drive(workload);
         }
@@ -415,6 +424,7 @@ fn main() -> Result<()> {
         }
         Cmd::Compare { .. }
         | Cmd::MeasureRss { .. }
+        | Cmd::RunLimited { .. }
         | Cmd::Drive { .. }
         | Cmd::PrepareAdd { .. }
         | Cmd::PrepareSwitch { .. }
