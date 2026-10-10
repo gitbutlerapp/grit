@@ -26,13 +26,28 @@ pub struct Stage0TrackedPaths {
 }
 
 impl Stage0TrackedPaths {
-    /// Build a lookup table from the index once per worktree walk.
+    /// Build a lookup table from stage-0 index entries once per worktree walk.
     #[must_use]
     pub fn from_index(index: &Index, ignorecase: bool) -> Self {
+        Self::from_index_with_stage_filter(index, ignorecase, |stage| stage == 0)
+    }
+
+    /// Build a lookup table for untracked scanning: every indexed path counts as
+    /// tracked, including unmerged conflict stages (1–3).
+    #[must_use]
+    pub fn from_index_for_untracked_scan(index: &Index, ignorecase: bool) -> Self {
+        Self::from_index_with_stage_filter(index, ignorecase, |_| true)
+    }
+
+    fn from_index_with_stage_filter(
+        index: &Index,
+        ignorecase: bool,
+        stage_ok: impl Fn(u8) -> bool,
+    ) -> Self {
         if ignorecase {
             let mut folded = HashMap::new();
             for e in &index.entries {
-                if e.stage() == 0 {
+                if stage_ok(e.stage()) {
                     push_bucket(&mut folded, e.path.clone());
                 }
             }
@@ -43,7 +58,7 @@ impl Stage0TrackedPaths {
         } else {
             let mut exact = HashSet::with_capacity(index.entries.len());
             for e in &index.entries {
-                if e.stage() == 0 {
+                if stage_ok(e.stage()) {
                     exact.insert(e.path.clone());
                 }
             }

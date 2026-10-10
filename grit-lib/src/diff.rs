@@ -2381,6 +2381,8 @@ pub struct DiffIndexToWorktreeOptions {
     /// Shared per-operation attribute/conversion context (see [`crate::worktree_rules::WorktreeRules`]).
     pub worktree_rules:
         Option<std::sync::Arc<std::sync::Mutex<crate::worktree_rules::WorktreeRules>>>,
+    /// When true, omit worktree-vs-index diffs for unmerged paths (used by `status` only).
+    pub for_status: bool,
 }
 
 struct StagingHashJob {
@@ -3119,31 +3121,33 @@ fn diff_index_to_worktree_inner(
             score: None,
         });
 
-        if let Some(meta) = wt_meta {
-            let file_attrs = file_attrs_for(&path);
-            let wt_oid = worktree_file_oid(
-                odb,
-                &file_path,
-                &meta,
-                &conv,
-                &file_attrs,
-                &path,
-                Some(&base_entry),
-                materialize_dirty_blobs,
-                filter_fp,
-            )?;
-            let wt_mode = mode_from_metadata(&meta);
-            if wt_oid != base_entry.oid || wt_mode != base_entry.mode {
-                result.push(DiffEntry {
-                    status: DiffStatus::Modified,
-                    old_path: Some(path.clone()),
-                    new_path: Some(path),
-                    old_mode: format_mode(base_entry.mode),
-                    new_mode: format_mode(wt_mode),
-                    old_oid: base_entry.oid,
-                    new_oid: wt_oid,
-                    score: None,
-                });
+        if !options.for_status {
+            if let Some(meta) = wt_meta {
+                let file_attrs = file_attrs_for(&path);
+                let wt_oid = worktree_file_oid(
+                    odb,
+                    &file_path,
+                    &meta,
+                    &conv,
+                    &file_attrs,
+                    &path,
+                    Some(&base_entry),
+                    materialize_dirty_blobs,
+                    filter_fp,
+                )?;
+                let wt_mode = mode_from_metadata(&meta);
+                if wt_oid != base_entry.oid || wt_mode != base_entry.mode {
+                    result.push(DiffEntry {
+                        status: DiffStatus::Modified,
+                        old_path: Some(path.clone()),
+                        new_path: Some(path),
+                        old_mode: format_mode(base_entry.mode),
+                        new_mode: format_mode(wt_mode),
+                        old_oid: base_entry.oid,
+                        new_oid: wt_oid,
+                        score: None,
+                    });
+                }
             }
         }
     }

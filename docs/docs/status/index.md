@@ -76,6 +76,18 @@ On main  ·  even with origin/main
 Nothing to commit — working tree clean.
 ```
 
+Merge in progress with a conflict:
+
+```console
+$ grit status
+On main  ·  merging — resolve conflicts
+
+Staged
+  !  conflict      f
+
+→ resolve conflicts, then grit commit "message"
+```
+
 Check from a script whether the working tree is clean:
 
 ```console
@@ -99,6 +111,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `unstaged` | array | Unstaged changes with `path` and `status`. |
 | `untracked` | array | Paths of untracked files. |
 | `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
+| `merging` | boolean | `true` when a merge is in progress (`MERGE_HEAD` exists). |
+| `in_progress` | array | Stable operation ids while work is paused (for example `merge`, `rebase`). Omitted when empty. |
+| `conflicts` | array | Paths with unmerged index stages. Omitted when empty. |
 
 Example:
 

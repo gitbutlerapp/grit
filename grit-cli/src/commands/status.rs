@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
-use grit_lib::state::HeadState;
+use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
 use serde::Serialize;
 
 use crate::context::{self, CommitSummary};
@@ -25,6 +25,8 @@ enum HeaderKind {
     Unborn,
     Detached,
     Invalid,
+    MergeInProgress,
+    OtherInProgress,
 }
 
 /// Result of `grit status`.
@@ -45,6 +47,14 @@ pub struct StatusOutcome {
     pub unstaged: Vec<ChangeJson>,
     pub untracked: Vec<String>,
     pub clean: bool,
+    /// True when a merge is in progress (`MERGE_HEAD` exists).
+    pub merging: bool,
+    /// In-progress operations (e.g. `merge`, `rebase`), when any apply.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub in_progress: Vec<String>,
+    /// Unmerged paths from the index (stages 1–3).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<String>,
 
     // Human-only state, not part of the JSON schema.
     #[serde(skip)]
@@ -107,6 +117,14 @@ impl StatusOutcome {
                 println!("HEAD is in an unknown state");
                 println!();
             }
+            HeaderKind::MergeInProgress => {
+                println!("On {branch}  ·  merging — resolve conflicts");
+                println!();
+            }
+            HeaderKind::OtherInProgress => {
+                println!("On {branch}  ·  operation in progress");
+                println!();
+            }
         }
     }
 
@@ -122,6 +140,14 @@ impl StatusOutcome {
     }
 
     fn render_hints(&self) {
+        if !self.conflicts.is_empty() {
+            println!("→ resolve conflicts, then grit commit \"message\"");
+            return;
+        }
+        if self.merging {
+            println!("→ grit commit \"message\" to finish the merge");
+            return;
+        }
         let mut hints = Vec::new();
         if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
             hints.push("grit add <file> to stage");
@@ -145,14 +171,25 @@ pub fn run() -> Result<StatusOutcome> {
     let model = status(&repo, &StatusOptions::default(), &mut NullProgress)
         .context("could not compute status")?;
 
+    let in_progress: Vec<String> = detect_in_progress(&repo.git_dir)
+        .into_iter()
+        .map(in_progress_label)
+        .collect();
+    let merging = model.state.merge_in_progress;
+    let conflicts = model.conflicts.clone();
+
     let (branch, detached, head, target, ahead_total, ahead_commits, header) =
-        resolve_header(&repo, &model.head)?;
+        resolve_header(&repo, &model.head, merging, &in_progress)?;
     let ahead = ahead_total;
     let commits = ahead_commits.iter().map(CommitJson::from_summary).collect();
 
     let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
     let unstaged: Vec<ChangeJson> = model.unstaged.iter().map(change_json).collect();
-    let clean = model.staged.is_empty() && model.unstaged.is_empty() && model.untracked.is_empty();
+    let clean = model.staged.is_empty()
+        && model.unstaged.is_empty()
+        && model.untracked.is_empty()
+        && conflicts.is_empty()
+        && !merging;
 
     let cwd = std::env::current_dir().context("could not read the current directory")?;
     let path_display = repo
@@ -171,6 +208,9 @@ pub fn run() -> Result<StatusOutcome> {
         unstaged,
         untracked: model.untracked,
         clean,
+        merging,
+        in_progress,
+        conflicts,
         header,
         commit_rows: ahead_commits,
         staged_entries: model.staged,
@@ -190,40 +230,71 @@ type HeaderResult = (
     HeaderKind,
 );
 
-fn resolve_header(repo: &grit_lib::repo::Repository, head: &HeadState) -> Result<HeaderResult> {
+fn in_progress_label(op: InProgressOperation) -> String {
+    match op {
+        InProgressOperation::Merge => "merge".to_owned(),
+        InProgressOperation::RebaseInteractive => "rebase-interactive".to_owned(),
+        InProgressOperation::Rebase => "rebase".to_owned(),
+        InProgressOperation::CherryPick => "cherry-pick".to_owned(),
+        InProgressOperation::Revert => "revert".to_owned(),
+        InProgressOperation::Bisect => "bisect".to_owned(),
+        InProgressOperation::Am => "am".to_owned(),
+    }
+}
+
+fn header_for_in_progress(merging: bool, in_progress: &[String]) -> Option<HeaderKind> {
+    if merging || in_progress.iter().any(|s| s == "merge") {
+        return Some(HeaderKind::MergeInProgress);
+    }
+    if !in_progress.is_empty() {
+        return Some(HeaderKind::OtherInProgress);
+    }
+    None
+}
+
+fn resolve_header(
+    repo: &grit_lib::repo::Repository,
+    head: &HeadState,
+    merging: bool,
+    in_progress: &[String],
+) -> Result<HeaderResult> {
     Ok(match head {
         HeadState::Branch {
             short_name,
             oid: Some(head_oid),
             ..
-        } => match context::find_target_branch(repo)? {
-            None => (
-                Some(short_name.clone()),
-                false,
-                Some(head_oid.to_hex()),
-                None,
-                0,
-                Vec::new(),
-                HeaderKind::NoTarget,
-            ),
-            Some(target) => {
-                let ahead = context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?;
-                let header = if ahead.total == 0 {
-                    HeaderKind::EvenWith
-                } else {
-                    HeaderKind::AheadOfTarget
-                };
-                (
+        } => {
+            let in_progress_header = header_for_in_progress(merging, in_progress);
+            match context::find_target_branch(repo)? {
+                None => (
                     Some(short_name.clone()),
                     false,
                     Some(head_oid.to_hex()),
-                    Some(target.display_name),
-                    ahead.total,
-                    ahead.commits,
-                    header,
-                )
+                    None,
+                    0,
+                    Vec::new(),
+                    in_progress_header.unwrap_or(HeaderKind::NoTarget),
+                ),
+                Some(target) => {
+                    let ahead =
+                        context::commits_ahead_of(repo, *head_oid, target.oid, SHORTLOG_LIMIT)?;
+                    let header = in_progress_header.unwrap_or(if ahead.total == 0 {
+                        HeaderKind::EvenWith
+                    } else {
+                        HeaderKind::AheadOfTarget
+                    });
+                    (
+                        Some(short_name.clone()),
+                        false,
+                        Some(head_oid.to_hex()),
+                        Some(target.display_name),
+                        ahead.total,
+                        ahead.commits,
+                        header,
+                    )
+                }
             }
-        },
+        }
         HeadState::Branch { short_name, .. } => (
             Some(short_name.clone()),
             false,
