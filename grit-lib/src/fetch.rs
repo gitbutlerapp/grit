@@ -1662,16 +1662,19 @@ pub(crate) fn retain_following_tags(
         if !m.is_tag {
             return true;
         }
-        if !pack_oids.contains(&m.oid) {
-            return false;
-        }
         let peeled = m
             .advertised_peel
             .unwrap_or_else(|| peel_tag_target(local_odb, m.oid));
-        if commit_reach.contains(&peeled) {
+        let reachable = commit_reach.contains(&peeled) || pack_reach.contains(&peeled);
+        if !reachable {
+            return false;
+        }
+        // Lightweight tags store the peeled commit directly; no tag object is required.
+        if m.oid == peeled {
             return true;
         }
-        pack_reach.contains(&peeled)
+        // Annotated tags need their tag object (new in this fetch or already local).
+        pack_oids.contains(&m.oid) || local_odb.exists(&m.oid)
     });
     Ok(())
 }
