@@ -1,7 +1,5 @@
 //! Shallow/deepen handling for [`super::upload_pack`].
 
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet};
 
 use crate::objects::{ObjectId, ObjectKind};
@@ -19,6 +17,7 @@ pub(crate) struct ShallowRequest {
     pub depth: Option<u32>,
     pub deepen_since: Option<i64>,
     pub deepen_not: Vec<ObjectId>,
+    pub deepen_relative: bool,
 }
 
 impl ShallowRequest {

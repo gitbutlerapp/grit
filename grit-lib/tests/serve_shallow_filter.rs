@@ -316,6 +316,54 @@ fn clone_depth(url: &str, dest: &Path, depth: &str, extra_env: &[(&str, &str)]) 
     );
 }
 
+fn clone_depth_v0(url: &str, dest: &Path, depth: &str) {
+    let out = Command::new("git")
+        .args([
+            "-c",
+            "protocol.version=0",
+            "clone",
+            "-q",
+            "--depth",
+            depth,
+            url,
+            dest.to_str().unwrap(),
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("clone");
+    assert!(
+        out.status.success(),
+        "v0 depth clone failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn clone_v0_bare_filtered(url: &str, dest: &Path) {
+    let out = Command::new("git")
+        .args([
+            "-c",
+            "protocol.version=0",
+            "clone",
+            "-q",
+            "--bare",
+            "--filter=blob:none",
+            "--depth",
+            "1",
+            url,
+            dest.to_str().unwrap(),
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("clone");
+    assert!(
+        out.status.success(),
+        "v0 filter bare clone failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn fetch_in(repo: &Path, remote: &str, args: &[&str]) {
     let mut argv = vec!["fetch", "-q", remote];
     argv.extend(args);
@@ -385,6 +433,254 @@ fn shallow_and_filter_http_matches_git_upload_pack() {
         );
     }
     compare_to_git_reference(&grit_f, &git_f);
+}
+
+#[test]
+fn v0_shallow_and_filter_http_matches_git_upload_pack() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        eprintln!("SKIP: grit-http-server not built");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let (grit_bare, _git_bare) = setup_bare_pair(tmp.path());
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: no port");
+        return;
+    };
+    let srv_root = tmp.path().join("http-root");
+    std::fs::create_dir_all(&srv_root).unwrap();
+    std::fs::rename(&grit_bare, srv_root.join("repo.git")).unwrap();
+    let Some(child) = spawn_http_server(&server_bin, &srv_root, port) else {
+        eprintln!("SKIP: server spawn");
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: server not ready");
+        return;
+    }
+    let grit_url = format!("http://127.0.0.1:{port}/repo.git");
+    let git_url = git_file_url(&tmp.path().join("git.git"));
+
+    let grit_clone = tmp.path().join("grit-v0-depth1");
+    let git_clone = tmp.path().join("git-v0-depth1");
+    clone_depth_v0(&grit_url, &grit_clone, "1");
+    clone_depth_v0(&git_url, &git_clone, "1");
+    compare_to_git_reference(&grit_clone, &git_clone);
+
+    let grit_f = tmp.path().join("grit-v0-filter");
+    let git_f = tmp.path().join("git-v0-filter");
+    clone_v0_bare_filtered(&grit_url, &grit_f);
+    clone_v0_bare_filtered(&git_url, &git_f);
+    compare_to_git_reference(&grit_f, &git_f);
+
+    let since_date = "2005-04-07T00:00:00";
+    let grit_since = tmp.path().join("grit-v0-since");
+    let git_since = tmp.path().join("git-v0-since");
+    for (url, dest) in [(&grit_url, &grit_since), (&git_url, &git_since)] {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "protocol.version=0",
+                "clone",
+                "-q",
+                "--shallow-since",
+                since_date,
+                url,
+                dest.to_str().unwrap(),
+            ])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("shallow-since clone");
+        assert!(
+            out.status.success(),
+            "v0 shallow-since clone: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    compare_to_git_reference(&grit_since, &git_since);
+}
+
+#[test]
+fn v0_reachable_sha1_in_want_over_http() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let upstream = tmp.path().join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    build_linear_repo(&upstream, 5);
+    let grit_bare = tmp.path().join("grit.git");
+    bare_clone(&upstream, &grit_bare);
+    git(
+        Some(&grit_bare),
+        &["config", "uploadpack.allowReachableSha1InWant", "true"],
+    );
+    let old_commit = git(Some(&upstream), &["rev-parse", "HEAD~3"])
+        .trim()
+        .to_owned();
+
+    let Some(port) = free_port() else {
+        return;
+    };
+    let srv_root = tmp.path().join("http-root");
+    std::fs::create_dir_all(&srv_root).unwrap();
+    std::fs::rename(&grit_bare, srv_root.join("repo.git")).unwrap();
+    let Some(child) = spawn_http_server(&server_bin, &srv_root, port) else {
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        return;
+    }
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let dest = tmp.path().join("fetch-reachable");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(Some(&dest), &["init", "-q"]);
+    git(Some(&dest), &["remote", "add", "origin", &url]);
+    let out = Command::new("git")
+        .current_dir(&dest)
+        .args([
+            "-c",
+            "protocol.version=0",
+            "fetch",
+            "-q",
+            "origin",
+            &old_commit,
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("fetch");
+    assert!(
+        out.status.success(),
+        "v0 reachable want fetch: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let fetched = git(Some(&dest), &["rev-parse", "FETCH_HEAD"])
+        .trim()
+        .to_owned();
+    assert_eq!(fetched, old_commit);
+}
+
+fn setup_hidden_ref_bare(tmp: &Path) -> (PathBuf, grit_lib::objects::ObjectId, String) {
+    let upstream = tmp.join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    build_linear_repo(&upstream, 5);
+    let hidden_tip = git(Some(&upstream), &["rev-parse", "HEAD~2"])
+        .trim()
+        .to_owned();
+    git(Some(&upstream), &["branch", "-f", "hidden", &hidden_tip]);
+    let parent_of_hidden = git(Some(&upstream), &["rev-parse", "hidden~1"])
+        .trim()
+        .to_owned();
+    let bare = tmp.join("bare.git");
+    bare_clone(&upstream, &bare);
+    git(
+        Some(&bare),
+        &["config", "uploadpack.hideRefs", "refs/heads/hidden"],
+    );
+    let hidden_oid = grit_lib::objects::ObjectId::from_hex(&hidden_tip).expect("hex");
+    (bare, hidden_oid, parent_of_hidden)
+}
+
+fn fetch_oid_v0(dest: &Path, oid: &str) -> Output {
+    Command::new("git")
+        .current_dir(dest)
+        .args(["-c", "protocol.version=0", "fetch", "-q", "origin", oid])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("fetch")
+}
+
+#[test]
+fn v0_hidden_ref_tip_sha1_in_want_over_http() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let (bare, hidden_tip, _) = setup_hidden_ref_bare(tmp.path());
+    git(
+        Some(&bare),
+        &["config", "uploadpack.allowTipSha1InWant", "true"],
+    );
+
+    let Some(port) = free_port() else {
+        return;
+    };
+    let srv_root = tmp.path().join("http-root");
+    std::fs::create_dir_all(&srv_root).unwrap();
+    std::fs::rename(&bare, srv_root.join("repo.git")).unwrap();
+    let Some(child) = spawn_http_server(&server_bin, &srv_root, port) else {
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        return;
+    }
+    let grit_url = format!("http://127.0.0.1:{port}/repo.git");
+    let hex = hidden_tip.to_hex();
+
+    let dest = tmp.path().join("grit-tip");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(Some(&dest), &["init", "-q"]);
+    git(Some(&dest), &["remote", "add", "origin", &grit_url]);
+    let out = fetch_oid_v0(&dest, &hex);
+    assert!(
+        out.status.success(),
+        "system git v0 client hidden tip want against grit: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let fetched = git(Some(&dest), &["rev-parse", "FETCH_HEAD"])
+        .trim()
+        .to_owned();
+    assert_eq!(fetched, hex);
+}
+
+#[test]
+fn v0_hidden_ref_reachable_sha1_in_want_over_http() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let (bare, _hidden_tip, parent) = setup_hidden_ref_bare(tmp.path());
+    git(
+        Some(&bare),
+        &["config", "uploadpack.allowReachableSha1InWant", "true"],
+    );
+
+    let Some(port) = free_port() else {
+        return;
+    };
+    let srv_root = tmp.path().join("http-root");
+    std::fs::create_dir_all(&srv_root).unwrap();
+    std::fs::rename(&bare, srv_root.join("repo.git")).unwrap();
+    let Some(child) = spawn_http_server(&server_bin, &srv_root, port) else {
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        return;
+    }
+    let grit_url = format!("http://127.0.0.1:{port}/repo.git");
+
+    let dest = tmp.path().join("grit-reach");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(Some(&dest), &["init", "-q"]);
+    git(Some(&dest), &["remote", "add", "origin", &grit_url]);
+    let out = fetch_oid_v0(&dest, &parent);
+    assert!(
+        out.status.success(),
+        "system git v0 client reachable want against grit: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let fetched = git(Some(&dest), &["rev-parse", "FETCH_HEAD"])
+        .trim()
+        .to_owned();
+    assert_eq!(fetched, parent);
 }
 
 #[test]

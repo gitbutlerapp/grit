@@ -1,6 +1,6 @@
 //! Serving fetches and clones (`upload-pack`).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::io::{Read, Write};
 
 use super::shallow_upload::{compute_shallow_response, ShallowRequest, ShallowResponse};
@@ -13,9 +13,10 @@ use super::{
 };
 use crate::config::ConfigSet;
 use crate::objects::{ObjectId, ObjectKind};
-use crate::pack_objects::{build_pack_for_upload, PackBuildOptions};
+use crate::pack_objects::build_pack_for_upload;
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
+use crate::transfer::PackBuildOptions;
 
 /// Capabilities offered in a v0/v1 advertisement, before the per-repository ones.
 const V0_CAPABILITIES: &[&str] = &[
@@ -25,48 +26,83 @@ const V0_CAPABILITIES: &[&str] = &[
     "no-progress",
     "include-tag",
     "ofs-delta",
+    "shallow",
+    "deepen",
+    "deepen-since",
+    "deepen-not",
 ];
 
 /// Serve one fetch session: advertise refs, negotiate, and send a pack.
+///
+/// The version in [`ServeOptions::protocol`] selects the wire format. With
+/// [`ServeOptions::advertise_refs`] only the advertisement is written. With
+/// [`ServeOptions::stateless_rpc`] the advertisement is skipped and a single
+/// request is answered, which is how smart HTTP drives the exchange.
+///
+/// Shallow fetches, partial-clone filters, and `want-ref` follow repository
+/// upload-pack policy and the capabilities advertised for the session.
+///
+/// # Parameters
+///
+/// - `repo`: the repository being served.
+/// - `input`: requests from the client.
+/// - `output`: where responses are written.
+/// - `opts`: framing, protocol version, agent string, and hidden refs.
+///
+/// # Errors
+///
+/// Returns [`ServeError::NotOurRef`] when the client wants an object that was not
+/// advertised, [`ServeError::Protocol`] for malformed or unsupported requests,
+/// and I/O or repository errors from reading objects and writing the pack.
 pub fn upload_pack(
     repo: &Repository,
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &ServeOptions,
 ) -> Result<()> {
-    let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
-    let policy = UploadPackPolicy::from_config(&config);
     let result = match opts.protocol {
-        ProtocolVersion::V2 => serve_v2(repo, input, output, opts, &config, &policy),
-        ProtocolVersion::V0 | ProtocolVersion::V1 => {
-            serve_v0(repo, input, output, opts, &config, &policy)
-        }
+        ProtocolVersion::V2 => serve_v2(repo, input, output, opts),
+        ProtocolVersion::V0 | ProtocolVersion::V1 => serve_v0(repo, input, output, opts),
     };
     match result {
         Ok(()) => {
             output.flush()?;
             Ok(())
         }
-        Err(e) => {
-            if let Some(msg) = err_pkt_line(&e) {
-                let _ = write_line(output, &format!("ERR {msg}"));
-                let _ = output.flush();
-                return Ok(());
-            }
-            Err(e)
+        Err(err) if opts.stateless_rpc && opts.protocol == ProtocolVersion::V2 => {
+            let msg = serve_error_client_message(&err);
+            write_line(output, &format!("ERR {msg}"))?;
+            write_flush(output)?;
+            output.flush()?;
+            Ok(())
+        }
+        Err(err) => {
+            output.flush()?;
+            Err(err)
         }
     }
 }
 
-fn err_pkt_line(e: &ServeError) -> Option<String> {
-    match e {
-        ServeError::NotOurRef(oid) => Some(format!("upload-pack: not our ref {}", oid.to_hex())),
-        ServeError::UploadFilter(f) => Some(f.to_string()),
-        ServeError::Protocol(msg) if msg.starts_with("filter") || msg.contains("unknown ref") => {
-            Some(msg.clone())
+fn serve_error_client_message(err: &ServeError) -> String {
+    match err {
+        ServeError::Protocol(msg) => msg.clone(),
+        ServeError::UploadFilter(e) => e.to_string(),
+        ServeError::NotOurRef(oid) => format!("not our ref {}", oid.to_hex()),
+        ServeError::UnknownCommand(cmd) => format!("unknown command {cmd}"),
+        ServeError::ObjectFormatMismatch { client, repository } => {
+            format!("object format mismatch: client wants {client}, repository uses {repository}")
         }
-        _ => None,
+        ServeError::Repository(e) => e.to_string(),
+        ServeError::Io(e) => e.to_string(),
     }
+}
+
+fn repo_config(repo: &Repository) -> ConfigSet {
+    ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default()
+}
+
+fn upload_policy(repo: &Repository) -> UploadPackPolicy {
+    UploadPackPolicy::from_config(&repo_config(repo))
 }
 
 fn serve_v0(
@@ -74,8 +110,6 @@ fn serve_v0(
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &ServeOptions,
-    config: &ConfigSet,
-    policy: &UploadPackPolicy,
 ) -> Result<()> {
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
@@ -86,20 +120,20 @@ fn serve_v0(
         if opts.protocol == ProtocolVersion::V1 {
             write_line(output, "version 1")?;
         }
-        write_v0_advertisement(repo, output, &refs, &head, opts, policy)?;
+        write_v0_advertisement(repo, output, &refs, &head, opts)?;
         if opts.advertise_refs {
             return Ok(());
         }
         output.flush()?;
     }
 
-    let Some(request) = read_v0_request(repo, input, config, policy)? else {
+    let Some(request) = read_v0_request(repo, input, &config, &policy)? else {
         return Ok(());
     };
     if request.filter.is_some() {
         validate_wants_filtered(repo, &request.wants)?;
     } else {
-        validate_wants(repo, &refs, head.oid, &request.wants, policy)?;
+        validate_wants(repo, &refs, head.oid, &request.wants, &policy)?;
     }
 
     let shallow_resp = if request.shallow.is_active() {
@@ -111,9 +145,6 @@ fn serve_v0(
     } else {
         None
     };
-    // Duplex transports read the shallow/unshallow lines before the have
-    // exchange; stateless HTTP sends wants+done in one POST and expects them
-    // after `done` (see `read_stateless_response_stream` / `git fetch-pack`).
     if !opts.stateless_rpc {
         if let Some(ref sh) = shallow_resp {
             write_v0_shallow_lines(output, sh)?;
@@ -179,41 +210,34 @@ fn serve_v0(
         Some(_) => {}
         None => write_line(output, "NAK")?,
     }
-    if opts.stateless_rpc {
-        if let Some(ref sh) = shallow_resp {
-            write_v0_shallow_lines(output, sh)?;
-            write_flush(output)?;
-        }
-    }
     let sideband = request.caps.contains("side-band-64k");
-    let pack = build_response_pack(
+    let pack = build_response_pack_from_v0(
         repo,
         &refs,
-        &request.wants,
+        &request,
         &common,
-        &request.caps,
         request.filter.as_ref(),
         shallow_resp.as_ref(),
     )?;
-    write_v0_pack(output, &pack, sideband)
+    write_pack(output, &pack, sideband)
 }
 
+/// Write the v0 ref advertisement: `HEAD` and every ref, capabilities on the
+/// first line, and a peeled `^{}` line after each annotated tag.
 fn write_v0_advertisement(
     repo: &Repository,
     output: &mut dyn Write,
     refs: &[AdvertisedRef],
     head: &super::HeadInfo,
     opts: &ServeOptions,
-    policy: &UploadPackPolicy,
 ) -> Result<()> {
     let policy = upload_policy(repo);
     let mut caps: Vec<String> = V0_CAPABILITIES.iter().map(|c| (*c).to_owned()).collect();
-    caps.extend(
-        policy
-            .v0_capability_tokens()
-            .iter()
-            .map(|c| (*c).to_owned()),
-    );
+    for cap in policy.v0_capability_tokens() {
+        if !caps.iter().any(|existing| existing == cap) {
+            caps.push(cap.to_owned());
+        }
+    }
     if let (Some(target), Some(_)) = (&head.target, head.oid) {
         caps.push(format!("symref=HEAD:{target}"));
     }
@@ -367,54 +391,55 @@ fn resolve_deepen_not(repo: &Repository, spec: &str) -> Result<ObjectId> {
 }
 
 fn write_v0_shallow_lines(output: &mut dyn Write, sh: &ShallowResponse) -> Result<()> {
-    write_shallow_lines(output, sh, false)
-}
-
-/// Write `shallow` / `unshallow` lines for upload-pack (v0 or v2 `shallow-info`).
-fn write_shallow_lines(
-    output: &mut dyn Write,
-    sh: &ShallowResponse,
-    sideband_all: bool,
-) -> Result<()> {
     for oid in &sh.shallow {
-        write_fetch_line(output, &format!("shallow {}", oid.to_hex()), sideband_all)?;
+        write_line(output, &format!("shallow {}", oid.to_hex()))?;
     }
     for oid in &sh.unshallow {
-        write_fetch_line(output, &format!("unshallow {}", oid.to_hex()), sideband_all)?;
+        write_line(output, &format!("unshallow {}", oid.to_hex()))?;
     }
     Ok(())
 }
 
-/// One v2 fetch response line; with `sideband-all`, payload is band 1 (mirrors `packet_writer_write`).
-fn write_fetch_line(output: &mut dyn Write, line: &str, sideband_all: bool) -> Result<()> {
-    if sideband_all {
-        let mut payload = Vec::from(line.as_bytes());
-        payload.push(b'\n');
-        crate::pkt_line::write_sideband_packet(&mut &mut *output, 1, &payload)?;
+fn build_response_pack_from_v0(
+    repo: &Repository,
+    refs: &[AdvertisedRef],
+    request: &V0Request,
+    common: &[ObjectId],
+    filter: Option<&ObjectFilter>,
+    shallow: Option<&ShallowResponse>,
+) -> Result<Vec<u8>> {
+    let mut pack_wants = request.wants.clone();
+    if let Some(sh) = shallow {
+        pack_wants.extend(sh.extra_wants.iter().copied());
+    }
+    pack_wants.sort();
+    pack_wants.dedup();
+
+    let pack_common: Vec<ObjectId> = if let Some(sh) = shallow {
+        common
+            .iter()
+            .filter(|oid| !sh.unshallow.contains(oid))
+            .copied()
+            .collect()
     } else {
-        write_line(output, line)?;
-    }
-    Ok(())
-}
+        common.to_vec()
+    };
 
-fn write_v2_wanted_refs(
-    output: &mut dyn Write,
-    wanted: &HashMap<String, ObjectId>,
-    sideband_all: bool,
-) -> Result<()> {
-    if wanted.is_empty() {
-        return Ok(());
-    }
-    write_fetch_line(output, "wanted-refs", sideband_all)?;
-    for (name, oid) in wanted {
-        write_fetch_line(output, &format!("{} {name}", oid.to_hex()), sideband_all)?;
-    }
-    write_delim(output)
-}
+    let have_shallow: HashSet<ObjectId> = request.shallow.client_shallow.iter().copied().collect();
+    let source_shallow = shallow
+        .map(|s| s.pack_shallow_grafts.clone())
+        .unwrap_or_default();
 
-fn write_delim(output: &mut dyn Write) -> Result<()> {
-    output.write_all(crate::pkt_line::DELIM.as_bytes())?;
-    Ok(())
+    build_response_pack(ResponsePackInput {
+        repo,
+        refs,
+        wants: &pack_wants,
+        common: &pack_common,
+        caps: &request.caps,
+        filter,
+        have_shallow: &have_shallow,
+        source_shallow: &source_shallow,
+    })
 }
 
 fn serve_v2(
@@ -422,8 +447,6 @@ fn serve_v2(
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &ServeOptions,
-    config: &ConfigSet,
-    policy: &UploadPackPolicy,
 ) -> Result<()> {
     if opts.advertise_refs || !opts.stateless_rpc {
         write_line(output, "version 2")?;
@@ -431,8 +454,9 @@ fn serve_v2(
             write_line(output, &format!("agent={}", opts.agent))?;
         }
         write_line(output, "ls-refs=unborn")?;
-        let fetch_feats = policy.v2_fetch_features().join(" ");
-        write_line(output, &format!("fetch={fetch_feats}"))?;
+        let policy = upload_policy(repo);
+        let fetch_caps = policy.v2_fetch_features().join(" ");
+        write_line(output, &format!("fetch={fetch_caps}"))?;
         write_line(
             output,
             &format!("object-format={}", repo.odb.hash_algo().name()),
@@ -451,7 +475,7 @@ fn serve_v2(
         check_object_format(repo, request.object_format.as_deref())?;
         match request.command.as_str() {
             "ls-refs" => ls_refs(repo, output, &request.args, opts)?,
-            "fetch" => fetch_v2(repo, output, &request.args, opts, config, policy)?,
+            "fetch" => fetch_v2(repo, output, &request.args, opts)?,
             other => return Err(ServeError::UnknownCommand(other.to_owned())),
         }
         output.flush()?;
@@ -461,12 +485,15 @@ fn serve_v2(
     }
 }
 
+/// One v2 command request.
 struct V2Request {
     command: String,
     object_format: Option<String>,
     args: Vec<String>,
 }
 
+/// Read a v2 command request. Returns `None` at end of input or on a bare
+/// flush, which ends the session.
 fn read_v2_request(input: &mut dyn Read) -> Result<Option<V2Request>> {
     let mut command = None;
     let mut object_format = None;
@@ -489,6 +516,7 @@ fn read_v2_request(input: &mut dyn Read) -> Result<Option<V2Request>> {
                 } else if let Some(f) = line.strip_prefix("object-format=") {
                     object_format = Some(f.to_owned());
                 }
+                // agent=, server-option= and unknown capabilities are ignored.
             }
             Some(other) => {
                 return Err(ServeError::Protocol(format!(
@@ -566,31 +594,43 @@ fn fetch_v2(
     output: &mut dyn Write,
     args: &[String],
     opts: &ServeOptions,
-    config: &ConfigSet,
-    policy: &UploadPackPolicy,
 ) -> Result<()> {
-    let refs = advertised_refs(repo, &opts.hidden_refs)?;
-    let head = head_info(repo);
+    let config = repo_config(repo);
+    let policy = UploadPackPolicy::from_config(&config);
     let mut wants = Vec::new();
     let mut haves = Vec::new();
     let mut done = false;
     let mut caps = HashSet::new();
-    let mut shallow = ShallowRequest::default();
-    let mut filter: Option<ObjectFilter> = None;
-    let mut wanted_refs: HashMap<String, ObjectId> = HashMap::new();
-
+    let mut deepen = None;
+    let mut deepen_since = None;
+    let mut deepen_not: Vec<ObjectId> = Vec::new();
+    let mut deepen_relative = false;
+    let mut filter_spec: Option<String> = None;
+    let mut want_ref_names: Vec<String> = Vec::new();
     for arg in args {
         if let Some(hex) = arg.strip_prefix("want ") {
             wants.push(parse_oid(repo, hex.trim())?);
         } else if let Some(hex) = arg.strip_prefix("have ") {
             haves.push(parse_oid(repo, hex.trim())?);
+        } else if arg.starts_with("shallow ") {
+        } else if let Some(rest) = arg.strip_prefix("deepen ") {
+            deepen = Some(
+                rest.trim()
+                    .parse()
+                    .map_err(|_| ServeError::Protocol(format!("bad deepen '{arg}'")))?,
+            );
+        } else if let Some(rest) = arg.strip_prefix("deepen-since ") {
+            deepen_since = Some(
+                rest.trim()
+                    .parse()
+                    .map_err(|_| ServeError::Protocol(format!("bad deepen-since '{arg}'")))?,
+            );
+        } else if let Some(rest) = arg.strip_prefix("deepen-not ") {
+            deepen_not.push(parse_oid(repo, rest.trim())?);
+        } else if let Some(spec) = arg.strip_prefix("filter ") {
+            filter_spec = Some(spec.trim().to_owned());
         } else if let Some(name) = arg.strip_prefix("want-ref ") {
-            if !policy.ref_in_want {
-                return Err(ServeError::Protocol("want-ref not supported".into()));
-            }
-            let oid = resolve_want_ref(repo, &refs, &opts.hidden_refs, name.trim())?;
-            wanted_refs.insert(name.trim().to_owned(), oid);
-            wants.push(oid);
+            want_ref_names.push(name.trim().to_owned());
         } else if arg == "done" {
             done = true;
         } else if arg == "deepen-relative" {
@@ -600,8 +640,6 @@ fn fetch_v2(
             "thin-pack" | "no-progress" | "include-tag" | "ofs-delta" | "sideband-all"
         ) {
             caps.insert(arg.clone());
-        } else if parse_shallow_line(repo, arg, &mut shallow, config, policy, &mut filter)? {
-            continue;
         } else {
             return Err(ServeError::Protocol(format!(
                 "unsupported fetch argument '{arg}'"
@@ -609,90 +647,138 @@ fn fetch_v2(
         }
     }
 
+    let refs = advertised_refs(repo, &opts.hidden_refs)?;
+    let head = head_info(repo);
+    for name in want_ref_names {
+        wants.push(resolve_want_ref(repo, &refs, &opts.hidden_refs, &name)?);
+    }
+
+    let filter: Option<ObjectFilter> = match filter_spec {
+        None => None,
+        Some(spec) => Some(policy.parse_filter(&config, &spec)?),
+    };
+
     if filter.is_some() {
         validate_wants_filtered(repo, &wants)?;
     } else {
-        validate_wants(repo, &refs, head.oid, &wants, policy)?;
+        validate_wants(repo, &refs, head.oid, &wants, &policy)?;
     }
 
-    let shallow_resp = if shallow.is_active() {
-        Some(compute_shallow_response(repo, &wants, &shallow)?)
-    } else {
-        None
-    };
-
+    let sideband_all = caps.contains("sideband-all");
     let mut seen = HashSet::new();
     let common: Vec<ObjectId> = haves
         .into_iter()
         .filter(|h| seen.insert(*h) && repo.odb.exists(h))
         .collect();
 
-    let sideband_all = caps.contains("sideband-all");
-
     if !done {
-        write_fetch_line(output, "acknowledgments", sideband_all)?;
+        write_v2_fetch_line(output, "acknowledgments", sideband_all)?;
         if common.is_empty() {
-            write_fetch_line(output, "NAK", sideband_all)?;
+            write_v2_fetch_line(output, "NAK", sideband_all)?;
         }
         for oid in &common {
-            write_fetch_line(output, &format!("ACK {}", oid.to_hex()), sideband_all)?;
+            write_v2_fetch_line(output, &format!("ACK {}", oid.to_hex()), sideband_all)?;
         }
         return write_flush(output);
     }
 
-    if shallow.is_active() {
-        write_fetch_line(output, "shallow-info", sideband_all)?;
-        if let Some(sh) = shallow_resp.as_ref() {
-            write_shallow_lines(output, sh, sideband_all)?;
+    let client_shallow: Vec<ObjectId> = args
+        .iter()
+        .filter_map(|a| a.strip_prefix("shallow "))
+        .map(|hex| parse_oid(repo, hex.trim()))
+        .collect::<Result<Vec<_>>>()?;
+
+    let shallow_req = ShallowRequest {
+        client_shallow: client_shallow.clone(),
+        depth: deepen,
+        deepen_since,
+        deepen_not,
+        deepen_relative,
+    };
+    let shallow_active = shallow_req.is_active();
+    let shallow_resp = if shallow_active {
+        compute_shallow_response(repo, &wants, &shallow_req)?
+    } else {
+        Default::default()
+    };
+
+    if !shallow_resp.shallow.is_empty() || !shallow_resp.unshallow.is_empty() {
+        write_v2_fetch_line(output, "shallow-info", sideband_all)?;
+        for oid in &shallow_resp.unshallow {
+            write_v2_fetch_line(output, &format!("unshallow {}", oid.to_hex()), sideband_all)?;
         }
-        write_delim(output)?;
+        for oid in &shallow_resp.shallow {
+            write_v2_fetch_line(output, &format!("shallow {}", oid.to_hex()), sideband_all)?;
+        }
+        write_v2_section_delim(output)?;
     }
-    write_v2_wanted_refs(output, &wanted_refs, sideband_all)?;
 
-    let pack = build_response_pack(
-        repo,
-        &refs,
-        &wants,
-        &common,
-        &caps,
-        filter.as_ref(),
-        shallow_resp.as_ref(),
-    )?;
-    write_fetch_line(output, "packfile", sideband_all)?;
-    write_v2_packfile_body(output, &pack)
-}
-
-fn build_response_pack(
-    repo: &Repository,
-    refs: &[AdvertisedRef],
-    wants: &[ObjectId],
-    common: &[ObjectId],
-    caps: &HashSet<String>,
-    filter: Option<&ObjectFilter>,
-    shallow: Option<&ShallowResponse>,
-) -> Result<Vec<u8>> {
-    let mut pack_wants = wants.to_vec();
-    if let Some(sh) = shallow {
-        pack_wants.extend(sh.extra_wants.iter().copied());
-    }
-    if caps.contains("include-tag") {
-        pack_wants.extend(included_tags(repo, refs, wants, common)?);
-    }
+    let mut pack_wants = wants;
+    pack_wants.extend(shallow_resp.extra_wants);
     pack_wants.sort();
     pack_wants.dedup();
 
-    // Client `have` lines include shallow commits being deepened; their missing
-    // parents must still be packed (Git unshallow). Do not treat those haves as
-    // common bases for object exclusion.
-    let pack_haves: Vec<ObjectId> = if let Some(sh) = shallow {
-        common
-            .iter()
-            .filter(|oid| !sh.unshallow.contains(oid))
-            .copied()
-            .collect()
+    let have_shallow: HashSet<ObjectId> = client_shallow.iter().copied().collect();
+    let pack = build_response_pack(ResponsePackInput {
+        repo,
+        refs: &refs,
+        wants: &pack_wants,
+        common: &common,
+        caps: &caps,
+        filter: filter.as_ref(),
+        have_shallow: &have_shallow,
+        source_shallow: &shallow_resp.pack_shallow_grafts,
+    })?;
+    write_v2_fetch_line(output, "packfile", sideband_all)?;
+    // Protocol v2 always side-band-64k frames the packfile section payload (band 1),
+    // even when `sideband-all` was not negotiated.
+    write_pack(output, &pack, true)
+}
+
+fn write_v2_section_delim(output: &mut dyn Write) -> Result<()> {
+    write!(output, "0001").map_err(crate::error::Error::Io)?;
+    Ok(())
+}
+
+/// Write one v2 fetch response line, using sideband channel 1 when `sideband-all` was negotiated.
+fn write_v2_fetch_line(output: &mut dyn Write, line: &str, sideband_all: bool) -> Result<()> {
+    if sideband_all {
+        let mut payload = Vec::with_capacity(line.len() + 1);
+        payload.extend_from_slice(line.as_bytes());
+        payload.push(b'\n');
+        crate::pkt_line::write_sideband_packet(output, 1, &payload).map_err(ServeError::Io)?;
+        Ok(())
     } else {
-        common.to_vec()
-    };
+        write_line(output, line)
+    }
+}
+
+/// Inputs for [`build_response_pack`].
+struct ResponsePackInput<'a> {
+    repo: &'a Repository,
+    refs: &'a [AdvertisedRef],
+    wants: &'a [ObjectId],
+    common: &'a [ObjectId],
+    caps: &'a HashSet<String>,
+    filter: Option<&'a ObjectFilter>,
+    have_shallow: &'a HashSet<ObjectId>,
+    source_shallow: &'a HashSet<ObjectId>,
+}
+
+/// Build the pack answering a fetch, adding annotated tags when `include-tag`
+/// was negotiated.
+fn build_response_pack(input: ResponsePackInput<'_>) -> Result<Vec<u8>> {
+    let mut pack_wants = input.wants.to_vec();
+    if input.caps.contains("include-tag") {
+        pack_wants.extend(included_tags(
+            input.repo,
+            input.refs,
+            input.wants,
+            input.common,
+        )?);
+    }
+    pack_wants.sort();
+    pack_wants.dedup();
 
     let pack_opts = PackBuildOptions {
         thin: input.caps.contains("thin-pack"),
@@ -700,19 +786,21 @@ fn build_response_pack(
         use_ofs_delta: input.caps.contains("ofs-delta"),
         ..PackBuildOptions::default()
     };
-    let shallow_grafts = shallow
-        .map(|s| s.pack_shallow_grafts.clone())
-        .unwrap_or_default();
     Ok(build_pack_for_upload(
         input.repo,
         &pack_wants,
-        &pack_haves,
-        &shallow_grafts,
-        filter,
+        input.common,
+        input.have_shallow,
+        input.source_shallow,
+        input.filter,
         &pack_opts,
     )?)
 }
 
+/// Annotated tags the client did not ask for but whose target commit is being
+/// sent, so the client can follow tags without a second request.
+///
+/// Only tags that peel to commits are considered.
 fn included_tags(
     repo: &Repository,
     refs: &[AdvertisedRef],
@@ -737,6 +825,7 @@ fn included_tags(
         .collect())
 }
 
+/// Commits reachable from `tips` (peeling tags), not descending into `stop`.
 fn commit_closure(
     repo: &Repository,
     tips: &[ObjectId],
@@ -767,19 +856,13 @@ fn commit_closure(
     Ok(seen)
 }
 
-fn write_v0_pack(output: &mut dyn Write, pack: &[u8], side_band_64k: bool) -> Result<()> {
-    if side_band_64k {
+/// Write a pack, framed on side-band channel 1 when negotiated, then a flush.
+fn write_pack(output: &mut dyn Write, pack: &[u8], sideband: bool) -> Result<()> {
+    if sideband {
         crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, pack)?;
         write_flush(output)
     } else {
         output.write_all(pack)?;
         Ok(())
     }
-}
-
-/// Protocol v2 `packfile` section body is always side-band-64k framed on band 1,
-/// independent of the `sideband-all` capability (which only affects other sections).
-fn write_v2_packfile_body(output: &mut dyn Write, pack: &[u8]) -> Result<()> {
-    crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, pack)?;
-    write_flush(output)
 }
