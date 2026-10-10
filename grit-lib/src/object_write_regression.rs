@@ -253,6 +253,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             committer: ident.clone(),
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )
@@ -283,6 +284,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
             committer: ident,
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )
@@ -401,6 +403,7 @@ fn pack_signature_not_restatted_per_object() {
             committer: ident.clone(),
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )
@@ -470,6 +473,7 @@ fn pack_signature_not_restatted_per_object() {
             committer: ident,
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )

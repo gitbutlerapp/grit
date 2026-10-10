@@ -73,6 +73,7 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         committer: "T <t@e.com> 1 +0000".into(),
         allow_empty: false,
         sign_override: None,
+        amend: false,
     };
     grit_lib::porcelain::commit::create_commit(&repo, &req, &mut NullProgress).expect("commit");
 

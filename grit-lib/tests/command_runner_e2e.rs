@@ -101,6 +101,7 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
             committer: ident,
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )
@@ -137,6 +138,7 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
             committer: ident,
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )

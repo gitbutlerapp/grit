@@ -512,6 +512,10 @@ pub enum Error {
     #[error("symlink target is not UTF-8")]
     StashSymlinkNotUtf8,
 
+    /// [`CommitRequest::amend`](crate::porcelain::commit::CommitRequest::amend) was set on an unborn branch.
+    #[error("cannot amend: no commits on this branch yet")]
+    AmendUnborn,
+
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
     Midx(#[from] MidxError),

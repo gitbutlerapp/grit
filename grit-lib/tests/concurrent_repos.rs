@@ -200,6 +200,7 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
                 committer: ident,
                 allow_empty: false,
                 sign_override: None,
+                amend: false,
             },
             &mut NullProgress,
         )
@@ -399,6 +400,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
                 committer: ident,
                 allow_empty: false,
                 sign_override: None,
+                amend: false,
             },
             &mut NullProgress,
         )

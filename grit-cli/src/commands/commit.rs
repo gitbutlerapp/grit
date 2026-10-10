@@ -3,6 +3,7 @@
 use anyhow::{bail, Context, Result};
 use grit_lib::error::Error;
 use grit_lib::ident_resolve::IdentRole;
+use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use serde::Serialize;
@@ -18,6 +19,7 @@ pub struct CommitOutcome {
     pub branch: String,
     pub subject: String,
     pub changes: usize,
+    pub amended: bool,
 }
 
 impl HumanRender for CommitOutcome {
@@ -38,7 +40,7 @@ impl HumanRender for CommitOutcome {
 
 impl MarkdownRender for CommitOutcome {}
 
-pub fn run(message: Option<String>) -> Result<CommitOutcome> {
+pub fn run(message: Option<String>, amend: bool) -> Result<CommitOutcome> {
     let repo = context::discover()?;
 
     if repo.load_index()?.has_unmerged_entries() {
@@ -48,9 +50,11 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
     add::stage(&repo, &[])?;
 
     let message = match message {
-        Some(m) if !m.trim().is_empty() => m,
+        Some(m) if !m.trim().is_empty() => Some(m),
+        None if amend => None,
         _ => bail!("provide a commit message, e.g. grit commit \"what changed\""),
     };
+    let message_text = message.as_deref().unwrap_or("");
 
     let config = repo.config().context("could not load config")?;
     let env = repo.environment();
@@ -70,26 +74,33 @@ pub fn run(message: Option<String>) -> Result<CommitOutcome> {
         now,
     )?;
 
-    let subject = subject_line(&format!("{}\n", message.trim()));
-
     let outcome = create_commit(
         &repo,
         &CommitRequest {
-            message,
+            message: message_text.to_owned(),
             author,
             committer,
             allow_empty: false,
             sign_override: None,
+            amend,
         },
         &mut NullProgress,
     )
     .map_err(map_commit_error)?;
+
+    let subject = if let Some(m) = message.as_ref().filter(|m| !m.trim().is_empty()) {
+        subject_line(&format!("{}\n", m.trim()))
+    } else {
+        let obj = repo.odb.read(&outcome.oid).context("read new commit")?;
+        subject_line(&parse_commit(&obj.data).context("parse new commit")?.message)
+    };
 
     Ok(CommitOutcome {
         oid: outcome.oid.to_hex(),
         branch: outcome.branch,
         subject,
         changes: outcome.changes,
+        amended: amend,
     })
 }
 
@@ -100,6 +111,7 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::IndexUnmerged => anyhow::anyhow!(
             "cannot commit: the index still has unmerged paths — resolve conflicts and stage the result"
         ),
+        Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
         other => anyhow::anyhow!("{other}"),
     }
 }

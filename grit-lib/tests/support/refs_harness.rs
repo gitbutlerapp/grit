@@ -233,6 +233,7 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
             committer: ident,
             allow_empty: true,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )

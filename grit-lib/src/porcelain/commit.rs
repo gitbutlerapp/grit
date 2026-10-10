@@ -12,7 +12,9 @@ use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, Objec
 use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
-use crate::signing::{should_sign_commit, sign_serialized_commit, GpgConfig};
+use crate::signing::{
+    extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
+};
 use crate::state::{finish_merge_state, read_merge_heads, resolve_head, HeadState};
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 use std::fs;
@@ -31,6 +33,9 @@ pub struct CommitRequest {
     pub allow_empty: bool,
     /// When `Some(true)`, sign even if `commit.gpgsign` is false; when `Some(false)`, skip signing even when config requests it. When `None`, honor `commit.gpgsign`.
     pub sign_override: Option<bool>,
+    /// Replace the current branch tip: parents and author come from the tip being replaced; an empty
+    /// [`Self::message`] reuses that commit's message. Same-tree amends are allowed.
+    pub amend: bool,
 }
 
 /// Result of [`create_commit`].
@@ -61,7 +66,8 @@ pub struct CommitOutcome {
 /// # Errors
 ///
 /// - [`Error::DetachedHead`] when `HEAD` is not on a branch.
-/// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false.
+/// - [`Error::AmendUnborn`] when [`CommitRequest::amend`] is set but the branch has no commits yet.
+/// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
 /// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
 /// - Ref/reflog failures from [`crate::refs::update_branch_for_commit_with_config`]; the branch tip is not left advanced without reflogs when logging is enabled.
@@ -73,7 +79,7 @@ pub fn create_commit(
     progress.start("commit", None);
 
     let head = resolve_head(&repo.git_dir)?;
-    let (refname, short_name, parent) = match head {
+    let (refname, short_name, mut parent) = match head {
         HeadState::Branch {
             refname,
             short_name,
@@ -84,6 +90,33 @@ pub fn create_commit(
             return Err(Error::Message("HEAD is in an unknown state".into()));
         }
     };
+
+    let mut amend_parents = Vec::new();
+    let mut amend_author = None;
+    let mut amend_author_raw = Vec::new();
+    let mut amend_extra_headers = Vec::new();
+    let mut amend_default_message = None;
+    let mut replaced_tip = None;
+    if req.amend {
+        let Some(tip) = parent.take() else {
+            return Err(Error::AmendUnborn);
+        };
+        let obj = repo.odb.read(&tip)?;
+        if obj.kind != ObjectKind::Commit {
+            return Err(Error::CorruptObject(format!(
+                "expected commit, got {}",
+                obj.kind.as_str()
+            )));
+        }
+        let old = parse_commit(&obj.data)?;
+        amend_parents = old.parents.clone();
+        parent = old.parents.first().copied();
+        amend_author = Some(old.author);
+        amend_author_raw = old.author_raw;
+        amend_extra_headers = extra_headers_without_commit_signatures(&old.extra_headers);
+        amend_default_message = Some(old.message);
+        replaced_tip = Some(tip);
+    }
 
     let mut index = repo.load_index()?;
     if index.has_unmerged_entries() {
@@ -107,7 +140,7 @@ pub fn create_commit(
 
     let tree = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())?;
 
-    if !req.allow_empty {
+    if !req.allow_empty && !req.amend {
         if parent_tree.is_none() && is_empty_tree_oid(&repo.odb, &tree) {
             return Err(Error::NothingToCommit);
         }
@@ -121,6 +154,9 @@ pub fn create_commit(
     }
 
     let mut message = req.message.trim().to_owned();
+    if req.amend && message.is_empty() {
+        message = amend_default_message.unwrap_or_default();
+    }
     if !message.is_empty() {
         message.push('\n');
     }
@@ -142,38 +178,51 @@ pub fn create_commit(
         message.push('\n');
     }
 
-    let mut parents: Vec<ObjectId> = parent.into_iter().collect();
-    for merge_head in merge_heads {
-        if !parents.iter().any(|p| p == &merge_head) {
-            parents.push(merge_head);
+    let (author, author_raw) = if let Some(a) = amend_author {
+        (a, amend_author_raw)
+    } else {
+        (req.author.clone(), Vec::new())
+    };
+    let mut commit_parents = if req.amend {
+        amend_parents
+    } else {
+        parent.into_iter().collect()
+    };
+    if !req.amend {
+        for merge_head in merge_heads {
+            if !commit_parents.iter().any(|p| p == &merge_head) {
+                commit_parents.push(merge_head);
+            }
         }
     }
-
     let commit_data = CommitData {
         tree,
-        parents,
-        author: req.author.clone(),
+        parents: commit_parents,
+        author,
         committer: req.committer.clone(),
-        author_raw: Vec::new(),
+        author_raw,
         committer_raw: Vec::new(),
         encoding: None,
         message,
         raw_message: None,
-        extra_headers: Vec::new(),
+        extra_headers: amend_extra_headers,
     };
     let config = repo.config()?;
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
     let oid = repo.odb.write(ObjectKind::Commit, &bytes)?;
 
-    let reflog_old = parent.unwrap_or_else(zero_oid);
+    let previous_tip = replaced_tip.or(parent);
+    let reflog_old = previous_tip.unwrap_or_else(zero_oid);
     let subject = commit_subject(&commit_data.message);
-    let reflog_msg = if parent.is_some() {
+    let reflog_msg = if req.amend {
+        format!("commit (amend): {subject}")
+    } else if parent.is_some() {
         format!("commit: {subject}")
     } else {
         format!("commit (initial): {subject}")
     };
 
-    let expected_old = parent.or_else(|| {
+    let expected_old = previous_tip.or_else(|| {
         if crate::refs::resolve_ref(&repo.git_dir, &refname).is_ok() {
             Some(reflog_old)
         } else {
@@ -334,6 +383,7 @@ mod tests {
             committer: ident,
             allow_empty: false,
             sign_override: None,
+            amend: false,
         }
     }
 
@@ -486,6 +536,42 @@ mod tests {
         let commit_obj = repo.odb.read(&outcome.oid).unwrap();
         let tree = parse_commit(&commit_obj.data).unwrap().tree;
         assert_eq!(index.cache_tree_root, Some(tree));
+    }
+
+    #[test]
+    fn create_commit_amend_same_tree() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        create_commit(&repo, &commit_req("second"), &mut NullProgress).unwrap();
+
+        let mut req = commit_req("");
+        req.amend = true;
+        let tip = resolve_ref(&repo.git_dir, "refs/heads/main").unwrap();
+        let outcome = create_commit(&repo, &req, &mut NullProgress).unwrap();
+        assert_ne!(outcome.oid, tip);
+        assert!(outcome.parent.is_some());
+
+        let branch_log = read_reflog(&repo.git_dir, "refs/heads/main").unwrap();
+        assert_eq!(branch_log.len(), 3);
+        assert_eq!(branch_log[2].message, "commit (amend): second");
+    }
+
+    #[test]
+    fn create_commit_amend_unborn() {
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repo(tmp.path());
+        fs::write(tmp.path().join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+        let mut req = commit_req("nope");
+        req.amend = true;
+        let err = create_commit(&repo, &req, &mut NullProgress).unwrap_err();
+        assert!(matches!(err, Error::AmendUnborn));
     }
 
     #[test]

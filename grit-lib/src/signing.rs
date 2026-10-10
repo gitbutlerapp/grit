@@ -877,6 +877,42 @@ pub fn extract_signed_payload(raw_commit: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     Some((payload, signature))
 }
 
+/// Remove embedded commit signature headers from [`crate::objects::CommitData::extra_headers`].
+///
+/// Used when amending: the rewritten object must not carry the replaced tip's
+/// `gpgsig` / `gpgsig-sha256` block; signing (if any) adds a fresh header later.
+#[must_use]
+pub fn extra_headers_without_commit_signatures(extra: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(extra.len());
+    let mut idx = 0;
+    while idx < extra.len() {
+        let line_end = memchr(extra, idx, b'\n')
+            .map(|p| p + 1)
+            .unwrap_or(extra.len());
+        let line = &extra[idx..line_end];
+
+        if gpg_sig_header_line(line).is_some() {
+            idx = line_end;
+            while idx < extra.len() {
+                let cont_end = memchr(extra, idx, b'\n')
+                    .map(|p| p + 1)
+                    .unwrap_or(extra.len());
+                let cont = &extra[idx..cont_end];
+                if cont.first() == Some(&b' ') {
+                    idx = cont_end;
+                } else {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        out.extend_from_slice(line);
+        idx = line_end;
+    }
+    out
+}
+
 /// If `line` begins a `gpgsig` / `gpgsig-sha256` header, return the header name and
 /// the byte offset after `"<header> "`.
 fn gpg_sig_header_line(line: &[u8]) -> Option<(&'static str, usize)> {

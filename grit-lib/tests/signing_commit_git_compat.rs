@@ -87,6 +87,7 @@ fn create_commit_ssh_signs_when_gpgsign_true() {
             committer: ident,
             allow_empty: false,
             sign_override: None,
+            amend: false,
         },
         &mut NullProgress,
     )

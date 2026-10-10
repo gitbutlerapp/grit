@@ -22,7 +22,14 @@ fn commit_req(message: &str) -> CommitRequest {
         committer: id,
         allow_empty: false,
         sign_override: None,
+        amend: false,
     }
+}
+
+fn amend_req(message: &str) -> CommitRequest {
+    let mut req = commit_req(message);
+    req.amend = true;
+    req
 }
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
@@ -167,4 +174,127 @@ fn git_commits_readable_by_grit_create_commit_chain() {
     let obj = repo.odb.read(&outcome.oid).expect("read commit");
     let parsed = parse_commit(&obj.data).expect("parse");
     assert!(parsed.message.contains("from grit"));
+}
+
+fn author_signature(root: &Path) -> String {
+    git_out(root, &["log", "-1", "--format=%an%ae%at"])
+}
+
+#[test]
+fn amend_rewrites_tip() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    std::fs::write(root.join("a.txt"), b"1\n").unwrap();
+    git(root, &["add", "a.txt"]);
+    git(root, &["commit", "-q", "-m", "first"]);
+    let first = git_out(root, &["rev-parse", "HEAD"]);
+
+    std::fs::write(root.join("a.txt"), b"2\n").unwrap();
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &commit_req("second"), &mut NullProgress).expect("commit");
+    let old_second = git_out(root, &["rev-parse", "HEAD"]);
+
+    std::fs::write(root.join("a.txt"), b"3\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &amend_req("second amended"), &mut NullProgress).expect("amend");
+
+    fsck(root);
+    assert_eq!(git_out(root, &["rev-parse", "HEAD^"]), first);
+    assert_ne!(git_out(root, &["rev-parse", "HEAD"]), old_second);
+    let reflog = git_out(root, &["reflog", "-1", "HEAD"]);
+    assert!(
+        reflog.contains("commit (amend): second amended"),
+        "reflog: {reflog:?}"
+    );
+}
+
+#[test]
+fn amend_keeps_author_and_message() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    std::fs::write(root.join("a.txt"), b"1\n").unwrap();
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &commit_req("keep me"), &mut NullProgress).expect("commit");
+    let before_author = author_signature(root);
+
+    create_commit(&repo, &amend_req(""), &mut NullProgress).expect("amend");
+
+    fsck(root);
+    assert_eq!(author_signature(root), before_author);
+    assert_eq!(git_out(root, &["log", "-1", "--format=%s"]), "keep me");
+    let reflog = git_out(root, &["reflog", "-1", "HEAD"]);
+    assert!(
+        reflog.contains("commit (amend): keep me"),
+        "reflog: {reflog:?}"
+    );
+}
+
+#[test]
+fn amend_with_new_message() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    std::fs::write(root.join("a.txt"), b"1\n").unwrap();
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &commit_req("old subject"), &mut NullProgress).expect("commit");
+
+    create_commit(&repo, &amend_req("new subject"), &mut NullProgress).expect("amend");
+
+    fsck(root);
+    assert_eq!(git_out(root, &["log", "-1", "--format=%s"]), "new subject");
+    let reflog = git_out(root, &["reflog", "-1", "HEAD"]);
+    assert!(
+        reflog.contains("commit (amend): new subject"),
+        "reflog: {reflog:?}"
+    );
+}
+
+#[test]
+fn amend_root_commit() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    std::fs::write(root.join("a.txt"), b"1\n").unwrap();
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &commit_req("root"), &mut NullProgress).expect("commit");
+    let before_author = author_signature(root);
+
+    std::fs::write(root.join("b.txt"), b"2\n").unwrap();
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    create_commit(&repo, &amend_req("root plus b"), &mut NullProgress).expect("amend");
+
+    fsck(root);
+    assert_eq!(author_signature(root), before_author);
+    let out = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "HEAD^"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git rev-parse HEAD^");
+    assert!(!out.status.success(), "root amend must not gain a parent");
+    assert_eq!(git_out(root, &["log", "-1", "--format=%s"]), "root plus b");
+}
+
+#[test]
+fn amend_unborn_errors() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+    std::fs::write(root.join("a.txt"), b"1\n").unwrap();
+    let repo = Repository::discover(Some(root)).expect("open");
+    stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    let err = create_commit(&repo, &amend_req("nope"), &mut NullProgress).unwrap_err();
+    assert!(matches!(err, grit_lib::error::Error::AmendUnborn));
 }

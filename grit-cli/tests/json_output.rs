@@ -314,6 +314,24 @@ fn add_and_commit_emit_json() -> TestResult {
     assert_eq!(committed["subject"], "first commit");
     assert_eq!(committed["changes"], 1);
     assert_eq!(committed["oid"].as_str().unwrap().len(), 40);
+    assert_eq!(committed["amended"], Value::Bool(false));
+    Ok(())
+}
+
+#[test]
+fn commit_amend_emits_json() -> TestResult {
+    let scratch = Scratch::new("commit-amend")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "v1\n");
+    gs_ok(&repo, &["commit", "seed"]);
+
+    write_file(&repo.join("a.txt"), "v2\n");
+    let amended = gs_json(&repo, &["commit", "--amend", "revised"]);
+    assert_eq!(amended["amended"], Value::Bool(true));
+    assert_eq!(amended["subject"], "revised");
+    assert_eq!(amended["changes"], 1);
     Ok(())
 }
 
@@ -928,7 +946,10 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     assert_eq!(renamed["to"], "to.txt");
 
     let committed = gs_json(&seed, &["commit", "first"]);
-    assert_eq!(keys(&committed), ["branch", "changes", "oid", "subject"]);
+    assert_eq!(
+        keys(&committed),
+        ["amended", "branch", "changes", "oid", "subject"]
+    );
 
     let status = gs_json(&seed, &["status"]);
     assert_eq!(

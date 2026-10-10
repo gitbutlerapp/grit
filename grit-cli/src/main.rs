@@ -183,6 +183,9 @@ enum Command {
         /// Stage every change first, then commit. This is the default behavior.
         #[arg(short = 'a', long = "all")]
         all: bool,
+        /// Replace the tip commit instead of creating a new one.
+        #[arg(long = "amend")]
+        amend: bool,
     },
     /// List branches, or create / delete one.
     Branch {
@@ -491,7 +494,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             message,
             message_flag,
             all: _,
-        } => emit(&commands::commit::run(message.or(message_flag))?, opts),
+            amend,
+        } => emit(
+            &commands::commit::run(message.or(message_flag), amend)?,
+            opts,
+        ),
         Command::Branch {
             name,
             delete,
