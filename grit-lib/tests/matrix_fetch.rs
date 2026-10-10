@@ -206,6 +206,36 @@ impl Drop for ServerHandle {
     }
 }
 
+/// Build `grit-http-server` into the workspace target dir when tests need it.
+fn ensure_grit_http_server_built() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        if find_binary("grit-http-server").is_some() {
+            return;
+        }
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let status = Command::new("cargo")
+            .args(["build", "-q", "-p", "grit-http-server"])
+            .current_dir(&workspace)
+            .status()
+            .expect("spawn cargo build -p grit-http-server");
+        assert!(
+            status.success(),
+            "cargo build -p grit-http-server failed (smart-HTTP matrix tests need this binary)"
+        );
+    });
+}
+
+/// Resolve `grit-http-server` for smart-HTTP drivers.
+///
+/// Ensures the binary is built so `cargo test -p grit-lib -p grit-cli` does not
+/// require a separate manual build step.
+fn grit_http_server_binary() -> Option<PathBuf> {
+    ensure_grit_http_server_built();
+    find_binary("grit-http-server")
+}
+
 /// Locate a sibling binary (`grit`, `grit-http-server`) in the cargo target dir.
 fn find_binary(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -370,7 +400,7 @@ fn ssh_driver(protocol: u8, scratch: PathBuf) -> Option<Driver> {
 /// `UreqHttpClient` whose `Git-Protocol` header selects v2 (or omits it for
 /// v0/v1).
 fn http_driver(protocol: u8) -> Option<Driver> {
-    let server_bin = find_binary("grit-http-server")?;
+    let server_bin = grit_http_server_binary()?;
     let label = if protocol >= 2 { "http/v2" } else { "http/v1" };
     Some(Driver {
         name: label,

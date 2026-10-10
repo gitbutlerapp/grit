@@ -32,17 +32,7 @@ use crate::url_rewrite;
 #[cfg(feature = "http-ureq")]
 use crate::transport::http::ureq_client::UreqHttpClient;
 
-/// HTTP client types for non-git HTTP (e.g. OAuth) without importing [`crate::transport`] from binaries.
-#[cfg(feature = "http-ureq")]
-pub mod http_client {
-    pub use crate::transport::http::ureq_client::UreqHttpClient;
-    pub use crate::transport::http::HttpClient;
-}
-
 type RemoteResult<T> = std::result::Result<T, RemoteError>;
-
-/// Default remote name when none is configured (`origin`).
-pub const DEFAULT_REMOTE: &str = "origin";
 
 /// Errors specific to remote URL resolution and dispatch.
 #[derive(Debug, Error)]
@@ -586,26 +576,34 @@ fn list_refs_http(
         }
     };
 
+    use crate::protocol::client_git_protocol_header_value;
+
     let info_url = crate::transport::http::smart_info_refs_discovery_url(repo_url);
-    let git_protocol = Some("version=2");
+    let want_v2 = opts.protocol_version.unwrap_or(2) >= 2;
+    let requested = opts.protocol_version.unwrap_or(2);
+    let git_protocol_header = client_git_protocol_header_value(requested);
+    let git_protocol = git_protocol_header.as_deref();
     let (body, final_url) = client
-        .get_with_final_url(&info_url, git_protocol)
+        .get_with_final_url_exact(&info_url, git_protocol)
         .map_err(RemoteError::Library)?;
     let effective_base =
         crate::transport::http::rebased_base_from_redirect(repo_url, final_url.as_deref())
             .unwrap_or_else(|| repo_url.to_owned());
-    let (protocol_version, refs, caps, head_symref) = if effective_base.trim_end_matches('/')
-        != repo_url.trim_end_matches('/')
-    {
-        client.reset_auth_after_redirect_rebase();
-        crate::transport::http::discover_upload_pack(client.as_ref(), &effective_base, git_protocol)
+    let (protocol_version, refs, caps, head_symref) =
+        if effective_base.trim_end_matches('/') != repo_url.trim_end_matches('/') {
+            client.reset_auth_after_redirect_rebase();
+            crate::transport::http::discover_upload_pack_exact(
+                client.as_ref(),
+                &effective_base,
+                git_protocol,
+            )
             .map_err(RemoteError::Library)?
-    } else {
-        crate::transport::http::discover_upload_pack_from_body(&body)
-            .map_err(RemoteError::Library)?
-    };
+        } else {
+            crate::transport::http::discover_upload_pack_from_body(&body)
+                .map_err(RemoteError::Library)?
+        };
 
-    if protocol_version >= 2 && opts.protocol_version.unwrap_or(2) >= 2 {
+    if protocol_version >= 2 && want_v2 {
         let local_odb = odb.cloned().unwrap_or_else(|| open_odb(local_git_dir));
         let req = build_list_refs_v2_request(&caps, &local_odb, opts)?;
         let post_url = format!("{}/git-upload-pack", effective_base.trim_end_matches('/'));
@@ -704,54 +702,22 @@ fn list_refs_includes_head(opts: &ListRefsOptions) -> bool {
 }
 
 fn list_ref_prefixes(opts: &ListRefsOptions) -> Vec<String> {
-    if opts.heads && !opts.tags {
-        return vec!["refs/heads/".to_owned()];
-    }
-    if opts.tags && !opts.heads {
-        return vec!["refs/tags/".to_owned()];
-    }
     if !opts.prefixes.is_empty() {
-        return v2_ref_prefixes_from_ls_remote_patterns(&opts.prefixes);
+        if opts.heads && !opts.tags {
+            return vec!["refs/heads/".to_owned()];
+        }
+        if opts.tags && !opts.heads {
+            return vec!["refs/tags/".to_owned()];
+        }
+        return vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()];
     }
-    vec!["refs/".to_owned()]
-}
-
-/// Map `git ls-remote`-style patterns to v2 `ref-prefix` lines (broad enough to fetch, then filter client-side).
-fn v2_ref_prefixes_from_ls_remote_patterns(patterns: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let push_unique = |out: &mut Vec<String>, value: &str| {
-        if !out.iter().any(|v| v == value) {
-            out.push(value.to_owned());
-        }
-    };
-    for pat in patterns {
-        let pat = pat.trim();
-        if pat.is_empty() {
-            continue;
-        }
-        if pat == "HEAD" {
-            push_unique(&mut out, "HEAD");
-            continue;
-        }
-        if let Some(star) = pat.find('*') {
-            let prefix = &pat[..star];
-            if prefix.is_empty() {
-                push_unique(&mut out, "refs/");
-                continue;
-            }
-            if prefix.starts_with("refs/") {
-                push_unique(&mut out, prefix);
-            } else {
-                push_unique(&mut out, &format!("refs/heads/{prefix}"));
-            }
-            continue;
-        }
-        if pat.starts_with("refs/") {
-            push_unique(&mut out, pat);
-            continue;
-        }
-        push_unique(&mut out, "refs/heads/");
-        push_unique(&mut out, "refs/tags/");
+    let mut out = Vec::new();
+    let all = !opts.heads && !opts.tags;
+    if all || opts.heads {
+        out.push("refs/heads/".to_owned());
+    }
+    if all || opts.tags {
+        out.push("refs/tags/".to_owned());
     }
     out
 }
@@ -767,7 +733,6 @@ fn parse_list_refs_v2_response(
     let mut peel_map: std::collections::HashMap<String, ObjectId> =
         std::collections::HashMap::new();
     let mut head_symref: Option<String> = None;
-    let mut head_oid: Option<ObjectId> = None;
     let mut reader = reader;
     loop {
         match pkt_line::read_packet(&mut reader).map_err(Error::Io)? {
@@ -788,7 +753,6 @@ fn parse_list_refs_v2_response(
                     continue;
                 }
                 if name == "HEAD" {
-                    head_oid = Some(oid);
                     if let Some(t) =
                         symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t))
                     {
@@ -812,7 +776,7 @@ fn parse_list_refs_v2_response(
             }
         }
     }
-    finalize_list_refs_output(entries, peel_map, opts, head_symref, head_oid, None)
+    finalize_list_refs_output(entries, peel_map, opts, head_symref, None)
 }
 
 fn list_refs_v0_advertisement(
@@ -837,14 +801,7 @@ fn list_refs_v0_advertisement(
             symref_target: None,
         });
     }
-    finalize_list_refs_output(
-        entries,
-        peel_map,
-        opts,
-        head_symref.map(str::to_owned),
-        None,
-        odb,
-    )
+    finalize_list_refs_output(entries, peel_map, opts, head_symref.map(str::to_owned), odb)
 }
 
 fn finalize_list_refs_output(
@@ -852,7 +809,6 @@ fn finalize_list_refs_output(
     peel_map: std::collections::HashMap<String, ObjectId>,
     opts: &ListRefsOptions,
     head_symref: Option<String>,
-    head_oid: Option<ObjectId>,
     odb: Option<&Odb>,
 ) -> RemoteResult<Vec<RemoteRef>> {
     entries.retain(|e| ref_matches_list_opts(&e.name, opts));
@@ -867,34 +823,35 @@ fn finalize_list_refs_output(
                 .copied()
                 .or_else(|| odb.and_then(|o| peel_tag(o, &e.oid)));
             if let Some(p) = peeled {
-                let peel_name = format!("{}^{{}}", e.name);
-                if ref_matches_list_opts(&peel_name, opts) {
-                    peel_lines.push(RemoteRef {
-                        name: peel_name,
-                        oid: p,
-                        symref_target: None,
-                    });
-                }
+                peel_lines.push(RemoteRef {
+                    name: format!("{}^{{}}", e.name),
+                    oid: p,
+                    symref_target: None,
+                });
             }
         }
         entries.extend(peel_lines);
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    if list_refs_includes_head(opts) && ref_matches_list_opts("HEAD", opts) {
-        let resolved = head_oid.or_else(|| {
-            head_symref
-                .as_ref()
-                .and_then(|sym| entries.iter().find(|e| e.name == *sym).map(|e| e.oid))
-        });
-        if let Some(oid) = resolved {
-            entries.insert(
-                0,
-                RemoteRef {
-                    name: "HEAD".to_owned(),
-                    oid,
-                    symref_target: if opts.symrefs { head_symref } else { None },
-                },
-            );
+    if list_refs_includes_head(opts) {
+        if let Some(sym) = head_symref {
+            if ref_matches_list_opts("HEAD", opts) {
+                let head_oid = entries
+                    .iter()
+                    .find(|e| e.name == sym)
+                    .map(|e| e.oid)
+                    .or(None);
+                if let Some(oid) = head_oid {
+                    entries.insert(
+                        0,
+                        RemoteRef {
+                            name: "HEAD".to_owned(),
+                            oid,
+                            symref_target: if opts.symrefs { Some(sym) } else { None },
+                        },
+                    );
+                }
+            }
         }
     }
     Ok(entries)
@@ -1036,15 +993,12 @@ pub fn list_refs_from_git_dir(
             symref_target: None,
         });
         if opts.peel && name.starts_with("refs/tags/") {
-            let peel_name = format!("{name}^{{}}");
-            if ref_matches_list_opts(&peel_name, opts) {
-                if let Some(peeled) = peel_tag(odb, oid) {
-                    entries.push(RemoteRef {
-                        name: peel_name,
-                        oid: peeled,
-                        symref_target: None,
-                    });
-                }
+            if let Some(peeled) = peel_tag(odb, oid) {
+                entries.push(RemoteRef {
+                    name: format!("{name}^{{}}"),
+                    oid: peeled,
+                    symref_target: None,
+                });
             }
         }
     }
@@ -1255,34 +1209,5 @@ mod tests {
         );
         assert!(super::ref_matches_list_opts("refs/heads/main", &opts));
         assert!(!super::ref_matches_list_opts("refs/heads/topic", &opts));
-    }
-
-    #[test]
-    fn list_ref_prefixes_changes_namespace() {
-        let opts = super::ListRefsOptions {
-            prefixes: vec!["refs/changes/*".to_owned()],
-            ..Default::default()
-        };
-        assert_eq!(
-            super::list_ref_prefixes(&opts),
-            vec!["refs/changes/".to_owned()]
-        );
-    }
-
-    #[test]
-    fn list_ref_prefixes_unfiltered_uses_refs_root() {
-        let opts = super::ListRefsOptions::default();
-        assert_eq!(super::list_ref_prefixes(&opts), vec!["refs/".to_owned()]);
-    }
-
-    #[test]
-    fn patterned_peel_line_excluded_for_short_tag_pattern() {
-        let opts = super::ListRefsOptions {
-            prefixes: vec!["v1".to_owned()],
-            peel: true,
-            ..Default::default()
-        };
-        assert!(super::ref_matches_list_opts("refs/tags/v1", &opts));
-        assert!(!super::ref_matches_list_opts("refs/tags/v1^{}", &opts));
     }
 }

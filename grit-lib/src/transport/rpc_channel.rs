@@ -1,9 +1,9 @@
 //! Internal RPC abstraction shared by duplex and smart-HTTP transports.
 //!
-//! [`RpcChannel`] models one round-trip of the Git upload-pack/receive-pack
-//! protocols: send a pkt-line request body, read the response stream. Duplex
-//! connections ([`crate::transport::Connection`]) implement this by writing to
-//! the socket; smart HTTP ([`crate::transport::stateless_http::StatelessHttpConnection`])
+//! One round-trip of the Git upload-pack/receive-pack protocols: send a pkt-line
+//! request body, read the response stream. Duplex connections
+//! ([`crate::transport::Connection`]) implement this by writing to the socket;
+//! smart HTTP ([`crate::transport::stateless_http::StatelessHttpConnection`])
 //! replays prior state and POSTs each round per gitprotocol-http.
 
 use std::io::Read;

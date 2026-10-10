@@ -900,6 +900,15 @@ impl HttpClient for UreqHttpClient {
             .map(|(body, final_url)| (body, Some(final_url)))
     }
 
+    fn get_with_final_url_exact(
+        &self,
+        url: &str,
+        git_protocol: Option<&str>,
+    ) -> Result<(Vec<u8>, Option<String>)> {
+        self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
+            .map(|(body, final_url)| (body, Some(final_url)))
+    }
+
     fn git_protocol_header(&self) -> Option<&str> {
         self.git_protocol.as_deref()
     }
