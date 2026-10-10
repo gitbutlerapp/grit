@@ -191,4 +191,4 @@ jobs:
             --test transport_http --test transport_http_auth \
             --test transport_http_proxy_cookies --test transport_http_redirect_auth \
             --test matrix_fetch --test matrix_push --test matrix_sha256 \
-            --test matrix_credentials
+            --test matrix_credentials --test remote_dispatch

@@ -4,11 +4,8 @@
 //! resolved URL(s), fetch refspecs, and dispatches to the appropriate grit-lib
 //! transport (local, `git://`, SSH, smart HTTP).
 
-#[cfg(feature = "http-ureq")]
-use std::io::Cursor;
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "http-ureq")]
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -26,9 +23,7 @@ use crate::transfer::{
     fetch_local, push_local, FetchOptions, FetchOutcome, PushOptions, PushOutcome, PushRefSpec,
 };
 use crate::transport::http::{http_fetch, HttpClient};
-use crate::transport::{
-    ConnectOptions, GitDaemonTransport, Service, SshCommand, SshTransport, Transport,
-};
+use crate::transport::{ConnectOptions, GitDaemonTransport, Service, SshTransport, Transport};
 use crate::transport_path::{
     is_local_path_remote_url, resolve_local_remote_git_dir, url_is_local_not_ssh,
 };
@@ -174,6 +169,8 @@ pub struct ListRefsOptions {
     pub symrefs: bool,
     /// Append peeled `^{}` lines for annotated tags.
     pub peel: bool,
+    /// Requested wire protocol version for remote listing (`None` → prefer v2).
+    pub protocol_version: Option<u8>,
 }
 
 /// Builds HTTP clients for smart-HTTP remotes.
@@ -461,11 +458,10 @@ impl Remote {
         http_factory: Option<&dyn HttpClientFactory>,
         repo: Option<&Repository>,
     ) -> RemoteResult<Vec<RemoteRef>> {
-        let wire = url
-            .as_wire_url()
-            .ok_or(RemoteError::UnsupportedScheme)?;
-        let connect_v2 = ConnectOptions {
-            protocol_version: 2,
+        let wire = url.as_wire_url().ok_or(RemoteError::UnsupportedScheme)?;
+        let requested = opts.protocol_version.unwrap_or(2);
+        let connect_opts = ConnectOptions {
+            protocol_version: requested,
             ..Default::default()
         };
         match url {
@@ -474,31 +470,13 @@ impl Remote {
             }
             RemoteUrl::Git(_) => {
                 let mut conn =
-                    GitDaemonTransport::new().connect(wire, Service::UploadPack, &connect_v2)?;
-                if conn.protocol_version() >= 2 {
-                    list_refs_v2_connection(&mut *conn, local_git_dir, odb, opts)
-                } else {
-                    list_refs_v0_advertisement(
-                        conn.advertised_refs(),
-                        conn.head_symref(),
-                        odb,
-                        opts,
-                    )
-                }
+                    GitDaemonTransport::new().connect(wire, Service::UploadPack, &connect_opts)?;
+                list_refs_from_connection(&mut *conn, local_git_dir, odb, opts)
             }
             RemoteUrl::Ssh(_) => {
                 let transport = ssh_transport(repo);
-                let mut conn = transport.connect(wire, Service::UploadPack, &connect_v2)?;
-                if conn.protocol_version() >= 2 {
-                    list_refs_v2_connection(&mut *conn, local_git_dir, odb, opts)
-                } else {
-                    list_refs_v0_advertisement(
-                        conn.advertised_refs(),
-                        conn.head_symref(),
-                        odb,
-                        opts,
-                    )
-                }
+                let mut conn = transport.connect(wire, Service::UploadPack, &connect_opts)?;
+                list_refs_from_connection(&mut *conn, local_git_dir, odb, opts)
             }
             RemoteUrl::Local(_) | RemoteUrl::File(_) => unreachable!(),
         }
@@ -528,16 +506,9 @@ fn local_git_dir_from_url(
 fn ssh_transport(repo: Option<&Repository>) -> SshTransport {
     let mut transport = SshTransport::new();
     if let Some(r) = repo {
-        transport = transport.with_command_runner(r.command_runner());
-    }
-    if let Ok(cmd) = std::env::var("GIT_SSH_COMMAND") {
-        if !cmd.trim().is_empty() {
-            transport.ssh_command = SshCommand::ShellCommand(cmd.into());
-        }
-    } else if let Ok(prog) = std::env::var("GIT_SSH") {
-        if !prog.trim().is_empty() {
-            transport.ssh_command = SshCommand::Program(prog.into());
-        }
+        transport = transport
+            .with_command_runner(r.command_runner())
+            .with_ssh_environment(std::sync::Arc::new(r.environment().clone()));
     }
     transport
 }
@@ -561,7 +532,6 @@ fn http_client(
     }
 }
 
-#[cfg(feature = "http-ureq")]
 fn list_refs_http(
     repo_url: &str,
     local_git_dir: &Path,
@@ -570,27 +540,58 @@ fn list_refs_http(
     http_factory: Option<&dyn HttpClientFactory>,
     repo: Option<&Repository>,
 ) -> RemoteResult<Vec<RemoteRef>> {
-    let config = if let Some(r) = repo {
+    let config: Arc<ConfigSet> = if let Some(r) = repo {
         r.config().map_err(RemoteError::Library)?
     } else {
         Arc::new(ConfigSet::new())
     };
-    let factory = http_factory.unwrap_or(&DefaultHttpClientFactory as &dyn HttpClientFactory);
-    let client = factory.create(config.as_ref())?;
-    let (protocol_version, refs, caps, head_symref) =
-        crate::transport::http::discover_upload_pack(client.as_ref(), repo_url, Some("version=2"))
-            .map_err(RemoteError::Library)?;
-    if protocol_version >= 2 {
+    let client: Box<dyn HttpClient> = match http_factory {
+        Some(f) => f.create(config.as_ref())?,
+        None => {
+            #[cfg(feature = "http-ureq")]
+            {
+                DefaultHttpClientFactory.create(config.as_ref())?
+            }
+            #[cfg(not(feature = "http-ureq"))]
+            {
+                return Err(RemoteError::HttpUnavailable);
+            }
+        }
+    };
+
+    let info_url = crate::transport::http::smart_info_refs_discovery_url(repo_url);
+    let git_protocol = Some("version=2");
+    let (body, final_url) = client
+        .get_with_final_url(&info_url, git_protocol)
+        .map_err(RemoteError::Library)?;
+    let effective_base =
+        crate::transport::http::rebased_base_from_redirect(repo_url, final_url.as_deref())
+            .unwrap_or_else(|| repo_url.to_owned());
+    let (protocol_version, refs, caps, head_symref) = if effective_base.trim_end_matches('/')
+        != repo_url.trim_end_matches('/')
+    {
+        client.reset_auth_after_redirect_rebase();
+        crate::transport::http::discover_upload_pack(client.as_ref(), &effective_base, git_protocol)
+            .map_err(RemoteError::Library)?
+    } else {
+        crate::transport::http::discover_upload_pack_from_body(&body)
+            .map_err(RemoteError::Library)?
+    };
+
+    if protocol_version >= 2 && opts.protocol_version.unwrap_or(2) >= 2 {
         let local_odb = odb.cloned().unwrap_or_else(|| open_odb(local_git_dir));
         let req = build_list_refs_v2_request(&caps, &local_odb, opts)?;
-        let post_url = format!("{}/git-upload-pack", repo_url.trim_end_matches('/'));
-        let body = client.as_ref().post(
-            &post_url,
-            "application/x-git-upload-pack-request",
-            "application/x-git-upload-pack-result",
-            &req,
-            Some("version=2"),
-        )?;
+        let post_url = format!("{}/git-upload-pack", effective_base.trim_end_matches('/'));
+        let body = client
+            .as_ref()
+            .post(
+                &post_url,
+                "application/x-git-upload-pack-request",
+                "application/x-git-upload-pack-result",
+                &req,
+                git_protocol,
+            )
+            .map_err(RemoteError::Library)?;
         let mut cur = Cursor::new(body);
         parse_list_refs_v2_response(&mut cur, opts)
     } else {
@@ -598,16 +599,18 @@ fn list_refs_http(
     }
 }
 
-#[cfg(not(feature = "http-ureq"))]
-fn list_refs_http(
-    _repo_url: &str,
-    _local_git_dir: &Path,
-    _odb: Option<&Odb>,
-    _opts: &ListRefsOptions,
-    _http_factory: Option<&dyn HttpClientFactory>,
-    _repo: Option<&Repository>,
+fn list_refs_from_connection(
+    conn: &mut dyn crate::transport::Connection,
+    local_git_dir: &Path,
+    odb: Option<&Odb>,
+    opts: &ListRefsOptions,
 ) -> RemoteResult<Vec<RemoteRef>> {
-    Err(RemoteError::HttpUnavailable)
+    let want_v2 = opts.protocol_version.unwrap_or(2) >= 2;
+    if conn.protocol_version() >= 2 && want_v2 {
+        list_refs_v2_connection(conn, local_git_dir, odb, opts)
+    } else {
+        list_refs_v0_advertisement(conn.advertised_refs(), conn.head_symref(), odb, opts)
+    }
 }
 
 fn open_odb(git_dir: &Path) -> Odb {
@@ -659,12 +662,18 @@ fn build_list_refs_v2_request(
     if opts.peel {
         pkt_line::write_line(&mut req, "peel").map_err(Error::Io)?;
     }
-    pkt_line::write_line(&mut req, "ref-prefix HEAD").map_err(Error::Io)?;
+    if list_refs_includes_head(opts) {
+        pkt_line::write_line(&mut req, "ref-prefix HEAD").map_err(Error::Io)?;
+    }
     for prefix in list_ref_prefixes(opts) {
         pkt_line::write_line(&mut req, &format!("ref-prefix {prefix}")).map_err(Error::Io)?;
     }
     pkt_line::write_flush(&mut req).map_err(Error::Io)?;
     Ok(req)
+}
+
+fn list_refs_includes_head(opts: &ListRefsOptions) -> bool {
+    !opts.heads && !opts.tags && opts.prefixes.is_empty()
 }
 
 fn list_ref_prefixes(opts: &ListRefsOptions) -> Vec<String> {
@@ -692,6 +701,7 @@ fn parse_list_refs_v2_response(
     let mut entries: Vec<RemoteRef> = Vec::new();
     let mut peel_map: std::collections::HashMap<String, ObjectId> =
         std::collections::HashMap::new();
+    let mut head_symref: Option<String> = None;
     let mut reader = reader;
     loop {
         match pkt_line::read_packet(&mut reader).map_err(Error::Io)? {
@@ -711,6 +721,17 @@ fn parse_list_refs_v2_response(
                 if name.ends_with("^{}") {
                     continue;
                 }
+                if name == "HEAD" {
+                    if let Some(t) =
+                        symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t))
+                    {
+                        head_symref = Some(t);
+                    }
+                    continue;
+                }
+                if !crate::refs::is_valid_fetch_advertised_ref(&name) {
+                    continue;
+                }
                 if let Some(p) = peel {
                     peel_map.insert(name.clone(), p);
                 }
@@ -724,7 +745,7 @@ fn parse_list_refs_v2_response(
             }
         }
     }
-    finalize_list_refs_output(entries, peel_map, opts, None, None)
+    finalize_list_refs_output(entries, peel_map, opts, head_symref, None)
 }
 
 fn list_refs_v0_advertisement(
@@ -781,8 +802,7 @@ fn finalize_list_refs_output(
         entries.extend(peel_lines);
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    let include_head = !opts.heads && !opts.tags && opts.prefixes.is_empty();
-    if include_head {
+    if list_refs_includes_head(opts) {
         if let Some(sym) = head_symref {
             if ref_matches_list_opts("HEAD", opts) {
                 let head_oid = entries
@@ -810,7 +830,7 @@ fn ref_matches_list_opts(refname: &str, opts: &ListRefsOptions) -> bool {
     if opts.heads || opts.tags {
         let is_branch = opts.heads && refname.starts_with("refs/heads/");
         let is_tag = opts.tags && refname.starts_with("refs/tags/");
-        if !is_branch && !is_tag && refname != "HEAD" {
+        if !is_branch && !is_tag {
             return false;
         }
     }
@@ -874,8 +894,7 @@ pub fn list_refs_from_git_dir(
     use std::collections::BTreeMap;
 
     let mut entries = Vec::new();
-    let include_head = !opts.heads && !opts.tags && opts.prefixes.is_empty();
-    if include_head {
+    if list_refs_includes_head(opts) {
         if let Ok(head_oid) = crate::refs::resolve_ref(git_dir, "HEAD") {
             let symref_target = if opts.symrefs {
                 crate::refs::read_symbolic_ref(git_dir, "HEAD")
@@ -1065,6 +1084,38 @@ mod tests {
             RemoteUrl::try_from("ftp://x"),
             Err(RemoteError::UnsupportedScheme)
         ));
+    }
+
+    #[test]
+    fn pattern_matches_empty_allows_all() {
+        assert!(super::pattern_matches("refs/heads/main", &[]));
+        assert!(super::pattern_matches("HEAD", &[]));
+    }
+
+    #[test]
+    fn pattern_matches_exact() {
+        let pats = vec!["HEAD".to_owned()];
+        assert!(super::pattern_matches("HEAD", &pats));
+        assert!(!super::pattern_matches("refs/heads/main", &pats));
+    }
+
+    #[test]
+    fn pattern_matches_suffix_component() {
+        let pats = vec!["main".to_owned()];
+        assert!(super::pattern_matches("refs/heads/main", &pats));
+        assert!(!super::pattern_matches("refs/heads/notmain", &pats));
+        assert!(!super::pattern_matches("main-branch", &pats));
+    }
+
+    #[test]
+    fn list_opts_heads_excludes_head() {
+        let heads_only = super::ListRefsOptions {
+            heads: true,
+            ..Default::default()
+        };
+        assert!(!super::ref_matches_list_opts("HEAD", &heads_only));
+        assert!(super::ref_matches_list_opts("refs/heads/main", &heads_only));
+        assert!(!super::ref_matches_list_opts("refs/tags/v1", &heads_only));
     }
 
     #[test]

@@ -108,7 +108,7 @@ index.write(&repo.index_path())?;
 | `check_ref_format` | Ref name validation per Git rules |
 | `stripspace` | Whitespace and comment normalization |
 | `fmt_merge_msg` | Merge commit message formatting |
-| `ls_remote` | List references from a local repository |
+| `remote` | Typed remotes: list refs, fetch, and push over local, git, ssh, and HTTP |
 | `unpack_objects` | Unpack a pack stream into loose objects |
 | `error` | Typed error enum covering all failure modes |
 
