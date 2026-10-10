@@ -124,6 +124,24 @@ fn null_device() -> &'static str {
     }
 }
 
+fn system_git_ok(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("spawn git");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "git {} failed:\nstdout: {}\nstderr: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn path_arg(path: &Path) -> String {
     path.to_str().expect("utf-8 path").to_owned()
 }
@@ -186,6 +204,53 @@ fn status_json_reports_untracked_staged_and_clean() -> TestResult {
     let v = gs_json(&repo, &["status"]);
     assert_eq!(v["clean"], Value::Bool(true));
     assert!(v["head"].as_str().is_some(), "head oid after commit: {v}");
+    Ok(())
+}
+
+#[test]
+fn status_json_merge_conflict_lists_path_once_with_merge_fields() -> TestResult {
+    let scratch = Scratch::new("status-merge-conflict")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    system_git_ok(&repo, &["init", "-q", "-b", "main"]);
+    system_git_ok(&repo, &["config", "user.name", "T"]);
+    system_git_ok(&repo, &["config", "user.email", "t@e.com"]);
+    write_file(&repo.join("f"), "base\n");
+    system_git_ok(&repo, &["add", "f"]);
+    system_git_ok(&repo, &["commit", "-qm", "base"]);
+    system_git_ok(&repo, &["checkout", "-qb", "side"]);
+    write_file(&repo.join("f"), "side\n");
+    system_git_ok(&repo, &["commit", "-qam", "side"]);
+    system_git_ok(&repo, &["checkout", "-q", "main"]);
+    write_file(&repo.join("f"), "main\n");
+    system_git_ok(&repo, &["commit", "-qam", "main"]);
+    let merge = Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(&repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("git merge");
+    assert_ne!(
+        merge.status.code(),
+        Some(0),
+        "expected merge conflict:\n{}",
+        String::from_utf8_lossy(&merge.stderr)
+    );
+
+    let v = gs_json(&repo, &["status"]);
+    assert_eq!(v["merging"], Value::Bool(true));
+    assert_eq!(v["in_progress"], serde_json::json!(["merge"]));
+    assert_eq!(v["conflicts"], serde_json::json!(["f"]));
+    assert_eq!(v["staged"].as_array().unwrap().len(), 1);
+    assert_eq!(v["staged"][0]["path"], "f");
+    assert_eq!(v["staged"][0]["status"], "unmerged");
+    assert_eq!(v["unstaged"].as_array().unwrap().len(), 0);
+    assert!(
+        !v["untracked"].as_array().unwrap().iter().any(|p| p == "f"),
+        "conflicted path must not be untracked: {v}"
+    );
+    assert_eq!(v["clean"], Value::Bool(false));
     Ok(())
 }
 
@@ -676,6 +741,7 @@ fn schema_top_level_keys_are_stable() -> TestResult {
             "commits",
             "detached",
             "head",
+            "merging",
             "staged",
             "target",
             "unstaged",

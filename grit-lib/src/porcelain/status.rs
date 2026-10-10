@@ -132,6 +132,8 @@ pub struct StatusModel {
     pub untracked: Vec<String>,
     /// Ignored paths (subject to [`StatusOptions::ignored`]).
     pub ignored: Vec<String>,
+    /// Paths with unmerged index stages (1–3), sorted and deduplicated.
+    pub conflicts: Vec<String>,
     /// Number of stash entries (for the optional stash footer / `--show-stash`).
     pub stash_count: usize,
     /// Whether the on-disk index used the sparse-directory format.
@@ -305,7 +307,8 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let tracked_paths = crate::path_icase::Stage0TrackedPaths::from_index(index, ignorecase);
+    let tracked_paths =
+        crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase);
     let tracked: BTreeSet<String> = index
         .entries
         .iter()
@@ -1323,6 +1326,49 @@ fn directory_pathspec_matches_self(rel_dir: &str, pathspecs: &[String]) -> bool 
         || status_path_matches(&format!("{}/", rel_dir.trim_end_matches('/')), pathspecs)
 }
 
+// --- Conflict presentation --------------------------------------------------
+
+use crate::diff::DiffStatus;
+
+/// Collect repository-relative paths that have unmerged index stages (1–3).
+#[must_use]
+pub fn conflict_paths_from_index(index: &Index) -> Vec<String> {
+    let mut paths = BTreeSet::new();
+    for entry in &index.entries {
+        let stage = entry.stage();
+        if (1_u8..=3).contains(&stage) {
+            paths.insert(String::from_utf8_lossy(&entry.path).into_owned());
+        }
+    }
+    paths.into_iter().collect()
+}
+
+/// Deduplicate conflict paths across staged/unstaged lists for status display.
+///
+/// Each conflict path appears once under staged as [`DiffStatus::Unmerged`]; redundant
+/// unstaged rows (duplicate unmerged or worktree modified) are dropped.
+pub fn normalize_status_conflicts(
+    staged: &mut Vec<DiffEntry>,
+    unstaged: &mut Vec<DiffEntry>,
+    conflicts: &[String],
+) {
+    if conflicts.is_empty() {
+        return;
+    }
+    let conflict_set: BTreeSet<&str> = conflicts.iter().map(String::as_str).collect();
+    unstaged.retain(|e| !conflict_set.contains(e.path()));
+    let mut seen_staged = BTreeSet::new();
+    staged.retain(|e| {
+        if !conflict_set.contains(e.path()) {
+            return true;
+        }
+        if e.status != DiffStatus::Unmerged {
+            return true;
+        }
+        seen_staged.insert(e.path().to_owned())
+    });
+}
+
 // --- The status operation ---------------------------------------------------
 
 use crate::progress::ProgressSink;
@@ -1419,6 +1465,7 @@ pub fn status(
                 config: repo_config.clone(),
                 stat_parallel_threads: opts.stat_parallel_threads,
                 worktree_rules: Some(Arc::clone(&worktree_rules)),
+                for_status: true,
                 ..Default::default()
             },
         )?;
@@ -1434,6 +1481,9 @@ pub fn status(
         staged = apply_status_renames(&repo.odb, staged, rd, head_tree.as_ref())?;
         unstaged = apply_status_renames(&repo.odb, unstaged, rd, head_tree.as_ref())?;
     }
+
+    let conflicts = conflict_paths_from_index(&index);
+    normalize_status_conflicts(&mut staged, &mut unstaged, &conflicts);
 
     let (untracked, ignored) = if opts.untracked == UntrackedMode::No {
         (Vec::new(), Vec::new())
@@ -1467,6 +1517,7 @@ pub fn status(
         unstaged,
         untracked,
         ignored,
+        conflicts,
         stash_count,
         index_sparse_on_disk,
         sparse_directory_prefixes,

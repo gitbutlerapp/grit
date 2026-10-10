@@ -170,12 +170,20 @@ Untracked
 On main  ·  even with origin/main
 
 Nothing to commit — working tree clean.</code></pre>
+<p>Merge in progress with a conflict:</p>
+<pre><code>$ grit status
+On main  ·  merging — resolve conflicts
+
+Staged
+  !  conflict      f
+
+→ resolve conflicts, then grit commit &quot;message&quot;</code></pre>
 <p>Check from a script whether the working tree is clean:</p>
 <pre><code>$ grit status --json --filter .clean
 true</code></pre>
 <h2 id="json-output">JSON output</h2>
 <p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
-<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>branch</code></td><td>string or null</td><td>Current branch, or <code>null</code> when HEAD is detached.</td></tr><tr><td><code>detached</code></td><td>boolean</td><td>Whether HEAD is detached.</td></tr><tr><td><code>head</code></td><td>string or null</td><td>Full id of the current commit, or <code>null</code> before the first commit.</td></tr><tr><td><code>target</code></td><td>string or null</td><td>Target branch, or <code>null</code> when none was found.</td></tr><tr><td><code>ahead</code></td><td>number</td><td>Commits on the branch that the target does not have.</td></tr><tr><td><code>commits</code></td><td>array</td><td>Newest of those commits, up to ten, each with <code>oid</code> and <code>subject</code>.</td></tr><tr><td><code>staged</code></td><td>array</td><td>Staged changes with <code>path</code> and <code>status</code>.</td></tr><tr><td><code>unstaged</code></td><td>array</td><td>Unstaged changes with <code>path</code> and <code>status</code>.</td></tr><tr><td><code>untracked</code></td><td>array</td><td>Paths of untracked files.</td></tr><tr><td><code>clean</code></td><td>boolean</td><td><code>true</code> when there is nothing to commit and nothing untracked.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>branch</code></td><td>string or null</td><td>Current branch, or <code>null</code> when HEAD is detached.</td></tr><tr><td><code>detached</code></td><td>boolean</td><td>Whether HEAD is detached.</td></tr><tr><td><code>head</code></td><td>string or null</td><td>Full id of the current commit, or <code>null</code> before the first commit.</td></tr><tr><td><code>target</code></td><td>string or null</td><td>Target branch, or <code>null</code> when none was found.</td></tr><tr><td><code>ahead</code></td><td>number</td><td>Commits on the branch that the target does not have.</td></tr><tr><td><code>commits</code></td><td>array</td><td>Newest of those commits, up to ten, each with <code>oid</code> and <code>subject</code>.</td></tr><tr><td><code>staged</code></td><td>array</td><td>Staged changes with <code>path</code> and <code>status</code>.</td></tr><tr><td><code>unstaged</code></td><td>array</td><td>Unstaged changes with <code>path</code> and <code>status</code>.</td></tr><tr><td><code>untracked</code></td><td>array</td><td>Paths of untracked files.</td></tr><tr><td><code>clean</code></td><td>boolean</td><td><code>true</code> when there is nothing to commit and nothing untracked.</td></tr><tr><td><code>merging</code></td><td>boolean</td><td><code>true</code> when a merge is in progress (<code>MERGE_HEAD</code> exists).</td></tr><tr><td><code>in_progress</code></td><td>array</td><td>Stable operation ids while work is paused (for example <code>merge</code>, <code>rebase</code>). Omitted when empty.</td></tr><tr><td><code>conflicts</code></td><td>array</td><td>Paths with unmerged index stages. Omitted when empty.</td></tr></tbody></table></div>
 <p>Example:</p>
 <pre><code>{
   &quot;branch&quot;: &quot;feature&quot;,
