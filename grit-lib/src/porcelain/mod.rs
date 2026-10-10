@@ -29,6 +29,7 @@ pub mod cherry_pick;
 pub mod commit;
 pub mod log;
 pub mod merge;
+pub mod paths;
 pub mod rebase;
 pub mod replay;
 pub mod restore;

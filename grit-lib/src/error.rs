@@ -448,6 +448,13 @@ pub enum Error {
     #[error("pathspec '{spec}' did not match any file(s) known to git")]
     PathspecNoMatch { spec: String },
 
+    /// `remove_paths` refused because tracked paths have local modifications without `--force`.
+    #[error("the following files have local changes:\n{}", paths.join("\n"))]
+    PathsHaveLocalModifications { paths: Vec<String> },
+
+    /// A directory pathspec was used without `recursive` ([`crate::porcelain::paths::remove_paths`]).
+    #[error("not removing '{0}' recursively without -r")]
+    NotRemovingRecursively(String),
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.
