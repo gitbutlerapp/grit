@@ -94,8 +94,12 @@ fn restore_staged_and_worktree_drops_staged_new_file() {
     .expect("restore staged and worktree");
 
     assert!(!dir.path().join("new.txt").exists());
-    assert!(git_cmd(dir.path(), &["ls-files", "new.txt"]).trim().is_empty());
-    assert!(git_cmd(dir.path(), &["status", "--porcelain"]).trim().is_empty());
+    assert!(git_cmd(dir.path(), &["ls-files", "new.txt"])
+        .trim()
+        .is_empty());
+    assert!(git_cmd(dir.path(), &["status", "--porcelain"])
+        .trim()
+        .is_empty());
     git_fsck(dir.path());
 }
 
@@ -182,7 +186,10 @@ fn restore_source_worktree_only_leaves_index_at_head() {
     )
     .expect("restore source worktree");
 
-    assert_eq!(fs::read_to_string(dir.path().join("file")).unwrap(), "one\n");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("file")).unwrap(),
+        "one\n"
+    );
     assert_eq!(git_cmd(dir.path(), &["status", "--porcelain"]), " M file\n");
     assert!(git_cmd(dir.path(), &["diff", "--cached", "--name-only"])
         .trim()

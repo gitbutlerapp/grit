@@ -1026,7 +1026,7 @@ pub fn finish_merge_rerere(repo: &Repository) -> Result<Vec<RerereEvent>> {
     let events = rerere_post_commit(repo)?;
     let path = merge_rr_path(&repo.git_dir);
     if path.exists() {
-        fs::write(&path, &[])?;
+        fs::write(&path, [])?;
     }
     Ok(events)
 }

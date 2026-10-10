@@ -247,7 +247,7 @@ pub fn create_commit(
     )?;
 
     if concluding_merge {
-        let _ = finish_merge_state(&repo)?;
+        let _ = finish_merge_state(repo)?;
     }
 
     let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &commit_env);

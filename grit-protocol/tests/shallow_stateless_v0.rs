@@ -10,7 +10,12 @@ use grit_protocol::RepositoryOptions;
 fn two_post_shallow_depth_one_returns_pack_on_done() {
     let dir = std::env::temp_dir().join(format!("grit-shallow-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    grit_lib::repo::init_bare_clone_minimal(&dir, "main", "files").expect("init bare");
+    grit_lib::repo::init_bare_clone_minimal(
+        &dir,
+        "main",
+        grit_lib::ref_storage::RefStorageFormat::Files,
+    )
+    .expect("init bare");
     let repo = Repository::open_for_serving(&dir, &RepositoryOptions::default()).expect("open");
     let tree = grit_lib::objects::ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
         .expect("empty tree");

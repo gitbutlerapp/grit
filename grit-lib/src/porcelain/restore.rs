@@ -6,8 +6,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::diff::refresh_index_stat_content_verified_with_rules;
-use crate::index::index_file_mtime;
 use crate::error::{Error, Result};
+use crate::index::index_file_mtime;
 use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_GITLINK};
 use crate::objects::{parse_commit, ObjectId};
 use crate::pathspec::{matches_pathspec_list, pathspec_is_exclude};
@@ -242,7 +242,10 @@ fn apply_index_restore(
     for path in matched {
         let path_bytes = path.as_bytes();
         if let Some(src) = flat_tree_lookup(source_entries, path) {
-            if index.get(path_bytes, 0).is_some_and(|e| e.oid == src.oid && e.mode == src.mode) {
+            if index
+                .get(path_bytes, 0)
+                .is_some_and(|e| e.oid == src.oid && e.mode == src.mode)
+            {
                 continue;
             }
             let size = blob_index_size(repo, src)?;
@@ -256,6 +259,7 @@ fn apply_index_restore(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_worktree_restore(
     repo: &Repository,
     work_tree: &Path,
@@ -405,10 +409,9 @@ fn refresh_restored_index_stats(
     let rules = WorktreeRules::from_repository(repo, index).ok();
     let rules_arc = rules.map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
     let mut subset = index.clone();
-    subset.entries.retain(|e| {
-        e.stage() == 0
-            && touched.contains(String::from_utf8_lossy(&e.path).as_ref())
-    });
+    subset
+        .entries
+        .retain(|e| e.stage() == 0 && touched.contains(String::from_utf8_lossy(&e.path).as_ref()));
     if subset.entries.is_empty() {
         return Ok(());
     }
