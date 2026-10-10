@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-10T15:26:16.486029256Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16791945216,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.4",
+    "grit_commit": "e7f057462175c446086f7f2b22ed7806364d95a3"
+  },
+  "scenarios": [
+    {
+      "id": "stash-push-pop-10000",
+      "group": "stash",
+      "fixture": "synthetic-10000",
+      "description": "stash push then pop after modifying ~20% of files (git reset between runs)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 329.17113082,
+        "median_ms": 328.97759132000004,
+        "stddev_ms": 5.444916776355664,
+        "min_ms": 320.67659132000006,
+        "max_ms": 338.08224832,
+        "runs_ms": [
+          320.67659132000006,
+          327.09307932,
+          329.37782632,
+          328.57735632000004,
+          324.61585632000003,
+          338.08224832,
+          334.55813832,
+          330.38795032
+        ]
+      },
+      "grit": {
+        "mean_ms": 519.00467674,
+        "median_ms": 497.82114214000006,
+        "stddev_ms": 62.030508445566234,
+        "min_ms": 475.8790881400001,
+        "max_ms": 628.74883014,
+        "runs_ms": [
+          498.10749014000004,
+          475.8790881400001,
+          628.74883014,
+          494.46683314000006,
+          497.82114214000006
+        ]
+      },
+      "ratio": 1.5132372394804365
+    },
+    {
+      "id": "stash-push-pop-100000",
+      "group": "stash",
+      "fixture": "synthetic-100000",
+      "description": "stash push then pop after modifying ~20% of files (git reset between runs)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3501.76824458,
+        "median_ms": 3475.40762078,
+        "stddev_ms": 157.7175346911076,
+        "min_ms": 3283.58912178,
+        "max_ms": 3715.63929878,
+        "runs_ms": [
+          3283.58912178,
+          3475.40762078,
+          3467.14681678,
+          3715.63929878,
+          3567.05836478
+        ]
+      },
+      "grit": {
+        "mean_ms": 13577.53705842,
+        "median_ms": 13554.09364802,
+        "stddev_ms": 405.4395325597234,
+        "min_ms": 13182.57104702,
+        "max_ms": 14219.66909102,
+        "runs_ms": [
+          13287.32544602,
+          13644.02606002,
+          13554.09364802,
+          13182.57104702,
+          14219.66909102
+        ]
+      },
+      "ratio": 3.9000011299330692
+    }
+  ]
+}

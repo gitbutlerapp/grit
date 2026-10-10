@@ -403,6 +403,7 @@ fn run_server_side_clone_comparison(
         git: git_stats,
         grit: grit_stats,
         ratio,
+        grit_failure: None,
     })
 }
 
@@ -461,6 +462,7 @@ fn run_paired_cli_scenario(
         git: git_stats,
         grit: grit_stats,
         ratio,
+        grit_failure: None,
     })
 }
 

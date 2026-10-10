@@ -63,6 +63,7 @@ pub enum PrepareKind {
     PickSeriesReset,
     CommitIteration,
     RestoreReset,
+    StashReset,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -109,6 +110,7 @@ fn prepare_command(cfg: &RunConfig, git: &Path, kind: PrepareKind) -> String {
         PrepareKind::PickSeriesReset => "prepare-pick-series",
         PrepareKind::CommitIteration => "prepare-commit",
         PrepareKind::RestoreReset => "prepare-restore",
+        PrepareKind::StashReset => "prepare-stash",
     };
     shell_command(
         &cfg.prepare_bin,
@@ -360,6 +362,56 @@ pub fn run_commit_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
+/// `grit stash` + `grit stash pop` vs `git stash push` + `git stash pop`.
+pub fn run_stash_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    sizes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let mut scenarios = Vec::new();
+    for &size in sizes {
+        let repo = create_repo(git, size)?;
+        prepare_commit_iteration(&repo, git)
+            .with_context(|| format!("initial stash-bench setup for {size} files"))?;
+        let grit_cmd = chain_shell(
+            grit,
+            &[vec!["stash".into()], vec!["stash".into(), "pop".into()]],
+        );
+        let git_cmd = chain_shell(
+            git,
+            &[
+                vec!["stash".into(), "push".into(), "-q".into()],
+                vec!["stash".into(), "pop".into(), "-q".into()],
+            ],
+        );
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("stash-push-pop-{size}"),
+                group: "stash".into(),
+                fixture: format!("synthetic-{size}"),
+                description:
+                    "stash push then pop after modifying ~20% of files (git reset between runs)"
+                        .into(),
+                grit_argv: sh_script(grit_cmd),
+                git_argv: sh_script(git_cmd),
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::StashReset),
+                grit_via_shell: true,
+                git_via_shell: true,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
 fn build_report(
     git: &Path,
     grit: &Path,
@@ -405,6 +457,10 @@ pub fn run_prepare_commit(git: &Path) -> Result<()> {
 
 pub fn run_prepare_restore(_git: &Path) -> Result<()> {
     prepare_restore_iteration(&scratch_dir())
+}
+
+pub fn run_prepare_stash(git: &Path) -> Result<()> {
+    prepare_commit_iteration(&scratch_dir(), git)
 }
 
 pub fn run_prepare_switch(git: &Path) -> Result<()> {

@@ -17,7 +17,8 @@ use grit_utils::render::{render_markdown, render_text};
 use grit_utils::scenarios::{
     run_add_suite, run_commit_suite, run_hot_path_suite, run_prepare_add, run_prepare_commit,
     run_prepare_merge, run_prepare_pick, run_prepare_pick_series, run_prepare_restore,
-    run_prepare_switch, run_restore_suite, run_status_suite, RunConfig,
+    run_prepare_stash, run_prepare_switch, run_restore_suite, run_stash_suite, run_status_suite,
+    RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use std::net::TcpListener;
@@ -74,6 +75,11 @@ enum Cmd {
     },
     /// Benchmark `grit restore` at selected repo sizes
     Restore {
+        #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
+        sizes: Vec<usize>,
+    },
+    /// Benchmark `grit stash` push + pop at selected repo sizes
+    Stash {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
         sizes: Vec<usize>,
     },
@@ -199,6 +205,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareRestore,
+    #[command(hide = true)]
+    PrepareStash {
+        #[arg(long)]
+        git: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -392,6 +403,10 @@ fn main() -> Result<()> {
         Cmd::PrepareRestore => {
             return run_prepare_restore(&PathBuf::from("git"));
         }
+        Cmd::PrepareStash { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_stash(&git);
+        }
         _ => {}
     }
 
@@ -454,6 +469,11 @@ fn main() -> Result<()> {
             eprintln!("Running restore benchmarks...");
             let cfg = run_config(&cli, false);
             run_restore_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::Stash { sizes } => {
+            eprintln!("Running stash benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_stash_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
         }
         Cmd::Odb => {
             eprintln!("Running ODB read benchmarks...");
@@ -553,7 +573,8 @@ fn main() -> Result<()> {
         | Cmd::PrepareNetworkFetchNoop { .. }
         | Cmd::PrepareNetworkPush { .. }
         | Cmd::ServeGitHttp { .. }
-        | Cmd::PrepareRestore => unreachable!(),
+        | Cmd::PrepareRestore
+        | Cmd::PrepareStash { .. } => unreachable!(),
     };
 
     let rendered = render_report(&cli.format, &report)?;
