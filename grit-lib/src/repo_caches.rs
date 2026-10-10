@@ -334,7 +334,7 @@ impl RepoCaches {
 
     /// Cached ref storage format for `git_dir`.
     ///
-    /// On detection failure, returns [`crate::RefStorageFormat::Files`] (legacy `is_reftable_repo` behavior).
+    /// On detection failure, returns [`crate::RefStorageFormat::Files`].
     #[must_use]
     pub fn ref_storage_format(&self, git_dir: &Path) -> RefStorageFormat {
         let key = git_dir
@@ -350,12 +350,6 @@ impl RepoCaches {
             guard.insert(key, v);
         }
         v
-    }
-
-    /// Cached reftable-backend flag for `git_dir`.
-    #[must_use]
-    pub fn is_reftable_repo(&self, git_dir: &Path) -> bool {
-        self.ref_storage_format(git_dir).is_reftable()
     }
 
     /// Open (or reuse) the [`crate::refs::store::RefStore`] for `git_dir`.

@@ -24,7 +24,6 @@ mod tests {
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
     use crate::ref_storage::RefStorageFormat;
-    use crate::reftable::is_reftable_repo;
     use crate::repo::{init_repository, init_repository_separate_git_dir, Repository};
     use crate::rev_list::{rev_list, RevListOptions};
 
@@ -404,7 +403,7 @@ mod tests {
 
         result.expect("global extensions must not fail repository format check");
         assert!(
-            !is_reftable_repo(&discovered.git_dir),
+            !RefStorageFormat::detect(&discovered.git_dir).is_ok_and(|f| f.is_reftable()),
             "global refstorage must not enable reftable backend"
         );
     }
@@ -427,7 +426,9 @@ mod tests {
         .unwrap();
 
         let git_dir_thread = git_dir.clone();
-        let probe = std::thread::spawn(move || is_reftable_repo(&git_dir_thread));
+        let probe = std::thread::spawn(move || {
+            RefStorageFormat::detect(&git_dir_thread).is_ok_and(|f| f.is_reftable())
+        });
         let cfg = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),

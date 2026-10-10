@@ -23,7 +23,6 @@ use crate::refs::{
     resolve_ref, should_autocreate_reflog_with_config, update_branch_for_commit_with_config,
     BranchCommitRefLock, BranchCommitRefUpdate,
 };
-use crate::reftable::is_reftable_repo;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -177,7 +176,9 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
 
     let index_snapshot = fs::read(repo.index_path()).ok();
 
-    if is_reftable_repo(&repo.git_dir) {
+    if crate::refs::store::open_ref_store(&repo.git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         let current = resolve_ref(&repo.git_dir, &refname).ok();
         crate::refs::verify_branch_commit_cas(Some(head_oid), current, &refname)?;
 

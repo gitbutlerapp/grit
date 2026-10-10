@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::reftable::{
-    dump_reftable_blocks, is_reftable_repo, read_write_options, reftable_append_reflog,
-    reftable_create_reflog, reftable_delete_ref, reftable_delete_reflog, reftable_list_reflog_refs,
-    reftable_list_refs, reftable_read_reflog, reftable_read_symbolic_ref, reftable_reflog_exists,
+    dump_reftable_blocks, read_write_options, reftable_append_reflog, reftable_create_reflog,
+    reftable_delete_ref, reftable_delete_reflog, reftable_list_reflog_refs, reftable_list_refs,
+    reftable_read_reflog, reftable_read_symbolic_ref, reftable_reflog_exists,
     reftable_replace_reflog, reftable_resolve_ref, reftable_write_ref, reftable_write_symref,
     reftable_write_transaction, LogRecord, RefRecord, RefValue, ReftableReader, ReftableStack,
     ReftableTransactionUpdate, ReftableWriter, WriteOptions,
@@ -609,7 +609,10 @@ fn setup_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
 #[test]
 fn reftable_stack_write_resolve_list_and_delete() {
     let (_dir, git_dir) = setup_reftable_git_dir();
-    assert!(is_reftable_repo(&git_dir));
+    assert_eq!(
+        grit_lib::RefStorageFormat::detect(&git_dir).expect("detect"),
+        grit_lib::RefStorageFormat::Reftable
+    );
     let oid = oid(0x42);
     reftable_write_ref(&git_dir, "refs/heads/main", &oid, None, None).expect("write");
     reftable_write_symref(&git_dir, "refs/heads/other", "refs/heads/main", None, None)

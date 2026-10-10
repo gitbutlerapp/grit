@@ -374,7 +374,9 @@ pub fn delete_reflog_entries_rechain(
     for i in 1..kept.len() {
         kept[i].old_oid = kept[i - 1].new_oid;
     }
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        == crate::refs::store::RefStorageFormat::Reftable
+    {
         return crate::reftable::reftable_replace_reflog(git_dir, refname, &kept);
     }
     let path = reflog_path(git_dir, refname);

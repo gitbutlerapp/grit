@@ -2607,16 +2607,6 @@ impl ReftableStack {
 // Integration helpers — used by refs.rs and commands
 // ---------------------------------------------------------------------------
 
-/// Whether `extensions.refstorage = reftable` is declared in repository-local config only.
-pub(crate) fn reftable_declared_in_repository_config(git_dir: &Path) -> bool {
-    crate::ref_storage::RefStorageFormat::detect(git_dir).is_ok_and(|f| f.is_reftable())
-}
-
-/// Detect whether a git directory uses the reftable backend (uncached).
-pub fn is_reftable_repo(git_dir: &Path) -> bool {
-    reftable_declared_in_repository_config(git_dir)
-}
-
 /// Resolve a ref in a reftable repo, following symbolic refs.
 pub fn reftable_resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
     reftable_resolve_ref_depth(git_dir, refname, 0)
