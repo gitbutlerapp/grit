@@ -4,6 +4,11 @@
 
 Each docs page has a Markdown twin at the same URL with `index.md` instead of `index.html`. Use `grit --json` (and `--markdown` on many commands) for script- and agent-friendly CLI output.
 
+## Whole sections
+
+- [grit-cli.md](https://grit-scm.com/docs/grit-cli.md): The whole CLI in one file, to learn grit for everyday Git work.
+- [grit-lib.md](https://grit-scm.com/docs/grit-lib.md): The whole library guide in one file, to build Git-compatible Rust programs.
+
 ## Getting started
 
 - [Docs](https://grit-scm.com/docs/index.md): How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.

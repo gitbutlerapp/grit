@@ -28,6 +28,15 @@ On-disk formats and the wire protocol stay compatible with Git; the CLI's argv a
 
 See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`, and the [Agent guide](https://grit-scm.com/docs/agents/index.md) for automation-focused details.
 
+## For agents
+
+- [grit-cli.md](https://grit-scm.com/docs/grit-cli.md): the whole CLI in one file, to learn grit for everyday Git work.
+- [grit-lib.md](https://grit-scm.com/docs/grit-lib.md): the whole library guide in one file, to build Git-compatible Rust programs.
+- [llms.txt](https://grit-scm.com/llms.txt): an index of every page with a one-line summary.
+- [llms-full.txt](https://grit-scm.com/llms-full.txt): every docs page in one file.
+
+Every page also has a Markdown twin: replace `index.html` with `index.md` in its URL. Run `grit skill` to print an agent skill for the CLI.
+
 ## Commands
 
 ### Getting started
@@ -484,7 +493,7 @@ These options work on any command (and on `grit` itself when you pass no subcomm
 | Option | Description |
 | --- | --- |
 | `--json` | Print one JSON object instead of human-readable text. Errors become `{"error": "..."}`. |
-| `--markdown` | Print a Markdown field list instead of human-readable text (for agents). Mutually exclusive with `--json`. |
+| `--markdown` | Print agent-friendly Markdown instead of human-readable text. Most commands render structured headings, lists, and tables (or fenced diffs) rather than dumping JSON. Mutually exclusive with `--json`. |
 | `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. |
 | `-h`, `--help` | Print help for `grit` or for a command. |
 | `-V`, `--version` | Print the version of `grit`. |
@@ -790,14 +799,10 @@ Example:
 
 ## Markdown output
 
-Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for agent-friendly output (one bullet per field):
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for a short prose summary:
 
 ```text
-- **initialized**: true
-- **path**: /home/ada/project/.git
-- **bare**: false
-- **branch**: main
-- **ref_format**: reftable
+Initialized empty repository at `/home/ada/project/.git` (default branch `main`, ref-format `reftable`).
 ```
 
 ## See also
@@ -961,6 +966,18 @@ On main  ·  even with origin/main
 Nothing to commit — working tree clean.
 ```
 
+Merge in progress with a conflict:
+
+```console
+$ grit status
+On main  ·  merging — resolve conflicts
+
+Staged
+  !  conflict      f
+
+→ resolve conflicts, then grit commit "message"
+```
+
 Check from a script whether the working tree is clean:
 
 ```console
@@ -984,6 +1001,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `unstaged` | array | Unstaged changes with `path` and `status`. |
 | `untracked` | array | Paths of untracked files. |
 | `clean` | boolean | `true` when there is nothing to commit and nothing untracked. |
+| `merging` | boolean | `true` when a merge is in progress (`MERGE_HEAD` exists). |
+| `in_progress` | array | Stable operation ids while work is paused (for example `merge`, `rebase`). Omitted when empty. |
+| `conflicts` | array | Paths with unmerged index stages. Omitted when empty. |
 
 Example:
 
@@ -1007,6 +1027,25 @@ Example:
   "untracked": ["scratch.txt"],
   "clean": false
 }
+```
+
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for headed sections that mirror the status screen:
+
+```text
+On **`feature`** · **2** ahead of `origin/main`
+
+- `cf18394` Say hi (ada, 1 hour ago)
+
+Staged
+- **new** `notes.md`
+
+Changed (not staged)
+- **modified** `main.rs`
+
+Untracked
+- `scratch.txt`
 ```
 
 ## See also
@@ -1223,7 +1262,9 @@ The author and committer come from the `user.name` and `user.email` settings (se
 
 When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new commit object the same way Git does: OpenPGP and X.509 via your configured `gpg`/`gpgsm` program, or SSH via `ssh-keygen -Y sign` when `gpg.format` is `ssh`. Signing uses `user.signingkey` and the same `gpg.*` settings Git reads. [`grit merge`](https://grit-scm.com/docs/merge/index.md) and [`grit pick`](https://grit-scm.com/docs/pick/index.md) honor the same policy when they create commits.
 
-`grit commit` fails when there's nothing to commit, and when HEAD is detached rather than on a branch.
+`grit commit` fails when there's nothing to commit, when HEAD is detached rather than on a branch, and when the index still has **unmerged** paths (for example after a merge conflict). Resolve conflicts, stage the result with [`grit add`](https://grit-scm.com/docs/add/index.md), then commit again.
+
+When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
 
 ## Options
 
@@ -1388,6 +1429,21 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for one `diff`-fenced unified patch per changed file:
+
+```text
+File: main.rs
+
+@@ -1,1 +1,2 @@
+ fn main() {
++    println!("hello");
+ }
+```
+
+Each changed file is introduced with a level-2 heading on stdout, followed by a `diff`-fenced patch.
+
 ## See also
 
 [grit status](https://grit-scm.com/docs/status/index.md), [grit show](https://grit-scm.com/docs/show/index.md), [grit log](https://grit-scm.com/docs/log/index.md)
@@ -1469,6 +1525,17 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for a bullet list of commits (short oid, subject, author, relative date):
+
+```text
+- `b52cca6` Handle empty input (ada, 2 minutes ago)
+- `5fbefea` Add a greeting test (ada, 1 hour ago)
+
+More history: run `grit log --before=a7e3a5e`
+```
+
 ## See also
 
 [grit shortlog](https://grit-scm.com/docs/shortlog/index.md), [grit show](https://grit-scm.com/docs/show/index.md)
@@ -1533,6 +1600,19 @@ Example:
   "ahead": 0,
   "commits": []
 }
+```
+
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for a branch summary and commit bullets:
+
+```text
+# Branch `feature`
+
+Ahead of `main` by **2** commits.
+
+- `cf18394` Say hi (ada, 1 hour ago)
+- `9a1c2e0` Add a greeting test (ada, 2 hours ago)
 ```
 
 ## See also
@@ -1644,6 +1724,26 @@ Example:
     "deletions": 0
   }
 }
+```
+
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for headings, commit metadata, message body, and a diffstat table:
+
+```text
+# Commit `b52cca6`
+
+**Oid:** `92501f188ae0815af09a0cef6e121eddda4113cf`
+**Author:** Ada Lovelace <ada@example.com>
+**Date:** 2026-10-07 14:54:02 +0000
+
+Subject line as a level-2 heading, then a "Changes" section with a table:
+
+| File | + | − |
+| --- | ---: | ---: |
+| `README.md` | 1 | 0 |
+
+1 file changed, 1 insertion(+)
 ```
 
 ## See also
@@ -2716,6 +2816,17 @@ Example (with `content` shortened):
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) to print the full `SKILL.md` text on stdout (same bytes as human mode, suitable for saving or parsing):
+
+```text
+---
+name: grit
+description: Use the grit CLI for version control …
+---
+```
+
 ## See also
 
 [Agent guide](https://grit-scm.com/docs/agents/index.md), [grit update](https://grit-scm.com/docs/update/index.md), [Global options](https://grit-scm.com/docs/global-options/index.md)
@@ -2748,7 +2859,7 @@ Release archives also ship pre-generated scripts under `completions/` when you i
 | -------- | ------- |
 | `<shell>` | One of `bash`, `elvish`, `fish`, `powershell`, or `zsh`. |
 
-`grit completions` ignores the global [`--json`](https://grit-scm.com/docs/global-options/index.md) and [`--filter`](https://grit-scm.com/docs/global-options/index.md) flags; stdout is always the raw completion script.
+`grit completions` rejects the global [`--json`](https://grit-scm.com/docs/global-options/index.md) and [`--markdown`](https://grit-scm.com/docs/global-options/index.md) flags; stdout is always the raw completion script.
 
 ## Examples
 
@@ -2774,7 +2885,11 @@ grit completions fish > ~/.config/fish/completions/grit.fish
 
 ## JSON output
 
-There is no JSON form. `--json` does not change stdout; use the human completion script only.
+There is no JSON form. `--json` and `--markdown` exit with an error; use the human completion script only.
+
+## Markdown output
+
+None. `--markdown` is rejected for the same reason as `--json`.
 
 ## See also
 
@@ -3546,8 +3661,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::transport::Transport` | trait | A factory that connects to a remote and performs the protocol handshake. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/trait.Transport.html) |
 | `grit_lib::transport::http` | module | Smart-HTTP Git transport over a pluggable HTTP client. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/index.html) |
 | `grit_lib::transport::http::HttpClient` | trait | The minimal HTTP surface the smart-HTTP transport needs. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/trait.HttpClient.html) |
-| `grit_lib::transport::http::SmartHttpConnection` | struct | A live smart-HTTP connection: the parsed advertisement plus the context needed to issue the stateless-RPC POST. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/struct.SmartHttpConnection.html) |
 | `grit_lib::transport::http::SmartHttpTransport` | struct | A smart-HTTP Transport over a pluggable HttpClient. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/http/struct.SmartHttpTransport.html) |
+| `grit_lib::transport::stateless_http` | module | Smart-HTTP Connection over stateless POST rounds (upload-pack) or a single POST body (receive-pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/stateless_http/index.html) |
+| `grit_lib::transport::stateless_http::StatelessHttpConnection` | struct | A live smart-HTTP connection backed by HttpClient stateless RPC. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport/stateless_http/struct.StatelessHttpConnection.html) |
 | `grit_lib::transport_path` | module | Safety checks and path resolution for local transport URLs (matches Git connect.c / path.c). | [API](https://docs.rs/grit-lib/latest/grit_lib/transport_path/index.html) |
 | `grit_lib::transport_path::NoDirectoryName` | struct | Error returned by git_url_basename when no directory name can be derived from a URL. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport_path/struct.NoDirectoryName.html) |
 | `grit_lib::transport_path::TransportPathError` | enum | Errors returned while validating local transport paths. | [API](https://docs.rs/grit-lib/latest/grit_lib/transport_path/enum.TransportPathError.html) |

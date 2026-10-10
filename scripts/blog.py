@@ -121,7 +121,12 @@ def inline_md(value: str) -> str:
 FENCE_LINE = re.compile(r"^(?P<ticks>`{3,})(?P<info>\S*)?\s*$")
 
 
-def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
+def markdown_to_html(markdown: str, *, code_lang: bool = False) -> tuple[str, list[TocItem]]:
+    """Render Markdown to HTML and collect H2+ headings for a table of contents.
+
+    With ``code_lang``, each code block keeps its fence info string as
+    ``<pre data-lang="…">`` so callers can lay out and highlight it by language.
+    """
     lines = markdown.splitlines()
     output: list[str] = []
     toc: list[TocItem] = []
@@ -130,7 +135,12 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
     list_kind: str | None = None
     in_code = False
     code_lines: list[str] = []
+    code_info = ""
     table_rows: list[list[str]] = []
+
+    def code_block() -> str:
+        attr = f' data-lang="{html.escape(code_info, quote=True)}"' if code_lang else ""
+        return f"<pre{attr}><code>{html.escape(chr(10).join(code_lines))}</code></pre>"
 
     def unique_anchor(text: str) -> str:
         base = slugify(re.sub(r"<[^>]+>", "", text))
@@ -172,15 +182,16 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
         fence = FENCE_LINE.match(line.strip())
         if fence and line.strip().startswith("`"):
             if in_code:
-                output.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+                output.append(code_block())
                 code_lines = []
                 in_code = False
             else:
-                # Opening info string (e.g. ```console) is not copied into HTML.
+                # The opening info string (e.g. ```console) is only kept with code_lang.
                 flush_paragraph()
                 close_list()
                 in_code = True
                 code_lines = []
+                code_info = fence.group("info") or ""
             continue
         if in_code:
             code_lines.append(line)
@@ -214,7 +225,7 @@ def markdown_to_html(markdown: str) -> tuple[str, list[TocItem]]:
         paragraph.append(line.strip())
     flush_paragraph(); close_list(); flush_table()
     if in_code:
-        output.append(f"<pre><code>{html.escape(chr(10).join(code_lines))}</code></pre>")
+        output.append(code_block())
     return "\n".join(output), toc
 
 

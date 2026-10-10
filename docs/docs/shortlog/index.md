@@ -58,6 +58,19 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for a branch summary and commit bullets:
+
+```text
+# Branch `feature`
+
+Ahead of `main` by **2** commits.
+
+- `cf18394` Say hi (ada, 1 hour ago)
+- `9a1c2e0` Add a greeting test (ada, 2 hours ago)
+```
+
 ## See also
 
 [grit status](https://grit-scm.com/docs/status/index.md), [grit log](https://grit-scm.com/docs/log/index.md), [grit config](https://grit-scm.com/docs/config/index.md)

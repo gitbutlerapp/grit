@@ -139,6 +139,25 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for headed sections that mirror the status screen:
+
+```text
+On **`feature`** · **2** ahead of `origin/main`
+
+- `cf18394` Say hi (ada, 1 hour ago)
+
+Staged
+- **new** `notes.md`
+
+Changed (not staged)
+- **modified** `main.rs`
+
+Untracked
+- `scratch.txt`
+```
+
 ## See also
 
 [grit shortlog](https://grit-scm.com/docs/shortlog/index.md), [grit diff](https://grit-scm.com/docs/diff/index.md), [grit add](https://grit-scm.com/docs/add/index.md), [grit commit](https://grit-scm.com/docs/commit/index.md)

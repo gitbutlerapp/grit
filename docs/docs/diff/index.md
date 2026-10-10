@@ -101,6 +101,21 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for one `diff`-fenced unified patch per changed file:
+
+```text
+File: main.rs
+
+@@ -1,1 +1,2 @@
+ fn main() {
++    println!("hello");
+ }
+```
+
+Each changed file is introduced with a level-2 heading on stdout, followed by a `diff`-fenced patch.
+
 ## See also
 
 [grit status](https://grit-scm.com/docs/status/index.md), [grit show](https://grit-scm.com/docs/show/index.md), [grit log](https://grit-scm.com/docs/log/index.md)

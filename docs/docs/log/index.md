@@ -73,6 +73,17 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for a bullet list of commits (short oid, subject, author, relative date):
+
+```text
+- `b52cca6` Handle empty input (ada, 2 minutes ago)
+- `5fbefea` Add a greeting test (ada, 1 hour ago)
+
+More history: run `grit log --before=a7e3a5e`
+```
+
 ## See also
 
 [grit shortlog](https://grit-scm.com/docs/shortlog/index.md), [grit show](https://grit-scm.com/docs/show/index.md)

@@ -1,3 +1,110 @@
+# grit-lib: the library guide
+
+> Everything an agent needs to write Git-compatible Rust programs with `grit-lib`: the quick start, every library guide with its compiled example, and the generated API map. On-disk formats and the wire protocol match Git, so repositories you write work with `git` and any Git host. Full API reference: https://docs.rs/grit-lib
+
+Each section below is one docs page; its heading is the page's URL.
+
+# https://grit-scm.com/docs/library-quickstart/index.md
+
+# Library quick start
+
+> Add grit-lib to a Rust project, open a repository, and read the current commit from HEAD.
+
+This page walks through a minimal program that discovers a Git repository in the current directory (or a parent), resolves `HEAD`, and prints the commit id and subject line. The source below is the real example binary in the Grit repository; it is included automatically so the docs cannot drift from compiled code.
+
+## Add the dependency
+
+In your crate:
+
+```bash
+cargo add grit-lib
+```
+
+Or add to `Cargo.toml`:
+
+```toml
+[dependencies]
+grit-lib = "0.5.0"
+```
+
+Use the [latest version on crates.io](https://crates.io/crates/grit-lib) if the number above is stale.
+
+## Example program
+
+Save as `src/main.rs` (or copy from `grit-examples` in the Grit repo):
+
+```rust
+//! Minimal grit-lib program: discover a repository and print HEAD's commit id.
+//!
+//! Source for the library quick start in the docs; kept in sync via an include directive.
+
+use grit_lib::objects::{parse_commit, ObjectKind};
+use grit_lib::repo::Repository;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let repo = Repository::discover(None)?;
+    let head = grit_lib::refs::resolve_ref(&repo.git_dir, "HEAD")?;
+    let object = repo.odb.read(&head)?;
+    if object.kind != ObjectKind::Commit {
+        return Err("HEAD is not a commit".into());
+    }
+    let commit = parse_commit(&object.data)?;
+    println!("{head}");
+    let subject = commit.message.lines().next().unwrap_or("");
+    if !subject.is_empty() {
+        println!("{subject}");
+    }
+    Ok(())
+}
+```
+
+## Run it
+
+From the root of any Git repository with at least one commit:
+
+```bash
+cargo run
+```
+
+Example output (your commit id will differ):
+
+```text
+217c6f9a1b2c3d4e5f6789012345678901234567
+Start the project
+```
+
+The first line is the full object id of `HEAD`; the second is the first line of the commit message.
+
+## Next steps
+
+- [Library guide overview](https://grit-scm.com/docs/library/index.md) — longer-form guides for objects, refs, diff, and network code.
+- [grit-lib on docs.rs](https://docs.rs/grit-lib) — API reference for `Repository` and the rest of the public surface.
+- [Tutorial](https://grit-scm.com/docs/tutorial/index.md) — the same repository operations from the `grit` CLI.
+
+# https://grit-scm.com/docs/library/index.md
+
+# Library guide
+
+> Use grit-lib from Rust — the same engine that powers the grit CLI.
+
+These pages walk through opening a repository, the object database, refs, the index, diffs, history walks, and network transport using `grit-lib`. Each guide includes a compiled example from `grit-examples` that tests against the system `git` binary.
+
+| Page | Topic |
+| --- | --- |
+| [Repository](https://grit-scm.com/docs/library/repository/index.md) | Discover, open, config, errors |
+| [Embedding](https://grit-scm.com/docs/library/embedding/index.md) | Environment, sinks, subprocess injection, concurrency |
+| [Objects](https://grit-scm.com/docs/library/objects/index.md) | Odb read/write, object kinds |
+| [Refs](https://grit-scm.com/docs/library/refs/index.md) | Resolve, list, update refs and reflog |
+| [Index](https://grit-scm.com/docs/library/staging/index.md) | Read index, stage paths, write trees |
+| [Diff](https://grit-scm.com/docs/library/diff/index.md) | Tree, index, and blob diffs |
+| [Revwalk](https://grit-scm.com/docs/library/revwalk/index.md) | Rev-parse, rev-list, ranges, merge base |
+| [Network](https://grit-scm.com/docs/library/network/index.md) | ls-remote, fetch, push, credentials |
+| [API map](https://grit-scm.com/docs/library/api-map/index.md) | Generated module and type index with docs.rs links |
+
+For exhaustive API detail see [grit-lib on docs.rs](https://docs.rs/grit-lib).
+
+# https://grit-scm.com/docs/library/api-map/index.md
+
 # grit-lib API map
 
 > Generated index of public grit-lib modules and key types with docs.rs links.
@@ -616,3 +723,1297 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::write_tree::WriteTreePersistence` | enum | How cache_tree_update persists rebuilt tree objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/write_tree/enum.WriteTreePersistence.html) |
 | `grit_lib::ws` | module | Git-compatible whitespace rules (core.whitespace, whitespace attribute). | [API](https://docs.rs/grit-lib/latest/grit_lib/ws/index.html) |
 | `grit_lib::ws::WhitespaceGitAttr` | enum | Blank lines at end of file (handled at apply layer, not in ws_check). | [API](https://docs.rs/grit-lib/latest/grit_lib/ws/enum.WhitespaceGitAttr.html) |
+
+# https://grit-scm.com/docs/library/bitmaps/index.md
+
+# Reachability bitmaps
+
+> Query pack and MIDX commit bitmaps for fast object reachability and counting.
+
+Git stores optional **reachability bitmaps** alongside pack and multi-pack-index files. grit-lib can decode those bitmaps ([`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html)) and run **want/have** reachability queries ([`ReachabilityQuery`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachabilityQuery.html), [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html)) without walking every tree.
+
+## Opening an index
+
+[`BitmapIndex::open`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) prefers a MIDX bitmap when present, otherwise a pack sidecar. It returns `Ok(None)` when no valid bitmap exists.
+
+## Reachability queries
+
+[`BitmapIndex::reachability`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) (see [`bitmap_walk`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/index.html)) takes a repository handle, a [`ReachabilityQuery`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachabilityQuery.html) (wants, haves, optional [`ObjectFilter`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.ObjectFilter.html)), and [`MissingAction`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.MissingAction.html) for missing links. It returns [`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) or [`BitmapWalkUnsupported`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.BitmapWalkUnsupported.html) when the repository is shallow or the filter needs a non-bitmap walk (`sparse:oid`, `tree:<n>` with `n > 0`).
+
+[`ReachableSet`](https://docs.rs/grit-lib/latest/grit_lib/bitmap_walk/struct.ReachableSet.html) exposes `object_ids` for indexed and **extended** (out-of-namespace) objects, and `iter_grouped_by_kind` for oids in Git’s bitmap order (commits, trees, blobs, tags).
+
+## Pack generation
+
+[`build_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack.html) and [`build_pack_with_shallow_and_filter`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/fn.build_pack_with_shallow_and_filter.html) enumerate objects via [`enumerate_pack_objects`](https://docs.rs/grit-lib/latest/grit_lib/pack_object_select/fn.enumerate_pack_objects.html) when [`PackBuildOptions::use_bitmaps`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html) is true (the default) and a [`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) is available. Upload-pack reads `pack.useBitmaps` and `uploadpack.allowBitmaps` through [`PackBuildOptions::use_bitmaps_for_upload_pack`](https://docs.rs/grit-lib/latest/grit_lib/pack_objects/struct.PackBuildOptions.html). When bitmap enumeration is unsupported or disabled, grit falls back to the object walk; object sets stay the same.
+
+## Verifying on-disk bitmaps
+
+[`BitmapIndex::verify_commit`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) compares a stored commit bitmap with a fresh walk (similar to `git rev-list --test-bitmap`).
+
+## Example
+
+```rust
+//! Count objects reachable from a commit using pack/MIDX bitmaps when available.
+//!
+//! Usage: `cargo run --example count_reachable -- <repo> <commit>`
+
+use std::env;
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use grit_lib::bitmap_walk::{BitmapWalkError, ReachabilityQuery};
+use grit_lib::objects::ObjectId;
+use grit_lib::pack_bitmap::BitmapIndex;
+use grit_lib::repo::Repository;
+use grit_lib::rev_list::MissingAction;
+use grit_lib::rev_parse::resolve_revision_for_range_end;
+
+fn main() -> ExitCode {
+    let mut args = env::args().skip(1);
+    let Some(repo_path) = args.next() else {
+        eprintln!("usage: count_reachable <repo> <commit>");
+        return ExitCode::from(2);
+    };
+    let Some(rev) = args.next() else {
+        eprintln!("usage: count_reachable <repo> <commit>");
+        return ExitCode::from(2);
+    };
+
+    let repo = match Repository::discover(Some(repo_path.as_ref())) {
+        Ok(r) => r,
+        Err(err) => {
+            eprintln!("open repository: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    let commit: ObjectId = match resolve_revision_for_range_end(&repo, &rev) {
+        Ok(oid) => oid,
+        Err(err) => {
+            eprintln!("resolve {rev}: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let index: Arc<BitmapIndex> = match BitmapIndex::open(&repo) {
+        Ok(Some(idx)) => idx,
+        Ok(None) => {
+            eprintln!("no reachability bitmap in this repository");
+            return ExitCode::from(1);
+        }
+        Err(err) => {
+            eprintln!("open bitmap: {err}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let query = ReachabilityQuery {
+        wants: &[commit],
+        haves: &[],
+        filter: None,
+    };
+    match index.reachability(&repo, query, MissingAction::Error) {
+        Ok(set) => {
+            println!("reachable objects: {}", set.count());
+            println!(
+                "  commits: {}",
+                set.count_by_kind(grit_lib::objects::ObjectKind::Commit)
+                    .unwrap_or(0)
+            );
+            println!(
+                "  trees: {}",
+                set.count_by_kind(grit_lib::objects::ObjectKind::Tree)
+                    .unwrap_or(0)
+            );
+            println!(
+                "  blobs: {}",
+                set.count_by_kind(grit_lib::objects::ObjectKind::Blob)
+                    .unwrap_or(0)
+            );
+            println!(
+                "  tags: {}",
+                set.count_by_kind(grit_lib::objects::ObjectKind::Tag)
+                    .unwrap_or(0)
+            );
+            ExitCode::SUCCESS
+        }
+        Err(BitmapWalkError::Unsupported(_)) => {
+            eprintln!("bitmap walk unsupported for this query (use rev-list without bitmaps)");
+            ExitCode::from(1)
+        }
+        Err(err) => {
+            eprintln!("bitmap walk failed: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+```
+
+Run against a repository with a pack bitmap (`git repack -adb`):
+
+```bash
+cargo run --example count_reachable -- /path/to/repo HEAD
+```
+
+# https://grit-scm.com/docs/library/diff/index.md
+
+# Diff
+
+> Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.
+
+Diffing in grit-lib centers on [`diff`](https://docs.rs/grit-lib/latest/grit_lib/diff/index.html) and the [`diffing`](https://docs.rs/grit-lib/latest/grit_lib/diffing/index.html) module view. Results are [`DiffEntry`](https://docs.rs/grit-lib/latest/grit_lib/diff/struct.DiffEntry.html) rows with a [`DiffStatus`](https://docs.rs/grit-lib/latest/grit_lib/diff/enum.DiffStatus.html) letter (`M`, `A`, `D`, …), paths, modes, and object ids — the same shape [`grit diff`](https://grit-scm.com/docs/diff/index.md) and [`porcelain::status`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/status/index.html) use before formatting output.
+
+## Tree-to-tree
+
+[`diff_trees`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_trees.html) compares two tree objects recursively and returns changed paths. Pass `None` for either side to diff against an empty tree. [`diff_trees_show_tree_entries`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_trees_show_tree_entries.html) can emit tree objects themselves (Git’s `diff-tree -t` behavior).
+
+Commit-to-commit diffs resolve each commit’s tree with [`parse_commit`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.parse_commit.html), then call `diff_trees` on the parent and child trees.
+
+## Index-to-worktree
+
+[`diff_index_to_worktree`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_index_to_worktree.html) compares the index to files on disk. [`diff_index_to_worktree_with_options`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_index_to_worktree_with_options.html) adds index mtime, submodule/gitlink handling, broken-gitlink detection, and an optional repository git-dir override. [`porcelain::add::stage`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/fn.stage.html) uses [`diff_index_to_worktree_for_staging`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.diff_index_to_worktree_for_staging.html) internally so staging sees the same dirty paths as status.
+
+## Blob diffs
+
+For a single modified file, read old and new bytes from [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) and pass them to [`unified_diff`](https://docs.rs/grit-lib/latest/grit_lib/diff/fn.unified_diff.html) (histogram algorithm, Git-compatible hunks). The CLI builds human, `--json`, and `--markdown` views from `DiffEntry` lists plus optional unified bodies.
+
+## Porcelain models
+
+- **Status** — combines index vs HEAD and index vs worktree scans into structured sections (the CLI maps them to default / `--json` / `--markdown` output).
+- **Add** — uses diff results to decide which paths to hash and stage.
+- **Diff command** — tree-to-tree for commit ranges, index-to-worktree for uncommitted changes, then blob-level rendering for text files.
+
+## Example
+
+The program below diffs the latest commit against its parent (tree-to-tree), checks whether the work tree is dirty, and counts unified-diff lines for one modified blob:
+
+```rust
+//! Tree-to-tree, index-to-worktree, and blob diffs used by porcelain and the CLI.
+//!
+//! Source for the library guide "Diff" page (included in the docs site).
+
+use grit_lib::diff::{diff_index_to_worktree, diff_trees, unified_diff, DiffEntry, DiffStatus};
+use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::repo::Repository;
+use grit_lib::state::resolve_head;
+use std::path::{Path, PathBuf};
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId, grit_lib::error::Error> {
+    let obj = repo.odb.read(commit)?;
+    Ok(parse_commit(&obj.data)?.tree)
+}
+
+fn print_name_status(entries: &[DiffEntry]) {
+    for entry in entries {
+        let letter = entry.status.letter();
+        let path = entry.path();
+        if entry.status == DiffStatus::Renamed {
+            if let (Some(old), Some(new)) = (&entry.old_path, &entry.new_path) {
+                println!("{letter}\t{old}\t{new}");
+                continue;
+            }
+        }
+        println!("{letter}\t{path}");
+    }
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let root = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+    let repo = open_repo(&root)?;
+
+    let head = resolve_head(&repo.git_dir)?;
+    let new_commit = head
+        .oid()
+        .cloned()
+        .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
+    let new_obj = repo.odb.read(&new_commit)?;
+    let new_commit_data = parse_commit(&new_obj.data)?;
+    let parent = new_commit_data
+        .parents
+        .first()
+        .copied()
+        .ok_or_else(|| grit_lib::error::Error::Message("need a commit with a parent".into()))?;
+
+    let old_tree = tree_oid(&repo, &parent)?;
+    let new_tree = new_commit_data.tree;
+
+    let tree_changes = diff_trees(&repo.odb, Some(&old_tree), Some(&new_tree), "")?;
+    println!("tree_diff_begin");
+    print_name_status(&tree_changes);
+    println!("tree_diff_end");
+
+    if let Some(wt) = repo.work_tree.as_deref() {
+        let mut index = repo.load_index()?;
+        let wt_changes = diff_index_to_worktree(&repo.odb, &mut index, wt, false, false)?;
+        println!("index_worktree_dirty={}", !wt_changes.is_empty());
+    }
+
+    if let (Some(entry),) = (tree_changes.first(),) {
+        if entry.status == DiffStatus::Modified {
+            let old_blob = repo.odb.read(&entry.old_oid)?.data;
+            let new_blob = repo.odb.read(&entry.new_oid)?.data;
+            let old_text = String::from_utf8_lossy(&old_blob);
+            let new_text = String::from_utf8_lossy(&new_blob);
+            let old_path = entry.old_path.as_deref().unwrap_or(entry.path());
+            let new_path = entry.new_path.as_deref().unwrap_or(entry.path());
+            let patch = unified_diff(&old_text, &new_text, old_path, new_path, 3, false, false);
+            let hunk_lines = patch
+                .lines()
+                .filter(|l| l.starts_with('-') || l.starts_with('+'))
+                .count();
+            println!("blob_unified_hunk_lines={hunk_lines}");
+        }
+    }
+
+    Ok(())
+}
+```
+
+Requires a repository whose `HEAD` has a parent (at least two commits):
+
+```bash
+cargo run --bin guide_diff /path/to/repo
+git -C /path/to/repo diff --name-status HEAD~1 HEAD
+```
+
+# https://grit-scm.com/docs/library/embedding/index.md
+
+# Embedding grit-lib
+
+> Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.
+
+Grit is designed to be **linked into other Rust programs**, not only invoked as the `grit` CLI. The library avoids hidden process globals: discovery variables, config identity, subprocesses, warnings, and wall-clock references are supplied through explicit types at the boundary.
+
+## Environment
+
+[`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) holds Git discovery and configuration variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*`, home paths, author/committer overrides, transport trace flags, and related fields). Construct it with:
+
+- `Environment::empty()` — defaults only (`cwd = "."`).
+- [`Environment::from_vars`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) — parse an iterator of `(key, value)` pairs plus an explicit working directory (no reads from `std::env` inside the library).
+- `Environment::capture_process()` — **CLI boundary only**: snapshot the current process into an [`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html).
+
+Pass the same `Environment` into [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) (`discover_with` / `open_with`) and into [`ConfigSet`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) loading.
+
+## RepositoryOptions
+
+[`RepositoryOptions`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html) bundles everything needed to open a repository besides paths:
+
+| Field | Role |
+| --- | --- |
+| `environment` | Discovery/config/identity snapshot |
+| `command_runner` | Injectable subprocess execution (hooks, filters, signing helpers) |
+| `diagnostics` | [`DiagnosticSink`](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/trait.DiagnosticSink.html) for warnings and trace events |
+| `network_trace` | When true, emit network trace events via the diagnostics sink |
+| `reference_unix_time` | Wall clock for rev-parse date selectors (`@{yesterday}`, etc.) |
+| Test knobs | `test_assume_different_owner`, `force_split_index`, … |
+
+Use `RepositoryOptions::with_environment` and `with_command_runner` on [`RepositoryOptions`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html); assign `diagnostics` when you need a custom sink.
+
+## DiagnosticSink and ProgressSink
+
+Non-fatal conditions are [`Warning`](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/enum.Warning.html) values delivered to a [`DiagnosticSink`](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/trait.DiagnosticSink.html). The default is [`NullDiagnostics`](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/struct.NullDiagnostics.html). Tests and embedders often use [`CollectingDiagnostics`](https://docs.rs/grit-lib/latest/grit_lib/diagnostics/struct.CollectingDiagnostics.html) to assert warnings without parsing stderr.
+
+Long-running work (status, fetch, pack indexing) takes a [`ProgressSink`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.ProgressSink.html) (for example [`NullProgress`](https://docs.rs/grit-lib/latest/grit_lib/progress/struct.NullProgress.html)). Progress is separate from diagnostics: progress reports throughput; diagnostics report Git-style warnings.
+
+## CommandRunner
+
+[`CommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/trait.CommandRunner.html) is the only production path that spawns OS processes from the library ([`SystemCommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.SystemCommandRunner.html)). Hooks, smudge/clean filters, credential helpers, and signing helpers build a [`CommandSpec`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.CommandSpec.html) and call `spawn`.
+
+For tests, [`RecordingRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.RecordingRunner.html) records specs and returns scripted exit codes. Install it on `RepositoryOptions` before `Repository::open_with`.
+
+## Typed errors
+
+Library APIs return [`grit_lib::error::Result`](https://docs.rs/grit-lib/latest/grit_lib/error/type.Result.html). Match on [`Error`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) variants (`RevParse`, `RevList`, `HookError`, `FilterError`, …) instead of parsing `"fatal:"` strings. The CLI maps variants to exit codes and human messages in its own words.
+
+## Concurrency
+
+Two or more [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) handles may be used from different threads in one process when each handle is opened with its **own** `Environment`, `RepositoryOptions`, diagnostics sink, and command runner. Repository-scoped caches (config, attributes, pack read caches) do not leak between handles.
+
+Integration coverage: `grit-lib/tests/concurrent_repos.rs` runs parallel commit loops and a fetch/merge/notes scenario with isolated config and sinks.
+
+## Example
+
+```rust
+//! Open two repositories in one process with isolated environments and sinks.
+//!
+//! Source for the library guide "Embedding" page (included in the docs site).
+
+use std::sync::Arc;
+
+use grit_lib::command_runner::RecordingRunner;
+use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticSink};
+use grit_lib::environment::{Environment, RepositoryOptions};
+use grit_lib::error::Error;
+use grit_lib::repo::{init_repository, Repository};
+
+fn main() -> Result<(), Error> {
+    let base = tempfile::tempdir().map_err(Error::Io)?;
+
+    let open_named =
+        |name: &str, email: &str| -> Result<(Repository, Arc<CollectingDiagnostics>), Error> {
+            let root = base.path().join(name);
+            init_repository(
+                &root,
+                false,
+                "main",
+                None,
+                grit_lib::RefStorageFormat::Files,
+            )?;
+
+            let home = base.path().join(format!("home-{name}"));
+            std::fs::create_dir_all(&home).map_err(Error::Io)?;
+            let global = home.join(".gitconfig");
+            std::fs::write(
+                &global,
+                format!("[user]\n\tname = {name}\n\temail = {email}\n"),
+            )
+            .map_err(Error::Io)?;
+
+            let mut env = Environment::empty();
+            env.cwd = root.clone();
+            env.home = Some(home.into());
+            env.git_config_global = Some(global.to_string_lossy().into_owned());
+            env.git_config_nosystem = Some("true".into());
+            env.git_config_system = Some("/dev/null".into());
+
+            let diagnostics = Arc::new(CollectingDiagnostics::new());
+            let sink: Arc<dyn DiagnosticSink + Send + Sync> = diagnostics.clone();
+            let runner = RecordingRunner::always_success();
+            let mut options = RepositoryOptions::with_environment(env).with_command_runner(runner);
+            options.diagnostics = sink;
+
+            let git_dir = root.join(".git");
+            let repo = Repository::open_with(&options, &git_dir, Some(&root))?;
+            Ok((repo, diagnostics))
+        };
+
+    let (repo_a, sink_a) = open_named("alpha", "a@example.com")?;
+    let (repo_b, sink_b) = open_named("beta", "b@example.com")?;
+
+    let name_a = repo_a.config()?.get("user.name").unwrap_or_default();
+    let name_b = repo_b.config()?.get("user.name").unwrap_or_default();
+    println!("alpha user.name={name_a}");
+    println!("beta user.name={name_b}");
+    println!("alpha warnings={}", sink_a.warnings().len());
+    println!("beta warnings={}", sink_b.warnings().len());
+
+    Ok(())
+}
+```
+
+Build and run:
+
+```bash
+cargo run -p grit-examples --bin guide_embedding
+```
+
+# https://grit-scm.com/docs/library/network/index.md
+
+# Network
+
+> Remote dispatch, fetch, push, and ls-remote over every transport.
+
+Network operations in grit-lib center on [`Remote`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html): a typed URL ([`RemoteUrl`](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html)), configured fetch refspecs, and one dispatcher for **fetch**, **push**, and **list refs**. Wire bytes still flow through the same fetch/push engines as before; `Remote` picks the transport from the URL scheme.
+
+## Remote URL and config
+
+| Scheme / form | [`RemoteUrl`](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html) variant | Transport |
+| --- | --- | --- |
+| Path or `file://` | `Local` / `File` | [`fetch_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.fetch_local.html) / [`push_local`](https://docs.rs/grit-lib/latest/grit_lib/transfer/fn.push_local.html) |
+| `git://` | `Git` | [`GitDaemonTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.GitDaemonTransport.html) |
+| `ssh://`, scp-style | `Ssh` | [`SshTransport`](https://docs.rs/grit-lib/latest/grit_lib/transport/struct.SshTransport.html) (repo [`CommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/trait.CommandRunner.html)) |
+| `http(s)://` | `Http` / `Https` | [`http_fetch`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/fn.http_fetch.html) / [`push_http`](https://docs.rs/grit-lib/latest/grit_lib/push/fn.push_http.html) |
+
+Parse a literal URL with [`RemoteUrl::try_from`](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html). Load `remote.<name>.url`, optional `pushurl`, and `fetch` refspecs (default `+refs/heads/*:refs/remotes/<name>/*`) via [`Remote::from_config`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html). Config applies [`url_rewrite`](https://docs.rs/grit-lib/latest/grit_lib/url_rewrite/index.html) `insteadOf` / `pushInsteadOf` rules the same way Git does.
+
+Local paths resolve through [`resolve_local_remote_git_dir`](https://docs.rs/grit-lib/latest/grit_lib/transport_path/fn.resolve_local_remote_git_dir.html) from the repository root, not the process cwd.
+
+## list refs
+
+[`Remote::list_refs`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) takes [`ListRefsOptions`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.ListRefsOptions.html) (prefixes, heads, tags, symrefs, peel) and returns [`RemoteRef`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.RemoteRef.html) entries in `git ls-remote` order. On disk it uses [`list_refs_from_git_dir`](https://docs.rs/grit-lib/latest/grit_lib/remote/fn.list_refs_from_git_dir.html). Over the wire it uses protocol v2 `ls-refs` when available, otherwise the v0/v1 ref advertisement.
+
+## Fetch and push
+
+[`Remote::fetch`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) accepts [`FetchOptions`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.FetchOptions.html) and a [`Progress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) sink; fetch negotiates protocol v2 when the server supports it. [`Remote::push`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) uses [`PushRefSpec`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushRefSpec.html) and returns [`PushOutcome`](https://docs.rs/grit-lib/latest/grit_lib/transfer/struct.PushOutcome.html).
+
+HTTP remotes need an [`HttpClient`](https://docs.rs/grit-lib/latest/grit_lib/transport/http/trait.HttpClient.html). Implement [`HttpClientFactory`](https://docs.rs/grit-lib/latest/grit_lib/remote/trait.HttpClientFactory.html) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/struct.HelperCredentialProvider.html)).
+
+## Credentials and progress
+
+[`HelperCredentialProvider`](https://docs.rs/grit-lib/latest/grit_lib/credentials/struct.HelperCredentialProvider.html) satisfies HTTP `401` responses from configured `credential.helper` programs and never opens a TTY. Pass [`NoProgress`](https://docs.rs/grit-lib/latest/grit_lib/fetch/struct.NoProgress.html) to ignore sideband progress, or implement [`Progress::message`](https://docs.rs/grit-lib/latest/grit_lib/fetch/trait.Progress.html) for side-band channel 2.
+
+## Example
+
+This example resolves `origin`, lists refs on a **local** bare remote, fetches, creates a commit reusing the fetched tip’s tree, and pushes — all over `file://`:
+
+```rust
+//! List refs on a local remote, fetch, create a commit, and push over `file://`.
+//!
+//! Source for the library guide "Network" page (included in the docs site).
+
+use grit_examples::remote;
+use grit_lib::config::ConfigSet;
+use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
+use grit_lib::refs;
+use grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
+use grit_lib::repo::Repository;
+use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
+use grit_lib::transport_path::resolve_local_remote_git_dir;
+use std::path::Path;
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let consumer = std::env::args().nth(1).ok_or_else(|| {
+        grit_lib::error::Error::Message("usage: guide_network <consumer-repo>".to_owned())
+    })?;
+    let consumer = Path::new(&consumer);
+    let repo = Repository::discover(Some(consumer))?;
+    let git_dir = repo.git_dir.clone();
+    let work_tree = repo.work_tree.clone();
+    let config = ConfigSet::load(
+        &grit_lib::environment::Environment::capture_process(),
+        Some(&git_dir),
+        true,
+    )?;
+
+    let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+
+    let remote_git_dir =
+        resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
+    let remote_repo = Repository::open(&remote_git_dir, None)?;
+    let refs_on_remote = list_refs_from_git_dir(
+        &remote_git_dir,
+        &remote_repo.odb,
+        &ListRefsOptions::default(),
+    )
+    .map_err(grit_lib::error::Error::from)?;
+    eprintln!(
+        "ls-remote: {} ref(s) on {}",
+        refs_on_remote.len(),
+        remote_git_dir.display()
+    );
+
+    let fetch_opts = FetchOptions {
+        refspecs: remote_info.fetch_refspecs.clone(),
+        tags: TagMode::Following,
+        ..Default::default()
+    };
+    remote::fetch(&repo, &remote_info, &fetch_opts)
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+
+    let tracking = refs::resolve_ref(&git_dir, "refs/remotes/origin/main")?;
+    refs::write_ref(&git_dir, "refs/heads/main", &tracking)?;
+
+    let parent_obj = repo.odb.read(&tracking)?;
+    let parent = parse_commit(&parent_obj.data)?;
+    let commit = CommitData {
+        tree: parent.tree,
+        parents: vec![tracking],
+        author: parent.author.clone(),
+        committer: parent.committer.clone(),
+        author_raw: parent.author_raw.clone(),
+        committer_raw: parent.committer_raw.clone(),
+        encoding: parent.encoding.clone(),
+        message: "library guide network example\n".to_owned(),
+        raw_message: None,
+        extra_headers: Vec::new(),
+    };
+    let new_oid = repo
+        .odb
+        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+    refs::write_ref(&git_dir, "refs/heads/main", &new_oid)?;
+
+    let spec = PushRefSpec {
+        src: Some(new_oid),
+        dst: "refs/heads/main".to_owned(),
+        force: false,
+        delete: false,
+        expected_old: None,
+        expect_absent: false,
+    };
+    remote::push(&repo, &remote_info, &[spec], &PushOptions::default())
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+
+    println!("{new_oid}");
+    Ok(())
+}
+```
+
+The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispatch on URL scheme and print transport/auth discovery lines. Shared wiring lives in `grit-examples/src/remote.rs` (slated to thin over [`Remote`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) in a follow-up step).
+
+Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
+
+## Bundles
+
+Git’s [bundle format](https://git-scm.com/docs/gitformat-bundle) combines a text header (prerequisite commits, ref tips, optional v3 capabilities) with a thin packfile. [`grit_lib::bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/index.html) reads and writes that format for offline transfer and tests:
+
+- [`Bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.Bundle.html) (`open`, `verify`, `unbundle`) and [`read_header`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.read_header.html) parse v2/v3 headers and leave the stream at the `PACK` magic.
+- `verify` checks prerequisite OIDs against the ODB and ref connectivity (matching `git bundle verify` semantics).
+- `unbundle` ingests the pack via the index-pack path (`fix-thin`) and returns ref tips without updating refs.
+- [`write_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle/fn.write_bundle.html) builds v2 (SHA-1, no filter) or v3 bundles with a thin pack stream.
+- [`bundle_remote::fetch_from_bundle`](https://docs.rs/grit-lib/latest/grit_lib/bundle_remote/fn.fetch_from_bundle.html) ingests a bundle and applies fetch refspecs (clone/fetch from a `.bundle` path).
+
+Integration test `bundle_git_compat` round-trips bundles with system `git bundle` (verify, list-heads, clone/fetch, `fsck --strict`).
+
+# https://grit-scm.com/docs/library/object-stores/index.md
+
+# Object stores
+
+> Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.
+
+By default [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) opens a files-backed [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html) and `Repository::open_with_odb`.
+
+## Traits
+
+| Trait | Role |
+| ----- | ---- |
+| [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) | Read, metadata, streaming, enumeration |
+| [`WritableObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.WritableObjectStore.html) | Insert objects (idempotent writes) |
+
+Built-in backends live under [`grit_lib::odb::store`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/index.html) (`LooseStore`, `FilesSource`, `MemoryStore`, `CompositeStore`, and others).
+
+## Lookup order
+
+For a given [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) handle:
+
+1. In-memory overlay (when enabled for merge-tree-style operations)
+2. **Primary** store — files source by default, or your custom [`WritableObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.WritableObjectStore.html)
+3. Extra read sources from `OdbBuilder::push_read_source`
+4. Alternate object directories when `OdbBuilder::alternates` is true (`info/alternates`, environment alternates, submodule object dirs)
+
+## Building a custom repository
+
+```rust
+use std::sync::Arc;
+
+use grit_lib::environment::RepositoryOptions;
+use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::odb::store::MemoryStore;
+use grit_lib::odb::OdbBuilder;
+use grit_lib::repo::{init_repository, Repository};
+
+let dir = tempfile::tempdir()?;
+init_repository(dir.path(), false, "main", None, "files")?;
+let git_dir = dir.path().join(".git");
+let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+let repo = Repository::open_with_odb(
+    &RepositoryOptions::empty(),
+    &git_dir,
+    Some(dir.path()),
+    OdbBuilder::files(git_dir.join("objects"))
+        .primary(store)
+        .alternates(false),
+)?;
+let _blob = repo.odb.write(ObjectKind::Blob, b"hello")?;
+# Ok::<(), grit_lib::error::Error>(())
+```
+
+Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) returns [`Error::UnsupportedObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) when the primary is not the default files backend. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+
+## Conformance tests
+
+The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites. Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html).
+
+## Example: append-only packfile KV store
+
+`grit-examples` ships a single-file `PackfileKvStore` in `grit_examples::packfile_kv` (zlib records plus an in-memory index rebuilt on open) and a walkthrough that commits through a custom primary, walks history, and exports loose objects for system Git:
+
+```rust
+//! Custom append-only object store wired through [`OdbBuilder::primary`].
+//!
+//! Writes a small commit graph in the KV store, walks history with [`rev_list`],
+//! then exports objects as loose files for interoperability with system Git.
+
+use std::env;
+use std::path::PathBuf;
+
+use grit_examples::packfile_kv;
+
+fn main() -> grit_lib::error::Result<()> {
+    let (root, _tmpdir) = match env::args().nth(1) {
+        Some(path) => (PathBuf::from(path), None),
+        None => {
+            let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+            let root = dir.path().to_path_buf();
+            (root, Some(dir))
+        }
+    };
+    let log = packfile_kv::run_custom_object_store_demo(&root)?;
+    for oid in log {
+        println!("{oid}");
+    }
+    Ok(())
+}
+```
+
+## Example: SQLite object database
+
+For embedders who want indexed lookup without maintaining a separate `objects/` shard tree, `grit_examples::sqlite_odb` provides [`SqliteOdbStore`](https://github.com/gitbutlerapp/grit/blob/main/grit-examples/src/sqlite_odb.rs): each object is a row keyed by raw object id with zlib-compressed canonical store bytes (the same on-disk payload as a loose object file). The demo commits through a SQLite primary, walks history, then exports loose objects so system `git fsck` and `git log` succeed:
+
+```rust
+//! SQLite object store wired through [`OdbBuilder::primary`].
+//!
+//! Writes a small commit graph in SQLite, walks history with [`rev_list`],
+//! then exports objects as loose files for interoperability with system Git.
+
+use std::env;
+use std::path::PathBuf;
+
+use grit_examples::sqlite_odb;
+
+fn main() -> grit_lib::error::Result<()> {
+    let (root, _tmpdir) = match env::args().nth(1) {
+        Some(path) => (PathBuf::from(path), None),
+        None => {
+            let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+            let root = dir.path().to_path_buf();
+            (root, Some(dir))
+        }
+    };
+    let log = sqlite_odb::run_sqlite_object_store_demo(&root)?;
+    for oid in log {
+        println!("{oid}");
+    }
+    Ok(())
+}
+```
+
+# https://grit-scm.com/docs/library/objects/index.md
+
+# Objects
+
+> ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.
+
+Git stores four object kinds grit-lib exposes as [`ObjectKind`](https://docs.rs/grit-lib/latest/grit_lib/objects/enum.ObjectKind.html). Every object is named by an [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html) (SHA-1 by default). The [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) on [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) reads loose objects and packed storage transparently.
+
+## Writing
+
+[`Odb::write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) takes a kind and payload bytes, stores a loose object under `objects/`, and returns the id. Tree and commit bodies must already be in Git’s text format; use [`parse_tree`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.parse_tree.html) and [`parse_commit`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.parse_commit.html) when reading them back.
+
+[`Odb::hash`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (or [`HashAlgo::hash_object`](https://docs.rs/grit-lib/latest/grit_lib/objects/enum.HashAlgo.html)) computes an id without writing—useful for dry runs and tests. The algorithm follows the repository’s configured object format (SHA-1 or SHA-256).
+
+## Reading
+
+[`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) returns an [`Object`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.Object.html) with `kind` and uncompressed `data`. Packed and loose objects share the same API.
+
+When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) (see `read_info` on [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html)). It returns [`ObjectInfo`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectInfo.html) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
+
+## Pack read caching
+
+[`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) owns a repository-scoped [`PackStore`](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html).
+
+After repack, garbage collection, or installing a pack with [`install_pack_bytes`](https://docs.rs/grit-lib/latest/grit_lib/index_pack/fn.install_pack_bytes.html), call [`Odb::invalidate_packs`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so the next read rescans `objects/pack/`. If another [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
+
+For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`Odb::with_pack_read_context`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) so pack indexes, mmap-backed pack bytes, and the delta-base LRU stay on one thread-local context instead of reinstalling it per object. [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) detects an active matching context and skips nested setup.
+
+When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) with the entry offset from [`PackIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndex.html) so the read path does not repeat index lookup by OID.
+
+## Pack deltas (encoding)
+
+When building new pack deltas (as opposed to reusing on-disk zlib), grit-lib indexes the base blob with [`DeltaIndex`](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/struct.DeltaIndex.html) and encodes targets with a rolling fingerprint matcher. Reuse one index across many targets in a pack-objects window; `encode` on that index accepts an optional `max_size` cap (zero means no limit). An empty target yields a valid delta (header varints only). [`encode_delta`](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/fn.encode_delta.html) is a convenience wrapper for one-off base/target pairs.
+
+## Example
+
+This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
+
+```rust
+//! Write a blob, tree, and commit through [`grit_lib::odb::Odb`], then read them back.
+//!
+//! Source for the library guide "Objects" page (included in the docs site).
+
+use grit_lib::objects::{
+    parse_commit, parse_tree, serialize_commit, serialize_tree, CommitData, ObjectKind, TreeEntry,
+};
+use grit_lib::repo::{init_repository, Repository};
+use std::path::{Path, PathBuf};
+
+fn write_demo_objects(
+    repo: &Repository,
+) -> Result<
+    (
+        grit_lib::objects::ObjectId,
+        grit_lib::objects::ObjectId,
+        grit_lib::objects::ObjectId,
+    ),
+    grit_lib::error::Error,
+> {
+    let blob_data = b"hello from the library guide\n";
+    let blob_oid = repo.odb.write(ObjectKind::Blob, blob_data)?;
+
+    let tree_entries = vec![TreeEntry {
+        mode: 0o100644,
+        name: b"README".to_vec(),
+        oid: blob_oid,
+    }];
+    let tree_oid = repo
+        .odb
+        .write(ObjectKind::Tree, &serialize_tree(&tree_entries))?;
+
+    let commit = CommitData {
+        tree: tree_oid,
+        parents: Vec::new(),
+        author: "Ada Lovelace <ada@example.com> 0 +0000".to_owned(),
+        committer: "Ada Lovelace <ada@example.com> 0 +0000".to_owned(),
+        author_raw: Vec::new(),
+        committer_raw: Vec::new(),
+        encoding: None,
+        message: "Library guide objects example\n".to_owned(),
+        raw_message: None,
+        extra_headers: Vec::new(),
+    };
+    let commit_oid = repo
+        .odb
+        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+
+    let tree_obj = repo.odb.read(&tree_oid)?;
+    let entries = parse_tree(&tree_obj.data)?;
+    assert_eq!(entries[0].oid, blob_oid);
+
+    let commit_obj = repo.odb.read(&commit_oid)?;
+    let parsed = parse_commit(&commit_obj.data)?;
+    assert_eq!(parsed.tree, tree_oid);
+
+    Ok((blob_oid, tree_oid, commit_oid))
+}
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let repo = if let Some(root) = std::env::args().nth(1).map(PathBuf::from) {
+        open_repo(&root)?
+    } else {
+        let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+        init_repository(
+            temp.path(),
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )?;
+        open_repo(temp.path())?
+    };
+
+    let (blob_oid, tree_oid, commit_oid) = write_demo_objects(&repo)?;
+    println!("{commit_oid}");
+    println!("blob={blob_oid} tree={tree_oid}");
+    Ok(())
+}
+```
+
+Objects land on disk in standard loose format. System Git can read them:
+
+```bash
+cargo run --bin guide_objects /path/to/repo
+git -C /path/to/repo fsck --strict
+```
+
+When run without arguments the binary uses a temporary repository (fine for `cargo run`, not for fsck demos).
+
+# https://grit-scm.com/docs/library/pack-bitmaps/index.md
+
+# Pack reachability bitmaps
+
+> Read and write Git pack `.bitmap` sidecars (EWAH reachability sets, name-hash cache, lookup tables).
+
+Git can attach a **reachability bitmap** to a pack (or multi-pack-index) so rev-list and fetch paths avoid walking the full object graph. grit-lib implements the on-disk **BITM v1** format: type bitmaps, XOR-compressed commit entries, optional name-hash cache, and optional lookup table.
+
+## Reading
+
+[`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html) on a [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) loads the preferred bitmap (MIDX over pack when both exist). Decoded commit reachability sets, per-kind type filters, and optional name-hash cache entries are available on the opened index (see rustdoc on [`BitmapIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.BitmapIndex.html)).
+
+## Writing
+
+[`PackBitmapWriter`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriter.html) and [`Repository::write_pack_bitmap`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) build a `.bitmap` for an **existing** pack index whose objects are closed under reachability from the repository’s refs—the shape produced by an all-into-one repack. Options are passed explicitly as [`PackBitmapWriteOptions`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/struct.PackBitmapWriteOptions.html); [`ConfigSet::pack_bitmap_write_options`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) maps Git’s `pack.writeBitmapHashCache`, `pack.writeBitmapLookupTable`, and `pack.preferBitmapTips` when you want config-driven defaults.
+
+If no `.rev` sidecar exists, the writer creates one first so object order matches Git’s pack-offset order. Output is deterministic for identical inputs. A pack that is not closed under reachability returns [`PackBitmapWriteError::NotClosed`](https://docs.rs/grit-lib/latest/grit_lib/pack_bitmap/enum.PackBitmapWriteError.html).
+
+## Compatibility
+
+Integration tests in `grit-lib` round-trip against the system `git` binary (`rev-list --test-bitmap`, `--use-bitmap-index` counts). Name hashes use [`pack_name_hash`](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/fn.pack_name_hash.html) (v1) recorded during tree walks.
+
+# https://grit-scm.com/docs/library/refs/index.md
+
+# Refs
+
+> Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.
+
+References name commits (and other objects). grit-lib exposes them through [`refs`](https://docs.rs/grit-lib/latest/grit_lib/refs/index.html) and [`reftable`](https://docs.rs/grit-lib/latest/grit_lib/reftable/index.html), with [`reflog`](https://docs.rs/grit-lib/latest/grit_lib/reflog/index.html) for update history. The [`references`](https://docs.rs/grit-lib/latest/grit_lib/references/index.html) module groups these for navigation in rustdoc.
+
+## Resolving HEAD and symbolic refs
+
+[`resolve_head`](https://docs.rs/grit-lib/latest/grit_lib/state/fn.resolve_head.html) reads `HEAD` and returns a [`HeadState`](https://docs.rs/grit-lib/latest/grit_lib/state/enum.HeadState.html): on a branch (symbolic ref plus commit, if any), detached at a commit, or invalid. To resolve any ref name to an object id, use [`resolve_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.resolve_ref.html), which follows symbolic refs with cycle detection.
+
+[`read_ref_file`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.read_ref_file.html) returns a [`Ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.Ref.html) (`Direct` or `Symbolic`) without resolving the whole chain.
+
+## Listing branches and tags
+
+[`list_refs`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.list_refs.html) takes a prefix such as `refs/heads/` or `refs/tags/` and returns sorted `(name, ObjectId)` pairs. Loose refs under `refs/` override stale lines in `packed-refs`, matching Git. [`list_refs_glob`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.list_refs_glob.html) applies pattern matching when you need DWIM-style filtering.
+
+## Creating and updating refs with reflog
+
+[`write_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.write_ref.html) points a ref at a commit (or other object). [`write_symbolic_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.write_symbolic_ref.html) updates symbolic refs such as `HEAD`.
+
+Record history with [`append_reflog`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.append_reflog.html), then read it back with [`read_reflog`](https://docs.rs/grit-lib/latest/grit_lib/reflog/fn.read_reflog.html). Each [`ReflogEntry`](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.ReflogEntry.html) carries old and new ids, identity, and message. Batch updates can use [`update_refs`](https://docs.rs/grit-lib/latest/grit_lib/gc/fn.update_refs.html) when you need compare-and-swap semantics across many refs.
+
+## Loose, packed, and reftable backends
+
+By default, grit uses the **files** backend: one file per ref under `refs/`, plus an optional `packed-refs` file. [`list_refs`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.list_refs.html) and [`resolve_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.resolve_ref.html) merge packed and loose sources so callers see a single namespace.
+
+When `extensions.refStorage = reftable` is set in config, the same functions dispatch to the **reftable** backend ([`is_reftable_repo`](https://docs.rs/grit-lib/latest/grit_lib/reftable/fn.is_reftable_repo.html)). Reflog appends and ref listing go through reftable files instead of `logs/` and loose ref files. You do not choose the backend per call; discovery is automatic from the repository layout and config.
+
+## Pluggable ref storage (`RefStore`)
+
+For embedders and upcoming repository wiring, [`refs::store`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/index.html) defines a [`RefStore`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/trait.RefStore.html) trait: raw reads, sorted prefix iteration, compare-and-swap transactions ([`RefTransaction`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefTransaction.html) → prepare/commit/abort), and reflog helpers. [`MemoryRefStore`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.MemoryRefStore.html) is a fully in-memory backend for tests and hosts that keep refs outside a git directory. [`FilesRefStore`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.FilesRefStore.html) implements the same trait for loose refs and `packed-refs` (worktree-aware routing via [`FilesRefStoreConfig`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.FilesRefStoreConfig.html)). [`ReftableRefStore`](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.ReftableRefStore.html) implements it over a repository’s reftable stack (including `tables.list` locking, D/F checks, and one-table transactions). Path-based helpers such as [`resolve_ref`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.resolve_ref.html) still dispatch to the files or reftable layout automatically; reftable reflog and batch-write paths delegate to the store.
+
+## Example
+
+The program below resolves `HEAD`, lists branches and tags, updates `refs/heads/library-guide-demo`, and appends a reflog entry:
+
+```rust
+//! Resolve HEAD, list branches and tags, update a branch ref with reflog.
+//!
+//! Source for the library guide "Refs" page (included in the docs site).
+
+use grit_lib::objects::ObjectId;
+use grit_lib::reflog::read_reflog;
+use grit_lib::refs::{self, Ref};
+use grit_lib::repo::Repository;
+use grit_lib::state::resolve_head;
+use std::path::{Path, PathBuf};
+
+const DEMO_BRANCH: &str = "refs/heads/library-guide-demo";
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let root = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+    let repo = open_repo(&root)?;
+    let git_dir = &repo.git_dir;
+
+    let head = resolve_head(git_dir)?;
+    match &head {
+        grit_lib::state::HeadState::Branch { refname, oid, .. } => {
+            println!("head_symbolic={refname}");
+            if let Some(oid) = oid {
+                println!("head_oid={}", oid.to_hex());
+            }
+        }
+        grit_lib::state::HeadState::Detached { oid } => {
+            println!("head_detached={}", oid.to_hex());
+        }
+        grit_lib::state::HeadState::Invalid => println!("head_invalid=1"),
+    }
+
+    let head_file = refs::read_ref_file(&git_dir.join("HEAD"))?;
+    if let Ref::Symbolic(target) = head_file {
+        println!("head_file_symbolic={target}");
+    }
+
+    for (name, oid) in refs::list_refs(git_dir, "refs/heads/")? {
+        println!("branch {name} {}", oid.to_hex());
+    }
+    for (name, oid) in refs::list_refs(git_dir, "refs/tags/")? {
+        println!("tag {name} {}", oid.to_hex());
+    }
+
+    let storage = if grit_lib::reftable::is_reftable_repo(git_dir) {
+        "reftable"
+    } else {
+        "files"
+    };
+    println!("ref_storage={storage}");
+
+    let target = head
+        .oid()
+        .cloned()
+        .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
+
+    let old = refs::resolve_ref(git_dir, DEMO_BRANCH).ok();
+    refs::write_ref(git_dir, DEMO_BRANCH, &target)?;
+
+    let zero = ObjectId::zero();
+    let old_oid = old.as_ref().unwrap_or(&zero);
+    let identity = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
+    refs::append_reflog(
+        git_dir,
+        DEMO_BRANCH,
+        old_oid,
+        &target,
+        identity,
+        "library guide refs example",
+        true,
+    )?;
+
+    println!("demo_ref={DEMO_BRANCH}");
+    println!("demo_oid={}", target.to_hex());
+
+    let entries = read_reflog(git_dir, DEMO_BRANCH)?;
+    if let Some(last) = entries.last() {
+        println!("demo_reflog_new={}", last.new_oid.to_hex());
+        println!("demo_reflog_message={}", last.message);
+    }
+
+    Ok(())
+}
+```
+
+Run against any repository with at least one commit:
+
+```bash
+cargo run --bin guide_refs /path/to/repo
+git -C /path/to/repo rev-parse refs/heads/library-guide-demo
+git -C /path/to/repo reflog show refs/heads/library-guide-demo
+```
+
+# https://grit-scm.com/docs/library/repository/index.md
+
+# Repository
+
+> Open and discover Git repositories with an explicit Environment, read git-dir vs work tree, load config, and handle grit_lib::Error.
+
+A [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) is the main handle for grit-lib. It carries the absolute [`git_dir`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) path, an optional [`work_tree`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) for non-bare repos, an [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) for object reads and writes, and the [`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) used to discover or open it.
+
+## Environment
+
+[`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html) holds discovery and config variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_CEILING_DIRECTORIES`, `GIT_CONFIG_*`, home paths, `cwd`, and related fields) without reading the process environment inside the library. Construct one with `Environment::empty()` (defaults only) or `Environment::from_vars()` (parse an iterator of `(key, value)` pairs plus an explicit working directory). See [`Environment`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.Environment.html).
+
+The `grit` CLI builds an environment from the process in `grit-cli` and passes it into discovery. Embedders should do the same: snapshot the variables you care about once, then call `Repository::discover_with` or `Repository::open_with` with [`RepositoryOptions`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html).
+
+[`Repository::discover`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) and [`Repository::open`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) remain convenience entry points that use `Environment::empty()` (no overrides beyond `cwd = "."`).
+
+[`ConfigSet::load`](https://docs.rs/grit-lib/latest/grit_lib/config/struct.ConfigSet.html) takes `&Environment` as its first argument and always parses the cascade from disk (no process-global cache). Repository-scoped memoization lives on each open handle: [`Repository::config`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) returns `Arc<ConfigSet>` backed by [`RepoCaches`](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/struct.RepoCaches.html) (config cascade, gitattributes stacks, filter-process drivers, precompose flags, and related state).
+
+## Command runner
+
+Hooks, clean/smudge filters, credential helpers, signing, SSH transport, and similar features spawn subprocesses through a [`CommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/trait.CommandRunner.html) stored on the repository (via [`RepositoryOptions::command_runner`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html)). The default is [`SystemCommandRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.SystemCommandRunner.html), which is the only non-test code path that calls `std::process::Command`. Tests and embedders can install [`RecordingRunner`](https://docs.rs/grit-lib/latest/grit_lib/command_runner/struct.RecordingRunner.html) or a custom runner to assert argv, environment, and stdin without executing real programs. Hook failures surface as [`HookError`](https://docs.rs/grit-lib/latest/grit_lib/hooks/enum.HookError.html); shell filter subprocess failures use [`FilterError`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.FilterError.html).
+
+## Discover vs open
+
+Call `Repository::discover_with` when you have a working directory and want Git-style upward search. Call `Repository::open_with` when you already know the git directory and optionally the work tree path. See [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html).
+
+Bare repositories have `work_tree: None`. Linked worktrees and gitfile indirection are handled during discovery so `git_dir` always points at the directory that contains `objects/`.
+
+## Config
+
+[`Repository::config`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) returns a lazily loaded snapshot of the merged cascade (system / global / local / worktree / environment overrides). Prefer it on hot paths instead of calling `ConfigSet::load` repeatedly. Keys use Git’s dotted names (`user.name`, `core.bare`, …).
+
+## Errors
+
+Library operations return [`grit_lib::error::Result`](https://docs.rs/grit-lib/latest/grit_lib/error/type.Result.html). The [`Error`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) enum covers I/O, missing objects, bad repository layout, and invalid user input. Match on variants in application code; the `grit` CLI maps them to exit codes and messages separately.
+
+## Example
+
+The program below discovers a repository (or opens `.git` in the current directory), prints paths, and reads `user.name` from config:
+
+```rust
+//! Open and discover repositories; load config from the git directory.
+//!
+//! Source for the library guide "Repository" page (included in the docs site).
+
+use grit_lib::config::ConfigSet;
+use grit_lib::environment::{Environment, RepositoryOptions};
+use grit_lib::error::Error;
+use grit_lib::repo::Repository;
+
+fn main() -> Result<(), Error> {
+    let cwd = std::env::current_dir().map_err(Error::Io)?;
+    let env = Environment::from_vars(std::env::vars_os(), cwd.clone());
+    let options = RepositoryOptions::with_environment(env.clone());
+
+    let repo = match Repository::discover_with(&options, None) {
+        Ok(r) => r,
+        Err(Error::NotARepository(_)) => {
+            let git_dir = cwd.join(".git");
+            Repository::open_with(&options, &git_dir, Some(&cwd))?
+        }
+        Err(err) => return Err(err),
+    };
+
+    println!("git_dir={}", repo.git_dir.display());
+    if let Some(wt) = &repo.work_tree {
+        println!("work_tree={}", wt.display());
+    } else {
+        println!("work_tree=<bare>");
+    }
+
+    let cfg = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true)?;
+    let name = cfg.get("user.name").unwrap_or_default();
+    if !name.is_empty() {
+        println!("user.name={name}");
+    }
+
+    Ok(())
+}
+```
+
+Run from any Git checkout:
+
+```bash
+cargo run --bin guide_repository
+```
+
+# https://grit-scm.com/docs/library/revwalk/index.md
+
+# Revwalk
+
+> Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.
+
+History walks start from one or more **tips** (resolved ref names or expressions), follow parent links, optionally subtract another set of tips, then sort the result. grit-lib exposes the same machinery the CLI uses through [`rev_parse`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/index.html) and [`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/index.html).
+
+## Rev-parse
+
+[`resolve_revision`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.resolve_revision.html) turns a single spec (`HEAD`, `main`, `v1.0`, `abc1234`, `main^`, `HEAD~3`, tag peelers, and more) into an [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html). For range endpoints and log-style DWIM, [`resolve_revision_for_range_end`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.resolve_revision_for_range_end.html) matches Git’s `A..B` left/right rules.
+
+Common helpers that do not need a full repository walk:
+
+- [`split_double_dot_range`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.split_double_dot_range.html) — split `main..feature` into two tokens (ignores `...` and path segments).
+- [`abbreviate_ref_name`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.abbreviate_ref_name.html) — shorten `refs/heads/main` to `main` for display.
+
+## Rev-list
+
+[`rev_list`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/fn.rev_list.html) takes positive and negative revision specs plus [`RevListOptions`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListOptions.html). It returns a [`RevListResult`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListResult.html) whose `commits` field is the final oid list (after skip, max-count, and reverse).
+
+| Option | Meaning |
+| --- | --- |
+| [`ordering`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/struct.RevListOptions.html) | [`OrderingMode`](https://docs.rs/grit-lib/latest/grit_lib/rev_list/enum.OrderingMode.html) — default date order, topo, author-date variants. |
+| `first_parent` | Follow only the first parent at merges. |
+| `max_count` / `skip` | Limit how many commits are returned. |
+| `reverse` | Reverse the selected list after sorting. |
+
+For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](https://docs.rs/grit-lib/latest/grit_lib/rev_parse/fn.split_double_dot_range.html) as the example does). That matches `git rev-list main..feature`.
+
+## Merge base
+
+[`merge_bases_first_vs_rest`](https://docs.rs/grit-lib/latest/grit_lib/merge_base/fn.merge_bases_first_vs_rest.html) finds minimal common ancestors between one commit and one or more others — the library equivalent of `git merge-base A B`. For diff-style “pick exactly one base or fail”, see [`merge_base_for_diff_two_commits`](https://docs.rs/grit-lib/latest/grit_lib/merge_base/fn.merge_base_for_diff_two_commits.html).
+
+## Example
+
+The program below opens a repository (created by system Git in tests), walks `main..feature`, prints each commit oid, then prints the merge base of the range tips:
+
+```rust
+//! Walk commit history with [`grit_lib::rev_list::rev_list`] and compute a merge base.
+//!
+//! Source for the library guide "Revwalk" page (included in the docs site).
+
+use grit_lib::merge_base::merge_bases_first_vs_rest;
+use grit_lib::repo::Repository;
+use grit_lib::rev_list::{rev_list, RevListOptions};
+use grit_lib::rev_parse::{resolve_revision, split_double_dot_range};
+use std::path::Path;
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let mut args = std::env::args().skip(1);
+    let repo_root = args.next().map(std::path::PathBuf::from).ok_or_else(|| {
+        grit_lib::error::Error::Message("usage: guide_revwalk <repo> [main..feature]".to_owned())
+    })?;
+    let range = args.next().unwrap_or_else(|| "main..feature".to_owned());
+
+    let repo = open_repo(&repo_root)?;
+    let options = RevListOptions::default();
+    let result = if let Some((left, right)) = split_double_dot_range(&range) {
+        let mut positive = Vec::new();
+        let mut negative = Vec::new();
+        if !right.is_empty() {
+            positive.push(right.to_owned());
+        }
+        if !left.is_empty() {
+            negative.push(left.to_owned());
+        }
+        rev_list(&repo, &positive, &negative, &options)?
+    } else {
+        rev_list(&repo, std::slice::from_ref(&range), &[], &options)?
+    };
+
+    for oid in &result.commits {
+        println!("{oid}");
+    }
+
+    let (left_name, right_name) = range_names(&range)?;
+    let left = resolve_revision(&repo, left_name)?;
+    let right = resolve_revision(&repo, right_name)?;
+    let bases = merge_bases_first_vs_rest(&repo, left, &[right])?;
+    let Some(base) = bases.first() else {
+        return Err(grit_lib::error::Error::Message(
+            "no merge base for range tips".to_owned(),
+        ));
+    };
+    println!("merge_base={base}");
+
+    Ok(())
+}
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn range_names(range: &str) -> Result<(&str, &str), grit_lib::error::Error> {
+    split_double_dot_range(range).ok_or_else(|| {
+        grit_lib::error::Error::Message(format!("expected a double-dot range, got {range:?}"))
+    })
+}
+```
+
+Run against a repo with diverged `main` and `feature` branches:
+
+```bash
+cargo run --bin guide_revwalk /path/to/repo main..feature
+```
+
+The integration test `guide_revwalk` checks commit order against `git rev-list` and the merge base against `git merge-base`.
+
+# https://grit-scm.com/docs/library/staging/index.md
+
+# Index
+
+> Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.
+
+The Git index (staging area) lives in [`Index`](https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html). Open a [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html), then call `load_index` (or `write_index` after changes). Index-related modules are grouped under [`worktree_index`](https://docs.rs/grit-lib/latest/grit_lib/worktree_index/index.html) in rustdoc.
+
+See also the [Repository](https://grit-scm.com/docs/library/repository/index.md) and [Objects](https://grit-scm.com/docs/library/objects/index.md) pages for opening repos and writing objects. Other library topics: [Refs](https://grit-scm.com/docs/library/refs/index.md), [Diff](https://grit-scm.com/docs/library/diff/index.md).
+
+## Reading the index
+
+[`Index`](https://docs.rs/grit-lib/latest/grit_lib/index/struct.Index.html) `load` reads `index` from disk; [`Repository`](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) `load_index` applies sparse-checkout and split-index rules the same way porcelain commands do. Entries are [`IndexEntry`](https://docs.rs/grit-lib/latest/grit_lib/index/struct.IndexEntry.html) values with path, mode, object id, and stage.
+
+## Staging paths
+
+[`porcelain::add::stage`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/fn.stage.html) compares the index to the work tree once, hashes changed blobs, and writes the index back. Pass [`StageOptions`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/struct.StageOptions.html) for pathspecs and [`StageMode`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/add/enum.StageMode.html) (`All` vs `Update`). Long-running staging reports through a [`ProgressSink`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.ProgressSink.html); examples use [`NullProgress`](https://docs.rs/grit-lib/latest/grit_lib/progress/struct.NullProgress.html) when no UI is needed.
+
+The `grit add` command is a thin wrapper around this API.
+
+## Writing a tree from the index
+
+[`write_tree_from_index`](https://docs.rs/grit-lib/latest/grit_lib/write_tree/fn.write_tree_from_index.html) builds a tree object from stage-0 entries (respecting the optional path prefix). It returns the root [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html). When the index cache-tree extension is valid, grit reuses cached subtree oids for speed; otherwise it walks entries and writes new tree objects through [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html).
+
+## Example
+
+This program loads the index, stages new or changed paths, and prints the tree oid grit would commit:
+
+```rust
+//! Read the index, stage paths, and write a tree from staged entries.
+//!
+//! Source for the library guide "Index" page (included in the docs site).
+
+use grit_lib::porcelain::add::{stage, StageOptions};
+use grit_lib::progress::NullProgress;
+use grit_lib::repo::{init_repository, Repository};
+use grit_lib::write_tree::write_tree_from_index;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+    let git_dir = if root.join(".git").is_dir() {
+        root.join(".git")
+    } else {
+        root.to_path_buf()
+    };
+    let work_tree = if root.join(".git").is_dir() {
+        Some(root)
+    } else {
+        None
+    };
+    Repository::open(&git_dir, work_tree)
+}
+
+fn main() -> Result<(), grit_lib::error::Error> {
+    let mut temp_guard = None;
+    let repo = if let Some(root) = std::env::args().nth(1).map(PathBuf::from) {
+        open_repo(&root)?
+    } else {
+        let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+        init_repository(
+            temp.path(),
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )?;
+        let path = temp.path().join("hello.txt");
+        fs::write(&path, b"staged from the library guide\n").map_err(grit_lib::error::Error::Io)?;
+        let opened = open_repo(temp.path())?;
+        temp_guard = Some(temp);
+        opened
+    };
+    let _keep = temp_guard;
+
+    let index = repo.load_index()?;
+    println!("index_entries={}", index.entries().len());
+
+    let outcome = stage(&repo, &StageOptions::default(), &mut NullProgress)?;
+    println!(
+        "staged added={} modified={} removed={}",
+        outcome.added, outcome.modified, outcome.removed
+    );
+
+    let index = repo.load_index()?;
+    let tree_oid = write_tree_from_index(&repo.odb, &index, "")?;
+    println!("tree_oid={}", tree_oid.to_hex());
+
+    Ok(())
+}
+```
+
+With a repository path, compare the printed tree to Git:
+
+```bash
+cargo run --bin guide_index /path/to/repo
+git -C /path/to/repo write-tree
+git -C /path/to/repo fsck --strict
+```
+
+Without arguments the binary uses a temporary repository (useful for `cargo run`, not for fsck demos).

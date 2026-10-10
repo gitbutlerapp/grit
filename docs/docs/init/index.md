@@ -81,14 +81,10 @@ Example:
 
 ## Markdown output
 
-Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for agent-friendly output (one bullet per field):
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for a short prose summary:
 
 ```text
-- **initialized**: true
-- **path**: /home/ada/project/.git
-- **bare**: false
-- **branch**: main
-- **ref_format**: reftable
+Initialized empty repository at `/home/ada/project/.git` (default branch `main`, ref-format `reftable`).
 ```
 
 ## See also

@@ -26,6 +26,15 @@ On-disk formats and the wire protocol stay compatible with Git; the CLI's argv a
 
 See [Install](https://grit-scm.com/docs/install/index.md) for download options, [Global options](https://grit-scm.com/docs/global-options/index.md) for flags shared by every command, [Scripting with grit](https://grit-scm.com/docs/scripting/index.md) for `--json` and `--filter`, and the [Agent guide](https://grit-scm.com/docs/agents/index.md) for automation-focused details.
 
+## For agents
+
+- [grit-cli.md](https://grit-scm.com/docs/grit-cli.md): the whole CLI in one file, to learn grit for everyday Git work.
+- [grit-lib.md](https://grit-scm.com/docs/grit-lib.md): the whole library guide in one file, to build Git-compatible Rust programs.
+- [llms.txt](https://grit-scm.com/llms.txt): an index of every page with a one-line summary.
+- [llms-full.txt](https://grit-scm.com/llms-full.txt): every docs page in one file.
+
+Every page also has a Markdown twin: replace `index.html` with `index.md` in its URL. Run `grit skill` to print an agent skill for the CLI.
+
 ## Commands
 
 ### Getting started

@@ -103,6 +103,26 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](https://grit-scm.com/docs/global-options/index.md) for headings, commit metadata, message body, and a diffstat table:
+
+```text
+# Commit `b52cca6`
+
+**Oid:** `92501f188ae0815af09a0cef6e121eddda4113cf`
+**Author:** Ada Lovelace <ada@example.com>
+**Date:** 2026-10-07 14:54:02 +0000
+
+Subject line as a level-2 heading, then a "Changes" section with a table:
+
+| File | + | − |
+| --- | ---: | ---: |
+| `README.md` | 1 | 0 |
+
+1 file changed, 1 insertion(+)
+```
+
 ## See also
 
 [grit diff](https://grit-scm.com/docs/diff/index.md), [grit log](https://grit-scm.com/docs/log/index.md), [grit tag](https://grit-scm.com/docs/tag/index.md)

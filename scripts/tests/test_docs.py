@@ -60,10 +60,54 @@ label = "Missing"
 
     def test_sidebar_grit_lib_api_links_to_library_guide(self) -> None:
         site = docs.load_site(content_dir=self.content)
-        for current in ("index", "status", "library"):
+        for current in ("index", "status"):
             html_out = docs.sidebar(site, current)
             expected = docs.href_to(current, docs.LIBRARY_GUIDE_SLUG)
             self.assertIn(f'<a href="{expected}">grit-lib API</a>', html_out)
+        # Library pages use the ink nav, headed by a link to the library overview.
+        for current in ("library", "library/refs", "library-quickstart"):
+            html_out = docs.sidebar(site, current)
+            expected = docs.href_to(current, docs.LIBRARY_GUIDE_SLUG)
+            self.assertIn(f'<a class="label" href="{expected}">use grit_lib;</a>', html_out)
+
+    def test_command_page_puts_examples_in_ink_column(self) -> None:
+        site = docs.load_site(content_dir=self.content)
+        page = next(p for p in site.command_pages if p.slug == "commit")
+        html_out = docs.render(page, site, is_index=False)
+        main, aside = html_out.split('<aside class="col ink-col"', 1)
+        self.assertIn('class="synopsis"', main)
+        self.assertNotIn("<h2 id=\"examples\">", main)
+        self.assertIn('<span class="k">$</span> grit commit', aside)
+        self.assertIn("--json output", aside)
+        self.assertIn('class="see-also"', aside)
+
+    def test_library_guide_puts_included_example_in_ink_column(self) -> None:
+        site = docs.load_site(content_dir=self.content)
+        page = next(p for p in site.pages if p.slug == "library/refs")
+        html_out = docs.render(page, site, is_index=False)
+        main, aside = html_out.split('<aside class="col ink-col lib"', 1)
+        self.assertNotIn("rust:include=", html_out)
+        self.assertIn("Example · guide_refs.rs", aside)
+        self.assertIn(f"{docs.GITHUB_BLOB}/grit-examples/src/bin/guide_refs.rs", aside)
+        self.assertNotIn("guide_refs.rs", main.split("<main", 1)[1].split("pager")[0])
+
+    def test_section_bundles_hold_each_half(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:
+            out = Path(tmp)
+            docs.generate(out, content_dir=self.content, llms_dir=out / "llms")
+            cli = (out / docs.CLI_BUNDLE).read_text(encoding="utf-8")
+            lib = (out / docs.LIB_BUNDLE).read_text(encoding="utf-8")
+            self.assertIn(f"# {blog.SITE_URL}/docs/commit/index.md", cli)
+            self.assertIn(f"# {blog.SITE_URL}/docs/tutorial/index.md", cli)
+            self.assertNotIn(f"# {blog.SITE_URL}/docs/library/refs/index.md", cli)
+            self.assertIn(f"# {blog.SITE_URL}/docs/library/refs/index.md", lib)
+            self.assertIn(f"# {blog.SITE_URL}/docs/library-quickstart/index.md", lib)
+            self.assertNotIn(f"# {blog.SITE_URL}/docs/commit/index.md", lib)
+            index_md = (out / "index.md").read_text(encoding="utf-8")
+            self.assertIn("## For agents", index_md)
+            self.assertIn(docs.bundle_url(docs.CLI_BUNDLE), index_md)
+            llms = (out / "llms" / "llms.txt").read_text(encoding="utf-8")
+            self.assertIn(docs.bundle_url(docs.LIB_BUNDLE), llms)
 
     def test_command_urls_unchanged(self) -> None:
         with tempfile.TemporaryDirectory(prefix="grit-docs-out-") as tmp:

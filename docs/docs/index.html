@@ -11,138 +11,218 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
 <style>
-:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--code-fg:#e9e4d8;--chip:#e9e4d8;--rail:clamp(48px,8vw,120px);--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
-*{box-sizing:border-box}html{scroll-behavior:smooth}
-body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+:root{--bg:#f4f1ea;--ink:#1b1915;--soft:#3d3830;--muted:#7b7466;--line:#d9d3c5;--accent:#e2481f;--chip:#e9e4d8;--ink-soft:#c9c2b3;--ink-muted:#a39b8b;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
 a{color:inherit}a:hover{opacity:.7}
-.wrap{max-width:1200px;margin:0 auto;padding:0 clamp(20px,4vw,56px)}
-.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;padding:24px 0}
-.brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;text-decoration:none}
-.brand::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent)}
-.nav{display:flex;flex-wrap:wrap;align-items:center;gap:28px;font-size:15px}.nav a{text-decoration:none}
-.nav .pill{background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px}
-.commit{display:grid;grid-template-columns:var(--rail) minmax(0,1fr)}
-.commit+.commit{border-top:1px solid var(--line)}
-.rail{position:relative}.rail>span{position:absolute;display:block}
-.line{left:20px;top:0;bottom:0;width:3px;background:var(--ink)}
-.line.from-head{top:110px}.line.stub{bottom:auto;height:46px}
-.dot{left:15px;top:44px;width:13px;height:13px;border-radius:50%;background:var(--ink)}
-.head-dot{left:8px;top:96px;width:27px;height:27px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--ink)}
-.head-dot.small{left:13px;top:41px;width:17px;height:17px;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--ink)}
-.root-dot{left:14px;top:44px;width:15px;height:15px;border-radius:50%;background:var(--bg);box-shadow:0 0 0 3px var(--ink)}
-.hero{padding:56px 0 72px}
-.refs{display:flex;flex-wrap:wrap;gap:14px;font:14px var(--mono);color:var(--muted)}
-.refs a{text-decoration:none}.refs .ref{color:var(--accent)}
-h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spacing:-.06em;font-weight:700}
-.post-hero h1{font-size:clamp(44px,7vw,88px);line-height:.95;letter-spacing:-.045em;max-width:16ch;text-wrap:balance}
-.tagline{margin:24px 0 0;font-size:clamp(26px,3.4vw,40px);line-height:1.1;letter-spacing:-.025em;font-weight:500}
-.lede{max-width:640px;margin:20px 0 0;font-size:clamp(17px,1.6vw,20px);line-height:1.5;color:var(--soft);text-wrap:pretty}
-.entry{padding:36px 0 40px}
-.sha{font:13px var(--mono);color:var(--muted)}.sha.hot{color:var(--accent)}.sha a{color:inherit}
-.entry h2{margin:12px 0 0;font-size:clamp(28px,3.4vw,40px);line-height:1.05;letter-spacing:-.03em}
-.entry h2 a{text-decoration:none}
-.entry p{max-width:680px;margin:14px 0 0;font-size:18px;line-height:1.55;color:var(--soft);text-wrap:pretty}
-.post-body{display:grid;grid-template-columns:minmax(0,720px) minmax(0,1fr);gap:56px;padding:48px 0 64px}
-.content{font-size:19px;line-height:1.65;color:var(--soft)}
-.content>:first-child{margin-top:0}
-.content h2{margin:2.2em 0 .5em;font-size:clamp(26px,3vw,34px);line-height:1.1;letter-spacing:-.025em;color:var(--ink)}
-.content h3{margin:1.8em 0 .4em;font-size:22px;letter-spacing:-.015em;color:var(--ink)}
-.content p{margin:0 0 1.1em;text-wrap:pretty}
-.content ul,.content ol{margin:0 0 1.1em;padding-left:1.2em}.content li{margin:.3em 0}
-.content li::marker{color:var(--accent)}
+code,kbd{font-family:var(--mono)}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.app{height:100vh;display:flex;flex-direction:column}
+.dh{height:52px;flex-shrink:0;display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid var(--line);white-space:nowrap}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:19px;text-decoration:none}
+.brand::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--accent)}
+.switch{display:flex;border:1px solid var(--ink);border-radius:999px;overflow:hidden;font-size:14px;margin-left:12px}
+.switch>*{padding:5px 14px;text-decoration:none}.switch span{background:var(--ink);color:var(--bg)}
+.ref{font:13px var(--mono);color:var(--accent)}
+.tagline{font-size:15px;color:var(--soft);margin-left:16px;overflow:hidden;text-overflow:ellipsis}
+.dh nav{margin-left:auto;display:flex;align-items:center;gap:20px;font-size:15px}
+.dh nav a{text-decoration:none}
+.dh .pill{background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:999px}
+.search{position:relative;flex:1;max-width:400px;margin-left:auto;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--chip)}
+.search+nav{margin-left:0}
+.search input{flex:1;min-width:0;border:0;background:none;outline:none;font:13px var(--mono);color:var(--ink)}
+.search input::placeholder{color:var(--muted)}
+.search kbd{border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px;color:var(--muted)}
+.search ul{position:absolute;z-index:10;top:38px;left:0;right:0;margin:0;padding:6px;list-style:none;background:var(--bg);border:1px solid var(--ink);border-radius:10px;white-space:normal}
+.search li a{display:block;padding:8px 10px;border-radius:6px;text-decoration:none}
+.search li a.on,.search li a:hover{background:var(--chip);opacity:1}
+.search li b{display:block;font:500 13px var(--mono)}.search li span{display:block;font-size:13px;color:var(--soft);margin-top:2px}
+.search li.none{padding:8px 10px;font:13px var(--mono);color:var(--muted)}
+.docs-body{flex:1;min-height:0;display:grid;grid-template-columns:232px minmax(0,1fr)}
+.col{overflow-y:auto;min-height:0}
+.docnav{overflow-y:auto;min-height:0;padding:18px 14px 28px 18px;border-right:1px solid var(--line);font:13px/1.5 var(--mono);color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.docnav h2{margin:14px 0 0;padding:0 8px 4px;font:inherit;color:var(--accent)}.docnav h2:first-child{margin-top:0}
+.docnav h3{margin:8px 0 0;padding:2px 8px;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.docnav a{text-decoration:none;padding:2px 8px;border-radius:5px;color:var(--soft)}
+.docnav a.cmd{padding-left:16px}
+.docnav a.current{background:var(--ink);color:var(--bg);opacity:1}
+.subnav{display:flex;flex-direction:column;gap:2px;margin:4px 0 4px 14px;padding-left:10px;border-left:1px solid var(--line);font-size:12px}
+.subnav a{padding:1px 0;color:var(--muted)}.subnav a.on{color:var(--ink);background:none}
+.docnav.ink{background:var(--ink);color:var(--ink-muted);border-right:0;gap:3px}
+.docnav.ink a{color:var(--chip)}.docnav.ink a.current{background:var(--bg);color:var(--ink)}
+.docnav.ink .label{color:var(--accent);padding-bottom:4px}
+.docnav.ink h3{margin-top:14px;padding-bottom:4px;color:var(--ink-muted)}
+.docnav.ink .ext{color:var(--accent);margin-top:12px}
+.docnav.ink .subnav{border-color:var(--soft)}.docnav.ink .subnav a{color:var(--ink-muted)}.docnav.ink .subnav a.on{color:var(--bg)}
+.pane{min-height:0;display:grid;grid-template-columns:minmax(0,1fr)}
+.pane.three{grid-template-columns:minmax(0,1fr) 540px}.pane.three.lib{grid-template-columns:minmax(0,1fr) 580px}
+.main{padding:32px 44px 48px}
+.crumbs{display:flex;gap:16px;font:13px var(--mono);color:var(--muted)}
+.crumbs a{color:var(--accent);text-decoration:none}
+h1{margin:8px 0 0;font-size:64px;line-height:.92;letter-spacing:-.05em;font-weight:700;text-wrap:balance}
+h1.cmd{font:500 56px/1 var(--mono);letter-spacing:-.045em}
+.lede{margin:12px 0 0;max-width:680px;font-size:21px;line-height:1.33;font-weight:500;letter-spacing:-.01em;text-wrap:pretty}
+.content{margin-top:8px;font-size:17px;line-height:1.6;color:var(--soft)}
+.content h2{margin:32px 0 8px;font-size:24px;line-height:1.15;letter-spacing:-.02em;color:var(--ink)}
+.content h3{margin:24px 0 6px;font-size:19px;letter-spacing:-.015em;color:var(--ink)}
+.content p,.content ul,.content ol,.content blockquote{max-width:720px}
+.content p{margin:0 0 12px;text-wrap:pretty}
+.content ul,.content ol{margin:0 0 12px;padding-left:1.2em}.content li{margin:.25em 0}.content li::marker{color:var(--accent)}
 .content a{color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.content a code{background:none;padding:0}
+.content a[href^="https://docs.rs/"]{font:.88em var(--mono)}
 .content strong{color:var(--ink)}
-.content code{font:.86em var(--mono);background:var(--chip);border-radius:6px;padding:.1em .35em}
-.content pre{margin:1.4em 0;background:var(--ink);color:var(--code-fg);border-radius:14px;padding:22px 26px;font:14px/1.75 var(--mono);overflow-x:auto}
-.content pre code{background:none;padding:0;font-size:inherit;color:inherit}
-.content blockquote{margin:1.4em 0;padding:.1em 0 .1em 20px;border-left:3px solid var(--accent);color:var(--ink);font-size:21px;line-height:1.45}
-.content .table{margin:1.4em 0;overflow-x:auto}
-.content table{width:100%;border-collapse:collapse;font-size:16px;line-height:1.5}
-.content th{text-align:left;font:13px var(--mono);color:var(--muted);font-weight:500;padding:0 16px 10px 0;border-bottom:1px solid var(--line)}
-.content td{padding:12px 16px 12px 0;border-bottom:1px solid var(--line);vertical-align:top}
-.content td{overflow-wrap:anywhere}.content td code{white-space:nowrap}
-.content td:first-child{overflow-wrap:normal}
-.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
-.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
-.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
-.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
-.foot{padding:40px 0 64px}
-.foot .links{display:flex;flex-wrap:wrap;gap:28px;margin-top:14px;font-size:17px}
-@media(max-width:900px){.post-body{display:block}.toc{display:none}}
-
-.doc-body{display:grid;grid-template-columns:180px minmax(0,720px);gap:56px;padding:48px 0 64px}
-.doc-body.has-toc{grid-template-columns:180px minmax(0,720px) 180px}
-.post-hero h1.cmd{font-family:var(--mono);font-weight:500;letter-spacing:-.04em;max-width:none}
-.docnav{order:-1;position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted);max-height:calc(100vh - 48px);overflow-y:auto}
-.docnav h2{margin:20px 0 8px;font:inherit;color:var(--accent)}
-.docnav h2 a{color:inherit;text-decoration:none}
-.docnav h3{margin:16px 0 6px 14px;font:inherit;color:var(--muted);font-size:12px}
-.docnav ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
-.docnav li{margin:0 0 6px;padding-left:14px}.docnav a{text-decoration:none}
-.docnav a.current{color:var(--ink);font-weight:700}
-.toc{position:sticky;top:24px;align-self:start;font:13px/1.5 var(--mono);color:var(--muted)}
-.toc h2{margin:0 0 12px;font:inherit;color:var(--accent)}
-.toc ol{list-style:none;margin:0;padding:0;border-left:1px solid var(--line)}
-.toc li{margin:0 0 8px;padding-left:14px}.toc a{text-decoration:none}.toc-level-3{padding-left:28px}
-.content h3 code{font-size:.9em}
-.content table.cmds{table-layout:fixed}.content table.cmds td:first-child{width:210px}
-.pager{display:flex;justify-content:space-between;gap:16px;margin-top:3em;padding-top:1.4em;border-top:1px solid var(--line);font:15px var(--mono)}
-.pager a{text-decoration:none;color:var(--ink)}
-.content table.bench-results,.content table.bench-summary,.content table.bench-env{font:14px/1.5 var(--mono)}
-.content table.bench-results td,.content table.bench-results th,.content table.bench-summary td,.content table.bench-summary th{text-align:right}
-.content table.bench-results td:first-child,.content table.bench-results th:first-child,.content table.bench-summary td:first-child,.content table.bench-summary th:first-child{text-align:left}
-.content tr.bench-slow td{color:var(--accent);font-weight:600}
-.bench-meta{margin:1.5em 0 2em}
-@media(max-width:900px){.doc-body{display:flex;flex-direction:column}.doc-body.has-toc{display:flex}.docnav{order:1;position:static;max-height:none;border-top:1px solid var(--line);padding-top:24px}.toc{display:none}}
+.content code{font:.88em var(--mono);background:var(--chip);padding:1px 5px;border-radius:5px}
+.content blockquote{margin:16px 0;padding-left:16px;border-left:3px solid var(--accent);color:var(--ink)}
+.content .table{margin:12px 0 20px;overflow-x:auto}
+.content table.rows{max-width:760px}
+.content table{width:100%;border-collapse:collapse;font-size:15px;line-height:1.5;border-top:1px solid var(--ink)}
+.content th{text-align:left;font:12px var(--mono);color:var(--muted);font-weight:400;padding:8px 16px 8px 0;border-bottom:1px solid var(--line)}
+.content td{padding:10px 16px 10px 0;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:break-word}
+.content td:first-child{overflow-wrap:normal}.content td code{white-space:nowrap}
+.content table.rows thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.content table.rows td:first-child code{background:none;padding:0;font:500 14px/1.7 var(--mono);color:var(--ink)}
+.content table.rows-2 td:first-child{width:230px}
+.content table.rows-3 td:first-child{width:150px}.content table.rows-3 td:nth-child(2){width:100px;font:13px var(--mono);color:var(--muted)}
+.code{margin:12px 0 16px;background:var(--ink);color:var(--chip);border:1px solid var(--soft);border-radius:10px;padding:14px 16px;font:14px/1.75 var(--mono);overflow-x:auto;white-space:pre}
+.code code{font:inherit}
+.code .k{color:var(--accent)}.code .c,.code .out{color:var(--ink-muted)}.code .cmd{color:var(--bg)}
+.synopsis{margin-top:24px;max-width:760px;background:var(--chip);border-radius:10px;padding:14px 18px;font:15px/1.8 var(--mono);color:var(--ink);overflow-x:auto;white-space:pre}
+.pager{display:flex;justify-content:space-between;gap:16px;margin-top:36px;padding-top:16px;border-top:1px solid var(--line);font:15px var(--mono)}
+.pager a{text-decoration:none}
+.ink-col{background:var(--ink);color:var(--chip);padding:32px 32px 40px;display:flex;flex-direction:column;gap:22px}
+.ink-col.lib{padding:28px 28px 36px;gap:18px;border-left:1px solid var(--soft)}
+.ink-col .label{font:13px var(--mono);color:var(--accent)}
+.ex{display:flex;flex-direction:column;gap:8px}
+.ex .cap{display:flex;justify-content:space-between;gap:12px;font-size:15px;color:var(--ink-soft)}
+.ex .cap a{font:13px var(--mono);color:var(--accent);text-decoration:none}
+.ex .code{margin:0}
+.ink-col code,.step-code code{font-size:.9em}
+.ink-col .code code,.step-code .code code{font-size:inherit}
+.ink-prose{font-size:15px;line-height:1.55;color:var(--ink-soft)}
+.ink-prose code{background:none;color:var(--chip)}
+.ink-prose a{color:var(--bg)}
+.ex-head{display:flex;justify-content:space-between;align-items:baseline;font:13px var(--mono);color:var(--accent)}
+.ex-head a{color:var(--ink-muted);text-decoration:none}
+.ex-title{font-weight:700;color:var(--bg)}
+.ink-col.lib .code{font-size:13px;line-height:1.7}
+.see-also{margin-top:auto;padding-top:18px;border-top:1px solid var(--soft);display:flex;flex-wrap:wrap;gap:8px;font:13px var(--mono)}
+.see-also span{width:100%;color:var(--ink-muted)}
+.see-also a{color:var(--bg);border:1px solid var(--soft);border-radius:999px;padding:4px 10px;text-decoration:none}
+.modules{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px;font:13px var(--mono)}
+.modules a{border:1px solid var(--ink);border-radius:999px;padding:4px 10px;text-decoration:none}
+.steps{display:grid;grid-template-columns:minmax(0,1fr) 600px;align-content:start;background:linear-gradient(to left,var(--ink) 600px,transparent 600px) local}
+.step{padding:28px 44px;border-top:1px solid var(--line);display:grid;grid-template-columns:44px minmax(0,1fr);gap:4px}
+.step.intro{display:block;border-top:0;padding:36px 44px 32px}
+.step.intro .lede{max-width:600px}.step.intro .content{margin-top:14px;font-size:16px}
+.step.last{display:block;padding-top:0;border-top:0}
+.step .num{font:500 14px/1.9 var(--mono);color:var(--accent)}
+.step .content{margin:0}
+.step .content h2:first-child{margin:0;font-size:26px}
+.step .content>p:nth-child(2){margin-top:10px}
+.step-code{background:var(--ink);padding:28px 32px;border-top:1px solid var(--soft);display:flex;flex-direction:column;gap:14px;min-width:0}
+.step-code.intro{border-top:0;padding-top:36px;justify-content:flex-end}
+.step-code .code{margin:0;white-space:pre-wrap}
+.step-code .meta{margin:0;font:13px/1.5 var(--mono);color:var(--ink-muted)}
+.step-code .meta code{background:none;color:var(--chip)}
+.overview-body{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+.overview{display:contents}
+.half{padding:32px 40px 40px}
+.half .label{font:13px var(--mono);color:var(--accent)}
+.half h1,.half>h2{margin:8px 0 0;font-size:56px;line-height:.95;letter-spacing:-.045em}
+.half .lede{max-width:600px;font-size:17px;line-height:1.5;font-weight:400;color:var(--soft)}
+.half .lede code{font:.88em var(--mono);background:var(--chip);padding:1px 5px;border-radius:5px}
+.tiles{display:grid;gap:10px;margin-top:22px}.tiles.four{grid-template-columns:repeat(4,minmax(0,1fr))}.tiles.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.tile{border:1px solid var(--line);border-radius:10px;padding:14px;text-decoration:none;display:flex;flex-direction:column;gap:18px}
+.tile:hover{border-color:var(--ink);opacity:1}
+.tile span{font:12px var(--mono);color:var(--muted)}.tile b{font-size:17px}
+.tile.ink{background:var(--ink);color:var(--bg);border-color:var(--ink)}.tile.ink span{color:var(--accent)}
+.cmd-index{column-count:2;column-gap:36px;margin-top:28px}
+.group{break-inside:avoid;margin-bottom:20px}
+.group h3{margin:0;font:13px var(--mono);color:var(--accent);padding-bottom:6px;border-bottom:1px solid var(--ink)}
+.group a{display:grid;grid-template-columns:138px minmax(0,1fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--line);text-decoration:none;font-size:14px;line-height:1.4;color:var(--soft)}
+.group a:hover{background:var(--chip);opacity:1}
+.group code{font:500 14px var(--mono);color:var(--ink)}
+.agents{margin-top:12px;padding-top:16px;border-top:1px solid var(--ink);font-size:15px;line-height:1.55;color:var(--soft);break-inside:avoid}
+.agents h2{margin:0 0 8px;font:13px var(--mono);color:var(--accent)}
+.agents ul{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 24px}
+.agents a{font:500 14px var(--mono);color:var(--ink);text-decoration-color:var(--accent);text-underline-offset:3px}
+.agents p{margin:10px 0 0}
+.half.lib{background:var(--ink);color:var(--chip);display:flex;flex-direction:column}
+.half.lib>h2{color:var(--bg)}.half.lib .lede{color:var(--ink-soft)}
+.half.lib .tile{border-color:var(--soft);color:var(--bg)}.half.lib .tile:hover{border-color:var(--chip)}.half.lib .tile span{color:var(--ink-muted)}
+.half.lib .tile.accent{background:var(--accent);border-color:var(--accent);color:var(--ink)}.half.lib .tile.accent span{color:var(--ink)}
+.half.lib .sub{font:13px var(--mono);color:var(--ink-muted);margin:28px 0 6px}
+.guides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}
+.guides a{padding:9px 0;border-bottom:1px solid var(--soft);text-decoration:none;color:var(--bg);font-size:16px}
+.guides a:hover{color:var(--accent);opacity:1}
+.half.lib .ext{margin-top:16px;font:14px var(--mono);color:var(--accent);text-decoration:none}
+.half.lib .note{margin:0;margin-top:auto;padding-top:28px;font-size:14px;line-height:1.5;color:var(--ink-muted)}
+.half.lib .note a{color:var(--chip)}
+@media(max-width:1200px){
+.pane.three,.pane.three.lib{display:block;overflow-y:auto}
+.pane.three>.col{overflow:visible}
+.steps{display:block;background:none}
+.step-code{border-top:0}
+.tiles.four{grid-template-columns:repeat(2,minmax(0,1fr))}
+.search{max-width:260px}.tagline{display:none}
+}
+@media(max-width:900px){
+.app{height:auto;min-height:100vh}
+.dh{height:auto;flex-wrap:wrap;padding:12px 16px;gap:12px;white-space:normal}
+.dh .ref{display:none}
+.search{order:9;flex-basis:100%;max-width:none;margin-left:0}
+.docs-body{display:flex;flex-direction:column}
+.docs-body>.docnav{order:2;border-right:0;border-top:1px solid var(--line)}
+.col,.docnav,.pane{overflow:visible}
+.pane,.pane.three{display:block}
+.main,.half,.step,.step.intro{padding-left:16px;padding-right:16px}
+.step-code{padding:20px 16px}
+.ink-col,.ink-col.lib{padding:24px 16px}
+h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
+.cmd-index{column-count:1}
+.group a{grid-template-columns:120px minmax(0,1fr)}
+.guides,.agents ul{grid-template-columns:minmax(0,1fr)}
+.content table.rows-2 td:first-child{width:auto}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-<header class="topbar">
+<div class="app">
+<header class="dh">
   <a class="brand" href="../" aria-label="grit homepage">grit</a>
-  <nav class="nav" aria-label="Primary">
-    <a href="../docs/">Docs</a>
-    <a href="../docs/library/">Library</a>
-    <a href="../blog/">Blog</a>
-    <a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
+  <span class="ref">HEAD → docs</span>
+  <span class="tagline">How to use grit, a simple Git client built on grit-lib.</span>
+  <nav aria-label="Primary">
+    <a href="install/">Install</a><a href="benchmarks/">Benchmarks</a><a href="../blog/">Blog</a>
+    <a href="index.md">Markdown</a><a class="pill" href="https://github.com/gitbutlerapp/grit">GitHub</a>
   </nav>
 </header>
-<main>
-<section class="commit">
-  <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
-  <div class="hero">
-    <div class="refs"><span class="ref">HEAD → docs</span><a class="ref" href="index.md">Markdown</a></div>
-    <h1>Docs</h1>
-    <p class="lede">How to use grit, a simple Git client built on grit-lib. Start with the tutorial, then look up any command or open the library guide.</p>
-  </div>
-</section>
-<section class="commit">
-  <div class="rail" aria-hidden="true"><span class="line"></span></div>
-  <div class="doc-body has-toc">
-    <article class="content"><p>Grit is two things:</p>
-<ul>
-<li><strong><code>grit</code></strong> — a Git client with a small, modern command line. It works on any Git repository and talks to any Git remote, but its commands are its own: one obvious way to do the common thing, plain-language output, and <code>--json</code> on every command.</li>
-<li><strong><code>grit-lib</code></strong> — a fast, linkable Git library for Rust. Everything the CLI does goes through the library; you can embed the same engine in your own tools.</li>
-</ul>
-<h2 id="how-these-docs-are-organized">How these docs are organized</h2>
-<div class="table"><table><thead><tr><th>Section</th><th>What you&#x27;ll find</th></tr></thead><tbody><tr><td><strong>Getting started</strong></td><td><a href="install/">Install</a> grit, follow the <a href="tutorial/">tutorial</a>, or try the <a href="library-quickstart/">library quick start</a>.</td></tr><tr><td><strong>The grit CLI</strong></td><td><a href="global-options/">Global options</a>, <a href="scripting/">scripting with <code>--json</code></a>, <a href="agents/">agent guide</a>, and a man page for every command.</td></tr><tr><td><strong>Library guide</strong></td><td>Rust-oriented guides for <code>grit-lib</code> (growing over time), plus the <a href="https://docs.rs/grit-lib">API reference on docs.rs</a>.</td></tr><tr><td><strong>Benchmarks</strong></td><td>How <code>grit</code> and <code>grit-lib</code> compare to system Git on core operations.</td></tr></tbody></table></div>
-<p>If you&#x27;re new to the command line, start with the <a href="tutorial/">tutorial</a>. If you&#x27;re wiring Git into a Rust program, start with the <a href="library-quickstart/">library quick start</a> and the <a href="library/">library guide overview</a>.</p>
-<h2 id="cli-vs-library">CLI vs library</h2>
-<p>Use <strong><code>grit</code></strong> when you want a day-to-day Git client from the terminal or in scripts (<code>--json</code> / <code>--filter</code>). Use <strong><code>grit-lib</code></strong> when you need programmatic access — opening repositories, reading objects and refs, diffing, revwalking, fetch/push, and the rest of Git&#x27;s core — inside a Rust binary or service.</p>
-<p>On-disk formats and the wire protocol stay compatible with Git; the CLI&#x27;s argv and messages are deliberately <em>not</em> a Git mirror.</p>
-<p>See <a href="install/">Install</a> for download options, <a href="global-options/">Global options</a> for flags shared by every command, <a href="scripting/">Scripting with grit</a> for <code>--json</code> and <code>--filter</code>, and the <a href="agents/">Agent guide</a> for automation-focused details.</p><h2 id="commands">Commands</h2><h3 id="getting-started">Getting started</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="init/"><code>grit init</code></a></td><td>Create a new, empty repository.</td></tr><tr><td><a href="clone/"><code>grit clone</code></a></td><td>Copy a remote repository into a new directory.</td></tr><tr><td><a href="status/"><code>grit status</code></a></td><td>Show where you are and what&#x27;s changed. This is what plain grit runs.</td></tr><tr><td><a href="config/"><code>grit config</code></a></td><td>Read, set, list or remove configuration values.</td></tr></tbody></table></div><h3 id="making-changes">Making changes</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="add/"><code>grit add</code></a></td><td>Stage changes. With no paths, stages everything.</td></tr><tr><td><a href="commit/"><code>grit commit</code></a></td><td>Stage every change and record a new commit.</td></tr><tr><td><a href="diff/"><code>grit diff</code></a></td><td>Show uncommitted changes, or the change a commit introduced.</td></tr></tbody></table></div><h3 id="history">History</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="log/"><code>grit log</code></a></td><td>Show recent commits, newest first, a page at a time.</td></tr><tr><td><a href="shortlog/"><code>grit shortlog</code></a></td><td>List the commits on this branch that aren&#x27;t on the target branch yet.</td></tr><tr><td><a href="show/"><code>grit show</code></a></td><td>Show a commit, tag or branch, and a summary of what it changed.</td></tr></tbody></table></div><h3 id="branches-and-tags">Branches and tags</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="branch/"><code>grit branch</code></a></td><td>List branches, or create or delete one.</td></tr><tr><td><a href="switch/"><code>grit switch</code></a></td><td>Switch to another branch, or create one and switch to it.</td></tr><tr><td><a href="merge/"><code>grit merge</code></a></td><td>Merge another branch into the current one.</td></tr><tr><td><a href="pick/"><code>grit pick</code></a></td><td>Copy a single commit onto the current branch.</td></tr><tr><td><a href="tag/"><code>grit tag</code></a></td><td>List tags, or create or delete one. A new tag points at the current commit.</td></tr></tbody></table></div><h3 id="remotes">Remotes</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="remote/"><code>grit remote</code></a></td><td>List remotes, add one, or list refs on a remote.</td></tr><tr><td><a href="fetch/"><code>grit fetch</code></a></td><td>Download new commits, branches and tags from a remote.</td></tr><tr><td><a href="pull/"><code>grit pull</code></a></td><td>Fetch from the remote and bring the current branch up to date.</td></tr><tr><td><a href="push/"><code>grit push</code></a></td><td>Publish the current branch, or your tags, to a remote.</td></tr><tr><td><a href="auth/"><code>grit auth</code></a></td><td>Sign in to GitHub so HTTPS pushes and fetches just work.</td></tr><tr><td><a href="bundle/"><code>grit bundle</code></a></td><td>Create, verify, and list git bundle files for offline transfer.</td></tr></tbody></table></div><h3 id="maintenance">Maintenance</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="update/"><code>grit update</code></a></td><td>Update grit to the latest release.</td></tr><tr><td><a href="skill/"><code>grit skill</code></a></td><td>Print an agent skill that explains how to use grit.</td></tr><tr><td><a href="completions/"><code>grit completions</code></a></td><td>Generate shell completion scripts for bash, zsh, and fish.</td></tr></tbody></table></div><h3 id="plumbing">Plumbing</h3><div class="table"><table class="cmds"><tbody><tr><td><a href="upload-pack/"><code>grit upload-pack</code></a></td><td>Serve a fetch or clone of a repository over stdin and stdout.</td></tr><tr><td><a href="receive-pack/"><code>grit receive-pack</code></a></td><td>Accept a push to a repository over stdin and stdout.</td></tr><tr><td><a href="manager/"><code>grit manager</code></a></td><td>A credential helper that stores passwords and tokens in the Windows Credential Manager.</td></tr></tbody></table></div></article>
-    <nav class="docnav" aria-label="Docs"><h2><a href="./">Getting started</a></h2><ol><li><a class="current" href="./">Overview</a></li><li><a href="install/">Install</a></li><li><a href="tutorial/">Tutorial</a></li><li><a href="library-quickstart/">Library quick start</a></li></ol><h2><a href="global-options/">The grit CLI</a></h2><ol><li><a href="global-options/">Global options</a></li><li><a href="scripting/">Scripting</a></li><li><a href="agents/">Agent guide</a></li></ol><h3>Getting started</h3><ol><li><a href="init/">grit init</a></li><li><a href="clone/">grit clone</a></li><li><a href="status/">grit status</a></li><li><a href="config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="add/">grit add</a></li><li><a href="commit/">grit commit</a></li><li><a href="diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="log/">grit log</a></li><li><a href="shortlog/">grit shortlog</a></li><li><a href="show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="branch/">grit branch</a></li><li><a href="switch/">grit switch</a></li><li><a href="merge/">grit merge</a></li><li><a href="pick/">grit pick</a></li><li><a href="tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="remote/">grit remote</a></li><li><a href="fetch/">grit fetch</a></li><li><a href="pull/">grit pull</a></li><li><a href="push/">grit push</a></li><li><a href="auth/">grit auth</a></li><li><a href="bundle/">grit bundle</a></li></ol><h3>Maintenance</h3><ol><li><a href="update/">grit update</a></li><li><a href="skill/">grit skill</a></li><li><a href="completions/">grit completions</a></li></ol><h3>Plumbing</h3><ol><li><a href="upload-pack/">grit upload-pack</a></li><li><a href="receive-pack/">grit receive-pack</a></li><li><a href="manager/">grit manager</a></li></ol><h2><a href="library/">Library guide</a></h2><ol><li><a href="library/">Overview</a></li><li><a href="library/api-map/">grit-lib API map</a></li><li><a href="library/bitmaps/">Reachability bitmaps</a></li><li><a href="library/diff/">Diff</a></li><li><a href="library/embedding/">Embedding grit-lib</a></li><li><a href="library/network/">Network</a></li><li><a href="library/object-stores/">Object stores</a></li><li><a href="library/objects/">Objects</a></li><li><a href="library/pack-bitmaps/">Pack reachability bitmaps</a></li><li><a href="library/refs/">Refs</a></li><li><a href="library/repository/">Repository</a></li><li><a href="library/revwalk/">Revwalk</a></li><li><a href="library/staging/">Index</a></li><li><a href="library/">grit-lib API</a></li></ol><h2><a href="benchmarks/">Benchmarks</a></h2><ol><li><a href="benchmarks/">Benchmarks</a></li></ol></nav>
-    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#how-these-docs-are-organized">How these docs are organized</a></li><li class="toc-level-2"><a href="#cli-vs-library">CLI vs library</a></li></ol></aside>
-  </div>
-</section>
+<div class="docs-body overview-body"><div class="overview">
+<main class="col half cli">
+  <div class="label">$ grit</div>
+  <h1>The command line</h1>
+  <p class="lede">Works on any Git repository and talks to any remote. Plain-language output and <code>--json</code> on every command.</p>
+  <div class="tiles four"><a class="tile ink" href="tutorial/"><span>start here</span><b>Tutorial →</b></a><a class="tile" href="global-options/"><span>flags</span><b>Global options</b></a><a class="tile" href="scripting/"><span>--json / --filter</span><b>Scripting</b></a><a class="tile" href="agents/"><span>automation</span><b>Agent guide</b></a></div>
+  <h2 id="commands" class="visually-hidden">Commands</h2>
+  <div class="cmd-index"><div class="group"><h3 id="getting-started">Getting started</h3><a href="init/"><code>grit init</code><span>Create a new, empty repository.</span></a><a href="clone/"><code>grit clone</code><span>Copy a remote repository into a new directory.</span></a><a href="status/"><code>grit status</code><span>Show where you are and what&#x27;s changed. This is what plain grit runs.</span></a><a href="config/"><code>grit config</code><span>Read, set, list or remove configuration values.</span></a></div><div class="group"><h3 id="making-changes">Making changes</h3><a href="add/"><code>grit add</code><span>Stage changes. With no paths, stages everything.</span></a><a href="commit/"><code>grit commit</code><span>Stage every change and record a new commit.</span></a><a href="diff/"><code>grit diff</code><span>Show uncommitted changes, or the change a commit introduced.</span></a></div><div class="group"><h3 id="history">History</h3><a href="log/"><code>grit log</code><span>Show recent commits, newest first, a page at a time.</span></a><a href="shortlog/"><code>grit shortlog</code><span>List the commits on this branch that aren&#x27;t on the target branch yet.</span></a><a href="show/"><code>grit show</code><span>Show a commit, tag or branch, and a summary of what it changed.</span></a></div><div class="group"><h3 id="branches-and-tags">Branches and tags</h3><a href="branch/"><code>grit branch</code><span>List branches, or create or delete one.</span></a><a href="switch/"><code>grit switch</code><span>Switch to another branch, or create one and switch to it.</span></a><a href="merge/"><code>grit merge</code><span>Merge another branch into the current one.</span></a><a href="pick/"><code>grit pick</code><span>Copy a single commit onto the current branch.</span></a><a href="tag/"><code>grit tag</code><span>List tags, or create or delete one. A new tag points at the current commit.</span></a></div><div class="group"><h3 id="remotes">Remotes</h3><a href="remote/"><code>grit remote</code><span>List remotes, add one, or list refs on a remote.</span></a><a href="fetch/"><code>grit fetch</code><span>Download new commits, branches and tags from a remote.</span></a><a href="pull/"><code>grit pull</code><span>Fetch from the remote and bring the current branch up to date.</span></a><a href="push/"><code>grit push</code><span>Publish the current branch, or your tags, to a remote.</span></a><a href="auth/"><code>grit auth</code><span>Sign in to GitHub so HTTPS pushes and fetches just work.</span></a><a href="bundle/"><code>grit bundle</code><span>Create, verify, and list git bundle files for offline transfer.</span></a></div><div class="group"><h3 id="maintenance">Maintenance</h3><a href="update/"><code>grit update</code><span>Update grit to the latest release.</span></a><a href="skill/"><code>grit skill</code><span>Print an agent skill that explains how to use grit.</span></a><a href="completions/"><code>grit completions</code><span>Generate shell completion scripts for bash, zsh, and fish.</span></a></div><div class="group"><h3 id="plumbing">Plumbing</h3><a href="upload-pack/"><code>grit upload-pack</code><span>Serve a fetch or clone of a repository over stdin and stdout.</span></a><a href="receive-pack/"><code>grit receive-pack</code><span>Accept a push to a repository over stdin and stdout.</span></a><a href="manager/"><code>grit manager</code><span>A credential helper that stores passwords and tokens in the Windows Credential Manager.</span></a></div></div>
+  <section class="agents" aria-labelledby="for-agents"><h2 id="for-agents">For agents</h2><ul><li><a href="grit-cli.md">grit-cli.md</a> — the whole CLI in one file, to learn grit for everyday Git work</li><li><a href="grit-lib.md">grit-lib.md</a> — the whole library guide in one file, to build Git-compatible Rust programs</li><li><a href="../llms.txt">llms.txt</a> — an index of every page with a one-line summary</li><li><a href="../llms-full.txt">llms-full.txt</a> — every docs page in one file</li></ul><p>Every page has a Markdown twin: swap <code>index.html</code> for <code>index.md</code>. <code>grit skill</code> prints an agent skill for the CLI.</p></section>
 </main>
-<footer class="commit">
-  <div class="rail" aria-hidden="true"><span class="line stub"></span><span class="root-dot"></span></div>
-  <div class="foot">
-    <div class="sha">0000001 · initial commit · by <a href="https://gitbutler.com">GitButler</a></div>
-    <div class="links"><a href="./">Docs</a><a href="../">Home</a><a href="../blog/">Blog</a><a href="https://github.com/gitbutlerapp/grit">GitHub</a></div>
+<section class="col half lib" aria-label="The library">
+  <div class="label">use grit_lib;</div>
+  <h2>The library</h2>
+  <p class="lede">A fast, linkable Git library for Rust. Everything the CLI does goes through it: open repositories, read objects and refs, diff, revwalk, fetch and push.</p>
+  <div class="tiles two">
+    <a class="tile accent" href="library-quickstart/"><span>start here</span><b>Library quick start →</b></a>
+    <a class="tile" href="library/api-map/"><span>every public type</span><b>grit-lib API map</b></a>
   </div>
-</footer>
+  <div class="sub">Guides</div>
+  <div class="guides"><a href="library/bitmaps/">Reachability bitmaps</a><a href="library/diff/">Diff</a><a href="library/embedding/">Embedding grit-lib</a><a href="library/network/">Network</a><a href="library/object-stores/">Object stores</a><a href="library/objects/">Objects</a><a href="library/pack-bitmaps/">Pack reachability bitmaps</a><a href="library/refs/">Refs</a><a href="library/repository/">Repository</a><a href="library/revwalk/">Revwalk</a><a href="library/staging/">Index</a></div>
+  <a class="ext" href="https://docs.rs/grit-lib">API reference on docs.rs ↗</a>
+  <p class="note">On-disk formats and the wire protocol stay compatible with Git. <a href="benchmarks/">See benchmarks →</a></p>
+</section>
+</div></div>
 </div>
 </body>
 </html>
