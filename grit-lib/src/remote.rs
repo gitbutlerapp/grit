@@ -686,22 +686,54 @@ fn list_refs_includes_head(opts: &ListRefsOptions) -> bool {
 }
 
 fn list_ref_prefixes(opts: &ListRefsOptions) -> Vec<String> {
+    if opts.heads && !opts.tags {
+        return vec!["refs/heads/".to_owned()];
+    }
+    if opts.tags && !opts.heads {
+        return vec!["refs/tags/".to_owned()];
+    }
     if !opts.prefixes.is_empty() {
-        if opts.heads && !opts.tags {
-            return vec!["refs/heads/".to_owned()];
-        }
-        if opts.tags && !opts.heads {
-            return vec!["refs/tags/".to_owned()];
-        }
-        return vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()];
+        return v2_ref_prefixes_from_ls_remote_patterns(&opts.prefixes);
     }
-    let mut out = Vec::new();
-    let all = !opts.heads && !opts.tags;
-    if all || opts.heads {
-        out.push("refs/heads/".to_owned());
-    }
-    if all || opts.tags {
-        out.push("refs/tags/".to_owned());
+    vec!["refs/".to_owned()]
+}
+
+/// Map `git ls-remote`-style patterns to v2 `ref-prefix` lines (broad enough to fetch, then filter client-side).
+fn v2_ref_prefixes_from_ls_remote_patterns(patterns: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let push_unique = |out: &mut Vec<String>, value: &str| {
+        if !out.iter().any(|v| v == value) {
+            out.push(value.to_owned());
+        }
+    };
+    for pat in patterns {
+        let pat = pat.trim();
+        if pat.is_empty() {
+            continue;
+        }
+        if pat == "HEAD" {
+            push_unique(&mut out, "HEAD");
+            continue;
+        }
+        if let Some(star) = pat.find('*') {
+            let prefix = &pat[..star];
+            if prefix.is_empty() {
+                push_unique(&mut out, "refs/");
+                continue;
+            }
+            if prefix.starts_with("refs/") {
+                push_unique(&mut out, prefix);
+            } else {
+                push_unique(&mut out, &format!("refs/heads/{prefix}"));
+            }
+            continue;
+        }
+        if pat.starts_with("refs/") {
+            push_unique(&mut out, pat);
+            continue;
+        }
+        push_unique(&mut out, "refs/heads/");
+        push_unique(&mut out, "refs/tags/");
     }
     out
 }
@@ -817,11 +849,14 @@ fn finalize_list_refs_output(
                 .copied()
                 .or_else(|| odb.and_then(|o| peel_tag(o, &e.oid)));
             if let Some(p) = peeled {
-                peel_lines.push(RemoteRef {
-                    name: format!("{}^{{}}", e.name),
-                    oid: p,
-                    symref_target: None,
-                });
+                let peel_name = format!("{}^{{}}", e.name);
+                if ref_matches_list_opts(&peel_name, opts) {
+                    peel_lines.push(RemoteRef {
+                        name: peel_name,
+                        oid: p,
+                        symref_target: None,
+                    });
+                }
             }
         }
         entries.extend(peel_lines);
@@ -829,12 +864,9 @@ fn finalize_list_refs_output(
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     if list_refs_includes_head(opts) && ref_matches_list_opts("HEAD", opts) {
         let resolved = head_oid.or_else(|| {
-            head_symref.as_ref().and_then(|sym| {
-                entries
-                    .iter()
-                    .find(|e| e.name == *sym)
-                    .map(|e| e.oid)
-            })
+            head_symref
+                .as_ref()
+                .and_then(|sym| entries.iter().find(|e| e.name == *sym).map(|e| e.oid))
         });
         if let Some(oid) = resolved {
             entries.insert(
@@ -842,11 +874,7 @@ fn finalize_list_refs_output(
                 RemoteRef {
                     name: "HEAD".to_owned(),
                     oid,
-                    symref_target: if opts.symrefs {
-                        head_symref
-                    } else {
-                        None
-                    },
+                    symref_target: if opts.symrefs { head_symref } else { None },
                 },
             );
         }
@@ -969,12 +997,15 @@ pub fn list_refs_from_git_dir(
             symref_target: None,
         });
         if opts.peel && name.starts_with("refs/tags/") {
-            if let Some(peeled) = peel_tag(odb, oid) {
-                entries.push(RemoteRef {
-                    name: format!("{name}^{{}}"),
-                    oid: peeled,
-                    symref_target: None,
-                });
+            let peel_name = format!("{name}^{{}}");
+            if ref_matches_list_opts(&peel_name, opts) {
+                if let Some(peeled) = peel_tag(odb, oid) {
+                    entries.push(RemoteRef {
+                        name: peel_name,
+                        oid: peeled,
+                        symref_target: None,
+                    });
+                }
             }
         }
     }
@@ -1185,5 +1216,34 @@ mod tests {
         );
         assert!(super::ref_matches_list_opts("refs/heads/main", &opts));
         assert!(!super::ref_matches_list_opts("refs/heads/topic", &opts));
+    }
+
+    #[test]
+    fn list_ref_prefixes_changes_namespace() {
+        let opts = super::ListRefsOptions {
+            prefixes: vec!["refs/changes/*".to_owned()],
+            ..Default::default()
+        };
+        assert_eq!(
+            super::list_ref_prefixes(&opts),
+            vec!["refs/changes/".to_owned()]
+        );
+    }
+
+    #[test]
+    fn list_ref_prefixes_unfiltered_uses_refs_root() {
+        let opts = super::ListRefsOptions::default();
+        assert_eq!(super::list_ref_prefixes(&opts), vec!["refs/".to_owned()]);
+    }
+
+    #[test]
+    fn patterned_peel_line_excluded_for_short_tag_pattern() {
+        let opts = super::ListRefsOptions {
+            prefixes: vec!["v1".to_owned()],
+            peel: true,
+            ..Default::default()
+        };
+        assert!(super::ref_matches_list_opts("refs/tags/v1", &opts));
+        assert!(!super::ref_matches_list_opts("refs/tags/v1^{}", &opts));
     }
 }

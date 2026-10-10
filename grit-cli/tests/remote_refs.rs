@@ -120,7 +120,10 @@ fn grit_http_server_bin() -> PathBuf {
             .args(["build", "-q", "-p", "grit-http-server"])
             .status()
             .expect("cargo build grit-http-server");
-        assert!(status.success(), "failed to build grit-http-server for tests");
+        assert!(
+            status.success(),
+            "failed to build grit-http-server for tests"
+        );
         let debug = workspace.join("target/debug/grit-http-server");
         assert!(debug.is_file(), "missing {}", debug.display());
         debug
@@ -169,7 +172,9 @@ fn remote_refs_json_includes_peeled_on_annotated_tag() {
         "annotated tag must include peeled commit oid"
     );
     assert!(
-        !refs.iter().any(|e| e["name"].as_str() == Some("refs/tags/v1^{}")),
+        !refs
+            .iter()
+            .any(|e| e["name"].as_str() == Some("refs/tags/v1^{}")),
         "JSON uses peeled field instead of a separate ^{{}} row"
     );
 }

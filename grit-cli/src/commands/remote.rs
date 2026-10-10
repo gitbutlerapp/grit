@@ -15,8 +15,13 @@ use crate::output::{HumanRender, MarkdownRender};
 #[derive(Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum RemoteOutcome {
-    List { remotes: Vec<RemoteEntry> },
-    Add { name: String, url: String },
+    List {
+        remotes: Vec<RemoteEntry>,
+    },
+    Add {
+        name: String,
+        url: String,
+    },
     Refs {
         refs: Vec<RemoteRefEntry>,
         #[serde(skip)]
