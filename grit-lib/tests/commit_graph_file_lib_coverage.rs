@@ -130,7 +130,7 @@ fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<Object
 }
 
 #[test]
-fn octopus_graph_commit_returns_none_and_validates_edges() {
+fn octopus_graph_commit_decodes_extra_edge_parents() {
     let (_dir, repo, merge, sorted) = octopus_merge_graph();
     let mut infos = HashMap::new();
     for oid in &sorted {
@@ -156,7 +156,17 @@ fn octopus_graph_commit_returns_none_and_validates_edges() {
     .expect("write");
     std::fs::write(repo.odb.objects_dir().join("info/commit-graph"), &bytes).expect("write");
     let chain = CommitGraphChain::load(repo.odb.objects_dir()).expect("load");
-    assert!(chain.graph_commit(&merge).is_none());
+    let (parents, _time) = chain.graph_commit(&merge).expect("octopus parents decoded");
+    assert_eq!(parents.len(), 3);
+    let mut parents_sorted = parents;
+    parents_sorted.sort();
+    let mut tips: Vec<ObjectId> = sorted.iter().copied().filter(|&o| o != merge).collect();
+    tips.sort();
+    assert_eq!(parents_sorted, tips);
+    let positions = chain
+        .parent_global_positions(&merge)
+        .expect("parent positions");
+    assert_eq!(positions.len(), 3);
     let gp = chain.global_position(&merge).expect("pos");
     assert_eq!(chain.find_commit(&merge), Some((0, gp)));
 }

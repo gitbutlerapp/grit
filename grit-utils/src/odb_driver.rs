@@ -468,7 +468,7 @@ pub fn rev_list_count(repo: &Repository) -> Result<()> {
         ..Default::default()
     };
     let result = rev_list(repo, &[], &[], &opts).context("rev-list --count --all")?;
-    let n = result.commits.len();
+    let n = result.commit_count();
     println!("{n}");
     Ok(())
 }
@@ -487,7 +487,7 @@ pub fn rev_list_count_objects(repo: &Repository) -> Result<()> {
         .odb
         .with_pack_read_context(|| rev_list(repo, &[], &[], &opts))
         .context("rev-list --count --objects --all")?;
-    let n = result.commits.len() + result.objects.len();
+    let n = result.count_with_objects_total();
     println!("{n}");
     Ok(())
 }

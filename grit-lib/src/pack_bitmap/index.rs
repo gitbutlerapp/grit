@@ -40,6 +40,11 @@ impl CommitReachabilityBitmap {
         self.bits.get(position as usize)
     }
 
+    /// Union this reachability set into `dest`.
+    pub(crate) fn or_into(&self, dest: &mut Bitmap) {
+        dest.or_assign(&self.bits);
+    }
+
     /// Iterate set bit positions in ascending order.
     pub fn positions(&self) -> impl Iterator<Item = u32> + '_ {
         self.bits

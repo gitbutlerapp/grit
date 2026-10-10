@@ -3485,7 +3485,7 @@ mod tests {
         let git_dir = tmp.path().join(".git");
         let objects = git_dir.join("objects");
         let odb = Odb::new(&objects).with_config_git_dir(git_dir);
-        let metrics = odb.hot_path_test_metrics_arc();
+        let metrics = odb.hot_path_metrics_arc();
         let _scope = HotPathMetricsScope::install(Arc::clone(&metrics));
         metrics.set_stamp_counting(true);
         let _ = odb.read(&oid).expect("prime");

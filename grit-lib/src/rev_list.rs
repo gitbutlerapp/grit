@@ -12,6 +12,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips};
 use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphChain};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
@@ -22,6 +23,7 @@ use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::commits_reachable_excluding_ancestors_of;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
+use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
 use crate::reflog::{list_reflog_refs, read_reflog};
@@ -662,8 +664,32 @@ pub struct RevListResult {
     pub object_segments: Vec<Vec<(ObjectId, String)>>,
     /// True when `--use-bitmap-index --objects` should format trees/blobs as bare OIDs (no paths).
     pub bitmap_object_format: bool,
+    /// When set, `--count` used a fast path that did not materialize [`Self::commits`].
+    pub reachable_commit_count: Option<usize>,
+    /// Non-commit objects counted for `--count --objects` without listing [`Self::objects`].
+    pub reachable_non_commit_object_count: Option<usize>,
     /// When a positive spec named a ref to an annotated tag of a commit, maps peeled commit → tag OID.
     pub tip_annotated_tag_by_commit: HashMap<ObjectId, ObjectId>,
+}
+
+impl RevListResult {
+    /// Commit count for `--count` (fast path or [`Self::commits`] length).
+    #[must_use]
+    pub fn commit_count(&self) -> usize {
+        self.reachable_commit_count.unwrap_or(self.commits.len())
+    }
+
+    /// Total printed lines for `--count --objects`.
+    #[must_use]
+    pub fn count_with_objects_total(&self) -> usize {
+        if let (Some(c), Some(o)) = (
+            self.reachable_commit_count,
+            self.reachable_non_commit_object_count,
+        ) {
+            return c + o;
+        }
+        self.commits.len() + self.objects.len()
+    }
 }
 
 /// Per-commit bisection score for `rev-list --bisect*` output.
@@ -848,13 +874,13 @@ pub fn rev_list(
     };
 
     if options.all_refs {
-        include.extend(all_ref_tips(repo, &RefExclusions::default())?);
-        // In `--objects` mode a ref may point at (or peel to) a blob or tree. Those refs do not
-        // appear among the commit tips above (`peel_ref_oids_to_unique_commits` drops them), but
-        // `git rev-list --all --objects` still lists the named object. Add them as object roots so
-        // that e.g. a lightweight tag pointing at a blob keeps that blob reachable (t5310).
         if options.objects {
-            object_roots.extend(all_ref_non_commit_object_roots(repo)?);
+            let (tips, roots) =
+                all_ref_commit_tips_and_object_roots(repo, &RefExclusions::default())?;
+            include.extend(tips);
+            object_roots.extend(roots);
+        } else {
+            include.extend(all_ref_tips(repo, &RefExclusions::default())?);
         }
     }
 
@@ -901,10 +927,23 @@ pub fn rev_list(
                 objects_print_commit: Vec::new(),
                 object_segments: Vec::new(),
                 bitmap_object_format: false,
+                reachable_commit_count: None,
+                reachable_non_commit_object_count: None,
                 tip_annotated_tag_by_commit: HashMap::new(),
             });
         }
         return Err(Error::InvalidRef("no revisions specified".to_owned()));
+    }
+
+    if let Some(result) = try_rev_list_accelerated(
+        repo,
+        &include,
+        &exclude,
+        &object_roots,
+        &negative_object_roots,
+        options,
+    )? {
+        return Ok(result);
     }
 
     let object_walk_tip_commits: Vec<ObjectId> = if options.objects {
@@ -1446,18 +1485,8 @@ pub fn rev_list(
     } else {
         options.missing_action
     };
-    // Git's bitmap object traversal emits OID-only object lines (no trailing pathname) and groups
-    // objects by type, which is observably different from the normal name-walk output. When the
-    // caller asks for `--use-bitmap-index --objects` and a pack/MIDX bitmap actually exists, mirror
-    // that format so `test_bitmap_traversal` (t5310) sees the two outputs differ yet normalize equal.
-    let bitmap_object_format = options.objects
-        && options.use_bitmap_index
-        && (options.bitmap_oid_only_objects
-            || !object_roots.is_empty()
-            || options.unpacked_only
-            || (pack_bitmap_present(repo)
-                && !filter_forces_bitmap_fallback(options.filter.as_ref())));
-    let omit_object_paths = bitmap_object_format;
+    let bitmap_object_format = false;
+    let omit_object_paths = options.bitmap_oid_only_objects;
     // `--unpacked` selects unpacked commits for the revision walk. Git's object walk still emits
     // the full object closure for those commits, including tree/blob objects that already live in a
     // pack (t6000, t6113). Do not pass the packed set into tree traversal here.
@@ -1604,6 +1633,8 @@ pub fn rev_list(
         objects_print_commit,
         object_segments,
         bitmap_object_format,
+        reachable_commit_count: None,
+        reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit,
     })
 }
@@ -4776,6 +4807,7 @@ fn load_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::Commi
             "object {oid} is not a commit"
         )));
     }
+    repo.odb.hot_path_metrics().record_commit_parse();
     parse_commit(&object.data)
 }
 
@@ -4793,8 +4825,243 @@ fn rev_list_result_from_commits(commits: Vec<ObjectId>) -> RevListResult {
         objects_print_commit: Vec::new(),
         object_segments: Vec::new(),
         bitmap_object_format: false,
+        reachable_commit_count: None,
+        reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit: HashMap::new(),
     }
+}
+
+fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
+    !options.first_parent
+        && !options.ancestry_path
+        && options.ancestry_path_bottoms.is_empty()
+        && !options.simplify_by_decoration
+        && options.simplify_by_decoration_oids.is_empty()
+        && options.paths.is_empty()
+        && !options.full_history
+        && !options.sparse
+        && !options.simplify_merges
+        && !options.show_pulls
+        && !options.boundary
+        && !options.left_right
+        && !options.left_only
+        && !options.right_only
+        && !options.cherry_mark
+        && !options.cherry_pick
+        && options.min_parents.is_none()
+        && options.max_parents.is_none()
+        && options.symmetric_left.is_none()
+        && options.symmetric_right.is_none()
+        && options.until_cutoff.is_none()
+        && options.since_cutoff.is_none()
+        && !options.maximal_only
+        && options.skip == 0
+        && options.max_count.is_none()
+        && options.ordering == OrderingMode::Default
+        && !options.reverse
+        && !options.filter_print_omitted
+        && !options.in_commit_order
+        && !options.no_kept_objects
+        && !options.unpacked_only
+        && !options.exclude_first_parent_only
+        && !options.exclude_promisor_objects
+        && options.missing_action == MissingAction::Error
+        && !options.include_reflog_entries
+        && !options.include_indexed_objects
+        && !options.exclude_indexed_objects
+        && options.output_mode == OutputMode::OidOnly
+        && !options.no_object_names
+}
+
+fn wants_bitmap_rev_list(options: &RevListOptions) -> bool {
+    options.use_bitmap_index || options.count
+}
+
+fn peeled_wants_from_rev_list_inputs(
+    include: &[ObjectId],
+    object_roots: &[RootObject],
+) -> (PeeledTips, Vec<ObjectId>) {
+    let mut peeled = PeeledTips {
+        commits: include.to_vec(),
+        tags: Vec::new(),
+        extra_objects: Vec::new(),
+    };
+    let mut filter_want_tips = include.to_vec();
+    for root in object_roots {
+        filter_want_tips.push(root.oid);
+        match root.expected_kind {
+            Some(ExpectedObjectKind::Tag) => peeled.tags.push(root.oid),
+            Some(ExpectedObjectKind::Tree) | Some(ExpectedObjectKind::Blob) => {
+                peeled.extra_objects.push(root.oid);
+            }
+            Some(ExpectedObjectKind::Commit) => peeled.commits.push(root.oid),
+            None => peeled.extra_objects.push(root.oid),
+        }
+    }
+    peeled.commits.sort();
+    peeled.commits.dedup();
+    (peeled, filter_want_tips)
+}
+
+fn try_commit_graph_count_only(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<RevListResult>> {
+    if !options.count || options.objects || !options.use_commit_graph {
+        return Ok(None);
+    }
+    if !crate::rev_parse::load_graft_parents(&repo.git_dir).is_empty() {
+        return Ok(None);
+    }
+    let Some(chain) = CommitGraphChain::try_load_with_caches(
+        &repo.git_dir.join("objects"),
+        Some(repo.caches().as_ref()),
+    )
+    .ok()
+    .flatten() else {
+        return Ok(None);
+    };
+    let shallow = load_shallow_boundaries(&repo.git_dir);
+    let Some(n) = chain.count_reachable_commits(include, exclude, false, &shallow) else {
+        return Ok(None);
+    };
+    Ok(Some(RevListResult {
+        commits: Vec::new(),
+        objects: Vec::new(),
+        omitted_objects: Vec::new(),
+        missing_objects: Vec::new(),
+        boundary_commits: Vec::new(),
+        left_right_map: HashMap::new(),
+        cherry_equivalent: HashSet::new(),
+        per_commit_object_counts: Vec::new(),
+        object_walk_tips: Vec::new(),
+        objects_print_commit: Vec::new(),
+        object_segments: Vec::new(),
+        bitmap_object_format: false,
+        reachable_commit_count: Some(n),
+        reachable_non_commit_object_count: None,
+        tip_annotated_tag_by_commit: HashMap::new(),
+    }))
+}
+
+fn try_rev_list_accelerated(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    object_roots: &[RootObject],
+    negative_object_roots: &[RootObject],
+    options: &RevListOptions,
+) -> Result<Option<RevListResult>> {
+    if !rev_list_acceleration_compatible(options) {
+        return Ok(None);
+    }
+
+    if !wants_bitmap_rev_list(options) || !bitmap_filter_supported(options.filter.as_ref()) {
+        return try_commit_graph_count_only(repo, include, exclude, options);
+    }
+
+    let index = match repo.odb.with_pack_read_context(|| BitmapIndex::open(repo)) {
+        Ok(Some(index)) => index,
+        Ok(None) => {
+            return try_commit_graph_count_only(repo, include, exclude, options);
+        }
+        Err(e) => {
+            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+        }
+    };
+    let (peeled_wants, filter_want_tips) = peeled_wants_from_rev_list_inputs(include, object_roots);
+    let reachable = match index.reachability_with_peeled_wants(
+        repo,
+        peeled_wants,
+        exclude,
+        options.filter.as_ref(),
+        options.missing_action,
+        &filter_want_tips,
+    ) {
+        Ok(set) => set,
+        Err(BitmapWalkError::Unsupported(_)) => {
+            return try_commit_graph_count_only(repo, include, exclude, options);
+        }
+        Err(BitmapWalkError::Bitmap(e)) => {
+            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+        }
+        Err(BitmapWalkError::Repository(e)) => return Err(e),
+    };
+
+    let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
+    let excluded_object_ids = excluded_object_root_ids(
+        repo,
+        negative_object_roots,
+        options.missing_action,
+        None,
+        skip_trees,
+        true,
+        false,
+    )?;
+
+    let (commit_count, non_commit_count) = if excluded_object_ids.is_empty() {
+        let commit_count = reachable
+            .count_by_kind(ObjectKind::Commit)
+            .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
+        let total = reachable.count();
+        (commit_count, total.saturating_sub(commit_count))
+    } else {
+        let commit_count = reachable
+            .iter_by_kind(ObjectKind::Commit)
+            .filter(|oid| !excluded_object_ids.contains(oid))
+            .count();
+        let non_commit_count = [ObjectKind::Tree, ObjectKind::Blob, ObjectKind::Tag]
+            .into_iter()
+            .flat_map(|kind| reachable.iter_by_kind(kind))
+            .filter(|oid| !excluded_object_ids.contains(oid))
+            .count();
+        (commit_count, non_commit_count)
+    };
+
+    let (commits, objects) = if options.count {
+        (Vec::new(), Vec::new())
+    } else {
+        let commits: Vec<ObjectId> = reachable
+            .iter_by_kind(ObjectKind::Commit)
+            .filter(|oid| !excluded_object_ids.contains(oid))
+            .collect();
+        let objects: Vec<(ObjectId, String)> =
+            [ObjectKind::Tree, ObjectKind::Blob, ObjectKind::Tag]
+                .into_iter()
+                .flat_map(|kind| {
+                    reachable
+                        .iter_by_kind(kind)
+                        .filter(|oid| !excluded_object_ids.contains(oid))
+                        .map(|oid| (oid, String::new()))
+                })
+                .collect();
+        (commits, objects)
+    };
+
+    Ok(Some(RevListResult {
+        commits,
+        objects,
+        omitted_objects: Vec::new(),
+        missing_objects: Vec::new(),
+        boundary_commits: Vec::new(),
+        left_right_map: HashMap::new(),
+        cherry_equivalent: HashSet::new(),
+        per_commit_object_counts: Vec::new(),
+        object_walk_tips: if options.objects {
+            filter_want_tips
+        } else {
+            Vec::new()
+        },
+        objects_print_commit: Vec::new(),
+        object_segments: Vec::new(),
+        bitmap_object_format: true,
+        reachable_commit_count: options.count.then_some(commit_count),
+        reachable_non_commit_object_count: (options.count && options.objects)
+            .then_some(non_commit_count),
+        tip_annotated_tag_by_commit: HashMap::new(),
+    }))
 }
 
 fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
@@ -5494,70 +5761,62 @@ fn relevant_parent_reaches(
     Ok(false)
 }
 
-fn all_ref_tips(repo: &Repository, exclusions: &RefExclusions) -> Result<Vec<ObjectId>> {
+fn ref_pairs_for_all(repo: &Repository) -> Result<Vec<(String, ObjectId)>> {
     let mut pairs = Vec::new();
     if let Ok(head) = refs::resolve_ref(&repo.git_dir, "HEAD") {
         pairs.push(("HEAD".to_owned(), head));
     }
     pairs.extend(refs::list_refs(&repo.git_dir, "refs/")?);
+    Ok(pairs)
+}
+
+fn all_ref_tips(repo: &Repository, exclusions: &RefExclusions) -> Result<Vec<ObjectId>> {
+    let pairs = ref_pairs_for_all(repo)?;
     commit_tips_from_ref_pairs(repo, &pairs, exclusions)
 }
 
-/// Whether `filter` is incompatible with bitmap traversal, forcing `--use-bitmap-index` to fall
-/// back to a normal name-walk (and therefore the normal, path-bearing object output).
-///
-/// Path-based filters (`sparse:oid`) and depth-limited tree filters (`tree:<n>`) cannot be served
-/// from reachability bitmaps; `blob:none`, `blob:limit`, and most `object:type` filters can. This
-/// mirrors the CLI's `bitmap_use_oid_only_object_lines`.
-fn filter_forces_bitmap_fallback(filter: Option<&ObjectFilter>) -> bool {
-    match filter {
-        None => false,
-        Some(ObjectFilter::SparseOid(_)) | Some(ObjectFilter::TreeDepth(_)) => true,
-        Some(ObjectFilter::Combine(parts)) => {
-            parts.iter().any(|p| filter_forces_bitmap_fallback(Some(p)))
-        }
-        _ => false,
-    }
-}
-
-/// Whether a pack or multi-pack-index reachability bitmap (`*.bitmap`) is present in the object
-/// store, indicating that `--use-bitmap-index` would engage a real bitmap and therefore emit the
-/// OID-only bitmap object format.
-fn pack_bitmap_present(repo: &Repository) -> bool {
-    repo.odb
-        .primary()
-        .ok()
-        .and_then(|primary| primary.packed_objects().reachability_bitmap_present().ok())
-        .unwrap_or(false)
-}
-
-/// Collect `--all` refs whose target is (or peels to) a non-commit object — a blob or tree — as
-/// object roots for `--objects` traversal.
-///
-/// Commit-pointing refs are already covered by [`all_ref_tips`]; only refs naming a blob/tree
-/// directly, or annotated tags that peel to a blob/tree, are returned here. This mirrors
-/// `git rev-list --all --objects`, which lists objects directly referenced by any ref.
-fn all_ref_non_commit_object_roots(repo: &Repository) -> Result<Vec<RootObject>> {
+/// One pass over `--all` refs: unique commit tips plus object roots for `--objects`.
+fn all_ref_commit_tips_and_object_roots(
+    repo: &Repository,
+    exclusions: &RefExclusions,
+) -> Result<(Vec<ObjectId>, Vec<RootObject>)> {
+    let namespace_prefix = git_namespace_prefix();
+    let pairs = ref_pairs_for_all(repo)?;
+    let mut commits = HashSet::new();
     let mut roots = Vec::new();
-    let mut seen: HashSet<ObjectId> = HashSet::new();
-    for (refname, oid) in refs::list_refs(&repo.git_dir, "refs/")? {
+    let mut seen_roots = HashSet::new();
+    for (refname, oid) in pairs {
+        if exclusions.ref_excluded(strip_git_namespace(&refname, &namespace_prefix), &refname) {
+            continue;
+        }
         let Ok(object) = repo.odb.read(&oid) else {
             continue;
         };
         match object.kind {
-            ObjectKind::Commit => continue,
+            ObjectKind::Commit => {
+                commits.insert(oid);
+            }
             ObjectKind::Tree | ObjectKind::Blob => {
-                if seen.insert(oid) {
+                if seen_roots.insert(oid) {
                     roots.push(RootObject {
                         oid,
                         input: refname,
-                        expected_kind: None,
+                        expected_kind: ExpectedObjectKind::from_object_kind(object.kind),
                         root_path: None,
                         wrap_with_tag: None,
                     });
                 }
             }
             ObjectKind::Tag => {
+                if seen_roots.insert(oid) {
+                    roots.push(RootObject {
+                        oid,
+                        input: refname.clone(),
+                        expected_kind: Some(ExpectedObjectKind::Tag),
+                        root_path: None,
+                        wrap_with_tag: None,
+                    });
+                }
                 let Ok(tag) = parse_tag(&object.data) else {
                     continue;
                 };
@@ -5565,11 +5824,11 @@ fn all_ref_non_commit_object_roots(repo: &Repository) -> Result<Vec<RootObject>>
                 else {
                     continue;
                 };
-                // Annotated tags peeling to a commit are handled by the commit-tip walk.
                 if expected_kind == ExpectedObjectKind::Commit {
+                    commits.insert(tag.object);
                     continue;
                 }
-                if seen.insert(tag.object) {
+                if seen_roots.insert(tag.object) {
                     roots.push(RootObject {
                         oid: tag.object,
                         input: refname,
@@ -5581,7 +5840,9 @@ fn all_ref_non_commit_object_roots(repo: &Repository) -> Result<Vec<RootObject>>
             }
         }
     }
-    Ok(roots)
+    let mut tips: Vec<ObjectId> = commits.into_iter().collect();
+    tips.sort();
+    Ok((tips, roots))
 }
 
 /// Expand named refs to peeled unique commit tips, applying `--exclude` / `--exclude-hidden` rules.

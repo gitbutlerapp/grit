@@ -505,7 +505,7 @@ fn read_worktree_blob_oid(
         symlink_target_bytes(&target)
     } else {
         #[cfg(test)]
-        repo.odb.hot_path_test_metrics().record_blob_content_read();
+        repo.odb.hot_path_metrics().record_blob_content_read();
         fs::read(abs_path)?
     };
     repo.odb.write(ObjectKind::Blob, &data)

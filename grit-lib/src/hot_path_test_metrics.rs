@@ -1,5 +1,7 @@
 //! Per-[`crate::odb::Odb`] hot-path counters for regression tests (test builds only).
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -13,10 +15,12 @@ pub struct HotPathTestMetrics {
     pack_signature_stats: AtomicUsize,
     midx_stamp_stats: AtomicUsize,
     loose_path_open_attempts: AtomicUsize,
+    commit_parse_calls: AtomicUsize,
     freshen_counting: AtomicBool,
     blob_counting: AtomicBool,
     stamp_counting: AtomicBool,
     loose_open_counting: AtomicBool,
+    commit_parse_counting: AtomicBool,
 }
 
 impl HotPathTestMetrics {
@@ -98,6 +102,25 @@ impl HotPathTestMetrics {
         self.loose_open_counting.store(enabled, Ordering::Relaxed);
     }
 
+    pub fn reset_commit_parse_calls(&self) {
+        self.commit_parse_calls.store(0, Ordering::SeqCst);
+    }
+
+    pub fn set_commit_parse_counting(&self, enabled: bool) {
+        self.commit_parse_counting.store(enabled, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn commit_parse_calls(&self) -> usize {
+        self.commit_parse_calls.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_commit_parse(&self) {
+        if self.commit_parse_counting.load(Ordering::Relaxed) {
+            self.commit_parse_calls.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     #[must_use]
     pub fn loose_path_open_attempts(&self) -> usize {
         self.loose_path_open_attempts.load(Ordering::SeqCst)
@@ -143,6 +166,7 @@ impl HotPathTestMetrics {
         self.set_blob_counting(false);
         self.set_stamp_counting(false);
         self.set_loose_open_counting(false);
+        self.set_commit_parse_counting(false);
     }
 }
 

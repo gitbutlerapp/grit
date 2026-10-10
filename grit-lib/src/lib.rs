@@ -276,10 +276,9 @@ pub mod zlib_inflate;
 
 pub use ref_storage::RefStorageFormat;
 
-#[cfg(test)]
-mod hot_path_test_metrics;
+#[doc(hidden)]
+pub mod hot_path_test_metrics;
 #[cfg(test)]
 mod object_write_regression;
-#[cfg(test)]
 #[cfg(test)]
 mod repository_config_snapshot_tests;
