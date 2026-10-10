@@ -9,7 +9,8 @@ use grit_lib::porcelain::stash::{
     apply_stash, drop_stash, list_stashes, pop_stash, push_stash, stash_diff, StashCreateOptions,
 };
 use grit_lib::repo::Repository;
-use serde::Serialize;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 
 use crate::commands::diff::{self, DiffOutcome};
 use crate::commands::show::{self, DiffStat};
@@ -17,39 +18,56 @@ use crate::context;
 use crate::output::{HumanRender, MarkdownRender};
 
 /// Result of `grit stash push` (or bare `grit stash`).
-#[derive(Serialize)]
-pub struct StashPushOutcome {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oid: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    pub stashed: bool,
+pub enum StashPushOutcome {
+    /// Local changes were saved to the stash.
+    Saved {
+        oid: String,
+        message: String,
+    },
+    /// Working tree and index already matched `HEAD`; nothing was saved.
+    Nothing,
+}
+
+impl Serialize for StashPushOutcome {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Saved { oid, message } => {
+                let mut st = serializer.serialize_struct("StashPushOutcome", 2)?;
+                st.serialize_field("oid", oid)?;
+                st.serialize_field("message", message)?;
+                st.end()
+            }
+            Self::Nothing => {
+                let mut st = serializer.serialize_struct("StashPushOutcome", 1)?;
+                st.serialize_field("stashed", &false)?;
+                st.end()
+            }
+        }
+    }
 }
 
 impl HumanRender for StashPushOutcome {
     fn render_human(&self) {
-        if !self.stashed {
-            println!("No local changes to save");
-            return;
-        }
-        let oid = self.oid.as_deref().unwrap_or("");
-        let short = oid.get(..7).unwrap_or(oid);
-        let msg = self.message.as_deref().unwrap_or("");
-        if msg.is_empty() {
-            println!("Saved working directory and index state {short}");
-        } else {
-            println!("Saved working directory and index state On {msg} {short}");
+        match self {
+            Self::Nothing => println!("No local changes to save"),
+            Self::Saved { oid, message } => {
+                let short = oid.get(..7).unwrap_or(oid.as_str());
+                if message.is_empty() {
+                    println!("Saved working directory and index state {short}");
+                } else {
+                    println!("Saved working directory and index state On {message} {short}");
+                }
+            }
         }
     }
 }
 
 impl MarkdownRender for StashPushOutcome {}
 
-/// Result of `grit stash list`.
+/// Result of `grit stash list` (`--json` is the bare array of entries).
 #[derive(Serialize)]
-pub struct StashListOutcome {
-    pub entries: Vec<StashListEntry>,
-}
+#[serde(transparent)]
+pub struct StashListOutcome(pub Vec<StashListEntry>);
 
 #[derive(Serialize)]
 pub struct StashListEntry {
@@ -60,7 +78,7 @@ pub struct StashListEntry {
 
 impl HumanRender for StashListOutcome {
     fn render_human(&self) {
-        for entry in &self.entries {
+        for entry in &self.0 {
             let short = entry.oid.get(..7).unwrap_or(&entry.oid);
             println!("stash@{{{}}} {}: {}", entry.index, short, entry.message);
         }
@@ -69,11 +87,11 @@ impl HumanRender for StashListOutcome {
 
 impl MarkdownRender for StashListOutcome {
     fn render_markdown(&self) {
-        if self.entries.is_empty() {
+        if self.0.is_empty() {
             println!("- _(no stash entries)_");
             return;
         }
-        for entry in &self.entries {
+        for entry in &self.0 {
             let short = entry.oid.get(..7).unwrap_or(&entry.oid);
             println!(
                 "- **stash@{{{}}}** `{short}` — {}",
@@ -212,26 +230,22 @@ pub fn run_push(message: Option<String>, include_untracked: bool) -> Result<Stas
             let message = entries
                 .iter()
                 .find(|e| e.oid == oid)
-                .map(|e| e.message.clone());
-            StashPushOutcome {
-                oid: Some(oid.to_hex()),
+                .map(|e| e.message.clone())
+                .unwrap_or_default();
+            StashPushOutcome::Saved {
+                oid: oid.to_hex(),
                 message,
-                stashed: true,
             }
         }
-        None => StashPushOutcome {
-            oid: None,
-            message: None,
-            stashed: false,
-        },
+        None => StashPushOutcome::Nothing,
     })
 }
 
 pub fn run_list() -> Result<StashListOutcome> {
     let repo = context::discover()?;
     let entries = list_stashes(&repo).map_err(map_stash_error)?;
-    Ok(StashListOutcome {
-        entries: entries
+    Ok(StashListOutcome(
+        entries
             .into_iter()
             .map(|e| StashListEntry {
                 index: e.index,
@@ -239,7 +253,7 @@ pub fn run_list() -> Result<StashListOutcome> {
                 message: e.message,
             })
             .collect(),
-    })
+    ))
 }
 
 pub fn run_show(index: Option<String>, patch: bool) -> Result<StashShowOutcome> {
