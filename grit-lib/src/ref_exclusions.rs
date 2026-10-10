@@ -146,7 +146,7 @@ pub fn git_namespace_prefix() -> String {
     git_namespace_prefix_env(&crate::environment::Environment::empty())
 }
 
-/// Like [`git_namespace_prefix`] with an explicit [`crate::environment::Environment`].
+/// Like [`git_namespace_prefix`] with an explicit [`Environment`](crate::environment::Environment).
 pub fn git_namespace_prefix_env(env: &crate::environment::Environment) -> String {
     let raw = env.git_namespace.clone().unwrap_or_default();
     if raw.is_empty() {

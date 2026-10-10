@@ -22,7 +22,8 @@ use crate::diff::{diff_trees, DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedCheckoutError, DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{
-    entry_from_metadata, Index, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK,
+    entry_from_metadata, entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK,
+    MODE_REGULAR, MODE_SYMLINK,
 };
 use crate::objects::ObjectId;
 use crate::repo::Repository;
@@ -74,7 +75,12 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
         if change.status == DiffStatus::Deleted {
             if let Some(path) = &change.old_path {
                 let abs = work_tree.join(path);
-                let _ = fs::remove_file(&abs);
+                let old_mode = parse_git_mode(&change.old_mode);
+                if old_mode == MODE_GITLINK {
+                    remove_uninitialized_gitlink_worktree(&abs);
+                } else {
+                    let _ = fs::remove_file(&abs);
+                }
                 deleted_abs_paths.push(abs);
                 paths_to_remove.push(path.as_bytes().to_vec());
             }
@@ -85,6 +91,28 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
             continue;
         };
         let mode = parse_git_mode(&change.new_mode);
+        if mode == MODE_GITLINK {
+            if let Some(existing) = index.get(path.as_bytes(), 0) {
+                if existing.oid == change.new_oid
+                    && existing.mode == MODE_GITLINK
+                    && gitlink_worktree_matches_index(&work_tree.join(path))
+                {
+                    let abs = work_tree.join(path);
+                    let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
+                    let mut entry =
+                        entry_from_metadata(&meta, path.as_bytes(), change.new_oid, MODE_GITLINK);
+                    entry.size = 0;
+                    new_entries.push(entry);
+                    continue;
+                }
+            }
+            materialize_gitlink_worktree(&work_tree, path, &mut dir_cache)?;
+            let abs = work_tree.join(path);
+            let mut entry = entry_from_stat(&abs, path.as_bytes(), change.new_oid, MODE_GITLINK)?;
+            entry.size = 0;
+            new_entries.push(entry);
+            continue;
+        }
         if let Some(existing) = index.get(path.as_bytes(), 0) {
             if crate::diff::path_checkout_skip_blob_write_when_up_to_date(
                 &repo.odb,
@@ -330,6 +358,51 @@ fn smudge_retry_after_delay(
 
 fn parse_git_mode(mode: &str) -> u32 {
     u32::from_str_radix(mode, 8).unwrap_or(MODE_REGULAR)
+}
+
+/// True when `path` is an uninitialized submodule checkout (directory, no nested `.git`).
+fn gitlink_worktree_matches_index(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    let git_meta = path.join(".git");
+    !(git_meta.is_file() || git_meta.is_dir())
+}
+
+/// Remove a gitlink path from the worktree unless it looks like an initialized submodule.
+fn remove_uninitialized_gitlink_worktree(abs: &Path) {
+    if abs.is_dir() {
+        let git_meta = abs.join(".git");
+        if git_meta.is_file() || git_meta.is_dir() {
+            return;
+        }
+        let _ = fs::remove_dir_all(abs);
+    } else {
+        let _ = fs::remove_file(abs);
+    }
+}
+
+/// Create an empty directory for an uninitialized gitlink, replacing conflicting paths.
+fn materialize_gitlink_worktree(
+    work_tree: &Path,
+    rel_path: &str,
+    dir_cache: &mut LeadingDirCache,
+) -> Result<()> {
+    dir_cache.ensure_parents(work_tree, rel_path)?;
+    let file_path = work_tree.join(rel_path);
+    if let Ok(meta) = fs::symlink_metadata(&file_path) {
+        if meta.file_type().is_symlink() || meta.is_file() {
+            fs::remove_file(&file_path)?;
+        } else if meta.is_dir() {
+            let git_meta = file_path.join(".git");
+            if !(git_meta.is_file() || git_meta.is_dir()) {
+                fs::remove_dir_all(&file_path)?;
+            }
+        }
+    }
+    fs::create_dir_all(&file_path)
+        .map_err(|e| Error::PathError(format!("creating gitlink directory '{rel_path}': {e}")))?;
+    Ok(())
 }
 
 fn is_regular_git_mode(mode: u32) -> bool {
@@ -817,6 +890,40 @@ mod tests {
         let commit_oid = repo.odb.write(ObjectKind::Commit, &bytes).expect("commit");
         refs::write_ref(&repo.git_dir, "HEAD", &commit_oid).expect("head");
         tree
+    }
+
+    #[test]
+    fn checkout_deletes_gitlink_directory() {
+        let tmp = TempDir::new().expect("tempdir");
+        let wt = tmp.path().join("wt");
+        fs::create_dir_all(&wt).expect("mkdir");
+        let repo = init_repository(&wt, false, "main", None, "files").expect("init");
+        let gitlink: ObjectId = "855827c583bc30645ba427885caa40c5b81764d2"
+            .parse()
+            .expect("oid");
+        fs::write(wt.join("a"), b"a\n").expect("a");
+        let a_oid = repo.odb.write(ObjectKind::Blob, b"a\n").expect("blob");
+        let mut index = repo.load_index().expect("index");
+        index.add_or_replace(entry_from_stat(&wt.join("a"), b"a", a_oid, MODE_REGULAR).expect("e"));
+        index.add_or_replace(prospective_index_entry("sub", gitlink, MODE_GITLINK));
+        index.sort();
+        let with_sub = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())
+            .expect("tree with sub");
+        fs::write(wt.join("b"), b"b\n").expect("b");
+        let b_oid = repo.odb.write(ObjectKind::Blob, b"b\n").expect("blob");
+        index.remove(b"sub");
+        index.add_or_replace(entry_from_stat(&wt.join("b"), b"b", b_oid, MODE_REGULAR).expect("e"));
+        index.sort();
+        let no_sub = write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent())
+            .expect("tree no sub");
+
+        checkout_between_trees(&repo, None, &with_sub).expect("checkout gitlink");
+        assert!(wt.join("sub").is_dir());
+        checkout_between_trees(&repo, Some(&with_sub), &no_sub).expect("remove gitlink");
+        assert!(
+            !wt.join("sub").exists(),
+            "gitlink directory should be removed on delete"
+        );
     }
 
     #[test]

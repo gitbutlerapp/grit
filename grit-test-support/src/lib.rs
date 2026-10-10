@@ -5,6 +5,7 @@
 //! integration tests in `grit` and `grit-lib`.
 
 pub mod objects;
+pub mod odb_conformance;
 
 pub use objects::{
     git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,
@@ -523,6 +524,7 @@ fn run_program(
         child_stdin
             .write_all(stdin)
             .unwrap_or_else(|e| panic!("write stdin for {} {args:?}: {e}", program.display()));
+        drop(child_stdin);
         child
             .wait_with_output()
             .unwrap_or_else(|e| panic!("wait {} {args:?}: {e}", program.display()))

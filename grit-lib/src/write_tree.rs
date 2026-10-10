@@ -1033,7 +1033,7 @@ mod tests {
             Some(&empty_cache_tree_root())
         ));
         let missing_oid = CacheTreeNode::valid(b"root".to_vec(), 1, tree_oid, vec![]);
-        std::fs::remove_file(odb.object_path(&tree_oid)).unwrap();
+        odb.test_remove_loose_object(&tree_oid);
         assert!(!cache_tree_fully_valid(&odb, Some(&missing_oid)));
     }
 
@@ -1315,8 +1315,8 @@ mod tests {
         let oid_a = odb.write(ObjectKind::Blob, b"a").unwrap();
         let oid_b = odb.write(ObjectKind::Blob, b"b").unwrap();
 
-        let path_a = odb.object_path(&oid_a);
-        let path_b = odb.object_path(&oid_b);
+        let path_a = odb.test_loose_object_path(&oid_a);
+        let path_b = odb.test_loose_object_path(&oid_b);
         thread::sleep(Duration::from_millis(50));
         let stamp_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
         let stamp_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
@@ -1353,10 +1353,10 @@ mod tests {
 
         let root_oid =
             write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
-        let tree_path = odb.object_path(&root_oid);
+        let tree_path = odb.test_loose_object_path(&root_oid);
 
-        let path_a = odb.object_path(&oid_a);
-        let path_b = odb.object_path(&oid_b);
+        let path_a = odb.test_loose_object_path(&oid_a);
+        let path_b = odb.test_loose_object_path(&oid_b);
         thread::sleep(Duration::from_millis(50));
         let stamp_a = FileTime::from_last_modification_time(&fs::metadata(&path_a).unwrap());
         let stamp_b = FileTime::from_last_modification_time(&fs::metadata(&path_b).unwrap());
@@ -1462,8 +1462,8 @@ mod tests {
         let alpha_before = cache_tree_child_oid(&index, b"alpha");
         let wide_before = cache_tree_child_oid(&index, b"wide");
         let beta_before = cache_tree_child_oid(&index, b"beta");
-        let alpha_path = odb.object_path(&alpha_before);
-        let wide_path = odb.object_path(&wide_before);
+        let alpha_path = odb.test_loose_object_path(&alpha_before);
+        let wide_path = odb.test_loose_object_path(&wide_before);
         let alpha_mtime =
             FileTime::from_last_modification_time(&fs::metadata(&alpha_path).unwrap());
         let wide_mtime = FileTime::from_last_modification_time(&fs::metadata(&wide_path).unwrap());
@@ -1502,7 +1502,7 @@ mod tests {
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         let beta_oid = cache_tree_child_oid(&index, b"beta");
         let root_oid = index.cache_tree.as_ref().unwrap().oid.unwrap();
-        std::fs::remove_file(odb.object_path(&beta_oid)).unwrap();
+        odb.test_remove_loose_object(&beta_oid);
         assert!(!odb.exists(&beta_oid));
         assert!(
             odb.exists(&root_oid),
@@ -1523,7 +1523,7 @@ mod tests {
         index.add_or_replace(entry("dir/x", MODE_REGULAR, blob));
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         let dir_oid = cache_tree_child_oid(&index, b"dir");
-        std::fs::remove_file(odb.object_path(&dir_oid)).unwrap();
+        odb.test_remove_loose_object(&dir_oid);
 
         write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
         assert!(odb.exists(&cache_tree_child_oid(&index, b"dir")));

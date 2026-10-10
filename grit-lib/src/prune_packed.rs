@@ -3,12 +3,13 @@
 //! Removes loose objects that are already stored in a pack file, freeing
 //! disk space without losing any object data.
 
-use crate::error::{Error, Result};
-use crate::objects::{HashAlgo, ObjectId};
-use crate::pack::read_local_pack_indexes;
+use crate::error::Result;
+use crate::odb::store::ObjectStore;
+use crate::odb::Odb;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 /// Options controlling the behaviour of [`prune_packed_objects`].
@@ -22,7 +23,7 @@ pub struct PrunePackedOptions {
 
 /// Remove loose objects that are already stored in a pack file.
 ///
-/// For each loose object under `objects_dir` whose [`ObjectId`] appears in
+/// For each loose object under `objects_dir` whose [`crate::objects::ObjectId`] appears in
 /// at least one local pack index, the file is deleted (or, with
 /// [`PrunePackedOptions::dry_run`], paths are listed in the return value only).
 /// Empty two-char prefix directories are removed afterwards.
@@ -31,96 +32,55 @@ pub struct PrunePackedOptions {
 ///
 /// # Errors
 ///
-/// - [`Error::Io`] for directory or file access failures.
+/// - [`crate::error::Error::Io`] for directory or file access failures.
 pub fn prune_packed_objects(objects_dir: &Path, opts: PrunePackedOptions) -> Result<Vec<PathBuf>> {
-    let packed_ids = collect_packed_ids(objects_dir)?;
+    let odb = Odb::new(objects_dir);
+    let primary = odb.primary()?;
+    let loose = primary.loose_store();
+    let packed = primary.packed_objects();
+
+    let mut packed_ids = HashSet::new();
+    packed.for_each_object(&mut |oid| {
+        packed_ids.insert(*oid);
+        ControlFlow::Continue(())
+    })?;
     if packed_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let hash_bytes = packed_ids
-        .iter()
-        .next()
-        .map(|oid| oid.as_bytes().len())
-        .unwrap_or(HashAlgo::Sha1.len());
-    let loose_name_len = hash_bytes * 2 - 2;
+
+    let mut candidates = Vec::new();
+    let mut prefix_dirs = HashSet::new();
+    loose.for_each_object(&mut |oid| {
+        if !packed_ids.contains(oid) {
+            return ControlFlow::Continue(());
+        }
+        let obj_path = loose.object_path(oid);
+        if let Some(parent) = obj_path.parent() {
+            prefix_dirs.insert(parent.to_path_buf());
+        }
+        candidates.push(obj_path);
+        ControlFlow::Continue(())
+    })?;
 
     let mut removed = Vec::new();
-    let rd = match fs::read_dir(objects_dir) {
-        Ok(rd) => rd,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(Error::Io(err)),
-    };
-
-    for entry in rd {
-        let entry = entry.map_err(Error::Io)?;
-        let dir_name = entry.file_name().to_string_lossy().to_string();
-
-        // Only process two-hex-char prefix subdirectories.
-        if dir_name.len() != 2
-            || !dir_name.chars().all(|c| c.is_ascii_hexdigit())
-            || !entry.path().is_dir()
-        {
-            continue;
-        }
-
-        let sub_rd = match fs::read_dir(entry.path()) {
-            Ok(rd) => rd,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(Error::Io(err)),
-        };
-
-        for file in sub_rd {
-            let file = file.map_err(Error::Io)?;
-            let file_name = file.file_name().to_string_lossy().to_string();
-            // Loose object filenames are (2 * hash_bytes - 2) hex chars after the prefix dir.
-            if file_name.len() != loose_name_len
-                || !file_name.chars().all(|c| c.is_ascii_hexdigit())
-            {
-                continue;
-            }
-
-            let hex = format!("{dir_name}{file_name}");
-            let oid: ObjectId = match hex.parse() {
-                Ok(id) => id,
-                Err(_) => continue,
-            };
-
-            if !packed_ids.contains(&oid) {
-                continue;
-            }
-
-            let obj_path = file.path();
-            if !opts.dry_run {
-                match fs::remove_file(&obj_path) {
-                    Ok(()) => {}
-                    Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                    Err(err) => return Err(Error::Io(err)),
-                }
-            }
-            removed.push(obj_path);
-        }
-
-        // Try to remove the now-possibly-empty prefix directory.
+    for obj_path in candidates {
         if !opts.dry_run {
-            let _ = fs::remove_dir(entry.path());
+            match fs::remove_file(&obj_path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(crate::error::Error::Io(err)),
+            }
+        }
+        removed.push(obj_path);
+    }
+
+    if !opts.dry_run {
+        for dir in prefix_dirs {
+            let _ = fs::remove_dir(dir);
         }
     }
 
     Ok(removed)
-}
-
-/// Build the set of all object IDs present in local pack indexes.
-fn collect_packed_ids(objects_dir: &Path) -> Result<HashSet<ObjectId>> {
-    let indexes = read_local_pack_indexes(objects_dir)?;
-    let mut ids = HashSet::new();
-    for idx in indexes {
-        for entry in idx.iter() {
-            if let Ok(oid) = ObjectId::from_bytes(entry.oid()) {
-                ids.insert(oid);
-            }
-        }
-    }
-    Ok(ids)
 }
 
 #[cfg(test)]

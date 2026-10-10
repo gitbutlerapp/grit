@@ -68,7 +68,7 @@ pub fn prune_loose_unreachable(
 
     // 2. Enumerate loose objects and delete the unreachable, sufficiently-old ones.
     let mut stats = PruneStats::default();
-    for (oid, path) in enumerate_loose_objects(odb)? {
+    for (oid, path) in odb.enumerate_local_loose_objects()? {
         if reachable.contains(&oid) {
             stats.kept += 1;
             continue;
@@ -156,57 +156,6 @@ fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>>
 /// Entries whose names do not form a valid full-length hex OID for the
 /// repository's hash algorithm are skipped (e.g. tmp files, the wrong hash
 /// width), matching Git's loose-object scan.
-fn enumerate_loose_objects(odb: &Odb) -> Result<Vec<(ObjectId, std::path::PathBuf)>> {
-    let objects_dir = odb.objects_dir();
-    let mut out = Vec::new();
-
-    let top = match std::fs::read_dir(objects_dir) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(Error::Io(e)),
-    };
-
-    for top_entry in top {
-        let top_entry = top_entry.map_err(Error::Io)?;
-        let name = top_entry.file_name();
-        let Some(prefix) = name.to_str() else {
-            continue;
-        };
-        // Fan-out directories are exactly two lowercase hex chars.
-        if prefix.len() != 2 || !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-            continue;
-        }
-        if !top_entry.file_type().map_err(Error::Io)?.is_dir() {
-            continue;
-        }
-
-        let sub = match std::fs::read_dir(top_entry.path()) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(Error::Io(e)),
-        };
-        for sub_entry in sub {
-            let sub_entry = sub_entry.map_err(Error::Io)?;
-            let suffix_name = sub_entry.file_name();
-            let Some(suffix) = suffix_name.to_str() else {
-                continue;
-            };
-            if !ObjectId::is_loose_suffix_len(suffix.len())
-                || !suffix.bytes().all(|b| b.is_ascii_hexdigit())
-            {
-                continue;
-            }
-            let hex = format!("{prefix}{suffix}");
-            let Ok(oid) = ObjectId::from_hex(&hex) else {
-                continue;
-            };
-            out.push((oid, sub_entry.path()));
-        }
-    }
-
-    Ok(out)
-}
-
 /// Return the short name of a local remote's default branch (its `HEAD` symref
 /// target), e.g. `main` for a `HEAD` pointing at `refs/heads/main`.
 ///
@@ -248,7 +197,7 @@ pub fn remote_default_branch_local(remote_git_dir: &Path) -> Result<Option<Strin
 }
 
 /// A single ref change in an [`update_refs`] batch transaction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RefTransactionItem {
     /// Full ref name (e.g. `refs/heads/main`).
     pub name: String,
@@ -290,6 +239,20 @@ pub struct RefTransactionItem {
 /// pre-checked, conflict-free case), which is the same guarantee Git's files
 /// backend gives outside of `core.refTransaction` hooks.
 pub fn update_refs(git_dir: &Path, updates: &[RefTransactionItem]) -> Result<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+
+    let mut seen = HashSet::new();
+    for item in updates {
+        if !seen.insert(&item.name) {
+            return Err(Error::Message(format!(
+                "ref transaction rejected: multiple updates for ref '{}' not allowed",
+                item.name
+            )));
+        }
+    }
+
     // Phase 1: verify every CAS expectation against current state. Apply nothing
     // if any check fails.
     for item in updates {
@@ -308,13 +271,128 @@ pub fn update_refs(git_dir: &Path, updates: &[RefTransactionItem]) -> Result<()>
         }
     }
 
-    // Phase 2: apply. All CAS checks passed, so conflicts are not expected.
+    let batch: Vec<crate::refs::RefBatchItem> = updates
+        .iter()
+        .map(|item| crate::refs::RefBatchItem {
+            name: item.name.clone(),
+            new_oid: item.new_oid,
+        })
+        .collect();
+    if let Err(unavail) = crate::refs::verify_ref_transaction_batch(git_dir, &batch) {
+        let refname = match &unavail {
+            crate::refs::RefnameUnavailable::AncestorExists { new_ref, .. }
+            | crate::refs::RefnameUnavailable::DescendantExists { new_ref, .. } => new_ref.clone(),
+            crate::refs::RefnameUnavailable::SameBatch { refname, .. } => refname.clone(),
+        };
+        return Err(Error::Message(format!(
+            "ref transaction rejected: cannot lock ref '{refname}': {}",
+            unavail.lock_message_suffix()
+        )));
+    }
+
+    if crate::reftable::is_reftable_repo(git_dir) {
+        let rt_updates: Vec<crate::reftable::ReftableTransactionUpdate> = updates
+            .iter()
+            .map(|item| crate::reftable::ReftableTransactionUpdate {
+                refname: item.name.clone(),
+                value: Some(match item.new_oid {
+                    Some(oid) => crate::reftable::RefValue::Val1(oid),
+                    None => crate::reftable::RefValue::Deletion,
+                }),
+                log: None,
+                expected_old: item.expected_old,
+            })
+            .collect();
+        return crate::reftable::reftable_write_transaction(git_dir, rt_updates);
+    }
+
+    // Phase 2: apply. Re-check CAS immediately before each write so concurrent
+    // updaters cannot both succeed after the initial pre-check (see TESTING.md
+    // gap note for whole-batch lock-all atomicity).
     for item in updates {
-        match &item.new_oid {
-            Some(oid) => crate::refs::write_ref(git_dir, &item.name, oid)?,
-            None => crate::refs::delete_ref(git_dir, &item.name)?,
+        if let Some(expected) = item.expected_old {
+            let current = crate::refs::resolve_ref(git_dir, &item.name).ok();
+            if current != Some(expected) {
+                return Err(Error::Message(format!(
+                    "ref transaction rejected: '{}' expected {} but found {}",
+                    item.name,
+                    expected,
+                    current
+                        .map(|o| o.to_hex())
+                        .unwrap_or_else(|| "<absent>".to_owned()),
+                )));
+            }
+        }
+        match (&item.new_oid, item.expected_old) {
+            (Some(oid), Some(expected)) => {
+                crate::refs::write_ref_cas(git_dir, &item.name, oid, expected)?
+            }
+            (Some(oid), None) => crate::refs::write_ref(git_dir, &item.name, oid)?,
+            (None, Some(expected)) => crate::refs::delete_ref_cas(git_dir, &item.name, expected)?,
+            (None, None) => crate::refs::delete_ref(git_dir, &item.name)?,
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod update_refs_tests {
+    use super::*;
+    use crate::repo::init_repository;
+    use tempfile::TempDir;
+
+    fn sample_oid(hex: &str) -> ObjectId {
+        hex.parse().expect("oid")
+    }
+
+    #[test]
+    fn rejects_duplicate_ref_names_in_batch() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+        let oid = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
+        let items = vec![
+            RefTransactionItem {
+                name: "refs/heads/dup".to_owned(),
+                new_oid: Some(oid),
+                expected_old: None,
+            },
+            RefTransactionItem {
+                name: "refs/heads/dup".to_owned(),
+                new_oid: Some(oid),
+                expected_old: None,
+            },
+        ];
+        let err = update_refs(&repo.git_dir, &items).expect_err("duplicate");
+        assert!(
+            err.to_string()
+                .contains("multiple updates for ref 'refs/heads/dup'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reftable_cas_rechecked_under_stack_lock() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(tmp.path(), false, "main", None, "reftable").expect("init");
+        let git_dir = repo.git_dir;
+        let c1 = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
+        let c2 = sample_oid("1111111111111111111111111111111111111111");
+        crate::refs::write_ref(&git_dir, "refs/heads/locked-cas", &c1).expect("seed");
+        crate::refs::write_ref(&git_dir, "refs/heads/locked-cas", &c2).expect("advance");
+        let err = update_refs(
+            &git_dir,
+            &[RefTransactionItem {
+                name: "refs/heads/locked-cas".to_owned(),
+                new_oid: Some(c1),
+                expected_old: Some(c1),
+            }],
+        )
+        .expect_err("stale cas");
+        assert!(err.to_string().contains("expected"));
+        assert_eq!(
+            crate::refs::resolve_ref(&git_dir, "refs/heads/locked-cas").unwrap(),
+            c2
+        );
+    }
 }

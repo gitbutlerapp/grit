@@ -98,6 +98,7 @@ pub mod cascade_load_counters {
         });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn record_cache_validated() {
         MEASURING.with(|m| {
             if m.get() {
@@ -367,6 +368,12 @@ impl Parser {
         }
     }
 
+    fn valid_variable_name(name: &str) -> bool {
+        let name = name.trim();
+        name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    }
+
     /// Build the canonical key for a variable name in the current section.
     fn make_key(&self, name: &str) -> String {
         let sec = self.section.to_lowercase();
@@ -481,10 +488,13 @@ impl Parser {
 
         if let Some(eq_pos) = trimmed.find('=') {
             let raw_name = trimmed[..eq_pos].trim();
+            if !Self::valid_variable_name(raw_name) {
+                return None;
+            }
             let raw_value = trimmed[eq_pos + 1..].trim();
             // Strip inline comment (not inside quotes)
             let value = strip_inline_comment(raw_value);
-            let value = unescape_value(&value);
+            let value = parse_config_value(&value);
             let key = self.make_key(raw_name);
             Some((key, Some(value)))
         } else {
@@ -493,7 +503,11 @@ impl Parser {
             if raw_name.split_whitespace().count() > 1 {
                 return None;
             }
-            let key = self.make_key(raw_name.trim());
+            let raw_name = raw_name.trim();
+            if !Self::valid_variable_name(raw_name) {
+                return None;
+            }
+            let key = self.make_key(raw_name);
             Some((key, None))
         }
     }
@@ -605,7 +619,44 @@ fn strip_inline_comment(s: &str) -> String {
     trimmed.to_owned()
 }
 
-/// Unescape a config value: handle `\"`, `\\`, `\n`, `\t`, and strip
+/// Parse a config value after `=` (comments already stripped).
+fn parse_config_value(s: &str) -> String {
+    if s.starts_with('"') {
+        unescape_value(s)
+    } else {
+        unescape_unquoted_value(s)
+    }
+}
+
+/// Unquoted config values: backslash escapes plus literal tab → space (Git t1300).
+fn unescape_unquoted_value(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('b') => result.push('\x08'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else if ch == '\t' {
+            result.push(' ');
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Unescape a quoted config value: handle `\"`, `\\`, `\n`, `\t`, `\b`, and strip
 /// surrounding quotes.
 fn unescape_value(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -617,6 +668,7 @@ fn unescape_value(s: &str) -> String {
                 Some('n') => result.push('\n'),
                 Some('r') => result.push('\r'),
                 Some('t') => result.push('\t'),
+                Some('b') => result.push('\x08'),
                 Some('\\') => result.push('\\'),
                 Some('"') => result.push('"'),
                 Some(other) => {
@@ -653,22 +705,59 @@ fn escape_value(s: &str) -> String {
     // Quote leading `-` so values are not mistaken for config options (Git does this for
     // submodule paths like `-sub` in `.gitmodules`), but leave signed numeric values bare.
     let leading_dash_needs_quoting = s.starts_with('-') && parse_i64(s).is_err();
-    let needs_quoting = leading_dash_needs_quoting
+    let must_quote = leading_dash_needs_quoting
         || s.starts_with(' ')
         || s.starts_with('\t')
         || s.ends_with(' ')
         || s.ends_with('\t')
         || s.contains('"')
-        || s.contains('\\')
-        || s.contains('\n')
-        || s.contains('\r')
         || s.contains('#')
         || s.contains(';');
 
-    if !needs_quoting {
-        return s.to_owned();
+    if must_quote {
+        return escape_value_quoted(s);
     }
 
+    if s.contains('\n') || s.contains('\r') || s.contains('\t') || s.contains('\\') {
+        let mut out = String::with_capacity(s.len() + 4);
+        for ch in s.chars() {
+            match ch {
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                other => out.push(other),
+            }
+        }
+        return out;
+    }
+
+    s.to_owned()
+}
+
+/// Compile a Git config value-pattern (`drop`, `!keep`, or full regex).
+fn compile_config_value_pattern(pat: &str) -> std::result::Result<(regex::Regex, bool), Error> {
+    let (negated, actual_pat) = if let Some(rest) = pat.strip_prefix('!') {
+        (true, rest)
+    } else {
+        (false, pat)
+    };
+    let re = regex::Regex::new(actual_pat)
+        .map_err(|e| Error::Config(format!("invalid value-pattern regex: {e}").into()))?;
+    Ok((re, negated))
+}
+
+fn value_matches_config_pattern(re: &regex::Regex, negated: bool, value: &str) -> bool {
+    let matched = re.is_match(value);
+    if negated {
+        !matched
+    } else {
+        matched
+    }
+}
+
+fn escape_value_quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 4);
     out.push('"');
     for ch in s.chars() {
@@ -687,23 +776,27 @@ fn escape_value(s: &str) -> String {
 
 /// Format a comment suffix for appending to a config value line.
 ///
-/// Git's `--comment` flag normalises the comment:
-/// - If the comment already starts with `#` (possibly preceded by whitespace/tab),
-///   it is used as-is.
-/// - Otherwise, ` # ` is prepended.
-fn format_comment_suffix(comment: Option<&str>) -> String {
+/// Matches Git's `git_config_prepare_comment_string` normalization:
+/// leading space/tab is preserved only when followed by `#`; otherwise ` # ` is inserted.
+///
+/// # Errors
+///
+/// Returns [`ConfigError::MultilineCommentNotAllowed`] when `comment` contains `\n` or `\r`.
+fn format_comment_suffix(comment: Option<&str>) -> Result<String> {
     match comment {
-        None => String::new(),
+        None => Ok(String::new()),
         Some(c) => {
-            if c.starts_with(' ') || c.starts_with('\t') {
-                // Comment has its own leading whitespace separator
-                c.to_owned()
+            if c.contains('\n') || c.contains('\r') {
+                return Err(Error::Config(ConfigError::MultilineCommentNotAllowed));
+            }
+            let leading_blanks = c.find(|ch| ch != ' ' && ch != '\t').unwrap_or(c.len());
+            let after_blanks = &c[leading_blanks..];
+            if leading_blanks > 0 && after_blanks.starts_with('#') {
+                Ok(c.to_owned())
             } else if c.starts_with('#') {
-                // Comment starts with #, just prepend a space separator
-                format!(" {c}")
+                Ok(format!(" {c}"))
             } else {
-                // Plain text comment, prepend " # "
-                format!(" # {c}")
+                Ok(format!(" # {c}"))
             }
         }
     }
@@ -722,6 +815,7 @@ impl ConfigFile {
     ///
     /// Returns [`Error::Config`] on malformed input.
     pub fn parse(path: &Path, content: &str, scope: ConfigScope) -> Result<Self> {
+        let content = content.strip_prefix('\u{feff}').unwrap_or(content);
         let raw_lines: Vec<String> = content
             .lines()
             .map(|l| l.strip_suffix('\r').unwrap_or(l))
@@ -1039,8 +1133,13 @@ impl ConfigFile {
         comment: Option<&str>,
     ) -> Result<()> {
         let canon = canonical_key(key)?;
+        if self.entries.iter().filter(|e| e.key == canon).count() > 1 {
+            return Err(Error::Config(ConfigError::MultipleValues {
+                key: key.to_owned(),
+            }));
+        }
         let raw_var = raw_variable_name(key);
-        let comment_suffix = format_comment_suffix(comment);
+        let comment_suffix = format_comment_suffix(comment)?;
 
         // Find the last entry with this key to replace in-place.
         let existing_idx = self.entries.iter().rposition(|e| e.key == canon);
@@ -1115,19 +1214,11 @@ impl ConfigFile {
         comment: Option<&str>,
     ) -> Result<()> {
         let canon = canonical_key(key)?;
-        let comment_suffix = format_comment_suffix(comment);
+        let comment_suffix = format_comment_suffix(comment)?;
 
-        // Parse optional regex pattern, handling `!` negation
         let (re, negated) = match value_pattern {
             Some(pat) => {
-                let (neg, actual_pat) = if let Some(rest) = pat.strip_prefix('!') {
-                    (true, rest)
-                } else {
-                    (false, pat)
-                };
-                let compiled = regex::Regex::new(actual_pat).map_err(|e| {
-                    Error::Config(format!("invalid value-pattern regex: {e}").into())
-                })?;
+                let (compiled, neg) = compile_config_value_pattern(pat)?;
                 (Some(compiled), neg)
             }
             None => (None, false),
@@ -1144,12 +1235,7 @@ impl ConfigFile {
                 }
                 if let Some(ref re) = re {
                     let v = e.value.as_deref().unwrap_or("");
-                    let matched = re.is_match(v);
-                    if negated {
-                        !matched
-                    } else {
-                        matched
-                    }
+                    value_matches_config_pattern(re, negated, v)
                 } else {
                     true
                 }
@@ -1164,13 +1250,9 @@ impl ConfigFile {
 
         let raw_var = raw_variable_name(key);
 
-        let target_idx = if value_pattern.is_some() {
-            matching_indices[0]
-        } else {
-            *matching_indices
-                .last()
-                .ok_or_else(|| Error::Config("missing config match".to_owned().into()))?
-        };
+        let target_idx = *matching_indices
+            .last()
+            .ok_or_else(|| Error::Config("missing config match".to_owned().into()))?;
         let target_line_idx = self.entries[target_idx].line - 1;
         let raw_line = &self.raw_lines[target_line_idx];
         if is_section_header_with_inline_entry(raw_line) {
@@ -1242,11 +1324,19 @@ impl ConfigFile {
     /// Returns the number of entries removed (0 or 1).
     pub fn unset_last(&mut self, key: &str) -> Result<usize> {
         let canon = canonical_key(key)?;
+        let matches: Vec<_> = self.entries.iter().filter(|e| e.key == canon).collect();
+        if matches.len() > 1 {
+            return Err(Error::Config(ConfigError::MultipleValues {
+                key: key.to_owned(),
+            }));
+        }
         let last_idx = self.entries.iter().rposition(|e| e.key == canon);
 
         if let Some(idx) = last_idx {
             let line_idx = self.entries[idx].line - 1;
             self.remove_entry_line(line_idx);
+            let (section, subsection, _) = split_key(&canon)?;
+            self.remove_empty_section_headers_matching(&section, subsection.as_deref());
             let content = self.raw_lines.join("\n");
             let reparsed = Self::parse(&self.path, &content, self.scope)?;
             self.entries = reparsed.entries;
@@ -1282,6 +1372,9 @@ impl ConfigFile {
         }
 
         if count > 0 {
+            if let Ok((section, subsection, _)) = split_key(&canon) {
+                self.remove_empty_section_headers_matching(&section, subsection.as_deref());
+            }
             let content = self.raw_lines.join("\n");
             let reparsed = Self::parse(&self.path, &content, self.scope)?;
             self.entries = reparsed.entries;
@@ -1306,13 +1399,13 @@ impl ConfigFile {
         preserve_empty_section_header: bool,
     ) -> Result<usize> {
         let canon = canonical_key(key)?;
-        let re =
-            match value_pattern {
-                Some(pat) => Some(regex::Regex::new(pat).map_err(|e| {
-                    Error::Config(format!("invalid value-pattern regex: {e}").into())
-                })?),
-                None => None,
-            };
+        let pattern = match value_pattern {
+            Some(pat) => {
+                let (re, negated) = compile_config_value_pattern(pat)?;
+                Some((re, negated))
+            }
+            None => None,
+        };
 
         let line_indices: Vec<usize> = self
             .entries
@@ -1321,9 +1414,9 @@ impl ConfigFile {
                 if e.key != canon {
                     return false;
                 }
-                if let Some(ref re) = re {
+                if let Some((ref re, negated)) = pattern {
                     let v = e.value.as_deref().unwrap_or("");
-                    re.is_match(v)
+                    value_matches_config_pattern(re, negated, v)
                 } else {
                     true
                 }
@@ -1457,7 +1550,7 @@ impl ConfigFile {
     ) -> Result<()> {
         let canon = canonical_key(key)?;
         let raw_var = raw_variable_name(key);
-        let comment_suffix = format_comment_suffix(comment);
+        let comment_suffix = format_comment_suffix(comment)?;
         let (section, subsection, _var) = split_key(&canon)?;
         let (raw_sec, raw_sub) = raw_section_parts(key);
 
@@ -1563,22 +1656,63 @@ impl ConfigFile {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] on write failure.
+    /// Returns [`Error::Io`] on write failure, or [`ConfigError::ConfigFileLocked`] when
+    /// `{path}.lock` already exists.
     pub fn write(&self) -> Result<()> {
-        let content = self.raw_lines.join("\n");
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            // Write empty file if no content
-            fs::write(&self.path, "")?;
-        } else {
-            // Ensure trailing newline
-            let content = if content.ends_with('\n') {
-                content
-            } else {
-                format!("{content}\n")
-            };
-            fs::write(&self.path, content)?;
+        let lock_path = config_lock_path(&self.path);
+        if lock_path.exists() {
+            return Err(Error::Config(ConfigError::ConfigFileLocked {
+                path: lock_path.display().to_string(),
+            }));
         }
+
+        let content = self.raw_lines.join("\n");
+        let bytes: Vec<u8> = if content.trim().is_empty() {
+            Vec::new()
+        } else if content.ends_with('\n') {
+            content.into_bytes()
+        } else {
+            format!("{content}\n").into_bytes()
+        };
+
+        let mut lock_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    Error::Config(ConfigError::ConfigFileLocked {
+                        path: lock_path.display().to_string(),
+                    })
+                } else {
+                    Error::Io(e)
+                }
+            })?;
+
+        if let Ok(meta) = fs::metadata(&self.path) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = meta.permissions().mode();
+                let _ = fs::set_permissions(&lock_path, fs::Permissions::from_mode(mode));
+            }
+        }
+
+        use std::io::Write as _;
+        lock_file.write_all(&bytes).map_err(|e| {
+            let _ = fs::remove_file(&lock_path);
+            Error::Io(e)
+        })?;
+        lock_file.sync_all().map_err(|e| {
+            let _ = fs::remove_file(&lock_path);
+            Error::Io(e)
+        })?;
+        drop(lock_file);
+
+        fs::rename(&lock_path, &self.path).map_err(|e| {
+            let _ = fs::remove_file(&lock_path);
+            Error::Io(e)
+        })?;
         Ok(())
     }
 
@@ -1587,11 +1721,15 @@ impl ConfigFile {
     fn find_or_create_section(&mut self, section: &str, subsection: Option<&str>) -> usize {
         let sec_lower = section.to_lowercase();
         let mut parser = Parser::new();
+        let mut last_match = None;
 
         for (idx, line) in self.raw_lines.iter().enumerate() {
             if parser.try_parse_section(line) && section_matches(&parser, &sec_lower, subsection) {
-                return idx;
+                last_match = Some(idx);
             }
+        }
+        if let Some(idx) = last_match {
+            return idx;
         }
 
         // Create new section at end of file
@@ -1617,11 +1755,15 @@ impl ConfigFile {
     ) -> usize {
         let sec_lower = section.to_lowercase();
         let mut parser = Parser::new();
+        let mut last_match = None;
 
         for (idx, line) in self.raw_lines.iter().enumerate() {
             if parser.try_parse_section(line) && section_matches(&parser, &sec_lower, subsection) {
-                return idx;
+                last_match = Some(idx);
             }
+        }
+        if let Some(idx) = last_match {
+            return idx;
         }
 
         // Create new section at end of file, using original case
@@ -2376,12 +2518,13 @@ impl ConfigSet {
         included_files: &mut Vec<PathBuf>,
     ) -> Result<()> {
         // Mirror Git behavior and stop runaway include recursion.
-        // t0017 expects the diagnostic to contain this exact phrase.
         const MAX_INCLUDE_DEPTH: usize = 10;
         if depth > MAX_INCLUDE_DEPTH {
-            return Err(Error::Config(
-                "exceeded maximum include depth".to_owned().into(),
-            ));
+            return Err(ConfigError::IncludeDepthExceeded {
+                depth,
+                limit: MAX_INCLUDE_DEPTH,
+            }
+            .into());
         }
         if !process_includes {
             set.merge(file);
@@ -3856,9 +3999,11 @@ fn validate_hasconfig_remote_url_include(
 ) -> Result<()> {
     const MAX_INCLUDE_DEPTH: usize = 10;
     if depth > MAX_INCLUDE_DEPTH {
-        return Err(Error::Config(
-            "exceeded maximum include depth".to_owned().into(),
-        ));
+        return Err(ConfigError::IncludeDepthExceeded {
+            depth,
+            limit: MAX_INCLUDE_DEPTH,
+        }
+        .into());
     }
     if file.entries.iter().any(is_remote_url_entry) {
         return Err(ConfigError::RemoteUrlInHasconfigInclude.into());
@@ -3962,6 +4107,16 @@ fn section_matches(parser: &Parser, section_lower: &str, subsection: Option<&str
     };
     parser.subsection.is_none()
         && parser.section.to_lowercase() == format!("{section_lower}.{}", subsection.to_lowercase())
+}
+
+/// Path to the lock file Git uses when updating a config file (`config.lock`).
+#[must_use]
+pub fn config_lock_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("config");
+    path.with_file_name(format!("{file_name}.lock"))
 }
 
 fn validate_section_name(section: &str, subsection: Option<&str>) -> Result<()> {

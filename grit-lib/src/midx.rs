@@ -280,6 +280,7 @@ pub(crate) mod midx_cache {
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
     use std::collections::HashMap;
     use std::fs;
+    use std::ops::ControlFlow;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
@@ -492,6 +493,101 @@ pub(crate) mod midx_cache {
         fn test_find_position(&self, oid: &ObjectId) -> Option<usize> {
             self.find_position(oid)
         }
+
+        fn for_each_listed_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> Result<()> {
+            for i in 0..self.num_objects {
+                let oid = ObjectId::from_bytes(self.oid_at(i))
+                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                if f(&oid).is_break() {
+                    break;
+                }
+            }
+            Ok(())
+        }
+
+        fn lookup_prefix(
+            &self,
+            prefix: &str,
+            limit: usize,
+            count: &mut usize,
+            out: &mut Vec<ObjectId>,
+            seen: &mut std::collections::HashSet<ObjectId>,
+        ) -> Result<()> {
+            if prefix.is_empty() {
+                return self.for_each_listed_object(&mut |oid| {
+                    if !seen.insert(*oid) {
+                        return ControlFlow::Continue(());
+                    }
+                    out.push(*oid);
+                    *count += 1;
+                    if limit != 0 && *count >= limit {
+                        return ControlFlow::Break(());
+                    }
+                    ControlFlow::Continue(())
+                });
+            }
+            let hash_bytes = self.hash_len;
+            let hex_len = hash_bytes * 2;
+            if prefix.len() > hex_len {
+                return Err(Error::InvalidObjectId(prefix.to_owned()));
+            }
+            let pad = hex_len - prefix.len();
+            let min_hex = format!("{prefix}{:0>pad$}", "", pad = pad);
+            let max_hex = format!("{prefix}{}", "f".repeat(pad));
+            let min = ObjectId::from_hex(&min_hex)?;
+            let max = ObjectId::from_hex(&max_hex)?;
+            let min_bytes = min.as_bytes();
+            let max_bytes = max.as_bytes();
+            let lo = self.lower_bound_oid(min_bytes);
+            let hi = self.upper_bound_oid(max_bytes);
+            for pos in lo..hi {
+                let oid = ObjectId::from_bytes(self.oid_at(pos))
+                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
+                if !oid.to_hex().starts_with(prefix) {
+                    continue;
+                }
+                if !seen.insert(oid) {
+                    continue;
+                }
+                out.push(oid);
+                *count += 1;
+                if limit != 0 && *count >= limit {
+                    break;
+                }
+            }
+            Ok(())
+        }
+
+        fn lower_bound_oid(&self, needle: &[u8]) -> usize {
+            let mut lo = 0usize;
+            let mut hi = self.num_objects;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if self.oid_at(mid) < needle {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        }
+
+        fn upper_bound_oid(&self, needle: &[u8]) -> usize {
+            let mut lo = 0usize;
+            let mut hi = self.num_objects;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if self.oid_at(mid) <= needle {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        }
     }
 
     #[cfg(test)]
@@ -586,6 +682,62 @@ pub(crate) mod midx_cache {
                 layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
             }
         }
+
+        /// Pack index basenames referenced by any layer in this chain.
+        pub(crate) fn covered_pack_basenames(&self) -> std::collections::HashSet<String> {
+            let mut out = std::collections::HashSet::new();
+            for names in &self.pack_names_by_layer {
+                for name in names {
+                    out.insert(name.clone());
+                }
+            }
+            out
+        }
+
+        /// Invoke `f` for each OID listed in the chain (newest layer wins deduplication).
+        pub(crate) fn for_each_listed_object(
+            &self,
+            f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+        ) -> Result<()> {
+            use std::collections::HashSet;
+            let mut seen = HashSet::new();
+            for layer in &self.layers {
+                let mut stop = false;
+                layer.for_each_listed_object(&mut |oid| {
+                    if !seen.insert(*oid) {
+                        return ControlFlow::Continue(());
+                    }
+                    if f(oid).is_break() {
+                        stop = true;
+                        return ControlFlow::Break(());
+                    }
+                    ControlFlow::Continue(())
+                })?;
+                if stop {
+                    break;
+                }
+            }
+            Ok(())
+        }
+
+        /// Collect OIDs whose hex form starts with `prefix` (case-insensitive), up to `limit`.
+        pub(crate) fn lookup_prefix(
+            &self,
+            prefix: &str,
+            limit: usize,
+            out: &mut Vec<ObjectId>,
+        ) -> Result<()> {
+            use std::collections::HashSet;
+            let mut seen = HashSet::new();
+            let mut count = 0usize;
+            for layer in &self.layers {
+                layer.lookup_prefix(prefix, limit, &mut count, out, &mut seen)?;
+                if limit != 0 && count >= limit {
+                    break;
+                }
+            }
+            Ok(())
+        }
     }
 
     fn read_be_u32(data: &[u8], off: usize) -> Result<u32> {
@@ -650,6 +802,7 @@ pub(crate) mod midx_cache {
     #[derive(Default)]
     pub(crate) struct State {
         chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
+        strict_chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
         hot_chain: Option<(PathBuf, Arc<PreparedMidxChain>)>,
     }
 
@@ -657,28 +810,59 @@ pub(crate) mod midx_cache {
         objects_dir: &Path,
         diagnostics: &dyn DiagnosticSink,
     ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        build_chain_impl(objects_dir, diagnostics, false)
+    }
+
+    fn build_chain_strict(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        build_chain_impl(objects_dir, diagnostics, true)
+    }
+
+    fn build_chain_impl(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+        require_every_layer: bool,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
         let pack_dir = objects_dir.join("pack");
         let paths = midx_chain_layer_paths_newest_first(&pack_dir);
         if paths.is_empty() {
             return Ok(None);
         }
+        let path_count = paths.len();
         let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
-        let mut layers = Vec::with_capacity(paths.len());
-        let mut pack_names_by_layer = Vec::with_capacity(paths.len());
+        let mut layers = Vec::with_capacity(path_count);
+        let mut pack_names_by_layer = Vec::with_capacity(path_count);
         for path in paths {
             let bytes: Arc<[u8]> = match fs::read(&path) {
                 Ok(b) => Arc::from(b),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    if require_every_layer {
+                        return Ok(None);
+                    }
+                    continue;
+                }
                 Err(err) => return Err(Error::Io(err)),
             };
-            let view = match midx_load_for_read(&bytes, hash_version, diagnostics)? {
-                MidxLoadResult::Ok(v) => v,
-                MidxLoadResult::Skip => continue,
+            let view = match midx_load_for_read(&bytes, hash_version, diagnostics) {
+                Ok(MidxLoadResult::Ok(v)) => v,
+                Ok(MidxLoadResult::Skip) => {
+                    if require_every_layer {
+                        return Ok(None);
+                    }
+                    continue;
+                }
+                Err(Error::Midx(_)) if require_every_layer => return Ok(None),
+                Err(err) => return Err(err),
             };
             pack_names_by_layer.push(view.pack_names.clone());
             layers.push(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
         }
         if layers.is_empty() {
+            return Ok(None);
+        }
+        if require_every_layer && layers.len() != path_count {
             return Ok(None);
         }
         Ok(Some(Arc::new(PreparedMidxChain {
@@ -724,6 +908,36 @@ pub(crate) mod midx_cache {
         Ok(Some(stored))
     }
 
+    /// Like [`prepared_chain`], but every referenced chain layer must load cleanly.
+    pub fn prepared_chain_strict(
+        objects_dir: &Path,
+        diagnostics: &dyn DiagnosticSink,
+    ) -> Result<Option<Arc<PreparedMidxChain>>> {
+        let pack_dir = objects_dir.join("pack");
+        if let Some(chain) = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            state.strict_chains.get(&pack_dir).map(Arc::clone)
+        }) {
+            return Ok(Some(chain));
+        }
+        let built = match build_chain_strict(objects_dir, diagnostics) {
+            Ok(v) => v,
+            Err(Error::Midx(_)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let Some(chain) = built else {
+            return Ok(None);
+        };
+        let stored = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            Arc::clone(
+                state
+                    .strict_chains
+                    .entry(pack_dir)
+                    .or_insert_with(|| Arc::clone(&chain)),
+            )
+        });
+        Ok(Some(stored))
+    }
+
     pub fn evict_pack_dir(pack_dir: &Path) {
         crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
             evict_pack_dir_in_state(state, pack_dir);
@@ -742,6 +956,9 @@ pub(crate) mod midx_cache {
             state.hot_chain = None;
         }
         state.chains.retain(|path, _| !path.starts_with(pack_dir));
+        state
+            .strict_chains
+            .retain(|path, _| !path.starts_with(pack_dir));
     }
 }
 
@@ -750,6 +967,13 @@ pub(crate) use midx_cache::PreparedMidxChain;
 
 pub(crate) fn prepared_midx_chain(objects_dir: &Path) -> Result<Option<Arc<PreparedMidxChain>>> {
     midx_cache::prepared_chain(objects_dir, &NullDiagnostics)
+}
+
+/// Prepared chain requiring every on-disk layer file to parse (for [`crate::odb::store::MidxObjects`]).
+pub(crate) fn prepared_midx_chain_strict(
+    objects_dir: &Path,
+) -> Result<Option<Arc<PreparedMidxChain>>> {
+    midx_cache::prepared_chain_strict(objects_dir, &NullDiagnostics)
 }
 
 /// MIDX layer files to search on object reads, newest chain layer first.

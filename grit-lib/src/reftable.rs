@@ -184,6 +184,12 @@ pub struct WriteOptions {
     /// Object-id width in bytes: 20 for SHA-1 (reftable version 1), 32 for
     /// SHA-256 (reftable version 2). Defaults to SHA-1.
     pub hash_size: usize,
+    /// Geometric factor for stack auto-compaction (`reftable.geometricFactor`).
+    /// Defaults to 2 when unset.
+    pub auto_compaction_factor: u8,
+    /// Whether to run automatic stack compaction after writes (Git test knob via
+    /// [`Environment::reftable_autocompaction_enabled`](crate::environment::Environment::reftable_autocompaction_enabled)).
+    pub autocompaction_enabled: bool,
 }
 
 impl Default for WriteOptions {
@@ -195,6 +201,8 @@ impl Default for WriteOptions {
             skip_index_objects: false,
             unpadded: false,
             hash_size: HASH_SIZE,
+            auto_compaction_factor: 2,
+            autocompaction_enabled: true,
         }
     }
 }
@@ -213,6 +221,9 @@ pub struct ReftableTransactionUpdate {
     pub value: Option<RefValue>,
     /// Optional reflog entry to record in the same table and update index.
     pub log: Option<LogRecord>,
+    /// When set, the ref's current oid must match before the update is applied (checked
+    /// while the stack lock is held).
+    pub expected_old: Option<ObjectId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -562,10 +573,10 @@ impl BlockWriter {
         self.buf[self.header_off + 3] = (block_len & 0xff) as u8;
 
         if self.typ == BLOCK_TYPE_LOG {
-            use flate2::write::DeflateEncoder;
+            use flate2::write::ZlibEncoder;
             use flate2::Compression;
             let skip = 4 + self.header_off;
-            let mut enc = DeflateEncoder::new(Vec::new(), Compression::new(9));
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(9));
             enc.write_all(&self.buf[skip..])
                 .map_err(|e| Error::Zlib(e.to_string()))?;
             let compressed = enc.finish().map_err(|e| Error::Zlib(e.to_string()))?;
@@ -1211,10 +1222,8 @@ impl ReftableReader {
                 break;
             }
 
-            // Read restart count (last 2 bytes before padding)
-            let rc = read_u16(&self.data, records_end - 2);
-            // Restart table is rc * 3 bytes before the restart_count
-            let restart_table_start = records_end - 2 - (rc * 3);
+            let restart_table_start =
+                restart_table_start_for_block(&self.data, records_end, block_data_start)?;
 
             // Read records from block_data_start to restart_table_start
             let mut rpos = block_data_start;
@@ -1251,9 +1260,111 @@ impl ReftableReader {
 
     /// Look up a single ref by name.
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
-        // Simple: scan all refs. For large files the index would speed this up.
+        if self.ref_index_position > 0 {
+            if let Some(rec) = self.lookup_ref_via_index(name)? {
+                return Ok(Some(rec));
+            }
+        }
         let refs = self.read_refs()?;
         Ok(refs.into_iter().find(|r| r.name == name))
+    }
+
+    /// Resolve a ref name to a record using ref index blocks when present.
+    fn lookup_ref_via_index(&self, name: &str) -> Result<Option<RefRecord>> {
+        let Some(block_off) = self.locate_ref_block_via_index(name.as_bytes())? else {
+            return Ok(None);
+        };
+        self.find_ref_in_block(block_off, name)
+    }
+
+    fn locate_ref_block_via_index(&self, name: &[u8]) -> Result<Option<usize>> {
+        let mut pos = self.ref_index_position as usize;
+        if pos == 0 {
+            return Ok(None);
+        }
+        for _ in 0..64 {
+            if pos >= self.data.len() {
+                return Ok(None);
+            }
+            match self.data[pos] {
+                BLOCK_TYPE_REF => return Ok(Some(pos)),
+                BLOCK_TYPE_INDEX => {
+                    let Some(offset) = self.index_block_seek_offset(pos, name)? else {
+                        return Ok(None);
+                    };
+                    let next = offset as usize;
+                    if next == pos {
+                        return Ok(None);
+                    }
+                    pos = next;
+                }
+                _ => return Ok(None),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Pick the index entry for `name`: the first record whose `last_key` is >=
+    /// `name`, or the final entry when every indexed `last_key` is smaller.
+    fn index_block_seek_offset(&self, block_pos: usize, name: &[u8]) -> Result<Option<u64>> {
+        let (records_start, records_end) = self.block_record_range(block_pos)?;
+        let mut rpos = records_start;
+        let mut prev_key = Vec::<u8>::new();
+        let mut last: Option<u64> = None;
+        while rpos < records_end {
+            let (key, offset, new_pos) = decode_index_record(&self.data, rpos, &prev_key)?;
+            prev_key = key;
+            if prev_key.as_slice() >= name {
+                return Ok(Some(offset));
+            }
+            last = Some(offset);
+            rpos = new_pos;
+        }
+        Ok(last)
+    }
+
+    fn find_ref_in_block(&self, block_pos: usize, name: &str) -> Result<Option<RefRecord>> {
+        let (records_start, records_end) = self.block_record_range(block_pos)?;
+        let mut rpos = records_start;
+        let mut prev_name = Vec::<u8>::new();
+        while rpos < records_end {
+            let (rec, new_pos) = decode_ref_record(
+                &self.data,
+                rpos,
+                &prev_name,
+                self.min_update_index,
+                self.hash_size(),
+            )?;
+            prev_name = rec.name.as_bytes().to_vec();
+            match rec.name.as_str().cmp(name) {
+                std::cmp::Ordering::Equal => return Ok(Some(rec)),
+                std::cmp::Ordering::Greater => return Ok(None),
+                std::cmp::Ordering::Less => {}
+            }
+            rpos = new_pos;
+        }
+        Ok(None)
+    }
+
+    fn block_record_range(&self, block_pos: usize) -> Result<(usize, usize)> {
+        if block_pos + 4 > self.data.len() {
+            return Err(Error::InvalidRef("reftable: truncated block header".into()));
+        }
+        let block_len = read_u24(&self.data, block_pos + 1);
+        let header_len = self.header_len();
+        let is_first = block_pos == header_len;
+        let records_end = if is_first {
+            block_len
+        } else {
+            block_pos + block_len
+        };
+        if records_end > self.data.len() || records_end < 2 {
+            return Err(Error::InvalidRef("reftable: invalid block length".into()));
+        }
+        let records_data_start = block_pos + 4;
+        let restart_table_start =
+            restart_table_start_for_block(&self.data, records_end, records_data_start)?;
+        Ok((records_data_start, restart_table_start))
     }
 
     /// Read all log records from the table.
@@ -1305,25 +1416,16 @@ impl ReftableReader {
             let header_prefix = if is_first { self.header_len() } else { 0 };
             let inflated_size = block_len.saturating_sub(4 + header_prefix);
 
-            // Decompress
-            use flate2::read::DeflateDecoder;
             let remaining = &self.data[compressed_start..file_end];
-            let mut decoder = DeflateDecoder::new(remaining);
-            let mut inflated = vec![0u8; inflated_size];
-            decoder
-                .read_exact(&mut inflated)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-
-            // How many compressed bytes were consumed?
-            let consumed = decoder.total_in() as usize;
+            let (inflated, consumed) = decompress_log_payload(remaining, inflated_size)?;
 
             // Parse log records from inflated data
             // Read restart_count from end
             if inflated.len() < 2 {
                 break;
             }
-            let rc = read_u16(&inflated, inflated.len() - 2);
-            let restart_table_start = inflated.len() - 2 - (rc * 3);
+            let records_end = inflated.len();
+            let restart_table_start = restart_table_start_for_block(&inflated, records_end, 0)?;
 
             let mut rpos = 0usize;
             let mut prev_key = Vec::<u8>::new();
@@ -1361,11 +1463,40 @@ impl ReftableReader {
     pub fn max_update_index(&self) -> u64 {
         self.max_update_index
     }
+
+    /// Byte offset of the top-level ref index section, or 0 if none.
+    pub fn ref_index_offset(&self) -> u64 {
+        self.ref_index_position
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Record decoding helpers
 // ---------------------------------------------------------------------------
+
+fn decode_index_record(data: &[u8], pos: usize, prev_key: &[u8]) -> Result<(Vec<u8>, u64, usize)> {
+    let (prefix_len, p) = get_varint(data, pos)?;
+    let (suffix_and_type, mut p) = get_varint(data, p)?;
+    let suffix_len = (suffix_and_type >> 3) as usize;
+
+    let mut key = Vec::with_capacity(prefix_len as usize + suffix_len);
+    if prefix_len > 0 {
+        if (prefix_len as usize) > prev_key.len() {
+            return Err(Error::InvalidRef(
+                "reftable: index prefix_len exceeds prev key".into(),
+            ));
+        }
+        key.extend_from_slice(&prev_key[..prefix_len as usize]);
+    }
+    if p + suffix_len > data.len() {
+        return Err(Error::InvalidRef("reftable: index suffix overflows".into()));
+    }
+    key.extend_from_slice(&data[p..p + suffix_len]);
+    p += suffix_len;
+
+    let (offset, p) = get_varint(data, p)?;
+    Ok((key, offset, p))
+}
 
 fn decode_ref_record(
     data: &[u8],
@@ -1774,6 +1905,15 @@ impl ReftableStack {
         Ok(merged.into_values().collect())
     }
 
+    /// Resolve the current oid for `name`, or `None` when the ref is absent or deleted.
+    pub fn lookup_ref_oid(&self, name: &str) -> Result<Option<ObjectId>> {
+        Ok(self.lookup_ref(name)?.and_then(|rec| match rec.value {
+            RefValue::Val1(oid) => Some(oid),
+            RefValue::Val2(oid, _) => Some(oid),
+            RefValue::Deletion | RefValue::Symref(_) => None,
+        }))
+    }
+
     /// Look up a single ref across all tables (most recent wins).
     pub fn lookup_ref(&self, name: &str) -> Result<Option<RefRecord>> {
         // Search tables in reverse (newest first)
@@ -1930,7 +2070,12 @@ impl ReftableStack {
     ///
     /// Writes the table bytes to a new file, then atomically updates
     /// `tables.list`.
-    pub fn add_table(&mut self, data: &[u8], update_index: u64) -> Result<String> {
+    pub fn add_table(
+        &mut self,
+        data: &[u8],
+        update_index: u64,
+        opts: &WriteOptions,
+    ) -> Result<String> {
         let table_has_deletion = ReftableReader::new(data.to_vec())
             .and_then(|reader| reader.read_refs())
             .map(|records| {
@@ -1969,13 +2114,8 @@ impl ReftableStack {
         // ref/log updates and should settle back to one table; a following tag write remains as a
         // second table until explicit `pack-refs`.
         if table_has_deletion && self.table_names.len() > 2 {
-            self.compact_prefix_preserving_newest()?;
-        } else if self.table_names.len() > 3
-            && crate::environment::Environment::empty()
-                .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        {
+            self.compact_prefix_preserving_newest(opts)?;
+        } else if self.table_names.len() > 3 && opts.autocompaction_enabled {
             if self
                 .table_names
                 .iter()
@@ -1990,12 +2130,8 @@ impl ReftableStack {
         Ok(filename)
     }
 
-    fn compact_prefix_preserving_newest(&mut self) -> Result<()> {
-        if crate::environment::Environment::empty()
-            .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-            .map(|value| value == "false")
-            .unwrap_or(false)
-        {
+    fn compact_prefix_preserving_newest(&mut self, opts: &WriteOptions) -> Result<()> {
+        if !opts.autocompaction_enabled {
             return Ok(());
         }
         let guard = self.acquire_tables_list_lock()?;
@@ -2156,7 +2292,7 @@ impl ReftableStack {
 
         // Auto-compaction runs after releasing the append lock; it re-acquires
         // the lock internally and works from a fresh view of the stack.
-        self.maybe_auto_compact()?;
+        self.maybe_auto_compact(opts)?;
         Ok(())
     }
 
@@ -2179,6 +2315,21 @@ impl ReftableStack {
         {
             let guard = self.acquire_tables_list_lock()?;
             self.reload_table_names();
+            for update in &updates {
+                if let Some(expected) = update.expected_old {
+                    let current = self.lookup_ref_oid(&update.refname)?;
+                    if current != Some(expected) {
+                        return Err(Error::Message(format!(
+                            "ref transaction rejected: '{}' expected {} but found {}",
+                            update.refname,
+                            expected.to_hex(),
+                            current
+                                .map(|o| o.to_hex())
+                                .unwrap_or_else(|| "<absent>".to_owned()),
+                        )));
+                    }
+                }
+            }
             let update_index = self.max_update_index_unlocked()? + 1;
             let mut writer = ReftableWriter::new(opts.clone(), update_index, update_index);
 
@@ -2206,7 +2357,7 @@ impl ReftableStack {
             self.write_tables_list_locked(&guard)?;
         }
 
-        self.maybe_auto_compact()?;
+        self.maybe_auto_compact(opts)?;
         Ok(())
     }
 
@@ -2230,18 +2381,13 @@ impl ReftableStack {
 
     /// Run the auto-compaction policy (matching `add_table`) without appending a
     /// new table. Re-reads the stack under the lock to avoid racing.
-    fn maybe_auto_compact(&mut self) -> Result<()> {
+    fn maybe_auto_compact(&mut self, opts: &WriteOptions) -> Result<()> {
         self.reload_table_names();
         let has_locked = self
             .table_names
             .iter()
             .any(|name| self.table_is_locked(name));
-        if self.table_names.len() > 3
-            && crate::environment::Environment::empty()
-                .var("GIT_TEST_REFTABLE_AUTOCOMPACTION")
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        {
+        if self.table_names.len() > 3 && opts.autocompaction_enabled {
             if has_locked {
                 self.compact_unlocked_suffix()?;
             } else {
@@ -2526,7 +2672,7 @@ fn reftable_storage_location(git_dir: &Path, refname: &str) -> (PathBuf, String)
 }
 
 fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Result<ObjectId> {
-    if depth > 10 {
+    if depth >= crate::refs::SYMREF_MAXDEPTH {
         return Err(Error::InvalidRef(format!(
             "reftable: symlink too deep: {refname}"
         )));
@@ -2566,13 +2712,27 @@ fn reftable_resolve_ref_depth(git_dir: &Path, refname: &str, depth: usize) -> Re
     }
 }
 
-/// Write a ref to a reftable repo.
+/// Write a ref to a reftable repo using config-derived [`WriteOptions`].
 pub fn reftable_write_ref(
     git_dir: &Path,
     refname: &str,
     oid: &ObjectId,
     log_identity: Option<&str>,
     log_message: Option<&str>,
+) -> Result<()> {
+    let (store_git_dir, _) = reftable_storage_location(git_dir, refname);
+    let opts = read_write_options(&store_git_dir);
+    reftable_write_ref_with_write_options(git_dir, refname, oid, log_identity, log_message, &opts)
+}
+
+/// Write a ref to a reftable repo with explicit write options (including auto-compaction).
+pub fn reftable_write_ref_with_write_options(
+    git_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+    log_identity: Option<&str>,
+    log_message: Option<&str>,
+    opts: &WriteOptions,
 ) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
@@ -2608,8 +2768,7 @@ pub fn reftable_write_ref(
     let write_log = log.is_some() || should_log_ref_updates(&store_git_dir);
     let log = if write_log { log } else { None };
 
-    let opts = read_write_options(&store_git_dir);
-    stack.write_ref(&storage_refname, RefValue::Val1(*oid), log, &opts)
+    stack.write_ref(&storage_refname, RefValue::Val1(*oid), log, opts)
 }
 
 /// Build a reflog record for a reftable transaction (update index filled by the writer).
@@ -2716,7 +2875,7 @@ mod reftable_tx_fail_inject {
     }
 }
 
-/// When enabled (debug builds only), the next [`ReftableStack::write_transaction`] fails before writing.
+/// When enabled (tests only), the next [`ReftableStack::write_transaction`] fails before writing.
 #[cfg(test)]
 pub fn set_test_inject_reftable_transaction_fail(enabled: bool) {
     reftable_tx_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
@@ -2743,6 +2902,9 @@ fn test_inject_reftable_transaction_fail() -> Result<()> {
 pub fn reftable_delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let (store_git_dir, storage_refname) = reftable_storage_location(git_dir, refname);
     let mut stack = ReftableStack::open(&store_git_dir)?;
+    if stack.lookup_ref(&storage_refname)?.is_none() {
+        return Err(Error::InvalidRef(format!("ref not found: {refname}")));
+    }
     let opts = read_write_options(&store_git_dir);
     stack.write_ref(&storage_refname, RefValue::Deletion, None, &opts)
 }
@@ -2950,7 +3112,7 @@ pub fn reftable_append_reflog(
     // hash width so every OID in a sha256 reftable is 32 bytes (a mixed-width
     // log record desynchronizes the block).
     let hash_size = opts.hash_size;
-    let mut writer = ReftableWriter::new(opts, update_index, update_index);
+    let mut writer = ReftableWriter::new(opts.clone(), update_index, update_index);
     writer.add_log(LogRecord {
         refname: storage_refname.clone(),
         update_index,
@@ -2964,7 +3126,7 @@ pub fn reftable_append_reflog(
     })?;
 
     let data = writer.finish()?;
-    stack.add_table(&data, update_index)?;
+    stack.add_table(&data, update_index, &opts)?;
     if storage_refname.starts_with("refs/heads/branch-") {
         stack.reload_table_names();
         let has_locked = stack
@@ -3054,18 +3216,32 @@ pub fn reftable_delete_reflog(git_dir: &Path, refname: &str) -> Result<()> {
 // Write options helpers
 // ---------------------------------------------------------------------------
 
-/// Read reftable write options from the repository config.
+/// Apply `reftable.geometricFactor` when the value is in Git's supported range (2..=255).
+fn apply_geometric_factor_from_config(opts: &mut WriteOptions, raw: &str) {
+    if let Ok(v) = raw.trim().parse::<u64>() {
+        if (2..=255).contains(&v) {
+            opts.auto_compaction_factor = v as u8;
+        }
+    }
+}
+
+/// Read reftable write options from the repository config (auto-compaction enabled).
 pub fn read_write_options(git_dir: &Path) -> WriteOptions {
+    read_write_options_with_environment(git_dir, &crate::environment::Environment::empty())
+}
+
+/// Read reftable write options from config and an explicit discovery environment.
+pub fn read_write_options_with_environment(
+    git_dir: &Path,
+    env: &crate::environment::Environment,
+) -> WriteOptions {
     let mut opts = WriteOptions {
         hash_size: reftable_hash_size_for_git_dir(git_dir),
+        autocompaction_enabled: env.reftable_autocompaction_enabled(),
         ..Default::default()
     };
 
-    if let Ok(config) = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    ) {
+    if let Ok(config) = ConfigSet::load(env, Some(git_dir), true) {
         if let Some(value) = config.get("reftable.blockSize") {
             if let Ok(v) = value.parse::<u32>() {
                 opts.block_size = v;
@@ -3081,6 +3257,9 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
             if value == "false" || value == "0" || value == "no" || value == "off" {
                 opts.skip_index_objects = true;
             }
+        }
+        if let Some(value) = config.get("reftable.geometricFactor") {
+            apply_geometric_factor_from_config(&mut opts, &value);
         }
         if let Some(value) = config.get("core.logAllRefUpdates") {
             let value = value.to_lowercase();
@@ -3119,6 +3298,15 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
                             if let Ok(v) = value.parse::<usize>() {
                                 opts.restart_interval = v;
                             }
+                        }
+                        "indexobjects" => {
+                            let value = value.to_lowercase();
+                            if value == "false" || value == "0" || value == "no" || value == "off" {
+                                opts.skip_index_objects = true;
+                            }
+                        }
+                        "geometricfactor" => {
+                            apply_geometric_factor_from_config(&mut opts, value);
                         }
                         _ => {}
                     }
@@ -3232,11 +3420,8 @@ pub fn dump_reftable_blocks(path: &Path) -> Result<String> {
             // data after the 4-byte header is zlib-compressed.
             let skip = 4 + header_off;
             let comp = &data[block_off as usize + skip..];
-            let mut dec = flate2::read::DeflateDecoder::new(comp);
-            let mut inflated = vec![0u8; blk_len.saturating_sub(skip)];
-            // Read exactly the uncompressed payload.
-            read_exact_inflate(&mut dec, &mut inflated)?;
-            let consumed = dec.total_in() as usize;
+            let inflated_size = blk_len.saturating_sub(skip);
+            let (inflated, consumed) = decompress_log_payload(comp, inflated_size)?;
             // restart trailer lives at the end of the (header + inflated) block.
             let mut full = vec![0u8; skip];
             full.extend_from_slice(&inflated);
@@ -3300,16 +3485,25 @@ fn be16(data: &[u8], off: usize) -> u16 {
     ((data[off] as u16) << 8) | (data[off + 1] as u16)
 }
 
-fn read_exact_inflate<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<()> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        match r.read(&mut buf[filled..]) {
-            Ok(0) => break,
-            Ok(n) => filled += n,
-            Err(e) => return Err(Error::Zlib(e.to_string())),
-        }
+/// Decompress a log block payload (zlib-wrapped, matching Git, or raw deflate for legacy grit tables).
+fn decompress_log_payload(compressed: &[u8], inflated_size: usize) -> Result<(Vec<u8>, usize)> {
+    use flate2::read::{DeflateDecoder, ZlibDecoder};
+    use std::io::Read;
+
+    let mut inflated = vec![0u8; inflated_size];
+    if compressed.len() >= 2 && compressed[0] == 0x78 {
+        let mut decoder = ZlibDecoder::new(compressed);
+        decoder
+            .read_exact(&mut inflated)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        Ok((inflated, decoder.total_in() as usize))
+    } else {
+        let mut decoder = DeflateDecoder::new(compressed);
+        decoder
+            .read_exact(&mut inflated)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        Ok((inflated, decoder.total_in() as usize))
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -3345,6 +3539,43 @@ fn read_u24(data: &[u8], pos: usize) -> usize {
 /// Read a big-endian u16 from 2 bytes at `pos`.
 fn read_u16(data: &[u8], pos: usize) -> usize {
     ((data[pos] as usize) << 8) | (data[pos + 1] as usize)
+}
+
+/// Start of the restart offset table within a block's record area.
+///
+/// Validates restart count and trailer size so corrupt tables cannot trigger
+/// arithmetic overflow.
+fn restart_table_start_for_block(
+    data: &[u8],
+    records_end: usize,
+    records_data_start: usize,
+) -> Result<usize> {
+    if records_end < 2 || records_end > data.len() {
+        return Err(Error::InvalidRef(
+            "reftable: block trailer out of bounds".into(),
+        ));
+    }
+    let rc = read_u16(data, records_end - 2);
+    if rc > MAX_RESTARTS {
+        return Err(Error::InvalidRef(format!(
+            "reftable: restart count out of range: {rc}"
+        )));
+    }
+    let restart_bytes = rc * 3;
+    let Some(restart_table_start) = records_end
+        .checked_sub(2)
+        .and_then(|without_count| without_count.checked_sub(restart_bytes))
+    else {
+        return Err(Error::InvalidRef(
+            "reftable: restart table larger than block".into(),
+        ));
+    };
+    if restart_table_start < records_data_start {
+        return Err(Error::InvalidRef(
+            "reftable: restart table overlaps block records".into(),
+        ));
+    }
+    Ok(restart_table_start)
 }
 
 /// Parse the footer of a reftable file.
@@ -3665,5 +3896,37 @@ mod tests {
         let refs = reader.read_refs().unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].value, RefValue::Deletion);
+    }
+
+    #[test]
+    fn write_transaction_inject_failure_leaves_tables_list_unchanged() {
+        use crate::objects::ObjectId;
+        use crate::repo::init_repository;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let repo = init_repository(tmp.path(), false, "main", None, "reftable").unwrap();
+        let git_dir = repo.git_dir;
+        let tables_list = git_dir.join("reftable/tables.list");
+        let before = fs::read_to_string(&tables_list).unwrap_or_default();
+
+        let oid = ObjectId::from_bytes(&[0xcd; 20]).unwrap();
+        set_test_inject_reftable_transaction_fail(true);
+        let mut stack = ReftableStack::open(&git_dir).unwrap();
+        let opts = read_write_options(&git_dir);
+        let err = stack.write_transaction(
+            vec![ReftableTransactionUpdate {
+                refname: "refs/heads/inject-fail".to_owned(),
+                value: Some(RefValue::Val1(oid)),
+                log: None,
+                expected_old: None,
+            }],
+            &opts,
+        );
+        set_test_inject_reftable_transaction_fail(false);
+        assert!(err.is_err());
+
+        let after = fs::read_to_string(&tables_list).unwrap_or_default();
+        assert_eq!(after, before);
     }
 }

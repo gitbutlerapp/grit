@@ -21,7 +21,7 @@ use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::commits_reachable_excluding_ancestors_of;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
-use crate::pack;
+use crate::odb::store::ObjectStore;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
 use crate::reflog::{list_reflog_refs, read_reflog};
@@ -2947,15 +2947,11 @@ fn sparse_blob_access_error(spec: &str) -> Error {
 
 fn packed_object_set(repo: &Repository) -> HashSet<ObjectId> {
     let mut out = HashSet::new();
-    let objects_dir = repo.odb.objects_dir();
-    if let Ok(indexes) = pack::read_local_pack_indexes(objects_dir) {
-        for idx in indexes {
-            for e in idx.iter() {
-                if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
-                    out.insert(oid);
-                }
-            }
-        }
+    if let Ok(primary) = repo.odb.primary() {
+        let _ = primary.packed_objects().for_each_object(&mut |oid| {
+            out.insert(*oid);
+            std::ops::ControlFlow::Continue(())
+        });
     }
     out
 }
@@ -5528,16 +5524,11 @@ fn filter_forces_bitmap_fallback(filter: Option<&ObjectFilter>) -> bool {
 /// store, indicating that `--use-bitmap-index` would engage a real bitmap and therefore emit the
 /// OID-only bitmap object format.
 fn pack_bitmap_present(repo: &Repository) -> bool {
-    let pack_dir = repo.odb.objects_dir().join("pack");
-    let Ok(rd) = std::fs::read_dir(&pack_dir) else {
-        return false;
-    };
-    rd.filter_map(|e| e.ok()).any(|e| {
-        e.path()
-            .extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|ext| ext == "bitmap")
-    })
+    repo.odb
+        .primary()
+        .ok()
+        .and_then(|primary| primary.packed_objects().reachability_bitmap_present().ok())
+        .unwrap_or(false)
 }
 
 /// Collect `--all` refs whose target is (or peels to) a non-commit object — a blob or tree — as
@@ -7252,25 +7243,7 @@ fn collect_reachable_objects_in_commit_order(
 
 /// Collect OIDs of all objects in packs that have a `.keep` file.
 fn kept_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
-    let pack_dir = repo.git_dir.join("objects/pack");
-    let mut kept = HashSet::new();
-    if !pack_dir.is_dir() {
-        return Ok(kept);
-    }
-    for entry in std::fs::read_dir(&pack_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "keep") {
-            // Find the corresponding .idx file
-            let idx_path = path.with_extension("idx");
-            if idx_path.exists() {
-                if let Ok(oids) = crate::pack::read_idx_object_ids(&idx_path) {
-                    kept.extend(oids);
-                }
-            }
-        }
-    }
-    Ok(kept)
+    repo.odb.primary()?.packed_objects().kept_pack_object_ids()
 }
 
 /// Like [`flatten_tree`] but also carries each blob's file mode, so callers can detect

@@ -20,7 +20,7 @@ use crate::index::{
     entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE,
 };
 use crate::objects::{parse_commit, parse_tree, ObjectId};
-use crate::odb::WriteOptions;
+use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::pathspec::{has_glob_chars, matches_pathspec_list, pathspec_is_exclude};
 use crate::porcelain::status::{
@@ -480,11 +480,7 @@ fn stage_untracked_paths_parallel(
     if !prepared.is_empty() {
         repo.odb.ensure_all_loose_prefix_dirs()?;
     }
-    let write_opts = WriteOptions {
-        assume_loose_only_existence: true,
-        trust_new_loose: true,
-        ..WriteOptions::default()
-    };
+    let write_opts = BULK_NEW_LOOSE_WRITE;
     let write_bytes: usize = prepared.iter().map(|p| p.zlib_store.len()).sum();
     let threads = parallelism.threads();
     let _written: Vec<ObjectId> = try_par_hash_with(&prepared, threads, write_bytes, |prep| {

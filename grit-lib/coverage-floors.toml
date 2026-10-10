@@ -11,13 +11,13 @@ minimum = 85.0
 
 [aggregate.refs-config]
 groups = ["refs", "reflog", "config", "ignore", "attributes"]
-minimum = 49.7
+minimum = 57.4
 
 [group.attributes]
 files = [
     "attributes.rs",
 ]
-minimum = 50.6
+minimum = 85.0
 
 [group.commit-graph]
 files = [
@@ -25,20 +25,20 @@ files = [
     "commit_graph_write.rs",
     "bloom.rs",
 ]
-minimum = 85.0
+minimum = 86.5
 
 [group.config]
 files = [
     "config.rs",
 ]
-minimum = 39.5
+minimum = 66.4
 
 [group.ignore]
 files = [
     "ignore.rs",
     "wildmatch.rs",
 ]
-minimum = 71.9
+minimum = 86.3
 
 [group.midx]
 files = [
@@ -61,13 +61,13 @@ files = [
     "pack_index_build.rs",
     "pack_zlib.rs",
 ]
-minimum = 85.0
+minimum = 86.1
 
 [group.reflog]
 files = [
     "reflog.rs",
 ]
-minimum = 34.6
+minimum = 83.4
 
 [group.refs]
 files = [
@@ -75,7 +75,7 @@ files = [
     "reftable.rs",
     "check_ref_format.rs",
 ]
-minimum = 53.8
+minimum = 69.9
 
 [group.supporting]
 files = [
@@ -87,10 +87,10 @@ files = [
     "promisor.rs",
     "fsck_standalone.rs",
 ]
-minimum = 80.0
+minimum = 85.2
 
 [file."attributes.rs"]
-minimum = 50.6
+minimum = 85.0
 
 [file."bloom.rs"]
 minimum = 91.6
@@ -98,23 +98,23 @@ minimum = 91.6
 [file."check_ref_format.rs"]
 minimum = 95.2
 
-[file."config.rs"]
-minimum = 39.5
-
 [file."commit_graph_file.rs"]
 minimum = 85.0
 
 [file."commit_graph_write.rs"]
 minimum = 87.9
 
+[file."config.rs"]
+minimum = 66.4
+
 [file."delta_encode.rs"]
 minimum = 93.3
 
 [file."fsck_standalone.rs"]
-minimum = 83.9
+minimum = 86.1
 
 [file."ignore.rs"]
-minimum = 69.3
+minimum = 82.6
 
 [file."index_pack.rs"]
 minimum = 90.7
@@ -138,7 +138,7 @@ minimum = 89.7
 minimum = 87.0
 
 [file."pack_map.rs"]
-minimum = 88.7
+minimum = 91.1
 
 [file."pack_rev.rs"]
 minimum = 89.3
@@ -150,19 +150,19 @@ minimum = 73.4
 minimum = 81.1
 
 [file."reflog.rs"]
-minimum = 34.6
+minimum = 83.4
 
 [file."refs.rs"]
-minimum = 61.3
+minimum = 72.3
 
 [file."reftable.rs"]
-minimum = 43.2
+minimum = 75.6
 
 [file."unpack_objects.rs"]
-minimum = 82.8
+minimum = 82.9
 
 [file."wildmatch.rs"]
-minimum = 74.6
+minimum = 95.9
 
 [file."zlib_inflate.rs"]
 minimum = 85.0

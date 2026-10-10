@@ -540,3 +540,326 @@ impl ObjectBenchFixtures {
         FIX.get_or_init(ObjectBenchFixtures::build)
     }
 }
+
+/// One layout for [`OdbBackendFixtures`]: loose-only, single pack, MIDX, or alternates.
+pub struct OdbBackendCase {
+    pub _keep: TempDir,
+    pub odb: Odb,
+    pub hit: ObjectId,
+    pub miss: ObjectId,
+}
+
+/// Four ODB backend shapes used before the ObjectStore refactor.
+pub struct OdbBackendFixtures {
+    pub loose_10k: OdbBackendCase,
+    pub pack_100k: OdbBackendCase,
+    pub midx_8: OdbBackendCase,
+    pub alternate_only: OdbBackendCase,
+}
+
+fn miss_oid(hex: &str) -> ObjectId {
+    ObjectId::from_hex(hex).expect("bench miss oid")
+}
+
+fn collect_idx_oids(idx: &PackIndex, limit: usize) -> Vec<ObjectId> {
+    let mut oids = Vec::with_capacity(limit.min(idx.len()));
+    for e in idx.iter() {
+        if e.oid().len() == 20 {
+            if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
+                oids.push(oid);
+                if oids.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    oids
+}
+
+fn build_loose_only_backend(count: usize) -> OdbBackendCase {
+    let keep = tempfile::tempdir().expect("loose backend tempdir");
+    let objects = keep.path().join("objects");
+    std::fs::create_dir_all(&objects).expect("objects dir");
+    let odb = Odb::new(&objects);
+    let mut last = odb
+        .write(ObjectKind::Blob, b"seed\n")
+        .expect("seed loose blob");
+    for i in 1..count {
+        let body = format!("loose-only bench payload {i}\n");
+        last = odb
+            .write(ObjectKind::Blob, body.as_bytes())
+            .expect("write loose blob");
+    }
+    OdbBackendCase {
+        _keep: keep,
+        odb,
+        hit: last,
+        miss: miss_oid("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+    }
+}
+
+fn hot_path_repacked_objects_dir() -> Option<PathBuf> {
+    let root = std::env::var("GRIT_BENCH_ODB_CACHE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp/grit-bench-odb-cache"));
+    let repo = root.join("hot-path-100k-repacked");
+    if repo.join(".grit-bench-odb-ready").is_file() {
+        Some(repo.join(".git/objects"))
+    } else {
+        None
+    }
+}
+
+fn head_oid_in_git_repo(repo_root: &Path) -> ObjectId {
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["rev-parse", "HEAD"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("rev-parse HEAD");
+    assert!(out.status.success(), "rev-parse in {}", repo_root.display());
+    ObjectId::from_hex(std::str::from_utf8(&out.stdout).expect("utf8").trim()).expect("HEAD oid")
+}
+
+fn build_single_pack_backend(object_count: usize) -> OdbBackendCase {
+    if let Some(objects) = hot_path_repacked_objects_dir() {
+        let repo_root = objects
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root from objects dir");
+        let pack_dir = objects.join("pack");
+        let idx_path = std::fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "idx"))
+            .expect("repacked cache must have a pack index");
+        let idx = read_pack_index(&idx_path).expect("read cached pack idx");
+        assert!(
+            idx.len() >= object_count.min(1000),
+            "cached pack idx too small: {}",
+            idx.len()
+        );
+        let hit = head_oid_in_git_repo(repo_root);
+        let odb = Odb::new(&objects);
+        let keep = tempfile::tempdir().expect("pack backend anchor tempdir");
+        return OdbBackendCase {
+            _keep: keep,
+            odb,
+            hit,
+            miss: miss_oid("cafebabecafebabecafebabecafebabecafebabe"),
+        };
+    }
+
+    let keep = tempfile::tempdir().expect("pack backend tempdir");
+    let objects = keep.path().join("objects");
+    let (idx, tip) = build_large_pack_index(&objects, object_count);
+    let oids = collect_idx_oids(&idx, object_count);
+    assert!(
+        oids.len() >= object_count.min(1000),
+        "pack fixture needs many oids, got {}",
+        oids.len()
+    );
+    let hit = *oids.get(oids.len() / 2).unwrap_or(&tip);
+    let odb = Odb::new(&objects);
+    OdbBackendCase {
+        _keep: keep,
+        odb,
+        hit,
+        miss: miss_oid("cafebabecafebabecafebabecafebabecafebabe"),
+    }
+}
+
+fn git_run(dir: &Path, args: &[&str]) {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir).args(args);
+    for (k, v) in GIT_ENV {
+        cmd.env(k, v);
+    }
+    cmd.env("GIT_AUTHOR_NAME", "Bench");
+    cmd.env("GIT_AUTHOR_EMAIL", "bench@grit-scm.test");
+    cmd.env("GIT_COMMITTER_NAME", "Bench");
+    cmd.env("GIT_COMMITTER_EMAIL", "bench@grit-scm.test");
+    let status = cmd.status().expect("git status");
+    assert!(status.success(), "git {:?} in {}", args, dir.display());
+}
+
+fn git_pack_layer(dir: &Path, layer: usize, all_objects: bool) {
+    let rev = if all_objects {
+        Command::new("git")
+            .current_dir(dir)
+            .args(["rev-list", "--objects", "--all"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list all")
+    } else {
+        Command::new("git")
+            .current_dir(dir)
+            .args(["rev-list", "--objects", "-1", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list head")
+    };
+    assert!(rev.status.success(), "rev-list for pack layer {layer}");
+    let mut child = Command::new("git")
+        .current_dir(dir)
+        .args(["pack-objects", &format!(".git/objects/pack/layer-{layer}")])
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("pack-objects");
+    use std::io::Write;
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(&rev.stdout)
+        .expect("write rev-list");
+    let out = child.wait_with_output().expect("wait pack-objects");
+    assert!(
+        out.status.success(),
+        "pack-objects layer {layer}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Pick an object that lives in a pack (not loose) after `git prune-packed`.
+fn pack_only_hit_oid(repo_root: &Path, objects_dir: &Path) -> Result<ObjectId> {
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["rev-parse", "HEAD"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .map_err(grit_lib::error::Error::Io)?;
+    if !out.status.success() {
+        return Err(grit_lib::error::Error::Message(
+            "rev-parse HEAD for pack-only hit".into(),
+        ));
+    }
+    let hit = ObjectId::from_hex(std::str::from_utf8(&out.stdout).expect("utf8").trim())
+        .map_err(|_| grit_lib::error::Error::Message("HEAD oid hex".into()))?;
+    if loose_object_path(objects_dir, &hit).is_file() {
+        let pack_dir = objects_dir.join("pack");
+        for entry in std::fs::read_dir(&pack_dir).map_err(grit_lib::error::Error::Io)? {
+            let entry = entry.map_err(grit_lib::error::Error::Io)?;
+            let path = entry.path();
+            if path.extension().is_some_and(|x| x == "idx") {
+                let idx = read_pack_index(&path)?;
+                for e in idx.iter() {
+                    if e.oid().len() == 20 {
+                        if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
+                            if !loose_object_path(objects_dir, &oid).is_file() {
+                                return Ok(oid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Err(grit_lib::error::Error::Message(
+            "no pack-only oid after prune-packed".into(),
+        ));
+    }
+    Ok(hit)
+}
+
+fn loose_object_path(objects_dir: &Path, oid: &ObjectId) -> PathBuf {
+    Odb::new(objects_dir).object_path(oid)
+}
+
+fn assert_midx_pack_only_hit(objects_dir: &Path, odb: &Odb, hit: &ObjectId) {
+    assert!(
+        !loose_object_path(objects_dir, hit).is_file(),
+        "MIDX bench hit {hit} must not exist as a loose object"
+    );
+    assert!(
+        odb.exists(hit),
+        "MIDX bench hit {hit} must be reachable via packs/MIDX"
+    );
+}
+
+fn build_midx_backend(pack_count: usize) -> OdbBackendCase {
+    let keep = tempfile::tempdir().expect("midx backend tempdir");
+    let dir = keep.path();
+    git_run(dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("seed.txt"), b"seed").expect("seed file");
+    git_run(dir, &["add", "seed.txt"]);
+    git_run(dir, &["commit", "-q", "-m", "seed"]);
+    for i in 0..pack_count {
+        std::fs::write(dir.join(format!("p{i}.txt")), format!("layer {i}")).expect("layer file");
+        git_run(dir, &["add", &format!("p{i}.txt")]);
+        git_run(dir, &["commit", "-q", "-m", &format!("c{i}")]);
+        git_pack_layer(dir, i, i + 1 == pack_count);
+    }
+    git_run(dir, &["multi-pack-index", "write"]);
+    git_run(dir, &["prune-packed"]);
+    let git_dir = dir.join(".git");
+    let objects = git_dir.join("objects");
+    let hit = pack_only_hit_oid(dir, &objects).expect("pack-only hit for midx bench");
+    let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+    assert_midx_pack_only_hit(&objects, &odb, &hit);
+    OdbBackendCase {
+        _keep: keep,
+        odb,
+        hit,
+        miss: miss_oid("00000000000000000000000000000000000000f1"),
+    }
+}
+
+fn build_alternate_only_backend() -> OdbBackendCase {
+    let keep = tempfile::tempdir().expect("alternate backend tempdir");
+    let alt_objects = keep.path().join("alt/objects");
+    std::fs::create_dir_all(&alt_objects).expect("alt objects");
+    let alt_odb = Odb::new(&alt_objects);
+    let mut hit = alt_odb
+        .write(ObjectKind::Blob, b"alternate-only payload\n")
+        .expect("alt blob");
+    for i in 0..256 {
+        let body = format!("alt bench blob {i}\n");
+        hit = alt_odb
+            .write(ObjectKind::Blob, body.as_bytes())
+            .expect("alt write");
+    }
+
+    let primary_objects = keep.path().join("primary/objects");
+    std::fs::create_dir_all(primary_objects.join("info")).expect("info dir");
+    std::fs::write(
+        primary_objects.join("info/alternates"),
+        format!("{}\n", alt_objects.display()),
+    )
+    .expect("alternates file");
+    let odb = Odb::new(&primary_objects);
+    assert!(
+        !odb.exists_local(&hit),
+        "hit must not exist as loose object in primary store"
+    );
+    assert!(odb.exists(&hit), "hit must resolve via alternate");
+    OdbBackendCase {
+        _keep: keep,
+        odb,
+        hit,
+        miss: miss_oid("badc0ffebadc0ffebadc0ffebadc0ffebadc0ffe"),
+    }
+}
+
+impl OdbBackendFixtures {
+    fn build() -> Self {
+        Self {
+            loose_10k: build_loose_only_backend(10_000),
+            pack_100k: build_single_pack_backend(100_000),
+            midx_8: build_midx_backend(8),
+            alternate_only: build_alternate_only_backend(),
+        }
+    }
+
+    /// Process-wide singleton; building the 100k pack is expensive.
+    #[must_use]
+    pub fn global() -> &'static Self {
+        static FIX: OnceLock<OdbBackendFixtures> = OnceLock::new();
+        FIX.get_or_init(OdbBackendFixtures::build)
+    }
+}

@@ -96,6 +96,10 @@ name = "midx"
 harness = false
 
 [[bench]]
+name = "odb_backend"
+harness = false
+
+[[bench]]
 name = "userdiff_hunk_header"
 harness = false
 

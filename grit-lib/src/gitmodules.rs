@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use crate::config::{ConfigFile, ConfigScope};
 use crate::error::Result;
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind, TreeEntry};
+use crate::odb::store::PackedObjects;
 use crate::odb::Odb;
-use crate::pack::read_pack_index;
 use url::{Host, Url};
 
 /// Returns `true` when `s` is non-empty and starts with `-` (Git `looks_like_command_line_option`).
@@ -1046,12 +1046,7 @@ pub fn oids_from_copied_object_paths(copied: &[PathBuf]) -> Result<HashSet<Objec
             continue;
         };
         if name.ends_with(".idx") {
-            let idx = read_pack_index(p)?;
-            for e in idx.iter() {
-                if let Ok(oid) = ObjectId::from_bytes(e.oid()) {
-                    out.insert(oid);
-                }
-            }
+            out.extend(PackedObjects::object_ids_from_index_path(p)?);
             continue;
         }
         if let Some(oid) = object_id_from_loose_object_path(p) {

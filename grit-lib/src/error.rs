@@ -91,9 +91,25 @@ pub enum ConfigError {
     )]
     RemoteUrlInHasconfigInclude,
 
+    /// `[include]` / `[includeIf]` nesting exceeded the Git-compatible depth limit.
+    #[error("exceeded maximum include depth (depth {depth} exceeds limit {limit})")]
+    IncludeDepthExceeded { depth: usize, limit: usize },
+
     /// Generic config error with free-form detail (legacy call sites).
     #[error("{0}")]
     Other(String),
+
+    /// The config file could not be written because a `.lock` file is already present.
+    #[error("could not lock config file {path}: File exists")]
+    ConfigFileLocked { path: String },
+
+    /// A single-value operation was requested but the key has multiple values.
+    #[error("cannot overwrite multiple values with a single value for '{key}'")]
+    MultipleValues { key: String },
+
+    /// Inline `--comment` text must not span lines.
+    #[error("no multi-line comment allowed")]
+    MultilineCommentNotAllowed,
 }
 
 impl From<String> for ConfigError {
@@ -125,6 +141,10 @@ pub enum RefLockError {
         "cannot lock ref '{refname}': there is a non-empty directory '{path}' blocking reference '{refname}'"
     )]
     DirectoryInTheWay { refname: String, path: String },
+
+    /// Another process holds the `packed-refs.lock` file (or it already exists).
+    #[error("Unable to create '{lock_path}': File exists.")]
+    PackedRefsLockHeld { lock_path: String },
 }
 
 /// Clean/smudge filter and EOL conversion failures.
@@ -350,6 +370,10 @@ pub enum Error {
     #[error("invalid ref: {0}")]
     InvalidRef(String),
 
+    /// A `packed-refs` line Git would reject when reading the ref database.
+    #[error("unexpected line in {path}: {line}")]
+    PackedRefsUnexpectedLine { path: String, line: String },
+
     /// A general path-related error (invalid UTF-8, out-of-bounds, etc.).
     #[error("path error: {0}")]
     PathError(String),
@@ -437,6 +461,11 @@ pub enum Error {
     /// A Git hook subprocess failed or could not be started.
     #[error(transparent)]
     Hook(#[from] crate::hooks::HookError),
+
+    /// An [`ObjectStore`](crate::odb::store::ObjectStore) backend does not implement the
+    /// requested operation (for example filesystem-only helpers on an in-memory store).
+    #[error("object store does not support: {operation}")]
+    UnsupportedObjectStore { operation: &'static str },
 }
 
 impl Error {

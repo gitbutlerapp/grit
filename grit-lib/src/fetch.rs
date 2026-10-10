@@ -1586,8 +1586,10 @@ pub(crate) fn add_wire_tags(
             continue;
         }
         seen_remote_ref.insert(name.clone());
-        matched_oids.insert(*oid);
-        if mode == crate::transfer::TagMode::Following {
+        // Only tag oids newly added here belong in `following_only`. A lightweight
+        // tag at the same commit as an already-matched branch tip must not suppress
+        // the branch's `want` when building the pack request.
+        if matched_oids.insert(*oid) && mode == crate::transfer::TagMode::Following {
             following_only.insert(*oid);
         }
         matched.push(crate::transfer::MatchedRef {
@@ -1788,5 +1790,53 @@ mod fetch_advertised_ref_tests {
             .flatten()
             .expect("wildcard matches malicious remote name");
         assert!(!is_valid_storable_ref_name(&local));
+    }
+
+    #[test]
+    fn add_wire_tags_following_skips_following_only_when_oid_already_matched() {
+        use crate::transfer::TagMode;
+        use std::collections::{HashMap, HashSet};
+
+        let shared = ObjectId::from_hex("4eda3c62a0f0a0a0a0a0a0a0a0a0a0a0a0a0a0a0").unwrap();
+        let unreachable_tag =
+            ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let remote_refs = vec![
+            ("refs/heads/rel".to_owned(), shared),
+            ("refs/tags/light".to_owned(), shared),
+            ("refs/tags/orphan".to_owned(), unreachable_tag),
+        ];
+        let advertised_peel = HashMap::new();
+        let negatives: Vec<crate::refspec::RefspecItem> = Vec::new();
+        let mut matched = Vec::new();
+        let mut matched_oids = HashSet::from([shared]);
+        let mut seen = HashSet::from(["refs/heads/rel".to_owned()]);
+        matched.push(crate::transfer::MatchedRef {
+            remote_ref: "refs/heads/rel".to_owned(),
+            local_ref: Some("refs/remotes/origin/rel".to_owned()),
+            oid: shared,
+            force: false,
+            is_tag: false,
+            advertised_peel: None,
+        });
+
+        let following_only = add_wire_tags(
+            TagMode::Following,
+            &remote_refs,
+            &advertised_peel,
+            &negatives,
+            &mut matched,
+            &mut matched_oids,
+            &mut seen,
+        );
+
+        assert!(
+            !following_only.contains(&shared),
+            "shared branch/tag tip must stay wanted"
+        );
+        assert!(
+            following_only.contains(&unreachable_tag),
+            "tag-only oid stays following-only (no upfront want)"
+        );
+        assert_eq!(matched.iter().filter(|m| m.is_tag).count(), 2);
     }
 }

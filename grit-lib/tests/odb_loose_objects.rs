@@ -545,6 +545,51 @@ fn sha256_exists_and_hash_when_git_supports() {
 }
 
 #[test]
+fn write_local_materializes_loose_when_object_only_in_cruft_pack() {
+    let repo = init_repo(HashAlgo::Sha1);
+    let odb = Odb::new(&repo.objects_dir());
+    let data = b"cruft-pack write_local rescue\n";
+    let oid = odb.write(ObjectKind::Blob, data).expect("write loose blob");
+    assert!(
+        odb.object_path(&oid).is_file(),
+        "fixture starts as loose object"
+    );
+
+    let repack = Command::new("git")
+        .current_dir(repo.path())
+        .args(["repack", "--cruft", "-d"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git repack --cruft");
+    assert!(
+        repack.status.success(),
+        "git repack --cruft: {}",
+        String::from_utf8_lossy(&repack.stderr)
+    );
+    odb.invalidate_packs();
+
+    assert!(
+        !odb.object_path(&oid).is_file(),
+        "cruft repack should remove the loose copy"
+    );
+    assert!(
+        odb.exists_local(&oid),
+        "object must remain reachable from local cruft pack"
+    );
+
+    let again = odb
+        .write_local(ObjectKind::Blob, data)
+        .expect("write_local after cruft repack");
+    assert_eq!(again, oid);
+    assert!(
+        odb.object_path(&oid).is_file(),
+        "write_local must materialize a loose copy when cruft pack cannot be freshened"
+    );
+    assert_eq!(odb.read(&oid).unwrap().data, data);
+}
+
+#[test]
 fn t1006_zlib_preset_dictionary_returns_needs_dictionary() {
     let repo = init_repo(HashAlgo::Sha1);
     let odb = Odb::new(&repo.objects_dir());

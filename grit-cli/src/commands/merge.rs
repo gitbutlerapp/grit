@@ -218,7 +218,7 @@ pub fn integrate(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    let oid = write_commit_object(&repo, &commit, None).context("could not store merge commit")?;
+    let oid = write_commit_object(repo, &commit, None).context("could not store merge commit")?;
 
     move_branch(repo, into_ref, into_oid, oid, &format!("merge {label}"))?;
     Ok(MergeOutcome::merged(label, oid))

@@ -7,7 +7,7 @@ use grit_lib::error::{
     ApplyError, BadNumericSource, ConfigError, Error, FilterError, FilterPhase, RefLockError,
 };
 use grit_lib::objects::ObjectId;
-use grit_test_support::git_cmd;
+use grit_test_support::{git, git_cmd};
 use std::fs;
 use tempfile::tempdir;
 
@@ -61,6 +61,18 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     let dir = tempdir().unwrap();
     let init = git_cmd(&["init"]).in_dir(dir.path()).exec();
     assert!(init.ok(), "git init failed: {}", init.stderr);
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "seed object for lock test",
+        ],
+    );
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let oid = ObjectId::from_hex(head.trim()).expect("HEAD oid");
     let git_dir = dir.path().join(".git");
     fs::create_dir_all(git_dir.join("refs/heads/feature")).unwrap();
     fs::write(
@@ -68,7 +80,6 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
         "0000000000000000000000000000000000000000\n",
     )
     .unwrap();
-    let oid = ObjectId::from_hex("67bf698f3ab735e92fb011a99cff3497c44d30c1").unwrap();
     let err = grit_lib::refs::write_ref(&git_dir, "refs/heads/feature", &oid).unwrap_err();
     assert!(matches!(
         err,

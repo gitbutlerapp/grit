@@ -171,6 +171,8 @@
 - An example custom backend passes the object test suite.
 - Benchmarks are within noise of the previous item's results.
 
+**Status (2026-10-09, factory step 672).** Trait routing, custom backends, and grit-examples sample store are on the mesh; post-refactor **`odb-backend-after.json`** and Criterion **`--baseline odb-before`** are committed with hot-path probes restored in **`Odb::read` / `exists` / write** so built-in layouts stay within the ±3% bar. Docs benchmarks page lists before/after grit-bench baselines.
+
 ## 11. Rust tests: refs, reflog, config, ignore, attributes
 *Workstream: Testing*
 

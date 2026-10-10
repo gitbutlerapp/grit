@@ -118,12 +118,63 @@ Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal
 
 ### Upstream test mapping: refs, reflog, config, ignore, attributes
 
-Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are mapped in the table below as those areas gain Rust coverage. Shared setup lives in [`grit-lib/tests/support/refs_harness.rs`](grit-lib/tests/support/refs_harness.rs): tests call `each_backend` to run the same scenario on **files** and **reftable** ref storage (`init_repository` with `ref_storage` `"files"` or `"reftable"`). Helpers run system `git` with a hermetic environment (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, fixed author/committer identity and dates). Grit ref lists come from `grit_lib::refs::list_refs`; git side uses `git show-ref`. When system git is older than 2.45 and cannot `git init --ref-format=reftable`, reftable scenarios print `SKIP: git lacks reftable` and return instead of failing.
+Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are mapped in the table below as those areas gain Rust coverage. Shared setup lives in [`grit-lib/tests/support/refs_harness.rs`](grit-lib/tests/support/refs_harness.rs): tests call `each_backend` to run the same scenario on **files** and **reftable** ref storage (`init_repository` with `ref_storage` `"files"` or `"reftable"`). Helpers run system `git` with a hermetic environment (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, fixed author/committer identity and dates). Grit ref lists come from `grit_lib::refs::list_refs`; git side uses `git show-ref`. When system git is older than 2.45 and cannot `git init --ref-format=reftable`, reftable scenarios print `SKIP: git lacks reftable` and return instead of failing. CI sets **`GRIT_REQUIRE_REFTABLE_GIT=1`** (with Git ≥ 2.45 from the git-core PPA in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) so those skips become hard failures.
 
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
+| t1400-update-ref.sh | loose ref write/read round-trip; grit ↔ git `rev-parse` / `show-ref`; `git fsck --strict` after grit writes | `grit-lib/tests/refs_loose_symref.rs` (`t1400_loose_ref_roundtrip_both_backends`, `t1400_git_written_ref_read_by_grit_both_backends`) | covered (loose subset; packed/transaction UX skipped) |
+| t1401-symbolic-ref.sh | symref read/write; HEAD detached vs symbolic; dangling symref; chain depth; long names; overwrite invalid symref | `grit-lib/tests/refs_loose_symref.rs` (`t1401_*_both_backends`) | covered |
+| t0600-reffiles-backend.sh | empty directory must not block create/delete; non-empty directory and broken ref block create; short hash / trailing token parsing | `grit-lib/tests/refs_loose_symref.rs` (`t0600_*`; files backend only) | partial (lock/transaction cases in step 4) |
+| t1405-main-ref-store.sh | `verify_refname_available_for_create` D/F prefix conflicts (single ref) | `grit-lib/tests/refs_loose_symref.rs` (`t1405_verify_refname_df_prefix_single_ref`) | partial (batch D/F in step 4) |
+| t1430-bad-ref-name.sh | invalid storable names vs `git check-ref-format`; `write_ref` rejects | `grit-lib/tests/refs_loose_symref.rs` (`t1430_invalid_names_match_git_check_ref_format`, `t1430_write_ref_rejects_invalid_names_both_backends`) | covered |
+| t1408-packed-refs.sh | load packed-refs (peeled/sorted headers, unsorted files, stale loose-over-packed, unicode names, garbage/CR/malformed line grammar vs valid refs) | `grit-lib/tests/refs_packed.rs` (`t1408_*`, `t1408_malformed_packed_refs_*`, `t1408_packed_refs_garbage_line_rejected_like_git`, `t1408_packed_refs_crlf_rejected_like_git`) | covered (files backend) |
+| t0601-reffiles-pack-refs.sh | peeled annotated tags, `list_refs` / `list_refs_physical` / `list_refs_glob` vs `git for-each-ref`, namespace helpers | `grit-lib/tests/refs_packed.rs` (`t0601_peeled_and_sorted_traits_match_git`, `list_refs_physical_and_glob_merge_loose_over_packed`, `packed_refs_get_has_namespace_and_entry_exists`) | covered (files backend) |
+| t0600-reffile.sh | delete loose+packed, packed-only, symref target; packed-refs lock failure; no stray lock files; no mkdir on packed-only delete | `grit-lib/tests/refs_packed.rs` (`t0600_delete_*`) | covered (files backend) |
+| t1409-avoid-packing-refs.sh | post-clone remote-tracking batch into sorted packed-refs (leave `origin/HEAD` loose) | `grit-lib/tests/refs_packed.rs` (`pack_remote_tracking_refs_for_clone_matches_git`) | partial (clone pack layout only) |
+| t0601 / fetch apply | `PackedRefs` snapshot + `resolve_ref_cached` / `write_ref_cached` after external `git pack-refs` | `grit-lib/tests/refs_packed.rs` (`resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs`) | covered (files backend) |
+| t1404-update-ref-errors.sh | CAS batch: bad `expected_old` applies nothing (refs + reflogs) | `grit-lib/tests/refs_transactions.rs` (`t1404_failed_cas_changes_nothing`) | covered |
+| t1404-update-ref-errors.sh | D/F batch add/delete long vs short (loose + packed), both orders vs `git update-ref --stdin` | `refs_transactions.rs` (`t1404_df_conflicts_match_git_update_ref_stdin`) | covered (symref variants skipped) |
+| t0031-lockfile-pid.sh | pre-existing `<ref>.lock` blocks write/delete; ref preserved | `refs_transactions.rs` (`ref_lock_present_fails_and_preserves_ref`) | covered (files backend) |
+| t1400-update-ref.sh | `--stdin` CAS concurrency: one winner, `fsck` clean | `refs_transactions.rs` (`concurrent_cas_single_winner`) | covered |
+| — | reftable failed transaction leaves `tables.list` unchanged | `reftable.rs` unit test (`write_transaction_inject_failure_leaves_tables_list_unchanged`) | covered |
+| t1416-ref-transaction-hooks.sh | hook ordering | — | skipped (hooks covered elsewhere) |
+| — | `update_refs` whole-batch lock-all atomicity vs Git `RefStore` transactions | — | gap → item 12 (RefStore transactions) |
+| t3070-wildmatch.sh | wildmatch / iwildmatch / pathmatch / ipathmatch vectors; pathological `*` backtracking bound | `grit-lib/tests/wildmatch_vectors.rs` (`t3070_vectors_all_modes`, `t3070_pathological_wildmatch_under_time_bound`, ls-files pathmatch cross-check) | covered |
+| t0008-ignores.sh | nested `.gitignore`, exclude, global excludes, negation, tracked overrides; `check-ignore -v -n` source/line/pattern | `grit-lib/tests/ignore_rules.rs` (`t0008_check_path_matches_git_check_ignore_verbose`, symlink warning, CLI precedence) | covered |
+| t3001-ls-files-others-exclude | `--exclude-from`, `--exclude-per-directory` | `grit-lib/tests/ignore_rules.rs` (`t3001_exclude_from_and_per_directory_name`) | covered |
+| t3003-ls-files-exclude | CRLF `.gitignore` lines | `grit-lib/tests/ignore_rules.rs` (`t3003_crlf_gitignore_lines`) | partial (core parse/match; skip UX-only ls-files flags) |
+| t0600-reffiles-backend.sh | empty reflog file; `reflog expire --all`; symref expire vs referent | `grit-lib/tests/reflog_roundtrip.rs` (`reflog_exists_list_and_path_match_git`, `t0600_expire_on_symref_not_referent`) | covered (symref expire files backend only) |
+| t1410-reflog.sh | reflog expire vs git (reachable/unreachable, gc patterns, stale-fix subset) | `grit-lib/tests/reflog_roundtrip.rs` (`t1410_expire_matches_git_byte_for_byte`, `expire_unreachable_stalefix_and_mark_reachable`) | covered (byte-compare on files backend) |
+| t1411-reflog.sh | reflog line parsing (subset) | `grit-lib/tests/reflog_roundtrip.rs` (`git_written_reflog_lines_parse_like_grit`) | covered |
+| t1413-reflog-detach.sh | detached HEAD + branch HEAD reflog mirror | `grit-lib/tests/reflog_roundtrip.rs` (`mirror_branch_reflog_to_head_and_detached`) | partial |
+| t1417-reflog-updateref.sh | expire with `--updateref` | — | not applicable: no `--updateref` API |
+| t1418-reflog-exists.sh | `reflog exists` / list | `grit-lib/tests/reflog_roundtrip.rs` (`reflog_exists_list_and_path_match_git`) | covered |
+| t1421-reflog-write.sh | grit-written reflog bytes read by git | `grit-lib/tests/reflog_roundtrip.rs` (`t1421_grit_written_entries_read_by_git_log_g`) | covered |
+| t0600 / rev-list | `all_reflog_oids` walk order | `grit-lib/tests/reflog_roundtrip.rs` (`all_reflog_oids_and_ordered_match_git_walk`) | covered |
+| — | `core.logAllRefUpdates` modes vs git auto-create | `grit-lib/tests/reflog_roundtrip.rs` (`log_all_ref_updates_modes_match_git`) | covered |
+| — | delete / truncate vs `git reflog delete` | `grit-lib/tests/reflog_roundtrip.rs` (`delete_reflog_and_truncate_match_git`) | covered (files backend byte-compare) |
+| t1300-config.sh | config write: set/add/replace-all/unset/count, sections, quoting, multivar errors, lock file | `grit-lib/tests/config_write.rs` (`t1300_edit_matches_git_byte_for_byte`, `config_lock_present_is_typed_error_and_preserves_file`) | covered (read/parse subset on other steps; `--comment` cases grit-only on Git &lt; 2.46) |
+| t1303-write-readonly.sh | write paths, subsection escaping, round-trip after edit | `grit-lib/tests/config_write.rs` (`subsection_backslash_in_name`, `grit_edited_repo_config_git_status_and_reread`) | partial (readonly-file cases N/A) |
+| t1300 | config read (whitespace, escapes, continuations, bare keys, subsections); oracle vs `git config --file` | `grit-lib/tests/config_parse.rs` (`t1300_values_match_git_config_get`) | covered (read subset) |
+| t1303 | wacky config (BOM, CRLF, long lines) | `grit-lib/tests/config_parse.rs` (`t1303_wacky_files_match_git`) | covered |
+| t1305 | `[include]` / `[includeIf]` and `--show-origin` | `grit-lib/tests/config_includes.rs` (`t1305_include_and_includeif_match_git_show_origin`) | covered |
+| t1308 | config set precedence (system/global/local/command) | `grit-lib/tests/config_parse.rs` (`t1308_config_set_precedence_matches_git`) | covered |
+| t1309 | early config / protected / ceiling (read order) | `grit-lib/tests/config_includes.rs` (`read_early_config_matches_git_layers`, `load_protected_skips_repo_config`) | partial |
+| t1310 | defaults, urlmatch, typed getters | `grit-lib/tests/config_parse.rs` (`t1310_config_default_and_urlmatch`, `typed_getters_match_git_config_type`) | covered |
+| t1311 | optional includes / missing targets | `grit-lib/tests/config_includes.rs` (`optional_include_git_parity`, `missing_include_is_ignored`) | covered |
+| t0003-attributes.sh | setup corpus: worktree, `--cached`, `--source` (tag-1/tag-2) vs `collect_attrs_for_path` | `grit-lib/tests/attributes_rules.rs` (`t0003_attrs_match_git_check_attr_worktree_cached_and_source`) | covered |
+| t0003-attributes.sh | `[attr]` macros only at repo root / `info/attributes` | `attributes_rules.rs` (`t0003_macro_rules_only_top_level`) | covered |
+| t0003-attributes.sh | `binary` macro, negative/`!` patterns, `**` globbing, `core.ignorecase` | `attributes_rules.rs` (`t0003_binary_macro_expansion_matches_git`, `t0003_negative_pattern_emits_warning`, `t0003_escaped_bang_pattern_matches_git`, `t0003_doublestar_patterns_match_git`, `t0003_ignorecase_worktree_matches_git`) | covered |
+| t0003-attributes.sh | `info/attributes` precedence, overlong lines, quoted paths | `attributes_rules.rs` (`t0003_info_attributes_precedence_over_root`, `t0003_overlong_line_skipped_with_warning`, `t0003_quote_path_for_check_attr_matches_git`) | covered |
+| t0003-attributes.sh | `builtin_objectmode` / invalid `builtin_*` names | `attributes_rules.rs` (`t0003_builtin_objectmode_*`, `t0003_validate_rules_for_add_rejects_bad_builtin_names`, `t0003_is_reserved_builtin_name`) | partial (skip when system git lacks `builtin_objectmode` in check-attr) |
+| t0003-attributes.sh | command-line / stdin UX, symlink `.gitattributes`, 101 MiB files | — | skipped (UX-only or `EXPENSIVE`; optional `GRIT_RUN_EXPENSIVE_ATTR_TESTS`) |
+| t0003-attributes.sh | bare repo default / `attr.tree` / bad `--attr-source` messages | — | follow-up (library loaders exist; extend `attributes_rules.rs`) |
+| t0610-reftable-basics.sh | stack open/read, git↔grit ref and reflog read, grit writes + git fsck/refs verify, stack lock and update index | `grit-lib/tests/reftable_stack_interop.rs` (`git_written_reftable_read_by_grit`, `grit_written_reftable_passes_git_fsck_and_refs_verify`, `stack_tables_list_and_update_index_mechanics`, `interleaved_git_and_grit_writers_keep_update_index_monotonic`, `compaction_output_readable_by_git`, `concurrent_grit_writers_serialize_and_preserve_updates`) | covered (skip when git < 2.45 locally) |
+| t0614-verify.sh | `git refs verify` on grit-written reftable stacks | `reftable_stack_interop.rs` (`grit_written_reftable_passes_git_fsck_and_refs_verify`, `concurrent_grit_writers_serialize_and_preserve_updates`) | covered when git provides `refs verify` |
+| t1460-refs-migrate.sh | files → reftable migration command | — | skipped: no migration CLI/API in scope |
+| t0612 (JGit interop) | JGit reftable quirks | — | skipped: JGit not in scope |
 
-Detailed rows for this area are filled in as steps 2–12 of the refs/config plan land; see also the ODB/pack mapping below.
+Detailed rows for remaining t1405 cases and other plan steps are filled in as later work lands; see also the ODB/pack mapping below.
 
 ### Upstream test mapping
 
@@ -165,6 +216,12 @@ Detailed rows for this area are filled in as steps 2–12 of the refs/config pla
 | `t/t5319-multi-pack-index.sh` | Grit/git MIDX write and verify; preferred pack and RIDX; duplicate OID selection; large offsets (LOFF); stale MIDX after pack changes; `verify_midx` corruption diagnostics | `grit-lib/tests/midx_roundtrip.rs`, `grit-lib/tests/midx_corruption.rs`, `grit-lib/tests/midx_write_coverage.rs` | covered (skip Git MIDX v2 verify on older Git; bitmap UX cases skipped) |
 | `t/t5334-incremental-multi-pack-index.sh` | Incremental chain layers; `resolve_midx_layer_path`; reads through `PreparedMidxChain`; convert to non-incremental via rewrite | `grit-lib/tests/midx_roundtrip.rs` (`incremental_chain_layer_paths_and_reads`; compact/chain tests skip when `git multi-pack-index --incremental` unavailable) | partial (bitmap/rev-list UX skipped) |
 | `t/t5335-compact-multi-pack-index.sh` | `compact_multi_pack_index` success path and `CompactError` variants | `grit-lib/tests/midx_roundtrip.rs` (`compact_multi_pack_index_builds_verified_chain`, `compact_error_variants`) | partial (skips when incremental chain unavailable) |
+| `t/unit-tests/u-reftable-record.c` | Ref/log record encode-decode, prefix compression | `grit-lib/tests/reftable_format.rs` (`ref_records_*`, `prefix_compression_*`, `log_*`) | covered |
+| `t/unit-tests/u-reftable-block.c` | Block layout, restart points, padding | `grit-lib/tests/reftable_format.rs` (`block_size_*`, `restart_interval_*`, `unpadded_*`) | covered |
+| `t/unit-tests/u-reftable-readwrite.c` | Writer/reader round-trip, index lookups | `grit-lib/tests/reftable_format.rs` (`index_block_lookups_find_every_ref`, `random_ref_and_log_sets_round_trip`) | covered |
+| `t/unit-tests/u-reftable-table.c` | Table footer, CRC, corruption | `grit-lib/tests/reftable_format.rs` (`corruption_*`, `every_truncation_is_typed_error_no_panic`) | covered |
+| `t/unit-tests/u-reftable-basics.c` | Empty table, update-index bounds, dump blocks | `grit-lib/tests/reftable_format.rs` (`empty_table_*`, `dump_reftable_blocks_stable_structure`) | covered |
+| `t0613-reftable-write-options.sh` | Config-driven block size, restart interval, indexObjects | `grit-lib/tests/reftable_format.rs` (`write_options_block_size_and_restart_interval_applied`) | covered (geometricFactor parsed; stack compaction in later step) |
 
 ### Documentation site and rustdoc jobs
 

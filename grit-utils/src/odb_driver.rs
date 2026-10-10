@@ -6,10 +6,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{diff_trees, unified_diff_with_prefix, DiffStatus};
+use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
-use grit_lib::pack::{
-    read_local_pack_indexes_cached, read_object_from_pack_at_offset, read_pack_index, PackIndex,
-};
+use grit_lib::pack::{read_object_from_pack_at_offset, read_pack_index_cached, PackIndex};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions, RevListResult};
 
@@ -31,13 +30,48 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
     })
 }
 
+/// Read hex object ids from stdin and emit `git cat-file --batch-check` lines.
+pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout().lock();
+    for line in stdin.lock().lines() {
+        let line = line.context("read oid line")?;
+        let hex = line.trim();
+        if hex.is_empty() {
+            continue;
+        }
+        let oid = ObjectId::from_hex(hex).with_context(|| format!("parse oid {hex}"))?;
+        match repo.odb.read_info(&oid) {
+            Ok(info) => {
+                writeln!(stdout, "{oid} {} {}", info.kind.as_str(), info.size)?;
+            }
+            Err(Error::ObjectNotFound(_)) => {
+                writeln!(stdout, "{oid} missing")?;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
 /// Emit every packed object in pack-file offset order (like `cat-file --batch-all-objects --unordered`).
 pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
     let objects_dir = repo.odb.objects_dir();
     repo.odb.with_pack_read_context(|| {
+        let pack_dir = objects_dir.join("pack");
         let mut stdout = BufWriter::with_capacity(1 << 20, io::stdout().lock());
-        let indexes = read_local_pack_indexes_cached(objects_dir)?;
-        for idx in indexes {
+        if !pack_dir.is_dir() {
+            return Ok(());
+        }
+        let mut idx_paths: Vec<_> = std::fs::read_dir(&pack_dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "idx"))
+            .collect();
+        idx_paths.sort();
+        for idx_path in idx_paths {
+            let idx = read_pack_index_cached(&idx_path)
+                .with_context(|| format!("read {}", idx_path.display()))?;
             emit_pack_in_offset_order(&mut stdout, idx.as_ref())?;
         }
         stdout.flush()?;
@@ -46,12 +80,13 @@ pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
 }
 
 fn emit_pack_in_offset_order(out: &mut impl Write, idx: &PackIndex) -> Result<()> {
-    let mut order: Vec<_> = idx.iter().collect();
-    order.sort_by_key(|e| e.offset());
-    for entry in order {
-        let oid = ObjectId::from_bytes(entry.oid()).context("pack entry oid")?;
-        let object = read_object_from_pack_at_offset(idx, entry.offset())
-            .with_context(|| format!("read packed object at offset {}", entry.offset()))?;
+    let mut order: Vec<usize> = (0..idx.len()).collect();
+    order.sort_by_key(|&i| idx.offset_at(i));
+    for i in order {
+        let offset = idx.offset_at(i);
+        let oid = ObjectId::from_bytes(idx.oid_at(i)).context("pack entry oid")?;
+        let object = read_object_from_pack_at_offset(idx, offset)
+            .with_context(|| format!("read packed object at offset {offset}"))?;
         write_batch_object_body(out, &oid, &object)?;
     }
     Ok(())
@@ -282,7 +317,7 @@ fn collect_hex_ids_for_abbrev(repo: &Repository) -> Result<Vec<String>> {
         for entry in std::fs::read_dir(&pack_dir)? {
             let path = entry?.path();
             if path.extension().is_some_and(|e| e == "idx") {
-                let idx = read_pack_index(&path)?;
+                let idx = read_pack_index_cached(&path)?;
                 for ent in idx.iter() {
                     ids.push(
                         ObjectId::from_bytes(ent.oid())

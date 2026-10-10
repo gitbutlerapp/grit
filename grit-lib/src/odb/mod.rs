@@ -17,32 +17,52 @@
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
 
+pub mod store;
+
+pub(crate) use store::loose::{
+    build_store_bytes, decompress_zlib_loose_bytes, for_each_loose_object_id,
+    loose_store_bytes_header_valid, parse_object_bytes, read_loose_object_info,
+    read_zlib_loose_payload, zlib_compress_store_bytes,
+};
+pub use store::LooseStore;
+pub use store::{CompositeStore, FilesSource, ObjectStream};
+use store::{MemoryStore, ObjectStore, WritableObjectStore};
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::hash::{Hash, Hasher};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::ConfigSet;
 use crate::diagnostics::NullDiagnostics;
 use crate::error::{Error, Result};
 use crate::hash;
-use crate::midx::{
-    midx_oid_listed_in_tip, try_read_info_via_midx_with_diagnostics,
-    try_read_object_via_midx_with_diagnostics, validate_midx_referenced_packs_with_diagnostics,
-};
+use crate::midx::validate_midx_referenced_packs_with_diagnostics;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use crate::pack;
 use crate::pack_store::PackStore;
-use crate::zlib_inflate::ZlibInflateScratch;
-use flate2::read::ZlibDecoder;
-use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
-type MemOdbOverlay = Arc<Mutex<Option<std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>>>>;
+type MemOdbOverlayStore = Arc<RwLock<Option<Arc<MemoryStore>>>>;
+
+/// Cached alternate [`CompositeStore`] keyed by file/env/submodule alternate state.
+struct AlternateSourcesCache {
+    file_generation: u64,
+    env_fingerprint: u64,
+    submodule_generation: u64,
+    sources: Option<Arc<CompositeStore>>,
+}
+
+struct AlternateSourcesKey {
+    file_generation: u64,
+    env_fingerprint: u64,
+    submodule_generation: u64,
+}
 
 /// Cached `info/alternates` chain for one [`Odb`] (generation bumps on invalidation/reload).
 struct FileAlternatesCache {
@@ -66,21 +86,12 @@ pub struct WriteOptions {
     pub trust_new_loose: bool,
 }
 
-/// Decompress a zlib-wrapped loose object payload from an open file.
-///
-/// When the zlib wrapper advertises a preset dictionary (FDICT), `flate2` typically fails with a
-/// generic corrupt-stream error; map that to `"needs dictionary"` so callers match Git's messages
-/// (`t1006-cat-file` zlib-dictionary test).
-fn read_zlib_loose_payload(file: fs::File) -> Result<Vec<u8>> {
-    let mut hdr = [0u8; 2];
-    let mut read_file = file;
-    read_file.read_exact(&mut hdr).map_err(Error::Io)?;
-    let cmf_flg = u16::from(hdr[0]) << 8 | u16::from(hdr[1]);
-    let looks_like_zlib_header = cmf_flg != 0 && cmf_flg % 31 == 0;
-    let preset_dictionary = looks_like_zlib_header && (hdr[1] & 0x20) != 0;
-    let mut scratch = ZlibInflateScratch::default();
-    scratch.decompress_loose_payload(&hdr, read_file, preset_dictionary)
-}
+/// [`WriteOptions`] for parallel staging of new worktree blobs (bulk `git add`).
+pub const BULK_NEW_LOOSE_WRITE: WriteOptions = WriteOptions {
+    assume_loose_only_existence: true,
+    trust_new_loose: true,
+    silent: false,
+};
 
 /// True when `oid` is stored as a loose object or in a **non-promisor** local pack.
 ///
@@ -88,20 +99,7 @@ fn read_zlib_loose_payload(file: fs::File) -> Result<Vec<u8>> {
 /// avoid a per-probe loose `stat` on the hot path. A non-promisor pack hit already
 /// implies the object is materialized locally, including when a loose copy also exists.
 fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> bool {
-    if object_in_local_packs(objects_dir, oid) {
-        return true;
-    }
-    if oid.loose_path_in(objects_dir).is_file() {
-        return true;
-    }
-    if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true) {
-        return object_in_local_packs(objects_dir, oid);
-    }
-    false
-}
-
-fn objects_dir_has_active_midx(objects_dir: &Path) -> bool {
-    matches!(crate::midx::prepared_midx_chain(objects_dir), Ok(Some(_)))
+    store::local_object_materialized(objects_dir, oid)
 }
 
 fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
@@ -112,34 +110,6 @@ fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
     entries
         .filter_map(|e| e.ok())
         .any(|ent| ent.path().extension().is_some_and(|ext| ext == "idx"))
-}
-
-fn object_in_local_packs(objects_dir: &Path, oid: &ObjectId) -> bool {
-    object_in_local_packs_filtered(objects_dir, oid, false)
-}
-
-/// Pack membership for [`Odb::exists`] / [`Odb::read`], including promisor-marked packs.
-fn object_in_local_packs_including_promisor(objects_dir: &Path, oid: &ObjectId) -> bool {
-    object_in_local_packs_filtered(objects_dir, oid, true)
-}
-
-fn object_in_local_packs_filtered(
-    objects_dir: &Path,
-    oid: &ObjectId,
-    include_promisor: bool,
-) -> bool {
-    let Ok(indexes) = pack::read_local_pack_indexes_cached(objects_dir) else {
-        return false;
-    };
-    for idx in &indexes {
-        if !include_promisor && idx.is_promisor {
-            continue;
-        }
-        if idx.contains(oid) {
-            return true;
-        }
-    }
-    false
 }
 
 /// A loose-object database rooted at a given `objects/` directory.
@@ -174,9 +144,13 @@ pub struct Odb {
     /// persisted to the loose store (Git's tmp-objdir). Reads consult the overlay first. This
     /// mirrors `git merge-tree --quiet`, which performs a full merge but must leave the object
     /// database untouched (no new loose objects).
-    mem_overlay: MemOdbOverlay,
+    mem_overlay: MemOdbOverlayStore,
     /// Whether [`Self::enable_mem_overlay`] activated the in-memory overlay (avoids locking on reads).
     mem_overlay_active: Arc<AtomicBool>,
+    /// Lazily built [`FilesSource`] for [`Self::objects_dir`].
+    primary_source: Arc<RwLock<Option<Arc<FilesSource>>>>,
+    /// Alternate object dirs as a [`CompositeStore`] (generation-bumped with file alternates).
+    alternate_sources_cache: Arc<RwLock<AlternateSourcesCache>>,
     /// Whether MIDX pack validation has run for this [`Odb`] (Git warns once per process).
     midx_packs_validated: Arc<OnceLock<()>>,
     /// The repository's object hash algorithm (`extensions.objectformat`),
@@ -200,6 +174,8 @@ pub struct Odb {
     pack_store: Arc<PackStore>,
     /// Cached [`PackStore`] handles for alternate object directories (lazy).
     alternate_pack_stores: Arc<Mutex<HashMap<PathBuf, Arc<PackStore>>>>,
+    /// Bumps when [`Self::register_submodule_object_directories_from_index`] repopulates submodule sources.
+    submodule_sources_generation: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Odb {
@@ -260,8 +236,15 @@ impl Odb {
             })),
             env_alternate_dirs: Vec::new(),
             env_alternate_lazy: Arc::new(OnceLock::new()),
-            mem_overlay: Arc::new(Mutex::new(None)),
+            mem_overlay: Arc::new(RwLock::new(None)),
             mem_overlay_active: Arc::new(AtomicBool::new(false)),
+            primary_source: Arc::new(RwLock::new(None)),
+            alternate_sources_cache: Arc::new(RwLock::new(AlternateSourcesCache {
+                file_generation: 0,
+                env_fingerprint: 0,
+                submodule_generation: 0,
+                sources: None,
+            })),
             midx_packs_validated: Arc::new(OnceLock::new()),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
@@ -272,6 +255,7 @@ impl Odb {
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
+            submodule_sources_generation: Arc::new(AtomicU64::new(0)),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -298,8 +282,15 @@ impl Odb {
             })),
             env_alternate_dirs: Vec::new(),
             env_alternate_lazy: Arc::new(OnceLock::new()),
-            mem_overlay: Arc::new(Mutex::new(None)),
+            mem_overlay: Arc::new(RwLock::new(None)),
             mem_overlay_active: Arc::new(AtomicBool::new(false)),
+            primary_source: Arc::new(RwLock::new(None)),
+            alternate_sources_cache: Arc::new(RwLock::new(AlternateSourcesCache {
+                file_generation: 0,
+                env_fingerprint: 0,
+                submodule_generation: 0,
+                sources: None,
+            })),
             midx_packs_validated: Arc::new(OnceLock::new()),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
@@ -310,6 +301,7 @@ impl Odb {
             freshened_packs: Arc::new(Mutex::new(HashSet::new())),
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
+            submodule_sources_generation: Arc::new(AtomicU64::new(0)),
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -419,7 +411,34 @@ impl Odb {
     #[must_use]
     pub fn with_env_alternate_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
         self.env_alternate_dirs = dirs;
+        self.clear_alternate_sources_cache();
         self
+    }
+
+    fn clear_alternate_sources_cache(&self) {
+        if let Ok(mut guard) = self.alternate_sources_cache.write() {
+            guard.sources = None;
+        }
+    }
+
+    fn alternate_sources_key(&self) -> AlternateSourcesKey {
+        AlternateSourcesKey {
+            file_generation: self
+                .file_alternate_dirs_cache
+                .read()
+                .map(|g| g.generation)
+                .unwrap_or(0),
+            env_fingerprint: self.env_alternate_fingerprint(),
+            submodule_generation: self.submodule_sources_generation.load(Ordering::Relaxed),
+        }
+    }
+
+    fn env_alternate_fingerprint(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for path in self.env_alternate_dirs_snapshot().iter() {
+            path.hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Drop the cached `info/alternates` chain so the next lookup re-reads the file.
@@ -428,6 +447,7 @@ impl Odb {
             guard.generation = guard.generation.wrapping_add(1);
             guard.snapshot = None;
         }
+        self.clear_alternate_sources_cache();
     }
 
     /// Reload `info/alternates` from disk into this [`Odb`]'s cache (used after external writes).
@@ -441,6 +461,7 @@ impl Odb {
             guard.generation = guard.generation.wrapping_add(1);
             guard.snapshot = Some(snapshot);
         }
+        self.clear_alternate_sources_cache();
         Ok(())
     }
 
@@ -534,61 +555,168 @@ impl Odb {
     /// without persisting any new loose objects.
     pub fn enable_mem_overlay(&self) {
         self.mem_overlay_active.store(true, Ordering::Release);
-        if let Ok(mut guard) = self.mem_overlay.lock() {
-            *guard = Some(std::collections::HashMap::new());
+        if let Ok(mut guard) = self.mem_overlay.write() {
+            *guard = Some(Arc::new(MemoryStore::new(self.hash_algo())));
         }
     }
 
     /// Disable the in-memory write overlay, discarding any objects accumulated in it.
     pub fn disable_mem_overlay(&self) {
         self.mem_overlay_active.store(false, Ordering::Release);
-        if let Ok(mut guard) = self.mem_overlay.lock() {
+        if let Ok(mut guard) = self.mem_overlay.write() {
             *guard = None;
         }
     }
 
     /// Whether the in-memory write overlay is currently enabled.
     fn overlay_active(&self) -> bool {
-        self.mem_overlay.lock().is_ok_and(|g| g.is_some())
+        self.mem_overlay
+            .read()
+            .ok()
+            .and_then(|g| g.as_ref().map(|_| ()))
+            .is_some()
+    }
+
+    fn overlay_store(&self) -> Option<Arc<MemoryStore>> {
+        if !self.mem_overlay_active.load(Ordering::Acquire) {
+            return None;
+        }
+        self.mem_overlay.read().ok().and_then(|g| g.clone())
     }
 
     /// Number of objects stored in the active mem overlay (tests only).
     #[cfg(test)]
     pub(crate) fn mem_overlay_len_for_tests(&self) -> Option<usize> {
-        self.mem_overlay
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(std::collections::HashMap::len))
+        let store = self.overlay_store()?;
+        let mut count = 0usize;
+        store
+            .for_each_object(&mut |_| {
+                count += 1;
+                ControlFlow::Continue(())
+            })
+            .ok()?;
+        Some(count)
     }
 
     /// If the in-memory overlay is active, store `(kind, data)` under `oid` there and return
     /// `true`; otherwise return `false` so the caller falls through to the on-disk path.
-    fn overlay_store(&self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> bool {
-        if let Ok(mut guard) = self.mem_overlay.lock() {
-            if let Some(map) = guard.as_mut() {
-                map.entry(oid).or_insert_with(|| (kind, data.to_vec()));
-                return true;
-            }
-        }
-        false
+    fn overlay_store_object(&self, oid: ObjectId, kind: ObjectKind, data: &[u8]) -> bool {
+        let Some(store) = self.overlay_store() else {
+            return false;
+        };
+        store.insert_object(oid, kind, Arc::from(data.to_owned()));
+        true
     }
 
     /// Read `oid` from the in-memory overlay, if active and present.
     fn overlay_read(&self, oid: &ObjectId) -> Option<Object> {
-        if !self.mem_overlay_active.load(Ordering::Acquire) {
-            return None;
+        let store = self.overlay_store()?;
+        store.read(oid).ok().flatten()
+    }
+
+    /// Primary on-disk object source for this repository's `objects/` directory.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures while opening pack, MIDX, or loose backends.
+    pub fn primary(&self) -> Result<Arc<FilesSource>> {
+        if let Ok(guard) = self.primary_source.read() {
+            if let Some(src) = guard.as_ref() {
+                return Ok(Arc::clone(src));
+            }
         }
-        if let Ok(guard) = self.mem_overlay.lock() {
-            if let Some(map) = guard.as_ref() {
-                if let Some((kind, data)) = map.get(oid) {
-                    return Some(Object {
-                        kind: *kind,
-                        data: data.clone(),
-                    });
+        let src = self.build_files_source(
+            &self.objects_dir,
+            self.multi_pack_index_reads_enabled(),
+            self.midx_tip_listing_enabled(),
+        )?;
+        if let Ok(mut guard) = self.primary_source.write() {
+            *guard = Some(Arc::clone(&src));
+        }
+        Ok(src)
+    }
+
+    /// Whether any alternate object directory is configured for this database.
+    #[must_use]
+    fn alternate_object_lookup_needed(&self) -> bool {
+        if !self.file_alternate_dirs_snapshot().is_empty() {
+            return true;
+        }
+        if !self.env_alternate_dirs_snapshot().is_empty() {
+            return true;
+        }
+        self.submodule_alternate_dirs
+            .lock()
+            .ok()
+            .is_some_and(|guard| !guard.is_empty())
+    }
+
+    /// Alternate object directories (`info/alternates`, env, submodules) as one composite store.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures while opening any alternate files source.
+    pub fn sources(&self) -> Result<Arc<CompositeStore>> {
+        let key = self.alternate_sources_key();
+        if let Ok(guard) = self.alternate_sources_cache.read() {
+            if guard.file_generation == key.file_generation
+                && guard.env_fingerprint == key.env_fingerprint
+                && guard.submodule_generation == key.submodule_generation
+            {
+                if let Some(sources) = guard.sources.as_ref() {
+                    return Ok(Arc::clone(sources));
                 }
             }
         }
-        None
+        let use_midx = self.multi_pack_index_reads_enabled();
+        let midx_tip = self.midx_tip_listing_enabled();
+        let mut stores: Vec<Arc<dyn ObjectStore>> = Vec::new();
+        for alt_dir in self.file_alternate_dirs_snapshot().iter() {
+            stores.push(self.build_files_source(alt_dir, use_midx, midx_tip)?);
+        }
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            stores.push(self.build_files_source(alt_dir, use_midx, midx_tip)?);
+        }
+        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
+            for alt_dir in guard.iter() {
+                stores.push(self.build_files_source(alt_dir, false, false)?);
+            }
+        }
+        let composite = Arc::new(CompositeStore::new(stores, self.hash_algo()));
+        if let Ok(mut guard) = self.alternate_sources_cache.write() {
+            guard.file_generation = key.file_generation;
+            guard.env_fingerprint = key.env_fingerprint;
+            guard.submodule_generation = key.submodule_generation;
+            guard.sources = Some(Arc::clone(&composite));
+        }
+        Ok(composite)
+    }
+
+    fn midx_tip_listing_enabled(&self) -> bool {
+        self.config_git_dir.is_some() && self.core_multi_pack_index_enabled()
+    }
+
+    fn build_files_source(
+        &self,
+        objects_dir: &Path,
+        use_midx: bool,
+        midx_tip_listing_for_exists: bool,
+    ) -> Result<Arc<FilesSource>> {
+        let loose = self.loose_at(objects_dir)?;
+        let pack_store = self.pack_store_for(objects_dir);
+        let diagnostics = if objects_dir == self.objects_dir.as_path() {
+            self.diagnostics_handle()
+        } else {
+            Arc::new(NullDiagnostics)
+        };
+        FilesSource::open(
+            pack_store,
+            loose,
+            use_midx,
+            midx_tip_listing_for_exists,
+            diagnostics,
+        )
+        .map(Arc::new)
     }
 
     /// Register `<submodule-git-dir>/objects` for every stage-0 gitlink in `index` that has a
@@ -623,6 +751,9 @@ impl Odb {
                 dirs.push(canon);
             }
         }
+        self.submodule_sources_generation
+            .fetch_add(1, Ordering::Relaxed);
+        self.clear_alternate_sources_cache();
     }
 
     /// Attach a git directory so [`Self::read`] can honor `core.multiPackIndex` when resolving packed objects.
@@ -815,56 +946,24 @@ impl Odb {
         if oid.is_well_known_empty_tree() {
             return true;
         }
-        if self.exists_in_dir(&self.objects_dir, oid) {
+        if self.overlay_read(oid).is_some() {
             return true;
         }
-        let file_alts = self.file_alternate_dirs_snapshot();
-        for alt_dir in file_alts.iter() {
-            if self.exists_in_dir(alt_dir, oid) {
-                return true;
-            }
-        }
-        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
-            if self.exists_in_dir(alt_dir, oid) {
-                return true;
-            }
-        }
-        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
-            for alt_dir in guard.iter() {
-                if self.exists_in_dir(alt_dir, oid) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// Check whether an object exists in a specific objects directory.
-    fn exists_in_dir(&self, objects_dir: &Path, oid: &ObjectId) -> bool {
-        if oid.loose_path_in(objects_dir).is_file() {
+        if self
+            .primary()
+            .ok()
+            .and_then(|primary| primary.contains(oid).ok())
+            == Some(true)
+        {
             return true;
         }
-        self.with_pack_store_for(objects_dir, || {
-            if object_in_local_packs_including_promisor(objects_dir, oid) {
-                return true;
-            }
-            if pack::reprepare_pack_directory_on_miss(objects_dir).ok() == Some(true)
-                && object_in_local_packs_including_promisor(objects_dir, oid)
-            {
-                return true;
-            }
-            if objects_dir == self.objects_dir.as_path()
-                && self.config_git_dir.is_some()
-                && self.core_multi_pack_index_enabled()
-            {
-                match midx_oid_listed_in_tip(objects_dir, oid) {
-                    Ok(Some(true)) => return true,
-                    Ok(Some(false)) | Ok(None) => {}
-                    Err(_) => return false,
-                }
-            }
-            false
-        })
+        if !self.alternate_object_lookup_needed() {
+            return false;
+        }
+        self.sources()
+            .ok()
+            .and_then(|sources| sources.contains(oid).ok())
+            == Some(true)
     }
 
     /// Run `f` with this [`Odb`]'s [`PackStore`] for `objects_dir` (primary or alternate).
@@ -879,10 +978,6 @@ impl Odb {
     /// reinstall thread-local pack context.
     pub fn with_pack_read_context<R>(&self, f: impl FnOnce() -> R) -> R {
         self.with_pack_store_for(&self.objects_dir, f)
-    }
-
-    fn read_primary_in_objects_dir(&self, oid: &ObjectId, use_midx: bool) -> Result<Object> {
-        self.read_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
     }
 
     /// Touch the loose object file or pack file containing `oid`, matching Git's
@@ -973,9 +1068,12 @@ impl Odb {
     /// When `oid` is already reachable, freshen it and return its id. Returns `None` when the
     /// object lives only in a pack and freshening failed so the caller can materialize a loose copy.
     fn try_freshen_existing(&self, oid: &ObjectId) -> Option<ObjectId> {
-        if self.object_path(oid).is_file() {
-            let _ = self.freshen_object(oid);
-            return Some(*oid);
+        if let Ok(primary) = self.primary() {
+            if let Ok(Some(existing)) =
+                primary.try_finish_duplicate_write(oid, WriteOptions::default())
+            {
+                return Some(existing);
+            }
         }
         if !self.exists(oid) {
             return None;
@@ -987,17 +1085,17 @@ impl Odb {
     }
 
     fn try_freshen_existing_local(&self, oid: &ObjectId) -> Option<ObjectId> {
-        if self.object_path(oid).is_file() {
-            let _ = self.freshen_object(oid);
-            return Some(*oid);
-        }
-        if self.with_pack_store_for(&self.objects_dir, || {
-            exists_materialized_in_objects_dir(&self.objects_dir, oid)
-        }) && self.freshen_object(oid)
-        {
-            return Some(*oid);
-        }
-        None
+        let primary = self.primary().ok()?;
+        primary
+            .try_finish_duplicate_write(
+                oid,
+                WriteOptions {
+                    assume_loose_only_existence: true,
+                    ..WriteOptions::default()
+                },
+            )
+            .ok()
+            .flatten()
     }
 
     /// Read a loose object file at `path`, verifying the uncompressed payload hashes to `expected_oid`.
@@ -1011,19 +1109,23 @@ impl Odb {
     /// - [`Error::CorruptObject`] — header is malformed.
     /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_loose_verify_oid(path: &Path, expected_oid: &ObjectId) -> Result<Object> {
-        let file = fs::File::open(path).map_err(Error::Io)?;
-        let raw = read_zlib_loose_payload(file)?;
-        let obj = parse_object_bytes_with_oid(&raw, expected_oid)?;
-        // Verify against the expected OID using its own hash algorithm; a SHA-256
-        // loose object must be re-hashed with SHA-256, not SHA-1.
-        let computed = hash_object_data_with(expected_oid.algo(), obj.kind, &obj.data);
-        if computed != *expected_oid {
-            return Err(Error::LooseHashMismatch {
-                path: path.display().to_string(),
-                real_oid: computed.to_hex(),
-            });
-        }
-        Ok(obj)
+        LooseStore::read_verify_oid(path, expected_oid)
+    }
+
+    fn local_loose(&self) -> Result<LooseStore> {
+        Ok(LooseStore::new(
+            self.objects_dir.clone(),
+            self.hash_algo(),
+            self.loose_compression()?,
+        ))
+    }
+
+    fn loose_at(&self, objects_dir: &Path) -> Result<LooseStore> {
+        Ok(LooseStore::new(
+            objects_dir.to_path_buf(),
+            self.hash_algo(),
+            self.loose_compression()?,
+        ))
     }
 
     /// Read and decompress an object from the loose store.
@@ -1035,14 +1137,12 @@ impl Odb {
     /// - [`Error::CorruptObject`] — header is malformed.
     pub fn read(&self, oid: &ObjectId) -> Result<Object> {
         if oid.is_well_known_empty_tree() {
-            return Ok(crate::objects::Object {
-                kind: crate::objects::ObjectKind::Tree,
+            return Ok(Object {
+                kind: ObjectKind::Tree,
                 data: Vec::new(),
             });
         }
 
-        // Objects written under an active in-memory overlay never hit disk, so they must be
-        // resolved here before any loose/pack lookup.
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(obj);
         }
@@ -1054,48 +1154,26 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
+        let primary = self.primary()?;
         let mut unreadable_local_loose = None;
-        let read_primary = || self.read_primary_in_objects_dir(oid, use_midx);
+        let read_primary = || primary.read(oid);
         match if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
             read_primary()
         } else {
             self.with_pack_store_for(&self.objects_dir, read_primary)
         } {
-            Ok(obj) => return Ok(obj),
-            Err(Error::ObjectNotFound(_)) => {}
-            Err(err) if local_loose_unreadable_try_alternates(&self.objects_dir, oid, &err) => {
+            Ok(Some(obj)) => return Ok(obj),
+            Ok(None) => {}
+            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
                 unreadable_local_loose = Some(err);
             }
             Err(err) => return Err(err),
         }
 
-        let midx_alt = use_midx;
-
-        let file_alts = self.file_alternate_dirs_snapshot();
-        for alt_dir in file_alts.iter() {
-            if let Ok(obj) =
-                self.with_pack_store_for(alt_dir, || self.read_from_dir(alt_dir, oid, midx_alt))
-            {
-                return Ok(obj);
-            }
-        }
-
-        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
-            if let Ok(obj) =
-                self.with_pack_store_for(alt_dir, || self.read_from_dir(alt_dir, oid, midx_alt))
-            {
-                return Ok(obj);
-            }
-        }
-
-        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
-            for alt_dir in guard.iter() {
-                if let Ok(obj) =
-                    self.with_pack_store_for(alt_dir, || self.read_from_dir(alt_dir, oid, false))
-                {
-                    return Ok(obj);
-                }
-            }
+        match self.sources()?.read(oid) {
+            Ok(Some(obj)) => return Ok(obj),
+            Ok(None) => {}
+            Err(err) => return Err(err),
         }
 
         if let Some(err) = unreadable_local_loose {
@@ -1137,45 +1215,21 @@ impl Odb {
             self.ensure_midx_prepared();
         }
 
+        let primary = self.primary()?;
         let mut unreadable_local_loose = None;
-        match self.with_pack_store_for(&self.objects_dir, || {
-            self.read_info_in_objects_dir(&self.objects_dir, oid, self.hash_algo(), use_midx)
-        }) {
-            Ok(info) => return Ok(info),
-            Err(Error::ObjectNotFound(_)) => {}
-            Err(err) if local_loose_unreadable_try_alternates(&self.objects_dir, oid, &err) => {
+        match primary.read_info(oid) {
+            Ok(Some(info)) => return Ok(info),
+            Ok(None) => {}
+            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
                 unreadable_local_loose = Some(err);
             }
             Err(err) => return Err(err),
         }
 
-        let midx_alt = use_midx;
-
-        let file_alts = self.file_alternate_dirs_snapshot();
-        for alt_dir in file_alts.iter() {
-            if let Ok(info) = self
-                .with_pack_store_for(alt_dir, || self.read_info_from_dir(alt_dir, oid, midx_alt))
-            {
-                return Ok(info);
-            }
-        }
-
-        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
-            if let Ok(info) = self
-                .with_pack_store_for(alt_dir, || self.read_info_from_dir(alt_dir, oid, midx_alt))
-            {
-                return Ok(info);
-            }
-        }
-
-        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
-            for alt_dir in guard.iter() {
-                if let Ok(info) = self
-                    .with_pack_store_for(alt_dir, || self.read_info_from_dir(alt_dir, oid, false))
-                {
-                    return Ok(info);
-                }
-            }
+        match self.sources()?.read_info(oid) {
+            Ok(Some(info)) => return Ok(info),
+            Ok(None) => {}
+            Err(err) => return Err(err),
         }
 
         if let Some(err) = unreadable_local_loose {
@@ -1185,190 +1239,111 @@ impl Odb {
         Err(Error::ObjectNotFound(oid.to_hex()))
     }
 
-    /// Try to read an object from a specific objects directory (pack-first, matching [`Self::read`]).
-    fn read_from_dir(&self, objects_dir: &Path, oid: &ObjectId, use_midx: bool) -> Result<Object> {
-        self.read_in_objects_dir(
-            objects_dir,
-            oid,
-            hash_algo_for_objects_dir(self.config_environment(), objects_dir),
-            use_midx,
-        )
-    }
-
-    fn read_info_from_dir(
-        &self,
-        objects_dir: &Path,
-        oid: &ObjectId,
-        use_midx: bool,
-    ) -> Result<ObjectInfo> {
-        self.read_info_in_objects_dir(
-            objects_dir,
-            oid,
-            hash_algo_for_objects_dir(self.config_environment(), objects_dir),
-            use_midx,
-        )
-    }
-
-    fn read_in_objects_dir(
-        &self,
-        objects_dir: &Path,
-        oid: &ObjectId,
-        hash_algo: HashAlgo,
-        use_midx: bool,
-    ) -> Result<Object> {
-        match self.try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
-            Ok(obj) => Ok(obj),
-            Err(Error::ObjectNotFound(_)) => {
-                if pack::reprepare_pack_directory_on_miss(objects_dir)? {
-                    self.try_read_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
-                } else {
-                    Err(Error::ObjectNotFound(oid.to_hex()))
-                }
-            }
-            Err(err) => Err(err),
+    /// Open a stream over `oid`'s uncompressed payload (overlay, primary, then alternates).
+    ///
+    /// # Errors
+    ///
+    /// Propagates backend failures other than a missing object (`Ok(None)`).
+    pub fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'static>>> {
+        use std::io::Cursor;
+        if let Some(obj) = self.overlay_read(oid) {
+            let size = u64::try_from(obj.data.len()).map_err(|_| {
+                Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+            })?;
+            return Ok(Some(ObjectStream {
+                kind: obj.kind,
+                size,
+                reader: Box::new(Cursor::new(obj.data)),
+            }));
         }
-    }
-
-    /// When MIDX lookup points at a corrupt pack slice, fall back to per-pack indexes
-    /// (Git reads around a broken MIDX offset the same way).
-    fn midx_read_should_fallback_to_packs(err: &Error) -> bool {
-        matches!(err, Error::CorruptObject(_) | Error::Zlib(_))
-    }
-
-    fn try_read_in_objects_dir(
-        &self,
-        objects_dir: &Path,
-        oid: &ObjectId,
-        _hash_algo: HashAlgo,
-        use_midx: bool,
-    ) -> Result<Object> {
-        let midx_pack_filter = use_midx && objects_dir_has_active_midx(objects_dir);
-        let pack_opts = pack::PackLookupOptions {
-            skip_midx_covered_packs: midx_pack_filter,
-            only_midx_covered_packs: false,
-        };
-
-        if use_midx {
-            let diagnostics = if objects_dir == self.objects_dir.as_path() {
-                self.diagnostics_handle()
-            } else {
-                std::sync::Arc::new(NullDiagnostics)
-            };
-            match try_read_object_via_midx_with_diagnostics(objects_dir, oid, diagnostics.as_ref())
-            {
-                Ok(Some(obj)) => return Ok(obj),
-                Ok(None) => {}
-                Err(Error::Midx(_)) => {}
-                Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
-                Err(err) => return Err(err),
-            }
+        if self.multi_pack_index_reads_enabled() {
+            self.ensure_midx_prepared();
         }
-
-        match pack::try_read_object_from_packs_with_options(objects_dir, oid, pack_opts) {
-            Ok(obj) => return Ok(obj),
-            Err(Error::ObjectNotFound(_)) => {}
+        self.sync_delta_base_cache_limit();
+        let primary = self.primary()?;
+        let mut unreadable_local_loose = None;
+        match primary.open_stream(oid) {
+            Ok(Some(stream)) => return materialize_stream(stream),
+            Ok(None) => {}
+            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
+                unreadable_local_loose = Some(err);
+            }
             Err(err) => return Err(err),
         }
-
-        if midx_pack_filter {
-            match pack::try_read_object_from_packs_with_options(
-                objects_dir,
-                oid,
-                pack::PackLookupOptions::MIDX_COVERED_PACKS,
-            ) {
-                Ok(obj) => return Ok(obj),
-                Err(Error::ObjectNotFound(_)) => {}
-                Err(err) => return Err(err),
-            }
-        }
-
-        let loose = oid.loose_path_in(objects_dir);
-        #[cfg(test)]
-        crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
-        match fs::File::open(&loose) {
-            Ok(file) => {
-                let raw = read_zlib_loose_payload(file)?;
-                return parse_object_bytes(&raw);
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(Error::Io(err)),
-        }
-
-        Err(Error::ObjectNotFound(oid.to_hex()))
-    }
-
-    fn read_info_in_objects_dir(
-        &self,
-        objects_dir: &Path,
-        oid: &ObjectId,
-        hash_algo: HashAlgo,
-        use_midx: bool,
-    ) -> Result<ObjectInfo> {
-        match self.try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx) {
-            Ok(info) => Ok(info),
-            Err(Error::ObjectNotFound(_)) => {
-                if pack::reprepare_pack_directory_on_miss(objects_dir)? {
-                    self.try_read_info_in_objects_dir(objects_dir, oid, hash_algo, use_midx)
-                } else {
-                    Err(Error::ObjectNotFound(oid.to_hex()))
-                }
-            }
-            Err(err) => Err(err),
-        }
-    }
-
-    fn try_read_info_in_objects_dir(
-        &self,
-        objects_dir: &Path,
-        oid: &ObjectId,
-        _hash_algo: HashAlgo,
-        use_midx: bool,
-    ) -> Result<ObjectInfo> {
-        let midx_pack_filter = use_midx && objects_dir_has_active_midx(objects_dir);
-        let pack_opts = pack::PackLookupOptions {
-            skip_midx_covered_packs: midx_pack_filter,
-            only_midx_covered_packs: false,
-        };
-
-        if use_midx {
-            let diagnostics = if objects_dir == self.objects_dir.as_path() {
-                self.diagnostics_handle()
-            } else {
-                Arc::new(NullDiagnostics)
-            };
-            match try_read_info_via_midx_with_diagnostics(objects_dir, oid, diagnostics.as_ref()) {
-                Ok(Some(info)) => return Ok(info),
-                Ok(None) => {}
-                Err(Error::Midx(_)) => {}
-                Err(err) if Self::midx_read_should_fallback_to_packs(&err) => {}
-                Err(err) => return Err(err),
-            }
-        }
-
-        match pack::try_read_object_info_from_packs_with_options(objects_dir, oid, pack_opts) {
-            Ok(info) => return Ok(info),
-            Err(Error::ObjectNotFound(_)) => {}
+        match self.sources()?.open_stream(oid) {
+            Ok(Some(stream)) => return materialize_stream(stream),
+            Ok(None) => {}
             Err(err) => return Err(err),
         }
+        if let Some(err) = unreadable_local_loose {
+            return Err(err);
+        }
+        Ok(None)
+    }
 
-        if midx_pack_filter {
-            match pack::try_read_object_info_from_packs_with_options(
-                objects_dir,
-                oid,
-                pack::PackLookupOptions::MIDX_COVERED_PACKS,
-            ) {
-                Ok(info) => return Ok(info),
-                Err(Error::ObjectNotFound(_)) => {}
-                Err(err) => return Err(err),
+    /// Invoke `f` for every object id reachable from this database until `f` returns [`ControlFlow::Break`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates enumeration failures from any consulted backend.
+    pub fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+        let mut seen = HashSet::new();
+        let mut visit = |store: &dyn ObjectStore| -> Result<bool> {
+            store::for_each_propagate_break(store, &mut |oid| {
+                if !seen.insert(*oid) {
+                    return ControlFlow::Continue(());
+                }
+                f(oid)
+            })
+        };
+        if let Some(overlay) = self.overlay_store() {
+            if visit(overlay.as_ref())? {
+                return Ok(());
             }
         }
-
-        let loose = oid.loose_path_in(objects_dir);
-        if loose.is_file() {
-            return read_loose_object_info(&loose);
+        if visit(self.primary()?.as_ref())? {
+            return Ok(());
         }
+        let _ = visit(self.sources()?.as_ref())?;
+        Ok(())
+    }
 
-        Err(Error::ObjectNotFound(oid.to_hex()))
+    /// Fill `out` with ids whose hex starts with `prefix` (deduplicated across overlay, primary, alternates).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex.
+    pub fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+        let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
+        if let Some(overlay) = self.overlay_store() {
+            append_lookup_prefix_layer(overlay.as_ref(), prefix, limit, out, &mut seen)?;
+            if limit != 0 && out.len() >= limit {
+                return Ok(());
+            }
+        }
+        append_lookup_prefix_layer(self.primary()?.as_ref(), prefix, limit, out, &mut seen)?;
+        if limit != 0 && out.len() >= limit {
+            return Ok(());
+        }
+        append_lookup_prefix_layer(self.sources()?.as_ref(), prefix, limit, out, &mut seen)
+    }
+
+    /// Enumerate loose objects in this database's primary `objects/` directory as `(oid, path)`.
+    ///
+    /// Pack files and alternate object directories are not scanned.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures while opening the primary files source or walking loose storage.
+    pub fn enumerate_local_loose_objects(&self) -> Result<Vec<(ObjectId, PathBuf)>> {
+        let primary = self.primary()?;
+        let loose = primary.loose_store();
+        let mut out = Vec::new();
+        loose.for_each_object(&mut |oid| {
+            out.push((*oid, loose.object_path(oid)));
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
     }
 
     /// Hash raw content of a given kind using this repository's hash algorithm.
@@ -1399,11 +1374,34 @@ impl Odb {
     ///
     /// Returns [`Error::Io`] if a directory cannot be created.
     pub fn ensure_all_loose_prefix_dirs(&self) -> Result<()> {
-        for i in 0u8..=255 {
-            let prefix = self.objects_dir.join(format!("{i:02x}"));
-            fs::create_dir_all(prefix).map_err(Error::Io)?;
-        }
-        Ok(())
+        self.local_loose()?.ensure_all_loose_prefix_dirs()
+    }
+
+    /// Test-only: filesystem path for a loose object (see `grit-lib/tests/odb_abstraction_guard.rs`).
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_loose_object_path(&self, oid: &ObjectId) -> PathBuf {
+        self.object_path(oid)
+    }
+
+    /// Test-only: delete a loose object file if present.
+    #[cfg(test)]
+    pub fn test_remove_loose_object(&self, oid: &ObjectId) {
+        let _ = fs::remove_file(self.object_path(oid));
+    }
+
+    /// Count loose object files under this repository's `objects/` directory.
+    ///
+    /// # Errors
+    ///
+    /// Propagates directory enumeration failures from the loose store walker.
+    pub fn count_loose_objects(&self) -> Result<usize> {
+        let mut count = 0usize;
+        for_each_loose_object_id(&self.objects_dir, self.hash_algo(), &mut |_| {
+            count += 1;
+            ControlFlow::Continue(())
+        })?;
+        Ok(count)
     }
 
     /// Zlib-compress canonical loose store bytes using the repository's loose level.
@@ -1412,44 +1410,7 @@ impl Odb {
     ///
     /// Returns [`Error::Zlib`] when compression fails.
     pub fn zlib_compress_loose_store(&self, store_bytes: &[u8]) -> Result<Vec<u8>> {
-        let compression = self.loose_compression()?;
-        zlib_compress_store_bytes(store_bytes, compression)
-    }
-
-    /// Publish precompressed bytes to a loose object path via a same-directory temp file.
-    ///
-    /// Readers never observe a partial object at the final name; failed writes remove the temp.
-    fn publish_zlib_loose_object(
-        path: &Path,
-        prefix_dir: &Path,
-        oid: &ObjectId,
-        zlib_store: &[u8],
-        prefix_dirs_precreated: bool,
-    ) -> Result<()> {
-        if !prefix_dirs_precreated {
-            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
-        }
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        if let Err(e) = fs::write(&tmp_path, zlib_store) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(Error::Io(e));
-        }
-        match fs::rename(&tmp_path, path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let _ = fs::remove_file(&tmp_path);
-            }
-            Err(e) => {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(Error::Io(e));
-            }
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o444));
-        }
-        Ok(())
+        self.local_loose()?.zlib_compress_store_bytes(store_bytes)
     }
 
     /// Write a loose object from precomputed id and zlib-compressed store bytes.
@@ -1467,26 +1428,18 @@ impl Odb {
         zlib_store: &[u8],
         options: WriteOptions,
     ) -> Result<ObjectId> {
-        let path = self.object_path(oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.touch_object_mtime(&path);
-            }
-            return Ok(*oid);
+        let primary = self.primary()?;
+        if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
+            return Ok(existing);
         }
 
-        let already_exists = if options.trust_new_loose {
-            false
-        } else if options.assume_loose_only_existence {
-            self.exists_local(oid)
-        } else {
-            self.exists(oid)
-        };
+        let already_exists =
+            !(options.trust_new_loose || options.assume_loose_only_existence) && self.exists(oid);
 
         if self.overlay_active() && !already_exists {
             if let Ok(raw) = decompress_zlib_loose_bytes(zlib_store) {
                 if let Ok(obj) = parse_object_bytes(&raw) {
-                    if self.overlay_store(*oid, obj.kind, &obj.data) {
+                    if self.overlay_store_object(*oid, obj.kind, &obj.data) {
                         return Ok(*oid);
                     }
                 }
@@ -1500,21 +1453,7 @@ impl Odb {
             return Ok(*oid);
         }
 
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        if !options.trust_new_loose {
-            fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
-        }
-
-        Self::publish_zlib_loose_object(
-            &path,
-            prefix_dir,
-            oid,
-            zlib_store,
-            options.trust_new_loose,
-        )?;
-        Ok(*oid)
+        primary.write_zlib_prehashed(oid, zlib_store, options)
     }
 
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
@@ -1527,27 +1466,17 @@ impl Odb {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
-        // Cheapest check first: a loose copy in this store answers every case below with a
-        // single stat, avoiding the full pack/alternates/MIDX existence scan per write.
-        let path = self.object_path(&oid);
-        if path.is_file() {
-            if !options.silent {
-                let _ = self.touch_object_mtime(&path);
-            }
-            return Ok(oid);
+        let primary = self.primary()?;
+        if let Some(existing) = primary.try_finish_duplicate_write(&oid, options)? {
+            return Ok(existing);
         }
 
-        let already_exists = if options.trust_new_loose {
-            false
-        } else if options.assume_loose_only_existence {
-            self.exists_local(&oid)
-        } else {
-            self.exists(&oid)
-        };
+        let already_exists =
+            !(options.trust_new_loose || options.assume_loose_only_existence) && self.exists(&oid);
 
         // When the in-memory overlay is active, keep the object in memory only (unless it is
         // already present on disk, in which case nothing new needs to be written anyway).
-        if self.overlay_active() && !already_exists && self.overlay_store(oid, kind, data) {
+        if self.overlay_active() && !already_exists && self.overlay_store_object(oid, kind, data) {
             return Ok(oid);
         }
 
@@ -1558,29 +1487,7 @@ impl Odb {
             return Ok(oid);
         }
 
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        WritableObjectStore::write(primary.as_ref(), kind, data, options)
     }
 
     /// Write an object as a loose file in this object directory only.
@@ -1606,30 +1513,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write(kind, data, WriteOptions::default())
     }
 
     /// Write a loose object file when it is missing, even if [`Self::exists`] is true because
@@ -1641,35 +1526,17 @@ impl Odb {
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
-        let path = self.object_path(&oid);
-        if path.exists() {
-            let _ = self.freshen_object(&oid);
-            return Ok(oid);
+        if let Ok(primary) = self.primary() {
+            if let Ok(Some(existing)) = primary
+                .loose_store()
+                .try_finish_if_loose_present(&oid, WriteOptions::default())
+            {
+                return Ok(existing);
+            }
         }
 
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write(kind, data, WriteOptions::default())
     }
 
     /// Write an already-serialized object (header + data) to the loose store.
@@ -1690,30 +1557,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
     }
 
     /// Like [`Self::write_raw`] but only consults this object directory, not alternates.
@@ -1731,30 +1576,8 @@ impl Odb {
             return Ok(existing);
         }
 
-        let path = self.object_path(&oid);
-        let prefix_dir = path
-            .parent()
-            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir)?;
-
-        let compression = self.loose_compression()?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, compression);
-            encoder
-                .write_all(store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o444));
-        }
-
-        Ok(oid)
+        self.local_loose()?
+            .write_store_prehashed(&oid, store_bytes, WriteOptions::default())
     }
 
     /// Returns true when a loose object exists at `oid`'s path and zlib-decompresses to a
@@ -1788,31 +1611,6 @@ impl Odb {
     }
 }
 
-fn loose_store_bytes_header_valid(raw: &[u8]) -> bool {
-    let nul = match raw.iter().position(|&b| b == 0) {
-        Some(i) => i,
-        None => return false,
-    };
-    let header = &raw[..nul];
-    let data = &raw[nul + 1..];
-    let sp = match header.iter().position(|&b| b == b' ') {
-        Some(i) => i,
-        None => return false,
-    };
-    if sp == 0 || sp > 32 {
-        return false;
-    }
-    let size_str = match std::str::from_utf8(&header[sp + 1..]) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let size: usize = match size_str.parse() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    data.len() == size
-}
-
 /// Hash the canonical store bytes of an object (`"<kind> <len>\0<data>"`) with
 /// the given hash algorithm.
 fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> ObjectId {
@@ -1838,144 +1636,40 @@ pub(crate) fn zlib_compress_loose_store_from_bytes(
     zlib_compress_store_bytes(store_bytes, compression)
 }
 
-fn zlib_compress_store_bytes(
-    store_bytes: &[u8],
-    compression: flate2::Compression,
-) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    let mut encoder = ZlibEncoder::new(&mut out, compression);
-    encoder
-        .write_all(store_bytes)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-    Ok(out)
-}
-
-fn decompress_zlib_loose_bytes(zlib: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = ZlibDecoder::new(zlib);
-    let mut raw = Vec::new();
-    decoder
-        .read_to_end(&mut raw)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    Ok(raw)
-}
-
-/// Build the canonical store byte sequence: `"<kind> <len>\0<data>"`.
-fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
-    let header = format!("{} {}\0", kind, data.len());
-    let mut out = Vec::with_capacity(header.len() + data.len());
-    out.extend_from_slice(header.as_bytes());
-    out.extend_from_slice(data);
-    out
-}
-
-/// Parse decompressed object bytes (`"<type> <size>\0<data>"`) into an [`Object`].
-pub(crate) fn parse_object_bytes(raw: &[u8]) -> Result<Object> {
-    parse_object_bytes_inner(raw, None)
-}
-
-pub(crate) fn parse_object_bytes_with_oid(raw: &[u8], oid: &ObjectId) -> Result<Object> {
-    parse_object_bytes_inner(raw, Some(oid))
-}
-
-/// Parse `"<type> <size>\0"` from decompressed bytes that include at least the header prefix.
-pub(crate) fn parse_object_header_prefix(raw: &[u8]) -> Result<(ObjectKind, u64)> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
-
-    let header = &raw[..nul];
-    let sp = header
-        .iter()
-        .position(|&b| b == b' ')
-        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
-
-    if sp > 32 {
-        return Err(Error::ObjectHeaderTooLong {
-            oid: hash_bytes_with(HashAlgo::Sha1, raw).to_hex(),
-        });
-    }
-
-    let kind = ObjectKind::from_bytes(&header[..sp])?;
-    let size_str = std::str::from_utf8(&header[sp + 1..])
-        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
-    let size: u64 = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
-    Ok((kind, size))
-}
-
-/// Read kind and size from a loose object file without loading the full payload.
-pub(crate) fn read_loose_object_info(path: &Path) -> Result<ObjectInfo> {
-    let file = fs::File::open(path).map_err(Error::Io)?;
-    let mut decoder = ZlibDecoder::new(file);
-    let mut prefix = Vec::with_capacity(64);
-    let mut buf = [0u8; 256];
-    loop {
-        let n = decoder
-            .read(&mut buf)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
-        if n == 0 {
-            break;
-        }
-        prefix.extend_from_slice(&buf[..n]);
-        if prefix.contains(&0) || prefix.len() >= 128 {
-            break;
+fn append_lookup_prefix_layer(
+    store: &dyn ObjectStore,
+    prefix: &str,
+    limit: usize,
+    out: &mut Vec<ObjectId>,
+    seen: &mut HashSet<ObjectId>,
+) -> Result<()> {
+    let mut scratch = Vec::new();
+    store.lookup_prefix(prefix, 0, &mut scratch)?;
+    for oid in scratch {
+        if seen.insert(oid) {
+            out.push(oid);
+            if limit != 0 && out.len() >= limit {
+                return Ok(());
+            }
         }
     }
-    let (kind, size) = parse_object_header_prefix(&prefix)?;
-    Ok(ObjectInfo { kind, size })
+    Ok(())
 }
 
-fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> Result<Object> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| Error::CorruptObject("missing NUL in object header".to_owned()))?;
-
-    let header = &raw[..nul];
-    let data = raw[nul + 1..].to_vec();
-
-    let sp = header
-        .iter()
-        .position(|&b| b == b' ')
-        .ok_or_else(|| Error::CorruptObject("missing space in object header".to_owned()))?;
-
-    if sp > 32 {
-        let oid_str = oid_hint
-            .map(|o| o.to_hex())
-            .unwrap_or_else(|| hash_bytes_with(HashAlgo::Sha1, raw).to_hex());
-        return Err(Error::ObjectHeaderTooLong { oid: oid_str });
-    }
-
-    let kind = ObjectKind::from_bytes(&header[..sp])?;
-
-    let size_str = std::str::from_utf8(&header[sp + 1..])
-        .map_err(|_| Error::CorruptObject("non-UTF-8 object size".to_owned()))?;
-    let size: usize = size_str
-        .parse()
-        .map_err(|_| Error::CorruptObject(format!("invalid object size: {size_str}")))?;
-
-    if data.len() != size {
-        return Err(Error::CorruptObject(format!(
-            "object size mismatch: header says {size} but got {}",
-            data.len()
-        )));
-    }
-
-    Ok(Object::new(kind, data))
-}
-
-/// When a loose object file exists locally but cannot be parsed, consult alternates (Git t5613).
-fn local_loose_unreadable_try_alternates(objects_dir: &Path, oid: &ObjectId, err: &Error) -> bool {
-    if !oid.loose_path_in(objects_dir).is_file() {
-        return false;
-    }
-    matches!(
-        err,
-        Error::CorruptObject(_) | Error::LooseHashMismatch { .. } | Error::Zlib(_)
-    )
+fn materialize_stream(stream: ObjectStream<'_>) -> Result<Option<ObjectStream<'static>>> {
+    use std::io::{Cursor, Read};
+    let ObjectStream {
+        kind,
+        size,
+        mut reader,
+    } = stream;
+    let mut payload = Vec::new();
+    reader.read_to_end(&mut payload).map_err(Error::Io)?;
+    Ok(Some(ObjectStream {
+        kind,
+        size,
+        reader: Box::new(Cursor::new(payload)),
+    }))
 }
 
 /// Parse a colon-separated alternates string, handling double-quoted entries
@@ -2102,7 +1796,8 @@ mod tests {
 
     #[test]
     fn parse_object_header_prefix_unknown_kind_is_typed_error() {
-        let err = parse_object_header_prefix(b"not-a-git-kind 0\0").unwrap_err();
+        let err = crate::odb::store::loose::parse_object_header_prefix(b"not-a-git-kind 0\0")
+            .unwrap_err();
         assert!(matches!(err, Error::UnknownObjectType(_)));
     }
 
@@ -3036,6 +2731,30 @@ mod tests {
             odb.hot_path_test_metrics().loose_path_open_attempts(),
             0,
             "packed objects must not attempt a loose-path open"
+        );
+    }
+
+    #[test]
+    fn loose_only_read_records_loose_path_open() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+        use crate::objects::ObjectKind;
+
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let odb = Odb::new(&objects);
+        let oid = odb
+            .write(ObjectKind::Blob, b"loose-only")
+            .expect("write loose");
+        odb.hot_path_test_metrics().set_loose_open_counting(true);
+        odb.hot_path_test_metrics().reset_loose_path_open_attempts();
+        let _scope = HotPathMetricsScope::install(Arc::clone(&odb.hot_path_test_metrics));
+
+        odb.read(&oid).expect("loose read");
+        assert_eq!(
+            odb.hot_path_test_metrics().loose_path_open_attempts(),
+            1,
+            "loose fallback must record a path open attempt"
         );
     }
 

@@ -18,10 +18,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::error::{Error, RefLockError, Result};
 use crate::objects::ObjectId;
 use crate::pack;
+
+/// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
+pub const SYMREF_MAXDEPTH: usize = 5;
 
 /// A symbolic or direct reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,16 +70,17 @@ pub fn read_ref_file(path: &Path) -> Result<Ref> {
 pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
     if let Some(target) = content.strip_prefix("ref: ") {
         Ok(Ref::Symbolic(target.trim().to_owned()))
-    } else if ObjectId::is_full_hex(content) {
-        let oid: ObjectId = content.parse()?;
-        Ok(Ref::Direct(oid))
-    } else if content == "unknown-oid" {
-        // Simplified harness `test_oid` placeholder (not valid hex). Match
-        // `for-each-ref` loose ref loading: treat as a direct ref to a
-        // non-resident OID so missing-object diagnostics match t6301.
-        const PLACEHOLDER: &[u8; 20] = b"GritUnknownOidPlc!X!";
-        let oid = ObjectId::from_bytes(PLACEHOLDER)?;
-        Ok(Ref::Direct(oid))
+    } else if let Some(token) = content.split_whitespace().next() {
+        if ObjectId::is_full_hex(token) {
+            let oid: ObjectId = token.parse()?;
+            Ok(Ref::Direct(oid))
+        } else if content == "unknown-oid" {
+            const PLACEHOLDER: &[u8; 20] = b"GritUnknownOidPlc!X!";
+            let oid = ObjectId::from_bytes(PLACEHOLDER)?;
+            Ok(Ref::Direct(oid))
+        } else {
+            Err(Error::InvalidRef(content.to_owned()))
+        }
     } else {
         Err(Error::InvalidRef(content.to_owned()))
     }
@@ -131,7 +136,7 @@ fn resolve_ref_depth(
     refname: &str,
     depth: usize,
 ) -> Result<ObjectId> {
-    if depth > 10 {
+    if depth >= SYMREF_MAXDEPTH {
         return Err(Error::InvalidRef(format!(
             "ref symlink too deep: {refname}"
         )));
@@ -285,25 +290,7 @@ fn packed_ref_with_prefix(git_dir: &Path, prefix_with_slash: &str) -> Result<Opt
 }
 
 fn packed_ref_name_exists(git_dir: &Path, refname: &str) -> Result<bool> {
-    let packed = git_dir.join("packed-refs");
-    let content = match fs::read_to_string(&packed) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    for line in content.lines() {
-        if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let _oid = parts.next();
-        if let Some(name) = parts.next() {
-            if name == refname {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
+    Ok(read_packed_refs_map(git_dir)?.contains_key(refname))
 }
 
 fn refname_namespace_conflicts(existing: &str, candidate: &str) -> bool {
@@ -319,25 +306,10 @@ fn refname_namespace_conflicts(existing: &str, candidate: &str) -> bool {
 }
 
 fn packed_ref_namespace_conflict(git_dir: &Path, refname: &str) -> Result<bool> {
-    let packed = git_dir.join("packed-refs");
-    let content = match fs::read_to_string(&packed) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    for line in content.lines() {
-        if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let _oid = parts.next();
-        if let Some(name) = parts.next() {
-            if refname_namespace_conflicts(name, refname) {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
+    let map = read_packed_refs_map(git_dir)?;
+    Ok(map
+        .keys()
+        .any(|existing| refname_namespace_conflicts(existing, refname)))
 }
 
 /// Returns true if `packed-refs` in the ref storage directory for `refname` contains that name.
@@ -590,6 +562,132 @@ pub fn verify_refname_available_for_create(
     Ok(())
 }
 
+/// One ref create/update/delete in a batch transaction (see [`crate::gc::update_refs`]).
+#[derive(Clone, Debug)]
+pub struct RefBatchItem {
+    /// Full ref name (e.g. `refs/heads/main`).
+    pub name: String,
+    /// New oid to write, or `None` to delete the ref.
+    pub new_oid: Option<ObjectId>,
+}
+
+/// Verify that every *new* ref in a batch can be created without D/F or namespace
+/// conflicts with the existing store or other items in the batch.
+///
+/// Matches Git's pre-lock `refs_verify_refnames_available` checks with an empty
+/// `skip` list (refs scheduled for deletion in the same batch do not suppress
+/// ancestor/descendant conflicts — see t1404 D/F batch tests).
+///
+/// # Errors
+///
+/// Returns [`RefnameUnavailable`] describing the first conflict.
+pub fn verify_ref_transaction_batch(
+    git_dir: &Path,
+    items: &[RefBatchItem],
+) -> std::result::Result<(), RefnameUnavailable> {
+    let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+    for i in 0..names.len() {
+        for j in (i + 1)..names.len() {
+            let (a, b) = (names[i], names[j]);
+            let (parent, child) = if refname_is_strict_prefix(a, b) {
+                (a, b)
+            } else if refname_is_strict_prefix(b, a) {
+                (b, a)
+            } else {
+                continue;
+            };
+            return Err(RefnameUnavailable::SameBatch {
+                refname: child.to_owned(),
+                other: parent.to_owned(),
+            });
+        }
+    }
+
+    let extras: BTreeSet<String> = items.iter().map(|i| i.name.clone()).collect();
+    let empty_skip = HashSet::new();
+    for item in items {
+        let Some(_oid) = item.new_oid else {
+            continue;
+        };
+        if resolve_ref(git_dir, &item.name).is_ok() {
+            continue;
+        }
+        verify_refname_available_for_create(git_dir, &item.name, &extras, &empty_skip)?;
+    }
+    Ok(())
+}
+
+fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
+    child.len() > parent.len()
+        && child.as_bytes().get(parent.len()) == Some(&b'/')
+        && child.starts_with(parent)
+}
+
+/// Removes `lock` on drop unless [`disarm`](Self::disarm) was called after a successful delete.
+struct LooseRefLockGuard<'a> {
+    lock: &'a Path,
+    armed: bool,
+}
+
+impl<'a> LooseRefLockGuard<'a> {
+    fn new(lock: &'a Path) -> Self {
+        Self { lock, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for LooseRefLockGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            abort_loose_ref_lock(self.lock);
+        }
+    }
+}
+
+fn delete_loose_ref_after_lock(
+    storage_dir: &Path,
+    stor: &str,
+    path: &Path,
+    lock: &Path,
+) -> Result<()> {
+    let mut lock_guard = LooseRefLockGuard::new(lock);
+    remove_packed_ref(storage_dir, stor)?;
+
+    remove_empty_ref_directory(path);
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e)
+            if e.kind() == io::ErrorKind::NotADirectory
+                || e.raw_os_error() == Some(libc::ENOTDIR) => {}
+        Err(e)
+            if e.raw_os_error() == Some(libc::EISDIR) || e.raw_os_error() == Some(libc::EPERM) => {}
+        Err(e) => return Err(Error::Io(e)),
+    }
+
+    let log_path = storage_dir.join("logs").join(stor);
+    let _ = fs::remove_file(&log_path);
+
+    let logs_root = storage_dir.join("logs");
+    let mut parent = log_path.parent();
+    while let Some(p) = parent {
+        if p == logs_root.as_path() || !p.starts_with(&logs_root) {
+            break;
+        }
+        if fs::remove_dir(p).is_err() {
+            break;
+        }
+        parent = p.parent();
+    }
+
+    fs::remove_file(lock)?;
+    lock_guard.disarm();
+    Ok(())
+}
+
 fn read_raw_ref_reftable(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
     if refname == "HEAD" {
         let head_path = git_dir.join("HEAD");
@@ -619,28 +717,161 @@ fn read_raw_ref_reftable(git_dir: &Path, refname: &str) -> Result<RawRefLookup> 
     }
 }
 
-/// Look up a refname in `packed-refs`.
-fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
-    let packed = git_dir.join("packed-refs");
-    let content = match fs::read_to_string(&packed) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(Error::Io(e)),
+fn packed_refs_unexpected_line(path: &Path, line: impl Into<String>) -> Error {
+    Error::PackedRefsUnexpectedLine {
+        path: path.display().to_string(),
+        line: line.into(),
+    }
+}
+
+fn packed_refs_unterminated_line(path: &Path, line: impl Into<String>) -> Error {
+    Error::PackedRefsUnexpectedLine {
+        path: path.display().to_string(),
+        line: line.into(),
+    }
+}
+
+fn parse_packed_ref_peel_line(path: &Path, line: &str, expect_peel: bool) -> Result<()> {
+    if !expect_peel {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    let inner = line
+        .strip_prefix('^')
+        .ok_or_else(|| packed_refs_unexpected_line(path, line))?;
+    let mut j = 0usize;
+    while j < inner.len() && inner.as_bytes()[j].is_ascii_hexdigit() {
+        j += 1;
+    }
+    if !ObjectId::is_hex_len(j) || j != inner.len() {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    Ok(())
+}
+
+fn parse_packed_ref_data_line(
+    path: &Path,
+    line: &str,
+    ref_opts: &RefNameOptions,
+) -> Result<(String, ObjectId)> {
+    let bytes = line.as_bytes();
+    let mut j = 0usize;
+    while j < bytes.len() && bytes[j].is_ascii_hexdigit() {
+        j += 1;
+    }
+    if !ObjectId::is_hex_len(j) || j + 1 >= bytes.len() || bytes[j] != b' ' {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    let refname = &line[j + 1..];
+    if refname.is_empty() || refname.as_bytes().iter().any(|b| b.is_ascii_whitespace()) {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    if check_refname_format(refname, ref_opts).is_err() {
+        return Err(packed_refs_unexpected_line(path, line));
+    }
+    let oid: ObjectId = line[..j].parse()?;
+    Ok((refname.to_owned(), oid))
+}
+
+/// Parse `packed-refs` bytes the way Git reads them for ref listing (strict).
+fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, ObjectId>> {
+    if data.is_empty() {
+        return Ok(HashMap::new());
+    }
+    if data.contains(&b'\r') {
+        return Err(packed_refs_unexpected_line(
+            path,
+            "<contains carriage return>",
+        ));
+    }
+    if !data.ends_with(b"\n") {
+        let tail = std::str::from_utf8(data)
+            .map(|s| s.rsplit('\n').next().unwrap_or(s))
+            .unwrap_or("<invalid utf-8>");
+        return Err(packed_refs_unterminated_line(path, tail));
+    }
+    let text = std::str::from_utf8(data)
+        .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
+
+    let ref_opts = RefNameOptions {
+        allow_onelevel: false,
+        refspec_pattern: false,
+        normalize: false,
     };
 
-    for line in content.lines() {
-        if line.starts_with('#') || line.starts_with('^') {
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+
+    let mut map = HashMap::new();
+    let mut expect_peel = false;
+    for line in lines {
+        if line.is_empty() {
+            return Err(packed_refs_unexpected_line(path, line));
+        }
+        if line.starts_with('#') {
+            expect_peel = false;
             continue;
         }
-        let mut parts = line.splitn(2, ' ');
-        let hash = parts.next().unwrap_or("");
-        let name = parts.next().unwrap_or("").trim();
-        if name == refname && ObjectId::is_hex_len(hash.len()) {
-            let oid: ObjectId = hash.parse()?;
-            return Ok(Some(oid));
+        if line.starts_with('^') {
+            parse_packed_ref_peel_line(path, line, expect_peel)?;
+            expect_peel = false;
+            continue;
+        }
+
+        let (refname, oid) = parse_packed_ref_data_line(path, line, &ref_opts)?;
+        map.insert(refname, oid);
+        expect_peel = true;
+    }
+    Ok(map)
+}
+
+fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, ObjectId>> {
+    let packed_path = store.join("packed-refs");
+    let data = match fs::read(&packed_path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    parse_packed_refs_to_map(&packed_path, &data)
+}
+
+fn acquire_packed_refs_lock(git_dir: &Path, lock: &Path, lock_display: &Path) -> Result<()> {
+    let timeout_ms = ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(git_dir),
+        true,
+    )
+    .ok()
+    .and_then(|cfg| cfg.get("core.packedrefstimeout"))
+    .and_then(|v| v.trim().parse::<i64>().ok())
+    .unwrap_or(0);
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(lock)
+        {
+            Ok(_) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                if timeout_ms > 0 && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    continue;
+                }
+                return Err(Error::from(RefLockError::PackedRefsLockHeld {
+                    lock_path: lock_display.display().to_string(),
+                }));
+            }
+            Err(e) => return Err(Error::Io(e)),
         }
     }
-    Ok(None)
+}
+
+/// Look up a refname in `packed-refs`.
+fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
+    Ok(read_packed_refs_map(git_dir)?.get(refname).copied())
 }
 
 /// Write a symbolic ref (e.g. `NOTES_MERGE_REF` → `refs/notes/m`).
@@ -749,6 +980,11 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
         }
         .into());
     }
+    if path.is_file() && matches!(read_ref_file(&path), Err(Error::InvalidRef(_))) {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{refname}': reference broken"
+        )));
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -770,6 +1006,107 @@ fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Re
     }
     fs::rename(&lock, &path)?;
     Ok(())
+}
+
+/// Like [`write_ref`], but requires `expected_old` to match the ref's current value
+/// while the loose-ref lock is held (atomic CAS for concurrent updaters).
+///
+/// # Errors
+///
+/// Same as [`write_ref`], plus [`Error::Message`] when the CAS check fails under lock.
+pub fn write_ref_cas(
+    git_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+    expected_old: ObjectId,
+) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
+    if crate::reftable::is_reftable_repo(git_dir) {
+        let current = resolve_ref(git_dir, refname).ok();
+        verify_branch_cas(Some(expected_old), current, refname)?;
+        return write_ref(git_dir, refname, oid);
+    }
+    let storage_dir = ref_storage_dir(git_dir, refname);
+    if packed_ref_namespace_conflict(&storage_dir, refname)? {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{refname}': reference namespace conflict"
+        )));
+    }
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let path = storage_dir.join(&stor);
+    remove_empty_ref_directory(&path);
+    if fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+    {
+        let display = ref_path_for_display(&path);
+        return Err(crate::error::RefLockError::DirectoryInTheWay {
+            refname: refname.to_owned(),
+            path: display,
+        }
+        .into());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let lock = lock_path_for_ref(&path);
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock)?;
+    let current = read_loose_or_packed_oid(git_dir, refname)?;
+    if let Err(err) = verify_branch_cas(Some(expected_old), current, refname) {
+        abort_loose_ref_lock(&lock);
+        return Err(err);
+    }
+    let content = format!("{oid}\n");
+    {
+        use std::io::Write as _;
+        let mut file = fs::OpenOptions::new().write(true).open(&lock)?;
+        file.write_all(content.as_bytes())?;
+    }
+    fs::rename(&lock, &path)?;
+    Ok(())
+}
+
+/// Like [`delete_ref`], but requires `expected_old` to match under the ref lock.
+///
+/// # Errors
+///
+/// Same as [`delete_ref`], plus [`Error::Message`] when the CAS check fails.
+pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
+    if crate::reftable::is_reftable_repo(git_dir) {
+        return crate::reftable::reftable_write_transaction(
+            git_dir,
+            vec![crate::reftable::ReftableTransactionUpdate {
+                refname: refname.to_owned(),
+                value: Some(crate::reftable::RefValue::Deletion),
+                log: None,
+                expected_old: Some(expected_old),
+            }],
+        );
+    }
+    let storage_dir = ref_storage_dir(git_dir, refname);
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let path = storage_dir.join(&stor);
+    let lock = lock_path_for_ref(&path);
+    if fs::symlink_metadata(&lock).is_ok() {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("ref lock present: {}", lock.display()),
+        )));
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock)?;
+    let current = read_loose_or_packed_oid(git_dir, refname)?;
+    if let Err(err) = verify_branch_cas(Some(expected_old), current, refname) {
+        abort_loose_ref_lock(&lock);
+        return Err(err);
+    }
+    delete_loose_ref_after_lock(&storage_dir, &stor, &path, &lock)
 }
 
 /// A one-time, in-memory snapshot of a ref store's `packed-refs` file.
@@ -797,33 +1134,11 @@ impl PackedRefs {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] if `packed-refs` exists but cannot be read.
+    /// Returns [`Error::Io`] if `packed-refs` exists but cannot be read, or
+    /// [`Error::PackedRefsUnexpectedLine`] when the file contains lines Git would reject.
     pub fn load(git_dir: &Path) -> Result<Self> {
         let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-        let packed = store.join("packed-refs");
-        let content = match fs::read_to_string(&packed) {
-            Ok(c) => c,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                return Ok(Self {
-                    map: HashMap::new(),
-                });
-            }
-            Err(e) => return Err(Error::Io(e)),
-        };
-        let mut map = HashMap::new();
-        for line in content.lines() {
-            if line.starts_with('#') || line.starts_with('^') {
-                continue;
-            }
-            let mut parts = line.splitn(2, ' ');
-            let hash = parts.next().unwrap_or("");
-            let name = parts.next().unwrap_or("").trim();
-            if !name.is_empty() && ObjectId::is_hex_len(hash.len()) {
-                if let Ok(oid) = hash.parse::<ObjectId>() {
-                    map.insert(name.to_owned(), oid);
-                }
-            }
-        }
+        let map = read_packed_refs_map(&store)?;
         Ok(Self { map })
     }
 
@@ -974,6 +1289,24 @@ fn dir_tree_has_files(dir: &Path) -> bool {
     false
 }
 
+/// Walk upward from `ref_path`'s parent, removing empty directories until `refs/`.
+fn prune_empty_loose_ref_parents(storage_dir: &Path, ref_path: &Path) {
+    let refs_root = storage_dir.join("refs");
+    let mut current = ref_path.parent();
+    while let Some(dir) = current {
+        if dir == refs_root.as_path() || !dir.starts_with(&refs_root) {
+            break;
+        }
+        if dir_tree_has_files(dir) {
+            break;
+        }
+        if fs::remove_dir(dir).is_err() {
+            break;
+        }
+        current = dir.parent();
+    }
+}
+
 /// Recursively remove an empty directory tree (assumes [`dir_tree_has_files`] returned false).
 fn remove_dir_tree(dir: &Path) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
@@ -998,9 +1331,19 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     if crate::reftable::is_reftable_repo(git_dir) {
         return crate::reftable::reftable_delete_ref(git_dir, refname);
     }
+    if matches!(read_raw_ref(git_dir, refname)?, RawRefLookup::NotFound) {
+        return Err(Error::InvalidRef(format!("ref not found: {refname}")));
+    }
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(&stor);
+    let lock = lock_path_for_ref(&path);
+    if fs::symlink_metadata(&lock).is_ok() {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("ref lock present: {}", lock.display()),
+        )));
+    }
 
     // Remove the packed-refs entry *first* (acquiring the packed-refs lock). Git deletes the
     // packed version while holding the lock before unlinking the loose ref, so that a failure to
@@ -1025,6 +1368,8 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
             if e.raw_os_error() == Some(libc::EISDIR) || e.raw_os_error() == Some(libc::EPERM) => {}
         Err(e) => return Err(Error::Io(e)),
     }
+
+    prune_empty_loose_ref_parents(&storage_dir, &path);
 
     let log_path = storage_dir.join("logs").join(&stor);
 
@@ -1053,7 +1398,7 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
 /// Remove a single entry from the packed-refs file, rewriting it.
 fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let packed_path = git_dir.join("packed-refs");
-    let content = match fs::read_to_string(&packed_path) {
+    let content = match fs::read(&packed_path) {
         Ok(c) => c,
         Err(e)
             if e.kind() == io::ErrorKind::NotFound
@@ -1064,6 +1409,11 @@ fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
         }
         Err(e) => return Err(Error::Io(e)),
     };
+    // Fail before mutating anything if the on-disk file is not readable like Git's.
+    parse_packed_refs_to_map(&packed_path, &content)?;
+
+    let content = String::from_utf8(content)
+        .map_err(|_| packed_refs_unexpected_line(&packed_path, "<invalid utf-8>"))?;
 
     let mut out = String::new();
     let mut skip_peeled = false;
@@ -1122,40 +1472,7 @@ fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
         let abs_lock = fs::canonicalize(git_dir)
             .map(|d| d.join("packed-refs.lock"))
             .unwrap_or_else(|_| lock.clone());
-        // Honor `core.packedrefstimeout`: git retries acquiring the packed-refs lock for up to
-        // this many milliseconds before giving up (t0600 "no bogus intermediate values during
-        // delete" holds the lock and expects update-ref to block, not fail immediately).
-        let timeout_ms = ConfigSet::load(
-            &crate::environment::Environment::empty(),
-            Some(git_dir),
-            true,
-        )
-        .ok()
-        .and_then(|cfg| cfg.get("core.packedrefstimeout"))
-        .and_then(|v| v.trim().parse::<i64>().ok())
-        .unwrap_or(0);
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
-        loop {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock)
-            {
-                Ok(_) => break,
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    if timeout_ms > 0 && std::time::Instant::now() < deadline {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                        continue;
-                    }
-                    return Err(Error::Message(format!(
-                        "Unable to create '{}': File exists.",
-                        abs_lock.display()
-                    )));
-                }
-                Err(e) => return Err(Error::Io(e)),
-            }
-        }
+        acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
 
         let tmp = packed_path.with_extension("new");
         let mut created_tmp = false;
@@ -1749,6 +2066,7 @@ fn update_branch_for_commit_reftable(
         refname: update.branch_ref.to_owned(),
         value: Some(crate::reftable::RefValue::Val1(update.new_oid)),
         log: branch_log,
+        expected_old: update.expected_old,
     });
 
     if should_autocreate_reflog(git_dir, "HEAD") {
@@ -1763,6 +2081,7 @@ fn update_branch_for_commit_reftable(
                 update.identity,
                 update.reflog_message,
             )?),
+            expected_old: None,
         });
     }
 
@@ -1865,9 +2184,12 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
         crate::odb::Odb::new(&git_dir.join("objects")).with_config_git_dir(git_dir.to_path_buf());
     let mut merged: HashMap<String, (ObjectId, Option<ObjectId>)> = HashMap::new();
     let packed_path = git_dir.join("packed-refs");
-    if let Ok(content) = fs::read_to_string(&packed_path) {
+    if let Ok(data) = fs::read(&packed_path) {
+        parse_packed_refs_to_map(&packed_path, &data)?;
+        let content = String::from_utf8(data)
+            .map_err(|_| packed_refs_unexpected_line(&packed_path, "<invalid utf-8>"))?;
         let mut last_name: Option<String> = None;
-        for line in content.lines() {
+        for line in content.split('\n') {
             if line.starts_with('#') {
                 continue;
             }
@@ -1953,34 +2275,10 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
 fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
     let packed_path = git_dir.join("packed-refs");
     let lock = lock_path_for_ref(&packed_path);
-    let timeout_ms = ConfigSet::load(
-        &crate::environment::Environment::empty(),
-        Some(git_dir),
-        true,
-    )
-    .ok()
-    .and_then(|cfg| cfg.get("core.packedrefstimeout"))
-    .and_then(|v| v.trim().parse::<i64>().ok())
-    .unwrap_or(0);
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
-    loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock)
-        {
-            Ok(_) => break,
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                if timeout_ms > 0 && std::time::Instant::now() < deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
-                }
-                return Err(Error::Io(e));
-            }
-            Err(e) => return Err(Error::Io(e)),
-        }
-    }
+    let abs_lock = fs::canonicalize(git_dir)
+        .map(|d| d.join("packed-refs.lock"))
+        .unwrap_or_else(|_| lock.clone());
+    acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
 
     let tmp = packed_path.with_extension("new");
     let mut created_tmp = false;
@@ -2334,29 +2632,15 @@ fn collect_packed_refs_into_map(
     physical_keys: bool,
     out: &mut HashMap<String, ObjectId>,
 ) -> Result<()> {
-    let packed_path = git_dir.join("packed-refs");
-    let content = match fs::read_to_string(&packed_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(Error::Io(e)),
-    };
-
-    for line in content.lines() {
-        if line.starts_with('#') || line.starts_with('^') || line.is_empty() {
+    let map = read_packed_refs_map(git_dir)?;
+    for (refname, oid) in map {
+        if !ref_name_matches_list_prefix(&refname, prefix) {
             continue;
         }
-        let mut parts = line.splitn(2, ' ');
-        let hash = parts.next().unwrap_or("");
-        let refname = parts.next().unwrap_or("").trim();
-        if !ref_name_matches_list_prefix(refname, prefix) || !ObjectId::is_hex_len(hash.len()) {
-            continue;
-        }
-        let oid: ObjectId = hash.parse()?;
         let key = if physical_keys {
-            refname.to_owned()
+            refname.clone()
         } else {
-            crate::ref_namespace::logical_ref_name_from_storage(refname)
-                .unwrap_or_else(|| refname.to_owned())
+            crate::ref_namespace::logical_ref_name_from_storage(&refname).unwrap_or(refname)
         };
         out.insert(key, oid);
     }
@@ -2458,6 +2742,32 @@ mod refname_available_tests {
     use super::*;
     use std::collections::{BTreeSet, HashSet};
     use tempfile::tempdir;
+
+    #[test]
+    fn verify_ref_transaction_batch_rejects_same_batch_parent_child() {
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path();
+        fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+        let items = vec![
+            RefBatchItem {
+                name: "refs/heads/c".to_owned(),
+                new_oid: Some(sample_oid()),
+            },
+            RefBatchItem {
+                name: "refs/heads/c/x".to_owned(),
+                new_oid: Some(sample_oid()),
+            },
+        ];
+        let err = verify_ref_transaction_batch(git_dir, &items).unwrap_err();
+        assert!(matches!(
+            err,
+            RefnameUnavailable::SameBatch { refname, .. } if refname == "refs/heads/c/x"
+        ));
+    }
+
+    fn sample_oid() -> ObjectId {
+        "67bf698f3ab735e92fb011a99cff3497c44d30c1".parse().unwrap()
+    }
 
     #[test]
     fn loose_parent_blocks_child_create() {
@@ -2733,5 +3043,105 @@ mod read_raw_ref_tests {
             read_raw_ref(git_dir, "refs/heads/packed").unwrap(),
             RawRefLookup::Exists
         );
+    }
+}
+
+#[cfg(test)]
+mod packed_refs_parse_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn parse_rejects_garbage_line() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("packed-refs");
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             0000000000000000000000000000000000000000 refs/heads/main\n\
+             not a ref line\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_carriage_return_bytes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("packed-refs");
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             0000000000000000000000000000000000000000 refs/heads/main\r\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_blank_line_and_missing_final_newline() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("packed-refs");
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\n\
+             0000000000000000000000000000000000000000 refs/heads/main\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             0000000000000000000000000000000000000000 refs/heads/main",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_orphan_peel_and_double_space() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("packed-refs");
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             ^0000000000000000000000000000000000000000\n\
+             0000000000000000000000000000000000000000 refs/heads/main\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+
+        fs::write(
+            &path,
+            "# pack-refs with: peeled\n\
+             0000000000000000000000000000000000000000  refs/heads/main\n",
+        )
+        .unwrap();
+        let data = fs::read(&path).unwrap();
+        assert!(matches!(
+            parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
     }
 }

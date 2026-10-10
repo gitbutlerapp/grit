@@ -20,6 +20,46 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 
 Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
 
+## grit-lib: ODB backend (pluggable object store)
+
+Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) on the primary store and [`CompositeStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) boundary.
+
+**Pluggable object store overhead (factory VM, 2026-10-09):** Re-run Criterion with `--baseline odb-before` after ODB changes; command-level **`grit-bench odb-backend`** baselines are in **`odb-backend-before.json`** (pre-refactor capture, scenario ids suffixed `-pre-refactor`) and **`odb-backend-after.json`**. Post-refactor Grit medians for cat-file batch/check are much lower than the pre-refactor capture on the same fixture; rev-list wall time is similar while Grit/Git **ratios** can drift when system `git` speeds up between runs.
+
+Criterion measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
+
+| Fixture | Shape |
+| --- | --- |
+| `loose_10k` | 10 000 loose blobs, no packs |
+| `pack_100k` | Single repacked pack (~100 000 objects) |
+| `midx_8` | Eight pack layers with multi-pack-index (`git prune-packed` so hits are pack-only, not loose) |
+| `alternate_only` | Primary store empty; objects only in an alternate |
+
+An additional benchmark, **`odb_backend/exists_miss_loop_10k`**, calls `exists` on 10 000 distinct missing OIDs against the 100k pack fixture (models add/status miss scans).
+
+Command-level ODB scenarios on the repacked **100k-file / 1000-commit** synthetic repo live in **`grit-utils/baselines/odb-backend-before.json`** and **`grit-utils/baselines/odb-backend-after.json`** (`grit-bench odb-backend`): library drivers (`grit-bench drive …`) vs **`git cat-file --batch`**, **`git cat-file --batch-check`**, and **`git rev-list --objects --all`** on the same sorted OID stdin list where applicable.
+
+```bash
+cargo build --release -p grit-utils
+./target/release/grit-bench odb-backend --format json --output grit-utils/baselines/odb-backend-after.json
+cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before
+make docs
+```
+
+Run `grit-bench odb-backend` once before the Criterion command (or leave a populated `GRIT_BENCH_ODB_CACHE`) so the `pack_100k` fixture reuses the repacked 100k repo instead of rebuilding 100k commits inline.
+
+**Recorded on the factory VM (2026-10-09, repacked 100k synthetic repo).** Pre-refactor numbers are in **`odb-backend-before.json`**; post-refactor in **`odb-backend-after.json`** (also drives the generated ODB rows below).
+
+| Scenario | Git median | Grit median (before → after) | Grit / Git (before → after) |
+| --- | ---: | ---: | ---: |
+| `cat-file-batch-hot-path-100k` | ~144 ms | 1 117 ms → ~356 ms | **7.4× → ~2.5×** |
+| `cat-file-batch-check-hot-path-100k` | ~52 ms | 1 261 ms → ~239 ms | **24.2× → ~5.2×** |
+| `rev-list-objects-odb-backend-hot-path-100k` | ~65 ms | 6 916 ms → ~6 189 ms | **99.1× → ~96×** |
+
+Rev-list **ratios** can rise when system **`git`** speeds up between captures even if Grit wall time improves; compare absolute Grit medians when judging regressions.
+
+The rev-list gap is dominated by history/object enumeration in `grit-lib`, not bulk pack I/O; cat-file scenarios exercise ODB read and `read_info` paths directly.
+
 ## grit-lib: parallel index-pack (in-memory)
 
 Hyperfine on a **~90 000-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-07). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) via `cargo run --release -p grit-lib --example index_pack_bench` (see `GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`).
@@ -95,15 +135,40 @@ Recorded on the factory VM after stacking pick/merge/stash perf work on `origin/
 
 **Machine (2026-10-08 acceptance):** Intel Xeon (factory VM), **4** physical / **4** logical CPUs, **16 GiB** RAM, Linux **6.12.94+**, scratch filesystem **ext4**, `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.1**, hyperfine **2.x** (see `machine` in each baseline JSON).
 
-| Scenario | L before × | L after × | H before × | H after × | Notes |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `add` | — | **2.52** | — | **4.51** | `suite-after-LH.json` (`add-{N}`) |
-| `commit` | — | **0.84** | — | **1.16** | `commit-after-LH.json` — `grit commit` vs `git add -A && git commit` |
-| `switch` | 3.29 | 3.44 | 4.89 | 5.63 | Still &gt;2× at L; H/L ≈ **1.64×** (&gt;1.25× bar) |
-| `switch-wide` | 3.70 | 2.29 | 26.5 | 2.98 | L still &gt;2×; H/L ≈ **1.30×** |
-| `pick` | 1.41 | 1.14 | 5.50 | 4.04 | L within 2×; H/L ≈ **3.54×** |
-| `merge` | 2.61 | 2.18 | 3.97 | 3.83 | L still above 2×; H/L ≈ **1.76×** |
-| `pick-series` | 12.9 | 11.2 | 21.7 | 17.7 | L &gt;2×; H/L ≈ **1.58×**; 20× sequential `grit pick` vs one `git cherry-pick` range |
+**Machine (2026-10-09 refresh):** same factory VM (Intel Xeon, **4** / **4** CPUs, **16 GiB** RAM, Linux **6.12.94+**, ext4 scratch), `rustc` **1.99.0**, `git` **2.43.0**, release `grit` **0.5.3** at **`01a254dc`**, hyperfine **2.0.0**. Committed baselines were regenerated with `./target/release/grit-bench {hot-paths,commit,all} --sizes 10000,100000` (default warmup / min-runs).
+
+| Scenario | L before × | L 2026-10-08 × | L 2026-10-09 × | H before × | H 2026-10-08 × | H 2026-10-09 × | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `add` | — | **2.52** | **2.23** | — | **4.51** | **2.69** | `suite-after-LH.json` — improved at H |
+| `commit` | — | **0.84** | **0.48** | — | **1.16** | **0.70** | `commit-after-LH.json` — faster vs Git at L/H |
+| `switch` | 3.29 | 3.44 | **2.94** | 4.89 | 5.63 | **4.06** | H improved; L still &gt;2× |
+| `switch-wide` | 3.70 | 2.29 | **3.42** | 26.5 | 2.98 | **22.54** | **H regression** — see refresh notes |
+| `pick` | 1.41 | 1.14 | **1.48** | 5.50 | 4.04 | **5.22** | L slightly worse vs 2026-10-08 |
+| `merge` | 2.61 | 2.18 | **2.86** | 3.97 | 3.83 | **3.74** | L ~32% worse ratio vs 2026-10-08 |
+| `pick-series` | 12.9 | 11.2 | **11.94** | 21.7 | 17.7 | **18.56** | Still &gt;2×; 20× `grit pick` vs one `git cherry-pick` range |
+
+**2026-10-09 refresh vs 2026-10-08 baselines:** `grit-bench compare` reports ratio drift beyond the default **0.10** absolute tolerance on most scenarios (many improved). Regressions **more than 20% worse** on the Grit/Git ratio: **`switch-wide-100000`** (2.98× → **22.54×**), **`switch-wide-10000`** (2.29× → 3.42×), **`merge-10000`**, **`pick-10000`**, **`pick-100000`**. **`status-dirty-100000`** remains ~**53×** (unchanged). Suite **status** and **add** ratios improved at L/H except dirty-100k.
+
+| Scenario | Git ms | Grit ms | Old ratio | New ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `status-dirty-10000` | 11.1 | 80.1 | 10.19× | 7.21× |
+| `status-dirty-100000` | 113.0 | 5962.1 | 52.66× | 52.77× |
+| `status-clean-10000` | 9.0 | 21.2 | 4.58× | 2.34× |
+| `status-clean-100000` | 82.7 | 513.8 | 9.67× | 6.21× |
+| `add-10000` | 21.4 | 47.8 | 2.52× | 2.23× |
+| `add-100000` | 224.8 | 603.6 | 4.51× | 2.69× |
+| `commit-10000` | 165.6 | 79.1 | 0.84× | 0.48× |
+| `commit-100000` | 1665.7 | 1159.3 | 1.16× | 0.70× |
+| `switch-10000` | 23.9 | 70.3 | 3.44× | 2.94× |
+| `switch-100000` | 160.6 | 652.4 | 5.63× | 4.06× |
+| `switch-wide-10000` | 45.3 | 155.3 | 2.29× | 3.42× |
+| `switch-wide-100000` | 386.4 | 8711.8 | 2.98× | 22.54× |
+| `pick-10000` | 115.9 | 171.5 | 1.14× | 1.48× |
+| `pick-100000` | 194.0 | 1011.6 | 4.04× | 5.22× |
+| `merge-10000` | 104.9 | 300.5 | 2.18× | 2.86× |
+| `merge-100000` | 283.4 | 1060.6 | 3.83× | 3.74× |
+| `pick-series-10000` | 129.4 | 1544.3 | 11.18× | 11.94× |
+| `pick-series-100000` | 961.6 | 17843.4 | 17.65× | 18.56× |
 
 **Suite at L/H** (`grit-utils/baselines/suite-after-LH.json`): status scenarios remain far above 2× (dirty/clean at 10k and 100k files).
 

@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+grit-lib = { path = "../grit-lib" }
 flate2.workspace = true
 hex.workspace = true
 sha1.workspace = true
