@@ -32,7 +32,17 @@ use crate::url_rewrite;
 #[cfg(feature = "http-ureq")]
 use crate::transport::http::ureq_client::UreqHttpClient;
 
+/// HTTP client types for non-git HTTP (e.g. OAuth) without importing [`crate::transport`] from binaries.
+#[cfg(feature = "http-ureq")]
+pub mod http_client {
+    pub use crate::transport::http::ureq_client::UreqHttpClient;
+    pub use crate::transport::http::HttpClient;
+}
+
 type RemoteResult<T> = std::result::Result<T, RemoteError>;
+
+/// Default remote name when none is configured (`origin`).
+pub const DEFAULT_REMOTE: &str = "origin";
 
 /// Errors specific to remote URL resolution and dispatch.
 #[derive(Debug, Error)]
@@ -522,7 +532,7 @@ fn http_client(
     }
     #[cfg(feature = "http-ureq")]
     {
-        return DefaultHttpClientFactory.create(config.as_ref());
+        DefaultHttpClientFactory.create(config.as_ref())
     }
     #[cfg(not(feature = "http-ureq"))]
     {
@@ -707,6 +717,7 @@ fn parse_list_refs_v2_response(
     let mut peel_map: std::collections::HashMap<String, ObjectId> =
         std::collections::HashMap::new();
     let mut head_symref: Option<String> = None;
+    let mut head_oid: Option<ObjectId> = None;
     let mut reader = reader;
     loop {
         match pkt_line::read_packet(&mut reader).map_err(Error::Io)? {
@@ -727,6 +738,7 @@ fn parse_list_refs_v2_response(
                     continue;
                 }
                 if name == "HEAD" {
+                    head_oid = Some(oid);
                     if let Some(t) =
                         symref_target.filter(|t| crate::refs::is_valid_advertised_symref_target(t))
                     {
@@ -750,7 +762,7 @@ fn parse_list_refs_v2_response(
             }
         }
     }
-    finalize_list_refs_output(entries, peel_map, opts, head_symref, None)
+    finalize_list_refs_output(entries, peel_map, opts, head_symref, head_oid, None)
 }
 
 fn list_refs_v0_advertisement(
@@ -775,7 +787,14 @@ fn list_refs_v0_advertisement(
             symref_target: None,
         });
     }
-    finalize_list_refs_output(entries, peel_map, opts, head_symref.map(str::to_owned), odb)
+    finalize_list_refs_output(
+        entries,
+        peel_map,
+        opts,
+        head_symref.map(str::to_owned),
+        None,
+        odb,
+    )
 }
 
 fn finalize_list_refs_output(
@@ -783,6 +802,7 @@ fn finalize_list_refs_output(
     peel_map: std::collections::HashMap<String, ObjectId>,
     opts: &ListRefsOptions,
     head_symref: Option<String>,
+    head_oid: Option<ObjectId>,
     odb: Option<&Odb>,
 ) -> RemoteResult<Vec<RemoteRef>> {
     entries.retain(|e| ref_matches_list_opts(&e.name, opts));
@@ -807,25 +827,28 @@ fn finalize_list_refs_output(
         entries.extend(peel_lines);
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    if list_refs_includes_head(opts) {
-        if let Some(sym) = head_symref {
-            if ref_matches_list_opts("HEAD", opts) {
-                let head_oid = entries
+    if list_refs_includes_head(opts) && ref_matches_list_opts("HEAD", opts) {
+        let resolved = head_oid.or_else(|| {
+            head_symref.as_ref().and_then(|sym| {
+                entries
                     .iter()
-                    .find(|e| e.name == sym)
+                    .find(|e| e.name == *sym)
                     .map(|e| e.oid)
-                    .or(None);
-                if let Some(oid) = head_oid {
-                    entries.insert(
-                        0,
-                        RemoteRef {
-                            name: "HEAD".to_owned(),
-                            oid,
-                            symref_target: if opts.symrefs { Some(sym) } else { None },
-                        },
-                    );
-                }
-            }
+            })
+        });
+        if let Some(oid) = resolved {
+            entries.insert(
+                0,
+                RemoteRef {
+                    name: "HEAD".to_owned(),
+                    oid,
+                    symref_target: if opts.symrefs {
+                        head_symref
+                    } else {
+                        None
+                    },
+                },
+            );
         }
     }
     Ok(entries)
