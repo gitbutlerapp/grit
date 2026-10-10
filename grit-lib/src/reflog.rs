@@ -52,7 +52,9 @@ pub fn reflog_path(git_dir: &Path, refname: &str) -> PathBuf {
 ///
 /// Returns I/O errors from reading or writing the reflog file.
 pub fn truncate_last_reflog_line(git_dir: &Path, refname: &str) -> Result<()> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         return Ok(());
     }
     let path = reflog_path(git_dir, refname);
@@ -102,11 +104,10 @@ fn adjust_reflog_shared_perm(git_dir: &Path, path: &Path) {
 
 /// Check whether a reflog exists for the given ref.
 pub fn reflog_exists(git_dir: &Path, refname: &str) -> bool {
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
-            .ok()
-            .and_then(|store| store.reflog_exists(refname).ok())
-            .unwrap_or(false);
+    if let Ok(store) = crate::refs::store::open_ref_store(git_dir) {
+        if store.format() != crate::refs::store::RefStorageFormat::Files {
+            return store.reflog_exists(refname).unwrap_or(false);
+        }
     }
     let path = reflog_path(git_dir, refname);
     path.is_file()
@@ -135,7 +136,9 @@ pub fn read_reflog_dwim(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry
 ///
 /// Returns an empty vec if the reflog file does not exist.
 pub fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
         let mut entries = Vec::new();
         store.for_each_reflog_entry(refname, false, &mut |entry| {
@@ -202,7 +205,9 @@ fn parse_reflog_line(line: &str) -> Option<ReflogEntry> {
 ///
 /// Used by `fsck` to validate reflog entries across loose-file and reftable backends.
 pub fn all_reflog_oids(git_dir: &Path) -> Result<HashSet<ObjectId>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         return Ok(all_reflog_oids_ordered(git_dir)?.into_iter().collect());
     }
     let mut out = HashSet::new();
@@ -224,7 +229,9 @@ pub fn all_reflog_oids(git_dir: &Path) -> Result<HashSet<ObjectId>> {
 /// on this order so that commits sharing a committer timestamp are emitted in a stable,
 /// Git-compatible sequence.
 pub fn all_reflog_oids_ordered(git_dir: &Path) -> Result<Vec<ObjectId>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         // Reftable repos: fall back to the ref-name-ordered reflog walk for a deterministic order.
         let mut out = Vec::new();
         let mut seen = HashSet::new();
@@ -321,7 +328,9 @@ pub fn delete_reflog_entries(git_dir: &Path, refname: &str, indices: &[usize]) -
         lines.push(format_reflog_entry(entry));
     }
 
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         let kept: Vec<ReflogEntry> = remaining
             .iter()
             .rev()
@@ -363,7 +372,9 @@ pub fn expire_reflog(git_dir: &Path, refname: &str, expire_time: Option<i64>) ->
         }
     }
 
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?
             .replace_reflog(refname, kept_entries)?;
         return Ok(pruned);
@@ -390,7 +401,9 @@ pub fn expire_reflog_unreachable(
     let Some(cutoff) = cutoff else {
         return Ok(0);
     };
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         return Ok(0);
     }
     let tip = match refs::resolve_ref(git_dir, refname) {
@@ -454,7 +467,9 @@ fn parse_timestamp_from_identity(identity: &str) -> Option<i64> {
 /// Copy `logs/<branch_refname>` to `logs/HEAD` when keeping symbolic-HEAD reflogs aligned with
 /// the checked-out branch (matches Git).
 pub fn mirror_branch_reflog_to_head(git_dir: &Path, branch_refname: &str) -> Result<()> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         return Ok(());
     }
     let src = reflog_path(git_dir, branch_refname);
@@ -472,7 +487,9 @@ pub fn mirror_branch_reflog_to_head(git_dir: &Path, branch_refname: &str) -> Res
 
 /// List all refs that have reflogs.
 pub fn list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files
+    {
         let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
         let mut refs = Vec::new();
         store.for_each_reflog_ref(&mut |name| {
@@ -889,7 +906,8 @@ pub fn expire_reflog_git(
     gc_global_unreachable: Option<i64>,
     now: i64,
 ) -> Result<ReflogExpireResult> {
-    let is_reftable = crate::reftable::is_reftable_repo(git_dir);
+    let is_reftable = crate::refs::store::open_ref_store(git_dir)?.format()
+        != crate::refs::store::RefStorageFormat::Files;
     let base_total = gc_global_total.unwrap_or_else(|| default_expire_total(now));
     let base_unreachable = gc_global_unreachable.unwrap_or_else(|| default_expire_unreachable(now));
     let (expire_total, expire_unreachable) = resolve_expire_for_ref(
@@ -1136,14 +1154,7 @@ mod default_expire_tests {
 
     fn seed_repo() -> (TempDir, Repository) {
         let tmp = TempDir::new().expect("tempdir");
-        let repo = init_repository(
-            tmp.path(),
-            false,
-            "main",
-            None,
-            crate::RefStorageFormat::Files,
-        )
-        .expect("init");
+        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
         (tmp, repo)
     }
 

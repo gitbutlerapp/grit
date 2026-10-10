@@ -95,6 +95,8 @@ pub struct Repository {
     /// without reopening the repository.
     /// Repository-scoped caches (config, attributes, filters, precompose, …).
     caches: Arc<RepoCaches>,
+    /// Pluggable ref backend selected for this repository.
+    ref_store: Arc<dyn crate::refs::store::RefStore>,
     /// Discovery and configuration environment used to open this repository.
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
@@ -210,6 +212,8 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
+        let ref_store = caches.open_ref_store(&git_dir)?;
+
         Ok(Self {
             git_dir,
             work_tree,
@@ -219,6 +223,7 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             caches,
+            ref_store,
             environment,
             git_prefix,
             command_runner,
@@ -370,7 +375,36 @@ impl Repository {
 
     /// Warm repository caches after discovery (reftable backend flag, optional config arc).
     pub(crate) fn install_config_snapshot(&self, _config: Arc<ConfigSet>) {
-        let _ = self.caches.is_reftable_repo(&self.git_dir);
+        let _ = self.caches.open_ref_store(&self.git_dir);
+    }
+
+    /// Reference storage backend for this repository.
+    #[must_use]
+    pub fn refs(&self) -> &dyn crate::refs::store::RefStore {
+        self.ref_store.as_ref()
+    }
+
+    /// Resolve `refname` through this repository's ref store.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`crate::refs::store::RefStoreError`] as [`Error::RefStore`].
+    pub fn resolve_ref_name(&self, refname: &str) -> Result<crate::objects::ObjectId> {
+        self.ref_store.resolve(refname)
+    }
+
+    /// Replace the ref store (embedders injecting [`crate::refs::store::MemoryRefStore`]).
+    #[must_use]
+    pub fn with_ref_store(mut self, store: Arc<dyn crate::refs::store::RefStore>) -> Self {
+        let key = self
+            .git_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.git_dir.clone());
+        if let Ok(mut guard) = self.caches.ref_stores.lock() {
+            guard.insert(key, Arc::clone(&store));
+        }
+        self.ref_store = store;
+        self
     }
 
     /// Whether pathspec matching should NFC-normalize paths for this repository.
@@ -418,39 +452,6 @@ impl Repository {
         repo.install_config_snapshot(cfg);
         warn_core_bare_worktree_conflict(options, &repo.git_dir);
         Ok(repo)
-    }
-
-    /// Open exactly the repository at `path` for wire-protocol serving.
-    ///
-    /// Unlike [`Self::discover`], this does not search parent directories: a
-    /// server must only serve the path it was given. The path may name a bare
-    /// repository, a working tree (with `.git` beside it), or the same logical
-    /// repository with a `.git` suffix appended to the path.
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: client-supplied repository path (bare root, work tree, or `*.git`).
-    /// - `options`: environment and injectable runners for config and hooks.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::NotARepository`] when none of the candidate layouts
-    /// contain a `HEAD` file.
-    pub fn open_for_serving(path: &Path, options: &RepositoryOptions) -> Result<Self> {
-        let mut with_git_suffix = path.as_os_str().to_owned();
-        with_git_suffix.push(".git");
-        let candidates = [
-            (path.join(".git"), Some(path.to_path_buf())),
-            (path.to_path_buf(), None),
-            (PathBuf::from(with_git_suffix), None),
-        ];
-        for (git_dir, work_tree) in candidates {
-            if !git_dir.join("HEAD").is_file() {
-                continue;
-            }
-            return Self::open_with(options, &git_dir, work_tree.as_deref());
-        }
-        Err(Error::NotARepository(path.display().to_string()))
     }
 
     /// Like [`Self::open`] but skips repository format validation (`validate_repository_format`).
@@ -570,6 +571,8 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
+        let ref_store = caches.open_ref_store(&git_dir)?;
+
         let repo = Self {
             git_dir,
             work_tree,
@@ -579,6 +582,7 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             caches,
+            ref_store,
             environment,
             git_prefix,
             command_runner,
@@ -901,21 +905,6 @@ impl Repository {
     /// subtrees into sparse-directory placeholders (when sparse index is enabled).
     pub fn write_index(&self, index: &mut Index) -> Result<()> {
         self.write_index_at(&self.index_path(), index)
-    }
-
-    /// Write a pack reachability `.bitmap` sidecar for `pack_idx_path`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::pack_bitmap::PackBitmapWriteError`] when the pack is not
-    /// closed under reachability from the repository refs used for validation.
-    pub fn write_pack_bitmap(
-        &self,
-        pack_idx_path: &std::path::Path,
-        options: &crate::pack_bitmap::PackBitmapWriteOptions,
-        now: std::time::SystemTime,
-    ) -> std::result::Result<std::path::PathBuf, crate::pack_bitmap::PackBitmapWriteError> {
-        crate::pack_bitmap::PackBitmapWriter::write(self, pack_idx_path, options, now)
     }
 
     /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`).
@@ -1898,7 +1887,6 @@ pub fn validate_repo_format(git_dir: &Path) -> Result<()> {
     validate_repository_format(git_dir)
 }
 
-/// Validate parsed repository format (version and extensions) before using the repo.
 pub(crate) fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
     if parsed.repo_version > 1 {
         return Err(Error::UnsupportedRepositoryFormatVersion(
@@ -1918,12 +1906,21 @@ pub(crate) fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Re
 }
 
 fn validate_repository_format(git_dir: &Path) -> Result<()> {
+    let parsed = read_repository_format_from_git_dir(git_dir)?;
+    validate_repository_format_parsed(&parsed)
+}
+
+/// Parse repository format from the repository-local config file.
+pub(crate) fn read_repository_format_from_git_dir(git_dir: &Path) -> Result<RepositoryFormat> {
     let Some(config_path) = repository_config_path(git_dir) else {
-        return Ok(());
+        return Ok(RepositoryFormat {
+            repo_version: 0,
+            extensions: BTreeSet::new(),
+            ref_storage: None,
+        });
     };
     let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
-    let parsed = parse_repository_format(&content, &config_path)?;
-    validate_repository_format_parsed(&parsed)
+    parse_repository_format(&content, &config_path)
 }
 
 /// The result of parsing `core.repositoryformatversion` and `extensions.*` from a
@@ -1935,23 +1932,6 @@ pub(crate) struct RepositoryFormat {
     pub(crate) extensions: BTreeSet<String>,
     /// Raw value of `extensions.refstorage`, if present.
     pub(crate) ref_storage: Option<String>,
-}
-
-/// Parse repository format from repository-local config (no global/system config).
-///
-/// # Errors
-///
-/// Returns [`Error::Io`] or [`Error::Config`] when config cannot be read or parsed.
-pub(crate) fn read_repository_format_from_git_dir(git_dir: &Path) -> Result<RepositoryFormat> {
-    let Some(config_path) = repository_config_path(git_dir) else {
-        return Ok(RepositoryFormat {
-            repo_version: 0,
-            extensions: BTreeSet::new(),
-            ref_storage: None,
-        });
-    };
-    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
-    parse_repository_format(&content, &config_path)
 }
 
 impl RepositoryFormat {
@@ -2769,7 +2749,7 @@ fn write_fresh_git_directory(
     bare: bool,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
+    ref_storage: &str,
     skip_hooks_and_info: bool,
 ) -> Result<()> {
     let mut subs = vec![
@@ -2788,7 +2768,7 @@ fn write_fresh_git_directory(
         fs::create_dir_all(git_dir.join(sub))?;
     }
 
-    if ref_storage.is_reftable() {
+    if ref_storage == "reftable" {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let tables_list = reftable_dir.join("tables.list");
@@ -2806,7 +2786,7 @@ fn write_fresh_git_directory(
     let head_content = format!("ref: refs/heads/{initial_branch}\n");
     fs::write(git_dir.join("HEAD"), head_content)?;
 
-    let needs_extensions = ref_storage.is_reftable();
+    let needs_extensions = ref_storage == "reftable";
     let repo_version = if needs_extensions { 1 } else { 0 };
 
     let mut config_content = String::from("[core]\n");
@@ -2877,7 +2857,7 @@ pub fn init_repository_separate_git_dir(
     git_dir: &Path,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
+    ref_storage: &str,
 ) -> Result<Repository> {
     let skip_hooks_info = template_dir.is_some_and(|p| p.as_os_str().is_empty());
     fs::create_dir_all(work_tree)?;
@@ -2941,7 +2921,7 @@ pub fn ensure_core_bare(git_dir: &Path) -> Result<()> {
 pub fn init_bare_clone_minimal(
     git_dir: &Path,
     initial_branch: &str,
-    ref_storage: crate::ref_storage::RefStorageFormat,
+    ref_storage: &str,
 ) -> Result<()> {
     for sub in &[
         "objects",
@@ -2954,7 +2934,7 @@ pub fn init_bare_clone_minimal(
         fs::create_dir_all(git_dir.join(sub))?;
     }
 
-    if ref_storage.is_reftable() {
+    if ref_storage == "reftable" {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let tables_list = reftable_dir.join("tables.list");
@@ -2966,7 +2946,7 @@ pub fn init_bare_clone_minimal(
     let head_content = format!("ref: refs/heads/{initial_branch}\n");
     fs::write(git_dir.join("HEAD"), head_content)?;
 
-    let needs_extensions = ref_storage.is_reftable();
+    let needs_extensions = ref_storage == "reftable";
     let repo_version = if needs_extensions { 1 } else { 0 };
     let mut config_content = String::from("[core]\n");
     config_content.push_str(&format!("\trepositoryformatversion = {repo_version}\n"));
@@ -2995,7 +2975,7 @@ pub fn init_repository(
     bare: bool,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
+    ref_storage: &str,
 ) -> Result<Repository> {
     let skip_hooks_info = !bare && template_dir.is_some_and(|p| p.as_os_str().is_empty());
     let git_dir = if bare {
@@ -3034,7 +3014,7 @@ pub fn init_bare_with_env_worktree(
     work_tree: &Path,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: crate::ref_storage::RefStorageFormat,
+    ref_storage: &str,
 ) -> Result<Repository> {
     fs::create_dir_all(git_dir)?;
     fs::create_dir_all(work_tree)?;

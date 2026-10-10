@@ -22,11 +22,9 @@ use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
 use crate::objects::ObjectId;
-use crate::pack_bitmap::BitmapIndexCache;
 use crate::precompose_config::{
     effective_core_precomposeunicode_with_config, filesystem_nfd_nfc_aliases,
 };
-use crate::ref_storage::RefStorageFormat;
 use crate::repo::Repository;
 
 /// Per-repository cache arena (held behind [`Arc`] on [`Repository`]).
@@ -36,12 +34,12 @@ pub struct RepoCaches {
     attr_bare: Mutex<HashMap<PathBuf, AttrStackCacheEntry>>,
     attr_tree: Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>>,
     pathspec_precompose: OnceLock<bool>,
-    ref_storage_format: Mutex<HashMap<PathBuf, RefStorageFormat>>,
+    reftable_backend: Mutex<HashMap<PathBuf, bool>>,
+    pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,
     filters: FilterProcessState,
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
     bare_worktree_warn_seen: Mutex<HashSet<String>>,
     commit_graph_warn_seen: Mutex<HashSet<String>>,
-    bitmap_index: BitmapIndexCache,
     diagnostics: Mutex<DiagnosticsHandle>,
 }
 
@@ -70,19 +68,14 @@ impl RepoCaches {
             attr_bare: Mutex::new(HashMap::new()),
             attr_tree: Mutex::new(HashMap::new()),
             pathspec_precompose: OnceLock::new(),
-            ref_storage_format: Mutex::new(HashMap::new()),
+            reftable_backend: Mutex::new(HashMap::new()),
+            ref_stores: Mutex::new(HashMap::new()),
             filters: FilterProcessState::new(command_runner),
             promisor_hydrate: Mutex::new(None),
             bare_worktree_warn_seen: Mutex::new(HashSet::new()),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
-            bitmap_index: BitmapIndexCache::default(),
             diagnostics: Mutex::new(diagnostics),
         })
-    }
-
-    /// Cached [`crate::pack_bitmap::BitmapIndex`] for this repository handle.
-    pub(crate) fn bitmap_index(&self) -> &BitmapIndexCache {
-        &self.bitmap_index
     }
 
     /// Return the diagnostic sink for this cache arena.
@@ -330,30 +323,45 @@ impl RepoCaches {
         })
     }
 
-    /// Cached ref storage format for `git_dir`.
-    ///
-    /// On detection failure, returns [`crate::RefStorageFormat::Files`] (legacy `is_reftable_repo` behavior).
+    /// Cached reftable-backend flag for `git_dir`.
     #[must_use]
-    pub fn ref_storage_format(&self, git_dir: &Path) -> RefStorageFormat {
+    pub fn is_reftable_repo(&self, git_dir: &Path) -> bool {
         let key = git_dir
             .canonicalize()
             .unwrap_or_else(|_| git_dir.to_path_buf());
-        if let Ok(guard) = self.ref_storage_format.lock() {
+        if let Ok(guard) = self.reftable_backend.lock() {
             if let Some(v) = guard.get(&key) {
                 return *v;
             }
         }
-        let v = crate::RefStorageFormat::detect(git_dir).unwrap_or(crate::RefStorageFormat::Files);
-        if let Ok(mut guard) = self.ref_storage_format.lock() {
+        let v = crate::ref_storage::RefStorageFormat::detect(git_dir)
+            .map(|f| f.is_reftable())
+            .unwrap_or_else(|_| crate::reftable::reftable_declared_in_repository_config(git_dir));
+        if let Ok(mut guard) = self.reftable_backend.lock() {
             guard.insert(key, v);
         }
         v
     }
 
-    /// Cached reftable-backend flag for `git_dir`.
-    #[must_use]
-    pub fn is_reftable_repo(&self, git_dir: &Path) -> bool {
-        self.ref_storage_format(git_dir).is_reftable()
+    /// Open (or reuse) the [`crate::refs::store::RefStore`] for `git_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates backend detection and initialization failures.
+    pub fn open_ref_store(&self, git_dir: &Path) -> Result<Arc<dyn crate::refs::store::RefStore>> {
+        let key = git_dir
+            .canonicalize()
+            .unwrap_or_else(|_| git_dir.to_path_buf());
+        if let Ok(guard) = self.ref_stores.lock() {
+            if let Some(store) = guard.get(&key) {
+                return Ok(Arc::clone(store));
+            }
+        }
+        let store = crate::refs::store::open_ref_store_uncached(git_dir)?;
+        if let Ok(mut guard) = self.ref_stores.lock() {
+            guard.insert(key, Arc::clone(&store));
+        }
+        Ok(store)
     }
 
     /// Filter-process registry and disabled-driver set for this repository.
