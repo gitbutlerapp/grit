@@ -143,6 +143,114 @@ fn branch_markdown_lists_branches_without_json_blob() {
 }
 
 #[test]
+fn diff_markdown_uses_extended_fence_when_patch_contains_triple_backticks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("doc.md"), "before\n```\nafter\n").unwrap();
+    Command::new(GRIT)
+        .args(["add", "doc.md"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    Command::new(GRIT)
+        .args(["commit", "-m", "add doc"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    std::fs::write(dir.path().join("doc.md"), "before\n```\nchanged\n").unwrap();
+    let out = Command::new(GRIT)
+        .args(["diff", "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("diff");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("````diff"),
+        "expected extended fence when patch contains ```:\n{stdout}"
+    );
+    let body = stdout
+        .split("````diff\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n````").next())
+        .expect("extended diff fence body");
+    assert!(
+        body.contains("+changed"),
+        "lines after inner ``` must stay inside the fence:\n{body}"
+    );
+}
+
+#[test]
+fn show_markdown_escapes_pipe_characters_in_diffstat_table() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let path = dir.path().join("a|b.txt");
+    std::fs::write(&path, "x\n").unwrap();
+    Command::new(GRIT)
+        .args(["add"])
+        .arg(path.to_str().unwrap())
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    Command::new(GRIT)
+        .args(["commit", "-m", "pipe name"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    std::fs::write(&path, "xy\n").unwrap();
+    Command::new(GRIT)
+        .args(["add"])
+        .arg(path.to_str().unwrap())
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    Command::new(GRIT)
+        .args(["commit", "-m", "change"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    let out = Command::new(GRIT)
+        .args(["show", "--markdown", "HEAD"])
+        .current_dir(dir.path())
+        .output()
+        .expect("show");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("a\\|b.txt"),
+        "pipe in filename must be escaped in the table row:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("| `a\\|b.txt` |"),
+        "table row must keep the filename in one cell:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("| `a|b.txt` |"),
+        "unescaped pipe must not appear in the table row:\n{stdout}"
+    );
+}
+
+#[test]
+fn status_markdown_hints_use_inline_code_not_html_tags() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("new.txt"), "n\n").unwrap();
+    let out = Command::new(GRIT)
+        .args(["status", "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("status");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("grit add `PATH` to stage"));
+    assert!(!stdout.contains("<file>"));
+}
+
+#[test]
 fn status_markdown_has_staged_section() {
     let dir = tempfile::tempdir().expect("tempdir");
     init_repo(dir.path());

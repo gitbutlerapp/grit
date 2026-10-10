@@ -82,7 +82,7 @@ impl MarkdownRender for StatusOutcome {
     fn render_markdown(&self) {
         self.render_markdown_header();
         self.render_markdown_changes();
-        self.render_hints();
+        self.render_markdown_hints();
     }
 }
 
@@ -163,6 +163,19 @@ impl StatusOutcome {
         }
         if !self.staged_entries.is_empty() {
             hints.push("grit commit \"message\" to commit");
+        }
+        if !hints.is_empty() {
+            println!("→ {}", hints.join("  ·  "));
+        }
+    }
+
+    fn render_markdown_hints(&self) {
+        let mut hints = Vec::new();
+        if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
+            hints.push("grit add `PATH` to stage");
+        }
+        if !self.staged_entries.is_empty() {
+            hints.push("grit commit `\"message\"` to commit");
         }
         if !hints.is_empty() {
             println!("→ {}", hints.join("  ·  "));

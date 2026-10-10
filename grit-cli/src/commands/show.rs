@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
 use crate::context::{self, subject_line};
+use crate::markdown;
 use crate::output::{HumanRender, MarkdownRender};
 
 /// Width budget for the `+`/`-` change bars in the diffstat.
@@ -515,7 +516,7 @@ fn render_markdown_stat(stat: &DiffStat) {
     println!("| File | + | − |");
     println!("| --- | ---: | ---: |");
     for file in &stat.files {
-        let path = stat_path(file);
+        let path = markdown::escape_table_cell(&stat_path(file));
         if file.binary {
             println!("| `{path}` | binary | |");
         } else {

@@ -100,12 +100,26 @@ pub fn print_diff_files(files: &[FileDiff]) {
     }
 }
 
+/// Pick a fence delimiter longer than any run of backticks appearing in `body`.
+#[must_use]
+pub fn diff_code_fence(body: &str) -> (String, String) {
+    let mut ticks = 3usize;
+    loop {
+        let marker = "`".repeat(ticks);
+        if !body.contains(&marker) {
+            return (format!("{marker}diff"), marker);
+        }
+        ticks += 1;
+    }
+}
+
 fn print_fenced_diff(body: &str) {
-    println!("```diff");
+    let (open, close) = diff_code_fence(body);
+    println!("{open}");
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
     let _ = stdio::io_result(writeln!(lock, "{body}"));
-    let _ = stdio::io_result(writeln!(lock, "```"));
+    let _ = stdio::io_result(writeln!(lock, "{close}"));
 }
 
 fn render_file_patch(file: &FileDiff) -> String {
@@ -191,7 +205,9 @@ pub fn print_config_entries(entries: &[crate::commands::config::ConfigEntry]) {
     }
 }
 
-fn escape_table_cell(s: &str) -> String {
+/// Escape `|` so a path or value does not split a Markdown table row.
+#[must_use]
+pub fn escape_table_cell(s: &str) -> String {
     s.replace('|', "\\|")
 }
 
@@ -255,6 +271,27 @@ fn short_hex(oid: &str) -> &str {
 }
 
 /// Per-ref push results.
+#[cfg(test)]
+mod tests {
+    use super::diff_code_fence;
+
+    #[test]
+    fn diff_code_fence_uses_longer_delimiter_when_body_has_triple_backticks() {
+        let body = " context\n+```\n";
+        let (open, close) = diff_code_fence(body);
+        assert_eq!(open, "````diff");
+        assert_eq!(close, "````");
+    }
+
+    #[test]
+    fn diff_code_fence_stays_at_three_when_body_is_safe() {
+        let body = "+hello\n";
+        let (open, close) = diff_code_fence(body);
+        assert_eq!(open, "```diff");
+        assert_eq!(close, "```");
+    }
+}
+
 pub fn print_push_results(
     remote: &str,
     branch: &str,
