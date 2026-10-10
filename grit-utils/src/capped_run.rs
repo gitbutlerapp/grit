@@ -86,6 +86,7 @@ pub fn run_capped_shell_command(
             if start.elapsed() >= limit {
                 kill_process_tree(pid);
                 let _ = child.wait();
+                peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
                 return Ok(CappedRunOutcome {
                     termination: TerminationKind::Timeout,
                     peak_rss_bytes,
@@ -99,6 +100,7 @@ pub fn run_capped_shell_command(
             if rss > cap {
                 kill_process_tree(pid);
                 let _ = child.wait();
+                peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
                 return Ok(CappedRunOutcome {
                     termination: TerminationKind::MemoryCap {
                         peak_rss_bytes,
@@ -111,6 +113,7 @@ pub fn run_capped_shell_command(
 
         match child.try_wait().context("poll capped command")? {
             Some(status) => {
+                peak_rss_bytes = peak_rss_bytes.max(children_rusage_peak_rss_bytes()?);
                 let termination = if status.success() {
                     TerminationKind::Success
                 } else {
@@ -207,6 +210,28 @@ fn process_tree_rss_bytes(root: u32) -> Result<u64> {
     Ok(total)
 }
 
+/// Peak RSS of all waited-for child processes ([`UsageWho::RUSAGE_CHILDREN`]).
+#[cfg(unix)]
+fn children_rusage_peak_rss_bytes() -> Result<u64> {
+    use nix::sys::resource::{getrusage, UsageWho};
+    let usage = getrusage(UsageWho::RUSAGE_CHILDREN).context("getrusage(RUSAGE_CHILDREN)")?;
+    Ok(rss_bytes_from_rusage_max_rss(usage.max_rss()))
+}
+
+/// Convert `ru_maxrss` from `getrusage` into bytes (OS-specific units).
+#[cfg(unix)]
+pub(crate) fn rss_bytes_from_rusage_max_rss(raw: i64) -> u64 {
+    let raw = raw.max(0) as u64;
+    #[cfg(target_os = "macos")]
+    {
+        raw
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        raw.saturating_mul(1024)
+    }
+}
+
 #[cfg(unix)]
 fn read_process_rss_bytes(pid: u32) -> Result<Option<u64>> {
     let path = format!("/proc/{pid}/status");
@@ -247,6 +272,15 @@ mod tests {
                 cap_bytes: 0
             }
         );
+    }
+
+    #[test]
+    fn rss_bytes_from_rusage_linux_kib_to_bytes() {
+        if cfg!(target_os = "macos") {
+            assert_eq!(rss_bytes_from_rusage_max_rss(4096), 4096);
+        } else {
+            assert_eq!(rss_bytes_from_rusage_max_rss(1024), 1024 * 1024);
+        }
     }
 
     #[cfg(unix)]
