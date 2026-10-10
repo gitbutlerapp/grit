@@ -217,7 +217,14 @@ fn write_tree_unchanged_index_writes_and_freshens_nothing() {
 #[test]
 fn create_commit_one_change_writes_only_changed_path_trees() {
     let tmp = TempDir::new().unwrap();
-    let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        crate::RefStorageFormat::Files,
+    )
+    .unwrap();
     let mut index = Index::new();
     let paths = [
         "top/mid/unchanged.txt",
@@ -317,7 +324,14 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
 #[test]
 fn stage_one_modified_file_hashes_one_blob() {
     let tmp = TempDir::new().unwrap();
-    let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        crate::RefStorageFormat::Files,
+    )
+    .unwrap();
     let mut index = build_flat_index(LARGE_INDEX_ENTRIES, 2);
     materialize_index_worktree(&repo, &index, "v1:");
     for entry in index.entries.iter_mut() {
@@ -353,7 +367,14 @@ fn stage_one_modified_file_hashes_one_blob() {
 #[test]
 fn pack_signature_not_restatted_per_object() {
     let tmp = TempDir::new().unwrap();
-    let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        crate::RefStorageFormat::Files,
+    )
+    .unwrap();
     let _scope = HotPathMetricsScope::install(Arc::clone(&repo.odb.hot_path_test_metrics));
     let metrics = repo.odb.hot_path_test_metrics();
     let wt = repo.work_tree.as_ref().unwrap();

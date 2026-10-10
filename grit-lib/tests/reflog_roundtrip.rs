@@ -694,7 +694,14 @@ fn log_all_ref_updates_modes_match_git() {
 fn t0600_expire_on_symref_not_referent() {
     let root = tempfile::tempdir().expect("tempdir");
     let worktree = root.path();
-    grit_lib::repo::init_repository(worktree, false, "main", None, "files").expect("init");
+    grit_lib::repo::init_repository(
+        worktree,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = worktree.join(".git");
     let refname = "refs/heads/main";
     let sym = "refs/heads/sym-main";

@@ -67,7 +67,14 @@ fn git_fsck_full(repo_root: &Path) {
 
 fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let objects = git_dir.join("objects");
     let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
@@ -149,7 +156,14 @@ fn memory_primary_resolve_abbrev_via_lookup_prefix() {
 #[test]
 fn memory_primary_write_raw_ignores_seeded_loose_on_disk() {
     let dir = tempfile::tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let objects = git_dir.join("objects");
     let payload = b"seed-on-disk-only\n";
@@ -179,7 +193,14 @@ fn memory_primary_write_raw_ignores_seeded_loose_on_disk() {
 #[test]
 fn files_primary_gc_prunes_unreachable_loose() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let kept_blob = repo.odb.write(ObjectKind::Blob, b"keep\n").expect("keep");
     let tree_body = serialize_tree(&[TreeEntry {
         mode: 0o100644,
@@ -252,7 +273,14 @@ fn memory_primary_abbrev_unique_prefix_considers_store_collisions() {
 #[test]
 fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
 
     let blob = repo
         .odb

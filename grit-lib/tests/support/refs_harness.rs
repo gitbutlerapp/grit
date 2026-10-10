@@ -83,10 +83,10 @@ impl TestRepo {
     }
 }
 
-fn ref_storage_name(backend: Backend) -> &'static str {
+fn ref_storage_format(backend: Backend) -> grit_lib::ref_storage::RefStorageFormat {
     match backend {
-        Backend::Files => "files",
-        Backend::Reftable => "reftable",
+        Backend::Files => grit_lib::ref_storage::RefStorageFormat::Files,
+        Backend::Reftable => grit_lib::ref_storage::RefStorageFormat::Reftable,
     }
 }
 
@@ -164,7 +164,7 @@ pub fn each_backend(f: impl Fn(Backend, &TestRepo)) {
         }
         let root = tempfile::tempdir().expect("tempdir");
         let worktree = root.path().to_path_buf();
-        init_repository(&worktree, false, "main", None, ref_storage_name(backend))
+        init_repository(&worktree, false, "main", None, ref_storage_format(backend))
             .expect("init_repository");
         let repo = TestRepo {
             _root: root,
@@ -320,7 +320,14 @@ pub fn git_check_ref_format(refname: &str) -> bool {
 pub fn files_repo() -> TestRepo {
     let root = tempfile::tempdir().expect("tempdir");
     let worktree = root.path().to_path_buf();
-    init_repository(&worktree, false, "main", None, "files").expect("init_repository");
+    init_repository(
+        &worktree,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init_repository");
     TestRepo {
         _root: root,
         worktree,

@@ -27,7 +27,7 @@ fn write_commit(odb: &Odb, msg: &str) -> grit_lib::error::Result<ObjectId> {
 }
 
 fn open_bare_with_main(dir: &Path) -> grit_lib::error::Result<(Repository, ObjectId)> {
-    init_bare_clone_minimal(dir, "main", "files")?;
+    init_bare_clone_minimal(dir, "main", grit_lib::ref_storage::RefStorageFormat::Files)?;
     let repo = Repository::open(dir, None)?;
     let tip = write_commit(&repo.odb, "init")?;
     fs::write(repo.git_dir.join("refs/heads/main"), format!("{tip}\n"))?;

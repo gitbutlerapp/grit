@@ -120,30 +120,35 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
   <div class="rail" aria-hidden="true"><span class="line"></span></div>
   <div class="doc-body has-toc">
     <article class="content"><h2 id="synopsis">Synopsis</h2>
-<pre><code>grit init [--bare] [&lt;path&gt;]</code></pre>
+<pre><code>grit init [--bare] [--ref-format &lt;files|reftable&gt;] [&lt;path&gt;]</code></pre>
 <h2 id="description">Description</h2>
 <p>Creates an empty Git repository at <code>&lt;path&gt;</code>, or in the current directory when no path is given. The directory is created if it doesn&#x27;t exist. A normal repository keeps its data in a <code>.git</code> directory next to your files. A bare repository has no working tree; the repository data is the directory itself, which is what you want for a repository that other people push to.</p>
 <p>The first branch is <code>main</code>. It has no commits until you make one.</p>
+<p>Use <code>--ref-format reftable</code> to initialize with Git&#x27;s reftable ref backend (requires a reftable-capable Git for interoperability). The default is <code>files</code> (loose refs under <code>refs/</code>).</p>
 <h2 id="options">Options</h2>
-<div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;path&gt;</code></td><td>Where to create the repository. Defaults to the current directory.</td></tr><tr><td><code>--bare</code></td><td>Create a bare repository, with no working tree.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;path&gt;</code></td><td>Where to create the repository. Defaults to the current directory.</td></tr><tr><td><code>--bare</code></td><td>Create a bare repository, with no working tree.</td></tr><tr><td><code>--ref-format</code></td><td>Ref storage backend: <code>files</code> (default) or <code>reftable</code>.</td></tr></tbody></table></div>
 <h2 id="examples">Examples</h2>
 <p>Start a new project in a new directory:</p>
 <pre><code>$ grit init project
-Initialized empty repository in /home/ada/project/.git</code></pre>
+Initialized empty repository in /home/ada/project/.git (ref-format: files)</code></pre>
 <p>Turn the current directory into a repository:</p>
 <pre><code>$ grit init</code></pre>
 <p>Create a bare repository to use as a shared remote:</p>
 <pre><code>$ grit init --bare /srv/git/project.git
-Initialized empty bare repository in /srv/git/project.git</code></pre>
+Initialized empty bare repository in /srv/git/project.git (ref-format: files)</code></pre>
+<p>Initialize with the reftable ref backend:</p>
+<pre><code>$ grit init --ref-format reftable reftable-demo
+Initialized empty repository in /home/ada/reftable-demo/.git (ref-format: reftable)</code></pre>
 <h2 id="json-output">JSON output</h2>
 <p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
-<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>initialized</code></td><td>boolean</td><td>Whether the repository was created successfully.</td></tr><tr><td><code>path</code></td><td>string</td><td>Repository directory (the <code>.git</code> directory for a normal repository).</td></tr><tr><td><code>bare</code></td><td>boolean</td><td>Whether the repository is bare.</td></tr><tr><td><code>branch</code></td><td>string</td><td>Initial branch name.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>initialized</code></td><td>boolean</td><td>Whether the repository was created successfully.</td></tr><tr><td><code>path</code></td><td>string</td><td>Repository directory (the <code>.git</code> directory for a normal repository).</td></tr><tr><td><code>bare</code></td><td>boolean</td><td>Whether the repository is bare.</td></tr><tr><td><code>branch</code></td><td>string</td><td>Initial branch name.</td></tr><tr><td><code>ref_format</code></td><td>string</td><td>Ref storage backend (<code>files</code> or <code>reftable</code>).</td></tr></tbody></table></div>
 <p>Example:</p>
 <pre><code>{
   &quot;initialized&quot;: true,
   &quot;path&quot;: &quot;/home/ada/project/.git&quot;,
   &quot;bare&quot;: false,
-  &quot;branch&quot;: &quot;main&quot;
+  &quot;branch&quot;: &quot;main&quot;,
+  &quot;ref_format&quot;: &quot;files&quot;
 }</code></pre>
 <h2 id="see-also">See also</h2>
 <p><a href="../clone/">grit clone</a>, <a href="../remote/">grit remote</a></p><div class="pager"><a href="../agents/">← Agent guide</a><a href="../clone/">grit clone →</a></div></article>

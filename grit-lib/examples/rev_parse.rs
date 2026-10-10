@@ -10,7 +10,13 @@ use grit_lib::write_tree::write_tree_from_index;
 
 fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
-    let repo = init_repository(root.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
 
     use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
     let blob_oid = repo.odb.write(ObjectKind::Blob, b"x\n")?;

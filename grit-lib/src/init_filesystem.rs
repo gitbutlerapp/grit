@@ -291,8 +291,14 @@ mod tests {
         .expect("template config");
 
         let root = TempDir::new().expect("worktree");
-        crate::repo::init_repository(root.path(), false, "main", Some(tmpl.path()), "files")
-            .expect("init");
+        crate::repo::init_repository(
+            root.path(),
+            false,
+            "main",
+            Some(tmpl.path()),
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
 
         let text = fs::read_to_string(root.path().join(".git/config")).expect("read");
         assert!(

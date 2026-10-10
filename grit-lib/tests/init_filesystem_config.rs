@@ -10,7 +10,14 @@ use tempfile::TempDir;
 #[test]
 fn init_sets_precomposeunicode_when_options_force_probe() {
     let td = TempDir::new().expect("tempdir");
-    init_repository(td.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        td.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     apply_init_filesystem_config(
         &td.path().join(".git"),
         InitFilesystemConfigOptions {

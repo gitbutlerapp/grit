@@ -2591,47 +2591,9 @@ impl ReftableStack {
 // Integration helpers — used by refs.rs and commands
 // ---------------------------------------------------------------------------
 
-/// Path to the repository-local `config` file (linked worktree common dir when needed).
-fn repository_config_file(git_dir: &Path) -> Option<PathBuf> {
-    let local = git_dir.join("config");
-    if local.is_file() {
-        return Some(local);
-    }
-    let common = crate::refs::common_dir(git_dir)?;
-    let shared = common.join("config");
-    if shared.is_file() {
-        Some(shared)
-    } else {
-        None
-    }
-}
-
 /// Whether `extensions.refstorage = reftable` is declared in repository-local config only.
 pub(crate) fn reftable_declared_in_repository_config(git_dir: &Path) -> bool {
-    let Some(path) = repository_config_file(git_dir) else {
-        return false;
-    };
-    let Ok(content) = fs::read_to_string(&path) else {
-        return false;
-    };
-    let mut in_extensions = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_extensions = trimmed.eq_ignore_ascii_case("[extensions]");
-            continue;
-        }
-        if in_extensions {
-            if let Some((key, value)) = trimmed.split_once('=') {
-                if key.trim().eq_ignore_ascii_case("refstorage")
-                    && value.trim().eq_ignore_ascii_case("reftable")
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    crate::ref_storage::RefStorageFormat::detect(git_dir).is_ok_and(|f| f.is_reftable())
 }
 
 /// Detect whether a git directory uses the reftable backend (uncached).
@@ -3905,7 +3867,14 @@ mod tests {
         use tempfile::TempDir;
 
         let tmp = TempDir::new().unwrap();
-        let repo = init_repository(tmp.path(), false, "main", None, "reftable").unwrap();
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .unwrap();
         let git_dir = repo.git_dir;
         let tables_list = git_dir.join("reftable/tables.list");
         let before = fs::read_to_string(&tables_list).unwrap_or_default();

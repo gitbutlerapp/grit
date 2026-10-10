@@ -9,7 +9,13 @@ use grit_lib::pack;
 use grit_lib::repo::init_repository;
 fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
-    let repo = init_repository(root.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
 
     let objects_dir = repo.git_dir.join("objects");
     let indexes = pack::read_local_pack_indexes(&objects_dir)?;

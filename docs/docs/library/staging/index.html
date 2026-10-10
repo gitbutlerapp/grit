@@ -161,7 +161,13 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
         open_repo(&amp;root)?
     } else {
         let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
-        init_repository(temp.path(), false, &quot;main&quot;, None, &quot;files&quot;)?;
+        init_repository(
+            temp.path(),
+            false,
+            &quot;main&quot;,
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )?;
         let path = temp.path().join(&quot;hello.txt&quot;);
         fs::write(&amp;path, b&quot;staged from the library guide\n&quot;).map_err(grit_lib::error::Error::Io)?;
         let opened = open_repo(temp.path())?;

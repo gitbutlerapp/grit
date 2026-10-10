@@ -31,7 +31,14 @@ fn ref_name_validation_and_dwim_helpers() {
 #[test]
 fn packed_refs_load_and_namespace_conflict() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     write_ref(&git_dir, "refs/heads/packed", &oid(1)).expect("write");
     fs::write(
@@ -57,7 +64,14 @@ fn packed_refs_load_and_namespace_conflict() {
 #[test]
 fn write_ref_cas_and_delete_cas_error_paths() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     write_ref(&git_dir, "refs/heads/cas", &oid(1)).expect("seed");
     assert!(write_ref_cas(&git_dir, "refs/heads/cas", &oid(2), oid(9)).is_err());
@@ -78,7 +92,14 @@ fn write_ref_cas_and_delete_cas_error_paths() {
 #[test]
 fn reflog_policy_and_append() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     write_ref(&git_dir, "refs/heads/logged", &oid(2)).expect("write");
     let mode = read_log_refs_config(&git_dir);
@@ -101,7 +122,14 @@ fn reflog_policy_and_append() {
 #[test]
 fn list_refs_resolve_dwim_and_symbolic() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     write_ref(&git_dir, "refs/heads/topic", &oid(3)).expect("write");
     write_symbolic_ref(&git_dir, "refs/heads/sym", "refs/heads/topic").expect("sym");
@@ -124,7 +152,14 @@ fn list_refs_resolve_dwim_and_symbolic() {
 #[test]
 fn pack_remote_tracking_refs_for_clone_smoke() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("cfg");
     cfg.push_str("[remote \"origin\"]\n\turl = https://example.com/r.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n");

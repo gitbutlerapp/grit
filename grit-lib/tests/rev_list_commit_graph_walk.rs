@@ -75,7 +75,14 @@ fn git_commit_graph_write(repo_root: &tempfile::TempDir) {
 #[test]
 fn rev_list_commit_graph_walk_matches_object_walk() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     write_linear_commits(&repo, 80);
     git_commit_graph_write(&dir);
     assert!(dir.path().join(".git/objects/info/commit-graph").is_file());

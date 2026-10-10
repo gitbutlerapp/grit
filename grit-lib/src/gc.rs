@@ -376,7 +376,14 @@ mod update_refs_tests {
     #[test]
     fn rejects_duplicate_ref_names_in_batch() {
         let tmp = TempDir::new().expect("tempdir");
-        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let oid = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
         let items = vec![
             RefTransactionItem {
@@ -401,7 +408,14 @@ mod update_refs_tests {
     #[test]
     fn reftable_cas_rechecked_under_stack_lock() {
         let tmp = TempDir::new().expect("tempdir");
-        let repo = init_repository(tmp.path(), false, "main", None, "reftable").expect("init");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .expect("init");
         let git_dir = repo.git_dir;
         let c1 = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
         let c2 = sample_oid("1111111111111111111111111111111111111111");

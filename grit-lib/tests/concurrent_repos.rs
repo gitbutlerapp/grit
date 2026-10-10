@@ -53,7 +53,14 @@ fn prepare_repo(
 ) -> RepoFixture {
     let root = base.join(name);
     fs::create_dir_all(&root).expect("repo root");
-    init_repository(&root, false, "main", None, "files").expect("init");
+    init_repository(
+        &root,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
 
     let home = base.join(format!("home-{name}"));
     fs::create_dir_all(&home).expect("home");
@@ -329,7 +336,14 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
      -> RepoFixture {
         let root = base.path().join(format!("{name}-{iter}"));
         fs::create_dir_all(&root).expect("root");
-        init_repository(&root, false, "main", None, "files").expect("init");
+        init_repository(
+            &root,
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )
+        .expect("init");
         let home = base.path().join(format!("home-{name}-{iter}"));
         fs::create_dir_all(&home).expect("home");
         let global = home.join(".gitconfig");

@@ -58,7 +58,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
 
     let td = tempfile::TempDir::new().expect("tempdir");
     let root = td.path();
-    init_repository(root, false, "main", None, "files").expect("init");
+    init_repository(root, false, "main", None, grit_lib::RefStorageFormat::Files).expect("init");
 
     let vars = [
         ("TZ", "America/New_York"),

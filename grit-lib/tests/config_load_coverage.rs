@@ -36,7 +36,14 @@ fn load_cascade_system_global_xdg_local_and_git_config_override() {
     fs::write(&system, "[system]\n\tk = from-system\n").expect("system");
 
     let repo = dir.path().join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     fs::write(
         git_dir.join("config"),
@@ -119,7 +126,14 @@ fn git_config_parameters_last_value_and_parse_roundtrip() {
 #[test]
 fn worktree_config_layer_when_extension_enabled() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     fs::write(
         git_dir.join("config"),
@@ -175,7 +189,14 @@ fn load_with_command_includes_and_no_process_includes() {
 #[test]
 fn read_early_config_and_load_repo_local_only() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     fs::write(
         git_dir.join("config"),
@@ -235,7 +256,14 @@ fn load_skips_system_when_nosystem_set() {
 #[test]
 fn load_errors_on_invalid_repository_config() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     fs::write(git_dir.join("config"), "[bad\n").expect("bad");
     let env = Environment::empty();
@@ -257,7 +285,14 @@ fn load_errors_on_invalid_git_config_override_file() {
 #[test]
 fn worktree_config_not_loaded_without_extension() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     fs::write(git_dir.join("config.worktree"), "[wt]\n\tk = 1\n").expect("wt");
     let env = Environment::empty();
@@ -302,7 +337,14 @@ fn kitchen_sink_config_load_exercises_cascade_branches() {
     let system = dir.path().join("sys.conf");
     fs::write(&system, "[system]\n\tk = sys\n").expect("sys");
     let repo = dir.path().join("repo");
-    init_repository(&repo, false, "feature/x", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "feature/x",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
     cfg.push_str(

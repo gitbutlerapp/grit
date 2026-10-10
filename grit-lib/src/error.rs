@@ -285,6 +285,10 @@ pub enum Error {
     #[error("unknown repository extension '{0}'")]
     UnsupportedRepositoryExtension(String),
 
+    /// `extensions.refStorage` names an unsupported backend.
+    #[error("invalid value for 'extensions.refstorage': '{value}'")]
+    InvalidRefStorageFormat { value: String },
+
     /// A supplied object ID string was not valid hex or the wrong length.
     #[error("invalid object id '{0}'")]
     InvalidObjectId(String),

@@ -17,7 +17,14 @@ fn oid(byte: u8) -> ObjectId {
 #[test]
 fn write_ref_cas_and_delete_loose_ref() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let name = "refs/heads/cas";
     write_ref(&git_dir, name, &oid(1)).expect("create");
@@ -33,7 +40,14 @@ fn write_ref_cas_and_delete_loose_ref() {
 #[test]
 fn list_refs_physical_includes_loose_file() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     write_ref(&git_dir, "refs/heads/extra", &oid(9)).expect("write");
     let physical = list_refs_physical(&git_dir, "refs/").expect("list");

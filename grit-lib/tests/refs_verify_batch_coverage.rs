@@ -21,7 +21,14 @@ fn oid(byte: u8) -> ObjectId {
 #[test]
 fn verify_batch_rejects_prefix_pair_in_same_transaction() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let items = vec![
         RefBatchItem {
@@ -40,7 +47,14 @@ fn verify_batch_rejects_prefix_pair_in_same_transaction() {
 #[test]
 fn verify_refname_blocks_loose_directory_and_packed_descendant() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let extras = BTreeSet::new();
     let skip = HashSet::new();
@@ -65,7 +79,14 @@ fn verify_refname_blocks_loose_directory_and_packed_descendant() {
 #[test]
 fn verify_refname_blocks_packed_descendant_without_loose_children() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let extras = BTreeSet::new();
     let skip = HashSet::new();

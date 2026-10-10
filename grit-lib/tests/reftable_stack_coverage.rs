@@ -26,7 +26,14 @@ fn table_count(git_dir: &std::path::Path) -> usize {
 #[test]
 fn autocompaction_after_many_appends_and_manual_compact() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "reftable").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Reftable,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
 
     for i in 0..6u8 {
@@ -70,7 +77,14 @@ fn autocompaction_after_many_appends_and_manual_compact() {
 #[test]
 fn compact_unlocked_suffix_when_middle_table_locked() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "reftable").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Reftable,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let rt = git_dir.join("reftable");
 
@@ -126,7 +140,14 @@ fn compact_unlocked_suffix_when_middle_table_locked() {
 #[test]
 fn read_write_options_manual_config_fallback() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "reftable").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Reftable,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     fs::write(
         git_dir.join("config"),
@@ -144,7 +165,14 @@ fn read_write_options_manual_config_fallback() {
 #[test]
 fn compact_prefix_after_deletion_with_multiple_tables() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "reftable").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Reftable,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let rt = git_dir.join("reftable");
 
@@ -192,7 +220,14 @@ fn compact_prefix_after_deletion_with_multiple_tables() {
 #[test]
 fn stack_write_ref_deletion_value() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "reftable").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Reftable,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     reftable_write_ref(&git_dir, "refs/heads/del-me", &oid(1), Some(IDENTITY), None)
         .expect("create");

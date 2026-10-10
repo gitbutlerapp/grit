@@ -9,7 +9,14 @@ use tempfile::tempdir;
 #[test]
 fn repository_config_load_and_reload_hits_cache() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     std::fs::write(
         git_dir.join("config"),

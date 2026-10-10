@@ -402,6 +402,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::ref_exclusions` | module | Reference exclusion rules for rev-list / rev-parse (--exclude, --exclude-hidden). | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_exclusions/index.html) |
 | `grit_lib::ref_exclusions::RefExclusions` | struct | Patterns that exclude refs from --all / glob expansion, including hidden-ref config. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_exclusions/struct.RefExclusions.html) |
 | `grit_lib::ref_namespace` | module | Git GIT_NAMESPACE handling: map logical ref names to storage under refs/namespaces/.../. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_namespace/index.html) |
+| `grit_lib::ref_storage` | module | Typed ref storage backend selection (files vs reftable). | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_storage/index.html) |
+| `grit_lib::ref_storage::RefStorageFormat` | enum | On-disk ref storage backend named by extensions.refStorage. | [API](https://docs.rs/grit-lib/latest/grit_lib/ref_storage/enum.RefStorageFormat.html) |
 | `grit_lib::references` | module | References: the refs backends, reflog, refspecs, name validation, namespaces. | [API](https://docs.rs/grit-lib/latest/grit_lib/references/index.html) |
 | `grit_lib::reflog` | module | Reflog reading and management. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/index.html) |
 | `grit_lib::reflog::GcReflogExpireConfig` | struct | Per-ref gc.<pattern>.reflogExpire* rules plus global gc.reflogExpire / gc.reflogExpireUnreachable. | [API](https://docs.rs/grit-lib/latest/grit_lib/reflog/struct.GcReflogExpireConfig.html) |

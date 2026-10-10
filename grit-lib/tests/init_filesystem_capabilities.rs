@@ -12,7 +12,14 @@ use tempfile::TempDir;
 #[test]
 fn init_writes_probed_filemode() {
     let root = TempDir::new().expect("tempdir");
-    init_repository(root.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = root.path().join(".git");
     let probed = probe_trust_filemode(&git_dir).expect("probe");
     let text = fs::read_to_string(git_dir.join("config")).expect("config");
@@ -87,7 +94,14 @@ fn init_local_filemode_follows_probe_not_global() {
         "GIT_CONFIG_SYSTEM",
         if cfg!(windows) { "NUL" } else { "/dev/null" },
     );
-    init_repository(root.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     std::env::remove_var("GIT_CONFIG_GLOBAL");
     std::env::remove_var("GIT_CONFIG_SYSTEM");
 
@@ -112,8 +126,14 @@ fn separate_git_dir_honors_filemode_false_in_external_config() {
 
     let work = TempDir::new().expect("worktree");
     let git_dir = TempDir::new().expect("git dir");
-    init_repository_separate_git_dir(work.path(), git_dir.path(), "main", None, "files")
-        .expect("init");
+    init_repository_separate_git_dir(
+        work.path(),
+        git_dir.path(),
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
 
     fs::write(
         git_dir.path().join("config"),

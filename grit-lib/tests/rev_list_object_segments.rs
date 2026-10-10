@@ -40,7 +40,7 @@ fn write_commit(
 }
 
 fn open_bare(dir: &Path) -> grit_lib::error::Result<Repository> {
-    init_bare_clone_minimal(dir, "main", "files")?;
+    init_bare_clone_minimal(dir, "main", grit_lib::ref_storage::RefStorageFormat::Files)?;
     Repository::open(dir, None)
 }
 

@@ -66,6 +66,9 @@ enum Command {
         /// Create a bare repository (no working tree).
         #[arg(long)]
         bare: bool,
+        /// Ref storage backend for the new repository.
+        #[arg(long, value_name = "FORMAT", default_value = "files")]
+        ref_format: grit_lib::ref_storage::RefStorageFormat,
     },
     /// Copy a remote repository into a new directory.
     Clone {
@@ -267,7 +270,11 @@ fn main() {
 /// was rejected).
 fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
     match cli.command.unwrap_or(Command::Status) {
-        Command::Init { path, bare } => emit(&commands::init::run(path, bare)?, opts),
+        Command::Init {
+            path,
+            bare,
+            ref_format,
+        } => emit(&commands::init::run(path, bare, ref_format)?, opts),
         Command::Clone { url, dir } => emit(&commands::clone::run(&url, dir, opts.mode)?, opts),
         Command::Remote { action } => {
             let add = action.map(|RemoteAction::Add { name, url }| (name, url));

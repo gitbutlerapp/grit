@@ -465,7 +465,13 @@ pub fn run_custom_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     use grit_lib::repo::{init_repository, Repository};
     use grit_lib::rev_list::{rev_list, RevListOptions};
 
-    init_repository(repo_root, false, "main", None, "files")?;
+    init_repository(
+        repo_root,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
     let git_dir = repo_root.join(".git");
     let objects_dir = git_dir.join("objects");
     let pack_path = git_dir.join("packfile-kv.store");

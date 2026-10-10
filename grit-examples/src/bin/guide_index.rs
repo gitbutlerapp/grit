@@ -29,7 +29,13 @@ fn main() -> Result<(), grit_lib::error::Error> {
         open_repo(&root)?
     } else {
         let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
-        init_repository(temp.path(), false, "main", None, "files")?;
+        init_repository(
+            temp.path(),
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )?;
         let path = temp.path().join("hello.txt");
         fs::write(&path, b"staged from the library guide\n").map_err(grit_lib::error::Error::Io)?;
         let opened = open_repo(temp.path())?;

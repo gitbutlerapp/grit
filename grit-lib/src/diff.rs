@@ -8203,7 +8203,14 @@ mod gitlink_tree_worktree_tests {
         let work_tree = dir.path();
         fs::create_dir(work_tree.join("sub")).expect("sub placeholder");
 
-        let repo = init_repository(work_tree, false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            work_tree,
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let gitlink: ObjectId = "855827c583bc30645ba427885caa40c5b81764d2"
             .parse()
             .expect("gitlink oid");
@@ -8248,7 +8255,14 @@ mod gitlink_tree_worktree_tests {
         let work_tree = dir.path();
         fs::create_dir(work_tree.join("sub")).expect("sub dir");
 
-        let repo = init_repository(work_tree, false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            work_tree,
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let sub = work_tree.join("sub");
         for args in [
             &["init", "-q"][..],

@@ -19,7 +19,14 @@ use tempfile::tempdir;
 fn relative_gitdir_include_from_disk_file() {
     let dir = tempdir().expect("tempdir");
     let repo = dir.path().join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     let inc = git_dir.join("extra.conf");
     fs::write(&inc, "[hit]\n\tk = yes\n").expect("inc");

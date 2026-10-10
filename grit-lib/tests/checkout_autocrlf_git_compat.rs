@@ -26,7 +26,8 @@ fn git_eol(repo: &std::path::Path, path: &str) -> String {
 }
 
 fn init_autocrlf_repo(root: &std::path::Path) -> Repository {
-    let repo = init_repository(root, false, "main", None, "files").expect("init");
+    let repo = init_repository(root, false, "main", None, grit_lib::RefStorageFormat::Files)
+        .expect("init");
     fs::write(
         root.join(".git/config"),
         "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tautocrlf = true\n",

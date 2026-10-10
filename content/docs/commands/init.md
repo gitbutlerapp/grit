@@ -8,7 +8,7 @@ order: 1
 ## Synopsis
 
 ```text
-grit init [--bare] [<path>]
+grit init [--bare] [--ref-format <files|reftable>] [<path>]
 ```
 
 ## Description
@@ -17,12 +17,15 @@ Creates an empty Git repository at `<path>`, or in the current directory when no
 
 The first branch is `main`. It has no commits until you make one.
 
+Use `--ref-format reftable` to initialize with Git's reftable ref backend (requires a reftable-capable Git for interoperability). The default is `files` (loose refs under `refs/`).
+
 ## Options
 
 | Option | Description |
 | --- | --- |
 | `<path>` | Where to create the repository. Defaults to the current directory. |
 | `--bare` | Create a bare repository, with no working tree. |
+| `--ref-format` | Ref storage backend: `files` (default) or `reftable`. |
 
 ## Examples
 
@@ -30,7 +33,7 @@ Start a new project in a new directory:
 
 ```console
 $ grit init project
-Initialized empty repository in /home/ada/project/.git
+Initialized empty repository in /home/ada/project/.git (ref-format: files)
 ```
 
 Turn the current directory into a repository:
@@ -43,7 +46,14 @@ Create a bare repository to use as a shared remote:
 
 ```console
 $ grit init --bare /srv/git/project.git
-Initialized empty bare repository in /srv/git/project.git
+Initialized empty bare repository in /srv/git/project.git (ref-format: files)
+```
+
+Initialize with the reftable ref backend:
+
+```console
+$ grit init --ref-format reftable reftable-demo
+Initialized empty repository in /home/ada/reftable-demo/.git (ref-format: reftable)
 ```
 
 ## JSON output
@@ -56,6 +66,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `path` | string | Repository directory (the `.git` directory for a normal repository). |
 | `bare` | boolean | Whether the repository is bare. |
 | `branch` | string | Initial branch name. |
+| `ref_format` | string | Ref storage backend (`files` or `reftable`). |
 
 Example:
 
@@ -64,7 +75,8 @@ Example:
   "initialized": true,
   "path": "/home/ada/project/.git",
   "bare": false,
-  "branch": "main"
+  "branch": "main",
+  "ref_format": "files"
 }
 ```
 

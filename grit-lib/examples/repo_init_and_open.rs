@@ -9,7 +9,7 @@ fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
     let path = root.path();
 
-    let repo = init_repository(path, false, "main", None, "files")?;
+    let repo = init_repository(path, false, "main", None, grit_lib::RefStorageFormat::Files)?;
     println!("opened after init: git_dir = {}", repo.git_dir.display());
     println!("work tree: {}", repo.work_tree.as_ref().unwrap().display());
 

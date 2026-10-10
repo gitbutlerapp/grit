@@ -51,7 +51,8 @@ fn append_repo_config(repo: &Repository, section: &str, key: &str, value: &str) 
 }
 
 fn seed_repo(root: &Path, preload_index: bool) -> Repository {
-    let repo = init_repository(root, false, "main", None, "files").expect("init");
+    let repo = init_repository(root, false, "main", None, grit_lib::RefStorageFormat::Files)
+        .expect("init");
     if !preload_index {
         append_repo_config(&repo, "core", "preloadIndex", "false");
     }

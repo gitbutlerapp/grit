@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::ref_storage::RefStorageFormat;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::transfer::{CloneReflog, FetchOptions, TagMode};
@@ -66,7 +67,7 @@ pub fn run(url: &str, dir: Option<String>, mode: OutputMode) -> Result<CloneOutc
 }
 
 fn clone_into(url: &str, path: &Path, dir: &str) -> Result<CloneOutcome> {
-    let repo = init_repository(path, false, "main", None, "files")
+    let repo = init_repository(path, false, "main", None, RefStorageFormat::default())
         .with_context(|| format!("could not initialize '{dir}'"))?;
 
     let origin_url = stored_clone_remote_url(url);

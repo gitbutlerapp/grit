@@ -148,7 +148,14 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
     ));
 
     let clone = tempfile::tempdir().expect("clone");
-    init_repository(clone.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        clone.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let clone_git = clone.path().join(".git");
 
     fetch_local(

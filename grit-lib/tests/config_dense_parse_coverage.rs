@@ -52,7 +52,14 @@ fn load_includes_system_global_and_local_layers() {
     std::fs::write(&system, "[sys]\n\tk = 1\n").expect("sys");
     std::fs::write(home.join(".gitconfig"), "[usr]\n\tk = 2\n").expect("usr");
     let repo = dir.path().join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     std::fs::write(git_dir.join("config"), "[loc]\n\tk = 3\n").expect("loc");
 
@@ -127,7 +134,14 @@ fn parse_error_branches_and_from_path_missing() {
 #[test]
 fn includeif_onbranch_misses_when_branch_differs() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "other", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "other",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     std::fs::write(
         git_dir.join("config"),

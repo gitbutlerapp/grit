@@ -12,7 +12,14 @@ fn init_preserves_template_file_at_probe_nfc_name() {
     fs::write(tmpl.path().join(NFC), b"template-payload").expect("write template");
 
     let root = TempDir::new().expect("worktree");
-    init_repository(root.path(), false, "main", Some(tmpl.path()), "files").expect("init");
+    init_repository(
+        root.path(),
+        false,
+        "main",
+        Some(tmpl.path()),
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
 
     let git_file = root.path().join(".git").join(NFC);
     assert!(

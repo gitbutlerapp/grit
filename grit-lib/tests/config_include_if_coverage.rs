@@ -24,7 +24,14 @@ fn ctx(git_dir: &std::path::Path, env: &Environment) -> IncludeContext {
 #[test]
 fn includeif_onbranch_matches_current_branch() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "feature/x", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "feature/x",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
     cfg.push_str("[includeIf \"onbranch:feature/x\"]\n\tpath = branch.conf\n");
@@ -44,7 +51,14 @@ fn includeif_onbranch_matches_current_branch() {
 #[test]
 fn includeif_hasconfig_remote_url() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
     cfg.push_str(
@@ -130,7 +144,14 @@ fn includeif_gitdir_icase_matches() {
     let home = dir.path().join("home");
     fs::create_dir_all(&home).expect("home");
     let repo = home.join("Repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     let pattern = format!("gitdir/i:{}/", repo.display());
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");

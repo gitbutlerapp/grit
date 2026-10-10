@@ -23,12 +23,13 @@ mod tests {
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
+    use crate::ref_storage::RefStorageFormat;
     use crate::reftable::is_reftable_repo;
     use crate::repo::{init_repository, init_repository_separate_git_dir, Repository};
     use crate::rev_list::{rev_list, RevListOptions};
 
     fn init_repo(root: &Path) -> Repository {
-        init_repository(root, false, "main", None, "files").expect("init")
+        init_repository(root, false, "main", None, crate::RefStorageFormat::Files).expect("init")
     }
 
     fn ident() -> String {
@@ -123,7 +124,7 @@ mod tests {
 
         let root = tmp.path().join("repo");
         fs::create_dir_all(&root).unwrap();
-        init_repository(&root, false, "main", None, "files").expect("init");
+        init_repository(&root, false, "main", None, crate::RefStorageFormat::Files).expect("init");
 
         let mut env = Environment::empty();
         env.cwd = root.clone();
@@ -263,8 +264,14 @@ mod tests {
         // Gitfile + separate git dir layout.
         let wt = root.join("gitfile-wt");
         let gd = root.join("gitfile-store.git");
-        let gitfile_repo =
-            init_repository_separate_git_dir(&wt, &gd, "main", None, "files").unwrap();
+        let gitfile_repo = init_repository_separate_git_dir(
+            &wt,
+            &gd,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
         fs::write(
             gd.join("config"),
             "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tautocrlf = true\n",

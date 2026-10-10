@@ -368,7 +368,14 @@ fn concurrent_cas_delete_single_winner() {
 #[test]
 fn concurrent_reftable_cas_single_winner() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(tmp.path(), false, "main", None, "reftable").expect("init");
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Reftable,
+    )
+    .expect("init");
     let git_dir = repo.git_dir.clone();
     let c1: ObjectId = "67bf698f3ab735e92fb011a99cff3497c44d30c1"
         .parse()

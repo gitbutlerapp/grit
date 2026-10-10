@@ -19,7 +19,14 @@ use grit_lib::write_tree::write_tree_from_index;
 
 fn one_commit_repo() -> (tempfile::TempDir, Repository, ObjectId) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let mut index = Index::new();
     index.hash_algo = repo.odb.hash_algo();
     let blob = repo.odb.write(ObjectKind::Blob, b"x\n").expect("blob");
@@ -89,7 +96,14 @@ fn git_cmd(dir: &Path, args: &[&str]) {
 
 fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<ObjectId>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let mk = |parents: Vec<ObjectId>, t: i64| -> ObjectId {
         let tree = repo.odb.write(ObjectKind::Tree, b"").expect("tree");
         let raw = serialize_commit(&CommitData {
@@ -199,7 +213,14 @@ fn bloom_walk_stats_counters() {
 #[test]
 fn commit_tree_high_bit_and_parse_graph_dump() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let mut index = Index::new();
     index.hash_algo = repo.odb.hash_algo();
     let blob = repo.odb.write(ObjectKind::Blob, b"x\n").expect("blob");
@@ -347,7 +368,14 @@ fn bloom_filter_slice_warns_on_bad_offsets_in_memory() {
 #[test]
 fn two_parent_graph_commit_matches_object() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let tree = repo.odb.write(ObjectKind::Tree, b"").expect("tree");
     let parent = {
         let raw = serialize_commit(&CommitData {
@@ -415,7 +443,14 @@ fn graph_content_hash(bytes: &[u8], algo: HashAlgo) -> String {
 
 fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let tree = repo.odb.write(ObjectKind::Tree, b"").expect("tree");
     let mut sorted = Vec::new();
     for t in [1i64, 2] {

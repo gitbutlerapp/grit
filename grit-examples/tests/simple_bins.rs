@@ -35,7 +35,13 @@ fn run_bin(bin: &str, args: &[&str], cwd: &std::path::Path) -> Result<String> {
 #[test]
 fn simple_bins_cover_a_tiny_commit_workflow() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let repo = init_repository(temp.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        temp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
     fs::write(temp.path().join("hello.txt"), "hello\n")?;
 
     run_bin("gritx-add", &["hello.txt"], temp.path())?;

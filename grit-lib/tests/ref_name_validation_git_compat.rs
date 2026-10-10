@@ -124,7 +124,14 @@ fn tag_short_names_match_git_check_ref_format() {
 #[test]
 fn write_ref_rejects_invalid_branch_names_without_loose_files() {
     let dir = tempdir().unwrap();
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.git_dir.clone();
     let invalid = ["bad name", "x..y", "a~b", "a.lock"];
     for name in invalid {
@@ -147,7 +154,14 @@ fn write_ref_rejects_invalid_branch_names_without_loose_files() {
 fn write_ref_accepts_refs_heads_head_like_git() {
     let dir = tempdir().unwrap();
     let worktree = dir.path();
-    let repo = init_repository(worktree, false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        worktree,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let tip = seed_empty_commit(worktree);
     write_ref(&repo.git_dir, "refs/heads/HEAD", &tip).expect("plumbing may write refs/heads/HEAD");
     assert!(

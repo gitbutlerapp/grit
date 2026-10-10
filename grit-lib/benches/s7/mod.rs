@@ -165,7 +165,8 @@ fn index_entry(path: &[u8], oid: ObjectId, size: usize, mode: u32) -> IndexEntry
 }
 
 fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
-    let repo = init_repository(dir, false, "main", None, "files").expect("init history repo");
+    let repo = init_repository(dir, false, "main", None, grit_lib::RefStorageFormat::Files)
+        .expect("init history repo");
     let mut index = Index::new();
     index.hash_algo = repo.odb.hash_algo();
     let blob = repo

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use grit_lib::git_path::user_display_path;
+use grit_lib::ref_storage::RefStorageFormat;
 use grit_lib::repo::init_repository;
 use serde::Serialize;
 
@@ -17,6 +18,8 @@ pub struct InitOutcome {
     pub path: String,
     pub bare: bool,
     pub branch: String,
+    /// Ref storage backend (`files` or `reftable`).
+    pub ref_format: String,
 }
 
 impl HumanRender for InitOutcome {
@@ -26,14 +29,17 @@ impl HumanRender for InitOutcome {
         } else {
             "repository"
         };
-        println!("Initialized empty {kind} in {}", self.path);
+        println!(
+            "Initialized empty {kind} in {} (ref-format: {})",
+            self.path, self.ref_format
+        );
     }
 }
 
-pub fn run(path: Option<String>, bare: bool) -> Result<InitOutcome> {
+pub fn run(path: Option<String>, bare: bool, ref_format: RefStorageFormat) -> Result<InitOutcome> {
     let path = PathBuf::from(path.unwrap_or_else(|| ".".to_owned()));
 
-    let repo = init_repository(&path, bare, "main", None, "files")
+    let repo = init_repository(&path, bare, "main", None, ref_format)
         .with_context(|| format!("could not initialize a repository at {}", path.display()))?;
 
     Ok(InitOutcome {
@@ -41,5 +47,6 @@ pub fn run(path: Option<String>, bare: bool) -> Result<InitOutcome> {
         path: user_display_path(&repo.git_dir),
         bare,
         branch: "main".to_owned(),
+        ref_format: ref_format.to_string(),
     })
 }

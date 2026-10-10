@@ -897,7 +897,8 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let wt = tmp.path().join("wt");
         fs::create_dir_all(&wt).expect("mkdir");
-        let repo = init_repository(&wt, false, "main", None, "files").expect("init");
+        let repo = init_repository(&wt, false, "main", None, crate::RefStorageFormat::Files)
+            .expect("init");
         let gitlink: ObjectId = "855827c583bc30645ba427885caa40c5b81764d2"
             .parse()
             .expect("oid");
@@ -930,7 +931,14 @@ mod tests {
     fn checkout_syscall_counts_one_metadata_per_dir_and_file() {
         syscall_probe::reset();
         let tmp = TempDir::new().expect("tempdir");
-        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let wt = repo.work_tree.as_ref().expect("wt");
         for d in 0..5 {
             let dir = wt.join(format!("dir{d}"));

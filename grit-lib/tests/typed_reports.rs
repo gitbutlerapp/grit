@@ -49,7 +49,14 @@ fn git(repo_root: &std::path::Path, args: &[&str]) -> String {
 #[test]
 fn reflog_expire_reports_actions_dry_run_and_real() {
     let tmp = TempDir::new().expect("tempdir");
-    let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.git_dir.clone();
 
     fs::write(tmp.path().join("f.txt"), "a\n").expect("write");
@@ -146,7 +153,14 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
 #[test]
 fn prune_packed_reports_removed_paths_dry_run_and_real() {
     let tmp = TempDir::new().expect("tempdir");
-    let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     fs::write(tmp.path().join("x.txt"), "payload\n").expect("write");
     git(tmp.path(), &["add", "x.txt"]);
     git(tmp.path(), &["commit", "-qm", "init"]);
@@ -206,7 +220,14 @@ fn index_conflict_entry(path: &str, stage: u16, oid: ObjectId) -> IndexEntry {
 #[test]
 fn rerere_records_then_reuses_resolution() {
     let tmp = TempDir::new().expect("tempdir");
-    init_repository(tmp.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let cfg_path = tmp.path().join(".git/config");
     let mut cfg = fs::read_to_string(&cfg_path).expect("read config");
     if !cfg.contains("[rerere]") {

@@ -211,7 +211,13 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
         open_repo(&amp;root)?
     } else {
         let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
-        init_repository(temp.path(), false, &quot;main&quot;, None, &quot;files&quot;)?;
+        init_repository(
+            temp.path(),
+            false,
+            &quot;main&quot;,
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )?;
         open_repo(temp.path())?
     };
 

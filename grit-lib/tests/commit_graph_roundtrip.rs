@@ -509,7 +509,14 @@ fn generation_overflow_and_wide_commit_times() {
 #[test]
 fn root_commit_and_grit_only_write_without_generation_chunk() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+    let repo = init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let mut index = Index::new();
     index.hash_algo = repo.odb.hash_algo();
     let blob = repo.odb.write(ObjectKind::Blob, b"x\n").expect("blob");

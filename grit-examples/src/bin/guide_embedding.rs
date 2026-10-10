@@ -16,7 +16,13 @@ fn main() -> Result<(), Error> {
     let open_named =
         |name: &str, email: &str| -> Result<(Repository, Arc<CollectingDiagnostics>), Error> {
             let root = base.path().join(name);
-            init_repository(&root, false, "main", None, "files")?;
+            init_repository(
+                &root,
+                false,
+                "main",
+                None,
+                grit_lib::RefStorageFormat::Files,
+            )?;
 
             let home = base.path().join(format!("home-{name}"));
             std::fs::create_dir_all(&home).map_err(Error::Io)?;

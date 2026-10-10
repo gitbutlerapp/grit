@@ -22,7 +22,7 @@ mod tests {
     use crate::write_tree::write_tree_from_index;
 
     fn init_repo(root: &Path) -> Repository {
-        init_repository(root, false, "main", None, "files").expect("init")
+        init_repository(root, false, "main", None, crate::RefStorageFormat::Files).expect("init")
     }
 
     fn nested_attributes_fixture(root: &Path) -> Repository {

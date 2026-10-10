@@ -298,7 +298,14 @@ mod tests {
 
     fn init_repo() -> (TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         std::fs::write(dir.path().join("tracked.txt"), "v1\n").expect("write");
         (dir, repo)
     }

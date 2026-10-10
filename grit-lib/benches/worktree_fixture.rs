@@ -115,10 +115,22 @@ fn build_status_nested_l_fixtures(base: &Path) -> (Repository, Repository) {
 
     let nested_root = base.join("status-nested-L");
     let plain_root = base.join("status-plain-L");
-    let nested_repo =
-        init_repository(&nested_root, false, "main", None, "files").expect("nested status repo");
-    let plain_repo =
-        init_repository(&plain_root, false, "main", None, "files").expect("plain status repo");
+    let nested_repo = init_repository(
+        &nested_root,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("nested status repo");
+    let plain_repo = init_repository(
+        &plain_root,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("plain status repo");
     populate(nested_repo.work_tree.as_ref().expect("wt"), true);
     populate(plain_repo.work_tree.as_ref().expect("wt"), false);
     (nested_repo, plain_repo)
@@ -249,8 +261,14 @@ impl WorktreeBenchFixtures {
         };
 
         let ignore_root = base.join("ignore-repo");
-        let ignore_repo =
-            init_repository(&ignore_root, false, "main", None, "files").expect("ignore repo init");
+        let ignore_repo = init_repository(
+            &ignore_root,
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )
+        .expect("ignore repo init");
         let wt = ignore_repo.work_tree.as_ref().expect("work tree");
         write_realistic_gitignore(&wt.join(".gitignore"));
         std::fs::write(
@@ -266,8 +284,14 @@ impl WorktreeBenchFixtures {
         let ignore_paths = generate_probe_paths(100_000);
 
         let attr_root = base.join("attr-repo");
-        let attr_repo =
-            init_repository(&attr_root, false, "main", None, "files").expect("attr repo init");
+        let attr_repo = init_repository(
+            &attr_root,
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )
+        .expect("attr repo init");
         let attr_wt = attr_repo.work_tree.as_ref().expect("work tree");
         write_realistic_gitattributes(&attr_wt.join(".gitattributes"));
         for d in 0..32 {
@@ -282,8 +306,14 @@ impl WorktreeBenchFixtures {
         let index_write_scratch = index_dir.join("write-scratch");
 
         let scan_root = base.join("scan-10k");
-        let scan_repo =
-            init_repository(&scan_root, false, "main", None, "files").expect("scan repo init");
+        let scan_repo = init_repository(
+            &scan_root,
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )
+        .expect("scan repo init");
         let scan_wt = scan_repo.work_tree.as_ref().expect("work tree");
         let mut scan_index = Index::empty(2);
         for i in 0..10_000 {

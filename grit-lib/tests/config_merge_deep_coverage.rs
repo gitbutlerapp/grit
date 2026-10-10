@@ -19,7 +19,14 @@ fn nested_includes_three_levels() {
     fs::write(root.join("c.conf"), "[leaf]\n\tk = deep\n").expect("c");
 
     let repo = root.join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     fs::write(
         git_dir.join("config"),
@@ -65,7 +72,14 @@ fn load_with_env_pairs_and_global_override() {
     fs::create_dir_all(&home).expect("home");
     fs::write(home.join(".gitconfig"), "[fromglobal]\n\tk = g\n").expect("g");
     let repo = dir.path().join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
 
     let mut env = isolated_env(&home);

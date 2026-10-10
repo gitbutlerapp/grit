@@ -1891,16 +1891,7 @@ fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
     }
 
     if let Some(raw) = parsed.ref_storage.as_deref() {
-        let lower = raw.to_ascii_lowercase();
-        let name = lower
-            .split_once(':')
-            .map(|(prefix, _)| prefix)
-            .unwrap_or(lower.as_str());
-        if !matches!(name, "files" | "reftable") {
-            return Err(Error::Message(crate::diagnostics::error_line(&format!(
-                "invalid value for 'extensions.refstorage': '{raw}'"
-            ))));
-        }
+        crate::ref_storage::RefStorageFormat::parse_config_value(raw)?;
     }
 
     if let Some(msg) = parsed.format_error_message() {
@@ -1921,13 +1912,30 @@ fn validate_repository_format(git_dir: &Path) -> Result<()> {
 
 /// The result of parsing `core.repositoryformatversion` and `extensions.*` from a
 /// repository's `config` file, using Git-compatible format parsing.
-struct RepositoryFormat {
+pub(crate) struct RepositoryFormat {
     /// Declared `core.repositoryformatversion` (defaults to 0; invalid values ignored).
-    repo_version: u32,
+    pub(crate) repo_version: u32,
     /// All extension keys (lowercased) declared under `[extensions]`.
-    extensions: BTreeSet<String>,
+    pub(crate) extensions: BTreeSet<String>,
     /// Raw value of `extensions.refstorage`, if present.
-    ref_storage: Option<String>,
+    pub(crate) ref_storage: Option<String>,
+}
+
+/// Parse repository format from repository-local config (no global/system config).
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] or [`Error::Config`] when config cannot be read or parsed.
+pub(crate) fn read_repository_format_from_git_dir(git_dir: &Path) -> Result<RepositoryFormat> {
+    let Some(config_path) = repository_config_path(git_dir) else {
+        return Ok(RepositoryFormat {
+            repo_version: 0,
+            extensions: BTreeSet::new(),
+            ref_storage: None,
+        });
+    };
+    let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
+    parse_repository_format(&content, &config_path)
 }
 
 impl RepositoryFormat {
@@ -2745,7 +2753,7 @@ fn write_fresh_git_directory(
     bare: bool,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: &str,
+    ref_storage: crate::ref_storage::RefStorageFormat,
     skip_hooks_and_info: bool,
 ) -> Result<()> {
     let mut subs = vec![
@@ -2764,7 +2772,7 @@ fn write_fresh_git_directory(
         fs::create_dir_all(git_dir.join(sub))?;
     }
 
-    if ref_storage == "reftable" {
+    if ref_storage.is_reftable() {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let tables_list = reftable_dir.join("tables.list");
@@ -2782,7 +2790,7 @@ fn write_fresh_git_directory(
     let head_content = format!("ref: refs/heads/{initial_branch}\n");
     fs::write(git_dir.join("HEAD"), head_content)?;
 
-    let needs_extensions = ref_storage == "reftable";
+    let needs_extensions = ref_storage.is_reftable();
     let repo_version = if needs_extensions { 1 } else { 0 };
 
     let mut config_content = String::from("[core]\n");
@@ -2853,7 +2861,7 @@ pub fn init_repository_separate_git_dir(
     git_dir: &Path,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: &str,
+    ref_storage: crate::ref_storage::RefStorageFormat,
 ) -> Result<Repository> {
     let skip_hooks_info = template_dir.is_some_and(|p| p.as_os_str().is_empty());
     fs::create_dir_all(work_tree)?;
@@ -2917,7 +2925,7 @@ pub fn ensure_core_bare(git_dir: &Path) -> Result<()> {
 pub fn init_bare_clone_minimal(
     git_dir: &Path,
     initial_branch: &str,
-    ref_storage: &str,
+    ref_storage: crate::ref_storage::RefStorageFormat,
 ) -> Result<()> {
     for sub in &[
         "objects",
@@ -2930,7 +2938,7 @@ pub fn init_bare_clone_minimal(
         fs::create_dir_all(git_dir.join(sub))?;
     }
 
-    if ref_storage == "reftable" {
+    if ref_storage.is_reftable() {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let tables_list = reftable_dir.join("tables.list");
@@ -2942,7 +2950,7 @@ pub fn init_bare_clone_minimal(
     let head_content = format!("ref: refs/heads/{initial_branch}\n");
     fs::write(git_dir.join("HEAD"), head_content)?;
 
-    let needs_extensions = ref_storage == "reftable";
+    let needs_extensions = ref_storage.is_reftable();
     let repo_version = if needs_extensions { 1 } else { 0 };
     let mut config_content = String::from("[core]\n");
     config_content.push_str(&format!("\trepositoryformatversion = {repo_version}\n"));
@@ -2971,7 +2979,7 @@ pub fn init_repository(
     bare: bool,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: &str,
+    ref_storage: crate::ref_storage::RefStorageFormat,
 ) -> Result<Repository> {
     let skip_hooks_info = !bare && template_dir.is_some_and(|p| p.as_os_str().is_empty());
     let git_dir = if bare {
@@ -3010,7 +3018,7 @@ pub fn init_bare_with_env_worktree(
     work_tree: &Path,
     initial_branch: &str,
     template_dir: Option<&Path>,
-    ref_storage: &str,
+    ref_storage: crate::ref_storage::RefStorageFormat,
 ) -> Result<Repository> {
     fs::create_dir_all(git_dir)?;
     fs::create_dir_all(work_tree)?;

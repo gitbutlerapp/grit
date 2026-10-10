@@ -8,7 +8,13 @@ use grit_lib::repo::init_repository;
 #[test]
 fn hash_object_writes_file_contents_as_blob() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let repo = init_repository(temp.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        temp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
     let input_path = temp.path().join("hello.txt");
     let contents = b"hello from grit examples\n";
     fs::write(&input_path, contents)?;

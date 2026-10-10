@@ -26,7 +26,7 @@ fn ref_matches_glob_wildcards_and_exact() {
 fn list_refs_glob_prefix_and_pattern() {
     let dir = tempdir().expect("tempdir");
     let root = dir.path();
-    init_repository(root, false, "main", None, "files").expect("init");
+    init_repository(root, false, "main", None, grit_lib::RefStorageFormat::Files).expect("init");
     let git_dir = root.join(".git");
     let oid = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
     write_ref(&git_dir, "refs/heads/topic/one", &oid).expect("write");
@@ -44,8 +44,16 @@ fn collect_alternate_ref_oids_reads_linked_object_store() {
     let dir = tempdir().expect("tempdir");
     let primary = dir.path().join("primary");
     let alt = dir.path().join("alternate");
-    init_repository(&primary, false, "main", None, "files").expect("init primary");
-    init_repository(&alt, false, "main", None, "files").expect("init alt");
+    init_repository(
+        &primary,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init primary");
+    init_repository(&alt, false, "main", None, grit_lib::RefStorageFormat::Files)
+        .expect("init alt");
     let alt_git = alt.join(".git");
     let oid = ObjectId::from_hex("2222222222222222222222222222222222222222").expect("oid");
     write_ref(&alt_git, "refs/heads/from-alt", &oid).expect("alt ref");
@@ -67,8 +75,16 @@ fn collect_alternate_ref_oids_honors_prefix_config() {
     let dir = tempdir().expect("tempdir");
     let primary = dir.path().join("primary");
     let alt = dir.path().join("alternate");
-    init_repository(&primary, false, "main", None, "files").expect("init primary");
-    init_repository(&alt, false, "main", None, "files").expect("init alt");
+    init_repository(
+        &primary,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init primary");
+    init_repository(&alt, false, "main", None, grit_lib::RefStorageFormat::Files)
+        .expect("init alt");
     let alt_git = alt.join(".git");
     let oid = ObjectId::from_hex("3333333333333333333333333333333333333333").expect("oid");
     write_ref(&alt_git, "refs/heads/picked", &oid).expect("alt ref");

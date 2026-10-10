@@ -16,7 +16,14 @@ fn oid(byte: u8) -> ObjectId {
 #[test]
 fn refs_fsck_reports_bad_symref_and_formats_line() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let repo = Repository::open(&git_dir, Some(dir.path())).expect("open");
     let config = ConfigSet::load_repo_local_only(&git_dir).expect("config");

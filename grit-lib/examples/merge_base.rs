@@ -62,7 +62,13 @@ fn commit_tree(
 
 fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
-    let repo = init_repository(root.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
 
     let base = commit_tree(&repo, None, "common root")?;
     refs::write_ref(&repo.git_dir, "refs/heads/main", &base)?;

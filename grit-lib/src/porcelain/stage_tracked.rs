@@ -588,7 +588,14 @@ mod tests {
 
     fn init_repo() -> (TempDir, Repository) {
         let dir = TempDir::new().unwrap();
-        let repo = init_repository(dir.path(), false, "main", None, "files").unwrap();
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
         (dir, repo)
     }
 
@@ -860,7 +867,14 @@ mod tests {
     #[cfg(unix)]
     fn symlink_under_symlinked_parent() {
         let dir = TempDir::new().unwrap();
-        let repo = init_repository(dir.path(), false, "main", None, "files").unwrap();
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
         let wt = repo.work_tree.as_ref().unwrap();
         fs::create_dir(wt.join("realdir")).unwrap();
         fs::write(wt.join("realdir/file"), b"data").unwrap();
@@ -963,7 +977,14 @@ mod tests {
     #[test]
     fn filemode_false_skips_executable_bit_only_refresh() {
         let dir = TempDir::new().unwrap();
-        let repo = init_repository(dir.path(), false, "main", None, "files").unwrap();
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
         fs::write(
             repo.git_dir.join("config"),
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n",

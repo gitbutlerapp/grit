@@ -834,7 +834,7 @@ mod tests {
     }
 
     fn open_test_bare(dir: &tempfile::TempDir) -> Result<Repository> {
-        init_bare_clone_minimal(dir.path(), "main", "files")?;
+        init_bare_clone_minimal(dir.path(), "main", crate::RefStorageFormat::Files)?;
         Repository::open(dir.path(), None)
     }
 

@@ -63,7 +63,14 @@ fn load_cascade_hits_local_and_global_layers() {
     )
     .expect("global");
     let repo = dir.path().join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
     cfg.push_str("[user]\n\temail = local@example.com\n");
@@ -104,7 +111,14 @@ fn config_write_lock_conflict() {
 #[test]
 fn effective_log_refs_config_and_i64_errors() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
     cfg.push_str("[core]\n\tlogAllRefUpdates = always\n[invalid]\n\ti = not-int\n");

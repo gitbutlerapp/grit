@@ -1681,7 +1681,8 @@ mod attr_cache_tests {
     use filetime::FileTime;
 
     fn test_repo(td: &Path) -> Repository {
-        crate::repo::init_repository(td, false, "main", None, "files").expect("init repo")
+        crate::repo::init_repository(td, false, "main", None, crate::RefStorageFormat::Files)
+            .expect("init repo")
     }
 
     fn rules_for(repo: &Repository, wt: &Path) -> Vec<String> {

@@ -47,8 +47,14 @@ pub struct HotPathsFixture {
 impl HotPathsFixture {
     fn build(file_count: usize, dir_count: usize) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = init_repository(dir.path(), false, "main", None, "files")
-            .expect("init hot-path bench repo");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            grit_lib::RefStorageFormat::Files,
+        )
+        .expect("init hot-path bench repo");
         populate_worktree(dir.path(), file_count, dir_count);
         let file_paths = list_txt_paths(dir.path());
         let head_tree = commit_all(&repo, "initial").expect("initial commit");

@@ -71,8 +71,8 @@ pub mod object_store {
 /// References: the refs backends, reflog, refspecs, name validation, namespaces.
 pub mod references {
     pub use crate::{
-        branch_tracking, check_ref_format, hide_refs, ref_exclusions, ref_namespace, reflog, refs,
-        refspec, reftable,
+        branch_tracking, check_ref_format, hide_refs, ref_exclusions, ref_namespace, ref_storage,
+        reflog, refs, refspec, reftable,
     };
 }
 
@@ -209,6 +209,7 @@ pub mod quote_path;
 pub mod receive_pack;
 pub mod ref_exclusions;
 pub mod ref_namespace;
+pub mod ref_storage;
 pub mod reflog;
 pub mod refs;
 pub mod refs_fsck;
@@ -260,6 +261,8 @@ pub mod write_tree;
 pub mod ws;
 #[doc(hidden)]
 pub mod zlib_inflate;
+
+pub use ref_storage::RefStorageFormat;
 
 #[cfg(test)]
 mod hot_path_test_metrics;

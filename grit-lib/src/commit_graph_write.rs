@@ -666,7 +666,14 @@ mod tests {
     #[test]
     fn load_commit_graph_commit_info_rejects_non_commit() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let blob = repo.odb.write(ObjectKind::Blob, b"x").expect("blob");
         let err = super::load_commit_graph_commit_info(&repo.odb, blob).unwrap_err();
         assert!(matches!(err, crate::error::Error::CorruptObject(_)));
@@ -675,7 +682,14 @@ mod tests {
     #[test]
     fn build_octopus_merge_includes_extra_edges_chunk() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let p1 = empty_commit(&repo, vec![], "T <t@example.com> 1 +0000");
         let p2 = empty_commit(&repo, vec![], "T <t@example.com> 2 +0000");
         let p3 = empty_commit(&repo, vec![], "T <t@example.com> 3 +0000");
@@ -712,7 +726,14 @@ mod tests {
     #[test]
     fn build_respects_max_new_filters_budget() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let mut index = Index::new();
         index.hash_algo = repo.odb.hash_algo();
         let blob = repo.odb.write(ObjectKind::Blob, b"a\n").expect("blob");
@@ -778,7 +799,14 @@ mod tests {
     #[test]
     fn collect_reachable_follows_annotated_tag_to_commit() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = init_repository(dir.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         let commit = empty_commit(&repo, vec![], "T <t@example.com> 1 +0000");
         let tag_body = format!(
             "object {}\ntype commit\ntag v1\ntagger T <t@example.com> 1 +0000\n\n",

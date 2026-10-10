@@ -29,7 +29,8 @@ fn include_ctx(git_dir: &Path, env: &Environment) -> IncludeContext {
 fn t1305_include_and_includeif_match_git_show_origin() {
     let dir = tempdir().expect("tempdir");
     let root = dir.path();
-    init_repository(root, false, "main", None, "files").expect("initialize repository");
+    init_repository(root, false, "main", None, grit_lib::RefStorageFormat::Files)
+        .expect("initialize repository");
     let gd = root.join(".git");
     let main = gd.join("config");
     fs::write(
@@ -213,7 +214,14 @@ fn includeif_gitdir_trailing_slash_and_wildcard() {
     let home = dir.path().join("home");
     fs::create_dir_all(&home).expect("home");
     let repo = home.join("nested").join("repo");
-    init_repository(&repo, false, "main", None, "files").expect("init");
+    init_repository(
+        &repo,
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = repo.join(".git");
     let gitdir_pattern = format!("gitdir:{}/", repo.display());
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read config");
@@ -246,7 +254,14 @@ fn includeif_gitdir_trailing_slash_and_wildcard() {
 #[test]
 fn extensions_worktree_config_layering() {
     let dir = tempdir().expect("tempdir");
-    init_repository(dir.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dir.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     let git_dir = dir.path().join(".git");
     let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
     if !cfg.contains("worktreeConfig") {

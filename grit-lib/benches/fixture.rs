@@ -107,7 +107,14 @@ pub fn git_repack_with_window(
 /// Repository with `git repack --depth=250 --window=250` for packed read micro-benchmarks.
 pub fn build_deep_repack_read_sample() -> (TempDir, PackIndex, ObjectId) {
     let tmp = tempfile::tempdir().expect("deep repack tempdir");
-    let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init repo");
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init repo");
     let mut parent = None;
     let mut body = String::new();
     for i in 0..128 {
@@ -291,8 +298,14 @@ fn deepest_deltified_oid(pack_bytes: &[u8], stem: &str) -> (ObjectId, u64) {
 
 fn build_delta_chain_pack(depth: usize) -> (Vec<u8>, ObjectId, u64) {
     let tmp = tempfile::tempdir().expect("delta chain tempdir");
-    let repo = init_repository(tmp.path(), false, "main", None, "files")
-        .expect("init bench repo for delta chain");
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init bench repo for delta chain");
     let mut parent = None;
     let mut body = String::new();
     for i in 0..128 {
@@ -356,7 +369,14 @@ pub fn build_packed_exists_local_fixture(object_count: usize) -> (TempDir, Odb, 
 
 fn build_large_pack_index(objects_dir: &Path, object_count: usize) -> (PackIndex, ObjectId) {
     let tmp = tempfile::tempdir().expect("large pack tempdir");
-    let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init repo");
+    let repo = init_repository(
+        tmp.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init repo");
     let mut parent = None;
     for i in 0..object_count {
         let rel = format!("file-{i:05}.txt");

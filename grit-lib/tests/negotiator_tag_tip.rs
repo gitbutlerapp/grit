@@ -20,7 +20,14 @@ fn write(repo: &Repository, kind: ObjectKind, data: &[u8]) -> ObjectId {
 #[test]
 fn add_tip_accepts_annotated_tag() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = init_repository(tmp.path(), true, "main", None, "files").expect("init");
+    let repo = init_repository(
+        tmp.path(),
+        true,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
 
     // empty tree -> a commit -> an annotated tag pointing at the commit.
     let tree = write(&repo, ObjectKind::Tree, &[]);

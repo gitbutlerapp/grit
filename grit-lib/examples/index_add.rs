@@ -8,7 +8,13 @@ use grit_lib::repo::init_repository;
 
 fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
-    let repo = init_repository(root.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
 
     let blob_oid = repo.odb.write(ObjectKind::Blob, b"staged content\n")?;
 

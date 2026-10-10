@@ -48,7 +48,13 @@ fn tree_of_commit(
 
 fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
-    let repo = init_repository(root.path(), false, "main", None, "files")?;
+    let repo = init_repository(
+        root.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )?;
 
     use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 
