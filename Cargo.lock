@@ -682,6 +682,7 @@ dependencies = [
  "clap",
  "grit-protocol",
  "serde",
+ "tempfile",
  "tokio",
 ]
 
@@ -725,8 +726,8 @@ dependencies = [
 name = "grit-protocol"
 version = "0.5.4"
 dependencies = [
- "anyhow",
  "grit-lib",
+ "thiserror",
 ]
 
 [[package]]
