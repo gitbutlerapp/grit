@@ -57,6 +57,65 @@ fn fetch_updates_refs_in_one_transaction_reftable() {
     });
 }
 
+#[test]
+fn push_tracking_remote_refs_one_reftable_transaction() {
+    each_backend(|backend, repo| {
+        if backend != Backend::Reftable {
+            return;
+        }
+        let git_dir = repo.git_dir();
+        let (c1, c2) = two_commit_oids(&repo);
+        std::fs::write(
+            git_dir.join("config"),
+            "[remote \"origin\"]\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
+        )
+        .expect("config");
+
+        use grit_lib::branch_tracking::apply_push_remote_tracking_updates;
+        use grit_lib::push_report::{PushRefResult, PushRefStatus};
+
+        let results = vec![
+            PushRefResult {
+                local_ref: Some("refs/heads/alpha".to_owned()),
+                remote_ref: "refs/heads/alpha".to_owned(),
+                old_oid: None,
+                new_oid: Some(c1),
+                forced: false,
+                deletion: false,
+                status: PushRefStatus::Ok,
+                message: None,
+            },
+            PushRefResult {
+                local_ref: Some("refs/heads/beta".to_owned()),
+                remote_ref: "refs/heads/beta".to_owned(),
+                old_oid: None,
+                new_oid: Some(c2),
+                forced: false,
+                deletion: false,
+                status: PushRefStatus::Ok,
+                message: None,
+            },
+        ];
+
+        let (_, count_before) = reftable_tables_snapshot(&git_dir);
+        apply_push_remote_tracking_updates(&git_dir, "origin", &results).expect("tracking batch");
+        assert_eq!(
+            resolve_ref(&git_dir, "refs/remotes/origin/alpha").ok(),
+            Some(c1)
+        );
+        assert_eq!(
+            resolve_ref(&git_dir, "refs/remotes/origin/beta").ok(),
+            Some(c2)
+        );
+        let (_, count_after) = reftable_tables_snapshot(&git_dir);
+        assert_eq!(
+            count_after,
+            count_before + 1,
+            "tracking updates from one push must share one reftable transaction"
+        );
+    });
+}
+
 #[cfg(unix)]
 #[test]
 fn receive_pack_atomic_push_both_backends() {

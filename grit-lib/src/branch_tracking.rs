@@ -10,6 +10,7 @@ use crate::merge_base::count_symmetric_ahead_behind;
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
+use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::{
@@ -157,17 +158,50 @@ pub fn update_remote_tracking_ref(
 ///
 /// # Errors
 ///
-/// Propagates errors from [`update_remote_tracking_ref`].
+/// Propagates errors from [`refs::commit_ref_store_batch`].
 pub fn apply_push_remote_tracking_updates(
     git_dir: &Path,
     remote_name: &str,
     results: &[PushRefResult],
 ) -> Result<()> {
+    let mut batch: Vec<RefUpdate> = Vec::new();
     for result in results {
         if result.status != PushRefStatus::Ok && result.status != PushRefStatus::UpToDate {
             continue;
         }
-        update_remote_tracking_ref(git_dir, remote_name, &result.remote_ref, result.new_oid)?;
+        let Some(tracking_ref) =
+            tracking_ref_for_remote_push_ref(git_dir, remote_name, &result.remote_ref)
+        else {
+            continue;
+        };
+        match result.new_oid {
+            Some(oid) => {
+                if refs::resolve_ref(git_dir, &tracking_ref).ok() == Some(oid) {
+                    continue;
+                }
+                batch.push(RefUpdate {
+                    name: tracking_ref,
+                    new_value: Some(RawRef::Direct(oid)),
+                    expected: Expected::Any,
+                    reflog: None,
+                    flags: RefUpdateFlags::default(),
+                });
+            }
+            None => {
+                if refs::resolve_ref(git_dir, &tracking_ref).is_ok() {
+                    batch.push(RefUpdate {
+                        name: tracking_ref,
+                        new_value: None,
+                        expected: Expected::Any,
+                        reflog: None,
+                        flags: RefUpdateFlags::default(),
+                    });
+                }
+            }
+        }
+    }
+    if !batch.is_empty() {
+        refs::commit_ref_store_batch(git_dir, &batch)?;
     }
     Ok(())
 }

@@ -1219,7 +1219,7 @@ fn apply_atomic_batch_ref_store_error(
     let fail_ref = ref_store_error_refname(&err);
     let message = err.to_string();
     let batch_names: HashSet<&str> = batch.iter().map(|u| u.name.as_str()).collect();
-    let mut in_batch = decisions
+    let in_batch = decisions
         .iter_mut()
         .filter(|d| d.apply && batch_names.contains(d.result.remote_ref.as_str()));
     if let Some(fail_name) = fail_ref {
