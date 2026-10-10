@@ -87,7 +87,7 @@ impl ReftableRefStore {
             false,
             "main",
             None,
-            crate::ref_storage::RefStorageFormat::Reftable,
+            "reftable",
         )?;
         let git_dir = root.path().join(".git");
         let store = Self {

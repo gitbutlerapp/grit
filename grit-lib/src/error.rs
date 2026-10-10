@@ -440,6 +440,10 @@ pub enum Error {
     #[error("the receiving end does not support push options")]
     PushOptionsUnsupported,
 
+    /// A bundle fetch or verify found prerequisite commits missing from history.
+    #[error("repository lacks these prerequisite commits")]
+    BundleMissingPrerequisites,
+
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.

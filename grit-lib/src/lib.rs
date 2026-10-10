@@ -116,7 +116,10 @@ pub mod attributes;
 pub mod blame;
 pub mod bloom;
 pub mod branch_tracking;
+pub mod bundle;
+pub mod bundle_remote;
 pub mod check_ref_format;
+pub mod clone;
 pub mod combined_diff_patch;
 pub mod combined_tree_diff;
 pub mod command_runner;
@@ -141,6 +144,12 @@ pub mod dotfile;
 pub mod environment;
 pub mod error;
 mod ewah_bitmap;
+
+#[doc(hidden)]
+pub mod ewah_bench {
+    include!("ewah_bench_api.rs");
+}
+pub mod bitmap_walk;
 pub mod fetch;
 pub mod fetch_head;
 pub mod fetch_negotiator;
@@ -166,7 +175,6 @@ pub mod index_pack;
 pub mod init_filesystem;
 pub mod interpret_trailers;
 pub mod line_log;
-pub mod ls_remote;
 pub mod mailmap;
 pub mod merge_base;
 pub mod merge_diff;
@@ -180,10 +188,13 @@ pub mod notes;
 pub mod objects;
 pub mod odb;
 pub mod pack;
+pub mod pack_bitmap;
 mod pack_index;
 pub(crate) mod pack_index_build;
 mod pack_map;
 pub mod pack_name_hash;
+pub mod pack_objects;
+pub mod pack_object_select;
 pub mod pack_receive;
 pub mod pack_rev;
 pub mod pack_store;
@@ -206,6 +217,7 @@ pub mod push_report;
 pub mod push_submodules;
 pub mod quote_path;
 pub mod receive_pack;
+pub mod receive_quarantine;
 pub mod ref_exclusions;
 pub mod ref_namespace;
 pub mod ref_storage;
@@ -214,6 +226,7 @@ pub mod refs;
 pub mod refs_fsck;
 pub mod refspec;
 pub mod reftable;
+pub mod remote;
 pub mod repo;
 pub mod repo_caches;
 pub mod rerere;
@@ -263,10 +276,9 @@ pub mod zlib_inflate;
 
 pub use ref_storage::RefStorageFormat;
 
-#[cfg(test)]
-mod hot_path_test_metrics;
+#[doc(hidden)]
+pub mod hot_path_test_metrics;
 #[cfg(test)]
 mod object_write_regression;
-#[cfg(test)]
 #[cfg(test)]
 mod repository_config_snapshot_tests;
