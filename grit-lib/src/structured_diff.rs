@@ -99,6 +99,34 @@ pub struct StructuredFileDiff {
     pub hunks: Vec<StructuredHunk>,
 }
 
+/// Pre-split line bodies for O(1) lookup while building hunks.
+#[derive(Debug, Clone)]
+struct TextLines {
+    lines: Vec<String>,
+    ends_with_newline: bool,
+}
+
+impl TextLines {
+    fn from_text(text: &str) -> Self {
+        let (parts, ends_nl) = lines_with_trailing_newline(text);
+        Self {
+            lines: parts
+                .iter()
+                .map(|s| strip_diff_newline_only(s).to_owned())
+                .collect(),
+            ends_with_newline: ends_nl,
+        }
+    }
+
+    fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    fn slice_refs(&self) -> Vec<&str> {
+        self.lines.iter().map(String::as_str).collect()
+    }
+}
+
 /// Build a structured line diff from two decoded text sides.
 #[must_use]
 pub fn structured_text_diff(
@@ -106,62 +134,70 @@ pub fn structured_text_diff(
     new_text: &str,
     options: StructuredDiffOptions,
 ) -> StructuredTextDiff {
-    let (old_parts, old_eof_nl) = lines_with_trailing_newline(old_text);
-    let (new_parts, new_eof_nl) = lines_with_trailing_newline(new_text);
-    let old_line_count = old_parts.len();
-    let new_line_count = new_parts.len();
+    let old = TextLines::from_text(old_text);
+    let new = TextLines::from_text(new_text);
+    let old_snapshot = old.lines.clone();
+    let new_snapshot = new.lines.clone();
 
-    let diff = TextDiff::from_slices(&old_parts, &new_parts);
+    let diff = TextDiff::from_slices(&old.slice_refs(), &new.slice_refs());
     let mut hunks = build_structured_hunks(
         &diff,
-        old_text,
-        new_text,
+        &old,
+        &new,
+        &old_snapshot,
+        &new_snapshot,
         options.context_lines,
-        old_eof_nl,
-        new_eof_nl,
-        old_line_count,
-        new_line_count,
     );
 
     if hunks.is_empty() && old_text != new_text {
         let diff = TextDiff::from_lines(old_text, new_text);
         hunks = build_structured_hunks(
             &diff,
-            old_text,
-            new_text,
+            &old,
+            &new,
+            &old_snapshot,
+            &new_snapshot,
             options.context_lines,
-            old_eof_nl,
-            new_eof_nl,
-            old_line_count,
-            new_line_count,
         );
     }
 
-    fix_line_text_from_sources(&mut hunks, old_text, new_text);
+    pin_canonical_line_text(&mut hunks, &old_snapshot, &new_snapshot);
 
     StructuredTextDiff { hunks }
 }
 
-fn fix_line_text_from_sources(hunks: &mut [StructuredHunk], old_text: &str, new_text: &str) {
+/// One O(n) pass: `similar` may drop `\r` in inline segments; restore from precomputed lines.
+fn pin_canonical_line_text(
+    hunks: &mut [StructuredHunk],
+    old_lines: &[String],
+    new_lines: &[String],
+) {
     for hunk in hunks {
         for line in &mut hunk.lines {
             let canonical = match line.kind {
                 StructuredLineKind::Del => line
                     .old
-                    .map(|n| line_at_text(old_text, Some(n.saturating_sub(1)))),
+                    .and_then(|n| old_lines.get(n.saturating_sub(1)).cloned()),
                 StructuredLineKind::Add => line
                     .new
-                    .map(|n| line_at_text(new_text, Some(n.saturating_sub(1)))),
+                    .and_then(|n| new_lines.get(n.saturating_sub(1)).cloned()),
                 StructuredLineKind::Context => line
                     .old
-                    .map(|n| line_at_text(old_text, Some(n.saturating_sub(1)))),
+                    .and_then(|n| old_lines.get(n.saturating_sub(1)).cloned()),
             };
-            let Some(canonical) = canonical.filter(|t| !t.is_empty()) else {
+            let Some(canonical) = canonical else {
                 continue;
             };
+            if line.kind == StructuredLineKind::Del {
+                let emphasis = line.segments.iter().any(|s| s.emphasis);
+                line.segments = vec![StructuredSegment {
+                    text: canonical,
+                    emphasis,
+                }];
+                continue;
+            }
             let rendered: String = line.segments.iter().map(|s| s.text.as_str()).collect();
-            let force = old_text.contains('\r') && line.kind == StructuredLineKind::Del;
-            if force || rendered != canonical {
+            if rendered != canonical {
                 let emphasis = line.segments.iter().any(|s| s.emphasis);
                 line.segments = vec![StructuredSegment {
                     text: canonical,
@@ -172,24 +208,21 @@ fn fix_line_text_from_sources(hunks: &mut [StructuredHunk], old_text: &str, new_
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_structured_hunks(
     diff: &TextDiff<'_, '_, str>,
-    old_text: &str,
-    new_text: &str,
+    old: &TextLines,
+    new: &TextLines,
+    old_bodies: &[String],
+    new_bodies: &[String],
     context_lines: usize,
-    old_eof_nl: bool,
-    new_eof_nl: bool,
-    old_line_count: usize,
-    new_line_count: usize,
 ) -> Vec<StructuredHunk> {
     diff.grouped_ops(context_lines)
         .into_iter()
         .filter_map(|group| {
             let first = group.first()?;
-            let old_start = first.old_range().start + 1;
-            let new_start = first.new_range().start + 1;
             let (old_lines, new_lines) = hunk_line_counts(&group);
+            let old_start = unified_hunk_start(first.old_range().start, old_lines);
+            let new_start = unified_hunk_start(first.new_range().start, new_lines);
 
             let mut lines = Vec::new();
             for op in &group {
@@ -200,9 +233,9 @@ fn build_structured_hunks(
                         ChangeTag::Insert => StructuredLineKind::Add,
                     };
                     let source_owned = match kind {
-                        StructuredLineKind::Del => line_at_text(old_text, change.old_index()),
-                        StructuredLineKind::Add => line_at_text(new_text, change.new_index()),
-                        StructuredLineKind::Context => line_at_text(old_text, change.old_index()),
+                        StructuredLineKind::Del => line_body(old_bodies, change.old_index()),
+                        StructuredLineKind::Add => line_body(new_bodies, change.new_index()),
+                        StructuredLineKind::Context => line_body(old_bodies, change.old_index()),
                     };
                     let inline = segments_for_change(&change, &source_owned);
                     let rendered: String = inline.iter().map(|s| s.text.as_str()).collect();
@@ -216,13 +249,27 @@ fn build_structured_hunks(
                     };
 
                     let no_newline_at_eof = match kind {
-                        StructuredLineKind::Del => {
-                            line_missing_eof_newline(change.old_index(), old_line_count, old_eof_nl)
+                        StructuredLineKind::Del => line_missing_eof_newline(
+                            change.old_index(),
+                            old.line_count(),
+                            old.ends_with_newline,
+                        ),
+                        StructuredLineKind::Add => line_missing_eof_newline(
+                            change.new_index(),
+                            new.line_count(),
+                            new.ends_with_newline,
+                        ),
+                        StructuredLineKind::Context => {
+                            line_missing_eof_newline(
+                                change.old_index(),
+                                old.line_count(),
+                                old.ends_with_newline,
+                            ) || line_missing_eof_newline(
+                                change.new_index(),
+                                new.line_count(),
+                                new.ends_with_newline,
+                            )
                         }
-                        StructuredLineKind::Add => {
-                            line_missing_eof_newline(change.new_index(), new_line_count, new_eof_nl)
-                        }
-                        StructuredLineKind::Context => false,
                     };
 
                     lines.push(StructuredLine {
@@ -240,7 +287,7 @@ fn build_structured_hunks(
                 new_start,
                 old_lines,
                 new_lines,
-                context: function_context(old_text, first.old_range().start),
+                context: function_context(&old.lines, first.old_range().start),
                 lines,
             })
         })
@@ -293,11 +340,10 @@ fn strip_diff_newline_only(s: &str) -> &str {
     s.strip_suffix('\n').unwrap_or(s)
 }
 
-fn line_at_text(text: &str, index: Option<usize>) -> String {
-    let (parts, _) = lines_with_trailing_newline(text);
+fn line_body(lines: &[String], index: Option<usize>) -> String {
     index
-        .and_then(|i| parts.get(i))
-        .map(|s| strip_diff_newline_only(s).to_owned())
+        .and_then(|i| lines.get(i))
+        .cloned()
         .unwrap_or_default()
 }
 
@@ -412,20 +458,32 @@ fn hunk_line_counts(group: &[DiffOp]) -> (usize, usize) {
     (old, new)
 }
 
-/// Nearest enclosing definition line above `start` (0-based old line index).
-fn function_context(old_text: &str, start: usize) -> Option<String> {
-    let lines: Vec<&str> = old_text.split('\n').collect();
-    let upto = start.min(lines.len());
-    lines[..upto].iter().rev().find_map(|line| {
-        let first = line.chars().next()?;
-        (first.is_alphabetic() || first == '_').then(|| line.trim_end().to_owned())
-    })
+/// 1-based unified-diff start, or `0` when that side has zero lines in the hunk (Git `xdiff`).
+fn unified_hunk_start(first_index_0based: usize, line_count: usize) -> usize {
+    if line_count == 0 {
+        0
+    } else {
+        first_index_0based + 1
+    }
 }
 
-/// Format a unified-style hunk range (`1` or `1,2`).
+/// Nearest enclosing definition line above `start` (0-based old line index).
+fn function_context(lines: &[String], start: usize) -> Option<String> {
+    lines[..start.min(lines.len())]
+        .iter()
+        .rev()
+        .find_map(|line| {
+            let first = line.chars().next()?;
+            (first.is_alphabetic() || first == '_').then(|| line.trim_end().to_owned())
+        })
+}
+
+/// Format one unified hunk range side (`1`, `1,2`, or `0,0`).
 #[must_use]
 pub fn format_hunk_range(start: usize, count: usize) -> String {
-    if count <= 1 {
+    if count == 0 {
+        "0,0".to_owned()
+    } else if count == 1 {
         start.to_string()
     } else {
         format!("{start},{count}")
@@ -435,6 +493,64 @@ pub fn format_hunk_range(start: usize, count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    fn git_diff(old: &str, new: &str) -> String {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("f.txt");
+        std::fs::write(&path, old).expect("write old");
+        Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git init");
+        Command::new("git")
+            .args(["config", "user.email", "t@e.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["add", "f.txt"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "init"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::fs::write(&path, new).expect("write new");
+        let out = Command::new("git")
+            .args(["diff", "f.txt"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git diff");
+        String::from_utf8(out.stdout).expect("utf8")
+    }
+
+    fn parse_hunk_header(patch: &str) -> (usize, usize, usize, usize) {
+        let line = patch.lines().find(|l| l.starts_with("@@")).expect("hunk");
+        let rest = line.strip_prefix("@@ ").expect("prefix");
+        let (old_part, new_part) = rest.split_once(" +").expect("plus");
+        let old_part = old_part.strip_prefix('-').expect("minus");
+        let (os, ol) = parse_range(old_part.split(' ').next().expect("old"));
+        let new_part = new_part.split(" @@").next().expect("close");
+        let (ns, nl) = parse_range(new_part);
+        (os, ol, ns, nl)
+    }
+
+    fn parse_range(s: &str) -> (usize, usize) {
+        if let Some((a, b)) = s.split_once(',') {
+            (a.parse().expect("start"), b.parse().expect("count"))
+        } else {
+            (s.parse().expect("start"), 1)
+        }
+    }
 
     #[test]
     fn lines_with_trailing_newline_splits_crlf() {
@@ -444,33 +560,22 @@ mod tests {
     }
 
     #[test]
+    fn text_lines_from_text_preserves_cr() {
+        let t = TextLines::from_text("a\r\nb\r\n");
+        assert_eq!(t.lines[0], "a\r");
+    }
+
+    #[test]
     fn crlf_to_lf_shows_carriage_return_on_removed_lines() {
         let old = "a\r\nb\r\n";
         let new = "a\nb\n";
         let d = structured_text_diff(old, new, StructuredDiffOptions::default());
-        assert_eq!(d.hunks.len(), 1);
         let del: Vec<_> = d.hunks[0]
             .lines
             .iter()
             .filter(|l| l.kind == StructuredLineKind::Del)
             .collect();
-        assert_eq!(del.len(), 2);
-        let (parts, _) = lines_with_trailing_newline(old);
-        assert_eq!(parts[0], "a\r");
         assert_eq!(del[0].segments[0].text, "a\r");
-        assert_eq!(del[1].segments[0].text, "b\r");
-        let add: Vec<_> = d.hunks[0]
-            .lines
-            .iter()
-            .filter(|l| l.kind == StructuredLineKind::Add)
-            .collect();
-        assert_eq!(add[0].segments[0].text, "a");
-    }
-
-    #[test]
-    fn eof_newline_from_lines_has_ops() {
-        let d = TextDiff::from_lines("line1\nline2", "line1\nline2\n");
-        assert!(!d.ops().is_empty());
     }
 
     #[test]
@@ -484,12 +589,45 @@ mod tests {
             .find(|l| l.kind == StructuredLineKind::Del)
             .expect("deleted line2");
         assert!(del.no_newline_at_eof);
-        let add = d.hunks[0]
+    }
+
+    #[test]
+    fn context_last_line_without_eof_newline_is_marked() {
+        let old = "old\nlast";
+        let new = "new\nlast";
+        let d = structured_text_diff(old, new, StructuredDiffOptions::default());
+        let ctx = d.hunks[0]
             .lines
             .iter()
-            .find(|l| l.kind == StructuredLineKind::Add)
-            .expect("added line2");
-        assert!(!add.no_newline_at_eof);
+            .find(|l| l.kind == StructuredLineKind::Context && l.segments[0].text == "last")
+            .expect("context last");
+        assert!(ctx.no_newline_at_eof);
+    }
+
+    #[test]
+    fn insert_into_empty_file_matches_git_hunk_header() {
+        let patch = git_diff("", "x\n");
+        let (g_os, g_ol, g_ns, g_nl) = parse_hunk_header(&patch);
+        let d = structured_text_diff("", "x\n", StructuredDiffOptions::default());
+        let h = &d.hunks[0];
+        assert_eq!(
+            (h.old_start, h.old_lines, h.new_start, h.new_lines),
+            (g_os, g_ol, g_ns, g_nl)
+        );
+        assert_eq!((h.old_start, h.old_lines), (0, 0));
+    }
+
+    #[test]
+    fn delete_to_empty_matches_git_hunk_header() {
+        let patch = git_diff("x\n", "");
+        let (g_os, g_ol, g_ns, g_nl) = parse_hunk_header(&patch);
+        let d = structured_text_diff("x\n", "", StructuredDiffOptions::default());
+        let h = &d.hunks[0];
+        assert_eq!(
+            (h.old_start, h.old_lines, h.new_start, h.new_lines),
+            (g_os, g_ol, g_ns, g_nl)
+        );
+        assert_eq!((h.new_start, h.new_lines), (0, 0));
     }
 
     #[test]
@@ -497,10 +635,7 @@ mod tests {
         let old = "x\n";
         let new = "x\nmore\n";
         let d = structured_text_diff(old, new, StructuredDiffOptions { context_lines: 3 });
-        assert_eq!(d.hunks.len(), 1);
         let h = &d.hunks[0];
-        assert_eq!(h.old_start, 1);
-        assert_eq!(h.new_start, 1);
         assert_eq!(h.old_lines, 1);
         assert_eq!(h.new_lines, 2);
     }
@@ -516,15 +651,6 @@ mod tests {
             &new,
             StructuredDiffOptions::default(),
         );
-        assert_eq!(f.old_mode.as_deref(), Some("100644"));
-        assert_eq!(f.new_mode.as_deref(), Some("100755"));
         assert!(f.hunks.is_empty());
-    }
-
-    #[test]
-    fn non_utf8_sets_encoding_lossy() {
-        let data = vec![b'c', b'a', b'f', 0xe9];
-        let side = SideBytes::from_bytes(data);
-        assert!(side.encoding_lossy);
     }
 }

@@ -479,12 +479,20 @@ fn render_file(file: &FileDiff, color: bool) {
 }
 
 fn render_hunk(hunk: &Hunk, width: usize, color: bool) {
-    if let Some(ctx) = &hunk.context {
-        println!("{}", paint(color, "33", &format!("┄┄ {ctx}")));
-    } else if !color {
-        let old_rng = format_hunk_range(hunk.old_start, hunk.old_lines);
-        let new_rng = format_hunk_range(hunk.new_start, hunk.new_lines);
-        println!("@@ -{old_rng} +{new_rng} @@");
+    let old_rng = format_hunk_range(hunk.old_start, hunk.old_lines);
+    let new_rng = format_hunk_range(hunk.new_start, hunk.new_lines);
+    let range = format!("@@ -{old_rng} +{new_rng} @@");
+    match (&hunk.context, color) {
+        (Some(ctx), true) => {
+            println!("{}", paint(color, "33", &format!("┄┄ {range} {ctx}")));
+        }
+        (Some(ctx), false) => {
+            println!("{range} {ctx}");
+        }
+        (None, false) => {
+            println!("{range}");
+        }
+        (None, true) => {}
     }
 
     for line in &hunk.lines {

@@ -627,6 +627,30 @@ fn diff_json_preserves_crlf_no_eof_and_mode() -> TestResult {
 }
 
 #[test]
+fn diff_human_shows_hunk_range_with_function_context() -> TestResult {
+    let scratch = Scratch::new("difffctx")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("f.rs"), "fn foo() {\n  a\n}\n");
+    gs_ok(&repo, &["commit", "first"]);
+    write_file(&repo.join("f.rs"), "fn foo() {\n  b\n}\n");
+    let out = gs(&repo, ["diff"]);
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    assert!(
+        out.stdout.contains("@@ -") && out.stdout.contains("fn foo()"),
+        "expected counted hunk header with function context: {}",
+        out.dump()
+    );
+    assert!(
+        out.stdout.contains(",3") || out.stdout.contains("-1,3"),
+        "expected line counts in header: {}",
+        out.dump()
+    );
+    Ok(())
+}
+
+#[test]
 fn diff_human_is_plain_when_piped() -> TestResult {
     let scratch = Scratch::new("diffhuman")?;
     let repo = scratch.child("repo");
