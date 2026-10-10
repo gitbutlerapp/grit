@@ -2995,6 +2995,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::index_name_hash_lazy` | module | Lazy, optionally multi-threaded index name/dir hash initialization compatible with Git’s name-hash.c (used by test-tool lazy-init-name-hash and regression test t3008). | [API](https://docs.rs/grit-lib/latest/grit_lib/index_name_hash_lazy/index.html) |
 | `grit_lib::index_pack` | module | Install a received packfile into the object store (index-pack path). | [API](https://docs.rs/grit-lib/latest/grit_lib/index_pack/index.html) |
 | `grit_lib::index_pack::IngestPackOptions` | struct | Options controlling how a received pack is ingested. | [API](https://docs.rs/grit-lib/latest/grit_lib/index_pack/struct.IngestPackOptions.html) |
+| `grit_lib::index_pack::IngestedPack` | struct | Result of installing a pack under objects/pack/. | [API](https://docs.rs/grit-lib/latest/grit_lib/index_pack/struct.IngestedPack.html) |
 | `grit_lib::init_filesystem` | module | Filesystem capability probes during repository initialization. | [API](https://docs.rs/grit-lib/latest/grit_lib/init_filesystem/index.html) |
 | `grit_lib::init_filesystem::InitFilesystemConfigOptions` | struct | Controls when init-time filesystem probes may write local config. | [API](https://docs.rs/grit-lib/latest/grit_lib/init_filesystem/struct.InitFilesystemConfigOptions.html) |
 | `grit_lib::interpret_trailers` | module | Commit message trailer parsing and rewriting (Git-compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/interpret_trailers/index.html) |
