@@ -81,7 +81,10 @@ fn for_local_copy_build_pack_reuse_bounded_on_repacked_fixture() {
 }
 
 /// When `/tmp/cargo.mirror` exists, full local-copy pack build must stay near grit main, not 8× slower.
+///
+/// Budget is calibrated for release builds; debug builds can exceed it on large mirrors.
 #[test]
+#[cfg_attr(debug_assertions, ignore = "release-only: cargo mirror perf budget")]
 fn cargo_mirror_for_local_copy_build_time_when_fixture_present() {
     let mirror = Path::new("/tmp/cargo.mirror");
     if !mirror.join("objects/pack").is_dir() {
