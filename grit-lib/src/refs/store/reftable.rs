@@ -20,10 +20,10 @@ use crate::repo::init_repository;
 
 use super::error::RefStoreError;
 use super::semantics::{
-    format_reflog_identity, reflog_new_oid_before, reflog_old_oid_before, reftable_write_target,
-    simulate_batch_apply,
+    apply_update_to_map, format_reflog_identity, reflog_new_oid_before, reflog_old_oid_before,
+    reftable_write_target, simulate_batch_apply,
 };
-use super::transaction::{expected_matches, RefTransaction};
+use super::transaction::RefTransaction;
 use super::validation::verify_create_conflicts;
 use super::{
     Expected, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate,
@@ -303,17 +303,6 @@ fn map_reftable_err(err: Error) -> RefStoreError {
     }
 }
 
-fn ref_snapshot_get(
-    git_dir: &Path,
-    refs: &BTreeMap<String, RawRef>,
-    logical_name: &str,
-) -> Option<RawRef> {
-    let (_, storage) = reftable_storage_location(git_dir, logical_name);
-    refs.get(&storage)
-        .or_else(|| refs.get(logical_name))
-        .cloned()
-}
-
 fn log_record_from_update(
     git_dir: &Path,
     storage_refname: &str,
@@ -343,36 +332,51 @@ fn build_reftable_updates_for_stack(
     refs: &BTreeMap<String, RawRef>,
     updates: &[RefUpdate],
 ) -> StoreResult<Vec<ReftableTransactionUpdate>> {
-    let mut out = Vec::new();
+    let mut trial = refs.clone();
+    let mut ref_values: BTreeMap<String, Option<RefValue>> = BTreeMap::new();
+    let mut expected_old_for_ref: BTreeMap<String, Option<ObjectId>> = BTreeMap::new();
+    let mut log_updates: Vec<ReftableTransactionUpdate> = Vec::new();
+
     for update in updates {
-        let target = reftable_write_target(refs, git_dir, update)?;
+        let target = reftable_write_target(&trial, git_dir, update)?;
         let mut value = target.value.clone();
         if update.name == "HEAD" {
             value = head_stack_value(git_dir, update, value);
         }
-        let old_oid = reflog_old_oid_before(refs, refs, update);
-        let new_oid = reflog_new_oid_before(refs, refs, update);
+        let old_oid = reflog_old_oid_before(&trial, refs, update);
+        let new_oid = reflog_new_oid_before(&trial, refs, update);
         let (_, log_refname) = reftable_storage_location(git_dir, &update.name);
-        let log = update
-            .reflog
-            .as_ref()
-            .map(|log| log_record_from_update(git_dir, &log_refname, old_oid, new_oid, log))
-            .transpose()
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        let expected_old = match &update.expected {
-            Expected::Oid(oid) => Some(*oid),
-            _ => None,
-        };
-        if value.is_none() && log.is_none() {
-            continue;
+        if let Some(log) = update.reflog.as_ref() {
+            let log = log_record_from_update(git_dir, &log_refname, old_oid, new_oid, log)
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            log_updates.push(ReftableTransactionUpdate {
+                refname: log_refname,
+                value: None,
+                log: Some(log),
+                expected_old: None,
+            });
         }
+        if value.is_some() {
+            let expected_old = match &update.expected {
+                Expected::Oid(oid) => Some(*oid),
+                _ => None,
+            };
+            ref_values.insert(target.storage_refname.clone(), value);
+            expected_old_for_ref.insert(target.storage_refname.clone(), expected_old);
+        }
+        apply_update_to_map(&mut trial, refs, update)?;
+    }
+
+    let mut out = Vec::new();
+    for (refname, value) in ref_values {
         out.push(ReftableTransactionUpdate {
-            refname: target.storage_refname.clone(),
+            refname: refname.clone(),
             value,
-            log,
-            expected_old,
+            log: None,
+            expected_old: expected_old_for_ref.remove(&refname).flatten(),
         });
     }
+    out.extend(log_updates);
     Ok(out)
 }
 
@@ -492,16 +496,6 @@ impl RefStore for ReftableRefStore {
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             verify_create_conflicts(&refs, &group)?;
             simulate_batch_apply(&refs, &group)?;
-            for update in &group {
-                let actual = ref_snapshot_get(&self.git_dir, &refs, &update.name);
-                if !expected_matches(actual.as_ref(), &update.expected) {
-                    return Err(RefStoreError::ExpectedMismatch {
-                        name: update.name.clone(),
-                        expected: update.expected.clone(),
-                        actual,
-                    });
-                }
-            }
             let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
             let mut stack = ReftableStack::open(&store_git_dir)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;

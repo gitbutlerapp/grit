@@ -32,7 +32,7 @@ pub fn simulate_batch_apply(
     Ok(())
 }
 
-fn apply_update_to_map(
+pub(crate) fn apply_update_to_map(
     trial: &mut BTreeMap<String, RawRef>,
     baseline: &BTreeMap<String, RawRef>,
     update: &RefUpdate,

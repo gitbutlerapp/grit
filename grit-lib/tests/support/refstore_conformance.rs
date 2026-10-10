@@ -83,6 +83,7 @@ pub fn run_refstore_conformance(factory: StoreFactory) {
     direct_update_reflog_oids(&factory);
     delete_with_reflog_oids(&factory);
     symref_deref_delete(&factory);
+    symref_head_deref_delete_recreate_branch(&factory);
     symref_no_deref_delete(&factory);
     symref_unborn_referent_created(&factory);
     batch_apply_rejected_leaves_store_unchanged(&factory);
@@ -374,6 +375,36 @@ fn symref_deref_delete(factory: &StoreFactory) {
         Some(RawRef::Symbolic("refs/heads/target".to_owned()))
     );
     assert_eq!(store.read_raw("refs/heads/target").expect("target"), None);
+}
+
+fn symref_head_deref_delete_recreate_branch(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/main", oid(1));
+    seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
+
+    let txn = RefTransaction::new()
+        .update(update("HEAD", None, Expected::Any))
+        .expect("delete head deref")
+        .update(update(
+            "refs/heads/main",
+            Some(RawRef::Direct(oid(2))),
+            Expected::Missing,
+        ))
+        .expect("recreate main");
+    store
+        .prepare(txn)
+        .expect("prepare ordered batch")
+        .commit()
+        .expect("commit");
+
+    assert_eq!(
+        store.read_raw("HEAD").expect("head"),
+        Some(RawRef::Symbolic("refs/heads/main".to_owned()))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("main"),
+        Some(RawRef::Direct(oid(2)))
+    );
 }
 
 fn symref_no_deref_delete(factory: &StoreFactory) {
