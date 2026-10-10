@@ -18,7 +18,9 @@ pub fn empty_global_config_path() -> &'static Path {
         let dir = scratch_dir();
         let _ = fs::create_dir_all(&dir);
         let path = dir.join(".grit-bench-empty-config");
-        if fs::write(&path, b"").is_err() {
+        // v0 smart HTTP matches system `git` against git-http-backend (v2 fetch breaks on CGI).
+        let contents = "[protocol]\n\tversion = 0\n";
+        if fs::write(&path, contents).is_err() {
             return PathBuf::from("/dev/null");
         }
         path

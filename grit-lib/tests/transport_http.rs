@@ -1694,3 +1694,106 @@ fn http_clone_peak_rss_bounded_for_large_pack() {
         "pack_spool_only fetch must leave a tmp_pack under objects/pack"
     );
 }
+
+/// `git http-backend` behind the grit-bench CGI wrapper (not grit-http-server).
+#[test]
+fn fetch_over_git_http_backend_cgi() {
+    let Some(bench_bin) = find_binary("grit-bench") else {
+        eprintln!("SKIP: `grit-bench` binary not found (build grit-utils first)");
+        return;
+    };
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+
+    let root = tmp.path().join("http-root");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            bare.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    let main_oid = rev_parse(&bare, "refs/heads/main");
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Ok(child) = Command::new(&bench_bin)
+        .args([
+            "serve-git-http",
+            "--root",
+            root.to_str().expect("utf8"),
+            "--bind",
+            &format!("127.0.0.1:{port}"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        eprintln!("SKIP: could not spawn grit-bench serve-git-http");
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: git http-backend wrapper did not become ready on port {port}");
+        return;
+    }
+
+    let local = tmp.path().join("local.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", local.to_str().expect("utf8")],
+    );
+
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let client = http_client_arc(UreqHttpClient::new());
+    let upload_url = format!("{url}/git-upload-pack");
+    let want = format!("want {main_oid} multi_ack thin-pack side-band side-band-64k");
+    let mut req_body = Vec::new();
+    grit_lib::pkt_line::write_line_to_vec(&mut req_body, &want).unwrap();
+    grit_lib::pkt_line::write_flush(&mut req_body).unwrap();
+    grit_lib::pkt_line::write_line_to_vec(&mut req_body, "done").unwrap();
+    grit_lib::pkt_line::write_flush(&mut req_body).unwrap();
+    let post_body = client
+        .post(
+            &upload_url,
+            "application/x-git-upload-pack-request",
+            "application/x-git-upload-pack-result",
+            &req_body,
+            None,
+        )
+        .expect("POST git-upload-pack");
+    assert!(
+        post_body.starts_with(b"0008"),
+        "upload-pack body should start with a pkt-line, got {:?}",
+        &post_body[..post_body.len().min(24)]
+    );
+    let mut progress = NoProgress;
+    http_fetch(
+        client.clone(),
+        &local,
+        &url,
+        &FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+            tags: TagMode::Following,
+            ..Default::default()
+        },
+        &mut progress,
+    )
+    .expect("http_fetch over git http-backend CGI wrapper");
+
+    assert_eq!(
+        resolve_ref(&local, "refs/remotes/origin/main").unwrap(),
+        main_oid
+    );
+}

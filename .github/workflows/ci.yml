@@ -138,6 +138,13 @@ jobs:
           sudo apt-get install -y git
           git version
 
+      - name: Install hyperfine (grit-bench network smoke)
+        run: |
+          HYPERFINE_VERSION=1.19.0
+          curl -fsSL "https://github.com/sharkdp/hyperfine/releases/download/v${HYPERFINE_VERSION}/hyperfine_${HYPERFINE_VERSION}_amd64.deb" -o /tmp/hyperfine.deb
+          sudo dpkg -i /tmp/hyperfine.deb
+          hyperfine --version
+
       - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
         run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
 
