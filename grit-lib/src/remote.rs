@@ -1114,10 +1114,11 @@ fn read_packed_refs(git_dir: &Path) -> Result<Vec<(String, ObjectId)>> {
 }
 
 fn peel_tag(odb: &Odb, oid: &ObjectId) -> Option<ObjectId> {
-    let obj = odb.read(oid).ok()?;
-    if obj.kind != ObjectKind::Tag {
+    let info = odb.read_info(oid).ok()?;
+    if info.kind != ObjectKind::Tag {
         return None;
     }
+    let obj = odb.read(oid).ok()?;
     let text = std::str::from_utf8(&obj.data).ok()?;
     for line in text.lines() {
         if let Some(target) = line.strip_prefix("object ") {
