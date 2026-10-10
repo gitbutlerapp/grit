@@ -105,8 +105,8 @@ pub(crate) fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<(
 ///
 /// # Errors
 ///
-/// Returns [`Error::RefStore`] for duplicate names, CAS failures, lock conflicts,
-/// and namespace conflicts. Propagates I/O and corrupt-store failures.
+/// Returns [`crate::refs::store::RefStoreError`] for duplicate names, CAS failures,
+/// lock conflicts, and namespace conflicts. Propagates I/O and corrupt-store failures.
 pub fn commit_ref_store_batch(git_dir: &Path, updates: &[RefUpdate]) -> Result<()> {
     if updates.is_empty() {
         return Ok(());

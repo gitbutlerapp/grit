@@ -261,8 +261,8 @@ pub struct RefTransactionItem {
 ///
 /// # Errors
 ///
-/// Returns [`Error::RefStore`] for duplicate ref names, CAS failures, lock
-/// conflicts, and namespace checks. Propagates other ref I/O errors.
+/// Returns [`crate::refs::store::RefStoreError`] for duplicate ref names, CAS failures,
+/// lock conflicts, and namespace checks. Propagates other ref I/O errors.
 pub fn update_refs(git_dir: &Path, updates: &[RefTransactionItem]) -> Result<()> {
     if updates.is_empty() {
         return Ok(());
