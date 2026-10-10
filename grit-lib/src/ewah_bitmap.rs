@@ -1,9 +1,9 @@
 //! Git-compatible EWAH bitmap serialization used by index extensions and pack bitmaps.
-#![allow(dead_code)] // Pack/MIDX bitmap readers consume `Bitmap` / `EwahView` in a follow-up step.
 //!
 //! Layout matches Git's on-disk EWAH format (bit size, word count, big-endian u64 words,
 //! RLW index). See `gitformat-pack` bitmap sections and the Enhanced Word-Aligned Hybrid
 //! (EWAH) paper for the compression scheme.
+#![allow(dead_code)] // Pack/MIDX bitmap readers consume `Bitmap` / `EwahView` in a follow-up step.
 
 use thiserror::Error;
 
@@ -29,6 +29,8 @@ pub(crate) enum EwahError {
     InvalidRlwIndex { index: usize, buffer_size: usize },
     #[error("ewah bitmap: word count overflow")]
     WordCountOverflow,
+    #[error("ewah bitmap: invalid RLW segment at compressed word {at}")]
+    InvalidRlwSegment { at: usize },
 }
 
 #[inline]
@@ -188,8 +190,8 @@ impl Bitmap {
     pub(crate) fn set_bits(&self) -> impl Iterator<Item = usize> + '_ {
         BitmapSetBitsIter {
             bitmap: self,
-            word: 0,
-            bit_in_word: 0,
+            word_idx: 0,
+            pending: 0,
         }
     }
 
@@ -205,29 +207,27 @@ impl Bitmap {
 
 struct BitmapSetBitsIter<'a> {
     bitmap: &'a Bitmap,
-    word: usize,
-    bit_in_word: usize,
+    word_idx: usize,
+    pending: Eword,
 }
 
 impl Iterator for BitmapSetBitsIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.word < self.bitmap.words.len() {
-            let w = self.bitmap.words[self.word];
-            while self.bit_in_word < BITS_IN_EWORD {
-                let mask = 1u64 << self.bit_in_word;
-                if w & mask != 0 {
-                    let pos = self.word * BITS_IN_EWORD + self.bit_in_word;
-                    self.bit_in_word += 1;
-                    return Some(pos);
-                }
-                self.bit_in_word += 1;
+        loop {
+            if self.pending != 0 {
+                let tz = self.pending.trailing_zeros() as usize;
+                let pos = (self.word_idx - 1) * BITS_IN_EWORD + tz;
+                self.pending &= self.pending - 1;
+                return Some(pos);
             }
-            self.word += 1;
-            self.bit_in_word = 0;
+            if self.word_idx >= self.bitmap.words.len() {
+                return None;
+            }
+            self.pending = self.bitmap.words[self.word_idx];
+            self.word_idx += 1;
         }
-        None
     }
 }
 
@@ -265,15 +265,31 @@ impl<'a> EwahView<'a> {
                 buffer_size,
             });
         }
-        Ok((
-            Self {
-                data,
-                bit_size,
-                buffer_size,
-                rlw_index,
-            },
-            pos,
-        ))
+        let view = Self {
+            data,
+            bit_size,
+            buffer_size,
+            rlw_index,
+        };
+        view.validate_segments()?;
+        Ok((view, pos))
+    }
+
+    fn validate_segments(&self) -> Result<(), EwahError> {
+        let mut idx = 0usize;
+        while idx < self.buffer_size {
+            let rlw = self.word_be(idx)?;
+            let literals = rlw_get_literal_words(rlw) as usize;
+            let next = idx
+                .checked_add(1)
+                .and_then(|n| n.checked_add(literals))
+                .ok_or(EwahError::WordCountOverflow)?;
+            if next > self.buffer_size {
+                return Err(EwahError::InvalidRlwSegment { at: idx });
+            }
+            idx = next;
+        }
+        Ok(())
     }
 
     pub(crate) fn bit_size(&self) -> usize {
@@ -288,24 +304,41 @@ impl<'a> EwahView<'a> {
     /// Decompress into `out`, replacing prior contents.
     pub(crate) fn expand_into(&self, out: &mut Bitmap) -> Result<(), EwahError> {
         out.words.clear();
-        let mut iter = EwahWordIter::new(self)?;
-        while let Some(word) = iter.next_word()? {
+        let mut stream = LogicalWordStream::from_view(self)?;
+        while let Some(word) = stream.next()? {
             out.words.push(word);
         }
         Ok(())
     }
 
-    /// OR decompressed words into `out` (Git `bitmap_or_ewah`), skipping all-zero runs cheaply.
+    /// OR logical words into `out`, advancing only through set runs and literal payloads.
     pub(crate) fn or_into(&self, out: &mut Bitmap) -> Result<(), EwahError> {
-        let other_final = self.bit_size.div_ceil(BITS_IN_EWORD);
-        out.grow_words(other_final);
-        let mut i = 0usize;
-        let mut iter = EwahWordIter::new(self)?;
-        while let Some(word) = iter.next_word()? {
-            if i < out.words.len() {
-                out.words[i] |= word;
+        let word_limit = self.bit_size.div_ceil(BITS_IN_EWORD);
+        out.grow_words(word_limit);
+        let mut logical = 0usize;
+        let mut idx = 0usize;
+        while idx < self.buffer_size {
+            let rlw = self.word_be(idx)?;
+            let run_words = rlw_get_running_len(rlw) as usize;
+            if rlw_get_run_bit(rlw) {
+                for offset in 0..run_words {
+                    let slot = logical + offset;
+                    if slot < out.words.len() {
+                        out.words[slot] = !0;
+                    }
+                }
             }
-            i += 1;
+            logical += run_words;
+            idx += 1;
+            let literal_count = rlw_get_literal_words(rlw) as usize;
+            for _ in 0..literal_count {
+                let lit = self.word_be(idx)?;
+                if logical < out.words.len() {
+                    out.words[logical] |= lit;
+                }
+                logical += 1;
+                idx += 1;
+            }
         }
         Ok(())
     }
@@ -348,78 +381,141 @@ impl<'a> EwahView<'a> {
     }
 }
 
-/// Expands compressed EWAH into logical u64 words (Git `ewah_iterator`).
-struct EwahWordIter<'a> {
-    view: &'a EwahView<'a>,
-    pointer: usize,
-    rl: u64,
-    lw: u64,
-    compressed: u64,
-    literals: u64,
-    run_bit: bool,
+/// Expands EWAH compressed storage into sequential logical 64-bit words.
+struct LogicalWordStream<'a> {
+    read_word: fn(&LogicalWordStream<'_>, usize) -> Result<Eword, EwahError>,
+    storage: StorageRef<'a>,
+    rlw_pos: usize,
+    run_remaining: usize,
+    run_value: Eword,
+    literal_remaining: usize,
+    literal_pos: usize,
+    segment_end: usize,
+    finished: bool,
 }
 
-impl<'a> EwahWordIter<'a> {
-    fn new(view: &'a EwahView<'a>) -> Result<Self, EwahError> {
-        let mut it = Self {
-            view,
-            pointer: 0,
-            rl: 0,
-            lw: 0,
-            compressed: 0,
-            literals: 0,
-            run_bit: false,
+enum StorageRef<'a> {
+    View(&'a EwahView<'a>),
+    Buffer(&'a [Eword]),
+}
+
+impl<'a> LogicalWordStream<'a> {
+    fn from_view(view: &'a EwahView<'a>) -> Result<Self, EwahError> {
+        let mut stream = Self {
+            read_word: Self::read_view_word,
+            storage: StorageRef::View(view),
+            rlw_pos: 0,
+            run_remaining: 0,
+            literal_remaining: 0,
+            literal_pos: 0,
+            segment_end: 0,
+            run_value: 0,
+            finished: view.buffer_size == 0,
         };
-        if it.pointer < view.buffer_size {
-            it.read_new_rlw()?;
+        if !stream.finished {
+            stream.load_segment()?;
         }
-        Ok(it)
+        Ok(stream)
     }
 
-    fn read_new_rlw(&mut self) -> Result<(), EwahError> {
-        self.literals = 0;
-        self.compressed = 0;
-        loop {
-            let word = self.view.word_be(self.pointer)?;
-            self.rl = rlw_get_running_len(word);
-            self.lw = rlw_get_literal_words(word);
-            self.run_bit = rlw_get_run_bit(word);
-            if self.rl != 0 || self.lw != 0 {
-                return Ok(());
-            }
-            if self.pointer < self.view.buffer_size - 1 {
-                self.pointer += 1;
-            } else {
-                self.pointer = self.view.buffer_size;
-                return Ok(());
-            }
+    fn from_buffer(words: &'a [Eword]) -> Result<Self, EwahError> {
+        let mut stream = Self {
+            read_word: Self::read_buffer_word,
+            storage: StorageRef::Buffer(words),
+            rlw_pos: 0,
+            run_remaining: 0,
+            literal_remaining: 0,
+            literal_pos: 0,
+            segment_end: 0,
+            run_value: 0,
+            finished: words.is_empty(),
+        };
+        if !stream.finished {
+            stream.load_segment()?;
+        }
+        Ok(stream)
+    }
+
+    fn buffer_len(&self) -> usize {
+        match self.storage {
+            StorageRef::View(v) => v.buffer_size,
+            StorageRef::Buffer(w) => w.len(),
         }
     }
 
-    fn next_word(&mut self) -> Result<Option<Eword>, EwahError> {
-        if self.pointer >= self.view.buffer_size {
+    fn read_view_word(this: &LogicalWordStream<'_>, idx: usize) -> Result<Eword, EwahError> {
+        match this.storage {
+            StorageRef::View(v) => v.word_be(idx),
+            StorageRef::Buffer(_) => Err(EwahError::InvalidRlwSegment { at: idx }),
+        }
+    }
+
+    fn read_buffer_word(this: &LogicalWordStream<'_>, idx: usize) -> Result<Eword, EwahError> {
+        match this.storage {
+            StorageRef::Buffer(w) => w
+                .get(idx)
+                .copied()
+                .ok_or(EwahError::InvalidRlwSegment { at: idx }),
+            StorageRef::View(_) => Err(EwahError::InvalidRlwSegment { at: idx }),
+        }
+    }
+
+    fn word_at(&self, idx: usize) -> Result<Eword, EwahError> {
+        (self.read_word)(self, idx)
+    }
+
+    fn load_segment(&mut self) -> Result<(), EwahError> {
+        while self.rlw_pos < self.buffer_len() {
+            let header = self.word_at(self.rlw_pos)?;
+            let run_len = rlw_get_running_len(header) as usize;
+            let lit_len = rlw_get_literal_words(header) as usize;
+            if run_len > 0 || lit_len > 0 {
+                self.run_remaining = run_len;
+                self.run_value = if rlw_get_run_bit(header) { !0 } else { 0 };
+                self.literal_remaining = lit_len;
+                self.literal_pos = self.rlw_pos + 1;
+                self.segment_end = self.rlw_pos + 1 + lit_len;
+                return Ok(());
+            }
+            self.rlw_pos += 1;
+        }
+        self.finished = true;
+        Ok(())
+    }
+
+    fn finish_segment(&mut self) -> Result<(), EwahError> {
+        self.rlw_pos = self.segment_end;
+        if self.rlw_pos >= self.buffer_len() {
+            self.finished = true;
+        } else {
+            self.load_segment()?;
+        }
+        Ok(())
+    }
+
+    fn next(&mut self) -> Result<Option<Eword>, EwahError> {
+        if self.finished {
             return Ok(None);
         }
-        let next = if self.compressed < self.rl {
-            self.compressed += 1;
-            if self.run_bit {
-                !0u64
-            } else {
-                0
+        if self.run_remaining > 0 {
+            self.run_remaining -= 1;
+            let word = self.run_value;
+            if self.run_remaining == 0 && self.literal_remaining == 0 {
+                self.finish_segment()?;
             }
-        } else {
-            self.literals += 1;
-            self.pointer += 1;
-            self.view.word_be(self.pointer)?
-        };
-
-        if self.compressed == self.rl && self.literals == self.lw {
-            self.pointer += 1;
-            if self.pointer < self.view.buffer_size {
-                self.read_new_rlw()?;
-            }
+            return Ok(Some(word));
         }
-        Ok(Some(next))
+        if self.literal_remaining > 0 {
+            let word = self.word_at(self.literal_pos)?;
+            self.literal_remaining -= 1;
+            self.literal_pos += 1;
+            if self.literal_remaining == 0 && self.run_remaining == 0 {
+                self.finish_segment()?;
+            }
+            return Ok(Some(word));
+        }
+        self.finished = true;
+        Ok(None)
     }
 }
 
@@ -555,54 +651,14 @@ impl EwahBitmap {
         }
     }
 
-    fn add_dirty_words(&mut self, buffer: &[Eword], number: usize, negate: bool) {
-        let mut offset = 0usize;
-        let mut remaining = number;
-        while remaining > 0 {
-            let literals = rlw_get_literal_words(*self.rlw_mut());
-            let can_add = min_sz(remaining, (RLW_LARGEST_LITERAL_COUNT - literals) as usize);
-            rlw_set_literal_words(self.rlw_mut(), literals + can_add as Eword);
-            self.buffer_grow(self.buffer_size + can_add);
-            for i in 0..can_add {
-                let w = if negate {
-                    !buffer[offset + i]
-                } else {
-                    buffer[offset + i]
-                };
-                self.buffer[self.buffer_size] = w;
-                self.buffer_size += 1;
-            }
-            self.bit_size += can_add * BITS_IN_EWORD;
-            remaining -= can_add;
-            offset += can_add;
-            if remaining > 0 {
-                self.buffer_push_rlw(0);
-            }
-        }
-    }
-
-    /// Compress an uncompressed bitmap (Git `bitmap_to_ewah`).
+    /// Compress an uncompressed bitmap word-by-word into EWAH runs and literals.
     pub(crate) fn from_bitmap(bitmap: &Bitmap) -> Self {
         let mut ewah = Self::new();
-        let mut running_empty = 0usize;
-        let mut last_word: Eword = 0;
-        for &word in &bitmap.words {
-            if word == 0 {
-                running_empty += 1;
-                continue;
+        if let Some(last) = bitmap.words.iter().rposition(|&w| w != 0) {
+            for &word in &bitmap.words[..=last] {
+                ewah.append_word(word);
             }
-            if last_word != 0 {
-                ewah.append_word(last_word);
-            }
-            if running_empty > 0 {
-                ewah.append_empty_words(false, running_empty);
-                running_empty = 0;
-            }
-            last_word = word;
         }
-        ewah.append_word(last_word);
-        // Index extensions build EWAH with `set_bit_extend`, so `bit_size` is the highest
-        // set bit plus one, not `word_alloc * 64` from a full word scan (Git `bitmap_to_ewah`).
         ewah.bit_size = Self::highest_set_bit_plus_one(bitmap);
         ewah
     }
@@ -638,43 +694,39 @@ impl EwahBitmap {
         Ok(ewah)
     }
 
-    /// XOR two EWAH bitmaps (Git `ewah_xor`).
+    /// XOR two EWAH bitmaps by zipping their logical word streams.
+    #[allow(clippy::while_let_loop)]
     pub(crate) fn xor_ewah(a: &Self, b: &Self) -> Self {
         let mut out = Self::new();
-        let mut rlw_a = RlwIter::new(a);
-        let mut rlw_b = RlwIter::new(b);
+        let Ok(mut stream_a) = LogicalWordStream::from_buffer(&a.buffer[..a.buffer_size]) else {
+            out.bit_size = b.bit_size;
+            return out;
+        };
+        let Ok(mut stream_b) = LogicalWordStream::from_buffer(&b.buffer[..b.buffer_size]) else {
+            out.bit_size = a.bit_size;
+            return out;
+        };
 
-        while rlw_a.word_size() > 0 && rlw_b.word_size() > 0 {
-            while rlw_a.running_len() > 0 || rlw_b.running_len() > 0 {
-                let (prey, predator) = if rlw_a.running_len() < rlw_b.running_len() {
-                    (&mut rlw_a, &mut rlw_b)
-                } else {
-                    (&mut rlw_b, &mut rlw_a)
-                };
-                let negate = predator.run_bit();
-                let index = prey.discharge(&mut out, predator.running_len(), negate);
-                out.append_empty_words(negate, predator.running_len() - index);
-                predator.discard_first_words(predator.running_len());
+        let mut wa = stream_a.next();
+        let mut wb = stream_b.next();
+        loop {
+            let left = match wa {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+            let right = match wb {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+            match (left, right) {
+                (None, None) => break,
+                (Some(a_word), Some(b_word)) => out.append_word(a_word ^ b_word),
+                (Some(a_word), None) => out.append_word(a_word),
+                (None, Some(b_word)) => out.append_word(b_word),
             }
-
-            let literals = min_sz(rlw_a.literal_words(), rlw_b.literal_words());
-            if literals > 0 {
-                for k in 0..literals {
-                    let wa = rlw_a.literal_word(k);
-                    let wb = rlw_b.literal_word(k);
-                    out.append_word(wa ^ wb);
-                }
-                rlw_a.discard_first_words(literals);
-                rlw_b.discard_first_words(literals);
-            }
+            wa = stream_a.next();
+            wb = stream_b.next();
         }
-
-        if rlw_a.word_size() > 0 {
-            rlw_a.discharge(&mut out, usize::MAX, false);
-        } else {
-            rlw_b.discharge(&mut out, usize::MAX, false);
-        }
-
         out.bit_size = max_sz(a.bit_size, b.bit_size);
         out
     }
@@ -769,107 +821,6 @@ impl EwahBitmap {
     }
 }
 
-struct RlwIter<'a> {
-    buffer: &'a [Eword],
-    size: usize,
-    pointer: usize,
-    running_len: usize,
-    literal_words: usize,
-    run_bit: bool,
-    literal_word_start: usize,
-}
-
-impl<'a> RlwIter<'a> {
-    fn new(parent: &'a EwahBitmap) -> Self {
-        let mut it = Self {
-            buffer: &parent.buffer[..parent.buffer_size],
-            size: parent.buffer_size,
-            pointer: 0,
-            running_len: 0,
-            literal_words: 0,
-            run_bit: false,
-            literal_word_start: 0,
-        };
-        let _ = it.next_word();
-        it
-    }
-
-    fn next_word(&mut self) -> bool {
-        if self.pointer >= self.size {
-            return false;
-        }
-        let word = self.buffer[self.pointer];
-        self.literal_words = rlw_get_literal_words(word) as usize;
-        self.running_len = rlw_get_running_len(word) as usize;
-        self.run_bit = rlw_get_run_bit(word);
-        self.literal_word_start = self.pointer + 1;
-        self.pointer += self.literal_words + 1;
-        true
-    }
-
-    fn word_size(&self) -> usize {
-        self.running_len + self.literal_words
-    }
-
-    fn running_len(&self) -> usize {
-        self.running_len
-    }
-
-    fn literal_words(&self) -> usize {
-        self.literal_words
-    }
-
-    fn run_bit(&self) -> bool {
-        self.run_bit
-    }
-
-    fn literal_word(&self, k: usize) -> Eword {
-        self.buffer[self.literal_word_start + k]
-    }
-
-    fn discard_first_words(&mut self, mut x: usize) {
-        while x > 0 {
-            if self.running_len > x {
-                self.running_len -= x;
-                return;
-            }
-            x -= self.running_len;
-            self.running_len = 0;
-            let discard = min_sz(x, self.literal_words);
-            self.literal_word_start += discard;
-            self.literal_words -= discard;
-            x -= discard;
-            if (x > 0 || self.word_size() == 0) && !self.next_word() {
-                break;
-            }
-        }
-    }
-
-    fn discharge(&mut self, out: &mut EwahBitmap, max: usize, negate: bool) -> usize {
-        let mut index = 0usize;
-        while index < max && self.word_size() > 0 {
-            let mut pl = self.running_len;
-            if index + pl > max {
-                pl = max - index;
-            }
-            out.append_empty_words(self.run_bit ^ negate, pl);
-            index += pl;
-
-            let mut pd = self.literal_words;
-            if pd + index > max {
-                pd = max - index;
-            }
-            if pd > 0 {
-                let slice = &self.buffer[self.literal_word_start..self.literal_word_start + pd];
-                out.add_dirty_words(slice, pd, negate);
-            }
-            self.discard_first_words(pd + pl);
-            index += pd;
-        }
-        index
-    }
-}
-
 impl Default for EwahBitmap {
     fn default() -> Self {
         Self::new()
@@ -910,6 +861,17 @@ mod tests {
             }
         }
         e
+    }
+
+    #[test]
+    fn empty_append_matches_from_bitmap() {
+        let append = append_build(&[]);
+        let mut append_bytes = Vec::new();
+        append.serialize(&mut append_bytes);
+        let compressed = EwahBitmap::from_bitmap(&Bitmap::new());
+        let mut compressed_bytes = Vec::new();
+        compressed.serialize(&mut compressed_bytes);
+        assert_eq!(append_bytes, compressed_bytes);
     }
 
     #[test]
@@ -1122,5 +1084,17 @@ mod tests {
             err,
             EwahError::TruncatedHeader | EwahError::TruncatedWords
         ));
+    }
+
+    #[test]
+    fn parse_rejects_literal_span_past_buffer() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // bit_size
+        bytes.extend_from_slice(&1u32.to_be_bytes()); // one compressed word
+        let rlw = (1u64) << (RLW_RUNNING_BITS + 1); // one literal, no run
+        bytes.extend_from_slice(&rlw.to_be_bytes());
+        bytes.extend_from_slice(&0u32.to_be_bytes()); // rlw index
+        let err = EwahView::parse(&bytes).unwrap_err();
+        assert!(matches!(err, EwahError::InvalidRlwSegment { .. }));
     }
 }
