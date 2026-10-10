@@ -426,6 +426,94 @@ fn nested_repo_directory_is_untouched() {
 }
 
 #[test]
+fn directories_false_preserves_empty_parent_dir() {
+    let root = tempfile::tempdir().expect("grit");
+    init_tracked_repo(root.path());
+    fs::create_dir_all(root.path().join("untracked-dir")).unwrap();
+    fs::write(root.path().join("untracked-dir/file.txt"), b"u\n").unwrap();
+
+    let repo = Repository::discover(Some(root.path())).expect("open");
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: false,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("clean without -d");
+
+    assert!(
+        root.path().join("untracked-dir").is_dir(),
+        "empty parent dir must remain when directories is false"
+    );
+    assert!(
+        !root.path().join("untracked-dir/file.txt").exists(),
+        "untracked file must still be removed"
+    );
+}
+
+#[test]
+fn empty_ignored_directory_preserves_collapsed_parent_like_git() {
+    let grit_root = tempfile::tempdir().expect("grit");
+    init_tracked_repo(grit_root.path());
+    fs::write(grit_root.path().join(".gitignore"), b"cache/\n").unwrap();
+    grit_lib::porcelain::add::stage(
+        &Repository::discover(Some(grit_root.path())).unwrap(),
+        &grit_lib::porcelain::add::StageOptions::default(),
+        &mut NullProgress,
+    )
+    .unwrap();
+    create_commit(
+        &Repository::discover(Some(grit_root.path())).unwrap(),
+        &commit_req("ignore cache dir"),
+        &mut NullProgress,
+    )
+    .unwrap();
+    fs::create_dir_all(grit_root.path().join("container")).unwrap();
+    fs::write(grit_root.path().join("container/loose.txt"), b"u\n").unwrap();
+    fs::create_dir_all(grit_root.path().join("container/cache")).unwrap();
+
+    let git_root = tempfile::tempdir().expect("git");
+    init_tracked_repo(git_root.path());
+    fs::write(git_root.path().join(".gitignore"), b"cache/\n").unwrap();
+    git(git_root.path(), &["add", ".gitignore"]);
+    git(git_root.path(), &["commit", "-m", "ignore cache dir"]);
+    fs::create_dir_all(git_root.path().join("container")).unwrap();
+    fs::write(git_root.path().join("container/loose.txt"), b"u\n").unwrap();
+    fs::create_dir_all(git_root.path().join("container/cache")).unwrap();
+
+    let repo = Repository::discover(Some(grit_root.path())).expect("open");
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("force clean");
+
+    git_clean_force(git_root.path(), &[]);
+
+    assert!(
+        grit_root.path().join("container/cache").is_dir(),
+        "empty ignored cache dir must survive grit clean -fd"
+    );
+    assert!(
+        git_root.path().join("container/cache").is_dir(),
+        "empty ignored cache dir must survive git clean -fd"
+    );
+    assert!(!grit_root.path().join("container/loose.txt").exists());
+    assert_eq!(
+        worktree_file_set(grit_root.path()),
+        worktree_file_set(git_root.path())
+    );
+}
+
+#[test]
 fn pathspec_limits_removal() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

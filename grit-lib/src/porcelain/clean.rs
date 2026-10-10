@@ -145,7 +145,7 @@ pub fn clean_untracked(
     let mut actually_removed = Vec::new();
     let environment = repo.environment();
     for rel in removal_order(&removed) {
-        if remove_one_path(work_tree, &rel, environment)? {
+        if remove_one_path(work_tree, &rel, opts.directories, environment)? {
             actually_removed.push(rel);
         }
     }
@@ -323,6 +323,13 @@ fn walk_dir_preserves_ignored(
         if path.is_dir() {
             if is_nested_git_worktree(&path) {
                 continue;
+            }
+            let rel = crate::git_path::strip_worktree_prefix(&path, work_tree).unwrap_or(name);
+            let (ignored, _) = rules
+                .ignore_mut()
+                .check_path(repo, Some(index), &rel, true)?;
+            if ignored {
+                return Ok(true);
             }
             if walk_dir_preserves_ignored(repo, index, rules, work_tree, &path)? {
                 return Ok(true);
@@ -531,6 +538,7 @@ fn removal_order(paths: &[String]) -> Vec<String> {
 fn remove_one_path(
     work_tree: &Path,
     rel: &str,
+    remove_empty_parent_dirs: bool,
     environment: &crate::environment::Environment,
 ) -> Result<bool> {
     let abs = work_tree.join(rel.trim_end_matches('/'));
@@ -545,8 +553,10 @@ fn remove_one_path(
         return Ok(true);
     }
     fs::remove_file(&abs).map_err(Error::Io)?;
-    if let Some(parent) = abs.parent() {
-        remove_empty_dirs(parent, work_tree, environment);
+    if remove_empty_parent_dirs {
+        if let Some(parent) = abs.parent() {
+            remove_empty_dirs(parent, work_tree, environment);
+        }
     }
     Ok(true)
 }
