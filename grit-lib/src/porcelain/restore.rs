@@ -126,16 +126,16 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
 
     if restore_worktree {
         let worktree_from_tree = matches!(opts.source, RestoreSource::Tree(_)) && !restore_staged;
-        apply_worktree_restore(
+        apply_worktree_restore(WorktreeRestoreContext {
             repo,
             work_tree,
             worktree_from_tree,
-            explicit_source_entries.as_deref(),
-            &matched,
-            &tracked_before_index_restore,
-            &mut index,
-            &mut outcome,
-        )?;
+            tree_source: explicit_source_entries.as_deref(),
+            matched: &matched,
+            tracked_for_worktree_deletion: &tracked_before_index_restore,
+            index_out: &mut index,
+            outcome: &mut outcome,
+        })?;
     }
 
     if restore_staged || restore_worktree {
@@ -259,17 +259,28 @@ fn apply_index_restore(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply_worktree_restore(
-    repo: &Repository,
-    work_tree: &Path,
+struct WorktreeRestoreContext<'a> {
+    repo: &'a Repository,
+    work_tree: &'a Path,
     worktree_from_tree: bool,
-    tree_source: Option<&[FlatTreeEntry]>,
-    matched: &BTreeSet<String>,
-    tracked_for_worktree_deletion: &HashSet<Vec<u8>>,
-    index_out: &mut Index,
-    outcome: &mut RestoreOutcome,
-) -> Result<()> {
+    tree_source: Option<&'a [FlatTreeEntry]>,
+    matched: &'a BTreeSet<String>,
+    tracked_for_worktree_deletion: &'a HashSet<Vec<u8>>,
+    index_out: &'a mut Index,
+    outcome: &'a mut RestoreOutcome,
+}
+
+fn apply_worktree_restore(ctx: WorktreeRestoreContext<'_>) -> Result<()> {
+    let WorktreeRestoreContext {
+        repo,
+        work_tree,
+        worktree_from_tree,
+        tree_source,
+        matched,
+        tracked_for_worktree_deletion,
+        index_out,
+        outcome,
+    } = ctx;
     let rules = WorktreeRules::from_repository(repo, index_out)?;
     let mut dir_cache = LeadingDirCache::new();
 

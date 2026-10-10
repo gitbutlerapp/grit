@@ -19,7 +19,6 @@ pub(crate) struct ShallowRequest {
     pub depth: Option<u32>,
     pub deepen_since: Option<i64>,
     pub deepen_not: Vec<ObjectId>,
-    pub deepen_relative: bool,
 }
 
 impl ShallowRequest {
