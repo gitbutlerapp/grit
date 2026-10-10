@@ -231,9 +231,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::line_log::LineLogFile` | struct | One tracked file with 0-based half-open line ranges. | [API](https://docs.rs/grit-lib/latest/grit_lib/line_log/struct.LineLogFile.html) |
 | `grit_lib::line_log::Range` | struct | Half-open line range using 0-based indices (Git internal). | [API](https://docs.rs/grit-lib/latest/grit_lib/line_log/struct.Range.html) |
 | `grit_lib::line_log::RangeSet` | struct | Sorted, disjoint, non-empty ranges. | [API](https://docs.rs/grit-lib/latest/grit_lib/line_log/struct.RangeSet.html) |
-| `grit_lib::ls_remote` | module | ls-remote — enumerate references from a local repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/index.html) |
-| `grit_lib::ls_remote::Options` | struct | Options controlling which references ls_remote returns. | [API](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/struct.Options.html) |
-| `grit_lib::ls_remote::RefEntry` | struct | A single reference entry produced by ls_remote. | [API](https://docs.rs/grit-lib/latest/grit_lib/ls_remote/struct.RefEntry.html) |
 | `grit_lib::mailmap` | module | Parse .mailmap and resolve author/committer identities (Git-compatible). | [API](https://docs.rs/grit-lib/latest/grit_lib/mailmap/index.html) |
 | `grit_lib::mailmap::MailmapEntry` | struct | Legacy line-shaped entry kept for API compatibility; prefer MailmapTable. | [API](https://docs.rs/grit-lib/latest/grit_lib/mailmap/struct.MailmapEntry.html) |
 | `grit_lib::mailmap::MailmapTable` | struct | Parsed mailmap as a lookup table (Git string_list + nested namemap). | [API](https://docs.rs/grit-lib/latest/grit_lib/mailmap/struct.MailmapTable.html) |
@@ -450,6 +447,13 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::reftable::ReftableTransactionUpdate` | struct | A ref update that should be written to a reftable transaction. | [API](https://docs.rs/grit-lib/latest/grit_lib/reftable/struct.ReftableTransactionUpdate.html) |
 | `grit_lib::reftable::ReftableWriter` | struct | Writes a single reftable file. | [API](https://docs.rs/grit-lib/latest/grit_lib/reftable/struct.ReftableWriter.html) |
 | `grit_lib::reftable::WriteOptions` | struct | Write options for reftable creation. | [API](https://docs.rs/grit-lib/latest/grit_lib/reftable/struct.WriteOptions.html) |
+| `grit_lib::remote` | module | Unified remote URL typing and transport dispatch for fetch, push, and ref listing. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/index.html) |
+| `grit_lib::remote::HttpClientFactory` | trait | Builds HTTP clients for smart-HTTP remotes. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/trait.HttpClientFactory.html) |
+| `grit_lib::remote::ListRefsOptions` | struct | Options controlling Remote::list_refs output, aligned with git ls-remote. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.ListRefsOptions.html) |
+| `grit_lib::remote::Remote` | struct | A resolved remote: name (if from config), URL(s), and fetch refspecs. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html) |
+| `grit_lib::remote::RemoteError` | enum | Errors specific to remote URL resolution and dispatch. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteError.html) |
+| `grit_lib::remote::RemoteRef` | struct | A single reference returned by Remote::list_refs. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.RemoteRef.html) |
+| `grit_lib::remote::RemoteUrl` | enum | A parsed remote URL by transport kind. | [API](https://docs.rs/grit-lib/latest/grit_lib/remote/enum.RemoteUrl.html) |
 | `grit_lib::repo` | module | Repository discovery and the primary Repository handle. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo/index.html) |
 | `grit_lib::repo::Repository` | struct | A handle to an open Git repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo/struct.Repository.html) |
 | `grit_lib::repo_caches` | module | Repository-scoped caches shared by an open Repository. | [API](https://docs.rs/grit-lib/latest/grit_lib/repo_caches/index.html) |

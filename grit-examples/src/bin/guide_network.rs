@@ -4,9 +4,9 @@
 
 use grit_examples::remote;
 use grit_lib::config::ConfigSet;
-use grit_lib::ls_remote::{self, Options as LsRemoteOptions};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
+use grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
 use grit_lib::repo::Repository;
 use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::transport_path::resolve_local_remote_git_dir;
@@ -32,11 +32,12 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let remote_git_dir =
         resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
     let remote_repo = Repository::open(&remote_git_dir, None)?;
-    let refs_on_remote = ls_remote::ls_remote(
+    let refs_on_remote = list_refs_from_git_dir(
         &remote_git_dir,
         &remote_repo.odb,
-        &LsRemoteOptions::default(),
-    )?;
+        &ListRefsOptions::default(),
+    )
+    .map_err(grit_lib::error::Error::from)?;
     eprintln!(
         "ls-remote: {} ref(s) on {}",
         refs_on_remote.len(),

@@ -384,6 +384,37 @@ fn info_refs_url(repo_url: &str) -> String {
     smart_info_refs_discovery_url(repo_url)
 }
 
+/// Discover `git-upload-pack` capabilities and (for v0/v1) advertised refs.
+///
+/// Returns `(protocol_version, advertised_refs, capability_lines, head_symref)`.
+/// For protocol v2 the ref list is empty; use `command=ls-refs` to enumerate refs.
+///
+/// # Errors
+///
+/// Returns an error on HTTP failure or malformed advertisement data.
+/// Parsed smart-HTTP upload-pack discovery: protocol version, refs, caps, HEAD symref.
+pub type UploadPackDiscovery = (u8, Vec<(String, ObjectId)>, Vec<String>, Option<String>);
+
+pub fn discover_upload_pack(
+    client: &dyn HttpClient,
+    repo_url: &str,
+    git_protocol: Option<&str>,
+) -> Result<UploadPackDiscovery> {
+    let url = info_refs_url(repo_url);
+    let gp = git_protocol.or_else(|| client.git_protocol_header());
+    let body = client.get(&url, gp)?;
+    let stripped = strip_service_advertisement(&body)?;
+    let disc = parse_advertisement(stripped)?;
+    let refs: Vec<(String, ObjectId)> = disc
+        .refs
+        .iter()
+        .filter(|r| r.name != "HEAD" && !r.name.ends_with("^{}"))
+        .map(|r| (r.name.clone(), r.oid))
+        .collect();
+    let caps: Vec<String> = disc.caps.iter().cloned().collect();
+    Ok((disc.protocol_version, refs, caps, disc.head_symref))
+}
+
 /// Build the smart-HTTP `info/refs?service=git-upload-pack` discovery URL for a repo base.
 #[must_use]
 pub fn smart_info_refs_discovery_url(repo_base: &str) -> String {

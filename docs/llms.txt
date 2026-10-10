@@ -63,7 +63,7 @@ Each docs page has a Markdown twin at the same URL with `index.md` instead of `i
 - [grit-lib API map](https://grit-scm.com/docs/library/api-map/index.md): Generated index of public grit-lib modules and key types with docs.rs links.
 - [Diff](https://grit-scm.com/docs/library/diff/index.md): Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEntry model the grit CLI renders.
 - [Embedding grit-lib](https://grit-scm.com/docs/library/embedding/index.md): Run multiple repositories in one process with explicit Environment, sinks, subprocess injection, and typed errors.
-- [Network](https://grit-scm.com/docs/library/network/index.md): ls-remote, fetch and push over file:// and smart HTTP, credentials, and progress.
+- [Network](https://grit-scm.com/docs/library/network/index.md): Remote dispatch, fetch, push, and ls-remote over every transport.
 - [Object stores](https://grit-scm.com/docs/library/object-stores/index.md): Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.
 - [Objects](https://grit-scm.com/docs/library/objects/index.md): ObjectId, ObjectKind, and reading or writing blobs, trees, and commits through Odb.
 - [Refs](https://grit-scm.com/docs/library/refs/index.md): Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.
