@@ -22,6 +22,7 @@ use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::filter_process::FilterProcessState;
 use crate::objects::ObjectId;
+use crate::pack_bitmap::BitmapIndexCache;
 use crate::precompose_config::{
     effective_core_precomposeunicode_with_config, filesystem_nfd_nfc_aliases,
 };
@@ -40,6 +41,7 @@ pub struct RepoCaches {
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
     bare_worktree_warn_seen: Mutex<HashSet<String>>,
     commit_graph_warn_seen: Mutex<HashSet<String>>,
+    bitmap_index: BitmapIndexCache,
     diagnostics: Mutex<DiagnosticsHandle>,
 }
 
@@ -73,8 +75,14 @@ impl RepoCaches {
             promisor_hydrate: Mutex::new(None),
             bare_worktree_warn_seen: Mutex::new(HashSet::new()),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
+            bitmap_index: BitmapIndexCache::default(),
             diagnostics: Mutex::new(diagnostics),
         })
+    }
+
+    /// Cached [`crate::pack_bitmap::BitmapIndex`] for this repository handle.
+    pub(crate) fn bitmap_index(&self) -> &BitmapIndexCache {
+        &self.bitmap_index
     }
 
     /// Return the diagnostic sink for this cache arena.

@@ -115,6 +115,10 @@ harness = false
 name = "ewah"
 harness = false
 
+[[bench]]
+name = "pack_bitmap"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }

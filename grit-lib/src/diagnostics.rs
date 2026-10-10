@@ -139,6 +139,11 @@ pub enum Warning {
     MidxUnknownPreferredPack {
         name: String,
     },
+    /// A `.bitmap` sidecar was present but could not be loaded; reachability falls back without it.
+    PackBitmapIgnored {
+        path: PathBuf,
+        reason: String,
+    },
 }
 
 /// Optional trace events (network debugging, etc.), separate from [`Warning`].
