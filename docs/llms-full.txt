@@ -2159,7 +2159,16 @@ Listing refs:
 
 ## Markdown output
 
-Pass `--markdown` for the same JSON document as `--json` (agent-friendly, one object on stdout).
+Pass `--markdown` for an agent-friendly Markdown table of refs (a “Remote refs” heading, then columns — not JSON). Example shape:
+
+```text
+Remote refs
+
+| Ref | Object | Peeled | Symref target |
+| --- | --- | --- | --- |
+| `refs/heads/main` | `a1b2c3…` | — | — |
+| `refs/tags/v1` | `tagoid…` | `commitoid…` | — |
+```
 
 ## See also
 
