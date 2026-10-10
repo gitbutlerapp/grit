@@ -230,7 +230,7 @@ The **`grit-bench network`** suite compares **`grit`** and system **`git`** on t
 | **many-refs** | deep-history plus **≥10 000** `refs/heads/bench-ref-*` branches |
 | **large-blobs** | a small tree with multi‑MiB blobs for pack-heavy transfer |
 
-Scenarios include **clone** over **`file://`**, **git http-backend** (local CGI), and **grit-http-server** smart HTTP; **incremental fetch** and **no-op fetch** over **`file://`**; **push** over **`file://`**; **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture; and a **server-side** comparison that times system **`git clone`** against **git http-backend** vs **grit-http-server** on the same published bare repo. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
+Scenarios include **clone** over **`file://`**, **git http-backend** (local CGI), and **grit-http-server** smart HTTP; **incremental** and **no-op fetch** over all three transports; **push** over **`file://`** and **grit-http-server** (git http-backend push is omitted until the bench CGI harness supports receive-pack); **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture over all three transports; and a **server-side** comparison that times system **`git clone`** against **git http-backend** vs **grit-http-server** on the same published bare repo. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
 
 ```bash
 cargo build --release -p grit-cli -p grit-http-server -p grit-utils
@@ -239,7 +239,7 @@ cargo build --release -p grit-cli -p grit-http-server -p grit-utils
 make docs
 ```
 
-Integration smoke (tiny fixtures, eight scenarios; requires **hyperfine** on `PATH`): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
+Integration smoke (tiny fixtures, fifteen scenarios; requires **hyperfine** on `PATH`): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
 
 Acceptance bars for the network performance pass are **≤1.2×** git wall time on client-side scenarios (clone, fetch, push, ls-remote over `file://` and smart HTTP). Compare the generated table ratios to that bar.
 

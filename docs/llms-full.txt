@@ -5313,7 +5313,7 @@ The **`grit-bench network`** suite compares **`grit`** and system **`git`** on t
 | **many-refs** | deep-history plus **≥10 000** `refs/heads/bench-ref-*` branches |
 | **large-blobs** | a small tree with multi‑MiB blobs for pack-heavy transfer |
 
-Scenarios include **clone** over **`file://`**, **git http-backend** (local CGI), and **grit-http-server** smart HTTP; **incremental fetch** and **no-op fetch** over **`file://`**; **push** over **`file://`**; **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture; and a **server-side** comparison that times system **`git clone`** against **git http-backend** vs **grit-http-server** on the same published bare repo. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
+Scenarios include **clone** over **`file://`**, **git http-backend** (local CGI), and **grit-http-server** smart HTTP; **incremental** and **no-op fetch** over all three transports; **push** over **`file://`** and **grit-http-server** (git http-backend push is omitted until the bench CGI harness supports receive-pack); **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture over all three transports; and a **server-side** comparison that times system **`git clone`** against **git http-backend** vs **grit-http-server** on the same published bare repo. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
 
 ```bash
 cargo build --release -p grit-cli -p grit-http-server -p grit-utils
@@ -5322,7 +5322,7 @@ cargo build --release -p grit-cli -p grit-http-server -p grit-utils
 make docs
 ```
 
-Integration smoke (tiny fixtures, eight scenarios; requires **hyperfine** on `PATH`): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
+Integration smoke (tiny fixtures, fifteen scenarios; requires **hyperfine** on `PATH`): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
 
 Acceptance bars for the network performance pass are **≤1.2×** git wall time on client-side scenarios (clone, fetch, push, ls-remote over `file://` and smart HTTP). Compare the generated table ratios to that bar.
 
@@ -5351,11 +5351,11 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 | commit | 2 | 0.58× | 0.68× |
 | delta_encode | 2 | — | — |
 | merge | 2 | 3.40× | 3.84× |
-| network-clone | 3 | 2.49× | 2.53× |
-| network-fetch | 2 | 8.72× | 16.73× |
-| network-ls-remote | 1 | 1.70× | 1.70× |
-| network-push | 1 | 21.43× | 21.43× |
-| network-server | 1 | 79.40× | 79.40× |
+| network-clone | 3 | 1.93× | 2.41× |
+| network-fetch | 6 | 0.86× | 9.80× |
+| network-ls-remote | 3 | 1.29× | 1.90× |
+| network-push | 2 | 17.41× | 18.63× |
+| network-server | 1 | 42.44× | 42.44× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 6 | 14.90× | 98.20× |
 | pick | 4 | 8.63× | 17.09× |
@@ -5373,34 +5373,41 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `clone-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 602 | 1,521 | 2.53× | ±27.1 ms |
-| `clone-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 671 | 1,669 | 2.49× | ±68.9 ms |
-| `clone-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 52,259 | 56,669 | 1.08× | ±2,437 ms |
+| `clone-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 745 | 1,441 | 1.93× | ±211 ms |
+| `clone-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 787 | 1,893 | 2.41× | ±160 ms |
+| `clone-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 19,584 | 19,893 | 1.02× | ±1,150 ms |
 
 ### network-fetch
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `fetch-incr-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 44.8 | 749 | 16.73× | ±20.0 ms |
-| `fetch-noop-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 8.93 | 6.41 | 0.72× | ±0.48 ms |
+| `fetch-incr-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 84.8 | 832 | 9.80× | ±126 ms |
+| `fetch-incr-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 98.0 | 100 | 1.02× | ±7.40 ms |
+| `fetch-incr-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 891 | 834 | 0.94× | ±65.8 ms |
+| `fetch-noop-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 11.8 | 9.21 | 0.78× | ±0.61 ms |
+| `fetch-noop-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 23.6 | 17.0 | 0.72× | ±1.42 ms |
+| `fetch-noop-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 25.6 | 15.9 | 0.62× | ±1.18 ms |
 
 ### network-ls-remote
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `ls-remote-file-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 44.1 | 75.1 | 1.70× | ±7.50 ms |
+| `ls-remote-file-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 42.9 | 81.6 | 1.90× | ±4.10 ms |
+| `ls-remote-git-http-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 20.1 | 25.1 | 1.25× | ±1.65 ms |
+| `ls-remote-grit-http-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 75.9 | 98.1 | 1.29× | ±24.3 ms |
 
 ### delta_encode
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `push-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 33.4 | 717 | 21.43× | ±9.04 ms |
+| `push-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 40.0 | 744 | 18.63× | ±83.1 ms |
+| `push-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 47.5 | 770 | 16.20× | ±59.6 ms |
 
 ### merge
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `server-clone-http-compare-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 688 | 54,617 | 79.40× | ±2,671 ms |
+| `server-clone-http-compare-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 609 | 25,829 | 42.44× | ±3,884 ms |
 
 ### object_reads
 
