@@ -1,20 +1,10 @@
-//! `git revert` pick-engine core.
+//! Revert-specific helpers (revision ordering and commit messages).
 //!
-//! Revert is the inverse pick: it applies the inverse of a commit's diff onto
-//! the current `HEAD` via a three-way merge whose sides are swapped relative to
-//! cherry-pick (base = the reverted commit's tree, ours = `HEAD`, theirs = the
-//! parent tree). The bulk of the revert command in the `grit` binary is the
-//! shared stateful sequencer: it parses argv, drives `REVERT_HEAD` /
-//! `sequencer/*` state files, launches the commit-message editor, runs hooks,
-//! prints progress and conflict hints, and maps exit codes. Those
-//! responsibilities — argv parsing, terminal output, editor/hook subprocess
-//! dispatch, state-file bookkeeping, and exit-code mapping — stay in the CLI.
-//! The tree/index transforms revert shares with cherry-pick live in
-//! [`crate::porcelain::cherry_pick`] and [`crate::porcelain::merge`].
-//!
-//! What lives here is the self-contained, presentation-free part that is
-//! specific to revert: the revision-set ordering used when reverting an `A..B`
-//! range, and the revert commit-message template.
+//! Single-commit revert replay (three-way merge with swapped sides, checkout,
+//! commit, and ref update) is implemented in [`crate::porcelain::replay`]
+//! ([`crate::porcelain::replay::ReplayDirection::Revert`]). Shared merge-strategy helpers live in
+//! [`crate::porcelain::cherry_pick`]; range revert ordering and the default
+//! revert message template live here.
 //!
 //! # What this module owns
 //!

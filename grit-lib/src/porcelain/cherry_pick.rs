@@ -1,16 +1,9 @@
-//! `git cherry-pick` / `git revert` pick-engine core.
+//! Merge-strategy helpers shared by pick/revert replay and other tree merges.
 //!
-//! The full cherry-pick command in the `grit` binary is a large stateful
-//! sequencer: it parses argv, drives `CHERRY_PICK_HEAD` / `sequencer/*` state
-//! files, launches the commit-message editor, runs hooks, prints progress and
-//! conflict hints, and maps exit codes. Those responsibilities — argv parsing,
-//! terminal output, editor/hook subprocess dispatch, state-file bookkeeping, and
-//! exit-code mapping — stay in the CLI.
-//!
-//! What lives here is the self-contained, presentation-free part of the pick
-//! engine: the pure data transforms over the three merge sides (base / ours /
-//! theirs) that the CLI calls but that compute results from tree/index data
-//! alone.
+//! End-to-end single-commit replay (three-way merge, checkout, commit, and ref
+//! update) lives in [`crate::porcelain::replay`]. What lives here are the pure
+//! data transforms over index/tree data: strategy-option parsing, directory-rename
+//! detection, and conflict-stage staging helpers.
 //!
 //! # What this module owns
 //!

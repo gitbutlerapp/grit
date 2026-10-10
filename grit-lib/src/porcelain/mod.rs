@@ -30,6 +30,7 @@ pub mod commit;
 pub mod log;
 pub mod merge;
 pub mod rebase;
+pub mod replay;
 pub mod revert;
 pub mod stage_tracked;
 pub mod staging;

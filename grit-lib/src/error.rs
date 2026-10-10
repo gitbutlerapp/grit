@@ -458,6 +458,18 @@ pub enum Error {
     #[error("HEAD is detached")]
     DetachedHead,
 
+    /// [`replay_commit`](crate::porcelain::replay::replay_commit) requires a branch with at least one commit.
+    #[error("no commits yet on this branch")]
+    UnbornHead,
+
+    /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits.
+    #[error("merge commit {oid}")]
+    MergeCommit { oid: crate::objects::ObjectId },
+
+    /// The commit to replay is already checked out as `HEAD`.
+    #[error("commit already at HEAD")]
+    ReplaySourceAtHead,
+
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
     Midx(#[from] MidxError),
