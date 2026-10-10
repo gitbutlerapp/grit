@@ -85,10 +85,6 @@ impl RefStore for MemoryRefStore {
         Ok(inner.refs.get(name).cloned())
     }
 
-    fn resolve(&self, name: &str) -> Result<ObjectId> {
-        super::resolve_store(self, name)
-    }
-
     fn for_each_ref(
         &self,
         prefix: &str,
@@ -101,7 +97,7 @@ impl RefStore for MemoryRefStore {
             }
             let peeled = match &value {
                 RawRef::Direct(_) => None,
-                RawRef::Symbolic(_) => resolve_raw(self, name, 0).ok(),
+                RawRef::Symbolic(_) => resolve_map(&inner.refs, name, 0).ok(),
             };
             let entry = RefEntry {
                 name: name.clone(),
@@ -155,10 +151,7 @@ impl RefStore for MemoryRefStore {
 
     fn reflog_exists(&self, name: &str) -> Result<bool> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(inner
-            .reflogs
-            .get(name)
-            .is_some_and(|entries| !entries.is_empty()))
+        Ok(inner.reflogs.contains_key(name))
     }
 
     fn for_each_reflog_entry(
@@ -201,11 +194,7 @@ impl RefStore for MemoryRefStore {
 
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if entries.is_empty() {
-            inner.reflogs.remove(name);
-        } else {
-            inner.reflogs.insert(name.to_owned(), entries);
-        }
+        inner.reflogs.insert(name.to_owned(), entries);
         Ok(())
     }
 
@@ -258,23 +247,87 @@ impl Drop for MemoryPrepared<'_> {
 }
 
 fn apply_update(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> StoreResult<()> {
-    if !update.flags.log_only {
-        match &update.new_value {
-            None => {
-                inner.refs.remove(&update.name);
-            }
-            Some(value) => {
-                inner.refs.insert(update.name.clone(), value.clone());
-            }
-        }
-    }
+    let reflog_oids = update.reflog.as_ref().map(|_| {
+        (
+            reflog_old_oid_before(inner, update),
+            reflog_new_oid_before(inner, update),
+        )
+    });
 
-    if let Some(log) = &update.reflog {
-        let old_oid = reflog_old_oid(inner, &update.name, update.flags);
-        let new_oid = reflog_new_oid(inner, update, update.flags);
+    apply_ref_change(inner, update)?;
+
+    if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
         append_reflog_entry(inner, &update.name, old_oid, new_oid, log);
     }
     Ok(())
+}
+
+fn apply_ref_change(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> StoreResult<()> {
+    if update.flags.log_only {
+        return Ok(());
+    }
+    match &update.new_value {
+        None => {
+            inner.refs.remove(&update.name);
+        }
+        Some(new_value) => {
+            if should_deref_symref_update(inner, update) {
+                let RawRef::Direct(oid) = new_value else {
+                    return Err(RefStoreError::Corrupt(
+                        "deref update requires direct oid".to_owned(),
+                    ));
+                };
+                let target = symref_peel_write_target(&inner.refs, &update.name)?;
+                inner.refs.insert(target, RawRef::Direct(*oid));
+            } else {
+                inner.refs.insert(update.name.clone(), new_value.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn should_deref_symref_update(inner: &MemoryRefStoreInner, update: &RefUpdate) -> bool {
+    if update.flags.no_deref {
+        return false;
+    }
+    matches!(
+        (inner.refs.get(&update.name), update.new_value.as_ref()),
+        (Some(RawRef::Symbolic(_)), Some(RawRef::Direct(_)))
+    )
+}
+
+fn symref_peel_write_target(
+    refs: &BTreeMap<String, RawRef>,
+    sym_name: &str,
+) -> StoreResult<String> {
+    let Some(RawRef::Symbolic(first)) = refs.get(sym_name) else {
+        return Err(RefStoreError::Corrupt(format!(
+            "not a symbolic ref: {sym_name}"
+        )));
+    };
+    resolve_symref_peel_target(refs, first)
+}
+
+fn resolve_symref_peel_target(
+    refs: &BTreeMap<String, RawRef>,
+    start: &str,
+) -> StoreResult<String> {
+    let mut name = start.to_owned();
+    let mut depth = 0;
+    loop {
+        if depth >= SYMREF_MAXDEPTH {
+            return Err(RefStoreError::SymrefLoop);
+        }
+        match refs.get(name.as_str()) {
+            Some(RawRef::Direct(_)) => return Ok(name),
+            Some(RawRef::Symbolic(next)) => {
+                name = next.clone();
+                depth += 1;
+            }
+            None => return Err(RefStoreError::Corrupt(format!("ref not found: {name}"))),
+        }
+    }
 }
 
 fn append_reflog_entry(
@@ -313,42 +366,44 @@ fn format_reflog_identity(identity: &str, time: time::OffsetDateTime) -> String 
     )
 }
 
-fn reflog_old_oid(inner: &MemoryRefStoreInner, name: &str, flags: RefUpdateFlags) -> ObjectId {
-    let Some(current) = inner.refs.get(name) else {
-        return zero_oid();
-    };
-    oid_for_reflog(current, flags, |n| resolve_stored(inner, n)).unwrap_or_else(|_| zero_oid())
+fn reflog_old_oid_before(inner: &MemoryRefStoreInner, update: &RefUpdate) -> ObjectId {
+    resolved_oid_at_name(inner, &update.name, update.flags).unwrap_or_else(|_| zero_oid())
 }
 
-fn reflog_new_oid(
-    inner: &MemoryRefStoreInner,
-    update: &RefUpdate,
-    flags: RefUpdateFlags,
-) -> ObjectId {
+fn reflog_new_oid_before(inner: &MemoryRefStoreInner, update: &RefUpdate) -> ObjectId {
     if update.flags.log_only {
-        return reflog_old_oid(inner, &update.name, flags);
+        return reflog_old_oid_before(inner, update);
     }
     match &update.new_value {
         None => zero_oid(),
-        Some(value) => oid_for_reflog(value, flags, |n| resolve_stored(inner, n))
-            .unwrap_or_else(|_| zero_oid()),
+        Some(RawRef::Direct(oid)) if should_deref_symref_update(inner, update) => *oid,
+        Some(value) => {
+            oid_for_reflog_value(inner, value, update.flags).unwrap_or_else(|_| zero_oid())
+        }
     }
 }
 
-fn oid_for_reflog(
+fn resolved_oid_at_name(
+    inner: &MemoryRefStoreInner,
+    name: &str,
+    flags: RefUpdateFlags,
+) -> StoreResult<ObjectId> {
+    let Some(value) = inner.refs.get(name) else {
+        return Ok(zero_oid());
+    };
+    oid_for_reflog_value(inner, value, flags)
+}
+
+fn oid_for_reflog_value(
+    inner: &MemoryRefStoreInner,
     value: &RawRef,
     flags: RefUpdateFlags,
-    mut resolve_name: impl FnMut(&str) -> StoreResult<ObjectId>,
 ) -> StoreResult<ObjectId> {
     match value {
         RawRef::Direct(oid) => Ok(*oid),
         RawRef::Symbolic(target) if flags.no_deref => Ok(zero_oid()),
-        RawRef::Symbolic(target) => resolve_name(target),
+        RawRef::Symbolic(target) => resolve_map(&inner.refs, target, 0),
     }
-}
-
-fn resolve_stored(inner: &MemoryRefStoreInner, name: &str) -> StoreResult<ObjectId> {
-    resolve_map(&inner.refs, name, 0)
 }
 
 fn resolve_map(refs: &BTreeMap<String, RawRef>, name: &str, depth: usize) -> StoreResult<ObjectId> {
@@ -364,19 +419,34 @@ fn resolve_map(refs: &BTreeMap<String, RawRef>, name: &str, depth: usize) -> Sto
     }
 }
 
-fn resolve_raw(store: &MemoryRefStore, name: &str, depth: usize) -> StoreResult<ObjectId> {
-    if depth >= SYMREF_MAXDEPTH {
-        return Err(RefStoreError::SymrefLoop);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::refs::store::{Expected, RefTransaction};
+
+    fn oid(byte: u8) -> ObjectId {
+        let mut bytes = [0u8; 20];
+        bytes[19] = byte;
+        ObjectId::from_bytes(&bytes).expect("valid oid")
     }
-    let inner = store.inner.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(value) = inner.refs.get(name) else {
-        return Err(RefStoreError::Corrupt(format!("ref not found: {name}")));
-    };
-    match value {
-        RawRef::Direct(oid) => Ok(*oid),
-        RawRef::Symbolic(target) => {
-            let target = target.clone();
-            resolve_raw(store, &target, depth + 1)
-        }
+
+    #[test]
+    fn for_each_ref_peels_symbolic_without_deadlock() {
+        let store = MemoryRefStore::new();
+        store
+            .set_ref("refs/heads/main", RawRef::Direct(oid(1)))
+            .expect("main");
+        store
+            .set_ref("HEAD", RawRef::Symbolic("refs/heads/main".to_owned()))
+            .expect("head");
+
+        let mut peeled = None;
+        store
+            .for_each_ref("HEAD", &mut |entry| {
+                peeled = entry.peeled;
+                ControlFlow::Break(())
+            })
+            .expect("iter");
+        assert_eq!(peeled, Some(oid(1)));
     }
 }

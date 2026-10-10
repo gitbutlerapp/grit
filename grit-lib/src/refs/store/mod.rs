@@ -64,7 +64,9 @@ pub trait RefStore: Send + Sync + Debug {
     ///
     /// Returns [`RefStoreError::SymrefLoop`] when the chain is too deep and
     /// [`RefStoreError::Corrupt`] when an intermediate target is missing.
-    fn resolve(&self, name: &str) -> Result<ObjectId>;
+    fn resolve(&self, name: &str) -> Result<ObjectId> {
+        resolve_store(self, name)
+    }
 
     /// Invoke `f` for each ref whose name starts with `prefix`, in sorted name order.
     fn for_each_ref(
@@ -107,11 +109,15 @@ pub trait RefStore: Send + Sync + Debug {
 }
 
 /// Resolve `name` through `store`, following symbolic refs.
-pub fn resolve_store(store: &dyn RefStore, name: &str) -> Result<ObjectId> {
+pub fn resolve_store<S: RefStore + ?Sized>(store: &S, name: &str) -> Result<ObjectId> {
     resolve_via_raw(store, name, 0).map_err(Into::into)
 }
 
-fn resolve_via_raw(store: &dyn RefStore, name: &str, depth: usize) -> StoreResult<ObjectId> {
+fn resolve_via_raw<S: RefStore + ?Sized>(
+    store: &S,
+    name: &str,
+    depth: usize,
+) -> StoreResult<ObjectId> {
     if depth >= SYMREF_MAXDEPTH {
         return Err(RefStoreError::SymrefLoop);
     }

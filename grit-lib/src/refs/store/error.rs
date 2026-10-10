@@ -27,10 +27,10 @@ pub enum RefStoreError {
     },
 
     /// A ref name cannot be created because of a directory/file conflict.
-    #[error("cannot lock ref: {detail}")]
+    #[error("cannot lock ref: {}", reason.lock_message_suffix())]
     NameUnavailable {
-        /// Human-readable conflict detail (Git lock message suffix).
-        detail: String,
+        /// Structured conflict reason (Git `refs_verify_refname_available` style).
+        reason: RefnameUnavailable,
     },
 
     /// The same ref name appears more than once in one transaction.
@@ -50,9 +50,7 @@ pub enum RefStoreError {
 }
 
 impl From<RefnameUnavailable> for RefStoreError {
-    fn from(value: RefnameUnavailable) -> Self {
-        Self::NameUnavailable {
-            detail: value.lock_message_suffix(),
-        }
+    fn from(reason: RefnameUnavailable) -> Self {
+        Self::NameUnavailable { reason }
     }
 }
