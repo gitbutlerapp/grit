@@ -432,6 +432,32 @@ fn list_refs_git_daemon_v0_matches_git() {
 }
 
 #[test]
+fn list_refs_git_daemon_v2_pattern_main_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        prefixes: vec!["main".to_owned()],
+        protocol_version: Some(2),
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].name, "refs/heads/main");
+
+    let mut cmd = Command::new("git");
+    cmd.args(["ls-remote", url, "main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    let out = cmd.output().expect("git ls-remote pattern");
+    assert!(out.status.success());
+    let git_out = String::from_utf8(out.stdout).expect("utf8");
+    assert!(git_out.contains("refs/heads/main"));
+}
+
+#[test]
 fn list_refs_git_daemon_v2_matches_git() {
     let Some(fixture) = daemon_fixture() else {
         panic!("git daemon fixture unavailable in this environment");
