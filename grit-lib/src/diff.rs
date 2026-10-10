@@ -1311,6 +1311,46 @@ pub fn diff_slice_ops_compacted(
     )
 }
 
+/// Whether each new-side line is marked changed by Git's xdiff engine (after change compaction).
+#[must_use]
+pub(crate) fn xdiff_new_line_changed_flags(
+    old_lines: &[&str],
+    new_lines: &[&str],
+    indent_heuristic: bool,
+) -> Vec<bool> {
+    use std::collections::HashMap;
+
+    let mut interner: HashMap<String, u32> = HashMap::new();
+    let mut intern = |line: &str| -> u32 {
+        let next = interner.len() as u32;
+        *interner.entry(line.to_owned()).or_insert(next)
+    };
+    let ids1: Vec<u32> = old_lines.iter().map(|line| intern(line)).collect();
+    let ids2: Vec<u32> = new_lines.iter().map(|line| intern(line)).collect();
+    let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2);
+    let ops = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
+    let compacted = diff_indent_heuristic::apply_change_compact_to_ops(
+        &ops,
+        old_lines,
+        new_lines,
+        indent_heuristic,
+    );
+    let mut flags = vec![false; new_lines.len()];
+    for op in compacted {
+        match op.tag() {
+            similar::DiffTag::Insert | similar::DiffTag::Replace => {
+                for idx in op.new_range() {
+                    if idx < flags.len() {
+                        flags[idx] = true;
+                    }
+                }
+            }
+            similar::DiffTag::Equal | similar::DiffTag::Delete => {}
+        }
+    }
+    flags
+}
+
 /// Map each line in `new_joined` to its origin in `old_joined` after Git-style compaction (for blame).
 #[must_use]
 pub fn map_new_to_old_lines_compacted(

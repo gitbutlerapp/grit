@@ -209,6 +209,99 @@ fn build_blame_fixture() -> (tempfile::TempDir, Repository, String) {
 }
 
 #[test]
+fn blame_matches_git_porcelain_after_adcb_permutation() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "f.txt";
+    std::fs::write(root.join(file), "a\nb\nc\nd\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "init"]);
+
+    std::fs::write(root.join(file), "a\nd\nc\nb\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "move"]);
+
+    let repo = Repository::discover(Some(root)).expect("open");
+    let dir = repo.work_tree.as_deref().expect("worktree");
+    assert_blame_matches(&repo, dir, file, None, None);
+}
+
+#[test]
+fn blame_matches_git_for_all_four_line_permutations() {
+    let base = ["a", "b", "c", "d"];
+    for perm in [
+        ["b", "a", "c", "d"],
+        ["b", "a", "d", "c"],
+        ["b", "c", "a", "d"],
+        ["b", "c", "d", "a"],
+        ["b", "d", "a", "c"],
+        ["b", "d", "c", "a"],
+        ["c", "a", "b", "d"],
+        ["c", "a", "d", "b"],
+        ["c", "b", "a", "d"],
+        ["c", "b", "d", "a"],
+        ["c", "d", "a", "b"],
+        ["c", "d", "b", "a"],
+        ["d", "a", "b", "c"],
+        ["d", "a", "c", "b"],
+        ["d", "b", "a", "c"],
+        ["d", "b", "c", "a"],
+        ["d", "c", "a", "b"],
+        ["d", "c", "b", "a"],
+        ["a", "b", "d", "c"],
+        ["a", "c", "b", "d"],
+        ["a", "c", "d", "b"],
+        ["a", "d", "b", "c"],
+        ["a", "d", "c", "b"],
+    ] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        git_run(root, &["init", "-q", "-b", "main"]);
+        git_run(root, &["config", "user.name", "Blame Test"]);
+        git_run(root, &["config", "user.email", "blame@example.com"]);
+
+        let file = "f.txt";
+        std::fs::write(root.join(file), format!("{}\n", base.join("\n"))).unwrap();
+        git_run(root, &["add", file]);
+        git_run(root, &["commit", "-m", "init"]);
+
+        std::fs::write(root.join(file), format!("{}\n", perm.join("\n"))).unwrap();
+        git_run(root, &["add", file]);
+        git_run(root, &["commit", "-m", "move"]);
+
+        let repo = Repository::discover(Some(root)).expect("open");
+        let dir = repo.work_tree.as_deref().expect("worktree");
+        assert_blame_matches(&repo, dir, file, None, None);
+    }
+}
+
+#[test]
+fn blame_matches_git_porcelain_after_dacb_style_permutation() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    git_run(root, &["config", "user.name", "Blame Test"]);
+    git_run(root, &["config", "user.email", "blame@example.com"]);
+
+    let file = "f.txt";
+    std::fs::write(root.join(file), "a\nb\nc\nd\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "init"]);
+
+    std::fs::write(root.join(file), "d\na\nc\nb\n").unwrap();
+    git_run(root, &["add", file]);
+    git_run(root, &["commit", "-m", "move"]);
+
+    let repo = Repository::discover(Some(root)).expect("open");
+    let dir = repo.work_tree.as_deref().expect("worktree");
+    assert_blame_matches(&repo, dir, file, None, None);
+}
+
+#[test]
 fn blame_matches_git_porcelain_after_rotate_line_to_head() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

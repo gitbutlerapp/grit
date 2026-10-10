@@ -155,10 +155,48 @@ pub fn build_exact_relocate_line_map(
     fuzzy_map
 }
 
-/// When parent and child have the same line count, decide which mapped lines were
-/// repositioned in the child commit (blame stays on that commit) vs shifted as a
-/// block (blame passes to the parent). Matches system `git blame` on rotations
-/// and swaps.
+/// Decide which child lines stop blame on the current commit (system `git blame` parity).
+///
+/// Uses the compacted diff equal-map, exact-text relocation, LIS reposition tie-break, and
+/// the rule that lines re-inserted at the same index without a diff equal mapping stay on
+/// the current commit.
+fn blame_stops_on_current_commit(
+    diff_map: &[Option<usize>],
+    relocate_map: &[Option<usize>],
+    xdiff_changed: &[bool],
+) -> Vec<bool> {
+    let reposition = blame_reposition_on_current_commit(relocate_map);
+    let mut stop = vec![false; diff_map.len()];
+    for child_idx in 0..diff_map.len() {
+        if reposition.get(child_idx).copied().unwrap_or(false) {
+            stop[child_idx] = true;
+            continue;
+        }
+        if xdiff_changed.get(child_idx).copied().unwrap_or(false) {
+            if let Some(parent_idx) = diff_map[child_idx] {
+                if parent_idx == child_idx {
+                    stop[child_idx] = true;
+                }
+            }
+        }
+        if stop[child_idx] {
+            continue;
+        }
+        if diff_map[child_idx].is_some() {
+            continue;
+        }
+        match relocate_map.get(child_idx).and_then(|p| *p) {
+            None => stop[child_idx] = true,
+            Some(parent_idx) if parent_idx == child_idx => {
+                stop[child_idx] = xdiff_changed.get(child_idx).copied().unwrap_or(false);
+            }
+            Some(_) => {}
+        }
+    }
+    stop
+}
+
+/// Longest-increasing-subsequence tie-break for lines that moved but stayed text-identical.
 fn blame_reposition_on_current_commit(line_map: &[Option<usize>]) -> Vec<bool> {
     let n = line_map.len();
     let pairs: Vec<(usize, usize)> = line_map
@@ -1459,15 +1497,23 @@ pub fn compute_blame(
                 let par_lines = content_lines(&par_content);
 
                 // Build mapping: cur_line_idx → Option<parent_line_idx>
-                let mut line_map =
+                let diff_line_map =
                     build_line_map(&par_lines, &cur_lines, diff_algorithm, indent_heuristic);
-                line_map = build_exact_relocate_line_map(&par_lines, &cur_lines, &line_map);
+                let mut line_map =
+                    build_exact_relocate_line_map(&par_lines, &cur_lines, &diff_line_map);
                 if is_ignored {
                     line_map = build_fuzzy_line_map(&par_lines, &cur_lines, &line_map);
                 }
-                let reposition_blame = (par_lines.len() == cur_lines.len())
-                    .then(|| blame_reposition_on_current_commit(&line_map))
-                    .unwrap_or_default();
+                let stop_blame_on_current = if par_lines.len() == cur_lines.len() {
+                    let xdiff_changed = crate::diff::xdiff_new_line_changed_flags(
+                        &par_lines,
+                        &cur_lines,
+                        indent_heuristic,
+                    );
+                    blame_stops_on_current_commit(&diff_line_map, &line_map, &xdiff_changed)
+                } else {
+                    Vec::new()
+                };
                 let mut inserted_copy_source: Option<CopySourceBlameCache> = None;
                 if copy_depth >= 3 {
                     if let Some((source_path, source_blame)) = find_copy_source_blame(
@@ -1543,7 +1589,7 @@ pub fn compute_blame(
                             } else {
                                 t.ignored
                             };
-                            if reposition_blame
+                            if stop_blame_on_current
                                 .get(t.current_idx)
                                 .copied()
                                 .unwrap_or(false)
@@ -2000,12 +2046,10 @@ mod tests {
     fn reposition_blame_flags_rotated_head_line_only() {
         let par = ["a", "b", "c", "d"];
         let cur = ["d", "a", "b", "c"];
-        let map = build_exact_relocate_line_map(
-            &par,
-            &cur,
-            &build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false),
-        );
-        let blame = blame_reposition_on_current_commit(&map);
+        let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
+        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
+        let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
         assert_eq!(blame, vec![true, false, false, false]);
     }
 
@@ -2013,13 +2057,33 @@ mod tests {
     fn reposition_blame_swapped_inserted_line_in_three_line_file() {
         let par = ["alpha ONE", "inserted", " gamma three"];
         let cur = ["alpha ONE", " gamma three", "inserted"];
-        let map = build_exact_relocate_line_map(
-            &par,
-            &cur,
-            &build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false),
-        );
-        let blame = blame_reposition_on_current_commit(&map);
+        let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
+        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
+        let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
         assert_eq!(blame, vec![false, false, true]);
+    }
+
+    #[test]
+    fn reposition_blame_dacb_permutation() {
+        let par = ["a", "b", "c", "d"];
+        let cur = ["d", "a", "c", "b"];
+        let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
+        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
+        let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
+        assert_eq!(blame, vec![true, false, false, true]);
+    }
+
+    #[test]
+    fn reposition_blame_flags_same_index_diff_insertion() {
+        let par = ["a", "b", "c", "d"];
+        let cur = ["a", "d", "c", "b"];
+        let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
+        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
+        let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
+        assert_eq!(blame, vec![false, false, true, true]);
     }
 
     #[test]
