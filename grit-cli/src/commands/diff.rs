@@ -146,6 +146,23 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
     Ok(outcome_from_changes(commit_changes(repo, oid)?))
 }
 
+/// Build a full patch-style [`DiffOutcome`] from tree diff entries (e.g. stash W vs base).
+pub fn outcome_from_tree_entries(
+    repo: &grit_lib::repo::Repository,
+    mut entries: Vec<DiffEntry>,
+) -> Result<DiffOutcome> {
+    sort_entries(&mut entries);
+    let changes = entries
+        .into_iter()
+        .map(|e| {
+            let (old_text, old_bin) = old_side_text(&repo.odb, &e)?;
+            let (new_text, new_bin) = new_side_text(&repo.odb, &e, None)?;
+            Ok(file_change(e, old_text, new_text, old_bin || new_bin))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(outcome_from_changes(changes))
+}
+
 fn outcome_from_changes(changes: Vec<FileChange>) -> DiffOutcome {
     DiffOutcome {
         files: changes.into_iter().map(build_file_diff).collect(),

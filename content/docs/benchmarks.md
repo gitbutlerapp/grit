@@ -194,7 +194,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 - **L &gt;2×:** `switch`, `switch-wide`, `merge`, `pick-series`, `add` (10k and 100k), status at L/H.
 - **H/L &gt;1.25×:** `switch`, `switch-wide`, `pick`, `merge`, `pick-series`.
 - **Repeatability:** second hot-path after-run drift on `merge-100000` and `pick-100000` (~13–14% relative).
-- **CLI gaps:** `grep`, `rebase`, `reset`, `stash push` (deferrals documented above).
+- **CLI gaps:** `grep`, `rebase`, `reset` (deferrals documented above).
 
 **Criterion** (`cargo bench -p grit-lib --bench hot_paths`, release): see factory run log — `apply_stash_L` ~52 ms median; `pick_2000_paths_L` ~621 ms (library merge/checkout path, not CLI).
 
@@ -205,7 +205,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | `grep` | none | Deferred — no porcelain driver in scope |
 | `rebase` | none | `pick-series` grit-bench scenario (20× `grit pick`) as upper-bound proxy |
 | `reset` | none | Deferred |
-| `stash push` | none | Criterion `apply_stash` / library `apply_stash` bench; no `grit stash push` timing |
+| `stash push` | `stash-push-pop` grit-bench scenario | `grit stash` + `grit stash pop` vs `git stash push` + `git stash pop` (see `stash-push-pop-LH.json`) |
 
 ### Object reads
 
