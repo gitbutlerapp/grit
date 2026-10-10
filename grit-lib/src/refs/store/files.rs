@@ -426,8 +426,7 @@ impl RefStore for FilesRefStore {
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         RefTransaction::validate_no_duplicates(txn.updates())?;
-        let mut updates = txn.into_updates();
-        updates.sort_by(|a, b| a.name.cmp(&b.name));
+        let updates = txn.into_updates();
 
         for update in &updates {
             validate_storable_refname(&update.name)?;

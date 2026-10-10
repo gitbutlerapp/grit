@@ -34,13 +34,69 @@ use crate::pack;
 /// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
 pub const SYMREF_MAXDEPTH: usize = 5;
 
+fn map_public_ref_store_error(err: Error, refname: &str) -> Error {
+    match err {
+        Error::RefStore(store::RefStoreError::SymrefLoop) => {
+            Error::InvalidRef(format!("ref symlink too deep: {refname}"))
+        }
+        Error::RefStore(store::RefStoreError::Corrupt(msg))
+            if msg.contains("not-a-ref") || msg.contains("reference broken") =>
+        {
+            Error::InvalidRef(format!("cannot update ref '{refname}': reference broken"))
+        }
+        other => other,
+    }
+}
+
+/// Loose-files checks shared by legacy [`write_ref_at_storage`] and RefStore-backed writes.
+fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
+        return Ok(());
+    }
+    let storage_dir = ref_storage_dir(git_dir, refname);
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let path = storage_dir.join(stor);
+    remove_empty_ref_directory(&path);
+    if fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+    {
+        let display = ref_path_for_display(&path);
+        return Err(crate::error::RefLockError::DirectoryInTheWay {
+            refname: refname.to_owned(),
+            path: display,
+        }
+        .into());
+    }
+    if path.is_file() && matches!(read_ref_file(&path), Err(Error::InvalidRef(_))) {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{refname}': reference broken"
+        )));
+    }
+    Ok(())
+}
+
+fn legacy_ref_update_flags(refname: &str) -> RefUpdateFlags {
+    let mut flags = RefUpdateFlags::default();
+    // Direct updates to `HEAD` detach or reattach the worktree HEAD file; do not peel symrefs.
+    if refname == "HEAD" {
+        flags.no_deref = true;
+    }
+    flags
+}
+
 fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<()> {
+    let refname = update.name.clone();
     let store = open_ref_store(git_dir)?;
     let txn = RefTransaction::new()
         .update(update)
         .map_err(crate::error::Error::from)?;
-    let prepared = store.prepare(txn).map_err(crate::error::Error::from)?;
-    prepared.commit().map_err(crate::error::Error::from)
+    let prepared = store
+        .prepare(txn)
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &refname))?;
+    prepared
+        .commit()
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &refname))
 }
 
 fn store_write_value(
@@ -51,6 +107,9 @@ fn store_write_value(
     reflog: Option<ReflogUpdate>,
 ) -> Result<()> {
     ensure_refname_safe_for_storage(refname)?;
+    if new_value.is_some() {
+        files_legacy_write_precheck(git_dir, refname)?;
+    }
     commit_store_update(
         git_dir,
         RefUpdate {
@@ -58,7 +117,7 @@ fn store_write_value(
             new_value,
             expected,
             reflog,
-            flags: RefUpdateFlags::default(),
+            flags: legacy_ref_update_flags(refname),
         },
     )
 }
@@ -161,7 +220,7 @@ pub fn resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
         {
             Err(Error::InvalidRef(msg))
         }
-        Err(err) => Err(err),
+        Err(err) => Err(map_public_ref_store_error(err, refname)),
     }
 }
 
