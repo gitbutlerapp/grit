@@ -577,10 +577,10 @@ fn apply_filter_one(
             }
         }
         ObjectFilter::BlobNone => {
-            clear_type(index, &mut set.bits, ObjectKind::Blob);
-            set.extended.retain(|(oid, kind)| {
-                *kind != ObjectKind::Blob && !is_blob_in_index(index, oid).unwrap_or(false)
-            });
+            let keep = explicit_filter_roots(repo, index, want_tips)?.blobs;
+            clear_type_except(index, &mut set.bits, ObjectKind::Blob, &keep);
+            set.extended
+                .retain(|(oid, kind)| *kind != ObjectKind::Blob || keep.contains(oid));
             rebuild_extended_set(set);
         }
         ObjectFilter::BlobLimit(limit) => {
@@ -595,10 +595,14 @@ fn apply_filter_one(
             rebuild_extended_set(set);
         }
         ObjectFilter::TreeDepth(0) => {
-            clear_type(index, &mut set.bits, ObjectKind::Tree);
-            clear_type(index, &mut set.bits, ObjectKind::Blob);
-            set.extended
-                .retain(|(_, kind)| !matches!(kind, ObjectKind::Tree | ObjectKind::Blob));
+            let roots = explicit_filter_roots(repo, index, want_tips)?;
+            clear_type_except(index, &mut set.bits, ObjectKind::Tree, &roots.trees);
+            clear_type_except(index, &mut set.bits, ObjectKind::Blob, &roots.blobs);
+            set.extended.retain(|(oid, kind)| {
+                matches!(kind, ObjectKind::Commit | ObjectKind::Tag)
+                    || roots.trees.contains(oid)
+                    || roots.blobs.contains(oid)
+            });
             rebuild_extended_set(set);
         }
         ObjectFilter::ObjectType(kind) => {
@@ -626,22 +630,77 @@ fn blob_under_limit(repo: &Repository, oid: &ObjectId, limit: u64) -> bool {
     }
 }
 
-fn is_blob_in_index(
-    index: &BitmapIndex,
-    oid: &ObjectId,
-) -> std::result::Result<bool, BitmapWalkError> {
-    let Some(pos) = index.position_of(oid) else {
-        return Ok(false);
-    };
-    Ok(index.type_bitmap(ObjectKind::Blob).contains(pos)?)
+fn clear_type(index: &BitmapIndex, bits: &mut Bitmap, kind: ObjectKind) {
+    clear_type_except(index, bits, kind, &HashSet::new());
 }
 
-fn clear_type(index: &BitmapIndex, bits: &mut Bitmap, kind: ObjectKind) {
+fn clear_type_except(
+    index: &BitmapIndex,
+    bits: &mut Bitmap,
+    kind: ObjectKind,
+    keep: &HashSet<ObjectId>,
+) {
     if let Ok(type_bits) = expand_type(index, kind) {
         for pos in type_bits.set_bits().collect::<Vec<_>>() {
+            let pos_u32 = u32::try_from(pos).unwrap_or(u32::MAX);
+            if let Ok(oid) = index.oid_at(pos_u32) {
+                if keep.contains(&oid) {
+                    continue;
+                }
+            }
             bits.clear(pos);
         }
     }
+}
+
+struct ExplicitFilterRoots {
+    trees: HashSet<ObjectId>,
+    blobs: HashSet<ObjectId>,
+}
+
+fn explicit_filter_roots(
+    repo: &Repository,
+    index: &BitmapIndex,
+    tips: &[ObjectId],
+) -> std::result::Result<ExplicitFilterRoots, BitmapWalkError> {
+    let peeled = peel_tips(repo, tips, MissingAction::Error)?;
+    let mut trees = HashSet::new();
+    let mut blobs = HashSet::new();
+    for oid in peeled.extra_objects {
+        match repo
+            .odb
+            .read_info(&oid)
+            .map_err(BitmapWalkError::from)?
+            .kind
+        {
+            ObjectKind::Tree => {
+                trees.insert(oid);
+            }
+            ObjectKind::Blob => {
+                blobs.insert(oid);
+            }
+            ObjectKind::Commit | ObjectKind::Tag => {}
+        }
+    }
+    for oid in tips {
+        if let Some(pos) = index.position_of(oid) {
+            if index
+                .type_bitmap(ObjectKind::Tree)
+                .contains(pos)
+                .unwrap_or(false)
+            {
+                trees.insert(*oid);
+            }
+            if index
+                .type_bitmap(ObjectKind::Blob)
+                .contains(pos)
+                .unwrap_or(false)
+            {
+                blobs.insert(*oid);
+            }
+        }
+    }
+    Ok(ExplicitFilterRoots { trees, blobs })
 }
 
 fn keep_only_object_type(set: &mut ReachableSet, kind: FilterObjectKind) {
@@ -682,29 +741,7 @@ fn tip_blob_oids(
     index: &BitmapIndex,
     tips: &[ObjectId],
 ) -> std::result::Result<HashSet<ObjectId>, BitmapWalkError> {
-    let peeled = peel_tips(repo, tips, MissingAction::Error)?;
-    let mut out = HashSet::new();
-    for oid in peeled.extra_objects {
-        if repo
-            .odb
-            .read_info(&oid)
-            .map_err(BitmapWalkError::from)?
-            .kind
-            == ObjectKind::Blob
-        {
-            out.insert(oid);
-        }
-    }
-    for oid in tips {
-        if index
-            .position_of(oid)
-            .and_then(|pos| index.type_bitmap(ObjectKind::Blob).contains(pos).ok())
-            .unwrap_or(false)
-        {
-            out.insert(*oid);
-        }
-    }
-    Ok(out)
+    Ok(explicit_filter_roots(repo, index, tips)?.blobs)
 }
 
 fn filter_blob_limit(

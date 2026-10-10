@@ -447,6 +447,98 @@ fn verify_commit_detects_tampered_bitmap() {
     );
 }
 
+fn one_commit_bitmap_fixture() -> RepoFixture {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    git_ok(&fixture, &["checkout", "-b", "main"]);
+    std::fs::write(fixture.path().join("f"), b"payload").unwrap();
+    git_ok(&fixture, &["add", "f"]);
+    git_ok(&fixture, &["commit", "-m", "root"]);
+    repack_with_bitmap(&fixture);
+    fixture
+}
+
+fn assert_bitmap_filter_matches_git(
+    fixture: &RepoFixture,
+    repo: &Repository,
+    index: &Arc<BitmapIndex>,
+    want: ObjectId,
+    filter_spec: &str,
+    filter: &ObjectFilter,
+) -> HashSet<ObjectId> {
+    let got = bitmap_query(repo, index, &[want], &[], Some(filter))
+        .expect("query")
+        .object_ids();
+    let git_set = git_rev_list_objects(fixture, &[want], &[], Some(filter_spec), true);
+    assert_sets_eq(filter_spec, &got, &git_set);
+    got
+}
+
+#[test]
+fn filter_keeps_explicit_peeled_and_direct_roots() {
+    let fixture = one_commit_bitmap_fixture();
+    let tree = ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "HEAD^{tree}"])).unwrap();
+    let blob = ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "HEAD:f"])).unwrap();
+
+    git_ok(
+        &fixture,
+        &["tag", "-a", "atree", "-m", "tree tag", "HEAD^{tree}"],
+    );
+    git_ok(
+        &fixture,
+        &["tag", "-a", "ablob", "-m", "blob tag", "HEAD:f"],
+    );
+    let atree_tag =
+        ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "refs/tags/atree"])).unwrap();
+    let ablob_tag =
+        ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "refs/tags/ablob"])).unwrap();
+
+    let repo = open_repo(fixture.path());
+    let index = BitmapIndex::open(&repo).expect("open").expect("bitmap");
+
+    let tree0 = ObjectFilter::TreeDepth(0);
+    let tree_tag_set =
+        assert_bitmap_filter_matches_git(&fixture, &repo, &index, atree_tag, "tree:0", &tree0);
+    assert!(tree_tag_set.contains(&atree_tag));
+    assert!(tree_tag_set.contains(&tree));
+
+    let blob_none = ObjectFilter::BlobNone;
+    let blob_tag_set = assert_bitmap_filter_matches_git(
+        &fixture,
+        &repo,
+        &index,
+        ablob_tag,
+        "blob:none",
+        &blob_none,
+    );
+    assert!(blob_tag_set.contains(&ablob_tag));
+    assert!(blob_tag_set.contains(&blob));
+
+    let tree_direct =
+        assert_bitmap_filter_matches_git(&fixture, &repo, &index, tree, "tree:0", &tree0);
+    assert!(tree_direct.contains(&tree));
+
+    let blob_direct =
+        assert_bitmap_filter_matches_git(&fixture, &repo, &index, blob, "blob:none", &blob_none);
+    assert!(blob_direct.contains(&blob));
+
+    std::fs::write(fixture.path().join("loose.txt"), b"loose blob").unwrap();
+    git_ok(&fixture, &["add", "loose.txt"]);
+    git_ok(&fixture, &["commit", "-m", "loose"]);
+    let loose_blob =
+        ObjectId::from_hex(&git_stdout(&fixture, &["rev-parse", "HEAD:loose.txt"])).unwrap();
+    let repo2 = open_repo(fixture.path());
+    let index2 = BitmapIndex::open(&repo2).expect("open").expect("bitmap");
+    let loose_set = assert_bitmap_filter_matches_git(
+        &fixture,
+        &repo2,
+        &index2,
+        loose_blob,
+        "blob:none",
+        &blob_none,
+    );
+    assert!(loose_set.contains(&loose_blob));
+}
+
 #[test]
 fn sha256_query() {
     let fixture = RepoFixture::init(HashAlgo::Sha256).expect("init");
