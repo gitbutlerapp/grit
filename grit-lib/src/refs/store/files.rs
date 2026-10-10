@@ -19,7 +19,7 @@ use crate::refs::{
 use super::apply::{apply_update, simulate_batch_apply, RefBatchState};
 use super::error::RefStoreError;
 use super::routing::{resolve_common_dir, route_ref_storage_with_namespace, RefStorageRoute};
-use super::transaction::RefTransaction;
+use super::transaction::{expected_matches, RefTransaction};
 use super::validation::{validate_storable_refname, verify_create_conflicts};
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 
@@ -486,6 +486,22 @@ impl RefStore for FilesRefStore {
                 return Err(err);
             }
             ref_locks.insert(name.clone(), lock);
+        }
+
+        for update in &updates {
+            let actual = self
+                .read_raw(&update.name)
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            if !expected_matches(actual.as_ref(), &update.expected) {
+                for acquired in ref_locks.values() {
+                    let _ = fs::remove_file(acquired);
+                }
+                return Err(RefStoreError::ExpectedMismatch {
+                    name: update.name.clone(),
+                    expected: update.expected.clone(),
+                    actual,
+                });
+            }
         }
 
         let mut packed_lock = None;
