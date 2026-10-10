@@ -467,7 +467,7 @@ pub enum Error {
     #[error("merge commit {oid}")]
     MergeCommit { oid: crate::objects::ObjectId },
 
-    /// The commit to replay is already checked out as `HEAD`.
+    /// Cherry-pick source is already checked out as `HEAD`.
     #[error("commit already at HEAD")]
     ReplaySourceAtHead,
 

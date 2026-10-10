@@ -272,6 +272,52 @@ fn replay_pick_root_commit() {
 }
 
 #[test]
+fn replay_revert_head_restores_parent_tree_like_git() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "a.txt", "v1\n", "initial");
+    commit_file(root.path(), "a.txt", "v2\n", "feature");
+    let head = oid_from_rev(root.path(), "HEAD");
+    let parent_tree = git(root.path(), &["rev-parse", "HEAD~1^{tree}"])
+        .trim()
+        .to_owned();
+
+    let oracle = tempfile::tempdir().expect("oracle");
+    let status = Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", root.path().display()),
+            &oracle.path().to_string_lossy(),
+        ])
+        .status()
+        .expect("cp");
+    assert!(status.success(), "cp -a oracle repo");
+    git(oracle.path(), &["revert", "--no-edit", "HEAD"]);
+    let git_tree = git(oracle.path(), &["rev-parse", "HEAD^{tree}"])
+        .trim()
+        .to_owned();
+
+    let repo = open_repo(root.path());
+    let outcome = replay_revert(&repo, head).expect("revert HEAD");
+    let ReplayOutcome::Committed { oid, tree } = outcome else {
+        panic!("expected revert commit, got {outcome:?}");
+    };
+
+    git_fsck_strict(root.path());
+    assert_eq!(tree.to_hex(), parent_tree);
+    assert_eq!(
+        git(root.path(), &["rev-parse", "HEAD^{tree}"]).trim(),
+        git_tree
+    );
+    let body = git_cat_file_commit(root.path(), &oid);
+    assert!(body.contains(&format!("parent {head}")));
+    assert_eq!(
+        fs::read_to_string(root.path().join("a.txt")).expect("read"),
+        "v1\n"
+    );
+}
+
+#[test]
 fn replay_revert_commit_message_and_author() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());
