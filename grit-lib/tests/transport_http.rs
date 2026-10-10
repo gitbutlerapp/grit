@@ -1597,7 +1597,7 @@ fn fetch_over_git_http_backend_cgi() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let mut child = Command::new(&bench_bin)
+    let Some(child) = Command::new(&bench_bin)
         .args([
             "serve-git-http",
             "--root",
@@ -1608,10 +1608,11 @@ fn fetch_over_git_http_backend_cgi() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .unwrap_or_else(|_| {
-            eprintln!("SKIP: could not spawn grit-bench serve-git-http");
-            std::process::exit(0);
-        });
+        .ok()
+    else {
+        eprintln!("SKIP: could not spawn grit-bench serve-git-http");
+        return;
+    };
     let _guard = ServerGuard(child);
     if !wait_ready(port) {
         eprintln!("SKIP: git http-backend wrapper did not become ready on port {port}");

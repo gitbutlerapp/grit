@@ -558,6 +558,36 @@ fn list_refs_smart_http_matches_git_ls_remote() {
     assert_refs_match_git(&url, &refs, &opts, &[]);
 }
 
+#[cfg(feature = "http-ureq")]
+#[test]
+fn list_refs_smart_http_v0_matches_git_ls_remote() {
+    let (_tmp, bare) = bare_fixture();
+    let grit_bin = find_binary("grit").expect("grit binary (build grit-cli first)");
+    let server_bin =
+        find_binary("grit-http-server").expect("grit-http-server binary must be built for CI");
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::rename(&bare, root.join("repo.git")).unwrap();
+    let port = free_port().expect("free port");
+    let child = spawn_http_server(&server_bin, &grit_bin, &root, port).expect("spawn server");
+    let _guard = ChildGuard(child);
+    assert!(wait_tcp(port), "smart HTTP server did not become ready");
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let remote = Remote::from_url(&url).unwrap();
+    let opts = ListRefsOptions {
+        symrefs: true,
+        peel: false,
+        protocol_version: Some(0),
+        ..Default::default()
+    };
+    let refs = remote
+        .list_refs(None, &opts, Some(&DefaultHttpClientFactory))
+        .unwrap();
+    assert!(!refs.is_empty(), "v0 smart HTTP list_refs must return refs");
+    assert_refs_match_git(&url, &refs, &opts, &[]);
+}
+
 fn bare_with_changes_ref() -> (tempfile::TempDir, PathBuf) {
     let (tmp, bare) = bare_fixture();
     let main = git(Some(&bare), &["rev-parse", "refs/heads/main"]);

@@ -600,6 +600,22 @@ fn offers_basic(challenges: &[String]) -> bool {
             .any(|c| c.trim_start().to_ascii_lowercase().starts_with("basic"))
 }
 
+/// Resolve the `Git-Protocol` header for one request.
+///
+/// * `caller == None` — use the client's configured default (if any).
+/// * `caller == Some("")` — omit the header (classic v0); do not fall back to the default.
+/// * `caller == Some(v)` — send `Git-Protocol: v`.
+fn resolve_git_protocol_header<'a>(
+    caller: Option<&'a str>,
+    client_default: Option<&'a str>,
+) -> Option<&'a str> {
+    match caller {
+        None => client_default,
+        Some("") => None,
+        Some(v) => Some(v),
+    }
+}
+
 impl UreqHttpClient {
     fn do_get(
         &self,
@@ -609,7 +625,8 @@ impl UreqHttpClient {
     ) -> Result<RawResponse> {
         let result = retry_interrupted(true, || {
             let mut req = self.agent.get(url).header("User-Agent", &self.user_agent);
-            if let Some(v) = git_protocol {
+            if let Some(v) = resolve_git_protocol_header(git_protocol, self.git_protocol.as_deref())
+            {
                 req = req.header("Git-Protocol", v);
             }
             if let Some(a) = auth {
@@ -643,7 +660,8 @@ impl UreqHttpClient {
                 .header("Content-Type", content_type)
                 .header("Accept", accept)
                 .header("User-Agent", &self.user_agent);
-            if let Some(v) = git_protocol {
+            if let Some(v) = resolve_git_protocol_header(git_protocol, self.git_protocol.as_deref())
+            {
                 req = req.header("Git-Protocol", v);
             }
             if let Some(a) = auth {
@@ -682,7 +700,8 @@ impl UreqHttpClient {
                 .header("Content-Type", content_type)
                 .header("Accept", accept)
                 .header("User-Agent", &self.user_agent);
-            if let Some(v) = git_protocol {
+            if let Some(v) = resolve_git_protocol_header(git_protocol, self.git_protocol.as_deref())
+            {
                 req = req.header("Git-Protocol", v);
             }
             if let Some(a) = auth {
@@ -852,8 +871,7 @@ impl UreqHttpClient {
 
 impl HttpClient for UreqHttpClient {
     fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
-        let gp = git_protocol.or(self.git_protocol.as_deref());
-        self.with_auth_retry(url, |target, auth| self.do_get(target, gp, auth))
+        self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, _)| body)
     }
 
@@ -865,9 +883,8 @@ impl HttpClient for UreqHttpClient {
         body: &[u8],
         git_protocol: Option<&str>,
     ) -> Result<Vec<u8>> {
-        let gp = git_protocol.or(self.git_protocol.as_deref());
         self.with_auth_retry(url, |target, auth| {
-            self.do_post(target, content_type, accept, body, gp, auth)
+            self.do_post(target, content_type, accept, body, git_protocol, auth)
         })
         .map(|(body, _)| body)
     }
@@ -880,13 +897,12 @@ impl HttpClient for UreqHttpClient {
         body: &[u8],
         git_protocol: Option<&str>,
     ) -> Result<Box<dyn Read + Send>> {
-        let gp = git_protocol.or(self.git_protocol.as_deref());
         Ok(Box::new(self.with_auth_retry_post_stream(
             url,
             content_type,
             accept,
             body,
-            gp,
+            git_protocol,
         )?))
     }
 
@@ -895,8 +911,7 @@ impl HttpClient for UreqHttpClient {
         url: &str,
         git_protocol: Option<&str>,
     ) -> Result<(Vec<u8>, Option<String>)> {
-        let gp = git_protocol.or(self.git_protocol.as_deref());
-        self.with_auth_retry(url, |target, auth| self.do_get(target, gp, auth))
+        self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, final_url)| (body, Some(final_url)))
     }
 
