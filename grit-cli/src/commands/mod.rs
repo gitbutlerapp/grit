@@ -2,6 +2,7 @@
 
 pub mod add;
 pub mod auth;
+pub mod blame;
 pub mod branch;
 pub mod bundle;
 pub mod clean;

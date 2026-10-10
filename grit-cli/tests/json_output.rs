@@ -981,6 +981,13 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     let log = gs_json(&seed, &["log"]);
     assert_eq!(keys(&log), ["commits", "next"]);
 
+    write_file(&seed.join("blame.txt"), "hello\n");
+    gs_ok(&seed, &["add", "blame.txt"]);
+    gs_ok(&seed, &["commit", "add blame file"]);
+    let blame = gs_json(&seed, &["blame", "blame.txt"]);
+    assert_eq!(keys(&blame), ["commits", "file", "lines", "rev"]);
+    assert!(blame["lines"].as_array().is_some_and(|a| !a.is_empty()));
+
     let branches = gs_json(&seed, &["branch"]);
     assert_eq!(keys(&branches), ["action", "branches", "current"]);
 

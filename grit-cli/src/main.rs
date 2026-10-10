@@ -131,6 +131,17 @@ enum Command {
         #[arg(long)]
         before: Option<String>,
     },
+    /// Show who last modified each line of a file.
+    Blame {
+        /// Path to the file (repository-relative).
+        file: String,
+        /// Blame at this revision instead of `HEAD`.
+        #[arg(long)]
+        rev: Option<String>,
+        /// Limit to an inclusive 1-based line range (`START,END`).
+        #[arg(short = 'L', long = "lines", value_name = "START,END")]
+        line_range: Option<String>,
+    },
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced.
     Diff {
@@ -488,6 +499,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             ),
         },
         Command::Log { before } => emit(&commands::log::run(before)?, opts),
+        Command::Blame {
+            file,
+            rev,
+            line_range,
+        } => emit_with_markdown(&commands::blame::run(file, rev, line_range)?, opts),
         Command::Diff { commit } => emit(&commands::diff::run(commit)?, opts),
         Command::Show { object } => emit(&commands::show::run(object)?, opts),
         Command::Status => emit(&commands::status::run()?, opts),
