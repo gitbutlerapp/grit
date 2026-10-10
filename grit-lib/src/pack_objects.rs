@@ -13,6 +13,8 @@ use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::repo::Repository;
+use crate::rev_list::{MissingAction, ObjectFilter, RevListOptions};
 
 /// Options controlling pack-objects output (also used by [`build_pack`]).
 #[derive(Clone, Copy, Debug)]
@@ -292,12 +294,94 @@ pub fn build_pack(
     haves: &[ObjectId],
     opts: &PackBuildOptions,
 ) -> Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    PackObjects::new(odb, PackObjectsOptions::from(*opts))
-        .wants(wants)
-        .haves(haves)
-        .write_to(&mut buf)?;
-    Ok(buf)
+    build_pack_with_shallow_and_filter(odb, wants, haves, &HashSet::new(), None, opts)
+}
+
+/// Build a pack for upload-pack with optional shallow grafts and object filter.
+///
+/// When `filter` is set, object selection follows `rev-list --objects --filter`
+/// (same path as filtered bundles).
+pub fn build_pack_with_shallow_and_filter(
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    filter: Option<&ObjectFilter>,
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    let have_closure = reachable_closure(odb, haves, &HashSet::new(), true, &HashSet::new())?;
+    let send = if let Some(filter) = filter {
+        let git_dir = odb
+            .config_git_dir()
+            .ok_or_else(|| Error::Message("filter pack requires ODB config git dir".into()))?;
+        let repo = Repository::open(git_dir, None)?;
+        enumerate_filtered_send(&repo, wants, haves, filter, &have_closure)?
+    } else {
+        collect_reachable_excluding(odb, wants, &have_closure, false, source_shallow)?
+    };
+    build_pack_from_send_list(odb, &send, &have_closure, opts)
+}
+
+/// Same as [`build_pack_with_shallow_and_filter`] with a live [`Repository`] (for upload-pack).
+pub fn build_pack_for_upload(
+    repo: &Repository,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    filter: Option<&ObjectFilter>,
+    opts: &PackBuildOptions,
+) -> Result<Vec<u8>> {
+    build_pack_with_shallow_and_filter(&repo.odb, wants, haves, source_shallow, filter, opts)
+}
+
+fn enumerate_filtered_send(
+    repo: &Repository,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    filter: &ObjectFilter,
+    have_closure: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let positive: Vec<String> = wants.iter().map(ObjectId::to_hex).collect();
+    let negative: Vec<String> = haves
+        .iter()
+        .map(|oid| format!("^{}", oid.to_hex()))
+        .collect();
+    let options = RevListOptions {
+        objects: true,
+        no_object_names: true,
+        quiet: true,
+        filter: Some(filter.clone()),
+        missing_action: MissingAction::Error,
+        ..Default::default()
+    };
+    let walk = crate::rev_list::rev_list(repo, &positive, &negative, &options)?;
+    Ok(collect_filtered_send_list(&walk, have_closure))
+}
+
+fn collect_filtered_send_list(
+    walk: &crate::rev_list::RevListResult,
+    have_closure: &HashSet<ObjectId>,
+) -> Vec<ObjectId> {
+    let mut send = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |oid: ObjectId| {
+        if have_closure.contains(&oid) {
+            return;
+        }
+        if seen.insert(oid) {
+            send.push(oid);
+        }
+    };
+    for oid in &walk.commits {
+        push(*oid);
+    }
+    for (oid, _) in &walk.objects {
+        push(*oid);
+    }
+    for tag_oid in walk.tip_annotated_tag_by_commit.values() {
+        push(*tag_oid);
+    }
+    send
 }
 
 /// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
