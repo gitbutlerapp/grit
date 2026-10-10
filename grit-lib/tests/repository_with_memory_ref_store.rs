@@ -5,10 +5,11 @@ use std::sync::Arc;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, ReflogUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
+use time::OffsetDateTime;
 
 #[test]
 fn repository_with_memory_ref_store() {
@@ -24,8 +25,12 @@ fn repository_with_memory_ref_store() {
                 .update(RefUpdate {
                     name: "refs/heads/injected".to_owned(),
                     new_value: Some(RawRef::Direct(oid)),
-                    expected: Expected::Any,
-                    reflog: None,
+                    expected: Expected::Missing,
+                    reflog: Some(ReflogUpdate {
+                        identity: "Test User <test@example.com>".to_owned(),
+                        message: "create injected".to_owned(),
+                        time: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
+                    }),
                     flags: grit_lib::refs::store::RefUpdateFlags::default(),
                 })
                 .expect("txn"),
@@ -50,4 +55,7 @@ fn repository_with_memory_ref_store() {
 
     let resolved = resolve_revision(&repo, "refs/heads/injected").expect("rev-parse");
     assert_eq!(resolved, oid);
+
+    let at_zero = resolve_revision(&repo, "refs/heads/injected@{0}").expect("reflog @{0}");
+    assert_eq!(at_zero, oid);
 }

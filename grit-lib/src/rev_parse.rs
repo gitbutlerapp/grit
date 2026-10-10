@@ -2499,6 +2499,16 @@ fn resolve_base(
     Err(Error::ObjectNotFound(spec.to_owned()))
 }
 
+fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEntry>> {
+    let mut entries = Vec::new();
+    repo.refs()
+        .for_each_reflog_entry(refname, false, &mut |entry| {
+            entries.push(entry.clone());
+            ControlFlow::Continue(())
+        })?;
+    Ok(entries)
+}
+
 /// Resolve `@{-N}` to the branch name (e.g. "side"), not to an OID.
 fn resolve_at_minus_to_branch(repo: &Repository, n: usize) -> Result<String> {
     let entries = read_reflog(&repo.git_dir, "HEAD")?;
