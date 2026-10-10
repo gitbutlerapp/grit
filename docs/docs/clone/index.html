@@ -126,6 +126,7 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 <p><code>&lt;url&gt;</code> can be an <code>https://</code> or <code>http://</code> URL, an <code>ssh://</code> URL or <code>user@host:path</code> address, a <code>git://</code> URL, a <code>file://</code> URL, or a path to a local repository. A local path is stored as an absolute path so that later fetches work from anywhere.</p>
 <p>Without <code>&lt;dir&gt;</code>, the directory is named after the last part of the URL with any <code>.git</code> suffix removed, so <code>https://github.com/gitbutlerapp/grit.git</code> clones into <code>grit</code>. The destination must not exist or must be empty.</p>
 <p>For private GitHub repositories over HTTPS, sign in first with <a href="../auth/"><code>grit auth</code></a>.</p>
+<p>You can clone from a shallow repository (including one created with <code>git clone --depth</code>); grit copies the shallow boundary into the new repository so history matches the source.</p>
 <h2 id="options">Options</h2>
 <div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;url&gt;</code></td><td>The repository to clone: a URL or a local path.</td></tr><tr><td><code>&lt;dir&gt;</code></td><td>The directory to clone into. Defaults to the repository&#x27;s name.</td></tr></tbody></table></div>
 <h2 id="examples">Examples</h2>

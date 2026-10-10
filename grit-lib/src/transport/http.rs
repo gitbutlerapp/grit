@@ -1383,7 +1383,12 @@ pub fn http_fetch(
 
     // 6. For TagMode::Following, drop tags whose target did not arrive.
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
+        crate::fetch::retain_following_tags(
+            &local_odb,
+            &mut matched,
+            &pack_oids,
+            &crate::shallow::load_shallow_boundaries(local_git_dir),
+        )?;
     }
 
     // 7. Classify + apply ref updates.
@@ -1588,7 +1593,12 @@ fn http_fetch_v2(
 
     // 6. For TagMode::Following, drop tags whose target did not arrive.
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids)?;
+        crate::fetch::retain_following_tags(
+            &local_odb,
+            &mut matched,
+            &pack_oids,
+            &crate::shallow::load_shallow_boundaries(local_git_dir),
+        )?;
     }
 
     // 7. Classify + apply ref updates (shared with the v0/v1 path).
