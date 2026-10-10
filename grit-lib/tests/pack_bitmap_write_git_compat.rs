@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use grit_lib::objects::ObjectId;
 use grit_lib::pack::{read_local_pack_indexes, read_pack_index};
 use grit_lib::pack_bitmap::{BitmapIndex, PackBitmapWriteOptions, PackBitmapWriter};
+use grit_lib::pack_name_hash::pack_name_hash;
 use grit_lib::pack_rev::{rev_path_for_index, verify_pack_rev_file_contents};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions};
@@ -286,6 +287,103 @@ fn deterministic_output() {
     let path2 = PackBitmapWriter::write(&repo, &idx, &opts, SystemTime::UNIX_EPOCH).expect("w2");
     let bytes2 = std::fs::read(&path2).expect("read2");
     assert_eq!(bytes1, bytes2);
+}
+
+#[test]
+fn hash_cache_entries_match_path_name_hashes() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    git_ok(&fixture, &["checkout", "-b", "main"]);
+    for i in 0..32 {
+        let name = format!("path-{i:02}.txt");
+        std::fs::write(fixture.path().join(&name), format!("body-{i}")).unwrap();
+        git_ok(&fixture, &["add", &name]);
+        git_ok(&fixture, &["commit", "-m", &format!("add {name}")]);
+    }
+    git_ok(&fixture, &["repack", "-ad"]);
+    let repo = open_repo(fixture.path());
+    grit_write_bitmap(
+        &repo,
+        &fixture,
+        PackBitmapWriteOptions {
+            hash_cache: true,
+            ..Default::default()
+        },
+    );
+    let index = BitmapIndex::open(&repo).expect("open").expect("bitmap");
+    for i in 0..32 {
+        let name = format!("path-{i:02}.txt");
+        let rev_arg = format!("HEAD:{name}");
+        let hex = git_stdout(&fixture, &["rev-parse", &rev_arg]);
+        let oid = ObjectId::from_hex(hex.trim()).expect("oid");
+        let pos = index.position_of(&oid).expect("blob in pack");
+        assert_eq!(
+            index.name_hash(pos),
+            Some(pack_name_hash(&name)),
+            "name hash for {name} at bitmap pos {pos}"
+        );
+    }
+}
+
+#[test]
+fn full_dag_allows_extra_unreachable_pack_object() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_rich_history(&fixture);
+    git_ok(&fixture, &["repack", "-ad"]);
+    let mut hash_child = Command::new("git")
+        .current_dir(fixture.path())
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("hash-object");
+    hash_child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"orphan blob not reachable from refs\n")
+        .expect("write");
+    let hash_out = hash_child.wait_with_output().expect("wait");
+    assert!(hash_out.status.success());
+    let orphan_hex = String::from_utf8(hash_out.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let mut object_list = git_stdout(&fixture, &["rev-list", "--objects", "--all"]);
+    object_list.push('\n');
+    object_list.push_str(&orphan_hex);
+    object_list.push('\n');
+    let prefix = fixture.objects_dir().join("pack/extra-unreachable");
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .current_dir(fixture.path())
+        .args(["pack-objects", &prefix.to_string_lossy()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("pack-objects");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(object_list.as_bytes())
+        .expect("write");
+    let pack_out = child.wait_with_output().expect("wait");
+    assert!(pack_out.status.success());
+    let pack_hash = String::from_utf8(pack_out.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let extra_idx = fixture
+        .objects_dir()
+        .join(format!("pack/extra-unreachable-{pack_hash}.idx"));
+    let repo = open_repo(fixture.path());
+    PackBitmapWriter::write(
+        &repo,
+        &extra_idx,
+        &PackBitmapWriteOptions::default(),
+        SystemTime::UNIX_EPOCH,
+    )
+    .expect("FULL_DAG pack with unreachable blob");
 }
 
 #[test]

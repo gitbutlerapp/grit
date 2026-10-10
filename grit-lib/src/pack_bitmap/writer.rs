@@ -190,12 +190,13 @@ impl PackBitmapWriter {
             .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
         verify_pack_closure(repo, &order, &roots)?;
         let tips = commit_tips_from_roots(repo, &roots)?;
-        let commits = list_commits_in_pack(repo, &order)?;
         let needs_bitmap = tip_needs_flags(repo, &tips, &options.prefer_bitmap_tips)?;
+        let hash_cache_len = hash_cache_row_count(&order);
+        let mut name_hashes = vec![0u32; hash_cache_len];
+        let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, &order)?;
         let selected = select_commits(&commits, &tips, &needs_bitmap);
-        let mut name_hashes = vec![0u32; order.object_count() as usize];
-        let type_bitmaps = build_type_bitmaps(repo, &order)?;
-        let commit_bitmaps = build_commit_bitmaps(repo, &order, &selected, &mut name_hashes)?;
+        let commit_bitmaps =
+            build_commit_bitmaps(repo, &order, &commits, &selected, &mut name_hashes)?;
         let (selected_sorted, xor_plan) = plan_xor_compression(repo, &selected, &commit_bitmaps);
         let bitmap_path = bitmap_path_for_index(pack_idx_path);
         let bytes = assemble_bitmap_bytes(
@@ -277,11 +278,15 @@ struct CommitRow {
     parents: Vec<ObjectId>,
 }
 
-fn list_commits_in_pack(
+fn build_type_bitmaps_and_commits(
     repo: &Repository,
     order: &BitmapOrder,
-) -> Result<Vec<CommitRow>, PackBitmapWriteError> {
-    let mut out = Vec::new();
+) -> Result<(TypeBitmaps, Vec<CommitRow>), PackBitmapWriteError> {
+    let mut commits = Vec::new();
+    let mut commit_bm = Bitmap::new();
+    let mut trees = Bitmap::new();
+    let mut blobs = Bitmap::new();
+    let mut tags = Bitmap::new();
     let n = order.object_count();
     for pos in 0..n {
         let oid = order
@@ -291,21 +296,36 @@ fn list_commits_in_pack(
             .odb
             .read(&oid)
             .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        if obj.kind != ObjectKind::Commit {
-            continue;
+        let p = pos as usize;
+        match obj.kind {
+            ObjectKind::Commit => {
+                commit_bm.set(p);
+                let c = parse_commit(&obj.data)
+                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+                let committer_date = parse_signature_times(&c.committer)
+                    .map(|t| t.unix_seconds)
+                    .unwrap_or(0);
+                commits.push(CommitRow {
+                    oid,
+                    committer_date,
+                    parents: c.parents,
+                });
+            }
+            ObjectKind::Tree => trees.set(p),
+            ObjectKind::Blob => blobs.set(p),
+            ObjectKind::Tag => tags.set(p),
         }
-        let c = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        let committer_date = parse_signature_times(&c.committer)
-            .map(|t| t.unix_seconds)
-            .unwrap_or(0);
-        out.push(CommitRow {
-            oid,
-            committer_date,
-            parents: c.parents,
-        });
     }
-    out.sort_by_key(|c| std::cmp::Reverse(c.committer_date));
-    Ok(out)
+    commits.sort_by_key(|c| std::cmp::Reverse(c.committer_date));
+    Ok((
+        TypeBitmaps {
+            commits: EwahBitmap::from_bitmap(&commit_bm),
+            trees: EwahBitmap::from_bitmap(&trees),
+            blobs: EwahBitmap::from_bitmap(&blobs),
+            tags: EwahBitmap::from_bitmap(&tags),
+        },
+        commits,
+    ))
 }
 
 fn commit_tips_from_roots(
@@ -409,21 +429,6 @@ fn verify_pack_closure(
     for oid in &reachable {
         if order.position_of(oid).is_none() {
             missing.push(*oid);
-            if missing.len() >= 32 {
-                break;
-            }
-        }
-    }
-    if !missing.is_empty() {
-        return Err(PackBitmapWriteError::NotClosed { missing });
-    }
-    let n = order.object_count();
-    for pos in 0..n {
-        let oid = order
-            .oid_at(pos)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        if !reachable.contains(&oid) {
-            missing.push(oid);
             if missing.len() >= 32 {
                 break;
             }
@@ -540,65 +545,78 @@ struct TypeBitmaps {
     tags: EwahBitmap,
 }
 
-fn build_type_bitmaps(
-    repo: &Repository,
-    order: &BitmapOrder,
-) -> Result<TypeBitmaps, PackBitmapWriteError> {
-    let mut commits = Bitmap::new();
-    let mut trees = Bitmap::new();
-    let mut blobs = Bitmap::new();
-    let mut tags = Bitmap::new();
-    let n = order.object_count();
-    for pos in 0..n {
-        let oid = order
-            .oid_at(pos)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        let obj = repo
-            .odb
-            .read(&oid)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        let p = pos as usize;
-        match obj.kind {
-            ObjectKind::Commit => commits.set(p),
-            ObjectKind::Tree => trees.set(p),
-            ObjectKind::Blob => blobs.set(p),
-            ObjectKind::Tag => tags.set(p),
-        }
-    }
-    Ok(TypeBitmaps {
-        commits: EwahBitmap::from_bitmap(&commits),
-        trees: EwahBitmap::from_bitmap(&trees),
-        blobs: EwahBitmap::from_bitmap(&blobs),
-        tags: EwahBitmap::from_bitmap(&tags),
-    })
-}
-
 fn build_commit_bitmaps(
     repo: &Repository,
     order: &BitmapOrder,
+    _commits: &[CommitRow],
     selected: &[ObjectId],
     name_hashes: &mut [u32],
 ) -> Result<HashMap<ObjectId, Bitmap>, PackBitmapWriteError> {
-    let mut by_date: Vec<&ObjectId> = selected.iter().collect();
-    by_date.sort_by(|a, b| commit_date_cmp(repo, **a, **b));
-    let mut stored: HashMap<ObjectId, Bitmap> = HashMap::new();
-    for &&commit in &by_date {
-        let mut bm = Bitmap::new();
-        if let Some(parent) = first_parent(repo, commit)? {
-            if let Some(parent_bm) = stored.get(&parent) {
-                bm = parent_bm.clone();
-            }
-        }
-        fill_commit_bitmap(repo, order, &mut bm, commit, name_hashes)?;
-        stored.insert(commit, bm);
+    let mut topo = selected.to_vec();
+    topo.sort_by_key(|a| commit_date(repo, *a));
+    let mut computed: HashMap<ObjectId, Bitmap> = HashMap::new();
+    for commit in topo {
+        let mut bm = seed_from_computed_ancestors(repo, commit, &computed)?;
+        fill_commit_bitmap(repo, order, &mut bm, commit, name_hashes, &computed)?;
+        computed.insert(commit, bm);
     }
-    Ok(stored)
+    Ok(computed)
 }
 
-fn commit_date_cmp(repo: &Repository, a: ObjectId, b: ObjectId) -> std::cmp::Ordering {
-    let da = commit_date(repo, a);
-    let db = commit_date(repo, b);
-    da.cmp(&db)
+fn seed_from_computed_ancestors(
+    repo: &Repository,
+    commit: ObjectId,
+    computed: &HashMap<ObjectId, Bitmap>,
+) -> Result<Bitmap, PackBitmapWriteError> {
+    let obj = repo
+        .odb
+        .read(&commit)
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+    let c = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+    let mut bm = Bitmap::new();
+    for parent in c.parents {
+        if let Some(parent_bm) = computed.get(&parent) {
+            bm.or_assign(parent_bm);
+            continue;
+        }
+        let mut walk = parent;
+        loop {
+            if let Some(ancestor_bm) = computed.get(&walk) {
+                bm.or_assign(ancestor_bm);
+                break;
+            }
+            let parent_obj = repo
+                .odb
+                .read(&walk)
+                .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            let parent_commit = parse_commit(&parent_obj.data)
+                .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            match parent_commit.parents.first().copied() {
+                Some(next) => walk = next,
+                None => break,
+            }
+        }
+    }
+    Ok(bm)
+}
+
+fn hash_cache_row_count(order: &BitmapOrder) -> usize {
+    order
+        .pack_index()
+        .map_or(order.object_count() as usize, |idx| idx.len())
+}
+
+fn store_name_hash(order: &BitmapOrder, name_hashes: &mut [u32], oid: &ObjectId, path: &str) {
+    if path.is_empty() {
+        return;
+    }
+    let Some(row) = order.storage_row_for_oid(oid) else {
+        return;
+    };
+    let r = row as usize;
+    if r < name_hashes.len() {
+        name_hashes[r] = pack_name_hash(path);
+    }
 }
 
 fn commit_date(repo: &Repository, oid: ObjectId) -> i64 {
@@ -611,24 +629,13 @@ fn commit_date(repo: &Repository, oid: ObjectId) -> i64 {
         .unwrap_or(0)
 }
 
-fn first_parent(
-    repo: &Repository,
-    commit: ObjectId,
-) -> Result<Option<ObjectId>, PackBitmapWriteError> {
-    let obj = repo
-        .odb
-        .read(&commit)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-    let c = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-    Ok(c.parents.first().copied())
-}
-
 fn fill_commit_bitmap(
     repo: &Repository,
     order: &BitmapOrder,
     bitmap: &mut Bitmap,
     tip: ObjectId,
     name_hashes: &mut [u32],
+    computed: &HashMap<ObjectId, Bitmap>,
 ) -> Result<(), PackBitmapWriteError> {
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     queue.push_back(tip);
@@ -638,6 +645,10 @@ fn fill_commit_bitmap(
         };
         let p = pos as usize;
         if bitmap.get(p) {
+            continue;
+        }
+        if let Some(cached) = computed.get(&oid) {
+            bitmap.or_assign(cached);
             continue;
         }
         bitmap.set(p);
@@ -678,16 +689,7 @@ fn fill_tree_bitmap(
         return Ok(());
     }
     bitmap.set(p);
-    if p < name_hashes.len() {
-        let path_key = if prefix.is_empty() {
-            String::new()
-        } else {
-            prefix.clone()
-        };
-        if !path_key.is_empty() {
-            name_hashes[p] = pack_name_hash(&path_key);
-        }
-    }
+    store_name_hash(order, name_hashes, &tree_oid, &prefix);
     let obj = repo
         .odb
         .read(&tree_oid)
@@ -720,9 +722,7 @@ fn fill_tree_bitmap(
                 if !bitmap.get(cp) {
                     bitmap.set(cp);
                 }
-                if cp < name_hashes.len() {
-                    name_hashes[cp] = pack_name_hash(&path);
-                }
+                store_name_hash(order, name_hashes, &entry.oid, &path);
             }
             ObjectKind::Tag | ObjectKind::Commit => {
                 if !bitmap.get(cp) {
@@ -747,25 +747,22 @@ fn plan_xor_compression(
 ) -> (Vec<ObjectId>, XorPlan) {
     let mut selected_sorted: Vec<ObjectId> = selected.to_vec();
     selected_sorted.sort_by_key(|a| commit_date(repo, *a));
-    let ewahs: Vec<EwahBitmap> = selected_sorted
-        .iter()
-        .map(|c| EwahBitmap::from_bitmap(&commit_bitmaps[c]))
-        .collect();
-    let n = ewahs.len();
+    let n = selected_sorted.len();
     let mut xor_prev = vec![None; n];
     let mut payload = Vec::with_capacity(n);
     for i in 0..n {
-        let mut best = ewahs[i].clone();
+        let base = &commit_bitmaps[&selected_sorted[i]];
+        let mut best_bm = base.clone();
         let mut best_off = 0usize;
+        let mut best_words = best_bm.word_len();
         for off in 1..=MAX_XOR_SEARCH.min(i) {
-            let x = EwahBitmap::xor_ewah(&ewahs[i], &ewahs[i - off]);
-            let mut buf_a = Vec::new();
-            let mut buf_b = Vec::new();
-            best.serialize(&mut buf_a);
-            x.serialize(&mut buf_b);
-            if buf_b.len() < buf_a.len() {
-                best = x;
+            let mut candidate = base.clone();
+            candidate.xor_assign(&commit_bitmaps[&selected_sorted[i - off]]);
+            let words = candidate.word_len();
+            if words < best_words {
+                best_bm = candidate;
                 best_off = off;
+                best_words = words;
             }
         }
         xor_prev[i] = if best_off == 0 {
@@ -773,7 +770,7 @@ fn plan_xor_compression(
         } else {
             Some(i - best_off)
         };
-        payload.push(best);
+        payload.push(EwahBitmap::from_bitmap(&best_bm));
     }
     (selected_sorted, XorPlan { xor_prev, payload })
 }
