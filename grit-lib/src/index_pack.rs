@@ -9,7 +9,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::hash::Parallelism;
+use crate::hash::{verify_trailer, Parallelism};
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::pack::{verify_pack_and_collect, write_v2_pack_index_with_trailer};
@@ -73,6 +73,11 @@ pub fn ingest_received_pack(
             "received data is not a pack stream".to_owned(),
         ));
     }
+    verify_trailer(odb.hash_algo(), &pack).map_err(|e| {
+        Error::CorruptObject(format!(
+            "received pack checksum mismatch (download may be incomplete): {e}"
+        ))
+    })?;
     install_pack_bytes(pack, odb, opts)
 }
 
@@ -178,6 +183,11 @@ pub fn install_pack_path(
         let indexed = PackData::open(&stage_pack)?;
         let (records, trailer) = {
             let pack_bytes: &[u8] = indexed.deref();
+            verify_trailer(odb.hash_algo(), pack_bytes).map_err(|e| {
+                Error::CorruptObject(format!(
+                    "received pack checksum mismatch (download may be incomplete): {e}"
+                ))
+            })?;
             let records =
                 pack_index_records_with_threads(pack_bytes, odb, opts.index_parallelism(odb))?;
             let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
@@ -271,6 +281,55 @@ mod tests {
             },
         )
         .expect("build pack")
+    }
+
+    /// Regression for large-clone failures (#889): parallel index-pack must skip
+    /// 0-byte zlib members instead of mis-scanning the stream (`unknown packed-object type 0`).
+    #[test]
+    fn parallel_index_pack_zero_byte_blob_among_many() {
+        use crate::hash::Parallelism;
+        use crate::unpack_objects::pack_index_records_with_threads;
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
+
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        for i in 0..200 {
+            pb.add_full(PK::Blob, format!("payload-{i}\n").as_bytes());
+        }
+        pb.add_full(PK::Blob, b"");
+        for i in 200..400 {
+            pb.add_full(PK::Blob, format!("after-empty-{i}\n").as_bytes());
+        }
+        let pack = pb.build().bytes;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        for threads in [1_usize, 8] {
+            let records =
+                pack_index_records_with_threads(&pack, &odb, Parallelism::resolve(Some(threads)))
+                    .unwrap_or_else(|e| panic!("threads={threads}: {e}"));
+            assert_eq!(records.len(), 401, "threads={threads}");
+        }
+    }
+
+    #[test]
+    fn install_rejects_truncated_pack_before_object_scan() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(tmp.path());
+        let mut pack = single_blob_pack(b"truncated-before-index");
+        pack.truncate(pack.len().saturating_sub(8));
+        let err = install_pack_bytes(
+            pack,
+            &odb,
+            &IngestPackOptions {
+                fix_thin: false,
+                ..Default::default()
+            },
+        )
+        .expect_err("truncated pack");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("checksum mismatch") || msg.contains("truncated"),
+            "expected checksum/truncated error, got {msg}"
+        );
     }
 
     fn pack_dir_entries(pack_dir: &Path) -> Vec<std::path::PathBuf> {
