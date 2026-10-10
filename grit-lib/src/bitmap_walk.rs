@@ -76,7 +76,24 @@ impl ReachableSet {
     ///
     /// Propagates bitmap type-index decode failures.
     pub fn count_by_kind(&self, kind: ObjectKind) -> std::result::Result<usize, BitmapWalkError> {
-        Ok(self.iter_by_kind(kind).count())
+        self.count_by_kind_popcount(kind)
+    }
+
+    /// Count reachable objects of `kind` via type-bitmap intersection popcount.
+    ///
+    /// # Errors
+    ///
+    /// Propagates bitmap type-index decode failures.
+    pub fn count_by_kind_popcount(
+        &self,
+        kind: ObjectKind,
+    ) -> std::result::Result<usize, BitmapWalkError> {
+        let mut type_bits = Bitmap::new();
+        self.index
+            .type_bitmap(kind)
+            .expand_into_bitmap(&mut type_bits)?;
+        type_bits.and_assign(&self.bits);
+        Ok(type_bits.count_ones() + self.extended.iter().filter(|(_, k)| *k == kind).count())
     }
 
     /// Iterate reachable oids of `kind` in ascending bitmap position order, then extended oids sorted.
@@ -160,10 +177,11 @@ pub fn bitmap_filter_supported(filter: Option<&ObjectFilter>) -> bool {
     }
 }
 
-struct PeeledTips {
-    commits: Vec<ObjectId>,
-    tags: Vec<ObjectId>,
-    extra_objects: Vec<ObjectId>,
+/// Commit, tag, and loose object tips after ref peeling (avoids re-reading objects in bitmap walks).
+pub(crate) struct PeeledTips {
+    pub commits: Vec<ObjectId>,
+    pub tags: Vec<ObjectId>,
+    pub extra_objects: Vec<ObjectId>,
 }
 
 fn peel_tips(
@@ -266,6 +284,32 @@ impl BitmapIndex {
             .collect();
         Ok(stored_set == walked_set && walked.extended.is_empty())
     }
+
+    /// Like [`Self::reachability`], but `wants` are already split by peeled kind (no tip re-read).
+    pub(crate) fn reachability_with_peeled_wants(
+        self: &std::sync::Arc<Self>,
+        repo: &Repository,
+        wants: PeeledTips,
+        haves: &[ObjectId],
+        filter: Option<&ObjectFilter>,
+        missing: MissingAction,
+        filter_want_tips: &[ObjectId],
+    ) -> std::result::Result<ReachableSet, BitmapWalkError> {
+        if !shallow_boundary_oids(&repo.git_dir).is_empty()
+            || repo.git_dir.join("shallow").is_file()
+        {
+            return Err(BitmapWalkUnsupported.into());
+        }
+        if !bitmap_filter_supported(filter) {
+            return Err(BitmapWalkUnsupported.into());
+        }
+
+        let haves = find_objects_union(repo, self, haves, missing, false)?;
+        let mut want_set = find_objects_peeled(repo, self, wants, missing, false)?;
+        want_set.subtract(&haves);
+        apply_filter(repo, self, &mut want_set, filter, filter_want_tips)?;
+        Ok(want_set)
+    }
 }
 
 fn find_objects_union(
@@ -294,6 +338,16 @@ fn find_objects(
     ignore_stored_commit_bitmaps: bool,
 ) -> std::result::Result<ReachableSet, BitmapWalkError> {
     let peeled = peel_tips(repo, tips, missing)?;
+    find_objects_peeled(repo, index, peeled, missing, ignore_stored_commit_bitmaps)
+}
+
+fn find_objects_peeled(
+    repo: &Repository,
+    index: &std::sync::Arc<BitmapIndex>,
+    peeled: PeeledTips,
+    missing: MissingAction,
+    ignore_stored_commit_bitmaps: bool,
+) -> std::result::Result<ReachableSet, BitmapWalkError> {
     let mut bits = Bitmap::new();
     let mut extended = Vec::new();
     let mut extended_set = HashSet::new();
@@ -401,9 +455,7 @@ fn try_or_commit_bitmap(
     let Some(bm) = index.commit_bitmap(commit) else {
         return Ok(false);
     };
-    for pos in bm.positions() {
-        bits.set(pos as usize);
-    }
+    bm.or_into(bits);
     Ok(true)
 }
 
