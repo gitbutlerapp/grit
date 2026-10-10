@@ -3,21 +3,21 @@ title: Refs
 summary: Repository ref handles, transactions, backend selection, and path-based helpers.
 ---
 
-References name commits and other objects. Prefer an open [`Repository`](rustdoc:grit_lib::repo::Repository): call [`refs()`](rustdoc:grit_lib::repo::Repository::refs) to borrow the cached [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) selected for that repository, or [`with_ref_store`](rustdoc:grit_lib::repo::Repository::with_ref_store) to inject a custom backend (for example [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) or a wrapper like the [`custom_ref_store`](../../grit-examples/src/bin/custom_ref_store.rs) example).
+References name commits and other objects. Prefer an open [`Repository`](rustdoc:grit_lib::repo::Repository): call `refs()` to borrow the cached [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) selected for that repository, or `with_ref_store` to inject a custom backend (for example [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) or the `custom_ref_store` example below).
 
 Path-based helpers in [`refs`](rustdoc:grit_lib::refs) (`resolve_ref`, `list_refs`, `write_ref`, …) still work on a git directory; they open the same backend via [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store). Rev-parse and porcelain on a `Repository` always go through the handle's store.
 
 ## Backend selection
 
-On-disk layout is chosen once from **repository-local** config (`extensions.refStorage`), never from global or system config. [`RefStorageFormat::detect`](rustdoc:grit_lib::RefStorageFormat::detect) in [`ref_storage`](rustdoc:grit_lib::ref_storage) reads that value and returns [`Files`](rustdoc:grit_lib::RefStorageFormat::Files) (loose refs plus `packed-refs`) or [`Reftable`](rustdoc:grit_lib::RefStorageFormat::Reftable). [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store) and [`RepoCaches::open_ref_store`](rustdoc:grit_lib::repo_caches::RepoCaches::open_ref_store) construct [`FilesRefStore`](rustdoc:grit_lib::refs::store::FilesRefStore) or [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore). The store's [`format()`](rustdoc:grit_lib::refs::store::RefStore::format) reports which backend is active (`files`, `reftable`, or `memory` for injected stores).
+On-disk layout is chosen once from **repository-local** config (`extensions.refStorage`), never from global or system config. [`RefStorageFormat`](rustdoc:grit_lib::ref_storage::RefStorageFormat) in [`ref_storage`](rustdoc:grit_lib::ref_storage) reads that value via `detect` and returns `files` (loose refs plus `packed-refs`) or `reftable`. [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store) and [`RepoCaches`](rustdoc:grit_lib::repo_caches::RepoCaches) construct [`FilesRefStore`](rustdoc:grit_lib::refs::store::FilesRefStore) or [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore). The store's `format()` reports which backend is active (`files`, `reftable`, or `memory` for injected stores).
 
 ## Transactions
 
-Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTransaction): queue [`RefUpdate`](rustdoc:grit_lib::refs::store::RefUpdate) entries with [`Expected`](rustdoc:grit_lib::refs::store::Expected) old-value checks, optional [`ReflogUpdate`](rustdoc:grit_lib::refs::store::ReflogUpdate), then [`RefStore::prepare`](rustdoc:grit_lib::refs::store::RefStore::prepare) → commit or abort. Fetch, push, receive-pack, and [`update_refs`](rustdoc:grit_lib::gc::update_refs) route through this path so locking and compare-and-swap semantics stay in the backend.
+Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTransaction): queue [`RefUpdate`](rustdoc:grit_lib::refs::store::RefUpdate) entries with [`Expected`](rustdoc:grit_lib::refs::store::Expected) old-value checks, optional [`ReflogUpdate`](rustdoc:grit_lib::refs::store::ReflogUpdate), then `RefStore::prepare` → commit or abort. Fetch, push, receive-pack, and [`update_refs`](rustdoc:grit_lib::gc::update_refs) route through this path so locking and compare-and-swap semantics stay in the backend.
 
 ## Resolving HEAD and symbolic refs
 
-[`resolve_head`](rustdoc:grit_lib::state::resolve_head) reads `HEAD` and returns a [`HeadState`](rustdoc:grit_lib::state::HeadState). [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref) (or [`RefStore::resolve`](rustdoc:grit_lib::refs::store::RefStore::resolve) on the repository store) follows symbolic refs with cycle detection. [`read_ref_file`](rustdoc:grit_lib::refs::read_ref_file) returns a [`Ref`](rustdoc:grit_lib::refs::Ref) without resolving the full chain.
+[`resolve_head`](rustdoc:grit_lib::state::resolve_head) reads `HEAD` and returns a [`HeadState`](rustdoc:grit_lib::state::HeadState). [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref) (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. [`read_ref_file`](rustdoc:grit_lib::refs::read_ref_file) returns a [`Ref`](rustdoc:grit_lib::refs::Ref) without resolving the full chain.
 
 ## Listing, writing, and reflog
 
@@ -31,7 +31,7 @@ Reflog helpers live in [`reflog`](rustdoc:grit_lib::reflog) and on [`RefStore`](
 
 <!-- include: grit-examples/src/bin/guide_refs.rs -->
 
-**Custom ref store** — wrap [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) with operation counting and inject it via [`with_ref_store`](rustdoc:grit_lib::repo::Repository::with_ref_store):
+**Custom ref store** — wrap [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) with operation counting and inject it via `Repository::with_ref_store`:
 
 <!-- include: grit-examples/src/bin/custom_ref_store.rs -->
 
