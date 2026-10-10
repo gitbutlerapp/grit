@@ -19,8 +19,10 @@ use crate::index_pack::{ingest_received_pack_path, IngestPackOptions};
 use crate::objects::{parse_commit, parse_tag, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
-use crate::rev_list::{FilterObjectKind, ObjectFilter};
-use crate::transfer::{build_pack, PackBuildOptions};
+use crate::rev_list::{
+    FilterObjectKind, MissingAction, ObjectFilter, RevListOptions, RevListResult,
+};
+use crate::transfer::{build_pack, build_pack_from_send_list, reachable_closure, PackBuildOptions};
 
 const V2_SIGNATURE: &str = "# v2 git bundle\n";
 const V3_SIGNATURE: &str = "# v3 git bundle\n";
@@ -220,6 +222,12 @@ impl Bundle {
         &self.path
     }
 
+    /// Byte offset in [`Self::path`] where the `PACK` stream begins.
+    #[must_use]
+    pub fn pack_byte_offset(&self) -> u64 {
+        self.pack_offset
+    }
+
     /// Check prerequisites against `repo` and ref connectivity.
     ///
     /// # Errors
@@ -281,10 +289,12 @@ impl Bundle {
             fix_thin: true,
             ..Default::default()
         };
-        ingest_received_pack_path(tmp.path().to_path_buf(), &repo.odb, &opts)
+        let ingested = ingest_received_pack_path(tmp.path().to_path_buf(), &repo.odb, &opts)
             .map_err(|e| BundleError::Io(e.to_string()))?;
         if self.header.filter.is_some() {
-            mark_newest_pack_promisor(&repo.odb)?;
+            std::fs::write(ingested.pack_path.with_extension("promisor"), b"")
+                .map_err(|e| BundleError::Io(e.to_string()))?;
+            repo.odb.invalidate_packs();
         }
         Ok(self
             .header
@@ -441,8 +451,24 @@ pub fn write_bundle(
     haves.sort();
     haves.dedup();
     let pack_opts = PackBuildOptions::for_local_push(None);
-    let pack = build_pack(&repo.odb, &include_oids, &haves, &pack_opts)
+    let empty_shallow = HashSet::new();
+    let have_closure = reachable_closure(&repo.odb, &haves, &HashSet::new(), true, &empty_shallow)
         .map_err(|e| BundleError::Io(e.to_string()))?;
+    let pack = if let Some(filter) = spec.filter.as_ref() {
+        let send = filtered_pack_objects(
+            repo,
+            &include_oids,
+            &spec.exclude,
+            filter.as_filter(),
+            &have_closure,
+        )
+        .map_err(|e| BundleError::Io(e.to_string()))?;
+        build_pack_from_send_list(&repo.odb, &send, &have_closure, &pack_opts)
+            .map_err(|e| BundleError::Io(e.to_string()))?
+    } else {
+        build_pack(&repo.odb, &include_oids, &haves, &pack_opts)
+            .map_err(|e| BundleError::Io(e.to_string()))?
+    };
     out.write_all(&pack)
         .map_err(|e| BundleError::Io(e.to_string()))?;
     Ok(())
@@ -694,29 +720,55 @@ fn filter_object_kind_name(kind: FilterObjectKind) -> &'static str {
     }
 }
 
-fn mark_newest_pack_promisor(odb: &Odb) -> std::result::Result<(), BundleError> {
-    let pack_dir = odb.objects_dir().join("pack");
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(&pack_dir).map_err(|e| BundleError::Io(e.to_string()))? {
-        let entry = entry.map_err(|e| BundleError::Io(e.to_string()))?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("pack") {
-            continue;
+/// Object list for a filtered bundle pack (`rev-list --objects --filter`).
+fn filtered_pack_objects(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    filter: &ObjectFilter,
+    have_closure: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let positive: Vec<String> = include.iter().map(ObjectId::to_hex).collect();
+    let negative: Vec<String> = exclude
+        .iter()
+        .map(|oid| format!("^{}", oid.to_hex()))
+        .collect();
+    let options = RevListOptions {
+        objects: true,
+        no_object_names: true,
+        quiet: true,
+        filter: Some(filter.clone()),
+        missing_action: MissingAction::Error,
+        ..Default::default()
+    };
+    let walk = crate::rev_list::rev_list(repo, &positive, &negative, &options)?;
+    Ok(collect_filtered_send_list(&walk, have_closure))
+}
+
+fn collect_filtered_send_list(
+    walk: &RevListResult,
+    have_closure: &HashSet<ObjectId>,
+) -> Vec<ObjectId> {
+    let mut send = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |oid: ObjectId| {
+        if have_closure.contains(&oid) {
+            return;
         }
-        let meta = entry
-            .metadata()
-            .map_err(|e| BundleError::Io(e.to_string()))?;
-        let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        if newest.as_ref().is_none_or(|(t, _)| modified > *t) {
-            newest = Some((modified, path));
+        if seen.insert(oid) {
+            send.push(oid);
         }
+    };
+    for oid in &walk.commits {
+        push(*oid);
     }
-    if let Some((_, pack)) = newest {
-        std::fs::write(pack.with_extension("promisor"), b"")
-            .map_err(|e| BundleError::Io(e.to_string()))?;
-        odb.invalidate_packs();
+    for (oid, _) in &walk.objects {
+        push(*oid);
     }
-    Ok(())
+    for tag_oid in walk.tip_annotated_tag_by_commit.values() {
+        push(*tag_oid);
+    }
+    send
 }
 
 #[cfg(test)]

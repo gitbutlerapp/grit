@@ -3,9 +3,11 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::bundle::{read_header, write_bundle, Bundle, BundleError, BundleSpec};
+use grit_lib::bundle::{read_header, write_bundle, Bundle, BundleError, BundleSpec, FilterSpec};
+use grit_lib::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::transfer::{build_pack, PackBuildOptions};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -346,6 +348,138 @@ fn verify_prerequisites_not_connected_when_dangling() {
         report.into_result().unwrap_err(),
         BundleError::PrerequisitesNotConnected
     );
+}
+
+#[test]
+fn unbundle_promisor_marks_installed_pack_not_preexisting() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    git_ok(src, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(src.join("payload"), vec![b'x'; 8192]).unwrap();
+    git_ok(src, &["add", "payload"]);
+    git_ok(src, &["commit", "-q", "-m", "blob"]);
+    let tip = rev_parse(src, "HEAD");
+
+    let consumer = tempfile::tempdir().expect("consumer");
+    git_ok(
+        consumer.path(),
+        &["init", "-q", "--bare", "-b", "main", "."],
+    );
+    let src_repo = grit_repo(src);
+    let bare = grit_repo(consumer.path());
+    let seed_pack = build_pack(
+        &src_repo.odb,
+        &[tip],
+        &[],
+        &PackBuildOptions {
+            delta: false,
+            ..Default::default()
+        },
+    )
+    .expect("seed pack");
+    let seeded = install_pack_bytes(seed_pack, &bare.odb, &IngestPackOptions::default())
+        .expect("install seed");
+    let old_pack = seeded.pack_path;
+    assert!(old_pack.is_file());
+    let future = filetime::FileTime::from_unix_time(2_000_000_000, 0);
+    filetime::set_file_mtime(&old_pack, future).expect("touch old pack mtime");
+
+    let filtered = src.join("filtered.bundle");
+    {
+        let mut f = std::fs::File::create(&filtered).expect("create");
+        write_bundle(
+            &grit_repo(src),
+            &BundleSpec {
+                include: vec![(tip, "refs/heads/main".to_owned())],
+                filter: Some(FilterSpec::parse("blob:none").expect("filter")),
+                ..Default::default()
+            },
+            &mut f,
+        )
+        .expect("write filtered bundle");
+    }
+
+    let before: std::collections::HashSet<_> =
+        std::fs::read_dir(consumer.path().join("objects/pack"))
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "pack"))
+            .collect();
+    assert_eq!(before.len(), 1);
+
+    Bundle::open(&filtered)
+        .expect("open")
+        .unbundle(&bare)
+        .expect("unbundle");
+
+    let packs: Vec<_> = std::fs::read_dir(consumer.path().join("objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "pack"))
+        .collect();
+    assert_eq!(packs.len(), 2, "expected seed pack plus bundle pack");
+    assert!(
+        !old_pack.with_extension("promisor").exists(),
+        "pre-existing pack must not get a promisor marker"
+    );
+    let new_pack = packs.iter().find(|p| *p != &old_pack).expect("new pack");
+    assert!(
+        new_pack.with_extension("promisor").is_file(),
+        "pack installed by filtered unbundle must be promisor-marked"
+    );
+}
+
+#[test]
+fn grit_write_filtered_bundle_omits_blobs_from_pack() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    git_ok(src, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(src.join("big.bin"), vec![b'b'; 4096]).unwrap();
+    git_ok(src, &["add", "big.bin"]);
+    git_ok(src, &["commit", "-q", "-m", "with blob"]);
+    let tip = rev_parse(src, "HEAD");
+    let bundle_path = src.join("filtered-write.bundle");
+    {
+        let mut f = std::fs::File::create(&bundle_path).expect("create");
+        write_bundle(
+            &grit_repo(src),
+            &BundleSpec {
+                include: vec![(tip, "refs/heads/main".to_owned())],
+                filter: Some(FilterSpec::parse("blob:none").expect("filter")),
+                ..Default::default()
+            },
+            &mut f,
+        )
+        .expect("write");
+    }
+    let bundle = Bundle::open(&bundle_path).expect("open");
+    assert!(bundle.header().filter.is_some());
+    let bytes = std::fs::read(&bundle_path).expect("read");
+    let pack = &bytes[bundle.pack_byte_offset() as usize..];
+    let scratch = tempfile::tempdir().expect("scratch odb");
+    let odb = grit_lib::odb::Odb::new(scratch.path());
+    let ingested = install_pack_bytes(pack.to_vec(), &odb, &IngestPackOptions::default())
+        .expect("index bundle pack");
+    let mut saw_commit = false;
+    let mut saw_tree = false;
+    for oid in ingested.object_ids {
+        let kind = odb.read(&oid).expect("read packed object").kind;
+        assert_ne!(
+            kind,
+            grit_lib::objects::ObjectKind::Blob,
+            "blob must be omitted from blob:none bundle pack"
+        );
+        if kind == grit_lib::objects::ObjectKind::Commit {
+            saw_commit = true;
+        }
+        if kind == grit_lib::objects::ObjectKind::Tree {
+            saw_tree = true;
+        }
+    }
+    assert!(saw_commit, "pack should contain a commit");
+    assert!(saw_tree, "pack should contain a tree");
 }
 
 #[test]
