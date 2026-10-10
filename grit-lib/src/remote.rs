@@ -586,13 +586,19 @@ fn list_refs_http(
         }
     };
 
-    use crate::protocol::client_git_protocol_header_value;
+    // When `protocol_version` is set, honor it on discovery (including v0 with no
+    // `Git-Protocol` header). `None` defers to the HTTP client's config default.
+    let protocol_header_value = opts
+        .protocol_version
+        .and_then(crate::protocol::client_git_protocol_header_value);
+    let git_protocol: Option<&str> = match opts.protocol_version {
+        None => None,
+        Some(0) => Some(""),
+        Some(_) => protocol_header_value.as_deref(),
+    };
 
     let info_url = crate::transport::http::smart_info_refs_discovery_url(repo_url);
     let want_v2 = opts.protocol_version.unwrap_or(2) >= 2;
-    let requested = opts.protocol_version.unwrap_or(2);
-    let git_protocol_header = client_git_protocol_header_value(requested);
-    let git_protocol = git_protocol_header.as_deref();
     let (body, final_url) = client
         .get_with_final_url_exact(&info_url, git_protocol)
         .map_err(RemoteError::Library)?;
