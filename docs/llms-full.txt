@@ -5303,7 +5303,32 @@ cargo build --release -p grit-cli -p grit-utils
 
 **Measured outcomes:** the Object reads table below is generated from committed `grit-utils/baselines/odb-read.json` (hyperfine **≥5** runs per scenario, grit vs system git medians and peak RSS). Refresh with two invocations and `grit-bench compare run1.json run2.json --tolerance 0.10` before updating the baseline file and running `make docs`.
 
-Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git peak RSS on the large fixture; compare the table ratios to those bars rather than this prose.
+## grit-bench: network (clone, fetch, push, ls-remote)
+
+The **`grit-bench network`** suite compares **`grit`** and system **`git`** on the same remote URLs. Cached fixtures live under **`GRIT_BENCH_NETWORK_CACHE`** (default `/tmp/grit-bench-network-cache`):
+
+| Fixture | Shape |
+| --- | --- |
+| **deep-history** | **≥50 000** commits and **≥20 000** tracked files (built once via `git fast-import`) |
+| **many-refs** | deep-history plus **≥10 000** `refs/heads/bench-ref-*` branches |
+| **large-blobs** | a small tree with multi‑MiB blobs for pack-heavy transfer |
+
+Scenarios include **clone** over **`file://`**, **git http-backend** (local CGI), and **grit-http-server** smart HTTP; **incremental fetch** and **no-op fetch** over **`file://`**; **push** over **`file://`**; **`git ls-remote`** vs **`grit remote refs`** on the many-refs fixture; and a **server-side** comparison that times system **`git clone`** against **git http-backend** vs **grit-http-server** on the same published bare repo. Hermetic git config matches other suites (`GIT_CONFIG_NOSYSTEM`, empty global config).
+
+```bash
+cargo build --release -p grit-cli -p grit-http-server -p grit-utils
+./target/release/grit-bench network --format json --output grit-utils/baselines/network.json
+./target/release/grit-bench compare grit-utils/baselines/network.json /tmp/network-rerun.json --tolerance 0.10
+make docs
+```
+
+Integration smoke (tiny fixtures, eight scenarios; requires **hyperfine** on `PATH`): `cargo test -p grit-utils network_scenario_smoke_end_to_end`.
+
+Acceptance bars for the network performance pass are **≤1.2×** git wall time on client-side scenarios (clone, fetch, push, ls-remote over `file://` and smart HTTP). Compare the generated table ratios to that bar.
+
+**Server-side clone (`server-clone-http-compare-*`):** system **`git clone`** against **grit-http-server** is expected to stay above **1.2×** until the upload-pack path uses **reachability bitmaps** during negotiation (same dependency as Git’s `upload-pack` on large, pack-served repos). Client-side grit and git both pay similar pack transfer cost; the gap is dominated by grit’s in-process upload-pack enumeration without bitmaps, not HTTP keep-alive or side-band framing. Track under the MIDX/bitmap roadmap item rather than masking with compatibility shortcuts.
+
+Regenerate release binaries with **`cargo build --release -p grit-lib`** before **`grit-bench network`** so the timed **`grit`** binary includes library changes.
 
 ### Results
 
@@ -5326,6 +5351,11 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | commit | 2 | 0.58× | 0.68× |
 | delta_encode | 2 | — | — |
 | merge | 2 | 3.40× | 3.84× |
+| network-clone | 3 | 2.49× | 2.53× |
+| network-fetch | 2 | 8.72× | 16.73× |
+| network-ls-remote | 1 | 1.70× | 1.70× |
+| network-push | 1 | 21.43× | 21.43× |
+| network-server | 1 | 79.40× | 79.40× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 6 | 14.90× | 98.20× |
 | pick | 4 | 8.63× | 17.09× |
@@ -5343,30 +5373,34 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `rev-list-count-git.git` | git.git | 63.7 | 218 | 3.42× | ±35.7 ms |
-| `rev-list-count-objects-git.git` | git.git | 24.3 | 546,442 | 22454.26× | ±5,375 ms |
-| `serve-clone-git.git` | git.git | 819 | 0.00 | 0.00× | ±0.00 ms |
+| `clone-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 602 | 1,521 | 2.53× | ±27.1 ms |
+| `clone-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 671 | 1,669 | 2.49× | ±68.9 ms |
+| `clone-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 52,259 | 56,669 | 1.08× | ±2,437 ms |
 
-### commit
+### network-fetch
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `commit-10000` | synthetic-10000 | 167 | 81.3 | 0.49× | ±9.20 ms |
-| `commit-100000` | synthetic-100000 | 1,680 | 1,140 | 0.68× | ±48.6 ms |
+| `fetch-incr-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 44.8 | 749 | 16.73× | ±20.0 ms |
+| `fetch-noop-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 8.93 | 6.41 | 0.72× | ±0.48 ms |
+
+### network-ls-remote
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `ls-remote-file-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 44.1 | 75.1 | 1.70× | ±7.50 ms |
 
 ### delta_encode
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `delta-encode-binary-256k` | synthetic-256k-binary | — | 0.36 | — | ±0.00 ms |
-| `delta-encode-text-256k` | synthetic-256k-text | — | 0.54 | — | ±0.01 ms |
+| `push-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 33.4 | 717 | 21.43× | ±9.04 ms |
 
 ### merge
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `merge-10000` | synthetic-10000 | 105 | 310 | 2.95× | ±23.6 ms |
-| `merge-100000` | synthetic-100000 | 289 | 1,110 | 3.84× | ±93.2 ms |
+| `server-clone-http-compare-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 688 | 54,617 | 79.40× | ±2,671 ms |
 
 ### object_reads
 
