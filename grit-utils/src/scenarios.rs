@@ -7,8 +7,9 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{
-    create_repo, create_repo_with_history, dirty_repo, modify_files_for_diff,
-    prepare_add_iteration, prepare_commit_iteration, prepare_restore_iteration, scratch_dir,
+    create_blame_deep_history_repo, create_repo, create_repo_with_history, dirty_repo,
+    modify_files_for_diff, prepare_add_iteration, prepare_commit_iteration,
+    prepare_restore_iteration, scratch_dir,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_switch,
@@ -505,6 +506,38 @@ pub fn run_commit_suite(
         )?);
     }
     Ok(build_report(git, grit, timestamp, scenarios))
+}
+
+/// `grit blame` vs `git blame --porcelain` on a file with deep linear history.
+pub fn run_blame_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    commit_count: usize,
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let repo = create_blame_deep_history_repo(git, commit_count)?;
+    let scenario = run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: format!("blame-deep-{commit_count}"),
+            group: "blame".into(),
+            fixture: format!("blame-linear-{commit_count}"),
+            description: "blame one file with deep history (git --porcelain vs grit blame)".into(),
+            grit_argv: vec!["blame".into(), "blame.txt".into()],
+            git_argv: vec!["blame".into(), "--porcelain".into(), "blame.txt".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &repo,
+    )?;
+    Ok(build_report(git, grit, timestamp, vec![scenario]))
 }
 
 fn build_report(

@@ -201,6 +201,25 @@ pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Repository with many sequential edits to a single tracked file (for blame benches).
+pub fn create_blame_deep_history_repo(git: &Path, commit_count: usize) -> Result<PathBuf> {
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    run_git(git, &dir, &["init", "-q"])?;
+    let path = "blame.txt";
+    fs::write(dir.join(path), "seed\n")?;
+    run_git(git, &dir, &["add", path])?;
+    run_git(git, &dir, &["commit", "-qm", "init"])?;
+    for i in 1..commit_count {
+        let body = format!("line {i}\nseed\n");
+        fs::write(dir.join(path), body)?;
+        run_git(git, &dir, &["add", path])?;
+        run_git(git, &dir, &["commit", "-qm", &format!("edit {i}")])?;
+    }
+    Ok(dir)
+}
+
 fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     let out = Command::new(git).args(args).current_dir(dir).output()?;
     if !out.status.success() {

@@ -15,8 +15,8 @@ use grit_utils::odb_driver::{self, open_repo};
 use grit_utils::odb_suite::{run_odb_backend_suite, run_odb_suite, OdbRunConfig};
 use grit_utils::render::{render_markdown, render_text};
 use grit_utils::scenarios::{
-    run_add_suite, run_commit_suite, run_diff_suite, run_hot_path_suite, run_log_suite,
-    run_prepare_add, run_prepare_commit, run_prepare_merge, run_prepare_pick,
+    run_add_suite, run_blame_suite, run_commit_suite, run_diff_suite, run_hot_path_suite,
+    run_log_suite, run_prepare_add, run_prepare_commit, run_prepare_merge, run_prepare_pick,
     run_prepare_pick_series, run_prepare_restore, run_prepare_switch, run_restore_suite,
     run_status_suite, RunConfig,
 };
@@ -87,6 +87,11 @@ enum Cmd {
     Log {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000])]
         sizes: Vec<usize>,
+    },
+    /// Blame one file with deep linear history vs `git blame --porcelain`
+    Blame {
+        #[arg(long, default_value_t = 2_000)]
+        commits: usize,
     },
     /// Switch / pick / merge hot-path scenarios (L/H sizes by default)
     HotPaths {
@@ -475,6 +480,11 @@ fn main() -> Result<()> {
             eprintln!("Running log benchmarks...");
             let cfg = run_config(&cli, false);
             run_log_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::Blame { commits } => {
+            eprintln!("Running blame benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_blame_suite(&hyperfine, &git, &grit, &cfg, *commits, timestamp)?
         }
         Cmd::Odb => {
             eprintln!("Running ODB read benchmarks...");
