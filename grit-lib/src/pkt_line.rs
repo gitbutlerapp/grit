@@ -148,7 +148,11 @@ pub fn read_data_lines_until_flush(
 }
 
 /// Write one sideband pkt-line on `band`.
-pub fn write_sideband_packet(w: &mut impl Write, band: u8, payload: &[u8]) -> io::Result<()> {
+pub fn write_sideband_packet(
+    w: &mut (impl Write + ?Sized),
+    band: u8,
+    payload: &[u8],
+) -> io::Result<()> {
     let len = 4 + 1 + payload.len();
     write!(w, "{len:04x}")?;
     w.write_all(&[band])?;
