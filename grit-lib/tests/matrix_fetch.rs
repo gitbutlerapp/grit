@@ -365,12 +365,11 @@ fn ssh_driver(protocol: u8, scratch: PathBuf) -> Option<Driver> {
     })
 }
 
-/// Build the http driver for `protocol`. Requires the `grit` and
-/// `grit-http-server` binaries; `None` otherwise. Uses `http_fetch` with a
+/// Build the http driver for `protocol`. Requires the `grit-http-server`
+/// binary; `None` otherwise. Uses `http_fetch` with a
 /// `UreqHttpClient` whose `Git-Protocol` header selects v2 (or omits it for
 /// v0/v1).
 fn http_driver(protocol: u8) -> Option<Driver> {
-    let grit_bin = find_binary("grit")?;
     let server_bin = find_binary("grit-http-server")?;
     let label = if protocol >= 2 { "http/v2" } else { "http/v1" };
     Some(Driver {

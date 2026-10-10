@@ -9,8 +9,8 @@
 //! We assert the tracking refs + tag land, the objects arrive, the fetched main
 //! tip matches `git rev-parse`, and the pack `fsck`s clean.
 //!
-//! The test skips gracefully (returns early) when `git`, the `grit` client binary, or
-//! the `grit-http-server` binary is unavailable, or the server fails to bind —
+//! The test skips gracefully (returns early) when `git` or the
+//! `grit-http-server` binary is unavailable, or the server fails to bind —
 //! the server itself does not require `grit` on `PATH`.
 //! the happy path is otherwise real end-to-end HTTP wire I/O.
 //!
@@ -174,10 +174,6 @@ impl Drop for ServerGuard {
 
 #[test]
 fn fetch_over_smart_http_lands_refs_and_objects() {
-    let Some(grit_bin) = find_binary("grit") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
-        return;
-    };
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
         return;
@@ -573,10 +569,6 @@ impl<C: HttpClient> HttpClient for IoFailUploadPackClient<C> {
 
 #[test]
 fn fetch_over_smart_http_v2_lands_refs_and_objects() {
-    let Some(grit_bin) = find_binary("grit") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
-        return;
-    };
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
         return;
@@ -891,10 +883,6 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
 /// complete a many-ref / large-pack fetch (the v0/v1 path mis-handles this).
 #[test]
 fn fetch_from_config_client_v2_many_refs_and_large_pack() {
-    let Some(grit_bin) = find_binary("grit") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
-        return;
-    };
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
         return;
@@ -999,10 +987,6 @@ fn fetch_from_config_client_v2_many_refs_and_large_pack() {
 
 #[test]
 fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
-    let Some(grit_bin) = find_binary("grit") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
-        return;
-    };
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
         return;
@@ -1074,10 +1058,6 @@ fn make_bare_target(root: &Path, name: &str) -> PathBuf {
 
 #[test]
 fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
-    let Some(grit_bin) = find_binary("grit") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
-        return;
-    };
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
         return;
@@ -1345,10 +1325,6 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
 /// client-side gate, declines the update.
 #[test]
 fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
-    let Some(grit_bin) = find_binary("grit") else {
-        eprintln!("SKIP: `grit` binary not found in target dir (build grit-cli first)");
-        return;
-    };
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
         return;

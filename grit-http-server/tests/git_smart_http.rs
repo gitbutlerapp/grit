@@ -3,12 +3,17 @@
 
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .current_dir(dir)
+    let status = git_cmd(dir, args).status().expect("spawn git");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+fn git_cmd(dir: &Path, args: &[&str]) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir)
         .args(args)
         .env("GIT_AUTHOR_NAME", "T")
         .env("GIT_AUTHOR_EMAIL", "t@example.com")
@@ -17,21 +22,28 @@ fn git(dir: &Path, args: &[&str]) {
         .env("GIT_COMMITTER_EMAIL", "t@example.com")
         .env("GIT_COMMITTER_DATE", "2005-04-07T22:13:13 +0200")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .status()
-        .expect("spawn git");
-    assert!(status.success(), "git {args:?} failed");
+        .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    cmd
 }
 
 fn git_ok(dir: &Path, args: &[&str]) -> bool {
-    Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+    git_cmd(dir, args)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn git_output(dir: &Path, args: &[&str]) -> Output {
+    git_cmd(dir, args).output().expect("spawn git")
+}
+
+fn rev_parse(dir: &Path, rev: &str) -> String {
+    let out = git_output(dir, &["rev-parse", rev]);
+    assert!(out.status.success(), "git rev-parse {rev} failed");
+    String::from_utf8(out.stdout)
+        .expect("utf8")
+        .trim()
+        .to_owned()
 }
 
 fn find_binary(name: &str) -> Option<PathBuf> {
@@ -46,9 +58,15 @@ fn find_binary(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn free_port() -> Option<u16> {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
-    Some(listener.local_addr().ok()?.port())
+fn require_binary(name: &str) -> PathBuf {
+    find_binary(name).unwrap_or_else(|| {
+        panic!("{name} binary not found (build grit-http-server with `cargo build -p grit-http-server`)")
+    })
+}
+
+fn require_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral port");
+    listener.local_addr().expect("local addr").port()
 }
 
 fn path_without_cargo_bins() -> String {
@@ -84,7 +102,7 @@ impl Drop for ServerGuard {
     }
 }
 
-fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Option<Child> {
+fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Child {
     Command::new(server_bin)
         .arg("--root")
         .arg(root)
@@ -95,15 +113,12 @@ fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Option<Child> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .ok()
+        .expect("could not spawn grit-http-server")
 }
 
 #[test]
-fn system_git_clone_fetch_v2_and_push_over_grit_http_server() {
-    let Some(server_bin) = find_binary("grit-http-server") else {
-        eprintln!("SKIP: grit-http-server binary not found (build it first)");
-        return;
-    };
+fn system_git_clone_fetch_v0_v2_and_push_over_grit_http_server() {
+    let server_bin = require_binary("grit-http-server");
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let origin = tmp.path().join("origin");
@@ -128,19 +143,13 @@ fn system_git_clone_fetch_v2_and_push_over_grit_http_server() {
     );
     git(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
 
-    let Some(port) = free_port() else {
-        eprintln!("SKIP: could not allocate a free port");
-        return;
-    };
-    let Some(child) = spawn_server(&server_bin, &root, port) else {
-        eprintln!("SKIP: could not spawn grit-http-server");
-        return;
-    };
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port);
     let _guard = ServerGuard(child);
-    if !wait_ready(port) {
-        eprintln!("SKIP: grit-http-server did not become ready");
-        return;
-    }
+    assert!(
+        wait_ready(port),
+        "grit-http-server did not become ready on port {port}"
+    );
 
     let url = format!("http://127.0.0.1:{port}/project.git");
 
@@ -156,12 +165,31 @@ fn system_git_clone_fetch_v2_and_push_over_grit_http_server() {
     );
     assert!(git_ok(&clone_dir, &["fsck"]));
 
-    std::fs::write(clone_dir.join("README"), "hello\nworld\n").unwrap();
-    git(&clone_dir, &["commit", "-q", "-am", "extend readme"]);
-    assert!(git_ok(
-        &clone_dir,
-        &["-c", "protocol.version=2", "fetch", "origin"]
-    ));
+    // New commit on the served bare repo, then explicit protocol v0 fetch.
+    std::fs::write(origin.join("v0-fetch.txt"), "v0\n").unwrap();
+    git(&origin, &["add", "v0-fetch.txt"]);
+    git(&origin, &["commit", "-q", "-m", "for v0 fetch"]);
+    git(&origin, &["push", "-q", url.as_str(), "main"]);
+    let v0_tip = rev_parse(&bare, "refs/heads/main");
+    git(&clone_dir, &["-c", "protocol.version=0", "fetch", "origin"]);
+    assert_eq!(
+        rev_parse(&clone_dir, "origin/main"),
+        v0_tip,
+        "protocol v0 fetch must update origin/main to the remote tip"
+    );
+
+    // Another remote commit, then explicit protocol v2 fetch.
+    std::fs::write(origin.join("v2-fetch.txt"), "v2\n").unwrap();
+    git(&origin, &["add", "v2-fetch.txt"]);
+    git(&origin, &["commit", "-q", "-m", "for v2 fetch"]);
+    git(&origin, &["push", "-q", url.as_str(), "main"]);
+    let v2_tip = rev_parse(&bare, "refs/heads/main");
+    git(&clone_dir, &["-c", "protocol.version=2", "fetch", "origin"]);
+    assert_eq!(
+        rev_parse(&clone_dir, "origin/main"),
+        v2_tip,
+        "protocol v2 fetch must update origin/main to the remote tip"
+    );
 
     std::fs::write(clone_dir.join("branch.txt"), "topic\n").unwrap();
     git(&clone_dir, &["checkout", "-q", "-b", "topic"]);
