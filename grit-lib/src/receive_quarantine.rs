@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
+use crate::objects::HashAlgo;
 use crate::odb::Odb;
 
 static QUARANTINE_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -19,16 +20,28 @@ static QUARANTINE_SEQ: AtomicU64 = AtomicU64::new(0);
 pub struct ReceiveQuarantine {
     path: PathBuf,
     main_objects: PathBuf,
+    config_git_dir: Option<PathBuf>,
+    hash_algo: HashAlgo,
     migrated: bool,
 }
 
 impl ReceiveQuarantine {
-    /// Create `tmp_objdir-incoming-*` under `main_objects` with a `pack/` subdir.
+    /// Create `tmp_objdir-incoming-*` under the repository's primary `objects/` tree.
+    ///
+    /// `source` supplies the hash algorithm and optional config git dir so pack
+    /// ingestion matches the receiving repository (including SHA-256).
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] when the directory cannot be created.
-    pub fn create(main_objects: &Path) -> Result<Self> {
+    /// Returns [`Error::UnsupportedObjectStore`] when `source` is not files-backed,
+    /// or [`Error::Io`] when the directory cannot be created.
+    pub fn create(source: &Odb, git_dir: &Path) -> Result<Self> {
+        let main_objects = source
+            .files_objects_dir()
+            .ok_or(Error::UnsupportedObjectStore {
+                operation: "receive quarantine",
+            })?
+            .to_path_buf();
         let seq = QUARANTINE_SEQ.fetch_add(1, Ordering::Relaxed);
         let path = main_objects.join(format!(
             "tmp_objdir-incoming-{}-{}",
@@ -38,7 +51,9 @@ impl ReceiveQuarantine {
         fs::create_dir_all(path.join("pack")).map_err(Error::Io)?;
         Ok(Self {
             path,
-            main_objects: main_objects.to_path_buf(),
+            main_objects,
+            config_git_dir: Some(git_dir.to_path_buf()),
+            hash_algo: source.hash_algo(),
             migrated: false,
         })
     }
@@ -52,7 +67,17 @@ impl ReceiveQuarantine {
     /// Object database that reads/writes the quarantine and falls back to alternates.
     #[must_use]
     pub fn odb(&self) -> Odb {
-        Odb::new(&self.path).with_env_alternate_dirs(vec![self.main_objects.clone()])
+        let mut odb = Odb::new(&self.path).with_env_alternate_dirs(vec![self.main_objects.clone()]);
+        if let Some(git_dir) = &self.config_git_dir {
+            odb = odb.with_config_git_dir(git_dir.clone());
+        }
+        odb
+    }
+
+    /// Hash algorithm of the receiving repository.
+    #[must_use]
+    pub fn hash_algo(&self) -> HashAlgo {
+        self.hash_algo
     }
 
     /// Environment pairs for hook subprocesses (absolute paths when possible).
@@ -177,7 +202,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let main = tmp.path().join("objects");
         fs::create_dir_all(&main).unwrap();
-        let mut q = ReceiveQuarantine::create(&main).expect("quarantine");
+        let main_odb = Odb::new(&main);
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let mut q = ReceiveQuarantine::create(&main_odb, &git_dir).expect("quarantine");
         let oid = q
             .odb()
             .write(ObjectKind::Blob, b"quarantined")
@@ -190,11 +218,33 @@ mod tests {
     }
 
     #[test]
+    fn quarantine_odb_matches_repository_hash_algorithm() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join("repo.git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let init = std::process::Command::new("git")
+            .current_dir(&git_dir)
+            .args(["init", "-q", "--bare", "--object-format=sha256", "."])
+            .status();
+        if init.map(|s| !s.success()).unwrap_or(true) {
+            return;
+        }
+        let objects = git_dir.join("objects");
+        let source = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+        assert_eq!(source.hash_algo(), crate::objects::HashAlgo::Sha256);
+        let q = ReceiveQuarantine::create(&source, &git_dir).expect("quarantine");
+        assert_eq!(q.odb().hash_algo(), crate::objects::HashAlgo::Sha256);
+    }
+
+    #[test]
     fn discard_removes_quarantine_without_migrating() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let main = tmp.path().join("objects");
         fs::create_dir_all(&main).unwrap();
-        let q = ReceiveQuarantine::create(&main).expect("quarantine");
+        let main_odb = Odb::new(&main);
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let q = ReceiveQuarantine::create(&main_odb, &git_dir).expect("quarantine");
         let oid = q.odb().write(ObjectKind::Blob, b"x").expect("write");
         let path = q.path().to_path_buf();
         q.discard().expect("discard");

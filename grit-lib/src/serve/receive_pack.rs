@@ -179,9 +179,7 @@ pub fn receive_pack(
 
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
     let mut quarantine = if needs_pack {
-        repo.odb
-            .files_objects_dir()
-            .and_then(|d| ReceiveQuarantine::create(d).ok())
+        ReceiveQuarantine::create(&repo.odb, &repo.git_dir).ok()
     } else {
         None
     };
@@ -364,12 +362,7 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
             match read_packet(input)? {
                 None | Some(Packet::Flush) => break,
                 Some(Packet::Data(line)) => {
-                    let Some(value) = line.strip_prefix("push-option ") else {
-                        return Err(ServeError::Protocol(format!(
-                            "expected push-option line, got '{line}'"
-                        )));
-                    };
-                    push_options.push(value.to_owned());
+                    push_options.push(line);
                 }
                 Some(other) => {
                     return Err(ServeError::Protocol(format!(
@@ -429,23 +422,29 @@ fn apply_commands_with_hooks(
         return Ok(results);
     }
 
-    let mut hook_env_owned = push_option_env_owned(&request.push_options);
+    let algo = repo.odb.hash_algo();
+    let mut pre_hook_env_owned = push_option_env_owned(&request.push_options);
     if let Some(q) = quarantine.as_ref() {
-        hook_env_owned.extend(q.hook_env());
+        pre_hook_env_owned.extend(q.hook_env());
     }
-    let hook_env: Vec<(&str, &str)> = hook_env_owned
+    let pre_hook_env: Vec<(&str, &str)> = pre_hook_env_owned
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let post_hook_env_owned = push_option_env_owned(&request.push_options);
+    let post_hook_env: Vec<(&str, &str)> = post_hook_env_owned
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
     let all_cmds: Vec<&Command> = request.commands.iter().collect();
-    let pre_stdin = commands_stdin(&all_cmds);
+    let pre_stdin = commands_stdin(&all_cmds, algo);
     let (pre_result, pre_out) = run_hook_in_git_dir(
         repo,
         "pre-receive",
         &[],
         Some(pre_stdin.as_bytes()),
-        &hook_env,
+        &pre_hook_env,
     );
     relay_hook_sideband(&mut sideband_out, &pre_out)?;
     hook_records.push(hook_record("pre-receive", &pre_result));
@@ -469,12 +468,12 @@ fn apply_commands_with_hooks(
         if result.error.is_some() {
             continue;
         }
-        let zero = null_oid_hex();
+        let zero = null_oid_hex(algo);
         let old_hex = cmd.old.map(|o| o.to_hex()).unwrap_or_else(|| zero.clone());
         let new_hex = cmd.new.map(|o| o.to_hex()).unwrap_or(zero.clone());
         let args = [cmd.refname.as_str(), old_hex.as_str(), new_hex.as_str()];
         let (update_result, update_out) =
-            run_hook_in_git_dir(repo, "update", &args, None, &hook_env);
+            run_hook_in_git_dir(repo, "update", &args, None, &post_hook_env);
         relay_hook_sideband(&mut sideband_out, &update_out)?;
         hook_records.push(hook_record("update", &update_result));
         if matches!(update_result, HookResult::Failed(_)) {
@@ -506,13 +505,13 @@ fn apply_commands_with_hooks(
         .filter(|(_, r)| r.error.is_none())
         .map(|(c, _)| c)
         .collect();
-    let post_stdin = commands_stdin(&successful);
+    let post_stdin = commands_stdin(&successful, algo);
     let (post_result, post_out) = run_hook_in_git_dir(
         repo,
         "post-receive",
         &[],
         Some(post_stdin.as_bytes()),
-        &hook_env,
+        &post_hook_env,
     );
     relay_hook_sideband(&mut sideband_out, &post_out)?;
     hook_records.push(hook_record("post-receive", &post_result));
@@ -523,7 +522,7 @@ fn apply_commands_with_hooks(
     }
     if !post_update_args.is_empty() {
         let (pu_result, pu_out) =
-            run_hook_in_git_dir(repo, "post-update", &post_update_args, None, &hook_env);
+            run_hook_in_git_dir(repo, "post-update", &post_update_args, None, &post_hook_env);
         relay_hook_sideband(&mut sideband_out, &pu_out)?;
         hook_records.push(hook_record("post-update", &pu_result));
     }
@@ -554,8 +553,8 @@ fn push_option_env_owned(options: &[String]) -> Vec<(String, String)> {
     pairs
 }
 
-fn commands_stdin(commands: &[&Command]) -> String {
-    let zero = null_oid_hex();
+fn commands_stdin(commands: &[&Command], algo: crate::objects::HashAlgo) -> String {
+    let zero = null_oid_hex(algo);
     commands
         .iter()
         .map(|c| {
@@ -569,8 +568,8 @@ fn commands_stdin(commands: &[&Command]) -> String {
         .collect()
 }
 
-fn null_oid_hex() -> String {
-    "0000000000000000000000000000000000000000".to_owned()
+fn null_oid_hex(algo: crate::objects::HashAlgo) -> String {
+    ObjectId::null(algo).to_hex()
 }
 
 fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, captured: &[u8]) -> Result<()> {

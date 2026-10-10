@@ -175,7 +175,7 @@ enum RunningCommandInner {
     },
 }
 
-struct RecordingStdinBuffer(Mutex<Vec<u8>>);
+struct RecordingStdinBuffer(Arc<Mutex<Vec<u8>>>);
 
 impl Write for RecordingStdinBuffer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -232,7 +232,7 @@ impl RunningCommand {
                     stderr,
                     exit,
                 })),
-                stdin: piped_stdin.then(|| RecordingStdinBuffer(Mutex::new(Vec::new()))),
+                stdin: piped_stdin.then(|| RecordingStdinBuffer(Arc::new(Mutex::new(Vec::new())))),
             },
         }
     }
@@ -512,6 +512,7 @@ pub enum RecordedResponse {
 #[derive(Debug, Default)]
 pub struct RecordingRunner {
     pub recorded: Mutex<Vec<CommandSpec>>,
+    stdin_payloads: Mutex<Vec<Arc<Mutex<Vec<u8>>>>>,
     responses: Mutex<VecDeque<RecordedResponse>>,
 }
 
@@ -537,6 +538,17 @@ impl RecordingRunner {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Stdin bytes written to each spawned hook/filter, in spawn order.
+    #[must_use]
+    pub fn stdin_payloads(&self) -> Vec<Vec<u8>> {
+        self.stdin_payloads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|buf| buf.lock().unwrap_or_else(|e| e.into_inner()).clone())
+            .collect()
     }
 }
 
@@ -593,7 +605,14 @@ impl CommandRunner for RecordingRunner {
                     stderr: Vec::new(),
                     exit,
                 })),
-                stdin: piped_stdin.then(|| RecordingStdinBuffer(Mutex::new(Vec::new()))),
+                stdin: piped_stdin.then(|| {
+                    let buf = Arc::new(Mutex::new(Vec::new()));
+                    self.stdin_payloads
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(buf.clone());
+                    RecordingStdinBuffer(buf)
+                }),
             },
         })
     }

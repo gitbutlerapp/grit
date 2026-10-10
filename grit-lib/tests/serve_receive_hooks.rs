@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::command_runner::{CommandRunner, RecordedResponse, RecordingRunner};
 use grit_lib::environment::{Environment, RepositoryOptions};
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::serve::{receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, ServeOptions};
@@ -167,7 +167,7 @@ fn recording_runner_pre_receive_sees_push_options_and_ref_stdin() {
         oid.to_hex()
     ));
     body.extend_from_slice(b"0000");
-    body.extend_from_slice(&pkt_line("push-option ci.skip\n"));
+    body.extend_from_slice(&pkt_line("ci.skip\n"));
     body.extend_from_slice(b"0000");
     body.extend_from_slice(&pack);
 
@@ -176,7 +176,7 @@ fn recording_runner_pre_receive_sees_push_options_and_ref_stdin() {
     assert_eq!(outcome.push_options, vec!["ci.skip".to_owned()]);
 
     let specs = runner.specs();
-    assert!(!specs.is_empty(), "expected hook spawn");
+    assert_eq!(specs.len(), 1, "expected only pre-receive configured hook");
     let env = &specs[0].env.set;
     assert!(env
         .iter()
@@ -185,6 +185,11 @@ fn recording_runner_pre_receive_sees_push_options_and_ref_stdin() {
         .iter()
         .any(|(k, v)| k == "GIT_PUSH_OPTION_0" && v == "ci.skip"));
     assert!(env.iter().any(|(k, _)| k == "GIT_QUARANTINE_PATH"));
+    let stdins = runner.stdin_payloads();
+    assert_eq!(stdins.len(), 1);
+    let stdin = String::from_utf8(stdins[0].clone()).expect("utf8 stdin");
+    assert!(stdin.contains(&oid.to_hex()));
+    assert!(stdin.contains("refs/heads/main"));
 }
 
 #[test]
@@ -216,6 +221,10 @@ fn pre_receive_reject_leaves_main_object_store_clean() {
     );
     assert!(resolve_ref(&bare, "refs/heads/main").is_err());
     assert_eq!(count_pack_files(&bare.join("objects")), packs_before);
+    assert!(
+        !repo.odb.exists(&oid),
+        "rejected push must not install objects in the main ODB"
+    );
 }
 
 #[test]
@@ -295,6 +304,233 @@ fn post_receive_sees_applied_updates() {
     let recorded = std::fs::read_to_string(&log).expect("post-receive log");
     assert!(recorded.contains(&oid.to_hex()));
     assert!(recorded.contains("refs/heads/main"));
+}
+
+#[test]
+fn update_hook_runs_without_quarantine_env_after_migrate() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "."]);
+    write_executable_hook(
+        &bare.join("hooks").join("pre-receive"),
+        "#!/bin/sh\ncat >/dev/null\nexit 0\n",
+    );
+    write_executable_hook(
+        &bare.join("hooks").join("update"),
+        "#!/bin/sh\nif [ -n \"${GIT_QUARANTINE_PATH:-}\" ]; then exit 1; fi\necho blob | git hash-object -w --stdin >/dev/null\nexit 0\n",
+    );
+    let repo = open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("f"), "hook-write\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    let pack = pack_for_commit(&source, oid);
+    let body = push_body(None, oid, "refs/heads/main", &pack);
+
+    let (outcome, _) = serve_push(&repo, &body);
+    assert!(
+        outcome.updates[0].error.is_none(),
+        "update hook should succeed after migrate: {:?}",
+        outcome.updates
+    );
+}
+
+#[test]
+fn sha256_pre_receive_stdin_uses_full_width_null_oid() {
+    if Command::new("git")
+        .args(["init", "-q", "--object-format=sha256", "--bare"])
+        .status()
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
+        eprintln!("SKIP: git cannot create sha256 repos");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(
+        &bare,
+        &["init", "-q", "--bare", "--object-format=sha256", "."],
+    );
+    let log = bare.join("pre-receive-log");
+    write_executable_hook(
+        &bare.join("hooks").join("pre-receive"),
+        &format!("#!/bin/sh\ncat >'{log}'\n", log = log.display()),
+    );
+    let repo = open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(
+        &source,
+        &["init", "-q", "-b", "main", "--object-format=sha256", "."],
+    );
+    std::fs::write(source.join("f"), "s\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    assert_eq!(oid.algo(), HashAlgo::Sha256);
+    let pack = pack_for_commit(&source, oid);
+    let null = ObjectId::null(HashAlgo::Sha256).to_hex();
+    let mut body = pkt_line(&format!(
+        "{null} {} refs/heads/main\0report-status\n",
+        oid.to_hex()
+    ));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pack);
+
+    let (outcome, _) = serve_push(&repo, &body);
+    assert!(outcome.updates[0].error.is_none(), "{:?}", outcome.updates);
+    let stdin = std::fs::read_to_string(&log).expect("pre-receive stdin");
+    assert!(stdin.contains(&null));
+    assert!(stdin.contains(&oid.to_hex()));
+}
+
+#[test]
+fn report_status_matches_git_receive_pack_for_same_push() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "."]);
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("f"), "rs\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    let pack = pack_for_commit(&source, oid);
+    let zero = ObjectId::null(HashAlgo::Sha1).to_hex();
+    let mut body = pkt_line(&format!(
+        "{zero} {} refs/heads/main\0report-status\n",
+        oid.to_hex()
+    ));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pack);
+
+    let git_out = Command::new("git")
+        .current_dir(&bare)
+        .args(["receive-pack", "--stateless-rpc", "."])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .spawn()
+        .and_then(|mut child| {
+            child
+                .stdin
+                .take()
+                .expect("stdin")
+                .write_all(&body)
+                .map_err(std::io::Error::other)?;
+            child.wait_with_output()
+        })
+        .expect("git receive-pack");
+    assert!(
+        git_out.status.success(),
+        "git receive-pack failed: {}",
+        String::from_utf8_lossy(&git_out.stderr)
+    );
+
+    let bare2 = tmp.path().join("bare2");
+    std::fs::create_dir_all(&bare2).unwrap();
+    git(&bare2, &["init", "-q", "--bare", "."]);
+    let repo = open_bare_with_runner(&bare2, grit_lib::command_runner::system_command_runner());
+    let (outcome, grit_out) = serve_push(&repo, &body);
+    assert!(outcome.updates[0].error.is_none(), "{:?}", outcome.updates);
+
+    fn normalize_report(raw: &[u8]) -> String {
+        String::from_utf8_lossy(raw)
+            .lines()
+            .filter(|l| !l.is_empty() && *l != "0000")
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+    assert_eq!(
+        normalize_report(&git_out.stdout),
+        normalize_report(&grit_out),
+        "report-status pkt-lines should match git receive-pack"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn git_push_push_option_value_over_grit_http_server() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        eprintln!("SKIP: grit-http-server not built");
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("opts.git");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "."]);
+    git(&bare, &["config", "receive.advertisePushOptions", "true"]);
+    let seen = bare.join("push-options-seen");
+    write_executable_hook(
+        &bare.join("hooks").join("pre-receive"),
+        &format!(
+            "#!/bin/sh\ncat >/dev/null\necho \"count=${{GIT_PUSH_OPTION_COUNT:-0}}\" >'{seen}'\necho \"0=${{GIT_PUSH_OPTION_0:-}}\" >>'{seen}'\n",
+            seen = seen.display()
+        ),
+    );
+
+    let port = free_port().expect("port");
+    let child = Command::new(&server_bin)
+        .arg("--root")
+        .arg(&root)
+        .arg("--bind")
+        .arg(format!("127.0.0.1:{port}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn");
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: server not ready");
+        return;
+    }
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("x"), "1\n").unwrap();
+    git(&source, &["add", "x"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    git(
+        &source,
+        &[
+            "remote",
+            "add",
+            "grit",
+            &format!("http://127.0.0.1:{port}/opts.git"),
+        ],
+    );
+    let push = Command::new("git")
+        .current_dir(&source)
+        .args(["push", "-q", "--push-option=ci.skip", "grit", "main"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git push");
+    assert!(
+        push.status.success(),
+        "git push with push-option failed: {}",
+        String::from_utf8_lossy(&push.stderr)
+    );
+    let recorded = std::fs::read_to_string(&seen).expect("hook log");
+    assert!(recorded.contains("count=1"));
+    assert!(recorded.contains("0=ci.skip"));
 }
 
 #[cfg(unix)]
