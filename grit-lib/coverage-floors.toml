@@ -67,6 +67,7 @@ files = [
     "pack_bitmap/index.rs",
     "pack_bitmap/order.rs",
     "bitmap_walk.rs",
+    "pack_bitmap/writer.rs",
 ]
 minimum = 86.3
 
@@ -169,6 +170,9 @@ minimum = 85.0
 minimum = 85.0
 
 [file."pack_bitmap/order.rs"]
+minimum = 85.0
+
+[file."pack_bitmap/writer.rs"]
 minimum = 85.0
 
 [file."promisor.rs"]

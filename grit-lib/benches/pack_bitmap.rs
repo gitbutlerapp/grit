@@ -12,7 +12,8 @@ use std::sync::OnceLock;
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::bitmap_walk::ReachabilityQuery;
 use grit_lib::objects::ObjectId;
-use grit_lib::pack_bitmap::BitmapIndex;
+use grit_lib::pack::read_local_pack_indexes;
+use grit_lib::pack_bitmap::{BitmapIndex, PackBitmapWriteOptions, PackBitmapWriter};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::MissingAction;
 
@@ -139,6 +140,30 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                 .reachability(&repo, query, MissingAction::Error)
                 .expect("reachability");
             black_box(set.count());
+        });
+    });
+    group.bench_function("write_from_git_bitmap", |b| {
+        b.iter(|| {
+            let repo = Repository::open(&bare, None).expect("open repo");
+            let indexes = read_local_pack_indexes(bare.join("objects").as_path()).expect("idx");
+            let idx = indexes
+                .into_iter()
+                .max_by_key(|i| i.len())
+                .expect("pack")
+                .idx_path;
+            let _ = std::fs::remove_file({
+                let stem = idx.file_stem().and_then(|s| s.to_str()).unwrap_or("pack");
+                bare.join("objects/pack").join(format!("{stem}.bitmap"))
+            });
+            black_box(
+                PackBitmapWriter::write(
+                    &repo,
+                    &idx,
+                    &PackBitmapWriteOptions::default(),
+                    std::time::SystemTime::UNIX_EPOCH,
+                )
+                .expect("write"),
+            );
         });
     });
     group.finish();

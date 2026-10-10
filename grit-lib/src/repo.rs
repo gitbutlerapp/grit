@@ -903,6 +903,21 @@ impl Repository {
         self.write_index_at(&self.index_path(), index)
     }
 
+    /// Write a pack reachability `.bitmap` sidecar for `pack_idx_path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::pack_bitmap::PackBitmapWriteError`] when the pack is not
+    /// closed under reachability from the repository refs used for validation.
+    pub fn write_pack_bitmap(
+        &self,
+        pack_idx_path: &std::path::Path,
+        options: &crate::pack_bitmap::PackBitmapWriteOptions,
+        now: std::time::SystemTime,
+    ) -> std::result::Result<std::path::PathBuf, crate::pack_bitmap::PackBitmapWriteError> {
+        crate::pack_bitmap::PackBitmapWriter::write(self, pack_idx_path, options, now)
+    }
+
     /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`).
     ///
     /// Opportunistic writers such as `status` stat refresh call this instead of

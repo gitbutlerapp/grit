@@ -5,6 +5,8 @@
 mod error;
 mod index;
 mod order;
+mod writer;
 
 pub use error::BitmapError;
 pub use index::{BitmapIndex, BitmapIndexCache, CommitReachabilityBitmap, TypeBitmap};
+pub use writer::{PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter};

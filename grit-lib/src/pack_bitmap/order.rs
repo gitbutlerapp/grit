@@ -138,6 +138,13 @@ impl BitmapOrder {
         })
     }
 
+    pub(crate) fn pack_index(&self) -> Option<Arc<PackIndex>> {
+        match self {
+            Self::Pack { index, .. } => Some(Arc::clone(index)),
+            Self::Midx { .. } => None,
+        }
+    }
+
     pub(crate) fn load_midx(objects_dir: &Path) -> Result<Option<Self>> {
         let tables = match load_midx_reuse_tables(objects_dir)? {
             Some(t) => t,

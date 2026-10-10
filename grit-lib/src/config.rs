@@ -1899,6 +1899,45 @@ impl ConfigSet {
             .unwrap_or(true)
     }
 
+    /// Default for `pack.writeBitmapHashCache` (Git default: true).
+    #[must_use]
+    pub fn pack_write_bitmap_hash_cache(&self) -> bool {
+        self.get_bool("pack.writebitmaphashcache")
+            .or_else(|| self.get_bool("pack.writeBitmapHashCache"))
+            .and_then(|r| r.ok())
+            .unwrap_or(true)
+    }
+
+    /// Default for `pack.writeBitmapLookupTable` (Git default: false).
+    #[must_use]
+    pub fn pack_write_bitmap_lookup_table(&self) -> bool {
+        self.get_bool("pack.writebitmaplookuptable")
+            .or_else(|| self.get_bool("pack.writeBitmapLookupTable"))
+            .and_then(|r| r.ok())
+            .unwrap_or(false)
+    }
+
+    /// Values of `pack.preferBitmapTips` (may appear multiple times).
+    #[must_use]
+    pub fn pack_prefer_bitmap_tips(&self) -> Vec<String> {
+        let mut out = self.get_all("pack.preferbitmaptips");
+        if out.is_empty() {
+            out = self.get_all("pack.preferBitmapTips");
+        }
+        out
+    }
+
+    /// Build [`crate::pack_bitmap::PackBitmapWriteOptions`] from config keys.
+    #[must_use]
+    pub fn pack_bitmap_write_options(&self) -> crate::pack_bitmap::PackBitmapWriteOptions {
+        crate::pack_bitmap::PackBitmapWriteOptions {
+            full_dag: true,
+            hash_cache: self.pack_write_bitmap_hash_cache(),
+            lookup_table: self.pack_write_bitmap_lookup_table(),
+            prefer_bitmap_tips: self.pack_prefer_bitmap_tips(),
+        }
+    }
+
     /// Default for `pack.writeReverseIndex` / `pack.writereverseindex` (Git default: true).
     ///
     /// Tests set `GIT_TEST_NO_WRITE_REV_INDEX` to force no `.rev` output.
