@@ -31,6 +31,10 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::check_ref_format` | module | Ref-name validation — git check-ref-format rules. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/index.html) |
 | `grit_lib::check_ref_format::RefNameError` | enum | Errors returned by check_refname_format. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/enum.RefNameError.html) |
 | `grit_lib::check_ref_format::RefNameOptions` | struct | Options controlling validation. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/struct.RefNameOptions.html) |
+| `grit_lib::clone` | module | Clone a remote repository: initialize, configure origin, fetch, and set up the default branch. | [API](https://docs.rs/grit-lib/latest/grit_lib/clone/index.html) |
+| `grit_lib::clone::CloneError` | enum | Errors during clone. | [API](https://docs.rs/grit-lib/latest/grit_lib/clone/enum.CloneError.html) |
+| `grit_lib::clone::CloneOptions` | struct | Options for clone. | [API](https://docs.rs/grit-lib/latest/grit_lib/clone/struct.CloneOptions.html) |
+| `grit_lib::clone::CloneOutcome` | struct | Result of a successful clone before working-tree checkout. | [API](https://docs.rs/grit-lib/latest/grit_lib/clone/struct.CloneOutcome.html) |
 | `grit_lib::combined_diff_patch` | module | Git-style combined merge diff hunks (diff --cc / diff --combined). | [API](https://docs.rs/grit-lib/latest/grit_lib/combined_diff_patch/index.html) |
 | `grit_lib::combined_diff_patch::CombinedDiffWsOptions` | struct | Whitespace handling for combined diffs (Git xdl_opts subset). | [API](https://docs.rs/grit-lib/latest/grit_lib/combined_diff_patch/struct.CombinedDiffWsOptions.html) |
 | `grit_lib::combined_tree_diff` | module | Multi-parent combined tree diff (Git diff_tree_paths / find_paths_multitree). | [API](https://docs.rs/grit-lib/latest/grit_lib/combined_tree_diff/index.html) |

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>grit remote - Grit docs</title>
-<meta name="description" content="List remotes, or add one." />
+<meta name="description" content="List remotes, add one, or list refs on a remote." />
 <link rel="alternate" type="text/markdown" href="index.md" />
 <script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -113,7 +113,7 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
   <div class="hero post-hero">
     <div class="refs"><a class="ref" href="../">← docs</a><span>man page</span><a class="ref" href="index.md">Markdown</a></div>
     <h1 class="cmd">grit remote</h1>
-    <p class="lede">List remotes, or add one.</p>
+    <p class="lede">List remotes, add one, or list refs on a remote.</p>
   </div>
 </section>
 <section class="commit">
@@ -121,22 +121,26 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
   <div class="doc-body has-toc">
     <article class="content"><h2 id="synopsis">Synopsis</h2>
 <pre><code>grit remote
-grit remote add &lt;name&gt; &lt;url&gt;</code></pre>
+grit remote add &lt;name&gt; &lt;url&gt;
+grit remote refs &lt;remote-or-url&gt; [--heads] [--tags] [&lt;prefix&gt;…]</code></pre>
 <h2 id="description">Description</h2>
 <p>A remote is another copy of the repository that you fetch from and push to, usually on a server. With no arguments, <code>grit remote</code> lists your remotes and their URLs.</p>
 <p><code>grit remote add</code> adds a remote. <a href="../fetch/"><code>grit fetch</code></a> then stores the remote&#x27;s branches as remote-tracking branches named <code>&lt;name&gt;/&lt;branch&gt;</code>, such as <code>origin/main</code>. <a href="../clone/"><code>grit clone</code></a> adds a remote called <code>origin</code> for you.</p>
-<p>The URL can be anything <a href="../clone/"><code>grit clone</code></a> accepts: an HTTPS, SSH, <code>git://</code> or <code>file://</code> URL, or a local path.</p>
+<p><code>grit remote refs</code> lists references on a configured remote name or a literal URL/path (same transports as <a href="../clone/"><code>grit clone</code></a>), matching <code>git ls-remote</code> ordering.</p>
 <h2 id="options">Options</h2>
-<div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>add &lt;name&gt; &lt;url&gt;</code></td><td>Add a remote called <code>&lt;name&gt;</code> at <code>&lt;url&gt;</code>. Fails if a remote with that name exists.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code>add &lt;name&gt; &lt;url&gt;</code></td><td>Add a remote called <code>&lt;name&gt;</code> at <code>&lt;url&gt;</code>. Fails if a remote with that name exists.</td></tr><tr><td><code>refs &lt;remote-or-url&gt;</code></td><td>List refs on the remote (or URL).</td></tr><tr><td><code>--heads</code></td><td>With <code>refs</code>, only <code>refs/heads/</code>.</td></tr><tr><td><code>--tags</code></td><td>With <code>refs</code>, only <code>refs/tags/</code>.</td></tr><tr><td><code>&lt;prefix&gt;…</code></td><td>With <code>refs</code>, optional ref prefixes (same rules as <code>git ls-remote</code>).</td></tr></tbody></table></div>
 <h2 id="examples">Examples</h2>
 <pre><code>$ grit remote add origin https://github.com/ada/project.git
 Added remote origin → https://github.com/ada/project.git
 
 $ grit remote
-origin	https://github.com/ada/project.git</code></pre>
+origin	https://github.com/ada/project.git
+
+$ grit remote refs origin
+a1b2c3d4e5f6789012345678901234567890abcd	refs/heads/main</code></pre>
 <h2 id="json-output">JSON output</h2>
 <p>Pass <code>--json</code> for stable, scripting-friendly output:</p>
-<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>action</code></td><td>string</td><td><code>list</code> or <code>add</code>.</td></tr><tr><td><code>remotes</code></td><td>array</td><td>For <code>list</code>, each remote with <code>name</code> and <code>url</code>.</td></tr><tr><td><code>name</code></td><td>string</td><td>For <code>add</code>, the remote name.</td></tr><tr><td><code>url</code></td><td>string</td><td>For <code>add</code>, the remote URL or path.</td></tr></tbody></table></div>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>action</code></td><td>string</td><td><code>list</code>, <code>add</code>, or <code>refs</code>.</td></tr><tr><td><code>remotes</code></td><td>array</td><td>For <code>list</code>, each remote with <code>name</code> and <code>url</code>.</td></tr><tr><td><code>name</code></td><td>string</td><td>For <code>add</code>, the remote name.</td></tr><tr><td><code>url</code></td><td>string</td><td>For <code>add</code>, the remote URL or path.</td></tr><tr><td><code>refs</code></td><td>array</td><td>For <code>refs</code>, each entry with <code>name</code>, <code>oid</code>, optional <code>peeled</code>, optional <code>symref_target</code>.</td></tr></tbody></table></div>
 <p>Listing remotes:</p>
 <pre><code>{
   &quot;action&quot;: &quot;list&quot;,
@@ -153,10 +157,24 @@ origin	https://github.com/ada/project.git</code></pre>
   &quot;name&quot;: &quot;origin&quot;,
   &quot;url&quot;: &quot;https://github.com/ada/project.git&quot;
 }</code></pre>
+<p>Listing refs:</p>
+<pre><code>{
+  &quot;action&quot;: &quot;refs&quot;,
+  &quot;refs&quot;: [
+    {
+      &quot;name&quot;: &quot;refs/heads/main&quot;,
+      &quot;oid&quot;: &quot;a1b2c3d4e5f6789012345678901234567890abcd&quot;,
+      &quot;peeled&quot;: null,
+      &quot;symref_target&quot;: null
+    }
+  ]
+}</code></pre>
+<h2 id="markdown-output">Markdown output</h2>
+<p>Pass <code>--markdown</code> for the same JSON document as <code>--json</code> (agent-friendly, one object on stdout).</p>
 <h2 id="see-also">See also</h2>
 <p><a href="../fetch/">grit fetch</a>, <a href="../push/">grit push</a>, <a href="../clone/">grit clone</a></p><div class="pager"><a href="../tag/">← grit tag</a><a href="../fetch/">grit fetch →</a></div></article>
     <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li><li><a href="../agents/">Agent guide</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a class="current" href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li><li><a href="../skill/">grit skill</a></li><li><a href="../completions/">grit completions</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/api-map/">grit-lib API map</a></li><li><a href="../library/diff/">Diff</a></li><li><a href="../library/embedding/">Embedding grit-lib</a></li><li><a href="../library/network/">Network</a></li><li><a href="../library/object-stores/">Object stores</a></li><li><a href="../library/objects/">Objects</a></li><li><a href="../library/refs/">Refs</a></li><li><a href="../library/repository/">Repository</a></li><li><a href="../library/revwalk/">Revwalk</a></li><li><a href="../library/staging/">Index</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
-    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#synopsis">Synopsis</a></li><li class="toc-level-2"><a href="#description">Description</a></li><li class="toc-level-2"><a href="#options">Options</a></li><li class="toc-level-2"><a href="#examples">Examples</a></li><li class="toc-level-2"><a href="#json-output">JSON output</a></li><li class="toc-level-2"><a href="#see-also">See also</a></li></ol></aside>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#synopsis">Synopsis</a></li><li class="toc-level-2"><a href="#description">Description</a></li><li class="toc-level-2"><a href="#options">Options</a></li><li class="toc-level-2"><a href="#examples">Examples</a></li><li class="toc-level-2"><a href="#json-output">JSON output</a></li><li class="toc-level-2"><a href="#markdown-output">Markdown output</a></li><li class="toc-level-2"><a href="#see-also">See also</a></li></ol></aside>
   </div>
 </section>
 </main>

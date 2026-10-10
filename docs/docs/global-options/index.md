@@ -7,6 +7,7 @@ These options work on any command (and on `grit` itself when you pass no subcomm
 | Option | Description |
 | --- | --- |
 | `--json` | Print one JSON object instead of human-readable text. Errors become `{"error": "..."}`. |
+| `--markdown` | Print one JSON document for agents (same shape as `--json`). Mutually exclusive with `--json`. |
 | `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. |
 | `-h`, `--help` | Print help for `grit` or for a command. |
 | `-V`, `--version` | Print the version of `grit`. |

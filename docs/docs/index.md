@@ -67,7 +67,7 @@ See [Install](https://grit-scm.com/docs/install/index.md) for download options, 
 
 | Command | Summary |
 | --- | --- |
-| [`grit remote`](https://grit-scm.com/docs/remote/index.md) | List remotes, or add one. |
+| [`grit remote`](https://grit-scm.com/docs/remote/index.md) | List remotes, add one, or list refs on a remote. |
 | [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) | Download new commits, branches and tags from a remote. |
 | [`grit pull`](https://grit-scm.com/docs/pull/index.md) | Fetch from the remote and bring the current branch up to date. |
 | [`grit push`](https://grit-scm.com/docs/push/index.md) | Publish the current branch, or your tags, to a remote. |

@@ -184,7 +184,7 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
         tags: TagMode::Following,
         ..Default::default()
     };
-    remote::fetch(&amp;git_dir, &amp;remote_info, &amp;fetch_opts)
+    remote::fetch(&amp;repo, &amp;remote_info, &amp;fetch_opts)
         .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
 
     let tracking = refs::resolve_ref(&amp;git_dir, &quot;refs/remotes/origin/main&quot;)?;
@@ -217,7 +217,7 @@ fn main() -&gt; Result&lt;(), grit_lib::error::Error&gt; {
         expected_old: None,
         expect_absent: false,
     };
-    remote::push(&amp;git_dir, &amp;remote_info, &amp;[spec], &amp;PushOptions::default())
+    remote::push(&amp;repo, &amp;remote_info, &amp;[spec], &amp;PushOptions::default())
         .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
 
     println!(&quot;{new_oid}&quot;);
