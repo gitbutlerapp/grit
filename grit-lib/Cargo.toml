@@ -38,7 +38,7 @@ flate2.workspace = true
 time.workspace = true
 hex.workspace = true
 tempfile.workspace = true
-similar.workspace = true
+similar = { workspace = true, features = ["inline"] }
 merge3.workspace = true
 imara-diff.workspace = true
 regex.workspace = true

@@ -62,9 +62,9 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `files` | array | Changed files, each with `path`, `status`, `binary`, and `hunks`. |
+| `files` | array | Changed files, each with `path`, `status`, `binary`, optional `old_mode` / `new_mode`, optional `old_encoding_lossy` / `new_encoding_lossy`, and `hunks`. |
 
-Nested fields include `files[].status` (`added`, `modified`, `deleted`, and so on), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, and `segments` with optional `emphasis` on intra-line changes.
+Nested fields include `files[].status` (`added`, `modified`, `deleted`, and so on), `hunks[].old_start` / `new_start` / `old_lines` / `new_lines`, optional `hunks[].context` (enclosing definition line), `hunks[].lines[].kind` (`context`, `add`, or `del`), line numbers on `old` and `new`, `segments` with optional `emphasis` on intra-line changes, and `no_newline_at_eof` when that side lacks a trailing newline (Git’s `\ No newline at end of file`). Carriage returns inside a line are preserved in `segments[].text` (for example CRLF→LF). When file bytes are not valid UTF-8, `old_encoding_lossy` or `new_encoding_lossy` is true and non-UTF-8 bytes appear as U+FFFD in text fields.
 
 Example:
 

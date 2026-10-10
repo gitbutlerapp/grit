@@ -576,6 +576,57 @@ fn diff_json_uncommitted_and_commit() -> TestResult {
 }
 
 #[test]
+fn diff_json_preserves_crlf_no_eof_and_mode() -> TestResult {
+    let scratch = Scratch::new("diffmeta")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    std::fs::write(repo.join("crlf.txt"), b"a\r\nb\r\n")?;
+    std::fs::write(repo.join("nonl.txt"), b"line1\nline2")?;
+    std::fs::write(repo.join("run.sh"), b"x\n")?;
+    gs_ok(&repo, &["commit", "init"]);
+
+    std::fs::write(repo.join("crlf.txt"), b"a\nb\n")?;
+    std::fs::write(repo.join("nonl.txt"), b"line1\nline2\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(repo.join("run.sh"))?.permissions();
+        perms.set_mode(0o100755);
+        fs::set_permissions(repo.join("run.sh"), perms)?;
+    }
+
+    let v = gs_json(&repo, &["diff"]);
+    let files = v["files"].as_array().unwrap();
+    let crlf = files.iter().find(|f| f["path"] == "crlf.txt").unwrap();
+    let del = crlf["hunks"][0]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["kind"] == "del")
+        .unwrap();
+    assert_eq!(del["segments"][0]["text"], "a\r");
+
+    let nonl = files.iter().find(|f| f["path"] == "nonl.txt").unwrap();
+    let del2 = nonl["hunks"][0]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["kind"] == "del" && l["old"] == 2)
+        .unwrap();
+    assert_eq!(del2["no_newline_at_eof"], true);
+
+    let run = files.iter().find(|f| f["path"] == "run.sh").unwrap();
+    assert_eq!(run["old_mode"], "100644");
+    assert_eq!(run["new_mode"], "100755");
+
+    let h = &crlf["hunks"][0];
+    assert!(h.get("old_lines").is_some());
+    assert!(h.get("new_lines").is_some());
+    Ok(())
+}
+
+#[test]
 fn diff_human_is_plain_when_piped() -> TestResult {
     let scratch = Scratch::new("diffhuman")?;
     let repo = scratch.child("repo");

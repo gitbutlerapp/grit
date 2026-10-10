@@ -15,13 +15,17 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use grit_lib::diff::{
-    diff_trees, read_submodule_head_oid, submodule_porcelain_flags, DiffEntry, DiffStatus,
+    diff_trees, read_submodule_head_oid,
+    structured::{
+        format_hunk_range, structured_file_diff, SideBytes, StructuredDiffOptions,
+        StructuredLineKind,
+    },
+    submodule_porcelain_flags, DiffEntry, DiffStatus,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
 use grit_lib::state::resolve_head;
 use serde::Serialize;
-use similar::{ChangeTag, TextDiff};
 
 use crate::context;
 use crate::markdown;
@@ -61,6 +65,18 @@ pub struct FileDiff {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_path: Option<String>,
     pub status: String,
+    /// Old git mode (octal), when present on this side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_mode: Option<String>,
+    /// New git mode (octal), when present on this side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_mode: Option<String>,
+    /// True when old side bytes were decoded with lossy UTF-8.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub old_encoding_lossy: bool,
+    /// True when new side bytes were decoded with lossy UTF-8.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub new_encoding_lossy: bool,
     pub binary: bool,
     pub hunks: Vec<Hunk>,
 }
@@ -71,6 +87,10 @@ pub struct Hunk {
     /// 1-based first old/new line numbers in the hunk.
     pub old_start: usize,
     pub new_start: usize,
+    /// Lines on the old side in this hunk (context + removals).
+    pub old_lines: usize,
+    /// Lines on the new side in this hunk (context + additions).
+    pub new_lines: usize,
     /// The enclosing definition line (function/struct/…), when found.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
@@ -88,6 +108,9 @@ pub struct Line {
     pub new: Option<usize>,
     /// The line split into segments; `emphasis` marks the intra-line word changes.
     pub segments: Vec<Segment>,
+    /// Missing newline at end of file on this side (Git `\ No newline at end of file`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub no_newline_at_eof: bool,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
@@ -134,8 +157,10 @@ struct FileChange {
     path: String,
     old_path: Option<String>,
     status: DiffStatus,
-    old_text: String,
-    new_text: String,
+    old_mode: String,
+    new_mode: String,
+    old_bytes: SideBytes,
+    new_bytes: SideBytes,
     binary: bool,
 }
 
@@ -170,9 +195,9 @@ fn worktree_changes(repo: &grit_lib::repo::Repository) -> Result<Vec<FileChange>
     entries
         .into_iter()
         .map(|e| {
-            let (old_text, old_bin) = old_side_text(&repo.odb, &e)?;
-            let (new_text, new_bin) = new_side_text(&repo.odb, &e, Some(work_tree))?;
-            Ok(file_change(e, old_text, new_text, old_bin || new_bin))
+            let (old_bytes, old_bin) = old_side_bytes(&repo.odb, &e)?;
+            let (new_bytes, new_bin) = new_side_bytes(&repo.odb, &e, Some(work_tree))?;
+            Ok(file_change(e, old_bytes, new_bytes, old_bin || new_bin))
         })
         .collect()
 }
@@ -193,9 +218,9 @@ fn commit_changes(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<V
     entries
         .into_iter()
         .map(|e| {
-            let (old_text, old_bin) = old_side_text(&repo.odb, &e)?;
-            let (new_text, new_bin) = new_side_text(&repo.odb, &e, None)?;
-            Ok(file_change(e, old_text, new_text, old_bin || new_bin))
+            let (old_bytes, old_bin) = old_side_bytes(&repo.odb, &e)?;
+            let (new_bytes, new_bin) = new_side_bytes(&repo.odb, &e, None)?;
+            Ok(file_change(e, old_bytes, new_bytes, old_bin || new_bin))
         })
         .collect()
 }
@@ -204,7 +229,12 @@ fn sort_entries(entries: &mut [DiffEntry]) {
     entries.sort_by(|a, b| a.path().cmp(b.path()));
 }
 
-fn file_change(e: DiffEntry, old_text: String, new_text: String, binary: bool) -> FileChange {
+fn file_change(
+    e: DiffEntry,
+    old_bytes: SideBytes,
+    new_bytes: SideBytes,
+    binary: bool,
+) -> FileChange {
     let path = e
         .new_path
         .clone()
@@ -218,33 +248,41 @@ fn file_change(e: DiffEntry, old_text: String, new_text: String, binary: bool) -
         path,
         old_path,
         status: e.status,
-        old_text,
-        new_text,
+        old_mode: e.old_mode,
+        new_mode: e.new_mode,
+        old_bytes,
+        new_bytes,
         binary,
     }
 }
 
-fn old_side_text(odb: &Odb, e: &DiffEntry) -> Result<(String, bool)> {
+fn old_side_bytes(odb: &Odb, e: &DiffEntry) -> Result<(SideBytes, bool)> {
     if e.old_mode == "160000" {
-        return Ok((gitlink_line(&e.old_oid, None), false));
+        return Ok((
+            SideBytes::from_bytes(gitlink_line(&e.old_oid, None).into_bytes()),
+            false,
+        ));
     }
     if e.old_mode == "000000" {
-        return Ok((String::new(), false));
+        return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
-    blob_text(odb, &e.old_oid)
+    blob_bytes(odb, &e.old_oid)
 }
 
-fn new_side_text(odb: &Odb, e: &DiffEntry, work_tree: Option<&Path>) -> Result<(String, bool)> {
+fn new_side_bytes(odb: &Odb, e: &DiffEntry, work_tree: Option<&Path>) -> Result<(SideBytes, bool)> {
     if e.new_mode == "160000" {
-        return Ok((gitlink_new_line(e, work_tree), false));
+        return Ok((
+            SideBytes::from_bytes(gitlink_new_line(e, work_tree).into_bytes()),
+            false,
+        ));
     }
     if e.new_mode == "000000" {
-        return Ok((String::new(), false));
+        return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     if let (Some(wt), Some(p)) = (work_tree, e.new_path.as_deref().or(e.old_path.as_deref())) {
-        Ok(file_text(&wt.join(p)))
+        Ok(file_bytes(&wt.join(p)))
     } else {
-        blob_text(odb, &e.new_oid)
+        blob_bytes(odb, &e.new_oid)
     }
 }
 
@@ -278,29 +316,29 @@ fn gitlink_new_line(e: &DiffEntry, work_tree: Option<&Path>) -> String {
     gitlink_line(&resolved, if dirty { Some("-dirty") } else { None })
 }
 
-/// Read a blob as text. Returns `(text, is_binary)`; a zero oid → empty text.
-fn blob_text(odb: &Odb, oid: &ObjectId) -> Result<(String, bool)> {
+/// Read a blob. Returns `(bytes, is_binary)`; a zero oid → empty.
+fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
-        return Ok((String::new(), false));
+        return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     let data = odb.read(oid)?.data;
-    Ok(bytes_to_text(&data))
+    Ok(bytes_for_diff(&data))
 }
 
-/// Read a worktree file as text. A missing file reads as empty (treated as a deletion).
-fn file_text(path: &Path) -> (String, bool) {
+/// Read a worktree file. A missing file reads as empty (treated as a deletion).
+fn file_bytes(path: &Path) -> (SideBytes, bool) {
     match std::fs::read(path) {
-        Ok(data) => bytes_to_text(&data),
-        Err(_) => (String::new(), false),
+        Ok(data) => bytes_for_diff(&data),
+        Err(_) => (SideBytes::from_bytes(Vec::new()), false),
     }
 }
 
-/// Convert bytes to `(text, is_binary)`. NUL in the first 8 KiB ⇒ binary.
-fn bytes_to_text(data: &[u8]) -> (String, bool) {
+/// Convert bytes to `(SideBytes, is_binary)`. NUL in the first 8 KiB ⇒ binary.
+fn bytes_for_diff(data: &[u8]) -> (SideBytes, bool) {
     if data.iter().take(8000).any(|&b| b == 0) {
-        (String::new(), true)
+        (SideBytes::from_bytes(Vec::new()), true)
     } else {
-        (String::from_utf8_lossy(data).into_owned(), false)
+        (SideBytes::from_bytes(data.to_vec()), false)
     }
 }
 
@@ -309,79 +347,60 @@ fn status_str(status: DiffStatus) -> &'static str {
 }
 
 fn build_file_diff(fc: FileChange) -> FileDiff {
-    let base = FileDiff {
-        path: fc.path.clone(),
-        old_path: fc.old_path.clone(),
+    let structured = structured_file_diff(
+        &fc.old_mode,
+        &fc.new_mode,
+        &fc.old_bytes,
+        &fc.new_bytes,
+        StructuredDiffOptions {
+            context_lines: CONTEXT_LINES,
+        },
+    );
+    let hunks = structured
+        .hunks
+        .into_iter()
+        .map(|h| Hunk {
+            old_start: h.old_start,
+            new_start: h.new_start,
+            old_lines: h.old_lines,
+            new_lines: h.new_lines,
+            context: h.context,
+            lines: h
+                .lines
+                .into_iter()
+                .map(|l| Line {
+                    kind: match l.kind {
+                        StructuredLineKind::Context => LineKind::Context,
+                        StructuredLineKind::Add => LineKind::Add,
+                        StructuredLineKind::Del => LineKind::Del,
+                    },
+                    old: l.old,
+                    new: l.new,
+                    segments: l
+                        .segments
+                        .into_iter()
+                        .map(|s| Segment {
+                            text: s.text,
+                            emphasis: s.emphasis,
+                        })
+                        .collect(),
+                    no_newline_at_eof: l.no_newline_at_eof,
+                })
+                .collect(),
+        })
+        .collect();
+
+    FileDiff {
+        path: fc.path,
+        old_path: fc.old_path,
         status: status_str(fc.status).to_owned(),
+        old_mode: structured.old_mode,
+        new_mode: structured.new_mode,
+        old_encoding_lossy: structured.old_encoding_lossy,
+        new_encoding_lossy: structured.new_encoding_lossy,
         binary: fc.binary,
-        hunks: Vec::new(),
-    };
-    if fc.binary {
-        return base;
+        hunks,
     }
-
-    let diff = TextDiff::from_lines(&fc.old_text, &fc.new_text);
-    let mut hunks = Vec::new();
-    for group in diff.grouped_ops(CONTEXT_LINES) {
-        let Some(first) = group.first() else {
-            continue;
-        };
-        let old_start = first.old_range().start;
-        let new_start = first.new_range().start;
-
-        let mut lines = Vec::new();
-        for op in &group {
-            for change in diff.iter_inline_changes(op) {
-                let kind = match change.tag() {
-                    ChangeTag::Equal => LineKind::Context,
-                    ChangeTag::Delete => LineKind::Del,
-                    ChangeTag::Insert => LineKind::Add,
-                };
-                // Drop the empty segment similar yields for the line's trailing
-                // newline so the rendering and JSON stay clean.
-                let segments = change
-                    .iter_strings_lossy()
-                    .map(|(emphasis, value)| (emphasis, strip_eol(value.as_ref()).to_owned()))
-                    .filter(|(_, text)| !text.is_empty())
-                    .map(|(emphasis, text)| Segment { text, emphasis })
-                    .collect();
-                lines.push(Line {
-                    kind,
-                    old: change.old_index().map(|i| i + 1),
-                    new: change.new_index().map(|i| i + 1),
-                    segments,
-                });
-            }
-        }
-
-        hunks.push(Hunk {
-            old_start: old_start + 1,
-            new_start: new_start + 1,
-            context: funcname(&fc.old_text, old_start),
-            lines,
-        });
-    }
-
-    FileDiff { hunks, ..base }
-}
-
-/// Strip a trailing newline (and CR) from a segment value.
-fn strip_eol(s: &str) -> &str {
-    s.strip_suffix('\n')
-        .map_or(s, |s| s.strip_suffix('\r').unwrap_or(s))
-}
-
-/// The nearest enclosing definition line above `start` (0-based old line index):
-/// the closest preceding non-empty line that begins at column 0 with a letter
-/// (functions, types, etc.). A lightweight stand-in for git's per-language
-/// `xfuncname`, good enough across C/Rust/Go/JS/… for the hunk header.
-fn funcname(old_text: &str, start: usize) -> Option<String> {
-    let lines: Vec<&str> = old_text.split('\n').collect();
-    let upto = start.min(lines.len());
-    lines[..upto].iter().rev().find_map(|line| {
-        let first = line.chars().next()?;
-        (first.is_alphabetic() || first == '_').then(|| line.trim_end().to_owned())
-    })
 }
 
 // --- Human (delta-style) rendering -----------------------------------------
@@ -434,6 +453,15 @@ fn render_file(file: &FileDiff, color: bool) {
         return;
     }
 
+    if file.old_mode != file.new_mode {
+        if let Some(m) = &file.old_mode {
+            println!("old mode {m}");
+        }
+        if let Some(m) = &file.new_mode {
+            println!("new mode {m}");
+        }
+    }
+
     // Width of each line-number column = widest number shown.
     let width = file
         .hunks
@@ -454,11 +482,17 @@ fn render_hunk(hunk: &Hunk, width: usize, color: bool) {
     if let Some(ctx) = &hunk.context {
         println!("{}", paint(color, "33", &format!("┄┄ {ctx}")));
     } else if !color {
-        println!("@@ -{} +{} @@", hunk.old_start, hunk.new_start);
+        let old_rng = format_hunk_range(hunk.old_start, hunk.old_lines);
+        let new_rng = format_hunk_range(hunk.new_start, hunk.new_lines);
+        println!("@@ -{old_rng} +{new_rng} @@");
     }
 
     for line in &hunk.lines {
         println!("{}", render_line(line, width, color));
+        if line.no_newline_at_eof {
+            let marker = "\\ No newline at end of file";
+            println!("{}", paint(color, FG_DIM, marker));
+        }
     }
 }
 

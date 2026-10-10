@@ -33,6 +33,9 @@ use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind,
 use crate::odb::Odb;
 use crate::userdiff::FuncnameMatcher;
 
+#[path = "structured_diff.rs"]
+pub mod structured;
+
 /// Splits imara-diff unified body (concatenated hunks) into per-hunk slices for post-processing.
 fn imara_unified_hunk_slices(body: &str) -> Vec<&str> {
     let mut starts: Vec<usize> = Vec::new();
