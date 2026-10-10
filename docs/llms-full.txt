@@ -74,6 +74,7 @@ See [Install](https://grit-scm.com/docs/install/index.md) for download options, 
 | [`grit pull`](https://grit-scm.com/docs/pull/index.md) | Fetch from the remote and bring the current branch up to date. |
 | [`grit push`](https://grit-scm.com/docs/push/index.md) | Publish the current branch, or your tags, to a remote. |
 | [`grit auth`](https://grit-scm.com/docs/auth/index.md) | Sign in to GitHub so HTTPS pushes and fetches just work. |
+| [`grit bundle`](https://grit-scm.com/docs/bundle/index.md) | Create, verify, and list git bundle files for offline transfer. |
 
 ### Maintenance
 
@@ -819,7 +820,7 @@ grit clone <url> [<dir>]
 
 Copies the repository at `<url>` into a new directory and checks out the remote's default branch. The remote is saved as `origin`, so [`grit fetch`](https://grit-scm.com/docs/fetch/index.md), [`grit pull`](https://grit-scm.com/docs/pull/index.md) and [`grit push`](https://grit-scm.com/docs/push/index.md) work with no further setup.
 
-`<url>` can be an `https://` or `http://` URL, an `ssh://` URL or `user@host:path` address, a `git://` URL, a `file://` URL, or a path to a local repository. A local path is stored as an absolute path so that later fetches work from anywhere.
+`<url>` can be an `https://` or `http://` URL, an `ssh://` URL or `user@host:path` address, a `git://` URL, a `file://` URL, a path to a local repository, or a path to a [git bundle](https://git-scm.com/docs/git-bundle) file (recognized by its header signature). A local path is stored as an absolute path so that later fetches work from anywhere.
 
 Without `<dir>`, the directory is named after the last part of the URL with any `.git` suffix removed, so `https://github.com/gitbutlerapp/grit.git` clones into `grit`. The destination must not exist or must be empty.
 
@@ -2190,6 +2191,8 @@ grit fetch [<remote>]
 
 Downloads everything new from a remote and updates your remote-tracking branches, such as `origin/main`, along with any new tags. Your own branches and working tree are left alone; to bring the new commits into your branch, use [`grit merge`](https://grit-scm.com/docs/merge/index.md) or [`grit pull`](https://grit-scm.com/docs/pull/index.md).
 
+`<remote>` may be a configured remote name or a path to a [git bundle](https://git-scm.com/docs/git-bundle) file (detected by the bundle signature, not the file extension). Bundle fetches verify that prerequisite commits are already in your repository before applying the pack.
+
 Each updated ref is listed with its old and new commit.
 
 Repositories created as shallow clones with Git (for example `git clone --depth 1`) are supported: `grit fetch` respects the existing shallow boundary, does not create tag refs to missing commits, and leaves a clean repository when there is nothing new to download.
@@ -2198,7 +2201,7 @@ Repositories created as shallow clones with Git (for example `git clone --depth 
 
 | Option | Description |
 | --- | --- |
-| `<remote>` | The remote to fetch from. Defaults to `origin`. |
+| `<remote>` | Configured remote name, or a path/URL to a repository or bundle file. Defaults to `origin`. |
 
 ## Examples
 
@@ -2472,6 +2475,126 @@ After logout:
 ## See also
 
 [grit push](https://grit-scm.com/docs/push/index.md), [grit config](https://grit-scm.com/docs/config/index.md), [grit manager](https://grit-scm.com/docs/manager/index.md)
+
+# https://grit-scm.com/docs/bundle/index.md
+
+# grit bundle
+
+> Create, verify, and list git bundle files for offline transfer.
+
+## Synopsis
+
+```text
+grit bundle create <file> <rev>…
+grit bundle verify <file>
+grit bundle list <file>
+```
+
+## Description
+
+Git bundles pack refs and objects into a single file. Use them to move history without a network remote, or to seed a clone from removable media.
+
+`create` walks the given revision specs (same rules as [`grit log`](https://grit-scm.com/docs/log/index.md)), writes prerequisite commits the recipient must already have, lists tip refs in the header, and appends a pack stream. Bundles are detected by the `# v2 git bundle` / `# v3 git bundle` signature, not by the `.bundle` file extension alone.
+
+`verify` checks the pack checksum and, when run inside a repository, confirms prerequisite commits are present and connected to your history.
+
+`list` prints the refs recorded in the bundle header.
+
+You can also treat a bundle path like a remote: [`grit fetch`](https://grit-scm.com/docs/fetch/index.md) and [`grit clone`](https://grit-scm.com/docs/clone/index.md) accept a path to a bundle file.
+
+## Options
+
+`create`:
+
+| Argument | Description |
+| --- | --- |
+| `<file>` | Output bundle path. |
+| `<rev>…` | One or more positive revision specs (commits, branches, ranges). |
+
+`verify` / `list`:
+
+| Argument | Description |
+| --- | --- |
+| `<file>` | Existing bundle file. |
+
+## Examples
+
+```console
+$ grit bundle create backup.bundle main
+Wrote bundle backup.bundle (1 refs).
+
+$ grit bundle verify backup.bundle
+backup.bundle is valid
+The bundle uses this hash algorithm: sha1
+The bundle contains 1 refs:
+f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main
+
+$ grit bundle list backup.bundle
+f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main
+```
+
+## JSON output
+
+`grit bundle verify --json`:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `path` | string | Bundle file path. |
+| `ok` | boolean | Whether verification succeeded. |
+| `hash_algorithm` | string | Object hash used by the pack (`sha1` or `sha256`). |
+| `references` | array | Each entry has `name` and `oid`. |
+| `prerequisites` | array of strings | Required commit ids (hex). |
+| `missing_prerequisites` | array of strings | Prerequisite ids absent from the current repo (empty when not in a repo or when `ok` is true). |
+
+```json
+{
+  "path": "backup.bundle",
+  "ok": true,
+  "hash_algorithm": "sha1",
+  "references": [
+    {
+      "name": "refs/heads/main",
+      "oid": "f4e623f540cd491f8856e9487a3da5f8242307f0"
+    }
+  ],
+  "prerequisites": [],
+  "missing_prerequisites": []
+}
+```
+
+`grit bundle list --json`:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `path` | string | Bundle file path. |
+| `references` | array | Refs from the bundle header (`name`, `oid`). |
+
+```json
+{
+  "path": "backup.bundle",
+  "references": [
+    {
+      "name": "refs/heads/main",
+      "oid": "f4e623f540cd491f8856e9487a3da5f8242307f0"
+    }
+  ]
+}
+```
+
+`grit bundle create --json`:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `path` | string | Output bundle path. |
+| `refs` | number | Count of refs written to the header. |
+
+## Markdown output
+
+Pass `--markdown` on any `grit bundle` subcommand for the same JSON document wrapped for agents (see [Global options](https://grit-scm.com/docs/global-options/index.md)).
+
+## See also
+
+[grit fetch](https://grit-scm.com/docs/fetch/index.md), [grit clone](https://grit-scm.com/docs/clone/index.md), [grit remote](https://grit-scm.com/docs/remote/index.md)
 
 # https://grit-scm.com/docs/update/index.md
 
@@ -2887,6 +3010,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::bundle::BundleWriter` | struct | Incremental writer for bundle bytes (header + pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.BundleWriter.html) |
 | `grit_lib::bundle::FilterSpec` | struct | Wire filter specification carried in v3 @filter= capabilities. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.FilterSpec.html) |
 | `grit_lib::bundle::UnbundledRef` | struct | A single ref entry returned from Bundle::unbundle. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.UnbundledRef.html) |
+| `grit_lib::bundle_remote` | module | Fetch and remote helpers for on-disk bundle files (clone / grit fetch from a .bundle). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle_remote/index.html) |
 | `grit_lib::check_ref_format` | module | Ref-name validation — git check-ref-format rules. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/index.html) |
 | `grit_lib::check_ref_format::RefNameError` | enum | Errors returned by check_refname_format. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/enum.RefNameError.html) |
 | `grit_lib::check_ref_format::RefNameOptions` | struct | Options controlling validation. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/struct.RefNameOptions.html) |

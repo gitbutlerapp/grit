@@ -43,6 +43,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::bundle::BundleWriter` | struct | Incremental writer for bundle bytes (header + pack). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.BundleWriter.html) |
 | `grit_lib::bundle::FilterSpec` | struct | Wire filter specification carried in v3 @filter= capabilities. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.FilterSpec.html) |
 | `grit_lib::bundle::UnbundledRef` | struct | A single ref entry returned from Bundle::unbundle. | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle/struct.UnbundledRef.html) |
+| `grit_lib::bundle_remote` | module | Fetch and remote helpers for on-disk bundle files (clone / grit fetch from a .bundle). | [API](https://docs.rs/grit-lib/latest/grit_lib/bundle_remote/index.html) |
 | `grit_lib::check_ref_format` | module | Ref-name validation — git check-ref-format rules. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/index.html) |
 | `grit_lib::check_ref_format::RefNameError` | enum | Errors returned by check_refname_format. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/enum.RefNameError.html) |
 | `grit_lib::check_ref_format::RefNameOptions` | struct | Options controlling validation. | [API](https://docs.rs/grit-lib/latest/grit_lib/check_ref_format/struct.RefNameOptions.html) |

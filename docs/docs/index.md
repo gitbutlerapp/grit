@@ -72,6 +72,7 @@ See [Install](https://grit-scm.com/docs/install/index.md) for download options, 
 | [`grit pull`](https://grit-scm.com/docs/pull/index.md) | Fetch from the remote and bring the current branch up to date. |
 | [`grit push`](https://grit-scm.com/docs/push/index.md) | Publish the current branch, or your tags, to a remote. |
 | [`grit auth`](https://grit-scm.com/docs/auth/index.md) | Sign in to GitHub so HTTPS pushes and fetches just work. |
+| [`grit bundle`](https://grit-scm.com/docs/bundle/index.md) | Create, verify, and list git bundle files for offline transfer. |
 
 ### Maintenance
 

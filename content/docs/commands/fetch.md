@@ -15,6 +15,8 @@ grit fetch [<remote>]
 
 Downloads everything new from a remote and updates your remote-tracking branches, such as `origin/main`, along with any new tags. Your own branches and working tree are left alone; to bring the new commits into your branch, use [`grit merge`](../merge/) or [`grit pull`](../pull/).
 
+`<remote>` may be a configured remote name or a path to a [git bundle](https://git-scm.com/docs/git-bundle) file (detected by the bundle signature, not the file extension). Bundle fetches verify that prerequisite commits are already in your repository before applying the pack.
+
 Each updated ref is listed with its old and new commit.
 
 Repositories created as shallow clones with Git (for example `git clone --depth 1`) are supported: `grit fetch` respects the existing shallow boundary, does not create tag refs to missing commits, and leaves a clean repository when there is nothing new to download.
@@ -23,7 +25,7 @@ Repositories created as shallow clones with Git (for example `git clone --depth 
 
 | Option | Description |
 | --- | --- |
-| `<remote>` | The remote to fetch from. Defaults to `origin`. |
+| `<remote>` | Configured remote name, or a path/URL to a repository or bundle file. Defaults to `origin`. |
 
 ## Examples
 

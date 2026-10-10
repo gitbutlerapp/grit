@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Install grit - Grit docs</title>
-<meta name="description" content="Install the grit CLI on your machine, try nightly builds, and keep your copy up to date." />
+<title>grit bundle - Grit docs</title>
+<meta name="description" content="Create, verify, and list git bundle files for offline transfer." />
 <link rel="alternate" type="text/markdown" href="index.md" />
 <script async src="https://u.gitbutler.com/script.js" data-website-id="2c6f680c-eaf5-4cd7-a419-1032ffab6bbc"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -111,54 +111,76 @@ h1{margin:20px 0 0;font-size:clamp(80px,14vw,200px);line-height:.85;letter-spaci
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line from-head"></span><span class="head-dot"></span></div>
   <div class="hero post-hero">
-    <div class="refs"><a class="ref" href="../">← docs</a><span>guide</span><a class="ref" href="index.md">Markdown</a></div>
-    <h1>Install grit</h1>
-    <p class="lede">Install the grit CLI on your machine, try nightly builds, and keep your copy up to date.</p>
+    <div class="refs"><a class="ref" href="../">← docs</a><span>man page</span><a class="ref" href="index.md">Markdown</a></div>
+    <h1 class="cmd">grit bundle</h1>
+    <p class="lede">Create, verify, and list git bundle files for offline transfer.</p>
   </div>
 </section>
 <section class="commit">
   <div class="rail" aria-hidden="true"><span class="line"></span></div>
   <div class="doc-body has-toc">
-    <article class="content"><h2 id="stable-release-recommended">Stable release (recommended)</h2>
-<p>On macOS and Linux:</p>
-<pre><code>curl -fsSL https://grit-scm.com/install | sh</code></pre>
-<p>On Windows, run this in PowerShell:</p>
-<pre><code>irm https://grit-scm.com/install.ps1 | iex</code></pre>
-<p>The script downloads the latest release from GitHub, installs the <code>grit</code> binary (by default into <code>~/.local/bin</code> on Unix), and prints the version it installed.</p>
-<h2 id="shell-completions">Shell completions</h2>
-<p>Tab completion helps you discover <code>grit</code>&#x27;s subcommands and flags. Generate a script with <a href="../completions/"><code>grit completions</code></a> and load it from your shell config, or copy the pre-generated files from a release tarball&#x27;s <code>completions/</code> directory.</p>
-<p><strong>bash</strong> — add to <code>~/.bashrc</code>:</p>
-<pre><code>eval &quot;$(grit completions bash)&quot;</code></pre>
-<p><strong>zsh</strong> — add to <code>~/.zshrc</code>:</p>
-<pre><code>eval &quot;$(grit completions zsh)&quot;</code></pre>
-<p>Or install once under a site-functions directory:</p>
-<pre><code>grit completions zsh &gt; ~/.local/share/zsh/site-functions/_grit</code></pre>
-<p><strong>fish</strong> — write a completion file:</p>
-<pre><code>mkdir -p ~/.config/fish/completions
-grit completions fish &gt; ~/.config/fish/completions/grit.fish</code></pre>
-<p>After <a href="../update/"><code>grit update</code></a>, regenerate completions so new commands appear.</p>
-<h2 id="nightly-builds">Nightly builds</h2>
-<p>CI publishes a rolling <strong>nightly</strong> prerelease when the release workflow is triggered manually. To install that build instead of the latest stable release:</p>
-<pre><code>curl -fsSL https://grit-scm.com/install-nightly | sh</code></pre>
-<p>On Windows:</p>
-<pre><code>irm https://grit-scm.com/install-nightly.ps1 | iex</code></pre>
-<p>Nightlies track recent <code>main</code>; use them when you want to test fixes before the next tagged release.</p>
-<h2 id="install-with-cargo">Install with Cargo</h2>
-<p>If you already have a Rust toolchain:</p>
-<pre><code>cargo install grit-cli</code></pre>
-<p>This builds and installs the <code>grit</code> executable into Cargo&#x27;s bin directory (usually <code>~/.cargo/bin</code>). Make sure that directory is on your <code>PATH</code>.</p>
-<h2 id="keep-grit-up-to-date">Keep grit up to date</h2>
-<p>After a script install, run <a href="../update/"><code>grit update</code></a> to re-run the same installer and replace the binary you&#x27;re running. If you installed with Cargo, update with:</p>
-<pre><code>cargo install grit-cli</code></pre>
-<h2 id="build-from-source">Build from source</h2>
-<p>Clone <a href="https://github.com/gitbutlerapp/grit">the repository</a> and build the CLI crate:</p>
-<pre><code>cargo build --release -p grit-cli</code></pre>
-<p>The binary is <code>target/release/grit</code>. You can copy it anywhere on your <code>PATH</code>, or run it from the build tree.</p>
-<h3 id="toolchain">Toolchain</h3>
-<p>The workspace pins a Rust version in <a href="https://github.com/gitbutlerapp/grit/blob/main/rust-toolchain.toml"><code>rust-toolchain.toml</code></a> (currently <strong>1.99.0</strong> with <code>rustfmt</code> and <code>clippy</code>). <code>rustup</code> picks this up automatically when you build in the repo.</p>
-<p>To use <code>grit-lib</code> in your own crate, add it from <a href="https://crates.io/crates/grit-lib">crates.io</a> — see the <a href="../library-quickstart/">library quick start</a>.</p><div class="pager"><a href="../">← Docs</a><a href="../tutorial/">Tutorial →</a></div></article>
-    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a class="current" href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li><li><a href="../agents/">Agent guide</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li><li><a href="../bundle/">grit bundle</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li><li><a href="../skill/">grit skill</a></li><li><a href="../completions/">grit completions</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/api-map/">grit-lib API map</a></li><li><a href="../library/bitmaps/">Reachability bitmaps</a></li><li><a href="../library/diff/">Diff</a></li><li><a href="../library/embedding/">Embedding grit-lib</a></li><li><a href="../library/network/">Network</a></li><li><a href="../library/object-stores/">Object stores</a></li><li><a href="../library/objects/">Objects</a></li><li><a href="../library/pack-bitmaps/">Pack reachability bitmaps</a></li><li><a href="../library/refs/">Refs</a></li><li><a href="../library/repository/">Repository</a></li><li><a href="../library/revwalk/">Revwalk</a></li><li><a href="../library/staging/">Index</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
-    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#stable-release-recommended">Stable release (recommended)</a></li><li class="toc-level-2"><a href="#shell-completions">Shell completions</a></li><li class="toc-level-2"><a href="#nightly-builds">Nightly builds</a></li><li class="toc-level-2"><a href="#install-with-cargo">Install with Cargo</a></li><li class="toc-level-2"><a href="#keep-grit-up-to-date">Keep grit up to date</a></li><li class="toc-level-2"><a href="#build-from-source">Build from source</a></li><li class="toc-level-3"><a href="#toolchain">Toolchain</a></li></ol></aside>
+    <article class="content"><h2 id="synopsis">Synopsis</h2>
+<pre><code>grit bundle create &lt;file&gt; &lt;rev&gt;…
+grit bundle verify &lt;file&gt;
+grit bundle list &lt;file&gt;</code></pre>
+<h2 id="description">Description</h2>
+<p>Git bundles pack refs and objects into a single file. Use them to move history without a network remote, or to seed a clone from removable media.</p>
+<p><code>create</code> walks the given revision specs (same rules as <a href="../log/"><code>grit log</code></a>), writes prerequisite commits the recipient must already have, lists tip refs in the header, and appends a pack stream. Bundles are detected by the <code># v2 git bundle</code> / <code># v3 git bundle</code> signature, not by the <code>.bundle</code> file extension alone.</p>
+<p><code>verify</code> checks the pack checksum and, when run inside a repository, confirms prerequisite commits are present and connected to your history.</p>
+<p><code>list</code> prints the refs recorded in the bundle header.</p>
+<p>You can also treat a bundle path like a remote: <a href="../fetch/"><code>grit fetch</code></a> and <a href="../clone/"><code>grit clone</code></a> accept a path to a bundle file.</p>
+<h2 id="options">Options</h2>
+<p><code>create</code>:</p>
+<div class="table"><table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;file&gt;</code></td><td>Output bundle path.</td></tr><tr><td><code>&lt;rev&gt;…</code></td><td>One or more positive revision specs (commits, branches, ranges).</td></tr></tbody></table></div>
+<p><code>verify</code> / <code>list</code>:</p>
+<div class="table"><table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code>&lt;file&gt;</code></td><td>Existing bundle file.</td></tr></tbody></table></div>
+<h2 id="examples">Examples</h2>
+<pre><code>$ grit bundle create backup.bundle main
+Wrote bundle backup.bundle (1 refs).
+
+$ grit bundle verify backup.bundle
+backup.bundle is valid
+The bundle uses this hash algorithm: sha1
+The bundle contains 1 refs:
+f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main
+
+$ grit bundle list backup.bundle
+f4e623f540cd491f8856e9487a3da5f8242307f0 refs/heads/main</code></pre>
+<h2 id="json-output">JSON output</h2>
+<p><code>grit bundle verify --json</code>:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>path</code></td><td>string</td><td>Bundle file path.</td></tr><tr><td><code>ok</code></td><td>boolean</td><td>Whether verification succeeded.</td></tr><tr><td><code>hash_algorithm</code></td><td>string</td><td>Object hash used by the pack (<code>sha1</code> or <code>sha256</code>).</td></tr><tr><td><code>references</code></td><td>array</td><td>Each entry has <code>name</code> and <code>oid</code>.</td></tr><tr><td><code>prerequisites</code></td><td>array of strings</td><td>Required commit ids (hex).</td></tr><tr><td><code>missing_prerequisites</code></td><td>array of strings</td><td>Prerequisite ids absent from the current repo (empty when not in a repo or when <code>ok</code> is true).</td></tr></tbody></table></div>
+<pre><code>{
+  &quot;path&quot;: &quot;backup.bundle&quot;,
+  &quot;ok&quot;: true,
+  &quot;hash_algorithm&quot;: &quot;sha1&quot;,
+  &quot;references&quot;: [
+    {
+      &quot;name&quot;: &quot;refs/heads/main&quot;,
+      &quot;oid&quot;: &quot;f4e623f540cd491f8856e9487a3da5f8242307f0&quot;
+    }
+  ],
+  &quot;prerequisites&quot;: [],
+  &quot;missing_prerequisites&quot;: []
+}</code></pre>
+<p><code>grit bundle list --json</code>:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>path</code></td><td>string</td><td>Bundle file path.</td></tr><tr><td><code>references</code></td><td>array</td><td>Refs from the bundle header (<code>name</code>, <code>oid</code>).</td></tr></tbody></table></div>
+<pre><code>{
+  &quot;path&quot;: &quot;backup.bundle&quot;,
+  &quot;references&quot;: [
+    {
+      &quot;name&quot;: &quot;refs/heads/main&quot;,
+      &quot;oid&quot;: &quot;f4e623f540cd491f8856e9487a3da5f8242307f0&quot;
+    }
+  ]
+}</code></pre>
+<p><code>grit bundle create --json</code>:</p>
+<div class="table"><table><thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>path</code></td><td>string</td><td>Output bundle path.</td></tr><tr><td><code>refs</code></td><td>number</td><td>Count of refs written to the header.</td></tr></tbody></table></div>
+<h2 id="markdown-output">Markdown output</h2>
+<p>Pass <code>--markdown</code> on any <code>grit bundle</code> subcommand for the same JSON document wrapped for agents (see <a href="../global-options/">Global options</a>).</p>
+<h2 id="see-also">See also</h2>
+<p><a href="../fetch/">grit fetch</a>, <a href="../clone/">grit clone</a>, <a href="../remote/">grit remote</a></p><div class="pager"><a href="../auth/">← grit auth</a><a href="../update/">grit update →</a></div></article>
+    <nav class="docnav" aria-label="Docs"><h2><a href="../">Getting started</a></h2><ol><li><a href="../">Overview</a></li><li><a href="../install/">Install</a></li><li><a href="../tutorial/">Tutorial</a></li><li><a href="../library-quickstart/">Library quick start</a></li></ol><h2><a href="../global-options/">The grit CLI</a></h2><ol><li><a href="../global-options/">Global options</a></li><li><a href="../scripting/">Scripting</a></li><li><a href="../agents/">Agent guide</a></li></ol><h3>Getting started</h3><ol><li><a href="../init/">grit init</a></li><li><a href="../clone/">grit clone</a></li><li><a href="../status/">grit status</a></li><li><a href="../config/">grit config</a></li></ol><h3>Making changes</h3><ol><li><a href="../add/">grit add</a></li><li><a href="../commit/">grit commit</a></li><li><a href="../diff/">grit diff</a></li></ol><h3>History</h3><ol><li><a href="../log/">grit log</a></li><li><a href="../shortlog/">grit shortlog</a></li><li><a href="../show/">grit show</a></li></ol><h3>Branches and tags</h3><ol><li><a href="../branch/">grit branch</a></li><li><a href="../switch/">grit switch</a></li><li><a href="../merge/">grit merge</a></li><li><a href="../pick/">grit pick</a></li><li><a href="../tag/">grit tag</a></li></ol><h3>Remotes</h3><ol><li><a href="../remote/">grit remote</a></li><li><a href="../fetch/">grit fetch</a></li><li><a href="../pull/">grit pull</a></li><li><a href="../push/">grit push</a></li><li><a href="../auth/">grit auth</a></li><li><a class="current" href="../bundle/">grit bundle</a></li></ol><h3>Maintenance</h3><ol><li><a href="../update/">grit update</a></li><li><a href="../skill/">grit skill</a></li><li><a href="../completions/">grit completions</a></li></ol><h3>Plumbing</h3><ol><li><a href="../upload-pack/">grit upload-pack</a></li><li><a href="../receive-pack/">grit receive-pack</a></li><li><a href="../manager/">grit manager</a></li></ol><h2><a href="../library/">Library guide</a></h2><ol><li><a href="../library/">Overview</a></li><li><a href="../library/api-map/">grit-lib API map</a></li><li><a href="../library/bitmaps/">Reachability bitmaps</a></li><li><a href="../library/diff/">Diff</a></li><li><a href="../library/embedding/">Embedding grit-lib</a></li><li><a href="../library/network/">Network</a></li><li><a href="../library/object-stores/">Object stores</a></li><li><a href="../library/objects/">Objects</a></li><li><a href="../library/pack-bitmaps/">Pack reachability bitmaps</a></li><li><a href="../library/refs/">Refs</a></li><li><a href="../library/repository/">Repository</a></li><li><a href="../library/revwalk/">Revwalk</a></li><li><a href="../library/staging/">Index</a></li><li><a href="../library/">grit-lib API</a></li></ol><h2><a href="../benchmarks/">Benchmarks</a></h2><ol><li><a href="../benchmarks/">Benchmarks</a></li></ol></nav>
+    <aside class="toc" aria-label="On this page"><h2>On this page</h2><ol><li class="toc-level-2"><a href="#synopsis">Synopsis</a></li><li class="toc-level-2"><a href="#description">Description</a></li><li class="toc-level-2"><a href="#options">Options</a></li><li class="toc-level-2"><a href="#examples">Examples</a></li><li class="toc-level-2"><a href="#json-output">JSON output</a></li><li class="toc-level-2"><a href="#markdown-output">Markdown output</a></li><li class="toc-level-2"><a href="#see-also">See also</a></li></ol></aside>
   </div>
 </section>
 </main>
