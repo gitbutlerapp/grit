@@ -31,7 +31,7 @@ pub enum OutputMode {
     Human,
     /// A single machine-readable JSON object on stdout.
     Json,
-    /// Agent-friendly structured output (JSON document on stdout).
+    /// Agent-friendly Markdown for commands that implement [`MarkdownRender`].
     Markdown,
 }
 
@@ -65,6 +65,11 @@ pub trait HumanRender {
     fn render_human(&self);
 }
 
+/// Render a command outcome as Markdown for agents (`--markdown`).
+pub trait MarkdownRender {
+    fn render_markdown(&self);
+}
+
 /// Render a command outcome to stdout in the chosen mode.
 ///
 /// Generic (rather than `Box<dyn …>`) because `serde::Serialize` is not
@@ -74,7 +79,23 @@ pub fn emit<T: Serialize + HumanRender>(value: &T, opts: &OutputOptions) -> Resu
     match opts.mode {
         OutputMode::Human => value.render_human(),
         OutputMode::Json => write_json(value, opts.filter.as_deref())?,
-        OutputMode::Markdown => write_json(value, None)?,
+        OutputMode::Markdown => {
+            bail!("this command does not support --markdown");
+        }
+    }
+    Ok(())
+}
+
+/// Like [`emit`], but supports [`OutputMode::Markdown`] when `value` implements [`MarkdownRender`].
+pub fn emit_with_markdown<T: Serialize + HumanRender + MarkdownRender>(
+    value: &T,
+    opts: &OutputOptions,
+) -> Result<()> {
+    opts.validate()?;
+    match opts.mode {
+        OutputMode::Human => value.render_human(),
+        OutputMode::Json => write_json(value, opts.filter.as_deref())?,
+        OutputMode::Markdown => value.render_markdown(),
     }
     Ok(())
 }
@@ -123,10 +144,7 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
             }
         }
         OutputMode::Markdown => {
-            let payload = serde_json::json!({ "error": human });
-            let stdout = std::io::stdout();
-            let mut lock = stdout.lock();
-            let _ = stdio::io_result(writeln!(lock, "{payload}"));
+            eprintln!("error: {human}");
         }
         OutputMode::Json => {
             let payload = if let Some(expr) = opts.filter.as_deref() {

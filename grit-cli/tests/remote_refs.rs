@@ -3,8 +3,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 const GRIT: &str = env!("CARGO_BIN_EXE_grit");
 
@@ -28,8 +29,9 @@ fn git(dir: Option<&Path>, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-fn grit(args: &[&str]) -> (String, String) {
+fn grit_in(cwd: &Path, args: &[&str]) -> (String, String) {
     let out = Command::new(GRIT)
+        .current_dir(cwd)
         .args(args)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -45,6 +47,10 @@ fn grit(args: &[&str]) -> (String, String) {
         String::from_utf8(out.stdout).unwrap(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+fn grit(args: &[&str]) -> (String, String) {
+    grit_in(Path::new("."), args)
 }
 
 fn parse_git_ls_remote(text: &str) -> BTreeMap<String, String> {
@@ -64,7 +70,7 @@ fn parse_git_ls_remote(text: &str) -> BTreeMap<String, String> {
     map
 }
 
-fn bare_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+fn bare_fixture_with_annotated_tag() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&work).unwrap();
@@ -82,6 +88,20 @@ fn bare_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
             "init",
         ],
     );
+    git(
+        Some(&work),
+        &[
+            "-c",
+            "user.email=t@e.com",
+            "-c",
+            "user.name=T",
+            "tag",
+            "-a",
+            "v1",
+            "-m",
+            "release",
+        ],
+    );
     let bare = tmp.path().join("upstream.git");
     git(
         Some(&work),
@@ -90,40 +110,85 @@ fn bare_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     (tmp, bare)
 }
 
+fn grit_http_server_bin() -> PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let workspace = manifest.parent().expect("workspace root");
+        let status = Command::new("cargo")
+            .current_dir(workspace)
+            .args(["build", "-q", "-p", "grit-http-server"])
+            .status()
+            .expect("cargo build grit-http-server");
+        assert!(status.success(), "failed to build grit-http-server for tests");
+        let debug = workspace.join("target/debug/grit-http-server");
+        assert!(debug.is_file(), "missing {}", debug.display());
+        debug
+    })
+    .clone()
+}
+
 #[test]
 fn remote_refs_file_url_matches_git_ls_remote_human() {
-    let (_tmp, bare) = bare_fixture();
+    let (_tmp, bare) = bare_fixture_with_annotated_tag();
     let url = bare.to_str().unwrap();
     let git_map = parse_git_ls_remote(&git(None, &["ls-remote", url]));
     let (stdout, _) = grit(&["remote", "refs", url]);
     let grit_map = parse_git_ls_remote(&stdout);
     assert_eq!(grit_map, git_map);
+    assert!(
+        grit_map.keys().any(|k| k.ends_with("^{}")),
+        "expected annotated tag peel line in output"
+    );
 }
 
 #[test]
-fn remote_refs_json_schema() {
-    let (_tmp, bare) = bare_fixture();
+fn remote_refs_relative_path_matches_git_ls_remote() {
+    let (tmp, bare) = bare_fixture_with_annotated_tag();
+    let upstream = tmp.path().join("upstream");
+    std::fs::rename(bare, &upstream).unwrap();
+    let git_map = parse_git_ls_remote(&git(Some(tmp.path()), &["ls-remote", "upstream"]));
+    let (stdout, _) = grit_in(tmp.path(), &["remote", "refs", "upstream"]);
+    assert_eq!(parse_git_ls_remote(&stdout), git_map);
+}
+
+#[test]
+fn remote_refs_json_includes_peeled_on_annotated_tag() {
+    let (_tmp, bare) = bare_fixture_with_annotated_tag();
     let url = bare.to_str().unwrap();
     let (stdout, _) = grit(&["--json", "remote", "refs", url]);
     let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(value["action"], "refs");
     let refs = value["refs"].as_array().unwrap();
-    assert!(!refs.is_empty());
-    for entry in refs {
-        assert!(entry.get("name").and_then(|v| v.as_str()).is_some());
-        assert!(entry.get("oid").and_then(|v| v.as_str()).is_some());
-        assert!(entry.get("peeled").is_some() || entry.get("peeled").is_none());
-        assert!(entry.get("symref_target").is_some() || entry.get("symref_target").is_none());
-    }
+    let tag = refs
+        .iter()
+        .find(|e| e["name"] == "refs/tags/v1")
+        .expect("refs/tags/v1 entry");
+    assert!(
+        tag["peeled"].as_str().is_some(),
+        "annotated tag must include peeled commit oid"
+    );
+    assert!(
+        !refs.iter().any(|e| e["name"].as_str() == Some("refs/tags/v1^{}")),
+        "JSON uses peeled field instead of a separate ^{{}} row"
+    );
 }
 
 #[test]
-fn remote_refs_markdown_emits_json_document() {
-    let (_tmp, bare) = bare_fixture();
+fn remote_refs_markdown_is_not_json() {
+    let (_tmp, bare) = bare_fixture_with_annotated_tag();
     let url = bare.to_str().unwrap();
     let (stdout, _) = grit(&["--markdown", "remote", "refs", url]);
-    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(value["action"], "refs");
+    assert!(
+        stdout.trim_start().starts_with("## Remote refs"),
+        "markdown must be a heading, not JSON: {stdout}"
+    );
+    assert!(
+        !stdout.trim_start().starts_with('{'),
+        "markdown must not be JSON"
+    );
+    assert!(stdout.contains("| Ref |"));
+    assert!(stdout.contains("refs/tags/v1"));
 }
 
 #[test]
@@ -132,18 +197,6 @@ fn remote_refs_smart_http_matches_git() {
     use std::process::{Child, Stdio};
     use std::time::{Duration, Instant};
 
-    fn find_binary(name: &str) -> Option<std::path::PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let deps = exe.parent()?;
-        let profile = deps.parent()?;
-        for cand in [profile.join(name), deps.join(name)] {
-            if cand.is_file() {
-                return Some(cand);
-            }
-        }
-        None
-    }
-
     fn free_port() -> Option<u16> {
         TcpListener::bind("127.0.0.1:0")
             .ok()
@@ -151,7 +204,7 @@ fn remote_refs_smart_http_matches_git() {
     }
 
     fn wait_tcp(port: u16) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             if std::net::TcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
                 return true;
@@ -168,13 +221,13 @@ fn remote_refs_smart_http_matches_git() {
         }
     }
 
-    let (_tmp, bare) = bare_fixture();
-    let grit_bin = find_binary("grit").expect("grit");
-    let server_bin = find_binary("grit-http-server").expect("grit-http-server");
+    let (_tmp, bare) = bare_fixture_with_annotated_tag();
+    let grit_bin = PathBuf::from(GRIT);
+    let server_bin = grit_http_server_bin();
     let srv = tempfile::tempdir().unwrap();
     let root = srv.path().join("srv");
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::rename(&bare, root.join("repo.git")).unwrap();
+    std::fs::rename(bare, root.join("repo.git")).unwrap();
     let port = free_port().expect("port");
     let child = Command::new(&server_bin)
         .arg("--root")
@@ -192,4 +245,5 @@ fn remote_refs_smart_http_matches_git() {
     let git_map = parse_git_ls_remote(&git(None, &["ls-remote", &url]));
     let (stdout, _) = grit(&["remote", "refs", &url]);
     assert_eq!(parse_git_ls_remote(&stdout), git_map);
+    assert!(git_map.keys().any(|k| k.ends_with("^{}")));
 }
