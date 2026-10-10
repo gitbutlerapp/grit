@@ -245,8 +245,8 @@ class BenchpageTest(unittest.TestCase):
         baseline_path.write_text(json.dumps(data), encoding="utf-8")
         self.addCleanup(lambda: baseline_path.write_text(original, encoding="utf-8"))
         with tempfile.TemporaryDirectory(prefix="grit-docs-check-bench-") as tmp:
-            out = Path(tmp)
-            docs.generate(out)
+            out = Path(tmp) / "docs"
+            docs.generate(out, llms_dir=Path(tmp) / "llms")
             issues = __import__("site_util").compare_directories(out, ROOT / "docs" / "docs", label="docs")
             self.assertTrue(issues, "expected stale docs after baseline edit")
 
