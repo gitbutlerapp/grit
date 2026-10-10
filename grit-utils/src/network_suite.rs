@@ -55,7 +55,11 @@ pub fn run_network_suite(
 
     let mut scenarios = Vec::new();
 
-    for transport in [TransportKind::File, TransportKind::GritHttp] {
+    for transport in [
+        TransportKind::File,
+        TransportKind::GitHttpBackend,
+        TransportKind::GritHttp,
+    ] {
         scenarios.extend(run_clone_scenarios(
             hyperfine,
             git,
@@ -98,20 +102,15 @@ pub fn run_network_suite(
         TransportKind::File,
     )?);
 
-    // Server-side git-http-backend clone is included when `GRIT_BENCH_GIT_HTTP_SERVER=1`.
-    if profile != NetworkProfile::Smoke
-        && std::env::var_os("GRIT_BENCH_GIT_HTTP_SERVER").is_some()
-    {
-        scenarios.push(run_server_side_clone_comparison(
-            hyperfine,
-            git,
-            grit,
-            http_server,
-            cfg,
-            profile,
-            &deep,
-        )?);
-    }
+    scenarios.push(run_server_side_clone_comparison(
+        hyperfine,
+        git,
+        grit,
+        http_server,
+        cfg,
+        profile,
+        &deep,
+    )?);
 
     Ok(BenchReport {
         schema_version: SCHEMA_VERSION,

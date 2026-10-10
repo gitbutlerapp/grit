@@ -117,6 +117,7 @@ mod tests {
 
     #[test]
     fn relative_explicit_path_is_canonicalized() {
+        let original_cwd = env::current_dir().expect("initial cwd");
         let dir = TempDir::new().unwrap();
         let script = dir.path().join("fake-grit");
         fs::write(&script, b"#!/bin/sh\nexit 0\n").unwrap();
@@ -126,8 +127,9 @@ mod tests {
             fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let rel = Path::new("fake-grit");
-        std::env::set_current_dir(dir.path()).unwrap();
+        env::set_current_dir(dir.path()).expect("set cwd for relative path test");
         let resolved = resolve_binary("grit", Some(rel)).unwrap();
+        env::set_current_dir(&original_cwd).expect("restore cwd after relative path test");
         assert!(resolved.is_absolute());
         assert_eq!(resolved, script.canonicalize().unwrap());
     }

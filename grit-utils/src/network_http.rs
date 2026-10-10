@@ -1,5 +1,6 @@
 //! Local smart HTTP servers for network benchmarks.
 
+use std::env;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -117,11 +118,17 @@ pub fn handle_git_http_connection(
     let mut content_type = String::new();
     let mut expect_continue = false;
     for line in lines {
-        if let Some(rest) = line.strip_prefix("Content-Length:") {
-            content_length = rest.trim().parse().unwrap_or(0);
-        } else if let Some(rest) = line.strip_prefix("Content-Type:") {
-            content_type = rest.trim().to_string();
-        } else if line.eq_ignore_ascii_case("Expect: 100-continue") {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if name.eq_ignore_ascii_case("Content-Length") {
+            content_length = value.parse().unwrap_or(0);
+        } else if name.eq_ignore_ascii_case("Content-Type") {
+            content_type = value.to_string();
+        } else if name.eq_ignore_ascii_case("Expect") && value.eq_ignore_ascii_case("100-continue")
+        {
             expect_continue = true;
         }
     }
@@ -144,22 +151,24 @@ pub fn handle_git_http_connection(
 
     let backend = git_http_backend_path(git)?;
     let mut cmd = Command::new(&backend);
-    cmd.env("GIT_HTTP_EXPORT_ALL", "1")
-        .env("GIT_PROJECT_ROOT", project_root)
-        .env("PATH_INFO", path_info)
-        .env("QUERY_STRING", query)
-        .env("REQUEST_METHOD", method)
-        .env("SERVER_PROTOCOL", "HTTP/1.1")
-        .env("GATEWAY_INTERFACE", "CGI/1.1");
+    configure_git_http_backend_cgi(
+        &mut cmd,
+        project_root,
+        path_info,
+        query,
+        &method,
+        content_length,
+        &content_type,
+    );
     if content_length > 0 {
-        cmd.env("CONTENT_LENGTH", content_length.to_string());
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+    } else {
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
     }
-    if !content_type.is_empty() {
-        cmd.env("CONTENT_TYPE", &content_type);
-    }
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
     let mut child = cmd.spawn().context("spawn git http-backend")?;
     if content_length > 0 {
         if let Some(mut stdin) = child.stdin.take() {
@@ -174,6 +183,7 @@ pub fn handle_git_http_connection(
     }
     let response = wrap_cgi_response(&output.stdout);
     stream.write_all(&response)?;
+    let _ = stream.shutdown(std::net::Shutdown::Write);
     Ok(())
 }
 
@@ -213,6 +223,38 @@ fn wrap_cgi_response(raw: &[u8]) -> Vec<u8> {
     out.extend_from_slice(b"\r\n");
     out.extend_from_slice(body);
     out
+}
+
+/// Hermetic CGI environment for `git http-backend` (inherits only `PATH` and `HOME`).
+fn configure_git_http_backend_cgi(
+    cmd: &mut Command,
+    project_root: &Path,
+    path_info: &str,
+    query: &str,
+    method: &str,
+    content_length: usize,
+    content_type: &str,
+) {
+    cmd.env_clear();
+    if let Ok(path) = env::var("PATH") {
+        cmd.env("PATH", path);
+    }
+    if let Ok(home) = env::var("HOME") {
+        cmd.env("HOME", home);
+    }
+    cmd.env("GIT_HTTP_EXPORT_ALL", "1")
+        .env("GIT_PROJECT_ROOT", project_root)
+        .env("PATH_INFO", path_info)
+        .env("QUERY_STRING", query)
+        .env("REQUEST_METHOD", method)
+        .env("SERVER_PROTOCOL", "HTTP/1.1")
+        .env("GATEWAY_INTERFACE", "CGI/1.1");
+    if content_length > 0 {
+        cmd.env("CONTENT_LENGTH", content_length.to_string());
+    }
+    if !content_type.is_empty() {
+        cmd.env("CONTENT_TYPE", content_type);
+    }
 }
 
 fn git_http_backend_path(git: &Path) -> Result<PathBuf> {
@@ -304,14 +346,40 @@ mod tests {
     fn git_http_backend_serves_cloneable_repo() {
         let git = PathBuf::from("/usr/bin/git");
         let tmp = tempfile::tempdir().expect("tempdir");
-        let bare = tmp.path().join("upstream.git");
+        let work = tmp.path();
+        let bare = work.join("upstream.git");
         Command::new(&git)
+            .current_dir(work)
             .args(["init", "--bare", bare.to_str().unwrap()])
             .status()
             .expect("init bare");
-        let root = tmp.path().join("http");
+        let seed = work.join("seed");
+        Command::new(&git)
+            .current_dir(work)
+            .args(["init", "-q", seed.to_str().unwrap()])
+            .status()
+            .expect("init seed");
+        std::fs::write(seed.join("README"), b"network bench smoke\n").unwrap();
+        let seed_steps: &[&[&str]] = &[
+            &["add", "README"],
+            &["commit", "-m", "seed"],
+            &["branch", "-M", "main"],
+            &["remote", "add", "origin", bare.to_str().unwrap()],
+            &["push", "-q", "origin", "main"],
+        ];
+        for args in seed_steps {
+            let status = Command::new(&git)
+                .current_dir(&seed)
+                .args(["-c", "user.email=bench@test", "-c", "user.name=bench"])
+                .args(*args)
+                .status()
+                .expect("seed repo setup");
+            assert!(status.success(), "seed repo setup step failed");
+        }
+        let root = work.join("http");
         std::fs::create_dir_all(&root).unwrap();
         Command::new(&git)
+            .current_dir(work)
             .args([
                 "clone",
                 "--bare",
@@ -322,8 +390,9 @@ mod tests {
             .expect("clone bare");
         let server = GitHttpBackendServer::start(&git, root.clone()).expect("start server");
         let url = server.url("fixture.git");
-        let dest = tmp.path().join("clone");
+        let dest = work.join("clone");
         let status = Command::new(&git)
+            .current_dir(work)
             .args(["clone", "-q", &url, dest.to_str().unwrap()])
             .status()
             .expect("git clone");

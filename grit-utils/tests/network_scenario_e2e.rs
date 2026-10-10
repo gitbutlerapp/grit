@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_utils::binary::require_hyperfine;
 
-fn build_grit_executable() -> PathBuf {
+fn build_network_binaries() -> (PathBuf, PathBuf) {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let status = Command::new(env!("CARGO"))
         .args([
@@ -16,25 +16,30 @@ fn build_grit_executable() -> PathBuf {
             "grit-http-server",
             "--bin",
             "grit",
+            "--bin",
+            "grit-http-server",
             "-q",
         ])
         .current_dir(&workspace)
         .status()
         .expect("spawn cargo build");
-    assert!(status.success(), "cargo build grit binaries failed");
-    workspace.join("target/debug/grit")
+    assert!(status.success(), "cargo build grit network binaries failed");
+    (
+        workspace.join("target/debug/grit"),
+        workspace.join("target/debug/grit-http-server"),
+    )
 }
 
 #[test]
 fn network_scenario_smoke_end_to_end() {
-    if require_hyperfine().is_err() {
-        eprintln!("skipping network_scenario_smoke_end_to_end: hyperfine not on PATH");
-        return;
-    }
+    require_hyperfine().expect(
+        "hyperfine is required for grit-bench network smoke; install from https://github.com/sharkdp/hyperfine",
+    );
 
-    let grit = build_grit_executable();
+    let (grit, http_server) = build_network_binaries();
     let bench = PathBuf::from(env!("CARGO_BIN_EXE_grit-bench"));
     let grit_flag = grit.to_string_lossy();
+    let http_flag = http_server.to_string_lossy();
 
     let output = Command::new(&bench)
         .args([
@@ -48,6 +53,8 @@ fn network_scenario_smoke_end_to_end() {
             "json",
             "--grit",
             &grit_flag,
+            "--http-server",
+            &http_flag,
         ])
         .output()
         .expect("run grit-bench network --smoke");
@@ -62,7 +69,11 @@ fn network_scenario_smoke_end_to_end() {
     assert_eq!(report["schema_version"], 1);
 
     let scenarios = report["scenarios"].as_array().expect("scenarios array");
-    assert_eq!(scenarios.len(), 6, "expected six smoke network scenarios");
+    assert_eq!(
+        scenarios.len(),
+        8,
+        "expected eight smoke network scenarios (clone×3, fetch, push, ls-remote, server compare)"
+    );
     for scenario in scenarios {
         let ratio = scenario["ratio"].as_f64().expect("ratio");
         assert!(
