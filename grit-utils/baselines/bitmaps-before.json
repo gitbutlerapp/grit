@@ -287,7 +287,7 @@
       "ratio": 0.0,
       "grit_failure": {
         "kind": "memory_cap",
-        "message": "measure-rss failed: Error: benchmark command failed with exit status: 137"
+        "message": "RSS monitor enforced cap 12884901888 bytes (exit 125)"
       }
     }
   ]
