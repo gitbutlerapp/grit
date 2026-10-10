@@ -148,7 +148,7 @@ pub fn clone(
             false,
             &opts.initial_branch,
             None,
-            "files",
+            RefStorageFormat::default(),
         )
         .map_err(|e| {
             CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))

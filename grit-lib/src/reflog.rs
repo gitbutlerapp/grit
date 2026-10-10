@@ -1154,7 +1154,14 @@ mod default_expire_tests {
 
     fn seed_repo() -> (TempDir, Repository) {
         let tmp = TempDir::new().expect("tempdir");
-        let repo = init_repository(tmp.path(), false, "main", None, "files").expect("init");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
         (tmp, repo)
     }
 

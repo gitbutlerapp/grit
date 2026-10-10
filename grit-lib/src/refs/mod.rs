@@ -2661,7 +2661,14 @@ mod update_branch_for_commit_tests {
     #[test]
     fn update_branch_for_commit_holds_lock_until_ref_commit() {
         let tmp = TempDir::new().unwrap();
-        let repo = init_repository(tmp.path(), false, "main", None, "files").unwrap();
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
         let git_dir = repo.git_dir.clone();
         let oid1 = sample_oid("67bf698f3ab735e92fb011a99cff3497c44d30c1");
         let oid2 = sample_oid("1111111111111111111111111111111111111111");
@@ -2710,7 +2717,14 @@ mod update_branch_for_commit_tests {
     #[test]
     fn update_branch_for_commit_reftable_transaction_is_all_or_nothing() {
         let tmp = TempDir::new().unwrap();
-        let repo = init_repository(tmp.path(), false, "main", None, "reftable").unwrap();
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Reftable,
+        )
+        .unwrap();
         let git_dir = repo.git_dir.clone();
         let new_oid = sample_oid("3333333333333333333333333333333333333333");
 
