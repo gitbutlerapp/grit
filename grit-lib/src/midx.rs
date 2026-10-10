@@ -21,7 +21,9 @@ use crate::diagnostics::{DiagnosticSink, NullDiagnostics, Warning};
 use crate::error::{Error, MidxError, Result};
 use crate::objects::{HashAlgo, ObjectId, ObjectInfo};
 use crate::pack::{read_pack_index_no_verify, PackIndex};
+use crate::pack_bitmap::{MidxBitmapWriter, PackBitmapWriteOptions};
 use crate::pack_rev::append_hashfile_checksum;
+use crate::repo::Repository;
 
 const MIDX_SIGNATURE: u32 = 0x4d49_4458;
 const MIDX_VERSION_V1: u8 = 1;
@@ -65,19 +67,40 @@ pub struct WriteMultiPackIndexOptions {
     pub preferred_pack_name: Option<String>,
     /// If set, only these `pack-*.idx` basenames are included, in this order (Git `--stdin-packs`).
     pub pack_names_subset_ordered: Option<Vec<String>>,
-    /// When true, append RIDX + empty BTMP chunks so `test-tool read-midx --bitmap` succeeds.
-    pub write_bitmap_placeholders: bool,
+    /// When true, append RIDX + BTMP chunks and write a reachability `.bitmap` sidecar
+    /// (non-incremental root MIDX and compaction only; incremental layers skip the bitmap).
+    pub write_bitmap: bool,
     /// When true, write a new layer in `multi-pack-index.d/` and extend the chain file
     /// instead of replacing `pack/multi-pack-index`.
     pub incremental: bool,
-    /// When true with [`Self::write_bitmap_placeholders`], also create an empty `.rev`
-    /// sidecar (Git `GIT_TEST_MIDX_WRITE_REV` compatibility).
-    pub write_rev_placeholder: bool,
+    /// When true with [`Self::write_bitmap`], emit a standalone `.rev` sidecar and omit the
+    /// embedded RIDX chunk (Git `GIT_TEST_MIDX_WRITE_REV` compatibility).
+    pub write_rev_sidecar: bool,
     /// On-disk MIDX format version to write (`1` or `2`). `None` writes the default (v2).
     /// Set from `midx.version`.
     pub version: Option<u8>,
     /// When set, non-fatal MIDX write warnings are reported here instead of being discarded.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+}
+
+/// Outcome of an optional MIDX reachability bitmap write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum MidxBitmapWriteOutcome {
+    /// No bitmap was requested for this write.
+    #[default]
+    NotRequested,
+    /// A `.bitmap` sidecar was written next to the MIDX.
+    Written,
+    /// Incremental chain layers do not carry bitmap sidecars (Git-compatible).
+    SkippedIncrementalLayer,
+}
+
+/// Result of [`write_multi_pack_index_with_options`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WriteMultiPackIndexResult {
+    /// Whether and how a reachability bitmap was handled.
+    pub bitmap: MidxBitmapWriteOutcome,
 }
 
 fn normalize_pack_idx_basename(raw: &str) -> Result<String> {
@@ -1059,6 +1082,62 @@ pub fn resolve_tip_midx_path(pack_dir: &Path) -> Option<std::path::PathBuf> {
 /// Resolve a specific MIDX layer file by its lowercase hex checksum. Searches the
 /// incremental chain (`multi-pack-index.d/multi-pack-index-<hash>.midx`) and the
 /// single-file root MIDX. Returns `None` when no layer matches that checksum.
+/// Sidecar path `multi-pack-index-<hash>.<ext>` in the same directory as `midx_path`.
+pub fn midx_sidecar_path_for_midx_file(midx_path: &Path, ext: &str) -> Result<PathBuf> {
+    if let Some(name) = midx_path.file_name().and_then(|s| s.to_str()) {
+        if let Some(hash_part) = name
+            .strip_prefix("multi-pack-index-")
+            .and_then(|r| r.strip_suffix(".midx"))
+        {
+            let parent = midx_path.parent().ok_or_else(|| {
+                Error::CorruptObject("MIDX path has no parent directory".to_owned())
+            })?;
+            return Ok(parent.join(format!("multi-pack-index-{hash_part}.{ext}")));
+        }
+    }
+    let hash_hex = midx_checksum_hex_from_path(midx_path)?;
+    let parent = midx_path
+        .parent()
+        .ok_or_else(|| Error::CorruptObject("MIDX path has no parent directory".to_owned()))?;
+    Ok(parent.join(format!("multi-pack-index-{hash_hex}.{ext}")))
+}
+
+/// Newest chain layer (or root MIDX) that has a non-empty `.bitmap` sidecar beside its MIDX file.
+///
+/// When the tip incremental layer has no bitmap, an older compacted layer's sidecar under
+/// `multi-pack-index.d/` is returned so readers match Git's split-layout layout.
+#[must_use]
+pub fn resolve_midx_bitmap_layer(pack_dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    let is_real_bitmap =
+        |path: &Path| path.is_file() && path.metadata().ok().is_some_and(|m| m.len() > 32);
+
+    if let Ok(chain) = read_chain_layer_hashes(pack_dir) {
+        if !chain.is_empty() {
+            let midx_d = midx_d_dir(pack_dir);
+            for hash in chain.iter().rev() {
+                let midx_path = midx_d.join(format!("multi-pack-index-{hash}.midx"));
+                if !midx_path.is_file() {
+                    continue;
+                }
+                let bitmap_path = midx_d.join(format!("multi-pack-index-{hash}.bitmap"));
+                if is_real_bitmap(&bitmap_path) {
+                    return Some((bitmap_path, midx_path));
+                }
+            }
+        }
+    }
+
+    let root = pack_dir.join("multi-pack-index");
+    if root.is_file() {
+        let hash_hex = midx_checksum_hex_from_path(&root).ok()?;
+        let bitmap_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.bitmap"));
+        if is_real_bitmap(&bitmap_path) {
+            return Some((bitmap_path, root));
+        }
+    }
+    None
+}
+
 pub fn resolve_midx_layer_path(pack_dir: &Path, checksum: &str) -> Option<std::path::PathBuf> {
     let checksum = checksum.to_ascii_lowercase();
     if let Ok(hashes) = read_chain_layer_hashes(pack_dir) {
@@ -1209,7 +1288,7 @@ fn clear_stale_split_layers(pack_dir: &Path, keep: &[String]) -> Result<()> {
         let Some((hash_part, _ext)) = rest.split_once('.') else {
             continue;
         };
-        if hash_part.len() == 40 && !keep.contains(hash_part) {
+        if (hash_part.len() == 40 || hash_part.len() == 64) && !keep.contains(hash_part) {
             let _ = fs::remove_file(ent.path());
         }
     }
@@ -1287,7 +1366,7 @@ fn build_midx_bytes_filtered(
     idx_names: &[String],
     indexes: &[PackIndex],
     preferred_idx: Option<usize>,
-    write_bitmap_placeholders: bool,
+    write_bitmap: bool,
     omit_embedded_ridx_chunk: bool,
     version: u8,
     hash_version: u8,
@@ -1423,12 +1502,12 @@ fn build_midx_bytes_filtered(
 
     // BTMP: per-pack (bitmap_pos, bitmap_nr) in the pseudo-bitmap namespace, matching Git's
     // `write_midx_bitmapped_packs` (cumulative start + object count per pack).
-    let rev_sidecar_order = if omit_embedded_ridx_chunk && write_bitmap_placeholders {
+    let bitmap_rid_order = if write_bitmap {
         Some(order.clone())
     } else {
         None
     };
-    let chunk_btmp: Vec<u8> = if write_bitmap_placeholders {
+    let chunk_btmp: Vec<u8> = if write_bitmap {
         // Per-pack `(bitmap_pos, bitmap_nr)`: position of the pack's first object in
         // the MIDX pack-order traversal and the number of (deduplicated) MIDX objects
         // selected from that pack — matching `write_midx_bitmapped_packs` in
@@ -1473,10 +1552,10 @@ fn build_midx_bytes_filtered(
     if !chunk_loff.is_empty() {
         chunks.push((MIDX_CHUNKID_LARGEOFFSETS, chunk_loff));
     }
-    if (pref.is_some() || write_bitmap_placeholders) && !omit_embedded_ridx_chunk {
+    if (pref.is_some() || write_bitmap) && !omit_embedded_ridx_chunk {
         chunks.push((MIDX_CHUNKID_REVINDEX, chunk_ridx));
     }
-    if write_bitmap_placeholders {
+    if write_bitmap {
         chunks.push((MIDX_CHUNKID_BITMAPPED_PACKS, chunk_btmp));
     }
 
@@ -1522,7 +1601,7 @@ fn build_midx_bytes_filtered(
     };
     out.extend_from_slice(algo.digest(&out).as_bytes());
 
-    Ok((out, rev_sidecar_order))
+    Ok((out, bitmap_rid_order))
 }
 
 /// Standalone MIDX `.rev` file (Git `write_rev_file_order` / `RIDX_SIGNATURE`).
@@ -2260,28 +2339,57 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
     let Some(path) = resolve_tip_midx_path(&pack_dir) else {
         return Ok(None);
     };
-    let data = fs::read(&path).map_err(Error::Io)?;
+    load_midx_reuse_tables_from_path(&path)
+}
+
+/// Load reuse tables from one on-disk MIDX layer (`multi-pack-index` or `multi-pack-index.d/…midx`).
+pub fn load_midx_reuse_tables_from_path(midx_path: &Path) -> Result<Option<MidxReuseTables>> {
+    let data = fs::read(midx_path).map_err(Error::Io)?;
     let hash_len = midx_hash_len(&data);
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (oidl_off, oid_l_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
     let (ooff_off, ooff_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
-    let Ok((ridx_off, ridx_len)) = find_chunk(&data, hdr_end, MIDX_CHUNKID_REVINDEX) else {
-        return Ok(None);
-    };
     if oid_l_len % hash_len != 0 || ooff_len != oid_l_len / hash_len * 8 {
         return Err(Error::CorruptObject(
             "MIDX OID / offset chunk size mismatch".to_owned(),
         ));
     }
     let num_objects = oid_l_len / hash_len;
-    if ridx_len != num_objects.saturating_mul(4) {
-        return Err(Error::CorruptObject(
-            "MIDX reverse index length does not match object count".to_owned(),
-        ));
-    }
     if num_objects == 0 {
         return Ok(None);
     }
+
+    let rid_order =
+        if let Ok((ridx_off, ridx_len)) = find_chunk(&data, hdr_end, MIDX_CHUNKID_REVINDEX) {
+            if ridx_len != num_objects.saturating_mul(4) {
+                return Err(Error::CorruptObject(
+                    "MIDX reverse index length does not match object count".to_owned(),
+                ));
+            }
+            let mut order = Vec::with_capacity(num_objects);
+            for i in 0..num_objects {
+                let base = ridx_off + i * 4;
+                order.push(read_be_u32(&data, base)?);
+            }
+            order
+        } else {
+            let hash_hex = hex::encode(&data[data.len().saturating_sub(hash_len)..]);
+            let rev_path = midx_path
+                .parent()
+                .map(|p| p.join(format!("multi-pack-index-{hash_hex}.rev")))
+                .unwrap_or_else(|| PathBuf::from(format!("multi-pack-index-{hash_hex}.rev")));
+            let rev_data = match fs::read(&rev_path) {
+                Ok(d) => d,
+                Err(_) => return Ok(None),
+            };
+            crate::pack_rev::try_rev_positions_in_pack_order(&rev_data, num_objects).ok_or_else(
+                || {
+                    Error::CorruptObject(
+                        "MIDX standalone .rev sidecar is invalid or missing".to_owned(),
+                    )
+                },
+            )?
+        };
 
     let mut oids = Vec::with_capacity(num_objects);
     for i in 0..num_objects {
@@ -2295,12 +2403,6 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
         let pack_id = read_be_u32(&data, ob)?;
         let off32 = read_be_u32(&data, ob + 4)?;
         pack_and_offset.push((pack_id, u64::from(off32)));
-    }
-
-    let mut rid_order = Vec::with_capacity(num_objects);
-    for i in 0..num_objects {
-        let base = ridx_off + i * 4;
-        rid_order.push(read_be_u32(&data, base)?);
     }
 
     let mut oid_idx_to_rank = vec![0u32; num_objects];
@@ -2322,6 +2424,62 @@ pub fn load_midx_reuse_tables(objects_dir: &Path) -> Result<Option<MidxReuseTabl
         rid_order,
         oid_idx_to_rank,
     }))
+}
+
+/// Parse reuse tables from in-memory MIDX bytes and a known RIDX / `.rev` traversal order.
+pub(crate) fn midx_reuse_tables_from_bytes(
+    data: &[u8],
+    rid_order: &[u32],
+) -> Result<MidxReuseTables> {
+    let hash_len = midx_hash_len(data);
+    let (_, hdr_end, _) = parse_midx_header(data)?;
+    let (oidl_off, oid_l_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_OIDLOOKUP)?;
+    let (ooff_off, ooff_len) = find_chunk(data, hdr_end, MIDX_CHUNKID_OBJECTOFFSETS)?;
+    if oid_l_len % hash_len != 0 || ooff_len != oid_l_len / hash_len * 8 {
+        return Err(Error::CorruptObject(
+            "MIDX OID / offset chunk size mismatch".to_owned(),
+        ));
+    }
+    let num_objects = oid_l_len / hash_len;
+    if rid_order.len() != num_objects {
+        return Err(Error::CorruptObject(
+            "MIDX reverse index length does not match object count".to_owned(),
+        ));
+    }
+
+    let mut oids = Vec::with_capacity(num_objects);
+    for i in 0..num_objects {
+        let base = oidl_off + i * hash_len;
+        oids.push(ObjectId::from_bytes(&data[base..base + hash_len])?);
+    }
+
+    let mut pack_and_offset = Vec::with_capacity(num_objects);
+    for i in 0..num_objects {
+        let ob = ooff_off + i * 8;
+        let pack_id = read_be_u32(data, ob)?;
+        let off32 = read_be_u32(data, ob + 4)?;
+        pack_and_offset.push((pack_id, u64::from(off32)));
+    }
+
+    let mut oid_idx_to_rank = vec![0u32; num_objects];
+    for (rank, &oid_idx) in rid_order.iter().enumerate() {
+        let idx = usize::try_from(oid_idx)
+            .map_err(|_| Error::CorruptObject("bad MIDX reverse index entry".to_owned()))?;
+        if idx >= num_objects {
+            return Err(Error::CorruptObject(
+                "MIDX reverse index out of range".to_owned(),
+            ));
+        }
+        oid_idx_to_rank[idx] = u32::try_from(rank)
+            .map_err(|_| Error::CorruptObject("too many MIDX objects".to_owned()))?;
+    }
+
+    Ok(MidxReuseTables {
+        oids,
+        pack_and_offset,
+        rid_order: rid_order.to_vec(),
+        oid_idx_to_rank,
+    })
 }
 
 impl MidxReuseTables {
@@ -2743,15 +2901,85 @@ pub fn clear_pack_midx_state(pack_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn write_multi_pack_index(pack_dir: &Path) -> Result<()> {
+pub fn write_multi_pack_index(pack_dir: &Path) -> Result<WriteMultiPackIndexResult> {
     write_multi_pack_index_with_options(pack_dir, &WriteMultiPackIndexOptions::default())
 }
 
-/// Write `multi-pack-index` with optional preferred pack, placeholders, and incremental chain.
+fn repository_for_pack_dir(pack_dir: &Path) -> Result<Repository> {
+    let objects = pack_dir.parent().ok_or_else(|| {
+        Error::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "pack directory has no parent",
+        ))
+    })?;
+    let git_dir = objects.parent().ok_or_else(|| {
+        Error::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "objects directory has no parent",
+        ))
+    })?;
+    Repository::open(git_dir, None)
+}
+
+fn midx_bitmap_sidecar_matches(path: &Path, midx_checksum: &[u8]) -> bool {
+    let Ok(data) = fs::read(path) else {
+        return false;
+    };
+    let header_end = 4 + 2 + 2 + 4;
+    if data.len() < header_end + midx_checksum.len() {
+        return false;
+    }
+    if &data[0..4] != b"BITM" {
+        return false;
+    }
+    data[header_end..header_end + midx_checksum.len()] == *midx_checksum
+}
+
+fn write_midx_reachability_bitmap(
+    pack_dir: &Path,
+    midx_bytes: &[u8],
+    rid_order: &[u32],
+    midx_checksum: &[u8],
+    bitmap_path: &Path,
+) -> Result<()> {
+    write_midx_reachability_bitmap_with_options(
+        pack_dir,
+        midx_bytes,
+        rid_order,
+        midx_checksum,
+        bitmap_path,
+        &PackBitmapWriteOptions::default(),
+    )
+}
+
+fn write_midx_reachability_bitmap_with_options(
+    pack_dir: &Path,
+    midx_bytes: &[u8],
+    rid_order: &[u32],
+    midx_checksum: &[u8],
+    bitmap_path: &Path,
+    options: &PackBitmapWriteOptions,
+) -> Result<()> {
+    let repo = repository_for_pack_dir(pack_dir)?;
+    MidxBitmapWriter::write_for_midx_layer(
+        &repo,
+        midx_bytes,
+        rid_order,
+        midx_checksum,
+        bitmap_path,
+        options,
+    )
+    .map_err(|e| MidxError::BitmapWriteFailed {
+        detail: e.to_string(),
+    })?;
+    Ok(())
+}
+
+/// Write `multi-pack-index` with optional preferred pack, bitmap sidecars, and incremental chain.
 pub fn write_multi_pack_index_with_options(
     pack_dir: &Path,
     opts: &WriteMultiPackIndexOptions,
-) -> Result<()> {
+) -> Result<WriteMultiPackIndexResult> {
     // Git warns and ignores an existing MIDX whose checksum does not validate when
     // writing a fresh (non-stdin-packs) MIDX (git/midx-write.c `write_midx_internal`).
     if opts.pack_names_subset_ordered.is_none() {
@@ -2860,7 +3088,7 @@ pub fn write_multi_pack_index_with_options(
     };
 
     if opts.incremental && layer_idx_names.is_empty() {
-        return Ok(());
+        return Ok(WriteMultiPackIndexResult::default());
     }
 
     let work_names = if opts.incremental {
@@ -2878,7 +3106,7 @@ pub fn write_multi_pack_index_with_options(
                 .position(|n| cmp_idx_or_pack_name(raw, n).is_eq());
         }
     }
-    if preferred_idx.is_none() && opts.write_bitmap_placeholders && !work_names.is_empty() {
+    if preferred_idx.is_none() && opts.write_bitmap && !work_names.is_empty() {
         preferred_idx = preferred_pack_index_by_mtime(pack_dir, work_names)?;
     }
     if let Some(p) = preferred_idx {
@@ -2953,10 +3181,9 @@ pub fn write_multi_pack_index_with_options(
         }
     }
 
-    let bitmap_placeholders =
-        opts.write_bitmap_placeholders && (!opts.incremental || !best.is_empty());
+    let write_bitmap_chunks = opts.write_bitmap && (!opts.incremental || !best.is_empty());
 
-    let omit_embedded_ridx = opts.write_rev_placeholder;
+    let omit_embedded_ridx = opts.write_rev_sidecar;
     // An incremental layer must not repeat objects already provided by the base
     // chain even when the layer's own pack physically contains them (a fresh pack
     // built with `--revs` from a tag range, for instance). Filter by base OID.
@@ -2965,11 +3192,11 @@ pub fn write_multi_pack_index_with_options(
     } else {
         None
     };
-    let (out, rev_sidecar_order) = build_midx_bytes_filtered(
+    let (out, bitmap_rid_order) = build_midx_bytes_filtered(
         work_names,
         &indexes,
         preferred_idx,
-        bitmap_placeholders,
+        write_bitmap_chunks,
         omit_embedded_ridx,
         opts.version.unwrap_or(MIDX_VERSION_V2),
         repo_midx_hash_version(pack_dir),
@@ -2981,6 +3208,16 @@ pub fn write_multi_pack_index_with_options(
     let hash = &out[out.len() - hash_len..];
     let hash_hex = hex::encode(hash);
     let hash_arr: Vec<u8> = hash.to_vec();
+
+    let bitmap_outcome = if opts.write_bitmap {
+        if opts.incremental {
+            MidxBitmapWriteOutcome::SkippedIncrementalLayer
+        } else {
+            MidxBitmapWriteOutcome::Written
+        }
+    } else {
+        MidxBitmapWriteOutcome::NotRequested
+    };
 
     if opts.incremental {
         let root_midx = pack_dir.join("multi-pack-index");
@@ -3014,17 +3251,11 @@ pub fn write_multi_pack_index_with_options(
 
         let _ = fs::remove_file(pack_dir.join("multi-pack-index"));
         scrub_root_midx_sidecars(pack_dir)?;
-        if bitmap_placeholders {
+        if write_bitmap_chunks && opts.write_rev_sidecar {
             let full = hex::encode(hash);
-            fs::write(midx_d.join(format!("multi-pack-index-{full}.bitmap")), [])
-                .map_err(Error::Io)?;
-            if opts.write_rev_placeholder {
-                let rev_path = midx_d.join(format!("multi-pack-index-{full}.rev"));
-                if let Some(order) = rev_sidecar_order.as_ref() {
-                    write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
-                } else {
-                    fs::write(rev_path, []).map_err(Error::Io)?;
-                }
+            let rev_path = midx_d.join(format!("multi-pack-index-{full}.rev"));
+            if let Some(order) = bitmap_rid_order.as_ref() {
+                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
             }
         }
     } else {
@@ -3039,14 +3270,16 @@ pub fn write_multi_pack_index_with_options(
         // already on disk and we are not (re)writing a bitmap, leave the file
         // untouched so its mtime is preserved (t5319 `test_midx_is_retained`).
         let bitmap_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.bitmap"));
-        let bitmap_ok = !opts.write_bitmap_placeholders || bitmap_path.exists();
+        let bitmap_ok = !opts.write_bitmap || midx_bitmap_sidecar_matches(&bitmap_path, hash);
         // Only short-circuit when there is no active incremental chain to collapse;
         // an empty leftover `multi-pack-index.d/` (from a prior conversion) must not
         // defeat the retention optimization, so key off the chain file, not the dir.
         if bitmap_ok && !chain_file_path(pack_dir).exists() {
             if let Ok(existing) = fs::read(&dest) {
                 if existing == out {
-                    return Ok(());
+                    return Ok(WriteMultiPackIndexResult {
+                        bitmap: bitmap_outcome,
+                    });
                 }
             }
         }
@@ -3057,25 +3290,24 @@ pub fn write_multi_pack_index_with_options(
 
         scrub_root_midx_sidecars_except(pack_dir, Some(&hash_hex))?;
 
-        if opts.write_bitmap_placeholders {
-            fs::write(
-                pack_dir.join(format!("multi-pack-index-{hash_hex}.bitmap")),
-                [],
-            )
-            .map_err(Error::Io)?;
-            if opts.write_rev_placeholder {
-                let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
-                if let Some(order) = rev_sidecar_order.as_ref() {
-                    write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
-                } else {
-                    fs::write(rev_path, []).map_err(Error::Io)?;
-                }
+        if opts.write_rev_sidecar {
+            let rev_path = pack_dir.join(format!("multi-pack-index-{hash_hex}.rev"));
+            if let Some(order) = bitmap_rid_order.as_ref() {
+                write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
             }
+        }
+        if opts.write_bitmap {
+            let rid = bitmap_rid_order.as_ref().ok_or_else(|| {
+                Error::CorruptObject("MIDX bitmap write missing reverse index order".to_owned())
+            })?;
+            write_midx_reachability_bitmap(pack_dir, &out, rid, hash, &bitmap_path)?;
         }
     }
 
     midx_cache::evict_pack_dir(pack_dir);
-    Ok(())
+    Ok(WriteMultiPackIndexResult {
+        bitmap: bitmap_outcome,
+    })
 }
 
 fn pack_names_match_layer(base_name: &str, disk_idx: &str) -> bool {
@@ -3244,7 +3476,7 @@ pub fn compact_multi_pack_index(
         Some(&base_oids)
     };
 
-    let (out, rev_sidecar_order) = build_midx_bytes_filtered(
+    let (out, bitmap_rid_order) = build_midx_bytes_filtered(
         &ordered_idx_names,
         &indexes,
         preferred_idx,
@@ -3281,19 +3513,28 @@ pub fn compact_multi_pack_index(
     fs::write(chain_file_path(pack_dir), chain_data.as_bytes()).map_err(Error::Io)?;
 
     if write_bitmaps {
-        fs::write(
-            midx_d.join(format!("multi-pack-index-{hash_hex}.bitmap")),
-            [],
-        )
-        .map_err(Error::Io)?;
-        let rev_path = midx_d.join(format!("multi-pack-index-{hash_hex}.rev"));
         if write_rev {
-            if let Some(order) = rev_sidecar_order.as_ref() {
+            let rev_path = midx_d.join(format!("multi-pack-index-{hash_hex}.rev"));
+            if let Some(order) = bitmap_rid_order.as_ref() {
                 write_midx_rev_sidecar(&rev_path, order, &hash_arr, repo_algo)?;
-            } else {
-                fs::write(rev_path, []).map_err(Error::Io)?;
             }
         }
+        let bitmap_path = midx_d.join(format!("multi-pack-index-{hash_hex}.bitmap"));
+        let rid = bitmap_rid_order.as_ref().ok_or_else(|| {
+            CompactError::Other("MIDX bitmap write missing reverse index order".to_owned())
+        })?;
+        write_midx_reachability_bitmap_with_options(
+            pack_dir,
+            &out,
+            rid,
+            hash,
+            &bitmap_path,
+            &PackBitmapWriteOptions {
+                verify_reachability_closure: false,
+                ..PackBitmapWriteOptions::default()
+            },
+        )
+        .map_err(|e| CompactError::Other(e.to_string()))?;
     }
 
     // Drop the now-removed range layers and their sidecars.

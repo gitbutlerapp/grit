@@ -9,4 +9,6 @@ mod writer;
 
 pub use error::BitmapError;
 pub use index::{BitmapIndex, BitmapIndexCache, CommitReachabilityBitmap, TypeBitmap};
-pub use writer::{PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter};
+pub use writer::{
+    MidxBitmapWriter, PackBitmapWriteError, PackBitmapWriteOptions, PackBitmapWriter,
+};

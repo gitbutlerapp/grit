@@ -241,6 +241,7 @@ fn lookup_table_and_hash_cache_variants() {
                 hash_cache,
                 lookup_table: lookup,
                 prefer_bitmap_tips: Vec::new(),
+                verify_reachability_closure: true,
             },
         );
         let out = Command::new("git")

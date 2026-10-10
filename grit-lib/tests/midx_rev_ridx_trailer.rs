@@ -38,8 +38,8 @@ fn git_available() -> bool {
 
 fn grit_write_midx_rev(pack_dir: &Path) {
     let opts = WriteMultiPackIndexOptions {
-        write_bitmap_placeholders: true,
-        write_rev_placeholder: true,
+        write_bitmap: true,
+        write_rev_sidecar: true,
         version: Some(1),
         ..WriteMultiPackIndexOptions::default()
     };

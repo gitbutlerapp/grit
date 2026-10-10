@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::midx::load_midx_reuse_tables;
+use crate::midx::{load_midx_reuse_tables, load_midx_reuse_tables_from_path};
 use crate::objects::ObjectId;
 use crate::pack::PackIndex;
 use crate::pack_rev::{rev_path_for_index, try_rev_positions_in_pack_order};
@@ -150,11 +150,32 @@ impl BitmapOrder {
             Some(t) => t,
             None => return Ok(None),
         };
-        Ok(Some(Self::Midx {
+        Ok(Some(Self::from_midx_tables(tables)))
+    }
+
+    pub(crate) fn load_midx_file(midx_path: &Path) -> Result<Option<Self>> {
+        let tables = match load_midx_reuse_tables_from_path(midx_path)? {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        Ok(Some(Self::from_midx_tables(tables)))
+    }
+
+    pub(crate) fn from_midx_tables(tables: crate::midx::MidxReuseTables) -> Self {
+        Self::Midx {
             oids: tables.oids,
             rid_order: tables.rid_order,
             oid_idx_to_rank: tables.oid_idx_to_rank,
-        }))
+        }
+    }
+
+    /// Build pseudo-pack bitmap order from a freshly written MIDX layer and its RIDX order.
+    pub(crate) fn from_midx_bytes_and_rid_order(
+        midx_data: &[u8],
+        rid_order: &[u32],
+    ) -> Result<Self> {
+        let tables = crate::midx::midx_reuse_tables_from_bytes(midx_data, rid_order)?;
+        Ok(Self::from_midx_tables(tables))
     }
 }
 

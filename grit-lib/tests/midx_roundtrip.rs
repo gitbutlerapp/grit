@@ -60,8 +60,8 @@ fn grit_midx_write_variants_pass_git_verify_sha1() {
             ..Default::default()
         },
         WriteMultiPackIndexOptions {
-            write_bitmap_placeholders: true,
-            write_rev_placeholder: true,
+            write_bitmap: true,
+            write_rev_sidecar: true,
             version: Some(1),
             ..Default::default()
         },
@@ -115,8 +115,8 @@ fn grit_midx_write_variants_pass_git_verify_sha256() {
     };
     let pack_dir = objects.join("pack");
     let opts = WriteMultiPackIndexOptions {
-        write_bitmap_placeholders: true,
-        write_rev_placeholder: true,
+        write_bitmap: true,
+        write_rev_sidecar: true,
         version: Some(1),
         ..Default::default()
     };
@@ -212,8 +212,8 @@ fn reuse_tables_and_preferred_pack_with_ridx() {
     };
     let pack_dir = objects.join("pack");
     let opts = WriteMultiPackIndexOptions {
-        write_bitmap_placeholders: true,
-        write_rev_placeholder: false,
+        write_bitmap: true,
+        write_rev_sidecar: false,
         version: Some(1),
         ..Default::default()
     };
@@ -221,7 +221,7 @@ fn reuse_tables_and_preferred_pack_with_ridx() {
     grit_write_midx(&pack_dir, &opts);
     let tables = load_midx_reuse_tables(&objects)
         .expect("load tables")
-        .expect("embedded RIDX chunk required when write_rev_placeholder is false");
+        .expect("embedded RIDX chunk required when write_rev_sidecar is false");
     assert!(!tables.oids.is_empty());
     for oid in &oids {
         if let Some(bit) = tables.global_bitmap_bit(oid) {
@@ -440,8 +440,8 @@ fn midx_public_api_smoke_sha1_and_sha256() {
         grit_write_midx(
             &pack_dir,
             &WriteMultiPackIndexOptions {
-                write_bitmap_placeholders: true,
-                write_rev_placeholder: true,
+                write_bitmap: true,
+                write_rev_sidecar: true,
                 ..Default::default()
             },
         );

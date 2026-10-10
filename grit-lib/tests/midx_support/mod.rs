@@ -399,6 +399,29 @@ pub fn grit_write_midx(pack_dir: &Path, opts: &WriteMultiPackIndexOptions) {
     clear_pack_cache();
 }
 
+/// Fail if any `multi-pack-index-*.bitmap` under `pack_dir` or `multi-pack-index.d/` is empty.
+pub fn assert_no_zero_byte_midx_bitmaps(pack_dir: &Path) {
+    let midx_d = pack_dir.join("multi-pack-index.d");
+    for dir in [pack_dir, &midx_d] {
+        if !dir.is_dir() {
+            continue;
+        }
+        for ent in std::fs::read_dir(dir).expect("read pack dir").flatten() {
+            let name = ent.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with("multi-pack-index-") || !name.ends_with(".bitmap") {
+                continue;
+            }
+            let len = ent.metadata().expect("metadata").len();
+            assert!(
+                len > 32,
+                "zero or stub MIDX bitmap sidecar: {}",
+                ent.path().display()
+            );
+        }
+    }
+}
+
 pub fn assert_grit_midx_reads_match_git(objects: &Path, oids: &[ObjectId]) {
     let git_objects = git_cat_file_batch(objects, oids);
     for (oid, kind, data) in git_objects {
