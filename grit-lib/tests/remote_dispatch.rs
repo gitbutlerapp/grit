@@ -1,7 +1,6 @@
 //! Integration tests for [`grit_lib::remote`]: URL parsing, config loading,
-//! `list_refs` across transports, and fetch/push parity with system `git`.
+//! `list_refs`, `fetch`, and `push` compared with system `git`.
 
-#![cfg(feature = "http-ureq")]
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
@@ -11,11 +10,37 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use grit_lib::config::ConfigSet;
+use grit_lib::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, RemoteRef, RemoteUrl};
+use grit_lib::remote::{ListRefsOptions, Remote, RemoteRef, RemoteUrl};
 use grit_lib::repo::Repository;
-use grit_lib::transfer::{FetchOptions, TagMode};
+use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
+
+#[cfg(feature = "http-ureq")]
+use grit_lib::remote::DefaultHttpClientFactory;
+
+struct EnvRestore {
+    key: &'static str,
+    prior: Option<std::ffi::OsString>,
+}
+
+impl EnvRestore {
+    fn set(key: &'static str, value: &str) -> Self {
+        let prior = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { key, prior }
+    }
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        match &self.prior {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
 
 fn git(dir: Option<&Path>, args: &[&str]) -> String {
     let mut cmd = Command::new("git");
@@ -42,14 +67,19 @@ fn git(dir: Option<&Path>, args: &[&str]) -> String {
     String::from_utf8(out.stdout).expect("utf8 git output")
 }
 
-fn git_ls_remote(url: &str, ssh_command: Option<&str>) -> BTreeMap<String, ObjectId> {
+fn git_ls_remote(
+    url: &str,
+    git_args: &[&str],
+    extra: &[(&str, &str)],
+) -> BTreeMap<String, ObjectId> {
     let mut cmd = Command::new("git");
-    cmd.args(["ls-remote", url])
-        .env("GIT_AUTHOR_NAME", "T")
+    cmd.arg("ls-remote")
+        .args(git_args)
+        .arg(url)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
-    if let Some(ssh) = ssh_command {
-        cmd.env("GIT_SSH_COMMAND", ssh);
+    for (k, v) in extra {
+        cmd.env(k, v);
     }
     let out = cmd.output().expect("git ls-remote");
     assert!(
@@ -60,6 +90,9 @@ fn git_ls_remote(url: &str, ssh_command: Option<&str>) -> BTreeMap<String, Objec
     let out = String::from_utf8(out.stdout).expect("utf8");
     let mut map = BTreeMap::new();
     for line in out.lines() {
+        if line.starts_with("ref:") {
+            continue;
+        }
         let Some((oid, name)) = line.split_once('\t').or_else(|| line.split_once(' ')) else {
             continue;
         };
@@ -73,13 +106,32 @@ fn grit_refs_map(refs: &[RemoteRef]) -> BTreeMap<String, ObjectId> {
     refs.iter().map(|r| (r.name.clone(), r.oid)).collect()
 }
 
-fn assert_refs_match_git(url: &str, grit_refs: &[RemoteRef], ssh_command: Option<&str>) {
-    let git_map = git_ls_remote(url, ssh_command);
-    if git_map.is_empty() {
-        eprintln!("SKIP: git ls-remote returned no refs for {url}");
-        return;
+fn git_args_for_list_opts(opts: &ListRefsOptions) -> Vec<&'static str> {
+    let mut args = Vec::new();
+    if opts.symrefs {
+        args.push("--symref");
     }
-    let grit_map = grit_refs_map(grit_refs);
+    args
+}
+
+fn assert_refs_match_git(
+    url: &str,
+    grit_refs: &[RemoteRef],
+    opts: &ListRefsOptions,
+    extra: &[(&str, &str)],
+) {
+    let git_args = git_args_for_list_opts(opts);
+    let mut git_map = git_ls_remote(url, &git_args, extra);
+    assert!(
+        !git_map.is_empty(),
+        "git ls-remote must return refs for {url}"
+    );
+    let mut grit_map = grit_refs_map(grit_refs);
+    if !opts.peel {
+        let drop_peel = |name: &str| name.ends_with("^{}");
+        git_map.retain(|name, _| !drop_peel(name));
+        grit_map.retain(|name, _| !drop_peel(name));
+    }
     assert_eq!(
         git_map, grit_map,
         "list_refs must match git ls-remote for {url}"
@@ -140,6 +192,7 @@ fn spawn_daemon(base_path: &Path, port: u16) -> Option<Child> {
         .ok()
 }
 
+#[cfg(feature = "http-ureq")]
 fn spawn_http_server(server_bin: &Path, grit_bin: &Path, root: &Path, port: u16) -> Option<Child> {
     Command::new(server_bin)
         .arg("--root")
@@ -192,6 +245,19 @@ eval "exec $cmd"
     Some(script)
 }
 
+fn bare_fixture() -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+    let bare = tmp.path().join("remote.git");
+    git(
+        Some(&work),
+        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
+    );
+    (tmp, bare)
+}
+
 #[test]
 fn remote_url_parsing_and_config() {
     assert!(matches!(
@@ -240,16 +306,7 @@ fn remote_url_parsing_and_config() {
 
 #[test]
 fn list_refs_file_url_matches_git_ls_remote() {
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("work");
-    std::fs::create_dir_all(&work).unwrap();
-    build_source(&work);
-    let bare = tmp.path().join("remote.git");
-    git(
-        Some(&work),
-        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
-    );
-
+    let (_tmp, bare) = bare_fixture();
     let url = format!("file://{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
     let opts = ListRefsOptions {
@@ -258,45 +315,30 @@ fn list_refs_file_url_matches_git_ls_remote() {
         ..Default::default()
     };
     let refs = remote.list_refs(None, &opts, None).unwrap();
-    assert_refs_match_git(&url, &refs, None);
+    assert_refs_match_git(&url, &refs, &opts, &[]);
 }
 
 #[test]
-fn list_refs_git_daemon_v0_and_fetch_push_match_git() {
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("work");
-    std::fs::create_dir_all(&work).unwrap();
-    build_source(&work);
-    let base = tmp.path().join("daemon");
-    std::fs::create_dir_all(&base).unwrap();
-    let bare = base.join("r.git");
-    git(
-        Some(&work),
-        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
-    );
-
-    let Some(port) = free_port() else {
-        return;
-    };
-    let Some(child) = spawn_daemon(&base, port) else {
-        return;
-    };
-    let _guard = ChildGuard(child);
-    if !wait_tcp(port) {
-        return;
-    }
-
-    let url = format!("git://127.0.0.1:{port}/r.git");
+fn list_refs_heads_only_matches_git() {
+    let (_tmp, bare) = bare_fixture();
+    let url = format!("file://{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
     let opts = ListRefsOptions {
-        symrefs: true,
-        peel: true,
+        heads: true,
         ..Default::default()
     };
     let refs = remote.list_refs(None, &opts, None).unwrap();
-    assert_refs_match_git(&url, &refs, None);
+    assert!(!refs.iter().any(|r| r.name == "HEAD"));
 
-    let local = tmp.path().join("local");
+    let git_heads = git_ls_remote(&url, &["--heads"], &[]);
+    let grit_map = grit_refs_map(&refs);
+    assert_eq!(git_heads, grit_map);
+}
+
+#[test]
+fn remote_push_local_file_url_matches_git() {
+    let (fixture, bare) = bare_fixture();
+    let local = fixture.path().join("local");
     std::fs::create_dir_all(&local).unwrap();
     git(Some(&local), &["init", "-q", "-b", "main", "."]);
     let repo = Repository::open(&local.join(".git"), Some(&local)).unwrap();
@@ -306,84 +348,174 @@ fn list_refs_git_daemon_v0_and_fetch_push_match_git() {
         tags: TagMode::Following,
         ..Default::default()
     };
+    let url = format!("file://{}", bare.display());
+    let remote = Remote::from_url(&url).unwrap();
     remote
         .fetch(&repo, fetch_opts, &mut grit_lib::fetch::NoProgress, None)
         .unwrap();
 
+    std::fs::write(local.join("push.txt"), "push\n").unwrap();
+    git(Some(&local), &["add", "push.txt"]);
+    git(Some(&local), &["commit", "-q", "-m", "push commit"]);
+    let tip = resolve_ref(&repo.git_dir, "refs/heads/main").unwrap();
+
+    let push_spec = PushRefSpec {
+        src: Some(tip),
+        dst: "refs/heads/pushed".to_owned(),
+        force: false,
+        delete: false,
+        expected_old: None,
+        expect_absent: false,
+    };
+    remote
+        .push(
+            &repo,
+            &[push_spec],
+            PushOptions::default(),
+            &mut grit_lib::fetch::NoProgress,
+            None,
+        )
+        .unwrap();
+
+    let git_oid =
+        ObjectId::from_hex(git(Some(&bare), &["rev-parse", "refs/heads/pushed"]).trim()).unwrap();
+    assert_eq!(tip, git_oid);
+    git(Some(&bare), &["fsck", "--strict"]);
+}
+
+struct DaemonFixture {
+    _tmp: tempfile::TempDir,
+    _guard: ChildGuard,
+    url: String,
+    bare: PathBuf,
+}
+
+fn daemon_fixture() -> Option<DaemonFixture> {
+    let tmp = tempfile::tempdir().ok()?;
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).ok()?;
+    build_source(&work);
+    let base = tmp.path().join("daemon");
+    std::fs::create_dir_all(&base).ok()?;
+    let bare = base.join("r.git");
+    git(Some(&work), &["clone", "-q", "--bare", ".", bare.to_str()?]);
+    let port = free_port()?;
+    let child = spawn_daemon(&base, port)?;
+    let guard = ChildGuard(child);
+    if !wait_tcp(port) {
+        return None;
+    }
+    Some(DaemonFixture {
+        url: format!("git://127.0.0.1:{port}/r.git"),
+        bare,
+        _tmp: tmp,
+        _guard: guard,
+    })
+}
+
+#[test]
+fn list_refs_git_daemon_v0_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        symrefs: true,
+        peel: false,
+        protocol_version: Some(0),
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    assert!(!refs.is_empty(), "v0 daemon list_refs must return refs");
+    assert_refs_match_git(url, &refs, &opts, &[]);
+}
+
+#[test]
+fn list_refs_git_daemon_v2_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        symrefs: true,
+        peel: false,
+        protocol_version: Some(2),
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    assert!(!refs.is_empty(), "v2 daemon list_refs must return refs");
+    assert_refs_match_git(url, &refs, &opts, &[]);
+}
+
+#[test]
+fn remote_fetch_git_daemon_matches_git() {
+    let Some(fixture) = daemon_fixture() else {
+        panic!("git daemon fixture unavailable in this environment");
+    };
+    let url = &fixture.url;
+    let local = fixture._tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    git(Some(&local), &["init", "-q", "-b", "main", "."]);
+    let repo = Repository::open(&local.join(".git"), Some(&local)).unwrap();
+    let remote = Remote::from_url(url).unwrap();
+    remote
+        .fetch(
+            &repo,
+            FetchOptions {
+                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+                tags: TagMode::Following,
+                ..Default::default()
+            },
+            &mut grit_lib::fetch::NoProgress,
+            None,
+        )
+        .unwrap();
     let main_git =
-        ObjectId::from_hex(git(Some(&bare), &["rev-parse", "refs/heads/main"]).trim()).unwrap();
+        ObjectId::from_hex(git(Some(&fixture.bare), &["rev-parse", "refs/heads/main"]).trim())
+            .unwrap();
     let main_grit = resolve_ref(&repo.git_dir, "refs/remotes/origin/main").unwrap();
     assert_eq!(main_git, main_grit);
-    git(Some(&local), &["fsck", "--strict"]);
 }
 
 #[test]
 fn list_refs_ssh_matches_git_ls_remote() {
-    let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("work");
-    std::fs::create_dir_all(&work).unwrap();
-    build_source(&work);
-    let bare = tmp.path().join("remote.git");
-    git(
-        Some(&work),
-        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
-    );
-
-    let Some(script) = write_fake_ssh(tmp.path()) else {
-        return;
-    };
+    let (_tmp, bare) = bare_fixture();
+    let script = write_fake_ssh(_tmp.path()).expect("fake ssh script");
     let ssh_cmd = script.to_str().unwrap();
-    std::env::set_var("GIT_SSH_COMMAND", ssh_cmd);
+    let _env = EnvRestore::set("GIT_SSH_COMMAND", ssh_cmd);
     let url = format!("git@localhost:{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
+    let options = RepositoryOptions::with_environment(Environment::capture_process());
+    let ctx = Repository::open_with(&options, &bare, None).expect("open bare");
     let opts = ListRefsOptions {
         symrefs: true,
         peel: true,
         ..Default::default()
     };
-    let ctx = Repository::open(&bare, None).ok();
-    let refs = match remote.list_refs(ctx.as_ref(), &opts, None) {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-    if refs.is_empty() {
-        eprintln!("SKIP: grit list_refs returned no refs over ssh wrapper");
-        return;
-    }
-    assert_refs_match_git(&url, &refs, Some(ssh_cmd));
+    let refs = remote
+        .list_refs(Some(&ctx), &opts, None)
+        .expect("ssh list_refs");
+    assert!(!refs.is_empty());
+    assert_refs_match_git(&url, &refs, &opts, &[("GIT_SSH_COMMAND", ssh_cmd)]);
 }
 
+#[cfg(feature = "http-ureq")]
 #[test]
 fn list_refs_smart_http_matches_git_ls_remote() {
+    let (_tmp, bare) = bare_fixture();
+    let grit_bin = find_binary("grit").expect("grit binary (build grit-cli first)");
+    let server_bin =
+        find_binary("grit-http-server").expect("grit-http-server binary must be built for CI");
     let tmp = tempfile::tempdir().unwrap();
-    let work = tmp.path().join("work");
-    std::fs::create_dir_all(&work).unwrap();
-    build_source(&work);
-    let bare = tmp.path().join("remote.git");
-    git(
-        Some(&work),
-        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
-    );
-
-    let Some(grit_bin) = find_binary("grit") else {
-        return;
-    };
-    let Some(server_bin) = find_binary("grit-http-server") else {
-        return;
-    };
     let root = tmp.path().join("srv");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::rename(&bare, root.join("repo.git")).unwrap();
-    let Some(port) = free_port() else {
-        return;
-    };
-    let Some(child) = spawn_http_server(&server_bin, &grit_bin, &root, port) else {
-        return;
-    };
+    let port = free_port().expect("free port");
+    let child = spawn_http_server(&server_bin, &grit_bin, &root, port).expect("spawn server");
     let _guard = ChildGuard(child);
-    if !wait_tcp(port) {
-        return;
-    }
+    assert!(wait_tcp(port), "smart HTTP server did not become ready");
     let url = format!("http://127.0.0.1:{port}/repo.git");
     let remote = Remote::from_url(&url).unwrap();
     let opts = ListRefsOptions {
@@ -394,5 +526,5 @@ fn list_refs_smart_http_matches_git_ls_remote() {
     let refs = remote
         .list_refs(None, &opts, Some(&DefaultHttpClientFactory))
         .unwrap();
-    assert_refs_match_git(&url, &refs, None);
+    assert_refs_match_git(&url, &refs, &opts, &[]);
 }

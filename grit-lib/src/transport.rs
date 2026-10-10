@@ -831,19 +831,13 @@ pub enum SshCommand {
 }
 
 impl SshCommand {
-    /// Resolve `Auto` against the current environment to a concrete variant.
-    fn resolve(&self) -> SshCommand {
+    /// Resolve `Auto` against `env` to a concrete variant.
+    fn resolve(&self, env: &crate::environment::Environment) -> SshCommand {
         match self {
             SshCommand::Auto => {
-                if let Some(c) = crate::environment::Environment::empty()
-                    .var_os("GIT_SSH_COMMAND")
-                    .filter(|v| !v.is_empty())
-                {
+                if let Some(c) = env.var_os("GIT_SSH_COMMAND").filter(|v| !v.is_empty()) {
                     SshCommand::ShellCommand(c)
-                } else if let Some(p) = crate::environment::Environment::empty()
-                    .var_os("GIT_SSH")
-                    .filter(|v| !v.is_empty())
-                {
+                } else if let Some(p) = env.var_os("GIT_SSH").filter(|v| !v.is_empty()) {
                     SshCommand::Program(p)
                 } else {
                     SshCommand::Program(OsString::from("ssh"))
@@ -935,6 +929,8 @@ pub struct SshTransport {
     /// How to invoke ssh. Defaults to [`SshCommand::Auto`] (env, then `ssh`).
     pub ssh_command: SshCommand,
     command_runner: Arc<dyn CommandRunner>,
+    /// Environment used to resolve [`SshCommand::Auto`] (`GIT_SSH_COMMAND`, `GIT_SSH`).
+    ssh_env: Arc<crate::environment::Environment>,
 }
 
 impl std::fmt::Debug for SshTransport {
@@ -950,6 +946,7 @@ impl Default for SshTransport {
         Self {
             ssh_command: SshCommand::Auto,
             command_runner: system_command_runner(),
+            ssh_env: Arc::new(crate::environment::Environment::empty()),
         }
     }
 }
@@ -969,6 +966,13 @@ impl SshTransport {
         self
     }
 
+    /// Environment consulted when [`Self::ssh_command`] is [`SshCommand::Auto`].
+    #[must_use]
+    pub fn with_ssh_environment(mut self, env: Arc<crate::environment::Environment>) -> Self {
+        self.ssh_env = env;
+        self
+    }
+
     /// A transport pinned to a specific ssh *program* (no shell), like
     /// `$GIT_SSH`.
     #[must_use]
@@ -976,6 +980,7 @@ impl SshTransport {
         Self {
             ssh_command: SshCommand::Program(program.into()),
             command_runner: system_command_runner(),
+            ssh_env: Arc::new(crate::environment::Environment::empty()),
         }
     }
 
@@ -986,6 +991,7 @@ impl SshTransport {
         Self {
             ssh_command: SshCommand::ShellCommand(command.into()),
             command_runner: system_command_runner(),
+            ssh_env: Arc::new(crate::environment::Environment::empty()),
         }
     }
 
@@ -1007,7 +1013,7 @@ impl SshTransport {
             ));
         }
 
-        match self.ssh_command.resolve() {
+        match self.ssh_command.resolve(self.ssh_env.as_ref()) {
             SshCommand::ShellCommand(cmd) => {
                 let cmd = cmd.to_string_lossy();
                 let port_opt = match port {
