@@ -15,7 +15,7 @@ import coverage as cov  # noqa: E402
 
 def _sample_json() -> str:
     files = [
-        ("odb.rs", 100, 85),
+        ("odb/mod.rs", 100, 85),
         ("pack.rs", 200, 160),
         ("pack_index.rs", 50, 45),
         ("midx.rs", 80, 50),
@@ -43,9 +43,9 @@ def _sample_json() -> str:
 class CoverageScriptTests(unittest.TestCase):
     def test_parse_coverage_json_maps_grit_lib_src_files(self) -> None:
         stats = cov.parse_coverage_json(_sample_json())
-        self.assertIn("odb.rs", stats)
-        self.assertEqual(stats["odb.rs"].count, 100)
-        self.assertEqual(stats["odb.rs"].covered, 85)
+        self.assertIn("odb/mod.rs", stats)
+        self.assertEqual(stats["odb/mod.rs"].count, 100)
+        self.assertEqual(stats["odb/mod.rs"].covered, 85)
 
     def test_aggregate_weighted_by_lines(self) -> None:
         stats = cov.parse_coverage_json(_sample_json())
@@ -64,9 +64,9 @@ class CoverageScriptTests(unittest.TestCase):
         floors = cov.load_floors(floors_path)
         stats = cov.parse_coverage_json(_sample_json())
         # Artificially high floors on one file.
-        floors.files["odb.rs"] = 99.0
+        floors.files["odb/mod.rs"] = 99.0
         updated = cov.apply_update(floors, stats)
-        self.assertGreaterEqual(updated.files["odb.rs"], 99.0)
+        self.assertGreaterEqual(updated.files["odb/mod.rs"], 99.0)
 
     def test_check_fails_when_below_floor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -81,10 +81,10 @@ groups = ["odb"]
 minimum = 99.0
 
 [group.odb]
-files = ["odb.rs"]
+files = ["odb/mod.rs"]
 minimum = 99.0
 
-[file."odb.rs"]
+[file."odb/mod.rs"]
 minimum = 99.0
 """,
                 encoding="utf-8",
@@ -93,7 +93,7 @@ minimum = 99.0
             stats = cov.parse_coverage_json(_sample_json())
             _table, failures = cov.check(floors, stats)
             self.assertTrue(failures)
-            self.assertTrue(any("odb.rs" in f for f in failures))
+            self.assertTrue(any("odb/mod.rs" in f for f in failures))
 
     def test_load_floors_legacy_core_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -191,11 +191,11 @@ groups = ["refs"]
 minimum = 99.0
 
 [group.refs]
-files = ["odb.rs"]
+files = ["odb/mod.rs"]
 minimum = 50.0
 
 [group.odb]
-files = ["odb.rs"]
+files = ["odb/mod.rs"]
 minimum = 50.0
 """,
                 encoding="utf-8",
