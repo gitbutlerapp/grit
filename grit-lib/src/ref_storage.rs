@@ -1,7 +1,7 @@
 //! Typed ref storage backend selection (`files` vs `reftable`).
 //!
 //! Discovery reads **repository-local** config only (never global or system config),
-//! matching [`crate::reftable::is_reftable_repo`] (see `repository_config_snapshot_tests`).
+//! matching legacy reftable detection (see `repository_config_snapshot_tests`).
 
 use std::fmt;
 use std::path::Path;
@@ -64,16 +64,9 @@ impl RefStorageFormat {
     ///
     /// When `extensions.refStorage` is absent, returns [`RefStorageFormat::Files`].
     ///
-    /// Rejects invalid combinations of `core.repositoryformatversion` and `[extensions]`
-    /// (same rules as [`crate::repo::validate_repo_format`]), including v0 repositories
-    /// that declare v1-only extensions such as `refStorage = reftable`.
-    ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] when local config cannot be read,
-    /// [`Error::UnsupportedRepositoryFormatVersion`] for unsupported versions,
-    /// [`Error::InvalidRefStorageFormat`] for unknown `extensions.refStorage` values, or
-    /// [`Error::Message`] for other format/extension mismatches.
+    /// Propagates I/O and repository format errors when local config is invalid.
     pub fn detect(git_dir: &Path) -> Result<Self> {
         let parsed = read_repository_format_from_git_dir(git_dir)?;
         validate_repository_format_parsed(&parsed)?;

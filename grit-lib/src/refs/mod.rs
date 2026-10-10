@@ -18,7 +18,12 @@ pub mod store;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use store::{
+    open_ref_store, Expected, RawRef as StoreRawRef, RefEntry, RefStorageFormat, RefStore,
+    RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+};
 
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
@@ -28,6 +33,112 @@ use crate::pack;
 
 /// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
 pub const SYMREF_MAXDEPTH: usize = 5;
+
+fn map_public_ref_store_error(err: Error, refname: &str) -> Error {
+    match err {
+        Error::RefStore(store::RefStoreError::SymrefLoop) => {
+            Error::InvalidRef(format!("ref symlink too deep: {refname}"))
+        }
+        Error::RefStore(store::RefStoreError::Corrupt(msg))
+            if msg.contains("not-a-ref") || msg.contains("reference broken") =>
+        {
+            Error::InvalidRef(format!("cannot update ref '{refname}': reference broken"))
+        }
+        other => other,
+    }
+}
+
+/// Loose-files checks shared by legacy [`write_ref_at_storage`] and RefStore-backed writes.
+fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
+        return Ok(());
+    }
+    let storage_dir = ref_storage_dir(git_dir, refname);
+    let stor = crate::ref_namespace::storage_ref_name(refname);
+    let path = storage_dir.join(stor);
+    remove_empty_ref_directory(&path);
+    if fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+    {
+        let display = ref_path_for_display(&path);
+        return Err(crate::error::RefLockError::DirectoryInTheWay {
+            refname: refname.to_owned(),
+            path: display,
+        }
+        .into());
+    }
+    if path.is_file() && matches!(read_ref_file(&path), Err(Error::InvalidRef(_))) {
+        return Err(Error::InvalidRef(format!(
+            "cannot update ref '{refname}': reference broken"
+        )));
+    }
+    Ok(())
+}
+
+fn legacy_ref_update_flags(refname: &str) -> RefUpdateFlags {
+    let mut flags = RefUpdateFlags::default();
+    // Direct updates to `HEAD` detach or reattach the worktree HEAD file; do not peel symrefs.
+    if refname == "HEAD" {
+        flags.no_deref = true;
+    }
+    flags
+}
+
+fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<()> {
+    let refname = update.name.clone();
+    let store = open_ref_store(git_dir)?;
+    let txn = RefTransaction::new()
+        .update(update)
+        .map_err(crate::error::Error::from)?;
+    let prepared = store
+        .prepare(txn)
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &refname))?;
+    prepared
+        .commit()
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &refname))
+}
+
+fn store_write_value(
+    git_dir: &Path,
+    refname: &str,
+    new_value: Option<StoreRawRef>,
+    expected: Expected,
+    reflog: Option<ReflogUpdate>,
+) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
+    if new_value.is_some() {
+        files_legacy_write_precheck(git_dir, refname)?;
+    }
+    commit_store_update(
+        git_dir,
+        RefUpdate {
+            name: refname.to_owned(),
+            new_value,
+            expected,
+            reflog,
+            flags: legacy_ref_update_flags(refname),
+        },
+    )
+}
+
+fn collect_resolved_refs(store: &dyn RefStore, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
+    let mut results = Vec::new();
+    store.for_each_ref(prefix, &mut |entry: &RefEntry| {
+        let oid = entry
+            .peeled
+            .or_else(|| match &entry.value {
+                StoreRawRef::Direct(oid) => Some(*oid),
+                StoreRawRef::Symbolic(target) => store.resolve(target).ok(),
+            })
+            .or_else(|| store.resolve(&entry.name).ok());
+        if let Some(oid) = oid {
+            results.push((entry.name.clone(), oid));
+        }
+        ControlFlow::Continue(())
+    })?;
+    Ok(results)
+}
 
 /// A symbolic or direct reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,11 +213,15 @@ pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
 /// - [`Error::InvalidRef`] if the ref is malformed or forms a cycle.
 /// - [`Error::ObjectNotFound`] if a symbolic target does not exist.
 pub fn resolve_ref(git_dir: &Path, refname: &str) -> Result<ObjectId> {
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_resolve_ref(git_dir, refname);
+    match open_ref_store(git_dir)?.resolve(refname) {
+        Ok(oid) => Ok(oid),
+        Err(Error::RefStore(store::RefStoreError::Corrupt(msg)))
+            if msg.starts_with("ref not found:") =>
+        {
+            Err(Error::InvalidRef(msg))
+        }
+        Err(err) => Err(map_public_ref_store_error(err, refname)),
     }
-    let common = common_dir(git_dir);
-    resolve_ref_depth(git_dir, common.as_deref(), refname, 0)
 }
 
 /// Determine the common git directory for worktree-aware ref resolution.
@@ -132,6 +247,7 @@ pub fn common_dir(git_dir: &Path) -> Option<PathBuf> {
 /// When operating inside a worktree, `common` points to the shared git
 /// directory where most refs live.  The worktree-specific `git_dir` is
 /// checked first for HEAD and per-worktree refs.
+#[allow(dead_code)]
 fn resolve_ref_depth(
     git_dir: &Path,
     _common: Option<&Path>,
@@ -204,16 +320,7 @@ pub enum RawRefLookup {
 ///
 /// Propagates I/O and reftable errors other than "not found".
 pub fn read_raw_ref(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
-    if crate::reftable::is_reftable_repo(git_dir) {
-        read_raw_ref_reftable(git_dir, refname)
-    } else {
-        read_raw_ref_files(git_dir, refname)
-    }
-}
-
-fn read_raw_ref_files(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
-    let store = crate::refs::store::FilesRefStore::from_git_dir(git_dir)?;
-    use crate::refs::store::RefStore;
+    let store = open_ref_store(git_dir)?;
     match store.read_raw(refname)? {
         Some(_) => Ok(RawRefLookup::Exists),
         None => {
@@ -240,6 +347,7 @@ pub fn lock_path_for_ref(path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
+#[allow(dead_code)]
 fn read_raw_ref_at(path: PathBuf) -> Result<Option<RawRefLookup>> {
     match fs::symlink_metadata(&path) {
         Ok(meta) => {
@@ -325,7 +433,10 @@ fn packed_ref_namespace_conflict(git_dir: &Path, refname: &str) -> Result<bool> 
 ///
 /// Propagates I/O errors reading `packed-refs`.
 pub fn packed_refs_entry_exists(git_dir: &Path, refname: &str) -> Result<bool> {
-    if crate::reftable::is_reftable_repo(git_dir) || refname == "HEAD" {
+    if refname == "HEAD" {
+        return Ok(false);
+    }
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return Ok(false);
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
@@ -625,6 +736,7 @@ fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
 }
 
 /// Removes `lock` on drop unless [`disarm`](Self::disarm) was called after a successful delete.
+#[allow(dead_code)]
 struct LooseRefLockGuard<'a> {
     lock: &'a Path,
     armed: bool,
@@ -648,6 +760,7 @@ impl Drop for LooseRefLockGuard<'_> {
     }
 }
 
+#[allow(dead_code)]
 fn delete_loose_ref_after_lock(
     storage_dir: &Path,
     stor: &str,
@@ -687,35 +800,6 @@ fn delete_loose_ref_after_lock(
     fs::remove_file(lock)?;
     lock_guard.disarm();
     Ok(())
-}
-
-fn read_raw_ref_reftable(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
-    if refname == "HEAD" {
-        let head_path = git_dir.join("HEAD");
-        match fs::symlink_metadata(&head_path) {
-            Ok(meta) => {
-                if meta.is_dir() {
-                    return Ok(RawRefLookup::IsDirectory);
-                }
-                return Ok(RawRefLookup::Exists);
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(RawRefLookup::NotFound),
-            Err(e) => return Err(Error::Io(e)),
-        }
-    }
-
-    if let Some(lookup) = read_raw_ref_at(git_dir.join(refname))? {
-        return Ok(lookup);
-    }
-
-    let stack = crate::reftable::ReftableStack::open(git_dir)?;
-    match stack.lookup_ref(refname)? {
-        Some(rec) => match rec.value {
-            crate::reftable::RefValue::Deletion => Ok(RawRefLookup::NotFound),
-            _ => Ok(RawRefLookup::Exists),
-        },
-        None => Ok(RawRefLookup::NotFound),
-    }
 }
 
 fn packed_refs_unexpected_line(path: &Path, line: impl Into<String>) -> Error {
@@ -884,26 +968,13 @@ pub(crate) fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<
 /// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage (e.g. path
 /// traversal under `refs/`), on a namespace conflict, or [`Error::Io`] on filesystem errors.
 pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_write_symref(git_dir, refname, target, None, None);
-    }
-    let storage_dir = ref_storage_dir(git_dir, refname);
-    if packed_ref_namespace_conflict(&storage_dir, refname)? {
-        return Err(Error::InvalidRef(format!(
-            "cannot update ref '{refname}': reference namespace conflict"
-        )));
-    }
-    let stor = crate::ref_namespace::storage_ref_name(refname);
-    let path = storage_dir.join(stor);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let content = format!("ref: {target}\n");
-    let lock = lock_path_for_ref(&path);
-    fs::write(&lock, &content)?;
-    fs::rename(&lock, &path)?;
-    Ok(())
+    store_write_value(
+        git_dir,
+        refname,
+        Some(StoreRawRef::Symbolic(target.to_owned())),
+        Expected::Any,
+        None,
+    )
 }
 
 pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
@@ -939,17 +1010,13 @@ pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
 /// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage (e.g. path
 /// traversal under `refs/`), on a namespace conflict, or [`Error::Io`] on filesystem errors.
 pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_write_ref(git_dir, refname, oid, None, None);
-    }
-    let storage_dir = ref_storage_dir(git_dir, refname);
-    if packed_ref_namespace_conflict(&storage_dir, refname)? {
-        return Err(Error::InvalidRef(format!(
-            "cannot update ref '{refname}': reference namespace conflict"
-        )));
-    }
-    write_ref_at_storage(&storage_dir, refname, oid)
+    store_write_value(
+        git_dir,
+        refname,
+        Some(StoreRawRef::Direct(*oid)),
+        Expected::Any,
+        None,
+    )
 }
 
 /// Write a loose ref file under `storage_dir`: the body shared by [`write_ref`]
@@ -1021,53 +1088,13 @@ pub fn write_ref_cas(
     oid: &ObjectId,
     expected_old: ObjectId,
 ) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
-        let current = resolve_ref(git_dir, refname).ok();
-        verify_branch_cas(Some(expected_old), current, refname)?;
-        return write_ref(git_dir, refname, oid);
-    }
-    let storage_dir = ref_storage_dir(git_dir, refname);
-    if packed_ref_namespace_conflict(&storage_dir, refname)? {
-        return Err(Error::InvalidRef(format!(
-            "cannot update ref '{refname}': reference namespace conflict"
-        )));
-    }
-    let stor = crate::ref_namespace::storage_ref_name(refname);
-    let path = storage_dir.join(&stor);
-    remove_empty_ref_directory(&path);
-    if fs::symlink_metadata(&path)
-        .map(|m| m.file_type().is_dir())
-        .unwrap_or(false)
-    {
-        let display = ref_path_for_display(&path);
-        return Err(crate::error::RefLockError::DirectoryInTheWay {
-            refname: refname.to_owned(),
-            path: display,
-        }
-        .into());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let lock = lock_path_for_ref(&path);
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)?;
-    let current = read_loose_or_packed_oid(git_dir, refname)?;
-    if let Err(err) = verify_branch_cas(Some(expected_old), current, refname) {
-        abort_loose_ref_lock(&lock);
-        return Err(err);
-    }
-    let content = format!("{oid}\n");
-    {
-        use std::io::Write as _;
-        let mut file = fs::OpenOptions::new().write(true).open(&lock)?;
-        file.write_all(content.as_bytes())?;
-    }
-    fs::rename(&lock, &path)?;
-    Ok(())
+    store_write_value(
+        git_dir,
+        refname,
+        Some(StoreRawRef::Direct(*oid)),
+        Expected::Oid(expected_old),
+        None,
+    )
 }
 
 /// Like [`delete_ref`], but requires `expected_old` to match under the ref lock.
@@ -1076,38 +1103,7 @@ pub fn write_ref_cas(
 ///
 /// Same as [`delete_ref`], plus [`Error::Message`] when the CAS check fails.
 pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_write_transaction(
-            git_dir,
-            vec![crate::reftable::ReftableTransactionUpdate {
-                refname: refname.to_owned(),
-                value: Some(crate::reftable::RefValue::Deletion),
-                log: None,
-                expected_old: Some(expected_old),
-            }],
-        );
-    }
-    let storage_dir = ref_storage_dir(git_dir, refname);
-    let stor = crate::ref_namespace::storage_ref_name(refname);
-    let path = storage_dir.join(&stor);
-    let lock = lock_path_for_ref(&path);
-    if fs::symlink_metadata(&lock).is_ok() {
-        return Err(Error::Io(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("ref lock present: {}", lock.display()),
-        )));
-    }
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)?;
-    let current = read_loose_or_packed_oid(git_dir, refname)?;
-    if let Err(err) = verify_branch_cas(Some(expected_old), current, refname) {
-        abort_loose_ref_lock(&lock);
-        return Err(err);
-    }
-    delete_loose_ref_after_lock(&storage_dir, &stor, &path, &lock)
+    store_write_value(git_dir, refname, None, Expected::Oid(expected_old), None)
 }
 
 /// A one-time, in-memory snapshot of a ref store's `packed-refs` file.
@@ -1174,9 +1170,8 @@ pub fn resolve_ref_cached(
     refname: &str,
     packed: &PackedRefs,
 ) -> Result<Option<ObjectId>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
-        // Reftable repositories don't use `packed-refs`; resolve directly.
-        return Ok(crate::reftable::reftable_resolve_ref(git_dir, refname).ok());
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
+        return Ok(resolve_ref(git_dir, refname).ok());
     }
 
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
@@ -1219,10 +1214,10 @@ pub fn write_ref_cached(
     oid: &ObjectId,
     packed: &PackedRefs,
 ) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_write_ref(git_dir, refname, oid, None, None);
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
+        return write_ref(git_dir, refname, oid);
     }
+    ensure_refname_safe_for_storage(refname)?;
     if packed.has_namespace_conflict(refname) {
         return Err(Error::InvalidRef(format!(
             "cannot update ref '{refname}': reference namespace conflict"
@@ -1328,13 +1323,13 @@ fn remove_dir_tree(dir: &Path) -> io::Result<()> {
 /// Returns [`Error::InvalidRef`] when `refname` is not safe for ref storage, or
 /// [`Error::Io`] for errors other than "not found".
 pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_delete_ref(git_dir, refname);
-    }
     if matches!(read_raw_ref(git_dir, refname)?, RawRefLookup::NotFound) {
         return Err(Error::InvalidRef(format!("ref not found: {refname}")));
     }
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
+        return store_write_value(git_dir, refname, None, Expected::Exists, None);
+    }
+    ensure_refname_safe_for_storage(refname)?;
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(&stor);
@@ -1536,34 +1531,10 @@ pub fn read_head(git_dir: &Path) -> Result<Option<String>> {
 /// Returns `Ok(Some(target))` when `refname` exists and is symbolic,
 /// `Ok(None)` when it is direct or missing.
 pub fn read_symbolic_ref(git_dir: &Path, refname: &str) -> Result<Option<String>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_read_symbolic_ref(git_dir, refname);
+    match open_ref_store(git_dir)?.read_raw(refname)? {
+        Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
+        Some(StoreRawRef::Direct(_)) | None => Ok(None),
     }
-    let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
-    let try_names: Vec<&str> =
-        if stor_name == "HEAD" && crate::ref_namespace::ref_storage_prefix_default().is_some() {
-            vec![storage_owned.as_str()]
-        } else if storage_owned != stor_name {
-            vec![storage_owned.as_str(), stor_name.as_str()]
-        } else {
-            vec![stor_name.as_str()]
-        };
-
-    for name in try_names {
-        let path = store.join(name);
-        match read_ref_file(&path) {
-            Ok(Ref::Symbolic(target)) => return Ok(Some(target)),
-            Ok(Ref::Direct(_)) => return Ok(None),
-            Err(Error::Io(ref e))
-                if e.kind() == io::ErrorKind::NotFound
-                    || e.kind() == io::ErrorKind::NotADirectory
-                    || e.kind() == io::ErrorKind::IsADirectory => {}
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(None)
 }
 
 /// Core `logAllRefUpdates` modes (after config lookup), matching Git's `log_refs_config`.
@@ -1752,7 +1723,7 @@ pub fn append_reflog_with_config(
     config: Option<&ConfigSet>,
 ) -> Result<()> {
     test_inject_reflog_fail(refname)?;
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return crate::reftable::reftable_append_reflog(
             git_dir,
             refname,
@@ -2127,7 +2098,7 @@ pub fn update_branch_for_commit_with_config(
 
     let reflog_old = update.expected_old.unwrap_or_else(crate::diff::zero_oid);
 
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return update_branch_for_commit_reftable(git_dir, update, &reflog_old);
     }
 
@@ -2180,7 +2151,7 @@ fn normalize_list_refs_prefix(git_dir: &Path, prefix: &str) -> String {
 ///
 /// Returns [`Error::Io`] on filesystem failures, or when a tag peel cannot be read.
 pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Result<()> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return Ok(());
     }
     let prefix = format!("refs/remotes/{remote}/");
@@ -2324,10 +2295,25 @@ fn atomic_rewrite_packed_refs(git_dir: &Path, body: &str) -> Result<()> {
 /// # Errors
 ///
 /// Returns [`Error::Io`] on directory traversal errors.
+/// List refs under `prefix` using the given repository's ref store.
+pub fn list_refs_for_repository(
+    repo: &crate::repo::Repository,
+    prefix: &str,
+) -> Result<Vec<(String, ObjectId)>> {
+    let git_dir = &repo.git_dir;
+    let prefix_norm = normalize_list_refs_prefix(git_dir, prefix);
+    let mut results = collect_resolved_refs(repo.refs(), prefix_norm.as_str())?;
+    if crate::worktree_ref::is_linked_worktree_git_dir(git_dir) {
+        results.retain(|(name, _)| crate::worktree_ref::ref_visible_from_worktree(git_dir, name));
+    }
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(results)
+}
+
 pub fn list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
     let prefix_norm = normalize_list_refs_prefix(git_dir, prefix);
     let prefix = prefix_norm.as_str();
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return crate::reftable::reftable_list_refs(git_dir, prefix);
     }
     // Merge packed + loose so **loose always wins** for the same ref name (matches Git and
@@ -2380,7 +2366,7 @@ pub fn resolve_ref_dwim(git_dir: &Path, spec: &str) -> (usize, Option<ObjectId>)
 /// Used by `receive-pack` when advertising: the server must see every physical ref so refs outside
 /// the active namespace can be offered as `.have` lines (matches Git `show_ref_cb`).
 pub fn list_refs_physical(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
-    if crate::reftable::is_reftable_repo(git_dir) {
+    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return crate::reftable::reftable_list_refs(git_dir, prefix);
     }
     let mut by_name: HashMap<String, ObjectId> = HashMap::new();

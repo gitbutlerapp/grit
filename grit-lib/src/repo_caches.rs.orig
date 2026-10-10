@@ -37,7 +37,6 @@ pub struct RepoCaches {
     attr_tree: Mutex<HashMap<ObjectId, Arc<ParsedGitAttributes>>>,
     pathspec_precompose: OnceLock<bool>,
     ref_storage_format: Mutex<HashMap<PathBuf, RefStorageFormat>>,
-    pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,
     filters: FilterProcessState,
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
     bare_worktree_warn_seen: Mutex<HashSet<String>>,
@@ -72,7 +71,6 @@ impl RepoCaches {
             attr_tree: Mutex::new(HashMap::new()),
             pathspec_precompose: OnceLock::new(),
             ref_storage_format: Mutex::new(HashMap::new()),
-            ref_stores: Mutex::new(HashMap::new()),
             filters: FilterProcessState::new(command_runner),
             promisor_hydrate: Mutex::new(None),
             bare_worktree_warn_seen: Mutex::new(HashSet::new()),
@@ -356,27 +354,6 @@ impl RepoCaches {
     #[must_use]
     pub fn is_reftable_repo(&self, git_dir: &Path) -> bool {
         self.ref_storage_format(git_dir).is_reftable()
-    }
-
-    /// Open (or reuse) the [`crate::refs::store::RefStore`] for `git_dir`.
-    ///
-    /// # Errors
-    ///
-    /// Propagates backend detection and initialization failures.
-    pub fn open_ref_store(&self, git_dir: &Path) -> Result<Arc<dyn crate::refs::store::RefStore>> {
-        let key = git_dir
-            .canonicalize()
-            .unwrap_or_else(|_| git_dir.to_path_buf());
-        if let Ok(guard) = self.ref_stores.lock() {
-            if let Some(store) = guard.get(&key) {
-                return Ok(Arc::clone(store));
-            }
-        }
-        let store = crate::refs::store::open_ref_store_uncached(git_dir)?;
-        if let Ok(mut guard) = self.ref_stores.lock() {
-            guard.insert(key, Arc::clone(&store));
-        }
-        Ok(store)
     }
 
     /// Filter-process registry and disabled-driver set for this repository.

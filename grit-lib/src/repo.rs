@@ -95,6 +95,8 @@ pub struct Repository {
     /// without reopening the repository.
     /// Repository-scoped caches (config, attributes, filters, precompose, …).
     caches: Arc<RepoCaches>,
+    /// Pluggable ref backend selected for this repository.
+    ref_store: Arc<dyn crate::refs::store::RefStore>,
     /// Discovery and configuration environment used to open this repository.
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
@@ -210,6 +212,8 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
+        let ref_store = caches.open_ref_store(&git_dir)?;
+
         Ok(Self {
             git_dir,
             work_tree,
@@ -219,6 +223,7 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             caches,
+            ref_store,
             environment,
             git_prefix,
             command_runner,
@@ -370,7 +375,36 @@ impl Repository {
 
     /// Warm repository caches after discovery (reftable backend flag, optional config arc).
     pub(crate) fn install_config_snapshot(&self, _config: Arc<ConfigSet>) {
-        let _ = self.caches.is_reftable_repo(&self.git_dir);
+        let _ = self.caches.open_ref_store(&self.git_dir);
+    }
+
+    /// Reference storage backend for this repository.
+    #[must_use]
+    pub fn refs(&self) -> &dyn crate::refs::store::RefStore {
+        self.ref_store.as_ref()
+    }
+
+    /// Resolve `refname` through this repository's ref store.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`crate::refs::store::RefStoreError`] as [`Error::RefStore`].
+    pub fn resolve_ref_name(&self, refname: &str) -> Result<crate::objects::ObjectId> {
+        self.ref_store.resolve(refname)
+    }
+
+    /// Replace the ref store (embedders injecting [`crate::refs::store::MemoryRefStore`]).
+    #[must_use]
+    pub fn with_ref_store(mut self, store: Arc<dyn crate::refs::store::RefStore>) -> Self {
+        let key = self
+            .git_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.git_dir.clone());
+        if let Ok(mut guard) = self.caches.ref_stores.lock() {
+            guard.insert(key, Arc::clone(&store));
+        }
+        self.ref_store = store;
+        self
     }
 
     /// Whether pathspec matching should NFC-normalize paths for this repository.
@@ -570,6 +604,8 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
+        let ref_store = caches.open_ref_store(&git_dir)?;
+
         let repo = Self {
             git_dir,
             work_tree,
@@ -579,6 +615,7 @@ impl Repository {
             work_tree_from_env: false,
             discovery_via_gitfile: false,
             caches,
+            ref_store,
             environment,
             git_prefix,
             command_runner,

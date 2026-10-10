@@ -247,8 +247,33 @@ pub(crate) fn reftable_write_target(
     })
 }
 
+/// Whether `identity` already ends with Git's reflog `<unix> <±HHMM>` suffix.
+#[must_use]
+pub(crate) fn reflog_identity_has_timestamp(identity: &str) -> bool {
+    let trimmed = identity.trim_end();
+    let Some((before_tz, tz)) = trimmed.rsplit_once(' ') else {
+        return false;
+    };
+    if tz.len() != 5 {
+        return false;
+    }
+    let Some(sign) = tz.chars().next() else {
+        return false;
+    };
+    if sign != '+' && sign != '-' {
+        return false;
+    }
+    if !tz[1..].chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    let Some((name_email, unix)) = before_tz.rsplit_once(' ') else {
+        return false;
+    };
+    !name_email.is_empty() && !unix.is_empty() && unix.chars().all(|c| c.is_ascii_digit())
+}
+
 pub(crate) fn format_reflog_identity(identity: &str, time: time::OffsetDateTime) -> String {
-    if identity.chars().any(|c| c.is_ascii_digit()) {
+    if reflog_identity_has_timestamp(identity) {
         return identity.to_owned();
     }
     let offset = time.offset().whole_seconds();
@@ -260,4 +285,26 @@ pub(crate) fn format_reflog_identity(identity: &str, time: time::OffsetDateTime)
         hours,
         minutes
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_reflog_identity, reflog_identity_has_timestamp};
+    use time::OffsetDateTime;
+
+    #[test]
+    fn reflog_identity_digits_in_name_still_need_timestamp() {
+        assert!(!reflog_identity_has_timestamp("Alice2 <alice@example.com>"));
+        let time = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let formatted = format_reflog_identity("Alice2 <alice@example.com>", time);
+        assert!(formatted.contains("1700000000"));
+    }
+
+    #[test]
+    fn reflog_identity_with_existing_suffix_is_preserved() {
+        let existing = "Bob <bob@example.com> 1234567890 +0000";
+        assert!(reflog_identity_has_timestamp(existing));
+        let time = OffsetDateTime::from_unix_timestamp(9).unwrap();
+        assert_eq!(format_reflog_identity(existing, time), existing);
+    }
 }
