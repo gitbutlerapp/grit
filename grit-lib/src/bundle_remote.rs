@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::bundle::{Bundle, BundleError, BundleSpec};
@@ -84,8 +84,8 @@ pub fn write_bundle_from_rev_specs(
     let file = File::create(path).map_err(Error::Io)?;
     let mut out = BufWriter::new(file);
     crate::bundle::write_bundle(repo, &spec, &mut out).map_err(map_bundle_err)?;
-    let bundle = Bundle::open(path).map_err(map_bundle_err)?;
-    Ok(bundle.header().refs.len())
+    out.flush().map_err(Error::Io)?;
+    Ok(spec.include.len())
 }
 
 fn display_ref_for_spec(repo: &Repository, spec: &str, _oid: ObjectId) -> Result<String> {
