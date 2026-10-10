@@ -60,6 +60,17 @@ Rev-list **ratios** can rise when system **`git`** speeds up between captures ev
 
 The rev-list gap is dominated by history/object enumeration in `grit-lib`, not bulk pack I/O; cat-file scenarios exercise ODB read and `read_info` paths directly.
 
+## grit-bench: reachability bitmaps (`git.git`)
+
+Scenario group **`bitmaps`** measures rev-list counting and a full-ref stateless **`upload-pack`** clone against a bare clone of upstream **`git/git`** at a pinned tag (`v2.47.0` by default), prepared with **`git repack -adb`** and **`git commit-graph write --reachable`**. Library workloads run through hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`).
+
+```bash
+cargo build --release -p grit-utils -p grit-cli
+./target/release/grit-bench bitmaps --format json --output grit-utils/baselines/bitmaps-before.json
+```
+
+Baseline **`bitmaps-before.json`** (factory VM, 2026-10-10): **`rev-list-count-git.git`** — git ~63 ms vs grit ~207 ms; **`rev-list-count-objects-git.git`** — git ~24 ms vs grit ~546 s (no pack bitmap reader yet); **`serve-clone-git.git`** — git ~785 ms, grit **failed** (`memory_cap` / OOM under the serve time and RSS caps). Re-run with **`--repo`** after the cached fixture exists under **`GRIT_BENCH_ODB_CACHE`**.
+
 ## grit-lib: parallel index-pack (in-memory)
 
 Hyperfine on a **~90 000-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-07). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) via `cargo run --release -p grit-lib --example index_pack_bench` (see `GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`).
