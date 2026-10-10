@@ -18,6 +18,7 @@ use crate::diff::zero_oid;
 use crate::error::{Error, Result};
 use crate::merge_base;
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use crate::refs::store::RefStore as _;
 use crate::refs::{self, reflog_file_path};
 use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_PATHNAME};
@@ -102,7 +103,10 @@ fn adjust_reflog_shared_perm(git_dir: &Path, path: &Path) {
 /// Check whether a reflog exists for the given ref.
 pub fn reflog_exists(git_dir: &Path, refname: &str) -> bool {
     if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_reflog_exists(git_dir, refname);
+        return crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
+            .ok()
+            .and_then(|store| store.reflog_exists(refname).ok())
+            .unwrap_or(false);
     }
     let path = reflog_path(git_dir, refname);
     path.is_file()
@@ -132,7 +136,13 @@ pub fn read_reflog_dwim(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry
 /// Returns an empty vec if the reflog file does not exist.
 pub fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
     if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_read_reflog(git_dir, refname);
+        let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
+        let mut entries = Vec::new();
+        store.for_each_reflog_entry(refname, false, &mut |entry| {
+            entries.push(entry.clone());
+            std::ops::ControlFlow::Continue(())
+        })?;
+        return Ok(entries);
     }
     let path = reflog_path(git_dir, refname);
     let content = match fs::read_to_string(&path) {
@@ -354,7 +364,8 @@ pub fn expire_reflog(git_dir: &Path, refname: &str, expire_time: Option<i64>) ->
     }
 
     if crate::reftable::is_reftable_repo(git_dir) {
-        crate::reftable::reftable_replace_reflog(git_dir, refname, &kept_entries)?;
+        crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?
+            .replace_reflog(refname, kept_entries)?;
         return Ok(pruned);
     }
     let path = reflog_path(git_dir, refname);
@@ -462,7 +473,14 @@ pub fn mirror_branch_reflog_to_head(git_dir: &Path, branch_refname: &str) -> Res
 /// List all refs that have reflogs.
 pub fn list_reflog_refs(git_dir: &Path) -> Result<Vec<String>> {
     if crate::reftable::is_reftable_repo(git_dir) {
-        return crate::reftable::reftable_list_reflog_refs(git_dir);
+        let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
+        let mut refs = Vec::new();
+        store.for_each_reflog_ref(&mut |name| {
+            refs.push(name.to_owned());
+            std::ops::ControlFlow::Continue(())
+        })?;
+        refs.sort();
+        return Ok(refs);
     }
     let mut refs = Vec::new();
     let mut seen = HashSet::new();

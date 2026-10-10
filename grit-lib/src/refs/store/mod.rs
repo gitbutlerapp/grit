@@ -9,7 +9,9 @@ mod apply;
 mod error;
 mod files;
 mod memory;
+mod reftable;
 mod routing;
+mod semantics;
 mod transaction;
 mod types;
 mod validation;
@@ -17,6 +19,7 @@ mod validation;
 pub use error::RefStoreError;
 pub use files::{FilesRefStore, FilesRefStoreConfig};
 pub use memory::MemoryRefStore;
+pub use reftable::ReftableRefStore;
 pub use transaction::RefTransaction;
 pub use types::{
     Expected, RawRef, RefEntry, RefStorageFormat, RefUpdate, RefUpdateFlags, ReflogUpdate,

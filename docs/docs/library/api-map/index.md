@@ -449,6 +449,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::refs::store::RefUpdate` | struct | One ref create, update, delete, or reflog-only touch in a transaction. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefUpdate.html) |
 | `grit_lib::refs::store::RefUpdateFlags` | struct | Per-update flags (Git REF_NO_DEREF / REF_LOG_ONLY semantics). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.RefUpdateFlags.html) |
 | `grit_lib::refs::store::ReflogUpdate` | struct | Metadata appended to a ref update for the reflog. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.ReflogUpdate.html) |
+| `grit_lib::refs::store::ReftableRefStore` | struct | On-disk ref storage using the reftable backend (extensions.refStorage = reftable). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.ReftableRefStore.html) |
 | `grit_lib::refs_fsck` | module | Reference database consistency checks for git refs verify and git fsck --references. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/index.html) |
 | `grit_lib::refs_fsck::RefsFsckIssue` | struct | One diagnostic (use format_refs_fsck_line for Git-compatible output). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/struct.RefsFsckIssue.html) |
 | `grit_lib::refs_fsck::RefsFsckSeverity` | enum | Severity of a refs-fsck diagnostic. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs_fsck/enum.RefsFsckSeverity.html) |

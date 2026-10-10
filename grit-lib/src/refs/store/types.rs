@@ -89,6 +89,8 @@ pub enum RefStorageFormat {
     Memory,
     /// Loose refs and `packed-refs` under a git directory.
     Files,
+    /// On-disk reftable stack (`extensions.refStorage = reftable`).
+    Reftable,
 }
 
 impl std::fmt::Display for RefStorageFormat {
@@ -96,6 +98,7 @@ impl std::fmt::Display for RefStorageFormat {
         match self {
             Self::Memory => f.write_str("memory"),
             Self::Files => f.write_str("files"),
+            Self::Reftable => f.write_str("reftable"),
         }
     }
 }
