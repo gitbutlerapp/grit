@@ -34,7 +34,7 @@ use grit_lib::push::push_http;
 use grit_lib::push_report::PushRefStatus;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
-use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
 use grit_lib::transport::http::{http_fetch, HttpClient, SmartHttpTransport};
 use grit_lib::transport::{ConnectOptions, Service, Transport};
 
@@ -229,7 +229,7 @@ fn fetch_over_smart_http_lands_refs_and_objects() {
     let local_git = local.join(".git");
 
     // 1. Connect via the trait and check the advertisement.
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
     let transport = SmartHttpTransport::new(client);
     let conn = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default()) {
         Ok(c) => c,
@@ -256,7 +256,7 @@ fn fetch_over_smart_http_lands_refs_and_objects() {
         tags: TagMode::All,
         ..Default::default()
     };
-    let outcome = http_fetch(client.as_ref(), &local_git, &url, &opts, &mut NoProgress)
+    let outcome = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
         .expect("http_fetch over grit-http-server");
 
     // PROVE this is genuinely the v0/v1 stateless RPC (not a silent v2 upgrade):
@@ -690,7 +690,7 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
         tags: TagMode::All,
         ..Default::default()
     };
-    let outcome = http_fetch(recording.as_ref(), &local_git, &url, &opts, &mut NoProgress)
+    let outcome = http_fetch(recording.clone(), &local_git, &url, &opts, &mut NoProgress)
         .expect("v2 http_fetch over grit-http-server");
 
     // PROVE v2: the recorded POSTs include a `command=ls-refs` and a
@@ -802,14 +802,8 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
     assert_ne!(new_main_oid, main_oid, "source main should have advanced");
 
     let recording2 = Arc::new(RecordingClient::new("version=2"));
-    let outcome2 = http_fetch(
-        recording2.as_ref(),
-        &local_git,
-        &url,
-        &opts,
-        &mut NoProgress,
-    )
-    .expect("incremental v2 http_fetch");
+    let outcome2 = http_fetch(recording2.clone(), &local_git, &url, &opts, &mut NoProgress)
+        .expect("incremental v2 http_fetch");
     let commands2 = recording2.post_commands.lock().unwrap().clone();
     assert!(
         commands2.iter().any(|c| c == "command=ls-refs"),
@@ -949,7 +943,7 @@ fn fetch_from_config_client_v2_many_refs_and_large_pack() {
         tags: TagMode::All,
         ..Default::default()
     };
-    let outcome = http_fetch(recording.as_ref(), &local_git, &url, &opts, &mut NoProgress)
+    let outcome = http_fetch(recording.clone(), &local_git, &url, &opts, &mut NoProgress)
         .expect("from_config v2 http_fetch over many-ref repo");
 
     let commands = recording.post_commands.lock().unwrap().clone();
@@ -1036,13 +1030,13 @@ fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
     let local_git = local.join(".git");
 
     let inner = UreqHttpClient::from_config(&ConfigSet::new()).expect("from_config");
-    let client = IoFailUploadPackClient { inner };
+    let client = http_client_arc(IoFailUploadPackClient { inner });
     let opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::None,
         ..Default::default()
     };
-    let err = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress).expect_err("I/O");
+    let err = http_fetch(client, &local_git, &url, &opts, &mut NoProgress).expect_err("I/O");
     assert!(
         matches!(err, Error::Io(_)),
         "truncated upload-pack read must surface as Io error, got {err:?}"
@@ -1099,7 +1093,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
     // Confirm the server actually offers receive-pack: GET the receive-pack
     // advertisement and require a smart-HTTP body. If it 404s / lacks the service,
     // skip rather than fail (matches the fetch test's graceful-skip policy).
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
     let probe_url = format!("{url}/info/refs?service=git-receive-pack");
     match client.get(&probe_url, None) {
         Ok(body) if body.windows(20).any(|w| w == b"# service=git-receiv") => {}
@@ -1123,7 +1117,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
     };
     let outcome = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[spec],
@@ -1201,7 +1195,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
     };
     let outcome_topic = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[spec_topic],
@@ -1243,7 +1237,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
     };
     let outcome2 = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[nonff],
@@ -1285,7 +1279,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         expect_absent: false,
     };
     let outcome3 = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[forced],
@@ -1364,7 +1358,7 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
 
     let url = format!("http://127.0.0.1:{port}/rt.git");
 
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
     // Skip cleanly if the server lacks receive-pack (matches the other tests).
     let probe_url = format!("{url}/info/refs?service=git-receive-pack");
     match client.get(&probe_url, None) {
@@ -1399,7 +1393,7 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         },
     ];
     let push_outcome = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &specs,
@@ -1439,9 +1433,15 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         tags: TagMode::None,
         ..Default::default()
     };
-    let client2 = UreqHttpClient::new();
-    let fetch_outcome = http_fetch(&client2, &back_git, &url, &fetch_opts, &mut NoProgress)
-        .expect("http_fetch back the just-pushed repo");
+    let client2 = http_client_arc(UreqHttpClient::new());
+    let fetch_outcome = http_fetch(
+        client2.clone(),
+        &back_git,
+        &url,
+        &fetch_opts,
+        &mut NoProgress,
+    )
+    .expect("http_fetch back the just-pushed repo");
 
     // The round-tripped refs equal what we pushed (byte-for-byte oid equality).
     assert_eq!(
@@ -1518,7 +1518,7 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         expect_absent: false,
     };
     let reject_outcome = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[forced_spec],
@@ -1540,5 +1540,135 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         resolve_ref(&bare, "refs/heads/main").unwrap(),
         main_oid,
         "server-rejected push must not move the remote ref"
+    );
+}
+
+/// Child entry for [`http_clone_peak_rss_bounded_for_large_pack`]: reads
+/// `GRIT_HTTP_RSS_URL` and `GRIT_HTTP_RSS_GIT_DIR`, runs one `http_fetch`.
+#[test]
+#[ignore = "spawned by http_clone_peak_rss_bounded_for_large_pack via grit-bench measure-rss"]
+fn http_fetch_rss_child_process() {
+    let url = std::env::var("GRIT_HTTP_RSS_URL").expect("GRIT_HTTP_RSS_URL");
+    let work = PathBuf::from(std::env::var("GRIT_HTTP_RSS_WORK").expect("GRIT_HTTP_RSS_WORK"));
+    std::fs::create_dir_all(&work).expect("work dir");
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    let git_dir = work.join(".git");
+    let opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        initial_remote_fetch: true,
+        remote_name: Some("origin".to_owned()),
+        ..Default::default()
+    };
+    let client = http_client_arc(UreqHttpClient::new());
+    http_fetch(client, &git_dir, &url, &opts, &mut NoProgress).expect("http_fetch");
+}
+
+/// Streaming HTTP fetch must not hold the full pack in memory (peak RSS well below pack size).
+#[test]
+fn http_clone_peak_rss_bounded_for_large_pack() {
+    const MEASURE_CMD_ENV: &str = "GRIT_BENCH_MEASURE_CMD";
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        eprintln!("SKIP: grit-http-server binary not found");
+        return;
+    };
+    let Some(bench_bin) = find_binary("grit-bench") else {
+        eprintln!("SKIP: grit-bench binary not found (build grit-utils)");
+        return;
+    };
+    let test_exe = std::env::current_exe().expect("current test exe");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    let big = work.join("big.bin");
+    let status = Command::new("dd")
+        .args([
+            "if=/dev/urandom",
+            &format!("of={}", big.display()),
+            "bs=1M",
+            "count=100",
+        ])
+        .status()
+        .expect("dd");
+    assert!(status.success(), "dd must create a 100 MiB blob");
+    git(&work, &["add", "big.bin"]);
+    git(&work, &["commit", "-q", "-m", "large blob"]);
+
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("repo.git");
+    git(
+        &work,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            ".",
+            source.to_str().expect("utf8 path"),
+        ],
+    );
+    git(&source, &["repack", "-adf"]);
+    git(&source, &["prune-packed"]);
+
+    let pack_size = std::fs::read_dir(source.join("objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        pack_size >= 90 * 1024 * 1024,
+        "expected ~100 MiB pack, got {pack_size} bytes"
+    );
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: no free port");
+        return;
+    };
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
+        eprintln!("SKIP: could not spawn grit-http-server");
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: server not ready");
+        return;
+    }
+
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let work = tmp.path().join("fetch-work");
+    let measure_cmd = format!(
+        "{} http_fetch_rss_child_process --ignored --exact --nocapture",
+        test_exe.display()
+    );
+    let out = Command::new(&bench_bin)
+        .arg("measure-rss")
+        .arg("--cwd")
+        .arg(tmp.path())
+        .env(MEASURE_CMD_ENV, &measure_cmd)
+        .env("GRIT_HTTP_RSS_URL", &url)
+        .env("GRIT_HTTP_RSS_WORK", "fetch-work")
+        .output()
+        .expect("measure-rss");
+    assert!(
+        out.status.success(),
+        "measure-rss failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let peak_rss: u64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("peak RSS bytes on stdout");
+    assert!(
+        peak_rss <= pack_size / 2,
+        "peak RSS {peak_rss} must not scale with pack size {pack_size} (streaming ingest)"
+    );
+    let git_dir = work.join(".git");
+    assert!(git_dir.is_dir(), "fetch must create a git dir");
+    assert!(
+        resolve_ref(&git_dir, "refs/remotes/origin/main").is_ok(),
+        "fetch must land origin/main"
     );
 }

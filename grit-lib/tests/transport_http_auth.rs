@@ -37,8 +37,8 @@ use grit_lib::push::push_http;
 use grit_lib::push_report::PushRefStatus;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
-use grit_lib::transport::http::http_fetch;
 use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, http_fetch};
 
 const USER: &str = "alice";
 const PASS: &str = "s3cr3t";
@@ -290,8 +290,8 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         std::fs::create_dir_all(&local).unwrap();
         git(&local, &["init", "-q", "-b", "main", "."]);
         let local_git = local.join(".git");
-        let client = UreqHttpClient::new().with_git_protocol("version=2");
-        let err = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress)
+        let client = http_client_arc(UreqHttpClient::new().with_git_protocol("version=2"));
+        let err = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
             .expect_err("fetch with no credentials against an authed server must fail");
         assert!(
             matches!(err, Error::Auth(_)),
@@ -309,7 +309,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         let provider = SharedProvider(Arc::new(StaticCredentialProvider::new(USER, "wrong-pass")));
         let client = UreqHttpClient::with_credentials(Box::new(provider.clone()))
             .with_git_protocol("version=2");
-        let err = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress)
+        let err = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
             .expect_err("fetch with wrong credentials must fail");
         assert!(
             matches!(err, Error::Auth(_)),
@@ -344,7 +344,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
     let provider = SharedProvider(Arc::new(StaticCredentialProvider::new(USER, PASS)));
     let client =
         UreqHttpClient::with_credentials(Box::new(provider.clone())).with_git_protocol("version=2");
-    let outcome = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress)
+    let outcome = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
         .expect("authed fetch with correct credentials must succeed");
 
     // Credentials were filled and approved (Git's credential_approve on success);
@@ -447,9 +447,9 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
 
     // --- 1. NO credentials → typed auth error, remote ref untouched -------------
     {
-        let client = UreqHttpClient::new();
+        let client = http_client_arc(UreqHttpClient::new());
         let err = push_http(
-            &client,
+            client.clone(),
             &local_git,
             &url,
             std::slice::from_ref(&spec),
@@ -469,9 +469,9 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
 
     // --- 2. RIGHT credentials → push succeeds, objects land, fsck clean ---------
     let provider = SharedProvider(Arc::new(StaticCredentialProvider::new(USER, PASS)));
-    let client = UreqHttpClient::with_credentials(Box::new(provider.clone()));
+    let client = http_client_arc(UreqHttpClient::with_credentials(Box::new(provider.clone())));
     let outcome = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         std::slice::from_ref(&spec),

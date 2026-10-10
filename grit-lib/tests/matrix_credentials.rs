@@ -734,8 +734,8 @@ mod http_401 {
     use grit_lib::fetch::NoProgress;
     use grit_lib::refs::resolve_ref;
     use grit_lib::transfer::{FetchOptions, TagMode};
-    use grit_lib::transport::http::http_fetch;
     use grit_lib::transport::http::ureq_client::UreqHttpClient;
+    use grit_lib::transport::http::{http_client_arc, http_fetch};
 
     const USER: &str = "alice";
     const PASS: &str = "s3cr3t";
@@ -936,7 +936,7 @@ mod http_401 {
 
             let client =
                 UreqHttpClient::with_credentials(Box::new(provider)).with_git_protocol("version=2");
-            let err = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress)
+            let err = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
                 .expect_err("wrong creds from helper must fail typed, not hang");
             assert!(
                 matches!(err, Error::Auth(_)),
@@ -965,7 +965,7 @@ mod http_401 {
 
         let client =
             UreqHttpClient::with_credentials(Box::new(provider)).with_git_protocol("version=2");
-        http_fetch(&client, &local_git, &url, &opts, &mut NoProgress)
+        http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
             .expect("authed fetch via helper-filled Basic creds must succeed");
 
         // The helper supplied a credential on the 401 (a `get` recorded).

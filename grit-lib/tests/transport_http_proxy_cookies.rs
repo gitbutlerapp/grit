@@ -37,8 +37,8 @@ use grit_lib::fetch::NoProgress;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, TagMode};
-use grit_lib::transport::http::http_fetch;
 use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, http_fetch};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -249,10 +249,10 @@ fn cookie_file_sends_cookie_header_to_server() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.cookieFile", cookie_file.to_str().unwrap())
         .unwrap();
-    let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+    let client = http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config"));
 
     let outcome = http_fetch(
-        &client,
+        client.clone(),
         &fx.local_git,
         &fx.url,
         &fetch_opts(),
@@ -297,10 +297,10 @@ fn save_cookies_persists_set_cookie_to_file() {
         .unwrap();
     cfg.add_command_override("http.saveCookies", "true")
         .unwrap();
-    let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+    let client = http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config"));
 
     http_fetch(
-        &client,
+        client.clone(),
         &fx.local_git,
         &fx.url,
         &fetch_opts(),
@@ -328,10 +328,10 @@ fn extra_header_reaches_server() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.extraHeader", "X-Grit-Test: wirevalue42")
         .unwrap();
-    let client = UreqHttpClient::from_config(&cfg).expect("from_config");
+    let client = http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config"));
 
     http_fetch(
-        &client,
+        client.clone(),
         &fx.local_git,
         &fx.url,
         &fetch_opts(),
@@ -435,10 +435,11 @@ fn http_proxy_routes_fetch_through_proxy() {
     let mut cfg = ConfigSet::new();
     cfg.add_command_override("http.proxy", &format!("http://127.0.0.1:{proxy_port}"))
         .unwrap();
-    let client = UreqHttpClient::from_config(&cfg).expect("from_config with proxy");
+    let client =
+        http_client_arc(UreqHttpClient::from_config(&cfg).expect("from_config with proxy"));
 
     let outcome = match http_fetch(
-        &client,
+        client.clone(),
         &fx.local_git,
         &fx.url,
         &fetch_opts(),

@@ -57,7 +57,7 @@ use grit_lib::push::{push_http, push_remote};
 use grit_lib::push_report::{PushRefResult, PushRefStatus};
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{PushOptions, PushOutcome, PushRefSpec};
-use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
 use grit_lib::transport::http::{HttpClient, SmartHttpTransport};
 #[cfg(unix)]
 use grit_lib::transport::SshTransport;
@@ -789,16 +789,23 @@ fn push_matrix_over_smart_http() {
     }
 
     let push = |specs: &[PushRefSpec], opts: &PushOptions| -> PushOutcome {
-        let client = UreqHttpClient::new();
-        push_http(&client, &local_git, &url, specs, opts, &mut NoProgress)
-            .expect("push_http over grit-http-server")
+        let client = http_client_arc(UreqHttpClient::new());
+        push_http(
+            client.clone(),
+            &local_git,
+            &url,
+            specs,
+            opts,
+            &mut NoProgress,
+        )
+        .expect("push_http over grit-http-server")
     };
 
     run_push_matrix("http", &bare, &graph, &push);
 
     // Bonus HTTP-only round-trip: fetch the pushed history back via the smart
     // transport's advertisement to prove the pushed pack is servable.
-    let conn = SmartHttpTransport::new(UreqHttpClient::new())
+    let conn = SmartHttpTransport::new(http_client_arc(UreqHttpClient::new()))
         .connect(&url, Service::UploadPack, &ConnectOptions::default())
         .expect("connect upload-pack after matrix");
     assert!(

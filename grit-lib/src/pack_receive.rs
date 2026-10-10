@@ -164,26 +164,6 @@ impl TempPackReceive {
         self.seen_pack
     }
 
-    pub(crate) fn file_mut(&mut self) -> &mut File {
-        &mut self.file
-    }
-
-    pub(crate) fn mark_seen_pack(&mut self, seen: bool) {
-        if seen {
-            self.seen_pack = true;
-        }
-    }
-
-    pub(crate) fn write_raw(&mut self, data: &[u8]) -> Result<()> {
-        if !data.is_empty() {
-            self.file.write_all(data).map_err(Error::Io)?;
-            if data.windows(4).any(|w| w == b"PACK") {
-                self.seen_pack = true;
-            }
-        }
-        Ok(())
-    }
-
     /// Demux side-band from `reader` into this temp file.
     ///
     /// # Errors
@@ -294,7 +274,8 @@ mod tests {
         let objects = dir.path().join("objects");
         let mut recv = TempPackReceive::create(&objects).expect("create");
         let header = b"PACK";
-        recv.write_raw(header).expect("write");
+        use std::io::Write;
+        recv.write_all(header).expect("write");
         assert!(recv.path().is_file(), "path must exist before finish");
         let path = recv.finish().expect("finish").expect("some pack");
         assert!(path.is_file(), "finish must return an on-disk path");

@@ -55,7 +55,7 @@ use grit_lib::push::{push_http, push_remote};
 use grit_lib::push_report::PushRefStatus;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
-use grit_lib::transport::http::HttpClient;
+use grit_lib::transport::http::{http_client_arc, HttpClient};
 use grit_lib::transport::{
     read_advertisement, ConnectOptions, Connection, GitDaemonTransport, Service, SshTransport,
     Transport,
@@ -495,6 +495,7 @@ fn push_remote_unpack_failure_report_demotes_all_sent_refs() {
 /// and a configurable result for the POST. `post_err` makes the POST fail (the
 /// connection-refused shape); otherwise the GET body alone drives the test
 /// (e.g. a v2 advertisement that push_http must reject before POSTing).
+#[derive(Clone)]
 struct FakeHttpClient {
     get_body: Vec<u8>,
     /// If set, `get` itself fails (discovery against a dead server).
@@ -524,6 +525,23 @@ impl HttpClient for FakeHttpClient {
         // No test reaches a successful POST; return an empty report-status.
         Ok(b"0000".to_vec())
     }
+
+    fn post_into_reader(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> GritResult<Box<dyn std::io::Read + Send>> {
+        Ok(Box::new(std::io::Cursor::new(self.post(
+            url,
+            content_type,
+            accept,
+            body,
+            git_protocol,
+        )?)))
+    }
 }
 
 /// Build a smart-HTTP `info/refs?service=git-receive-pack` body advertising a v2
@@ -550,11 +568,11 @@ fn push_http_rejects_v2_receive_pack_advertisement_typed() {
     let local_git = local.join(".git");
     let main_oid = rev_parse(&local, "HEAD");
 
-    let client = FakeHttpClient {
+    let client = grit_lib::transport::http::http_client_arc(FakeHttpClient {
         get_body: v2_receive_pack_advertisement(),
         get_err: None,
         post_err: Some("POST must not be reached for a v2 advertisement".to_owned()),
-    };
+    });
     let spec = PushRefSpec {
         src: Some(main_oid),
         dst: "refs/heads/main".to_owned(),
@@ -564,7 +582,7 @@ fn push_http_rejects_v2_receive_pack_advertisement_typed() {
         expect_absent: false,
     };
     let err = push_http(
-        &client,
+        client,
         &local_git,
         "http://example.invalid/repo.git",
         &[spec],
@@ -593,11 +611,11 @@ fn push_http_propagates_discovery_transport_error_typed() {
 
     // Discovery GET fails (connection refused / DNS failure shape). push_http must
     // surface a typed Error, not panic or hang.
-    let client = FakeHttpClient {
+    let client = grit_lib::transport::http::http_client_arc(FakeHttpClient {
         get_body: Vec::new(),
         get_err: Some("connection refused (os error 61)".to_owned()),
         post_err: None,
-    };
+    });
     let spec = PushRefSpec {
         src: Some(main_oid),
         dst: "refs/heads/main".to_owned(),
@@ -607,7 +625,7 @@ fn push_http_propagates_discovery_transport_error_typed() {
         expect_absent: false,
     };
     let err = push_http(
-        &client,
+        client,
         &local_git,
         "http://127.0.0.1:1/repo.git",
         &[spec],

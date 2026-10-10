@@ -29,8 +29,8 @@ use grit_lib::fetch::NoProgress;
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
 use grit_lib::transfer::FetchOptions;
-use grit_lib::transport::http::http_fetch;
 use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, http_fetch};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -200,7 +200,7 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
     let local_git = local.join(".git");
 
     // No `Git-Protocol` header → v0/v1 stateless RPC.
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
 
     // 1. Shallow depth=1 fetch.
     let shallow_opts = FetchOptions {
@@ -208,7 +208,13 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
         depth: Some(1),
         ..Default::default()
     };
-    let outcome = match http_fetch(&client, &local_git, &url, &shallow_opts, &mut NoProgress) {
+    let outcome = match http_fetch(
+        client.clone(),
+        &local_git,
+        &url,
+        &shallow_opts,
+        &mut NoProgress,
+    ) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("SKIP: shallow http_fetch failed (server/git mismatch?): {e}");
@@ -289,8 +295,14 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
         unshallow: true,
         ..Default::default()
     };
-    let outcome = http_fetch(&client, &local_git, &url, &unshallow_opts, &mut NoProgress)
-        .expect("unshallow http_fetch");
+    let outcome = http_fetch(
+        client.clone(),
+        &local_git,
+        &url,
+        &unshallow_opts,
+        &mut NoProgress,
+    )
+    .expect("unshallow http_fetch");
 
     let local_odb = open_odb(&local_git);
     assert!(

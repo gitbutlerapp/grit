@@ -22,7 +22,7 @@ use crate::repo::Repository;
 use crate::transfer::{
     fetch_local, push_local, FetchOptions, FetchOutcome, PushOptions, PushOutcome, PushRefSpec,
 };
-use crate::transport::http::{http_fetch, HttpClient};
+use crate::transport::http::{HttpClient, SmartHttpTransport};
 use crate::transport::{ConnectOptions, GitDaemonTransport, Service, SshTransport, Transport};
 use crate::transport_path::{
     is_local_path_remote_url, resolve_local_remote_git_dir, url_is_local_not_ssh,
@@ -403,8 +403,10 @@ impl Remote {
                 Ok(fetch_local(&repo.git_dir, &remote_git, opts)?)
             }
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
-                let client = http_client(http_factory, repo)?;
-                Ok(http_fetch(&*client, &repo.git_dir, u, opts, progress)?)
+                let client: Arc<dyn HttpClient> = Arc::from(http_client(http_factory, repo)?);
+                let transport = SmartHttpTransport::new(client);
+                let mut conn = transport.connect(u, Service::UploadPack, &connect)?;
+                Ok(fetch_remote(&repo.git_dir, &mut *conn, opts, progress)?)
             }
             RemoteUrl::Git(u) => {
                 let mut conn =
@@ -437,11 +439,12 @@ impl Remote {
                 Ok(push_local(&repo.git_dir, &remote_git, refs, opts)?)
             }
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
-                let client = http_client(http_factory, repo)?;
-                Ok(crate::push::push_http(
-                    client.as_ref(),
+                let client: Arc<dyn HttpClient> = Arc::from(http_client(http_factory, repo)?);
+                let transport = SmartHttpTransport::new(client);
+                let mut conn = transport.connect(u, Service::ReceivePack, &connect)?;
+                Ok(push_remote(
                     &repo.git_dir,
-                    u,
+                    &mut *conn,
                     refs,
                     opts,
                     progress,

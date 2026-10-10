@@ -140,11 +140,10 @@ fn read_ack_round(reader: &mut dyn Read, negotiator: &mut SkippingNegotiator) ->
 /// fatal error. Lifted from `read_sideband_pack_until_done`.
 fn read_sideband_pack(
     r: &mut dyn Read,
-    out: &mut Vec<u8>,
+    target: &mut crate::pack_receive::PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
 ) -> Result<()> {
-    let mut target = crate::pack_receive::PackReceiveTarget::Memory(out);
-    crate::pack_receive::read_sideband_pack_to(r, &mut target, progress)
+    crate::pack_receive::read_sideband_pack_to(r, target, progress)
 }
 
 /// Peel `oid` to the commit usable as a negotiation tip; `None` if it is not a
@@ -234,12 +233,12 @@ fn negotiate_pack(
     opts: &FetchOptions,
     local_shallow: &[ObjectId],
     progress: &mut dyn Progress,
-) -> Result<(Vec<u8>, ShallowUpdate)> {
+) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     let local_repo = crate::repo::Repository::open(local_git_dir, None)?;
     let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
 
     let Some(first_want) = wants.first().copied() else {
-        return Ok((Vec::new(), ShallowUpdate::default()));
+        return Ok((None, ShallowUpdate::default()));
     };
 
     // A deepen/shallow request changes the negotiation: the server precedes the
@@ -386,9 +385,11 @@ fn negotiate_pack(
         Some(_) => {}
     }
 
-    let mut pack = Vec::new();
-    read_sideband_pack(conn.reader(), &mut pack, progress)?;
-    Ok((pack, shallow_update))
+    let local_odb = open_odb(local_git_dir);
+    let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
+    pack_receive.read_sideband(conn.reader(), progress)?;
+    let pack_path = pack_receive.finish()?;
+    Ok((pack_path, shallow_update))
 }
 
 // ===========================================================================
@@ -692,9 +693,9 @@ fn negotiate_pack_v2(
     wants: &[ObjectId],
     deepen: &V2DeepenArgs,
     progress: &mut dyn Progress,
-) -> Result<(Vec<u8>, ShallowUpdate)> {
+) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     if wants.is_empty() {
-        return Ok((Vec::new(), ShallowUpdate::default()));
+        return Ok((None, ShallowUpdate::default()));
     }
     let object_format = v2_object_format(server_caps, local_odb);
     let cap_echo = protocol_v2::cap_lines_for_command_request(server_caps);
@@ -714,7 +715,7 @@ fn negotiate_pack_v2(
         v2_local_haves(local_git_dir, wants)?
     };
 
-    let mut pack = Vec::new();
+    let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
     let mut shallow_update = ShallowUpdate::default();
     if haves.is_empty() {
         // No local history to offer: single round, wants + done, read the pack.
@@ -730,13 +731,13 @@ fn negotiate_pack_v2(
         )?;
         read_v2_fetch_pack_response(
             conn.reader(),
-            &mut pack,
-            None,
+            &mut Vec::new(),
+            Some(&mut pack_receive),
             &mut shallow_update,
             progress,
             sideband_all,
         )?;
-        return Ok((pack, shallow_update));
+        return Ok((pack_receive.finish()?, shallow_update));
     }
 
     // Multi-round: round 1 sends the first batch of haves WITHOUT done.
@@ -758,8 +759,8 @@ fn negotiate_pack_v2(
         Some(round) if round.ready => {
             read_v2_fetch_pack_response(
                 conn.reader(),
-                &mut pack,
-                None,
+                &mut Vec::new(),
+                Some(&mut pack_receive),
                 &mut shallow_update,
                 progress,
                 sideband_all,
@@ -770,8 +771,8 @@ fn negotiate_pack_v2(
         None => {
             read_v2_fetch_pack_response(
                 conn.reader(),
-                &mut pack,
-                None,
+                &mut Vec::new(),
+                Some(&mut pack_receive),
                 &mut shallow_update,
                 progress,
                 sideband_all,
@@ -791,15 +792,15 @@ fn negotiate_pack_v2(
             )?;
             read_v2_fetch_pack_response(
                 conn.reader(),
-                &mut pack,
-                None,
+                &mut Vec::new(),
+                Some(&mut pack_receive),
                 &mut shallow_update,
                 progress,
                 sideband_all,
             )?;
         }
     }
-    Ok((pack, shallow_update))
+    Ok((pack_receive.finish()?, shallow_update))
 }
 
 /// The shallow/deepen arguments for a v2 `command=fetch` request, derived from
@@ -989,6 +990,19 @@ pub(crate) fn read_v2_acknowledgments(
     Ok(Some(V2AckRound { ready }))
 }
 
+/// Whether `line` is a v2 `wanted-refs` (or ls-refs) advertisement row:
+/// `<oid> <refname>[ …attributes…]`.
+fn v2_wanted_ref_ad_line(line: &str) -> bool {
+    let line = line.trim_end();
+    let Some((oid_hex, rest)) = line.split_once(' ') else {
+        return false;
+    };
+    if ObjectId::from_hex(oid_hex.trim()).is_err() {
+        return false;
+    }
+    !rest.trim().is_empty()
+}
+
 /// Read a v2 `command=fetch` response: capture the `shallow-info` section's
 /// `shallow`/`unshallow` lines into `shallow_out`, skip the other non-pack
 /// sections (`acknowledgments`/`shallow-info`/`wanted-refs`/`packfile-uris`), and demux the
@@ -1047,9 +1061,13 @@ pub(crate) fn read_v2_fetch_pack_response(
                 if let Some(pf) = pack_file {
                     pf.read_sideband(&mut *reader, progress)?;
                 } else {
-                    read_sideband_pack(&mut *reader, out, progress)?;
+                    let mut target = crate::pack_receive::PackReceiveTarget::Memory(out);
+                    read_sideband_pack(&mut *reader, &mut target, progress)?;
                 }
                 return Ok(());
+            }
+            other if v2_wanted_ref_ad_line(other) => {
+                // `wanted-refs` payload line (some servers omit the section header).
             }
             other => {
                 return Err(Error::Message(format!(
@@ -1269,7 +1287,7 @@ pub fn fetch_remote(
             opts.diagnostics.as_ref(),
             "fetch_remote: negotiating + fetching pack…"
         );
-        let (pack, su) = if let Some(caps) = v2_caps.as_ref() {
+        let (pack_path, su) = if let Some(caps) = v2_caps.as_ref() {
             let deepen = V2DeepenArgs::from_opts(opts, &local_shallow);
             negotiate_pack_v2(
                 local_git_dir,
@@ -1287,11 +1305,18 @@ pub fn fetch_remote(
         net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
-            "fetch_remote: received pack ({} bytes), unpacking…",
-            pack.len()
+            "fetch_remote: received pack, ingesting via index-pack…"
         );
-        if !pack.is_empty() {
-            pack_oids = ingest_negotiated_pack(local_git_dir, &local_odb, pack)?;
+        if let Some(path) = pack_path {
+            pack_oids = crate::index_pack::ingest_received_pack_path(
+                path,
+                &local_odb,
+                &crate::index_pack::IngestPackOptions {
+                    fix_thin: true,
+                    ..Default::default()
+                },
+            )?
+            .object_ids;
         }
     }
 
@@ -1466,22 +1491,6 @@ pub fn fetch_remote(
         new_shallow: shallow_update.shallow,
         new_unshallow: shallow_update.unshallow,
     })
-}
-
-fn ingest_negotiated_pack(
-    _local_git_dir: &Path,
-    local_odb: &crate::odb::Odb,
-    pack: Vec<u8>,
-) -> Result<HashSet<ObjectId>> {
-    Ok(crate::index_pack::ingest_received_pack(
-        pack,
-        local_odb,
-        &crate::index_pack::IngestPackOptions {
-            fix_thin: true,
-            ..Default::default()
-        },
-    )?
-    .object_ids)
 }
 
 /// Identity string for fetch/clone reflog entries (`Name <email> epoch tz`).

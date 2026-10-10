@@ -25,8 +25,8 @@ use grit_lib::fetch::NoProgress;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, TagMode};
-use grit_lib::transport::http::http_fetch;
 use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, http_fetch};
 
 const USER: &str = "alice";
 const PASS: &str = "s3cr3t";
@@ -324,7 +324,7 @@ fn cross_authority_redirect_does_not_forward_cached_basic_auth() {
     client.seed_cached_basic_auth(&fx.gateway_url, "wronguser", "wrongpass");
 
     http_fetch(
-        &client,
+        client.clone(),
         &fx.local_git,
         &fx.gateway_url,
         &fetch_opts(),
@@ -369,7 +369,7 @@ fn cross_authority_redirect_does_not_forward_host_only_cookies() {
         .with_git_protocol("version=2");
 
     http_fetch(
-        &client,
+        client.clone(),
         &fx.local_git,
         &fx.gateway_url,
         &fetch_opts(),

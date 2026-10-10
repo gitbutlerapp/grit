@@ -37,6 +37,8 @@ use crate::objects::ObjectId;
 use crate::pkt_line;
 
 pub mod http;
+pub mod rpc_channel;
+pub mod stateless_http;
 
 /// The Git service a [`Connection`] speaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

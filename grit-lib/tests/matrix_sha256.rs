@@ -46,7 +46,7 @@ use grit_lib::push::{push_http, push_remote};
 use grit_lib::push_report::PushRefStatus;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
-use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
 use grit_lib::transport::http::{http_fetch, HttpClient, SmartHttpTransport};
 use grit_lib::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -554,7 +554,7 @@ fn sha256_fetch_over_smart_http() {
     assert_eq!(open_odb(&local_git).hash_algo(), HashAlgo::Sha256);
 
     // 1. Advertisement: connect and confirm refs + the sha256 capability.
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
     let transport = SmartHttpTransport::new(client);
     let conn = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default()) {
         Ok(c) => c,
@@ -581,13 +581,13 @@ fn sha256_fetch_over_smart_http() {
     drop(conn);
 
     // 2. Fetch via http_fetch.
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
     let opts = FetchOptions {
         refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
         tags: TagMode::All,
         ..Default::default()
     };
-    let outcome = http_fetch(&client, &local_git, &url, &opts, &mut NoProgress)
+    let outcome = http_fetch(client.clone(), &local_git, &url, &opts, &mut NoProgress)
         .expect("sha256 http_fetch over grit-http-server");
 
     let got_main = resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main");
@@ -905,7 +905,7 @@ fn sha256_push_over_smart_http() {
 
     // Confirm the server offers receive-pack AND advertises sha256 over HTTP; skip
     // cleanly if the service is absent (matches the sibling tests' policy).
-    let client = UreqHttpClient::new();
+    let client = http_client_arc(UreqHttpClient::new());
     let probe_url = format!("{url}/info/refs?service=git-receive-pack");
     match client.get(&probe_url, None) {
         Ok(body) => {
@@ -935,7 +935,7 @@ fn sha256_push_over_smart_http() {
         expect_absent: false,
     };
     let outcome = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[spec],
@@ -999,7 +999,7 @@ fn sha256_push_over_smart_http() {
         expect_absent: false,
     };
     let outcome_feature = push_http(
-        &client,
+        client.clone(),
         &local_git,
         &url,
         &[spec_feature],

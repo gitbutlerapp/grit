@@ -25,7 +25,6 @@
 //! hash-width aware.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::Path;
 
@@ -236,91 +235,25 @@ pub fn push_remote(
 /// source object is missing from the local odb, the pack build fails, or on
 /// wire/parse I/O failure.
 pub fn push_http(
-    client: &dyn crate::transport::http::HttpClient,
+    client: std::sync::Arc<dyn crate::transport::http::HttpClient>,
     local_git_dir: &Path,
     repo_url: &str,
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn Progress,
 ) -> Result<PushOutcome> {
-    use crate::net_trace::net_trace;
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "push_http: begin — {} ref update(s) to {}, {} push-option(s)",
-        refs.len(),
-        repo_url,
-        opts.push_options.len()
-    );
-    let local_odb = open_odb(local_git_dir);
-    let algo = local_odb.hash_algo();
-
-    // 1. Discovery: GET info/refs?service=git-receive-pack.
-    let adv = discover_receive_pack(client, repo_url)?;
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "push_http: remote advertised {} ref(s) (protocol v{})",
-        adv.state.remote_refs.len(),
-        adv.protocol_version
-    );
-    if adv.protocol_version >= 2 {
-        return Err(Error::Message(
-            "push_http: protocol v2 receive-pack not supported in this phase (use v0/v1)"
-                .to_owned(),
-        ));
-    }
-
-    // Push-options require the server's `push-options` capability; fail typed
-    // (matching Git) before sending anything if the server lacks it.
-    require_push_options_supported(&adv.state, opts)?;
-
-    // 2–3. Decide each ref update client-side (shared with `push_remote`).
-    let mut plan = match plan_push(refs, &local_odb, local_git_dir, &adv.state, opts)? {
-        PlanOutcome::Send(plan) => plan,
-        PlanOutcome::Done(results) => return finish_push_outcome(local_git_dir, opts, results),
+    use crate::transport::http::SmartHttpTransport;
+    use crate::transport::{ConnectOptions, Service, Transport};
+    let connect = ConnectOptions {
+        protocol_version: 0,
+        diagnostics: opts.diagnostics.clone(),
+        network_trace: opts.network_trace,
+        ..Default::default()
     };
-
-    // 4. Build the single POST body: ref-update commands + flush (then the
-    //    push-option lines + flush when negotiated), then the pack (omitted
-    //    entirely for a deletion-only push, matching `git send-pack`).
-    let mut body = build_command_block(&plan, &adv.state, algo, &opts.push_options)?;
-    if let Some(pack) = build_push_pack(&plan, &local_odb, &adv.state)? {
-        body.extend_from_slice(&pack);
-    }
-
-    // 5. POST git-receive-pack and parse the report-status reply.
-    let service_url = receive_pack_url(repo_url);
-    let content_type = format!("application/x-{RECEIVE_PACK}-request");
-    let accept = format!("application/x-{RECEIVE_PACK}-result");
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "push_http: POST git-receive-pack ({} command(s), {} body bytes)…",
-        plan.decisions.len(),
-        body.len()
-    );
-    let resp = client.post(&service_url, &content_type, &accept, &body, None)?;
-
-    let report = if adv.state.server_sideband {
-        demux_report_and_remote_messages(&resp, progress)?
-    } else {
-        resp
-    };
-
-    apply_report_status(&report, &mut plan.decisions);
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "push_http: done — {} result(s)",
-        plan.decisions.len()
-    );
-
-    let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
-    finish_push_outcome(local_git_dir, opts, results)
+    let transport = SmartHttpTransport::new(client);
+    let mut conn = transport.connect(repo_url, Service::ReceivePack, &connect)?;
+    push_remote(local_git_dir, &mut *conn, refs, opts, progress)
 }
-
-const RECEIVE_PACK: &str = "git-receive-pack";
 
 /// The remote ref map + `.have` hints + capability flags parsed from a
 /// receive-pack advertisement. Shared by the duplex ([`push_remote`]) and
@@ -364,191 +297,6 @@ impl AdvertisedState {
             server_push_options: caps.iter().any(|c| c == "push-options"),
         }
     }
-}
-
-/// A parsed smart-HTTP receive-pack advertisement: protocol version + the shared
-/// [`AdvertisedState`].
-struct ReceivePackAdvertisement {
-    protocol_version: u8,
-    state: AdvertisedState,
-}
-
-/// Discover the `git-receive-pack` advertisement for `repo_url` over an
-/// [`crate::transport::http::HttpClient`] (`GET info/refs?service=git-receive-pack`).
-///
-/// Lifted from the CLI's `http_push_smart.rs` (`discover_receive_pack` /
-/// `read_receive_pack_advertisement`): strips the `# service=…` smart preamble,
-/// detects a v2 capability block, and otherwise parses the v0/v1 ref lines
-/// (capabilities ride the NUL suffix of the first ref line; `.have` lines and the
-/// all-zero capabilities carrier are handled). Hash-width aware via
-/// [`ObjectId::from_hex`].
-fn discover_receive_pack(
-    client: &dyn crate::transport::http::HttpClient,
-    repo_url: &str,
-) -> Result<ReceivePackAdvertisement> {
-    let base = repo_url.trim_end_matches('/');
-    let mut refs_url = format!("{base}/info/refs");
-    refs_url.push_str(if refs_url.contains('?') { "&" } else { "?" });
-    refs_url.push_str("service=");
-    refs_url.push_str(RECEIVE_PACK);
-
-    let body = client.get(&refs_url, None)?;
-    let pkt_body = strip_service_advertisement(&body)?;
-    parse_receive_pack_advertisement(pkt_body)
-}
-
-/// The `git-receive-pack` stateless-RPC endpoint URL for `repo_url`.
-fn receive_pack_url(repo_url: &str) -> String {
-    let base = repo_url.trim_end_matches('/');
-    format!("{base}/{RECEIVE_PACK}")
-}
-
-/// Strip the optional `# service=git-receive-pack\n` pkt-line + flush preamble a
-/// smart-HTTP `info/refs?service=…` response begins with, returning the remaining
-/// advertisement bytes. A dumb server (or raw advertisement) omits it.
-fn strip_service_advertisement(body: &[u8]) -> Result<&[u8]> {
-    let mut cur = Cursor::new(body);
-    match pkt_line::read_packet(&mut cur)? {
-        Some(Packet::Data(line)) if line.starts_with("# service=") => {
-            match pkt_line::read_packet(&mut cur)? {
-                Some(Packet::Flush) | None => {}
-                _ => return Ok(body),
-            }
-            let pos = cur.position() as usize;
-            Ok(&body[pos..])
-        }
-        _ => Ok(body),
-    }
-}
-
-/// Parse a receive-pack advertisement (after the service preamble is stripped)
-/// into a [`ReceivePackAdvertisement`].
-fn parse_receive_pack_advertisement(body: &[u8]) -> Result<ReceivePackAdvertisement> {
-    let mut cur = Cursor::new(body);
-
-    // Peek the first packet to distinguish a v2 capability block from v0/v1.
-    let first = match pkt_line::read_packet(&mut cur)? {
-        None | Some(Packet::Flush) => {
-            return Ok(ReceivePackAdvertisement {
-                protocol_version: 0,
-                state: AdvertisedState {
-                    remote_refs: HashMap::new(),
-                    advertised_haves: Vec::new(),
-                    server_sideband: false,
-                    server_ofs_delta: false,
-                    server_push_options: false,
-                },
-            });
-        }
-        Some(Packet::Data(s)) => s,
-        Some(other) => {
-            return Err(Error::Message(format!(
-                "unexpected first receive-pack advertisement packet: {other:?}"
-            )))
-        }
-    };
-    if first.trim_end() == "version 2" {
-        // A v2 advertisement carries no refs/`.have`s here; capabilities live in
-        // the following lines. We only need the version (push is v0/v1).
-        let mut caps: HashSet<String> = HashSet::new();
-        loop {
-            match pkt_line::read_packet(&mut cur)? {
-                None | Some(Packet::Flush) => break,
-                Some(Packet::Data(s)) => {
-                    caps.insert(s.trim_end().to_owned());
-                }
-                Some(_) => break,
-            }
-        }
-        return Ok(ReceivePackAdvertisement {
-            protocol_version: 2,
-            state: AdvertisedState {
-                remote_refs: HashMap::new(),
-                advertised_haves: Vec::new(),
-                server_sideband: caps
-                    .iter()
-                    .any(|c| c == "side-band-64k" || c == "side-band"),
-                server_ofs_delta: caps.iter().any(|c| c == "ofs-delta"),
-                server_push_options: caps.iter().any(|c| c == "push-options"),
-            },
-        });
-    }
-
-    // v0/v1: rewind and parse the ref lines + `.have`s.
-    cur.set_position(0);
-    let mut remote_refs: HashMap<String, ObjectId> = HashMap::new();
-    let mut advertised_haves: Vec<ObjectId> = Vec::new();
-    let mut caps: HashSet<String> = HashSet::new();
-    let mut first_ref_line = true;
-    let mut protocol_version = 0u8;
-    loop {
-        match pkt_line::read_packet(&mut cur)? {
-            None | Some(Packet::Flush) => break,
-            Some(Packet::Data(line)) => {
-                let line = line.trim_end_matches('\n');
-                if line == "version 1" {
-                    protocol_version = 1;
-                    continue;
-                }
-                if line.starts_with("version ") || line.starts_with("shallow ") {
-                    continue;
-                }
-                let (payload, cap_part) = match line.split_once('\0') {
-                    Some((p, c)) => (p.trim(), Some(c)),
-                    None => (line.trim(), None),
-                };
-                let Some((oid_hex, refname)) =
-                    payload.split_once('\t').or_else(|| payload.split_once(' '))
-                else {
-                    continue;
-                };
-                let oid_hex = oid_hex.trim();
-                let refname = refname.trim();
-                if first_ref_line {
-                    if let Some(raw_caps) = cap_part {
-                        for cap in raw_caps.split_whitespace() {
-                            caps.insert(cap.to_owned());
-                        }
-                    }
-                    first_ref_line = false;
-                }
-                if refname.is_empty() {
-                    continue;
-                }
-                // All-zero OID marks the capabilities-only carrier (empty repo).
-                if oid_hex.bytes().all(|b| b == b'0') {
-                    continue;
-                }
-                let oid = ObjectId::from_hex(oid_hex).map_err(|e| {
-                    Error::Message(format!(
-                        "bad oid in receive-pack advertisement: {oid_hex}: {e}"
-                    ))
-                })?;
-                if refname == ".have" {
-                    advertised_haves.push(oid);
-                } else {
-                    remote_refs.insert(refname.to_owned(), oid);
-                }
-            }
-            Some(other) => {
-                return Err(Error::Message(format!(
-                    "unexpected packet in receive-pack advertisement: {other:?}"
-                )))
-            }
-        }
-    }
-    Ok(ReceivePackAdvertisement {
-        protocol_version,
-        state: AdvertisedState {
-            remote_refs,
-            advertised_haves,
-            server_sideband: caps
-                .iter()
-                .any(|c| c == "side-band-64k" || c == "side-band"),
-            server_ofs_delta: caps.iter().any(|c| c == "ofs-delta"),
-            server_push_options: caps.iter().any(|c| c == "push-options"),
-        },
-    })
 }
 
 /// The accepted, value-changing updates a push will actually send, plus the full
@@ -1214,93 +962,6 @@ mod tests {
         // No options: ok regardless of capability.
         require_push_options_supported(&adv_state(true, true, false), &PushOptions::default())
             .unwrap();
-    }
-
-    #[test]
-    fn receive_pack_url_and_strip_preamble() {
-        assert_eq!(
-            receive_pack_url("http://h/r.git/"),
-            "http://h/r.git/git-receive-pack"
-        );
-        // The `# service=…` smart preamble + flush is stripped; the ref bytes remain.
-        let mut tail = Vec::new();
-        pkt_line::write_line_to_vec(&mut tail, &format!("{} refs/heads/main", "1".repeat(40)))
-            .unwrap();
-        tail.extend_from_slice(b"0000");
-
-        let mut body = Vec::new();
-        pkt_line::write_line_to_vec(&mut body, "# service=git-receive-pack\n").unwrap();
-        body.extend_from_slice(b"0000");
-        body.extend_from_slice(&tail);
-        assert_eq!(strip_service_advertisement(&body).unwrap(), tail.as_slice());
-        // A body without the preamble is returned verbatim.
-        assert_eq!(strip_service_advertisement(&tail).unwrap(), tail.as_slice());
-    }
-
-    #[test]
-    fn parses_v0_receive_pack_advertisement_with_caps_and_have() {
-        let main = "1".repeat(40);
-        let have = "2".repeat(40);
-        let mut body = Vec::new();
-        // First ref line carries the receive-pack capabilities after a NUL.
-        pkt_line::write_line_to_vec(
-            &mut body,
-            &format!(
-                "{main} refs/heads/main\0report-status report-status-v2 side-band-64k ofs-delta object-format=sha1"
-            ),
-        )
-        .unwrap();
-        // A `.have` hint line (object the remote holds, not named by a ref).
-        pkt_line::write_line_to_vec(&mut body, &format!("{have} .have")).unwrap();
-        body.extend_from_slice(b"0000");
-
-        let adv = parse_receive_pack_advertisement(&body).unwrap();
-        assert_eq!(adv.protocol_version, 0);
-        assert!(adv.state.server_sideband);
-        assert!(adv.state.server_ofs_delta);
-        assert_eq!(
-            adv.state
-                .remote_refs
-                .get("refs/heads/main")
-                .map(|o| o.to_hex()),
-            Some(main.clone())
-        );
-        assert_eq!(adv.state.advertised_haves.len(), 1);
-        assert_eq!(adv.state.advertised_haves[0].to_hex(), have);
-        // The `.have` carrier is not exposed as a real ref.
-        assert!(!adv.state.remote_refs.contains_key(".have"));
-    }
-
-    #[test]
-    fn parses_empty_repo_capabilities_carrier() {
-        // An empty receive-pack target advertises a single all-zero capabilities
-        // carrier line; it contributes no refs but still yields the caps.
-        let zero = "0".repeat(40);
-        let mut body = Vec::new();
-        pkt_line::write_line_to_vec(
-            &mut body,
-            &format!("{zero} capabilities^{{}}\0report-status delete-refs ofs-delta"),
-        )
-        .unwrap();
-        body.extend_from_slice(b"0000");
-
-        let adv = parse_receive_pack_advertisement(&body).unwrap();
-        assert_eq!(adv.protocol_version, 0);
-        assert!(adv.state.remote_refs.is_empty());
-        assert!(adv.state.advertised_haves.is_empty());
-        assert!(adv.state.server_ofs_delta);
-        assert!(!adv.state.server_sideband);
-    }
-
-    #[test]
-    fn detects_v2_receive_pack_advertisement() {
-        let mut body = Vec::new();
-        pkt_line::write_line_to_vec(&mut body, "version 2").unwrap();
-        pkt_line::write_line_to_vec(&mut body, "agent=grit/test").unwrap();
-        pkt_line::write_line_to_vec(&mut body, "object-format=sha1").unwrap();
-        body.extend_from_slice(b"0000");
-        let adv = parse_receive_pack_advertisement(&body).unwrap();
-        assert_eq!(adv.protocol_version, 2);
     }
 
     #[test]

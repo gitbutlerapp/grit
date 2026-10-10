@@ -56,8 +56,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
 use grit_lib::refs::resolve_ref;
 use grit_lib::transfer::{FetchOptions, FetchOutcome, TagMode, UpdateMode};
-use grit_lib::transport::http::http_fetch;
 use grit_lib::transport::http::ureq_client::UreqHttpClient;
+use grit_lib::transport::http::{http_client_arc, http_fetch};
 use grit_lib::transport::{ConnectOptions, GitDaemonTransport, Service, SshTransport, Transport};
 
 // ---------------------------------------------------------------------------
@@ -422,12 +422,12 @@ fn http_driver(protocol: u8) -> Option<Driver> {
             ))
         }),
         fetch: Box::new(move |url, local_git, opts| {
-            let client = if protocol >= 2 {
+            let client = http_client_arc(if protocol >= 2 {
                 UreqHttpClient::new().with_git_protocol("version=2")
             } else {
                 UreqHttpClient::new()
-            };
-            http_fetch(&client, local_git, url, opts, &mut NoProgress)
+            });
+            http_fetch(client, local_git, url, opts, &mut NoProgress)
         }),
     })
 }
@@ -1281,4 +1281,114 @@ fn for_each_driver_custom_serve(
         drop(handle);
     }
     ran
+}
+
+fn norm_fetch_updates(o: &FetchOutcome) -> Vec<String> {
+    let mut rows: Vec<String> = o
+        .updates
+        .iter()
+        .map(|u| {
+            format!(
+                "{} {:?} {:?} {:?}",
+                u.remote_ref, u.new_oid, u.old_oid, u.mode
+            )
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+fn assert_fetch_outcome_parity(git_out: &FetchOutcome, http_out: &FetchOutcome, label: &str) {
+    assert_eq!(git_out.default_branch, http_out.default_branch, "{label}");
+    assert_eq!(git_out.new_shallow, http_out.new_shallow, "{label}");
+    assert_eq!(git_out.new_unshallow, http_out.new_unshallow, "{label}");
+    assert_eq!(
+        norm_fetch_updates(git_out),
+        norm_fetch_updates(http_out),
+        "FetchOutcome must match between git:// and smart HTTP ({label})"
+    );
+}
+
+/// Shallow + tag fetch over git-daemon and smart-HTTP (v0/v1 and v2) must yield
+/// the same [`FetchOutcome`].
+#[test]
+fn fetch_outcome_identical_git_daemon_and_smart_http() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let all = drivers(scratch.path());
+
+    let scenarios: [(&str, FetchOptions); 4] = [
+        (
+            "shallow-v1",
+            FetchOptions {
+                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
+                depth: Some(1),
+                tags: TagMode::Following,
+                ..Default::default()
+            },
+        ),
+        (
+            "tags-v1",
+            FetchOptions {
+                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+                tags: TagMode::All,
+                ..Default::default()
+            },
+        ),
+        (
+            "shallow-v2",
+            FetchOptions {
+                refspecs: vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()],
+                depth: Some(1),
+                tags: TagMode::Following,
+                ..Default::default()
+            },
+        ),
+        (
+            "tags-v2",
+            FetchOptions {
+                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+                tags: TagMode::All,
+                ..Default::default()
+            },
+        ),
+    ];
+
+    let mut ran = 0usize;
+    for (scenario, opts) in scenarios {
+        let git_name = if scenario.contains("v2") {
+            "git/v2"
+        } else {
+            "git/v1"
+        };
+        let http_name = if scenario.contains("v2") {
+            "http/v2"
+        } else {
+            "http/v1"
+        };
+        let Some(git) = all.iter().find(|d| d.name == git_name) else {
+            eprintln!("SKIP {scenario}: {git_name} driver unavailable");
+            continue;
+        };
+        let Some(http) = all.iter().find(|d| d.name == http_name) else {
+            eprintln!("SKIP {scenario}: {http_name} driver unavailable");
+            continue;
+        };
+        ran += 1;
+
+        let work = scratch.path().join(format!("work-{scenario}"));
+        build_source_work(&work);
+        let (git_handle, git_url) = (git.serve)(&work).expect("git serve");
+        let (http_handle, http_url) = (http.serve)(&work).expect("http serve");
+
+        let local_git = init_local(&scratch.path().join(format!("local-git-{scenario}")));
+        let local_http = init_local(&scratch.path().join(format!("local-http-{scenario}")));
+        let out_git = (git.fetch)(&git_url, &local_git, &opts).expect("git daemon fetch");
+        let out_http = (http.fetch)(&http_url, &local_http, &opts).expect("http fetch");
+        assert_fetch_outcome_parity(&out_git, &out_http, scenario);
+        drop(git_handle);
+        drop(http_handle);
+    }
+    if ran == 0 {
+        eprintln!("SKIP: git daemon and smart HTTP drivers unavailable for parity check");
+    }
 }

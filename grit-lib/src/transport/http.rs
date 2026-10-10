@@ -31,21 +31,16 @@
 //! [`crate::fetch`].
 
 use std::collections::HashSet;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
-use crate::fetch_negotiator::SkippingNegotiator;
 use crate::objects::ObjectId;
 use crate::pkt_line;
-use crate::protocol_v2;
-use crate::refspec::{parse_fetch_refspec, RefspecItem};
-use crate::transfer::{
-    classify_update, match_positive, open_odb, prune_tracking_refs, ref_excluded, refspecs_force,
-    FetchOptions, FetchOutcome, RefUpdate, TagMode, UpdateMode,
-};
-use crate::transport::{Advertisement, ConnectOptions, Connection, Service, Transport};
+use crate::transfer::{FetchOptions, FetchOutcome};
+use crate::transport::stateless_http::StatelessHttpConnection;
+use crate::transport::{ConnectOptions, Connection, Service, Transport};
 
 #[cfg(feature = "http-ureq")]
 pub mod ureq_client;
@@ -132,6 +127,16 @@ pub trait HttpClient: Send + Sync {
         Ok((self.get(url, git_protocol)?, None))
     }
 
+    /// Like [`Self::get_with_final_url`], but does not merge [`Self::git_protocol_header`]
+    /// when `git_protocol` is `None` (used for forced v0/v1 `list_refs`).
+    fn get_with_final_url_exact(
+        &self,
+        url: &str,
+        git_protocol: Option<&str>,
+    ) -> Result<(Vec<u8>, Option<String>)> {
+        self.get_with_final_url(url, git_protocol)
+    }
+
     /// The default `Git-Protocol` request-header value to apply when the caller
     /// passes `None`. Defaults to no header.
     fn git_protocol_header(&self) -> Option<&str> {
@@ -151,6 +156,62 @@ pub trait HttpClient: Send + Sync {
 
 /// Forward [`HttpClient`] through a shared [`std::sync::Arc`], so one client can
 /// back several transports (and be observed by the caller) without moving it.
+impl HttpClient for std::sync::Arc<dyn HttpClient> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
+        (**self).get(url, git_protocol)
+    }
+
+    fn post(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        (**self).post(url, content_type, accept, body, git_protocol)
+    }
+
+    fn post_into_reader(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> Result<Box<dyn Read + Send>> {
+        (**self).post_into_reader(url, content_type, accept, body, git_protocol)
+    }
+
+    fn get_with_final_url(
+        &self,
+        url: &str,
+        git_protocol: Option<&str>,
+    ) -> Result<(Vec<u8>, Option<String>)> {
+        (**self).get_with_final_url(url, git_protocol)
+    }
+
+    fn get_with_final_url_exact(
+        &self,
+        url: &str,
+        git_protocol: Option<&str>,
+    ) -> Result<(Vec<u8>, Option<String>)> {
+        (**self).get_with_final_url_exact(url, git_protocol)
+    }
+
+    fn git_protocol_header(&self) -> Option<&str> {
+        (**self).git_protocol_header()
+    }
+
+    fn smart_http_enabled(&self) -> bool {
+        (**self).smart_http_enabled()
+    }
+
+    fn reset_auth_after_redirect_rebase(&self) {
+        (**self).reset_auth_after_redirect_rebase();
+    }
+}
+
 impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
     fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
         (**self).get(url, git_protocol)
@@ -184,6 +245,14 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         git_protocol: Option<&str>,
     ) -> Result<(Vec<u8>, Option<String>)> {
         (**self).get_with_final_url(url, git_protocol)
+    }
+
+    fn get_with_final_url_exact(
+        &self,
+        url: &str,
+        git_protocol: Option<&str>,
+    ) -> Result<(Vec<u8>, Option<String>)> {
+        (**self).get_with_final_url_exact(url, git_protocol)
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -419,6 +488,17 @@ pub fn discover_upload_pack(
     upload_pack_discovery_from_body(&body)
 }
 
+/// Discover upload-pack using an exact `Git-Protocol` header (no client default).
+pub fn discover_upload_pack_exact(
+    client: &dyn HttpClient,
+    repo_url: &str,
+    git_protocol: Option<&str>,
+) -> Result<UploadPackDiscovery> {
+    let url = info_refs_url(repo_url);
+    let (body, _) = client.get_with_final_url_exact(&url, git_protocol)?;
+    upload_pack_discovery_from_body(&body)
+}
+
 /// Build the smart-HTTP `info/refs?service=git-upload-pack` discovery URL for a repo base.
 #[must_use]
 pub fn smart_info_refs_discovery_url(repo_base: &str) -> String {
@@ -503,79 +583,6 @@ pub fn http_origins_match(a: &str, b: &str) -> bool {
     }
 }
 
-/// The `git-upload-pack` stateless-RPC endpoint URL for `repo_url`.
-fn upload_pack_url(repo_url: &str) -> String {
-    let base = repo_url.trim_end_matches('/');
-    format!("{base}/{UPLOAD_PACK}")
-}
-
-/// A live smart-HTTP connection: the parsed advertisement plus the context
-/// needed to issue the stateless-RPC POST. Smart HTTP is request/response, so
-/// there is no persistent duplex socket — the `reader`/`writer` accessors are
-/// not used by [`http_fetch`], which drives the POST loop directly.
-///
-/// `reader`/`writer` return empty/sink streams; embedders that want to drive a
-/// custom negotiation should use [`http_fetch`] (or read the advertisement via
-/// the accessors and POST through their [`HttpClient`]).
-pub struct SmartHttpConnection {
-    repo_url: String,
-    adv_refs: Vec<(String, ObjectId)>,
-    caps: Vec<String>,
-    head_symref: Option<String>,
-    protocol_version: u8,
-    object_format: String,
-    // Held so embedders/tests can identify which service this connection speaks.
-    service: Service,
-    empty_reader: Cursor<Vec<u8>>,
-    sink: Vec<u8>,
-}
-
-impl SmartHttpConnection {
-    /// The repository URL this connection targets.
-    #[must_use]
-    pub fn repo_url(&self) -> &str {
-        &self.repo_url
-    }
-
-    /// The server's advertised object format (`sha1` or `sha256`).
-    #[must_use]
-    pub fn object_format(&self) -> &str {
-        &self.object_format
-    }
-
-    /// The service this connection speaks.
-    #[must_use]
-    pub fn service(&self) -> Service {
-        self.service
-    }
-}
-
-impl Connection for SmartHttpConnection {
-    fn reader(&mut self) -> &mut dyn Read {
-        &mut self.empty_reader
-    }
-
-    fn writer(&mut self) -> &mut dyn Write {
-        &mut self.sink
-    }
-
-    fn advertised_refs(&self) -> &[(String, ObjectId)] {
-        &self.adv_refs
-    }
-
-    fn capabilities(&self) -> &[String] {
-        &self.caps
-    }
-
-    fn head_symref(&self) -> Option<&str> {
-        self.head_symref.as_deref()
-    }
-
-    fn protocol_version(&self) -> u8 {
-        self.protocol_version
-    }
-}
-
 /// A smart-HTTP [`Transport`] over a pluggable [`HttpClient`].
 ///
 /// [`Transport::connect`] performs the `info/refs?service=git-upload-pack`
@@ -586,7 +593,7 @@ pub struct SmartHttpTransport<C: HttpClient> {
     client: C,
 }
 
-impl<C: HttpClient> SmartHttpTransport<C> {
+impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
     /// Build a transport backed by `client`.
     pub fn new(client: C) -> Self {
         Self { client }
@@ -621,7 +628,16 @@ impl<C: HttpClient> SmartHttpTransport<C> {
         opts: &crate::transfer::PushOptions,
         progress: &mut dyn Progress,
     ) -> Result<crate::transfer::PushOutcome> {
-        crate::push::push_http(&self.client, local_git_dir, repo_url, refs, opts, progress)
+        use crate::push::push_remote;
+        use crate::transport::{ConnectOptions, Transport};
+        let connect = ConnectOptions {
+            protocol_version: 0,
+            diagnostics: opts.diagnostics.clone(),
+            network_trace: opts.network_trace,
+            ..Default::default()
+        };
+        let mut conn = self.connect(repo_url, Service::ReceivePack, &connect)?;
+        push_remote(local_git_dir, &mut *conn, refs, opts, progress)
     }
 
     /// Perform the `info/refs` discovery for `repo_url` and `service`, returning
@@ -630,18 +646,36 @@ impl<C: HttpClient> SmartHttpTransport<C> {
     /// `git_protocol` is the `Git-Protocol` request-header value to apply (e.g.
     /// `version=2` to request a v2 advertisement); when `None`, the client's
     /// default ([`HttpClient::git_protocol_header`]) is used.
-    fn discover(
+    /// Discover capabilities/refs and re-base the repo URL when `info/refs` redirects.
+    fn discover_with_redirect(
         &self,
         repo_url: &str,
-        _service: Service,
+        service: Service,
         git_protocol: Option<&str>,
-    ) -> Result<Discovery> {
-        let url = info_refs_url(repo_url);
+    ) -> Result<(String, Discovery)> {
+        let info_url = info_refs_url_for_service(repo_url, service);
         let gp = git_protocol.or_else(|| self.client.git_protocol_header());
-        let body = self.client.get(&url, gp)?;
-        let stripped = strip_service_advertisement(&body)?;
-        parse_advertisement(stripped)
+        let (body, final_url) = self.client.get_with_final_url(&info_url, gp)?;
+        if let Some(new_base) = rebased_base_from_redirect(repo_url, final_url.as_deref()) {
+            let _redirect = format!("http(s): redirected base {repo_url} -> {new_base}");
+            self.client.reset_auth_after_redirect_rebase();
+            let url = info_refs_url_for_service(&new_base, service);
+            let body = self.client.get(&url, gp)?;
+            let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
+            return Ok((new_base, disc));
+        }
+        let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
+        Ok((repo_url.to_owned(), disc))
     }
+}
+
+fn info_refs_url_for_service(repo_url: &str, service: Service) -> String {
+    let base = repo_url.trim_end_matches('/');
+    let mut url = format!("{base}/info/refs");
+    url.push_str(if url.contains('?') { "&" } else { "?" });
+    url.push_str("service=");
+    url.push_str(service.wire_name());
+    url
 }
 
 /// The `Git-Protocol` request-header value for a requested protocol version, or
@@ -654,17 +688,13 @@ fn git_protocol_for_version(version: u8) -> Option<String> {
     }
 }
 
-impl<C: HttpClient> Transport for SmartHttpTransport<C> {
+impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
     fn connect(
         &self,
         url: &str,
         service: Service,
         opts: &ConnectOptions,
     ) -> Result<Box<dyn Connection>> {
-        // Request the protocol version the caller asked for via the
-        // `Git-Protocol` header (a v2 server only returns its v2 capability
-        // advertisement when it sees `version=2`); fall back to the client's
-        // default header otherwise. The server may still downgrade.
         crate::net_trace::net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
@@ -673,7 +703,7 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
             opts.protocol_version
         );
         let gp = git_protocol_for_version(opts.protocol_version);
-        let disc = self.discover(url, service, gp.as_deref())?;
+        let (repo_url, disc) = self.discover_with_redirect(url, service, gp.as_deref())?;
         let adv_refs: Vec<(String, ObjectId)> = disc
             .refs
             .iter()
@@ -688,17 +718,17 @@ impl<C: HttpClient> Transport for SmartHttpTransport<C> {
             disc.protocol_version,
             adv_refs.len()
         );
-        Ok(Box::new(SmartHttpConnection {
-            repo_url: url.to_owned(),
+        Ok(Box::new(StatelessHttpConnection::new(
+            self.client.clone(),
+            service,
+            repo_url,
+            disc.protocol_version,
             adv_refs,
             caps,
-            head_symref: disc.head_symref,
-            protocol_version: disc.protocol_version,
-            object_format: disc.object_format,
-            service,
-            empty_reader: Cursor::new(Vec::new()),
-            sink: Vec::new(),
-        }))
+            disc.head_symref,
+            disc.object_format,
+            gp,
+        )))
     }
 }
 
@@ -1177,434 +1207,31 @@ fn negotiate_pack_http(
 
 /// Resolve the `wants` for a fetch from the advertised refs and the matched set.
 ///
-/// Returns the matched ref records (for later ref-update classification) and the
-/// set of wanted oids.
-struct MatchPlan {
-    matched: Vec<crate::transfer::MatchedRef>,
-    wants: HashSet<ObjectId>,
-    seen: HashSet<String>,
-}
-
-fn match_refspecs(
-    remote_refs: &[(String, ObjectId)],
-    advertised_peel: &std::collections::HashMap<String, ObjectId>,
-    positive: &[RefspecItem],
-    negatives: &[RefspecItem],
-) -> MatchPlan {
-    let mut matched: Vec<crate::transfer::MatchedRef> = Vec::new();
-    let mut wants: HashSet<ObjectId> = HashSet::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    for (name, oid) in remote_refs {
-        if ref_excluded(name, negatives) {
-            continue;
-        }
-        if let Some(local_ref) = match_positive(name, positive) {
-            if seen.insert(name.clone()) {
-                wants.insert(*oid);
-                matched.push(crate::transfer::MatchedRef {
-                    remote_ref: name.clone(),
-                    local_ref,
-                    oid: *oid,
-                    force: refspecs_force(name, positive),
-                    is_tag: name.starts_with("refs/tags/"),
-                    advertised_peel: advertised_peel.get(name).copied(),
-                });
-            }
-        }
-    }
-    MatchPlan {
-        matched,
-        wants,
-        seen,
-    }
-}
-
-fn extend_match_plan_with_tags(
-    plan: &mut MatchPlan,
-    mode: TagMode,
-    remote_refs: &[(String, ObjectId)],
-    advertised_peel: &std::collections::HashMap<String, ObjectId>,
-    negatives: &[RefspecItem],
-) {
-    if mode == TagMode::None {
-        return;
-    }
-    let mut matched_oids: std::collections::HashSet<ObjectId> =
-        plan.matched.iter().map(|m| m.oid).collect();
-    let following_only = crate::fetch::add_wire_tags(
-        mode,
-        remote_refs,
-        advertised_peel,
-        negatives,
-        &mut plan.matched,
-        &mut matched_oids,
-        &mut plan.seen,
-    );
-    plan.wants = matched_oids
-        .into_iter()
-        .filter(|oid| !following_only.contains(oid))
-        .collect();
-}
-
-fn advertised_peel_from_v0_refs(refs: &[AdvRef]) -> std::collections::HashMap<String, ObjectId> {
-    let mut peel = std::collections::HashMap::new();
-    for r in refs {
-        if let Some(base) = r.name.strip_suffix("^{}") {
-            peel.insert(base.to_owned(), r.oid);
-        }
-    }
-    peel
-}
-
-/// Fetch from a smart-HTTP remote, driving the stateless-RPC negotiation and
-/// writing tracking-ref updates into `local_git_dir`.
-///
-/// This is the HTTP counterpart to [`crate::fetch::fetch_remote`]: instead of a
-/// duplex socket it issues `info/refs` discovery + `git-upload-pack` POSTs
-/// through `client`. The refspec matching, tag-mode, prune, and update
-/// classification reuse the shared [`crate::transfer`] helpers, so the
-/// [`FetchOutcome`] shape matches every other fetch path.
-///
-/// Both protocol v0/v1 and protocol v2 are handled: the version is taken from
-/// the `info/refs` advertisement (the v2 capability block is returned only when
-/// the discovery GET carries `Git-Protocol: version=2`, which the client's
-/// default header supplies). For v2 the ref map is recovered with a
-/// `command=ls-refs` POST and the pack is negotiated with `command=fetch` POSTs
-/// (stateless: every round resends the wants + accumulated haves).
+/// Performs `info/refs` discovery (with redirect re-basing) and drives stateless
+/// `git-upload-pack` POSTs through a [`crate::transport::stateless_http::StatelessHttpConnection`].
 ///
 /// # Errors
 ///
-/// Returns an error if discovery fails, a refspec is invalid, or negotiation /
-/// pack ingest / ref I/O fails.
+/// Returns an error if discovery, negotiation, pack ingest, or ref updates fail.
 pub fn http_fetch(
-    client: &dyn HttpClient,
+    client: std::sync::Arc<dyn HttpClient>,
     local_git_dir: &Path,
     repo_url: &str,
     opts: &FetchOptions,
     progress: &mut dyn Progress,
 ) -> Result<FetchOutcome> {
-    use crate::net_trace::net_trace;
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "http_fetch: begin — {} ({} refspec(s), tags={:?})",
-        repo_url,
-        opts.refspecs.len(),
-        opts.tags
-    );
-    // 1. Discovery (request v2 via the client's default `Git-Protocol` header;
-    // a v0/v1 server ignores it and returns the classic advertisement). If the
-    // server redirects `info/refs` to another location, re-base every following
-    // request onto it (Git's `http.followRedirects`): re-fetch discovery from
-    // the new base so the request carries the `?service=` query a redirect may
-    // drop, and so the stateless-RPC POSTs target the redirected host (which a
-    // client that won't follow a POST redirect would otherwise miss).
-    let info_url = info_refs_url(repo_url);
-    let (body, final_url) = client.get_with_final_url(&info_url, client.git_protocol_header())?;
-    let rebased = rebased_base_from_redirect(repo_url, final_url.as_deref());
-    let repo_url_owned;
-    let (repo_url, disc) = match rebased {
-        Some(new_base) => {
-            net_trace!(
-                opts.network_trace,
-                opts.diagnostics.as_ref(),
-                "http_fetch: redirected base {repo_url} -> {new_base}"
-            );
-            client.reset_auth_after_redirect_rebase();
-            let url = info_refs_url(&new_base);
-            let body = client.get(&url, client.git_protocol_header())?;
-            let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
-            repo_url_owned = new_base;
-            (repo_url_owned.as_str(), disc)
-        }
-        None => {
-            let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
-            (repo_url, disc)
-        }
-    };
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "http_fetch: discovered protocol v{}, {} ref(s)",
-        disc.protocol_version,
-        disc.refs.len()
-    );
-    if disc.protocol_version >= 2 {
-        net_trace!(
-            opts.network_trace,
-            opts.diagnostics.as_ref(),
-            "http_fetch: delegating to v2 stateless fetch"
-        );
-        return http_fetch_v2(client, local_git_dir, repo_url, &disc, opts, progress);
-    }
-
-    let local_odb = open_odb(local_git_dir);
-
-    let default_branch = disc
-        .head_symref
-        .as_deref()
-        .map(|t| t.strip_prefix("refs/heads/").unwrap_or(t).to_owned());
-
-    let remote_refs: Vec<(String, ObjectId)> = disc
-        .refs
-        .iter()
-        .filter(|r| r.name != "HEAD" && !r.name.ends_with("^{}"))
-        .map(|r| (r.name.clone(), r.oid))
-        .collect();
-    let advertised_peel = advertised_peel_from_v0_refs(&disc.refs);
-
-    // 2. Parse refspecs.
-    let mut positive: Vec<RefspecItem> = Vec::new();
-    let mut negatives: Vec<RefspecItem> = Vec::new();
-    for spec in &opts.refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
-        if item.negative {
-            negatives.push(item);
-        } else {
-            positive.push(item);
-        }
-    }
-    for spec in &opts.negative_refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
-        negatives.push(item);
-    }
-
-    // 3. Match refs to refspecs.
-    let mut plan = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
-    extend_match_plan_with_tags(
-        &mut plan,
-        opts.tags,
-        &remote_refs,
-        &advertised_peel,
-        &negatives,
-    );
-    let MatchPlan {
-        mut matched, wants, ..
-    } = plan;
-
-    // 5. Wants → negotiate + ingest the pack. Normally the matched oids absent
-    // locally; for a deepen/`--unshallow` request we must still `want` the tips
-    // even if present so the server fills in ancestors past the old boundary.
-    let local_shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
-    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
-    let need: Vec<ObjectId> = if shallow_request {
-        wants.iter().copied().collect()
-    } else {
-        wants
-            .iter()
-            .copied()
-            .filter(|oid| !local_odb.exists(oid))
-            .collect()
-    };
-
-    let mut shallow_update = crate::fetch::ShallowUpdate::default();
-    let mut pack_oids = std::collections::HashSet::new();
-
-    if !need.is_empty() && !opts.dry_run {
-        let (pack, su) = negotiate_pack_http(
-            client,
-            local_git_dir,
-            repo_url,
-            &disc.caps,
-            &disc.refs,
-            &need,
-            opts,
-            &local_shallow,
-            progress,
-        )?;
-        shallow_update = su;
-        if let Some(pack_path) = pack {
-            pack_oids = crate::index_pack::ingest_received_pack_path(
-                pack_path,
-                &local_odb,
-                &crate::index_pack::IngestPackOptions {
-                    fix_thin: true,
-                    ..Default::default()
-                },
-            )?
-            .object_ids;
-        }
-    }
-
-    // Apply shallow/unshallow boundary updates to the on-disk `shallow` file.
-    if !opts.dry_run {
-        crate::shallow::apply_shallow_updates(
-            local_git_dir,
-            &shallow_update.shallow,
-            &shallow_update.unshallow,
-        )?;
-    }
-
-    // 6. For TagMode::Following, drop tags whose target did not arrive.
-    if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(
-            &local_odb,
-            &mut matched,
-            &pack_oids,
-            &crate::shallow::load_shallow_boundaries(local_git_dir),
-        )?;
-    }
-
-    // 7. Classify + apply ref updates.
-    let local_repo = if opts.dry_run {
-        None
-    } else {
-        crate::repo::Repository::open(local_git_dir, None).ok()
-    };
-
-    let mut updates: Vec<RefUpdate> = Vec::new();
-    if opts.prune {
-        prune_tracking_refs(
-            local_git_dir,
-            &positive,
-            &remote_refs,
-            opts.dry_run,
-            &mut updates,
-        )?;
-    }
-
-    for m in &matched {
-        let Some(local_ref) = &m.local_ref else {
-            updates.push(RefUpdate {
-                remote_ref: m.remote_ref.clone(),
-                local_ref: None,
-                old_oid: None,
-                new_oid: Some(m.oid),
-                mode: UpdateMode::NoChangeNeeded,
-                note: Some("not stored (empty destination)".to_owned()),
-            });
-            continue;
-        };
-        let old = crate::refs::resolve_ref(local_git_dir, local_ref).ok();
-        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
-        let write = matches!(
-            mode,
-            UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
-        );
-        if write && !opts.dry_run {
-            crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
-        }
-        updates.push(RefUpdate {
-            remote_ref: m.remote_ref.clone(),
-            local_ref: Some(local_ref.clone()),
-            old_oid: old,
-            new_oid: Some(m.oid),
-            mode,
-            note: None,
-        });
-    }
-
-    net_trace!(
-        opts.network_trace,
-        opts.diagnostics.as_ref(),
-        "http_fetch: done — {} ref update(s)",
-        updates.len()
-    );
-    crate::fetch::finish_initial_remote_fetch_layout(
-        local_git_dir,
-        opts,
-        default_branch.as_deref(),
-    )?;
-    Ok(FetchOutcome {
-        updates,
-        default_branch,
-        new_shallow: shallow_update.shallow,
-        new_unshallow: shallow_update.unshallow,
-    })
-}
-
-/// Fetch from a smart-HTTP remote that speaks protocol v2 (stateless multi-POST).
-///
-/// `disc` is the already-parsed v2 capability advertisement (no refs). This
-/// recovers the ref map with a `command=ls-refs` POST, matches refspecs / tags
-/// with the same shared [`crate::transfer`] helpers as the v0/v1 path, then
-/// negotiates the pack with `command=fetch` POSTs (each round resends the
-/// capability echo, all `want`s, and the accumulated `have`s) and demuxes the
-/// side-band-64k `packfile` section. Lifted from the CLI's stateless v2 flow
-/// (`http_ls_refs` / `http_negotiate_only_common` / `http_fetch_pack`), reusing
-/// the v2 request framing factored out of [`crate::fetch`].
-fn http_fetch_v2(
-    client: &dyn HttpClient,
-    local_git_dir: &Path,
-    repo_url: &str,
-    disc: &Discovery,
-    opts: &FetchOptions,
-    progress: &mut dyn Progress,
-) -> Result<FetchOutcome> {
-    let local_odb = open_odb(local_git_dir);
-    // The v2 capability lines, as a `Vec<String>` for the `protocol_v2` /
-    // `crate::fetch` helpers (each entry is one advertised capability line, e.g.
-    // `agent=…`, `fetch=…`, `object-format=…`).
-    let server_caps: Vec<String> = disc.caps.iter().cloned().collect();
-
-    let post_url = upload_pack_url(repo_url);
-    let content_type = format!("application/x-{UPLOAD_PACK}-request");
-    let accept = format!("application/x-{UPLOAD_PACK}-result");
-    // Pin v2 on every POST so the server runs its v2 serve loop for this request.
-    let git_protocol = "version=2";
-
-    // 1. Recover the ref map via `command=ls-refs`.
-    let (remote_refs, head_symref, advertised_peel) = {
-        let req = crate::fetch::build_v2_ls_refs_request(
-            &server_caps,
-            &local_odb,
-            opts.tags,
-            &opts.refspecs,
-        )?;
-        let resp = client.post(&post_url, &content_type, &accept, &req, Some(git_protocol))?;
-        let mut cur = Cursor::new(resp);
-        crate::fetch::parse_v2_ls_refs_response(&mut cur)?
-    };
-    let default_branch = head_symref
-        .as_deref()
-        .map(|t| t.strip_prefix("refs/heads/").unwrap_or(t).to_owned());
-
-    // 2. Parse refspecs.
-    let mut positive: Vec<RefspecItem> = Vec::new();
-    let mut negatives: Vec<RefspecItem> = Vec::new();
-    for spec in &opts.refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
-        if item.negative {
-            negatives.push(item);
-        } else {
-            positive.push(item);
-        }
-    }
-    for spec in &opts.negative_refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
-        negatives.push(item);
-    }
-
-    // 3. Match refs to refspecs (shared with the v0/v1 path).
-    let mut plan = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
-    extend_match_plan_with_tags(
-        &mut plan,
-        opts.tags,
-        &remote_refs,
-        &advertised_peel,
-        &negatives,
-    );
-    let MatchPlan {
-        mut matched, wants, ..
-    } = plan;
-
-    // 5. Wants → negotiate + ingest the pack. Normally the matched oids absent
-    // locally; for a deepen/`--unshallow` request we must still `want` the tips
-    // even if present so the server fills in ancestors past the old boundary.
-    let local_shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
-    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
-    let need: Vec<ObjectId> = if shallow_request {
-        wants.iter().copied().collect()
-    } else {
-        wants
-            .iter()
-            .copied()
-            .filter(|oid| !local_odb.exists(oid))
-            .collect()
+    use crate::fetch::fetch_remote;
+    use crate::transport::Transport;
+    let protocol_version = client
+        .git_protocol_header()
+        .and_then(|h| h.strip_prefix("version="))
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(0);
+    let connect = ConnectOptions {
+        protocol_version,
+        diagnostics: opts.diagnostics.clone(),
+        network_trace: opts.network_trace,
+        ..Default::default()
     };
 
     let mut shallow_update = crate::fetch::ShallowUpdate::default();
@@ -1903,158 +1530,5 @@ pub fn discovery_advertisement(conn: &SmartHttpConnection) -> Advertisement {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rebase_redirect_strips_info_refs_and_query() {
-        let base = "https://tangled.org/me/repo";
-        // A redirect that preserves the query (real-world: tangled.org → knot host).
-        assert_eq!(
-            rebased_base_from_redirect(
-                base,
-                Some("https://knot.example/did:plc:xyz/info/refs?service=git-upload-pack")
-            )
-            .as_deref(),
-            Some("https://knot.example/did:plc:xyz")
-        );
-        // A redirect that drops the query (still re-bases on the path suffix).
-        assert_eq!(
-            rebased_base_from_redirect(base, Some("https://host/smart/repo/info/refs")).as_deref(),
-            Some("https://host/smart/repo")
-        );
-    }
-
-    #[test]
-    fn effective_info_refs_url_uses_redirect_target() {
-        let requested =
-            smart_info_refs_discovery_url("http://127.0.0.1:9/smart-redir-auth/repo.git");
-        let final_url = "http://127.0.0.1:9/auth/smart/repo.git/info/refs?service=git-upload-pack";
-        let effective = effective_info_refs_url_after_redirect(&requested, Some(final_url));
-        assert_eq!(
-            effective,
-            smart_info_refs_discovery_url("http://127.0.0.1:9/auth/smart/repo.git")
-        );
-    }
-
-    #[test]
-    fn http_origin_distinguishes_localhost_from_loopback() {
-        assert!(!http_origins_match(
-            "http://127.0.0.1:8080/repo",
-            "http://localhost:8080/repo"
-        ));
-        assert!(http_origins_match(
-            "http://127.0.0.1:8080/x",
-            "http://127.0.0.1:8080/y"
-        ));
-        assert_eq!(
-            http_origin_key("https://Example.com/repo").as_deref(),
-            Some("https://example.com:443")
-        );
-    }
-
-    #[test]
-    fn rebase_redirect_none_when_no_change_or_unknown() {
-        let base = "https://host/smart/repo";
-        // No final URL reported (client doesn't track redirects) → keep original base.
-        assert_eq!(rebased_base_from_redirect(base, None), None);
-        // Same base (no actual redirect) → None.
-        assert_eq!(
-            rebased_base_from_redirect(
-                base,
-                Some("https://host/smart/repo/info/refs?service=git-upload-pack")
-            ),
-            None
-        );
-        // A final URL that is not an `info/refs` request → None (don't guess).
-        assert_eq!(
-            rebased_base_from_redirect(base, Some("https://host/elsewhere")),
-            None
-        );
-    }
-
-    #[test]
-    fn strips_smart_service_preamble() {
-        let mut body = Vec::new();
-        pkt_line::write_line_to_vec(&mut body, "# service=git-upload-pack\n").unwrap();
-        body.extend_from_slice(b"0000");
-        let oid = "1".repeat(40);
-        let line = format!("{oid} refs/heads/main\0multi_ack_detailed side-band-64k");
-        pkt_line::write_line_to_vec(&mut body, &line).unwrap();
-        body.extend_from_slice(b"0000");
-
-        let stripped = strip_service_advertisement(&body).unwrap();
-        let disc = parse_advertisement(stripped).unwrap();
-        assert_eq!(disc.protocol_version, 0);
-        assert_eq!(disc.refs.len(), 1);
-        assert_eq!(disc.refs[0].name, "refs/heads/main");
-        assert!(disc.caps.contains("side-band-64k"));
-    }
-
-    #[test]
-    fn parse_advertisement_drops_malicious_ref_and_symref() {
-        let oid = "aabbccddeeff00112233445566778899aabbccdd";
-        let malicious = "refs/heads/../../../config";
-        let mut body = Vec::new();
-        let head = format!("{oid} HEAD\0symref=HEAD:{malicious}");
-        pkt_line::write_line_to_vec(&mut body, &head).unwrap();
-        pkt_line::write_line_to_vec(&mut body, &format!("{oid} {malicious}")).unwrap();
-        body.extend_from_slice(b"0000");
-
-        let disc = parse_advertisement(&body).unwrap();
-        assert!(disc.head_symref.is_none());
-        assert!(
-            !disc.refs.iter().any(|r| r.name.contains("../")),
-            "malicious ref must not appear in HTTP discovery"
-        );
-    }
-
-    #[test]
-    fn parses_symref_and_caps() {
-        let mut body = Vec::new();
-        let main = "2".repeat(40);
-        let head = format!(
-            "{main} HEAD\0multi_ack_detailed symref=HEAD:refs/heads/main object-format=sha1"
-        );
-        pkt_line::write_line_to_vec(&mut body, &head).unwrap();
-        let r = format!("{main} refs/heads/main");
-        pkt_line::write_line_to_vec(&mut body, &r).unwrap();
-        body.extend_from_slice(b"0000");
-
-        let disc = parse_advertisement(&body).unwrap();
-        assert_eq!(disc.head_symref.as_deref(), Some("refs/heads/main"));
-        assert_eq!(disc.object_format, "sha1");
-        // `parse_advertisement` keeps HEAD; the connection/fetch layer filters
-        // HEAD and peeled `^{}` carriers. Both lines parse here.
-        assert!(disc.refs.iter().any(|r| r.name == "HEAD"));
-        assert!(disc.refs.iter().any(|r| r.name == "refs/heads/main"));
-    }
-
-    #[test]
-    fn detects_v2_preamble() {
-        let mut body = Vec::new();
-        pkt_line::write_line_to_vec(&mut body, "version 2").unwrap();
-        pkt_line::write_line_to_vec(&mut body, "ls-refs").unwrap();
-        pkt_line::write_line_to_vec(&mut body, "object-format=sha256").unwrap();
-        body.extend_from_slice(b"0000");
-        let disc = parse_advertisement(&body).unwrap();
-        assert_eq!(disc.protocol_version, 2);
-        assert_eq!(disc.object_format, "sha256");
-    }
-
-    #[test]
-    fn url_helpers() {
-        assert_eq!(
-            info_refs_url("http://h/r.git"),
-            "http://h/r.git/info/refs?service=git-upload-pack"
-        );
-        assert_eq!(
-            info_refs_url("http://h/r.git/"),
-            "http://h/r.git/info/refs?service=git-upload-pack"
-        );
-        assert_eq!(
-            upload_pack_url("http://h/r.git/"),
-            "http://h/r.git/git-upload-pack"
-        );
-    }
-}
+#[path = "http_discovery_tests.rs"]
+mod discovery_tests;
