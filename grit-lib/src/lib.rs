@@ -194,6 +194,7 @@ pub(crate) mod pack_index_build;
 mod pack_map;
 pub mod pack_name_hash;
 pub mod pack_objects;
+pub mod pack_object_select;
 pub mod pack_receive;
 pub mod pack_rev;
 pub mod pack_store;

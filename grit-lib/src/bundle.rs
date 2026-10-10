@@ -5,7 +5,7 @@
 //! verifies prerequisite connectivity against a local repository, and ingests the pack
 //! without updating refs (callers apply [`BundleHeader::refs`] themselves).
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -463,7 +463,13 @@ pub fn write_bundle(
             &have_closure,
         )
         .map_err(|e| BundleError::Io(e.to_string()))?;
-        build_pack_from_send_list(&repo.odb, &send, &have_closure, &pack_opts)
+        build_pack_from_send_list(
+            &repo.odb,
+            &send,
+            &have_closure,
+            &pack_opts,
+            &HashMap::new(),
+        )
             .map_err(|e| BundleError::Io(e.to_string()))?
     } else {
         build_pack(&repo.odb, &include_oids, &haves, &pack_opts)

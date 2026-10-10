@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
-use crate::rev_list::{MissingAction, ObjectFilter, RevListOptions};
+use crate::rev_list::ObjectFilter;
 
 /// Options controlling pack-objects output (also used by [`build_pack`]).
 #[derive(Clone, Copy, Debug)]
@@ -36,6 +36,8 @@ pub struct PackBuildOptions {
     pub reuse_deltas: bool,
     /// Reuse verbatim packed bytes for whole objects (CRC32-guarded v2 indexes).
     pub reuse_objects: bool,
+    /// Use pack reachability bitmaps for object enumeration when present.
+    pub use_bitmaps: bool,
 }
 
 impl Default for PackBuildOptions {
@@ -49,6 +51,7 @@ impl Default for PackBuildOptions {
             respect_islands: false,
             reuse_deltas: true,
             reuse_objects: true,
+            use_bitmaps: true,
         }
     }
 }
@@ -73,6 +76,7 @@ impl PackBuildOptions {
             use_ofs_delta: true,
             reuse_deltas: max_depth > 0,
             reuse_objects: true,
+            use_bitmaps: true,
             ..Default::default()
         }
     }
@@ -89,8 +93,26 @@ impl PackBuildOptions {
             use_ofs_delta: true,
             reuse_deltas: true,
             reuse_objects: true,
+            use_bitmaps: true,
             ..Default::default()
         }
+    }
+
+    /// Whether pack bitmaps may be used (`pack.useBitmaps`, default true).
+    #[must_use]
+    pub fn use_bitmaps_from_config(cfg: Option<&crate::config::ConfigSet>) -> bool {
+        cfg.map(crate::config::ConfigSet::pack_use_bitmaps)
+            .unwrap_or(true)
+    }
+
+    /// Upload-pack gating: `pack.useBitmaps` and `uploadpack.allowBitmaps`.
+    #[must_use]
+    pub fn use_bitmaps_for_upload_pack(cfg: Option<&crate::config::ConfigSet>) -> bool {
+        let pack_ok = Self::use_bitmaps_from_config(cfg);
+        let allow = cfg
+            .map(crate::config::ConfigSet::uploadpack_allow_bitmaps)
+            .unwrap_or(true);
+        pack_ok && allow
     }
 }
 
@@ -229,25 +251,36 @@ impl<'a> PackObjects<'a> {
     /// Missing wants, corrupt objects, or I/O failures while writing.
     pub fn write_to(mut self, w: &mut dyn Write) -> Result<PackStats> {
         let opts = self.opts.build;
-        let have_closure = reachable_closure(
+        let have_closure = crate::pack_object_select::reachable_closure_walk(
             self.odb,
             &self.haves,
             &HashSet::new(),
             true,
             &self.have_shallow,
         )?;
-        let send = collect_reachable_excluding(
+        let selection = crate::pack_object_select::enumerate_pack_objects(
             self.source_odb,
             &self.wants,
-            &have_closure,
-            false,
-            &self.source_shallow,
+            &self.haves,
+            &crate::pack_object_select::PackEnumerateOptions {
+                filter: None,
+                shallow_grafts: &self.source_shallow,
+                use_bitmaps: opts.use_bitmaps,
+                exclude_objects: Some(&have_closure),
+            },
         )?;
+        let send = selection.send;
         self.fire(PackProgress::Enumerated { total: send.len() });
         let bytes = if !opts.delta {
             serialize_pack(self.source_odb, &send, &opts)?
         } else {
-            let plan = plan_deltas(self.source_odb, &send, &have_closure, &opts)?;
+            let plan = plan_deltas(
+                self.source_odb,
+                &send,
+                &have_closure,
+                &opts,
+                &selection.blob_name_hashes,
+            )?;
             self.fire(PackProgress::PlannedDeltas);
             let delta_count = plan.entries.iter().filter(|e| e.base.is_some()).count() as u32;
             let pack = serialize_pack_with_deltas(self.source_odb, &plan, &opts)?;
@@ -309,23 +342,24 @@ pub fn build_pack_with_shallow_and_filter(
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
 ) -> Result<Vec<u8>> {
-    let have_closure = reachable_closure(odb, haves, &HashSet::new(), true, &HashSet::new())?;
-    let send = if let Some(filter) = filter {
-        let git_dir = odb
-            .config_git_dir()
-            .ok_or_else(|| Error::Message("filter pack requires ODB config git dir".into()))?;
-        let repo = Repository::open(git_dir, None)?;
-        let allowed =
-            collect_reachable_excluding(odb, wants, &have_closure, false, source_shallow)?;
-        let allowed_set: HashSet<ObjectId> = allowed.into_iter().collect();
-        enumerate_filtered_send(&repo, wants, haves, filter, &have_closure)?
-            .into_iter()
-            .filter(|oid| allowed_set.contains(oid))
-            .collect()
-    } else {
-        collect_reachable_excluding(odb, wants, &have_closure, false, source_shallow)?
-    };
-    build_pack_from_send_list(odb, &send, &have_closure, opts)
+    let selection = crate::pack_object_select::enumerate_pack_objects(
+        odb,
+        wants,
+        haves,
+        &crate::pack_object_select::PackEnumerateOptions {
+            filter,
+            shallow_grafts: source_shallow,
+            use_bitmaps: opts.use_bitmaps,
+            exclude_objects: None,
+        },
+    )?;
+    build_pack_from_send_list(
+        odb,
+        &selection.send,
+        &selection.have_closure,
+        opts,
+        &selection.blob_name_hashes,
+    )
 }
 
 /// Same as [`build_pack_with_shallow_and_filter`] with a live [`Repository`] (for upload-pack).
@@ -340,56 +374,6 @@ pub fn build_pack_for_upload(
     build_pack_with_shallow_and_filter(&repo.odb, wants, haves, source_shallow, filter, opts)
 }
 
-fn enumerate_filtered_send(
-    repo: &Repository,
-    wants: &[ObjectId],
-    haves: &[ObjectId],
-    filter: &ObjectFilter,
-    have_closure: &HashSet<ObjectId>,
-) -> Result<Vec<ObjectId>> {
-    let positive: Vec<String> = wants.iter().map(ObjectId::to_hex).collect();
-    let negative: Vec<String> = haves
-        .iter()
-        .map(|oid| format!("^{}", oid.to_hex()))
-        .collect();
-    let options = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        filter: Some(filter.clone()),
-        missing_action: MissingAction::Error,
-        ..Default::default()
-    };
-    let walk = crate::rev_list::rev_list(repo, &positive, &negative, &options)?;
-    Ok(collect_filtered_send_list(&walk, have_closure))
-}
-
-fn collect_filtered_send_list(
-    walk: &crate::rev_list::RevListResult,
-    have_closure: &HashSet<ObjectId>,
-) -> Vec<ObjectId> {
-    let mut send = Vec::new();
-    let mut seen = HashSet::new();
-    let mut push = |oid: ObjectId| {
-        if have_closure.contains(&oid) {
-            return;
-        }
-        if seen.insert(oid) {
-            send.push(oid);
-        }
-    };
-    for oid in &walk.commits {
-        push(*oid);
-    }
-    for (oid, _) in &walk.objects {
-        push(*oid);
-    }
-    for tag_oid in walk.tip_annotated_tag_by_commit.values() {
-        push(*tag_oid);
-    }
-    send
-}
-
 /// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
 ///
 /// # Errors
@@ -400,11 +384,12 @@ pub fn build_pack_from_send_list(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
+    blob_name_hashes: &HashMap<ObjectId, u32>,
 ) -> Result<Vec<u8>> {
     if !opts.delta {
         return serialize_pack(odb, send, opts);
     }
-    let plan = plan_deltas(odb, send, have_closure, opts)?;
+    let plan = plan_deltas(odb, send, have_closure, opts, blob_name_hashes)?;
     serialize_pack_with_deltas(odb, &plan, opts)
 }
 
@@ -650,6 +635,7 @@ fn plan_deltas(
     send: &[ObjectId],
     have_closure: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
+    blob_name_hashes: &HashMap<ObjectId, u32>,
 ) -> Result<DeltaPlan> {
     // Load every object once. The plan keeps payloads so the serializer needn't
     // re-read; for the typical pack sizes this is the same data the whole-object
@@ -711,7 +697,17 @@ fn plan_deltas(
             .copied()
             .filter(|oid| objects[oid].kind == ObjectKind::Blob && !objects[oid].data.is_empty())
             .collect();
-        blobs.sort_by_key(|oid| objects[oid].data.len());
+        blobs.sort_by(|a, b| {
+            let sa = objects[a].data.len();
+            let sb = objects[b].data.len();
+            sa.cmp(&sb).then_with(|| {
+                blob_name_hashes
+                    .get(a)
+                    .copied()
+                    .unwrap_or(0)
+                    .cmp(&blob_name_hashes.get(b).copied().unwrap_or(0))
+            })
+        });
 
         // Optional thin bases: blobs present only on the peer that a packed blob
         // could delta against. We load them lazily and cache by oid.

@@ -690,10 +690,17 @@ fn build_response_pack(
         common.to_vec()
     };
 
+    let cfg = crate::config::ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(&repo.git_dir),
+        true,
+    )
+    .unwrap_or_default();
     let pack_opts = PackBuildOptions {
         thin: caps.contains("thin-pack"),
         delta: true,
         use_ofs_delta: caps.contains("ofs-delta"),
+        use_bitmaps: PackBuildOptions::use_bitmaps_for_upload_pack(Some(&cfg)),
         ..PackBuildOptions::default()
     };
     let shallow_grafts = shallow
