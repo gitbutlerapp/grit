@@ -5,8 +5,9 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::pack::read_local_pack_indexes;
+use grit_lib::pack::{read_local_pack_indexes, read_pack_index};
 use grit_lib::pack_bitmap::{BitmapIndex, PackBitmapWriteOptions, PackBitmapWriter};
+use grit_lib::pack_rev::{rev_path_for_index, verify_pack_rev_file_contents};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions};
 use grit_test_support::{HashAlgo, RepoFixture};
@@ -36,6 +37,14 @@ fn git_stdout(repo: &RepoFixture, args: &[&str]) -> String {
 
 fn open_repo(path: &std::path::Path) -> Repository {
     Repository::discover(Some(path)).expect("open repo")
+}
+
+fn build_rich_history_with_nested_tree(repo: &RepoFixture) {
+    build_rich_history(repo);
+    std::fs::create_dir_all(repo.path().join("nested/deep")).unwrap();
+    std::fs::write(repo.path().join("nested/deep/leaf.txt"), b"leaf").unwrap();
+    git_ok(repo, &["add", "nested/deep/leaf.txt"]);
+    git_ok(repo, &["commit", "-m", "nested tree"]);
 }
 
 fn build_rich_history(repo: &RepoFixture) {
@@ -145,7 +154,7 @@ fn historical_commits(repo: &RepoFixture, n: usize) -> Vec<ObjectId> {
 #[test]
 fn grit_bitmap_passes_git_test_bitmap() {
     let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
-    build_rich_history(&fixture);
+    build_rich_history_with_nested_tree(&fixture);
     git_ok(&fixture, &["repack", "-ad"]);
     let repo = open_repo(fixture.path());
     grit_write_bitmap(&repo, &fixture, PackBitmapWriteOptions::default());
@@ -247,6 +256,23 @@ fn lookup_table_and_hash_cache_variants() {
 }
 
 #[test]
+fn grit_writes_rev_sidecar_when_missing() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_rich_history(&fixture);
+    git_ok(&fixture, &["repack", "-ad"]);
+    let idx_path = largest_pack_idx(&fixture);
+    let rev_path = rev_path_for_index(&idx_path);
+    if rev_path.is_file() {
+        std::fs::remove_file(&rev_path).expect("remove rev");
+    }
+    let repo = open_repo(fixture.path());
+    grit_write_bitmap(&repo, &fixture, PackBitmapWriteOptions::default());
+    let index = read_pack_index(&idx_path).expect("idx");
+    let rev_bytes = std::fs::read(&rev_path).expect("rev written");
+    verify_pack_rev_file_contents(&rev_bytes, &index, "fixture.rev").expect("valid rev");
+}
+
+#[test]
 fn deterministic_output() {
     let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
     build_rich_history(&fixture);
@@ -268,7 +294,6 @@ fn not_closed_pack_is_rejected() {
     build_rich_history(&fixture);
     git_ok(&fixture, &["repack", "-ad"]);
     let repo = open_repo(fixture.path());
-    let idx = largest_pack_idx(&fixture);
     let partial_list = git_stdout(&fixture, &["rev-list", "--objects", "HEAD~1"]);
     let prefix = fixture.objects_dir().join("pack/partial");
     use std::io::Write;
@@ -320,4 +345,55 @@ fn sha256_write() {
         .output()
         .expect("git");
     assert!(out.status.success());
+}
+
+/// When `/tmp/git.git` (or `GRIT_GIT_GIT_BARE`) exists, compare grit writer output size to Git's.
+#[test]
+#[ignore = "expensive; run locally after `git repack -ad` on a bare git.git clone"]
+fn git_git_sized_write_smoke() {
+    let bare = std::env::var("GRIT_GIT_GIT_BARE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/git.git"));
+    if !bare.is_dir() {
+        return;
+    }
+    let pack_dir = bare.join("objects/pack");
+    for entry in std::fs::read_dir(&pack_dir).into_iter().flatten().flatten() {
+        if entry.path().extension().is_some_and(|e| e == "bitmap") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let repo = Repository::open(&bare, None).expect("open");
+    let idx = read_local_pack_indexes(&bare.join("objects"))
+        .expect("idx")
+        .into_iter()
+        .max_by_key(|i| i.len())
+        .expect("pack");
+    let start = std::time::Instant::now();
+    let path = PackBitmapWriter::write(
+        &repo,
+        &idx.idx_path,
+        &PackBitmapWriteOptions::default(),
+        SystemTime::UNIX_EPOCH,
+    )
+    .expect("write");
+    let elapsed = start.elapsed();
+    let bytes = std::fs::read(&path).expect("read bitmap");
+    let entries = u32::from_be_bytes(bytes[8..12].try_into().expect("header"));
+    eprintln!(
+        "git_git grit_write_ms={} grit_bitmap_bytes={} grit_bitmap_entries={}",
+        elapsed.as_millis(),
+        bytes.len(),
+        entries
+    );
+    let git_test = Command::new("git")
+        .current_dir(&bare)
+        .args(["rev-list", "--test-bitmap", "HEAD"])
+        .output()
+        .expect("test-bitmap");
+    assert!(
+        git_test.status.success(),
+        "{}",
+        String::from_utf8_lossy(&git_test.stderr)
+    );
 }

@@ -17,7 +17,8 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::pack::{read_pack_index, PackIndex};
 use crate::pack_name_hash::pack_name_hash;
 use crate::pack_rev::{
-    append_hashfile_checksum, build_pack_rev_bytes, rev_path_for_index, verify_pack_rev_file,
+    append_hashfile_checksum, build_pack_rev_bytes_from_index_order_offsets_and_checksum,
+    rev_path_for_index, verify_pack_rev_file,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -32,10 +33,59 @@ const BITMAP_OPT_LOOKUP_TABLE: u16 = 0x10;
 const MAX_XOR_SEARCH: usize = 10;
 const XOR_ROW_NONE: u32 = 0xffff_ffff;
 
-const MIN_COMMITS_WINDOW: u32 = 100;
-const MAX_COMMITS_WINDOW: u32 = 5000;
-const MUST_REGION: u32 = 100;
-const MIN_REGION: u32 = 20000;
+/// Rank-based spacing for history sampling (newest commit = rank 0).
+///
+/// Calibrated against system `git repack -adb` on a full [git.git](https://github.com/git/git)
+/// clone (~62k commits, ~321 bitmap entries — denser near HEAD, sparser in ancient history).
+/// This plan uses rank tiers and linear stride growth, not Git's window-index function.
+#[derive(Debug, Clone, Copy)]
+struct HistorySamplePlan {
+    /// Ranks in `[0, recent_dense_end)` are visited with stride zero (every window picks HEAD of slice).
+    recent_dense_end: usize,
+    /// Ranks below this use [`Self::mid_stride`].
+    mid_history_end: usize,
+    mid_stride_base: usize,
+    mid_stride_step: usize,
+    far_stride_base: usize,
+    far_stride_step: usize,
+}
+
+impl Default for HistorySamplePlan {
+    fn default() -> Self {
+        Self {
+            recent_dense_end: 96,
+            mid_history_end: 4096,
+            mid_stride_base: 12,
+            mid_stride_step: 3,
+            far_stride_base: 384,
+            far_stride_step: 48,
+        }
+    }
+}
+
+impl HistorySamplePlan {
+    fn mid_stride(&self, rank: usize) -> usize {
+        debug_assert!(rank >= self.recent_dense_end && rank < self.mid_history_end);
+        let depth = rank - self.recent_dense_end;
+        self.mid_stride_base + (depth / 64) * self.mid_stride_step
+    }
+
+    fn far_stride(&self, rank: usize) -> usize {
+        debug_assert!(rank >= self.mid_history_end);
+        let depth = rank - self.mid_history_end;
+        self.far_stride_base + (depth / 32) * self.far_stride_step
+    }
+
+    fn gap_before_window(&self, rank: usize) -> usize {
+        if rank < self.recent_dense_end {
+            0
+        } else if rank < self.mid_history_end {
+            self.mid_stride(rank)
+        } else {
+            self.far_stride(rank)
+        }
+    }
+}
 
 /// Options controlling pack bitmap generation (caller-supplied; not read from the environment).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +118,7 @@ pub enum PackBitmapWriteError {
     /// An object reachable from the chosen tips is missing from the pack index.
     #[error("pack is not closed under reachability from tips")]
     NotClosed {
-        /// Example missing object ids (truncated list).
+        /// Object ids missing from the pack or unreachable from the validated ref roots.
         missing: Vec<ObjectId>,
     },
     /// The repository does not use a files-backed object store.
@@ -88,6 +138,15 @@ pub enum PackBitmapWriteError {
 impl PackBitmapWriteError {
     fn io(err: std::io::Error) -> Self {
         Self::Io(err.to_string())
+    }
+
+    /// Missing object ids when [`Self::NotClosed`] ended the write.
+    #[must_use]
+    pub fn not_closed_missing(&self) -> Option<&[ObjectId]> {
+        match self {
+            Self::NotClosed { missing } => Some(missing.as_slice()),
+            _ => None,
+        }
     }
 }
 
@@ -177,10 +236,14 @@ fn read_pack_trailer(idx: &PackIndex, hash_len: usize) -> Result<Vec<u8>, PackBi
 
 fn ensure_rev_sidecar(idx: &PackIndex) -> Result<(), PackBitmapWriteError> {
     let rev_path = rev_path_for_index(&idx.idx_path);
-    if verify_pack_rev_file(&rev_path, idx).is_ok() {
+    if rev_path.is_file() && verify_pack_rev_file(&rev_path, idx).is_ok() {
         return Ok(());
     }
-    let rev_bytes = build_pack_rev_bytes(idx);
+    let hash_len = idx.hash_bytes();
+    let pack_checksum = read_pack_trailer(idx, hash_len)?;
+    let offsets: Vec<u64> = (0..idx.len()).map(|i| idx.offset_at(i)).collect();
+    let rev_bytes =
+        build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, &pack_checksum);
     let tmp =
         NamedTempFile::new_in(rev_path.parent().ok_or_else(|| {
             PackBitmapWriteError::InvalidPackPath("rev path has no parent".into())
@@ -426,17 +489,20 @@ fn reachable_from_tips(
     Ok(seen)
 }
 
-fn next_commit_index(idx: u32) -> u32 {
-    if idx <= MUST_REGION {
-        return 0;
+fn pick_window_commit(window: &[CommitRow], needs_bitmap: &HashSet<ObjectId>) -> ObjectId {
+    if window.len() == 1 {
+        return window[0].oid;
     }
-    if idx <= MIN_REGION {
-        let offset = idx - MUST_REGION;
-        return offset.min(MIN_COMMITS_WINDOW);
+    let mut chosen = window[window.len() - 1].oid;
+    for cm in window {
+        if needs_bitmap.contains(&cm.oid) {
+            return cm.oid;
+        }
+        if cm.parents.len() > 1 {
+            chosen = cm.oid;
+        }
     }
-    let offset = idx - MIN_REGION;
-    let next = offset.min(MAX_COMMITS_WINDOW);
-    next.max(MIN_COMMITS_WINDOW)
+    chosen
 }
 
 fn select_commits(
@@ -446,33 +512,20 @@ fn select_commits(
 ) -> Vec<ObjectId> {
     let mut selected: HashSet<ObjectId> = tips.iter().copied().collect();
     let nr = commits.len();
-    if nr < 100 {
+    let plan = HistorySamplePlan::default();
+    if nr <= plan.recent_dense_end {
         selected.extend(commits.iter().map(|c| c.oid));
     } else {
-        let mut i = 0usize;
-        while i < nr {
-            let next = next_commit_index(i as u32) as usize;
-            if i + next >= nr {
+        let mut rank = 0usize;
+        while rank < nr {
+            let gap = plan.gap_before_window(rank);
+            if rank + gap >= nr {
                 break;
             }
-            let chosen = if next == 0 {
-                commits[i].oid
-            } else {
-                let mut chosen = commits[i + next].oid;
-                for j in 0..=next {
-                    let cm = &commits[i + j];
-                    if needs_bitmap.contains(&cm.oid) {
-                        chosen = cm.oid;
-                        break;
-                    }
-                    if cm.parents.len() > 1 {
-                        chosen = cm.oid;
-                    }
-                }
-                chosen
-            };
-            selected.insert(chosen);
-            i += next + 1;
+            let window_end = rank + gap;
+            let window = &commits[rank..=window_end];
+            selected.insert(pick_window_commit(window, needs_bitmap));
+            rank = window_end + 1;
         }
     }
     let mut list: Vec<ObjectId> = selected.into_iter().collect();
@@ -655,7 +708,6 @@ fn fill_tree_bitmap(
             });
         };
         let cp = child_pos as usize;
-        bitmap.set(cp);
         let child = repo
             .odb
             .read(&entry.oid)
@@ -664,10 +716,19 @@ fn fill_tree_bitmap(
             ObjectKind::Tree => {
                 fill_tree_bitmap(repo, order, bitmap, entry.oid, path, name_hashes)?;
             }
-            ObjectKind::Blob if cp < name_hashes.len() => {
-                name_hashes[cp] = pack_name_hash(&path);
+            ObjectKind::Blob => {
+                if !bitmap.get(cp) {
+                    bitmap.set(cp);
+                }
+                if cp < name_hashes.len() {
+                    name_hashes[cp] = pack_name_hash(&path);
+                }
             }
-            _ => {}
+            ObjectKind::Tag | ObjectKind::Commit => {
+                if !bitmap.get(cp) {
+                    bitmap.set(cp);
+                }
+            }
         }
     }
     Ok(())
@@ -834,9 +895,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn next_commit_index_matches_git_windows() {
-        assert_eq!(next_commit_index(50), 0);
-        assert_eq!(next_commit_index(150), 50);
-        assert_eq!(next_commit_index(25_000), 5000);
+    fn history_sample_plan_increases_stride_with_rank() {
+        let plan = HistorySamplePlan::default();
+        assert_eq!(plan.gap_before_window(10), 0);
+        assert!(plan.gap_before_window(200) >= plan.mid_stride_base);
+        assert!(plan.gap_before_window(10_000) >= plan.far_stride_base);
     }
 }
