@@ -267,10 +267,10 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 | commit | 2 | 0.58× | 0.68× |
 | delta_encode | 2 | — | — |
 | merge | 2 | 3.40× | 3.84× |
-| network-clone | 3 | 1.93× | 2.41× |
-| network-fetch | 6 | 0.86× | 9.80× |
-| network-ls-remote | 3 | 1.29× | 1.90× |
-| network-push | 2 | 17.41× | 18.63× |
+| network-clone | 3 | 2.41× | 2.82× |
+| network-fetch | 6 | 0.84× | 2.83× |
+| network-ls-remote | 3 | 1.29× | 1.98× |
+| network-push | 2 | 8.44× | 16.20× |
 | network-server | 1 | 42.44× | 42.44× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 6 | 14.90× | 98.20× |
@@ -304,7 +304,7 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `clone-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 745 | 1,441 | 1.93× | ±211 ms |
+| `clone-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 546 | 1,537 | 2.82× | ±112 ms |
 | `clone-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 787 | 1,893 | 2.41× | ±160 ms |
 | `clone-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 19,584 | 19,893 | 1.02× | ±1,150 ms |
 
@@ -312,10 +312,10 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `fetch-incr-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 84.8 | 832 | 9.80× | ±126 ms |
+| `fetch-incr-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 74.7 | 55.3 | 0.74× | ±3.44 ms |
 | `fetch-incr-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 98.0 | 100 | 1.02× | ±7.40 ms |
 | `fetch-incr-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 891 | 834 | 0.94× | ±65.8 ms |
-| `fetch-noop-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 11.8 | 9.21 | 0.78× | ±0.61 ms |
+| `fetch-noop-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 12.9 | 36.5 | 2.83× | ±2.36 ms |
 | `fetch-noop-git-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 23.6 | 17.0 | 0.72× | ±1.42 ms |
 | `fetch-noop-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 25.6 | 15.9 | 0.62× | ±1.18 ms |
 
@@ -323,7 +323,7 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `ls-remote-file-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 42.9 | 81.6 | 1.90× | ±4.10 ms |
+| `ls-remote-file-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 51.1 | 101 | 1.98× | ±10.5 ms |
 | `ls-remote-git-http-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 20.1 | 25.1 | 1.25× | ±1.65 ms |
 | `ls-remote-grit-http-prod` | /tmp/grit-bench-network-cache/many-refs-prod.git | 75.9 | 98.1 | 1.29× | ±24.3 ms |
 
@@ -331,7 +331,7 @@ Regenerate release binaries with **`cargo build --release -p grit-lib`** before 
 
 | Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
 | --- | --- | ---: | ---: | ---: | --- |
-| `push-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 40.0 | 744 | 18.63× | ±83.1 ms |
+| `push-file-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 39.5 | 26.6 | 0.68× | ±1.91 ms |
 | `push-grit-http-prod` | /tmp/grit-bench-network-cache/deep-history-prod.git | 47.5 | 770 | 16.20× | ±59.6 ms |
 
 ### merge
