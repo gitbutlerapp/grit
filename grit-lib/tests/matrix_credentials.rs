@@ -899,7 +899,7 @@ mod http_401 {
             .arg(format!("127.0.0.1:{port}"))
             .arg("--require-auth")
             .arg(format!("{USER}:{PASS}"))
-            .env("GUST_BIN", &grit_bin)
+            .env_remove("GUST_BIN")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();

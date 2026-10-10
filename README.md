@@ -60,7 +60,7 @@ The Windows version also comes with `grit manager` which works as an interface t
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | [`grit-cli`](https://crates.io/crates/grit-cli)       | The `grit` binary — workflow-oriented CLI backed by `grit-lib` (shipped by the install script) |
 | [`grit-lib`](https://crates.io/crates/grit-lib)       | Core library: object model, diff engine, index, refs, revision walking, merge, config, and more |
-| `grit-protocol` / `grit-http-server`                  | Smart HTTP serving, backed by `grit upload-pack` / `grit receive-pack`                         |
+| `grit-protocol` / `grit-http-server`                  | Smart HTTP serving via in-process `grit-lib` upload-pack / receive-pack                       |
 | `grit-examples`                                       | Runnable examples of library usage                                                              |
 | `grit-test-support`                                   | Workspace-only helpers for integration tests                                                    |
 

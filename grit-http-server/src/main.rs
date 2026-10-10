@@ -218,16 +218,28 @@ async fn info_refs(
 
     let advertisement = match service.as_str() {
         "git-upload-pack" => {
-            grit_protocol::upload_pack::advertise_refs(&repo_path, protocol_version)
+            tokio::task::spawn_blocking(move || {
+                grit_protocol::upload_pack::advertise_refs(&repo_path, protocol_version)
+            })
+            .await
         }
-        "git-receive-pack" => grit_protocol::receive_pack::advertise_refs(&repo_path),
+        "git-receive-pack" => {
+            tokio::task::spawn_blocking(move || {
+                grit_protocol::receive_pack::advertise_refs(&repo_path)
+            })
+            .await
+        }
         _ => unreachable!(),
     };
 
     let raw_adv = match advertisement {
-        Ok(data) => data,
+        Ok(Ok(data)) => data,
+        Ok(Err(e)) => {
+            eprintln!("info/refs error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
+        }
         Err(e) => {
-            eprintln!("info/refs error: {e:#}");
+            eprintln!("info/refs join error: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
         }
     };
@@ -257,14 +269,23 @@ async fn upload_pack_rpc(
         Err(e) => return *e,
     };
 
-    match grit_protocol::upload_pack::stateless_rpc(&repo_path, &body, protocol_version) {
-        Ok(data) => state
+    let request = body.to_vec();
+    match tokio::task::spawn_blocking(move || {
+        grit_protocol::upload_pack::stateless_rpc(&repo_path, &request, protocol_version)
+    })
+    .await
+    {
+        Ok(Ok(data)) => state
             .apply_set_cookie(no_cache_headers(axum::http::Response::builder()))
             .header(header::CONTENT_TYPE, "application/x-git-upload-pack-result")
             .body(axum::body::Body::from(data))
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Ok(Err(e)) => {
+            eprintln!("upload-pack error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "upload-pack failed").into_response()
+        }
         Err(e) => {
-            eprintln!("upload-pack error: {e:#}");
+            eprintln!("upload-pack join error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "upload-pack failed").into_response()
         }
     }
@@ -281,8 +302,13 @@ async fn receive_pack_rpc(
         Err(e) => return *e,
     };
 
-    match grit_protocol::receive_pack::stateless_rpc(&repo_path, &body) {
-        Ok(data) => state
+    let request = body.to_vec();
+    match tokio::task::spawn_blocking(move || {
+        grit_protocol::receive_pack::stateless_rpc(&repo_path, &request)
+    })
+    .await
+    {
+        Ok(Ok(data)) => state
             .apply_set_cookie(no_cache_headers(axum::http::Response::builder()))
             .header(
                 header::CONTENT_TYPE,
@@ -290,8 +316,12 @@ async fn receive_pack_rpc(
             )
             .body(axum::body::Body::from(data))
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Ok(Err(e)) => {
+            eprintln!("receive-pack error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "receive-pack failed").into_response()
+        }
         Err(e) => {
-            eprintln!("receive-pack error: {e:#}");
+            eprintln!("receive-pack join error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "receive-pack failed").into_response()
         }
     }

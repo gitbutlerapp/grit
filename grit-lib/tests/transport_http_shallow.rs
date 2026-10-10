@@ -1,19 +1,17 @@
 //! Integration test for **shallow / depth** fetch over the smart-HTTP transport
 //! (`http_fetch` over the default `ureq`-backed `HttpClient`), against a real
-//! `grit-http-server` whose upload-pack is the **system `git`** (`GUST_BIN=git`).
+//! `grit-http-server` serving upload-pack in-process via `grit-lib`.
 //!
-//! System `git upload-pack --stateless-rpc` fully implements the v0/v1 shallow
-//! protocol (`deepen`, the `shallow-info` section), so this exercises grit-lib's
-//! `negotiate_pack_http` shallow path end-to-end over real HTTP wire I/O:
+//! When grit's upload-pack implements the v0/v1 shallow protocol (`deepen`, the
+//! `shallow-info` section), this exercises grit-lib's `negotiate_pack_http`
+//! shallow path end-to-end over real HTTP wire I/O:
 //!   * `depth=1` lands only the tip; the parent is absent; the local
 //!     `.git/shallow` lists the boundary; the outcome reports it; `git log` shows
 //!     one commit. Cross-checked against `git clone --depth 1`.
 //!   * a follow-up `--unshallow` fetch brings the rest and removes `shallow`.
 //!
-//! v0/v1 is used deliberately (no `Git-Protocol` header): the grit-http-server
-//! delegates v2 to `<GUST_BIN> serve-v2`, which the system `git` does not have,
-//! whereas `git upload-pack --stateless-rpc` is a real command. The v2 shallow
-//! path is covered over `git daemon` in `transport_shallow.rs`.
+//! v0/v1 is used deliberately (no `Git-Protocol` header). The v2 shallow path is
+//! covered over `git daemon` in `transport_shallow.rs`.
 //!
 //! Skips gracefully (returns early) when `git`, the `grit-http-server` binary, or
 //! a free port is unavailable, or the server fails to bind.
@@ -104,15 +102,13 @@ fn find_binary(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Spawn `grit-http-server` with `GUST_BIN` pointed at the system `git`, so the
-/// served upload-pack is real `git` (which implements shallow).
 fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Option<Child> {
     Command::new(server_bin)
         .arg("--root")
         .arg(root)
         .arg("--bind")
         .arg(format!("127.0.0.1:{port}"))
-        .env("GUST_BIN", "git")
+        .env_remove("GUST_BIN")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -203,7 +199,7 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
     git(&local, &["init", "-q", "-b", "main", "."]);
     let local_git = local.join(".git");
 
-    // No `Git-Protocol` header → v0/v1 stateless RPC (real `git upload-pack`).
+    // No `Git-Protocol` header → v0/v1 stateless RPC.
     let client = UreqHttpClient::new();
 
     // 1. Shallow depth=1 fetch.

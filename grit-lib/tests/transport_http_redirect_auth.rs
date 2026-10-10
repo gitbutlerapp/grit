@@ -93,7 +93,6 @@ fn find_binary(name: &str) -> Option<PathBuf> {
 
 fn spawn_authed_server(
     server_bin: &Path,
-    grit_bin: &Path,
     root: &Path,
     port: u16,
     log_headers: &Path,
@@ -107,7 +106,7 @@ fn spawn_authed_server(
         .arg(format!("{USER}:{PASS}"))
         .arg("--log-headers")
         .arg(log_headers)
-        .env("GUST_BIN", grit_bin)
+        .env_remove("GUST_BIN")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -272,7 +271,7 @@ fn setup_fixture() -> Option<Fixture> {
     let target_port = free_port()?;
     let gateway_port = free_port()?;
     let headers_log = tmp.path().join("headers.log");
-    let child = spawn_authed_server(&server_bin, &grit_bin, &root, target_port, &headers_log)?;
+    let child = spawn_authed_server(&server_bin, &root, target_port, &headers_log)?;
     let target = ServerGuard(child);
     if !wait_ready(target_port) {
         return None;

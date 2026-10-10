@@ -269,13 +269,13 @@ fn find_binary(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn spawn_server(server_bin: &Path, grit_bin: &Path, root: &Path, port: u16) -> Option<Child> {
+fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Option<Child> {
     Command::new(server_bin)
         .arg("--root")
         .arg(root)
         .arg("--bind")
         .arg(format!("127.0.0.1:{port}"))
-        .env("GUST_BIN", grit_bin)
+        .env_remove("GUST_BIN")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -531,7 +531,7 @@ fn sha256_fetch_over_smart_http() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };
@@ -891,7 +891,7 @@ fn sha256_push_over_smart_http() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };

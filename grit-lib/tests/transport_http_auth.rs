@@ -117,12 +117,7 @@ fn find_binary(name: &str) -> Option<PathBuf> {
 }
 
 /// Spawn `grit-http-server --root <root> --bind … --require-auth user:pass`.
-fn spawn_authed_server(
-    server_bin: &Path,
-    grit_bin: &Path,
-    root: &Path,
-    port: u16,
-) -> Option<Child> {
+fn spawn_authed_server(server_bin: &Path, root: &Path, port: u16) -> Option<Child> {
     Command::new(server_bin)
         .arg("--root")
         .arg(root)
@@ -130,7 +125,7 @@ fn spawn_authed_server(
         .arg(format!("127.0.0.1:{port}"))
         .arg("--require-auth")
         .arg(format!("{USER}:{PASS}"))
-        .env("GUST_BIN", grit_bin)
+        .env_remove("GUST_BIN")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -250,7 +245,7 @@ fn start_authed_server(root: &Path) -> Option<(ServerGuard, u16)> {
     let grit_bin = find_binary("grit")?;
     let server_bin = find_binary("grit-http-server")?;
     let port = free_port()?;
-    let child = spawn_authed_server(&server_bin, &grit_bin, root, port)?;
+    let child = spawn_authed_server(&server_bin, root, port)?;
     let guard = ServerGuard(child);
     if !wait_ready(port) {
         return None;

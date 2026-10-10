@@ -6,9 +6,9 @@
 //! stdout, so they produce no human or JSON output of their own.
 
 use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 use crate::stdio;
 use grit_lib::config::ConfigSet;
@@ -44,7 +44,9 @@ pub fn run(
     stateless_rpc: bool,
     advertise_refs: bool,
 ) -> Result<()> {
-    let repo = open_served_repo(Path::new(directory))?;
+    let options = RepositoryOptions::with_environment(crate::context::environment());
+    let repo = Repository::open_for_serving(Path::new(directory), &options)
+        .with_context(|| format!("opening repository '{directory}'"))?;
     let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let hidden_refs = match service {
         Service::UploadPack => grit_lib::hide_refs::hide_ref_patterns_uploadpack(&config),
@@ -73,28 +75,4 @@ pub fn run(
     }
     stdio::io_result(output.flush()).context("writing the response")?;
     Ok(())
-}
-
-/// Open the repository a client asked for, without searching parent
-/// directories: a server must only serve exactly the path it was given.
-fn open_served_repo(path: &Path) -> Result<Repository> {
-    let options = RepositoryOptions::with_environment(crate::context::environment());
-    let mut with_git_suffix = path.as_os_str().to_owned();
-    with_git_suffix.push(".git");
-    let candidates = [
-        (path.join(".git"), Some(path.to_path_buf())),
-        (path.to_path_buf(), None),
-        (PathBuf::from(with_git_suffix), None),
-    ];
-    for (git_dir, work_tree) in candidates {
-        if !git_dir.join("HEAD").is_file() {
-            continue;
-        }
-        return Repository::open_with(&options, &git_dir, work_tree.as_deref())
-            .with_context(|| format!("opening repository '{}'", path.display()));
-    }
-    bail!(
-        "'{}' does not appear to be a git repository",
-        path.display()
-    )
 }

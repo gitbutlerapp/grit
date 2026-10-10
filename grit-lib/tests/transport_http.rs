@@ -9,8 +9,9 @@
 //! We assert the tracking refs + tag land, the objects arrive, the fetched main
 //! tip matches `git rev-parse`, and the pack `fsck`s clean.
 //!
-//! The test skips gracefully (returns early) when `git`, the `grit` binary, or
+//! The test skips gracefully (returns early) when `git`, the `grit` client binary, or
 //! the `grit-http-server` binary is unavailable, or the server fails to bind —
+//! the server itself does not require `grit` on `PATH`.
 //! the happy path is otherwise real end-to-end HTTP wire I/O.
 //!
 //! Gated on the `http-ureq` feature (the default `UreqHttpClient` lives there):
@@ -135,16 +136,15 @@ fn find_binary(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Spawn `grit-http-server --root <root> --bind 127.0.0.1:<port>`, pointing the
-/// server's upload-pack at the built `grit` binary via `GUST_BIN`. Returns the
-/// child handle, or `None` if a binary is missing.
-fn spawn_server(server_bin: &Path, grit_bin: &Path, root: &Path, port: u16) -> Option<Child> {
+/// Spawn `grit-http-server --root <root> --bind 127.0.0.1:<port>` (in-process
+/// upload-pack/receive-pack; no `GUST_BIN` or `grit` on `PATH` required).
+fn spawn_server(server_bin: &Path, root: &Path, port: u16) -> Option<Child> {
     Command::new(server_bin)
         .arg("--root")
         .arg(root)
         .arg("--bind")
         .arg(format!("127.0.0.1:{port}"))
-        .env("GUST_BIN", grit_bin)
+        .env_remove("GUST_BIN")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -214,7 +214,7 @@ fn fetch_over_smart_http_lands_refs_and_objects() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };
@@ -611,7 +611,7 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };
@@ -924,7 +924,7 @@ fn fetch_from_config_client_v2_many_refs_and_large_pack() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };
@@ -1032,7 +1032,7 @@ fn http_fetch_surfaces_io_error_from_upload_pack_read_failure() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };
@@ -1101,7 +1101,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };
@@ -1373,7 +1373,7 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         eprintln!("SKIP: could not allocate a free port");
         return;
     };
-    let Some(child) = spawn_server(&server_bin, &grit_bin, &root, port) else {
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
         eprintln!("SKIP: could not spawn grit-http-server");
         return;
     };

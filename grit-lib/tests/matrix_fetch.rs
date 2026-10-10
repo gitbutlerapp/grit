@@ -402,7 +402,7 @@ fn http_driver(protocol: u8) -> Option<Driver> {
                 .arg(&root)
                 .arg("--bind")
                 .arg(format!("127.0.0.1:{port}"))
-                .env("GUST_BIN", &grit_bin)
+                .env_remove("GUST_BIN")
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()

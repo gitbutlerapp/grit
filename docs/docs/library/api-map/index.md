@@ -300,6 +300,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack::PackedType` | enum | A pack object type as encoded in the packed stream header. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedType.html) |
 | `grit_lib::pack::VerifyObjectRecord` | struct | A decoded object header record used by verify-pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.VerifyObjectRecord.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
+| `grit_lib::pack_receive` | module | Stream side-band pack data from fetch/clone into memory or a pack temp file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/index.html) |
+| `grit_lib::pack_receive::PackReceiveTarget` | enum | Where demuxed pack bytes are stored. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/enum.PackReceiveTarget.html) |
+| `grit_lib::pack_receive::TempPackReceive` | struct | A temp pack file under objects/pack/ for streaming clone/fetch receive. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/struct.TempPackReceive.html) |
 | `grit_lib::pack_rev` | module | On-disk pack reverse index (.rev) — RIDX format matching Git’s pack-write.c. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_rev/index.html) |
 | `grit_lib::pack_store` | module | Repository-scoped pack and MIDX read caches. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/index.html) |
 | `grit_lib::pack_store::PackStore` | struct | Per-objects/ cache of pack indexes, bytes, MIDX views, and delta-base LRU state. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) |

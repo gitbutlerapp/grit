@@ -109,7 +109,6 @@ fn find_binary(name: &str) -> Option<PathBuf> {
 /// Spawn `grit-http-server`, optionally with `--log-headers` and `--set-cookie`.
 fn spawn_server(
     server_bin: &Path,
-    grit_bin: &Path,
     root: &Path,
     port: u16,
     log_headers: Option<&Path>,
@@ -120,7 +119,7 @@ fn spawn_server(
         .arg(root)
         .arg("--bind")
         .arg(format!("127.0.0.1:{port}"))
-        .env("GUST_BIN", grit_bin);
+        .env_remove("GUST_BIN");
     if let Some(p) = log_headers {
         cmd.arg("--log-headers").arg(p);
     }
@@ -178,7 +177,7 @@ fn setup(log_headers: Option<&Path>, set_cookie: Option<&str>) -> Option<Fixture
     let main_oid = rev_parse(&source, "refs/heads/main");
 
     let port = free_port()?;
-    let child = spawn_server(&server_bin, &grit_bin, &root, port, log_headers, set_cookie)?;
+    let child = spawn_server(&server_bin, &root, port, log_headers, set_cookie)?;
     let guard = ServerGuard(child);
     if !wait_ready(port) {
         return None;

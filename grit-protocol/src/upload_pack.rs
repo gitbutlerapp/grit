@@ -1,44 +1,37 @@
 //! Upload-pack protocol handler (server side of fetch/clone).
 //!
-//! Wraps the `grit upload-pack` subprocess with piped I/O for use in
-//! HTTP smart transport.
+//! Serves fetch and clone over smart HTTP by calling [`grit_lib::serve::upload_pack`]
+//! in-process.
 
-use anyhow::{Context, Result};
 use std::path::Path;
+
+use crate::{run_upload_pack, Result};
 
 /// Run upload-pack ref advertisement (for `GET /info/refs?service=git-upload-pack`).
 ///
 /// Returns the raw pkt-line advertisement bytes (the v0/v1 ref list, or the v2
-/// capability list when `protocol_version` is 2) suitable for wrapping in an
+/// capability list when `protocol_version` is `Some(2)`) suitable for wrapping in an
 /// HTTP response with the service header.
+///
+/// # Errors
+///
+/// Fails when `repo_path` is not a repository or advertisement generation fails.
 pub fn advertise_refs(repo_path: &Path, protocol_version: Option<u8>) -> Result<Vec<u8>> {
-    let output = crate::run_service(
-        "upload-pack",
-        &["--stateless-rpc", "--advertise-refs"],
-        repo_path,
-        protocol_version,
-        &[],
-    )
-    .context("upload-pack advertisement failed")?;
-    Ok(output)
+    run_upload_pack(repo_path, protocol_version, false, true, &[])
 }
 
 /// Run a stateless upload-pack RPC exchange (for `POST /git-upload-pack`).
 ///
 /// Takes the request body as input and returns the response body.
-/// Supports both protocol v0/v1 and v2.
+/// Supports both protocol v0/v1 and v2 via `protocol_version`.
+///
+/// # Errors
+///
+/// Fails when the repository cannot be opened or the exchange fails.
 pub fn stateless_rpc(
     repo_path: &Path,
     request_body: &[u8],
     protocol_version: Option<u8>,
 ) -> Result<Vec<u8>> {
-    let output = crate::run_service(
-        "upload-pack",
-        &["--stateless-rpc"],
-        repo_path,
-        protocol_version,
-        request_body,
-    )
-    .context("upload-pack failed")?;
-    Ok(output)
+    run_upload_pack(repo_path, protocol_version, true, false, request_body)
 }

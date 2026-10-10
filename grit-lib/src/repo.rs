@@ -420,6 +420,39 @@ impl Repository {
         Ok(repo)
     }
 
+    /// Open exactly the repository at `path` for wire-protocol serving.
+    ///
+    /// Unlike [`Self::discover`], this does not search parent directories: a
+    /// server must only serve the path it was given. The path may name a bare
+    /// repository, a working tree (with `.git` beside it), or the same logical
+    /// repository with a `.git` suffix appended to the path.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: client-supplied repository path (bare root, work tree, or `*.git`).
+    /// - `options`: environment and injectable runners for config and hooks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotARepository`] when none of the candidate layouts
+    /// contain a `HEAD` file.
+    pub fn open_for_serving(path: &Path, options: &RepositoryOptions) -> Result<Self> {
+        let mut with_git_suffix = path.as_os_str().to_owned();
+        with_git_suffix.push(".git");
+        let candidates = [
+            (path.join(".git"), Some(path.to_path_buf())),
+            (path.to_path_buf(), None),
+            (PathBuf::from(with_git_suffix), None),
+        ];
+        for (git_dir, work_tree) in candidates {
+            if !git_dir.join("HEAD").is_file() {
+                continue;
+            }
+            return Self::open_with(options, &git_dir, work_tree.as_deref());
+        }
+        Err(Error::NotARepository(path.display().to_string()))
+    }
+
     /// Like [`Self::open`] but skips repository format validation (`validate_repository_format`).
     ///
     /// Used after repository discovery when the format is unsupported so callers still learn

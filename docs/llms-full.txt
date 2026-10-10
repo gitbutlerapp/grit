@@ -2606,7 +2606,7 @@ grit upload-pack [--stateless-rpc] [--advertise-refs] <directory>
 
 ## Description
 
-The server side of fetch and clone. It speaks the Git wire protocol on stdin and stdout, so any Git client, `git` or `grit`, can fetch from a repository it serves. You don't normally run it yourself: an SSH server runs it when a client connects, and `grit-http-server` runs it to answer smart HTTP requests. It doesn't appear in `grit --help`.
+The server side of fetch and clone. It speaks the Git wire protocol on stdin and stdout, so any Git client, `git` or `grit`, can fetch from a repository it serves. You don't normally run it yourself: an SSH server runs it when a client connects, and `grit-http-server` answers smart HTTP requests by calling the same logic in `grit-lib` in-process (no separate `grit` binary next to the server). It doesn't appear in `grit --help`.
 
 `<directory>` is the repository to serve: a bare repository, a working tree, or a path that names one once `.git` is added. Unlike other commands, `grit upload-pack` doesn't search parent directories, so it serves exactly the repository it was given.
 
@@ -2656,7 +2656,7 @@ grit receive-pack [--stateless-rpc] [--advertise-refs] <directory>
 
 ## Description
 
-The server side of push. It speaks the Git wire protocol on stdin and stdout, receives the objects a client sends, and updates the repository's refs. You don't normally run it yourself: an SSH server runs it when a client pushes, and `grit-http-server` runs it to answer smart HTTP requests. It doesn't appear in `grit --help`.
+The server side of push. It speaks the Git wire protocol on stdin and stdout, receives the objects a client sends, and updates the repository's refs. You don't normally run it yourself: an SSH server runs it when a client pushes, and `grit-http-server` answers smart HTTP requests by calling the same logic in `grit-lib` in-process (no separate `grit` binary next to the server). It doesn't appear in `grit --help`.
 
 `<directory>` is the repository to push to: a bare repository, a working tree, or a path that names one once `.git` is added. It doesn't search parent directories.
 
@@ -3077,6 +3077,9 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::pack::PackedType` | enum | A pack object type as encoded in the packed stream header. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/enum.PackedType.html) |
 | `grit_lib::pack::VerifyObjectRecord` | struct | A decoded object header record used by verify-pack. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.VerifyObjectRecord.html) |
 | `grit_lib::pack_name_hash` | module | Git pack bitmap name-hash functions (pack_name_hash / pack_name_hash_v2). | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_name_hash/index.html) |
+| `grit_lib::pack_receive` | module | Stream side-band pack data from fetch/clone into memory or a pack temp file. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/index.html) |
+| `grit_lib::pack_receive::PackReceiveTarget` | enum | Where demuxed pack bytes are stored. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/enum.PackReceiveTarget.html) |
+| `grit_lib::pack_receive::TempPackReceive` | struct | A temp pack file under objects/pack/ for streaming clone/fetch receive. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_receive/struct.TempPackReceive.html) |
 | `grit_lib::pack_rev` | module | On-disk pack reverse index (.rev) — RIDX format matching Git’s pack-write.c. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_rev/index.html) |
 | `grit_lib::pack_store` | module | Repository-scoped pack and MIDX read caches. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/index.html) |
 | `grit_lib::pack_store::PackStore` | struct | Per-objects/ cache of pack indexes, bytes, MIDX views, and delta-base LRU state. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) |
