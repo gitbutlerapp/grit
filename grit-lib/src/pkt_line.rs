@@ -172,6 +172,47 @@ pub fn write_sideband_channel1_64k(w: &mut impl Write, payload: &[u8]) -> io::Re
     Ok(())
 }
 
+/// Incrementally frame pack bytes on sideband channel 1 (64k pkt-lines).
+pub struct SidebandChannel1Writer<'a, W: Write + ?Sized + 'a> {
+    inner: &'a mut W,
+    pending: Vec<u8>,
+}
+
+impl<'a, W: Write + ?Sized + 'a> SidebandChannel1Writer<'a, W> {
+    /// Wrap `inner` as a [`Write`] target that emits sideband-64k frames.
+    pub fn new(inner: &'a mut W) -> Self {
+        Self {
+            inner,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Flush any buffered band-1 bytes.
+    pub fn finish(mut self) -> io::Result<()> {
+        if !self.pending.is_empty() {
+            write_sideband_packet(self.inner, 1, &self.pending)?;
+            self.pending.clear();
+        }
+        Ok(())
+    }
+}
+
+impl<'a, W: Write + ?Sized + 'a> Write for SidebandChannel1Writer<'a, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        const MAX_PAYLOAD: usize = 65515;
+        self.pending.extend_from_slice(buf);
+        while self.pending.len() >= MAX_PAYLOAD {
+            let chunk: Vec<u8> = self.pending.drain(..MAX_PAYLOAD).collect();
+            write_sideband_packet(self.inner, 1, &chunk)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 /// Parse a 4-byte hexadecimal pkt-line length prefix.
 pub fn parse_hex_len(prefix: &[u8]) -> io::Result<usize> {
     let s = std::str::from_utf8(prefix)

@@ -124,6 +124,25 @@ impl ReachableSet {
         out
     }
 
+    /// Borrow the indexed reachability bitmap (bit = pack/MIDX namespace position).
+    #[must_use]
+    #[allow(dead_code)]
+    pub(crate) fn indexed_bits(&self) -> &Bitmap {
+        &self.bits
+    }
+
+    /// Bitmap index backing this set (pack or MIDX namespace).
+    #[must_use]
+    pub fn bitmap_index(&self) -> &std::sync::Arc<BitmapIndex> {
+        &self.index
+    }
+
+    /// Loose / out-of-namespace objects included in this set.
+    #[must_use]
+    pub fn extended_objects(&self) -> &[(ObjectId, ObjectKind)] {
+        &self.extended
+    }
+
     /// All reachable oids grouped by Git's bitmap output order (commits, trees, blobs, tags).
     pub fn iter_grouped_by_kind(&self) -> impl Iterator<Item = ObjectId> + '_ {
         [

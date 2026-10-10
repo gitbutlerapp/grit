@@ -1,5 +1,7 @@
 //! Upload-pack configuration: capabilities, want validation, filters.
 
+#![allow(dead_code)]
+
 use std::collections::{HashSet, VecDeque};
 
 use super::{AdvertisedRef, Result, ServeError};

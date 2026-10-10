@@ -1,5 +1,7 @@
 //! Shallow/deepen handling for [`super::upload_pack`].
 
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 
 use crate::objects::{ObjectId, ObjectKind};

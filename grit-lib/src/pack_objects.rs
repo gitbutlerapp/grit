@@ -374,6 +374,167 @@ pub fn build_pack_for_upload(
     build_pack_with_shallow_and_filter(&repo.odb, wants, haves, source_shallow, filter, opts)
 }
 
+/// Stream a pack for upload-pack: pack reuse when bitmaps allow, otherwise pack-objects.
+///
+/// Returns [`None`] when the caller should use another code path (should not happen today).
+#[allow(clippy::too_many_arguments)]
+pub fn write_upload_pack_stream(
+    repo: &Repository,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    source_shallow: &HashSet<ObjectId>,
+    filter: Option<&ObjectFilter>,
+    opts: &PackBuildOptions,
+    progress: &mut dyn FnMut(PackProgress),
+    w: &mut dyn Write,
+) -> Result<PackStats> {
+    if opts.use_bitmaps {
+        if let Some(stats) = crate::pack_reuse::try_write_streaming_pack(
+            repo,
+            wants,
+            haves,
+            source_shallow,
+            filter,
+            opts,
+            progress,
+            w,
+        )? {
+            return Ok(stats);
+        }
+    }
+    let _ = progress;
+    PackObjects::new(&repo.odb, PackObjectsOptions::from(*opts))
+        .wants(wants)
+        .haves(haves)
+        .source_shallow_grafts(source_shallow)
+        .write_to(w)
+}
+
+/// Append negotiated objects to an in-progress pack body (no header or trailer).
+#[allow(dead_code)]
+pub(crate) fn write_pack_body_from_send_list(
+    w: &mut dyn Write,
+    odb: &Odb,
+    send: &[ObjectId],
+    have_closure: &HashSet<ObjectId>,
+    opts: &PackBuildOptions,
+    blob_name_hashes: &HashMap<ObjectId, u32>,
+    pack_body_start: u64,
+) -> Result<u32> {
+    if send.is_empty() {
+        return Ok(0);
+    }
+    if !opts.delta {
+        for oid in send {
+            let obj = odb.read(oid)?;
+            let mut chunk = Vec::new();
+            write_whole_pack_object(&mut chunk, odb, *oid, obj.kind, &obj.data, opts)?;
+            w.write_all(&chunk).map_err(Error::Io)?;
+        }
+        return Ok(u32::try_from(send.len()).unwrap_or(u32::MAX));
+    }
+    let plan = plan_deltas(odb, send, have_closure, opts, blob_name_hashes)?;
+    write_planned_entries(w, odb, &plan, opts, pack_body_start)?;
+    Ok(u32::try_from(plan.entries.len()).unwrap_or(u32::MAX))
+}
+
+#[allow(dead_code)]
+fn write_planned_entries(
+    w: &mut dyn Write,
+    odb: &Odb,
+    plan: &DeltaPlan,
+    opts: &PackBuildOptions,
+    pack_body_start: u64,
+) -> Result<()> {
+    let algo = odb.hash_algo();
+    let mut buf = Vec::new();
+    let payloads: HashMap<ObjectId, &[u8]> = plan
+        .entries
+        .iter()
+        .map(|e| (e.oid, e.data.as_slice()))
+        .collect();
+    let mut oid_to_offset: HashMap<ObjectId, u64> = HashMap::new();
+    let mut delta_index_by_base: HashMap<ObjectId, DeltaIndex> = HashMap::new();
+
+    for entry in &plan.entries {
+        let start = pack_body_start + buf.len() as u64;
+        match entry.base {
+            None => {
+                write_whole_pack_object(&mut buf, odb, entry.oid, entry.kind, &entry.data, opts)?;
+                oid_to_offset.insert(entry.oid, start);
+            }
+            Some(base_oid) => {
+                let in_pack_offset = oid_to_offset.get(&base_oid).copied();
+                if let Some((delta_size, pack_bytes, zlib_start, zlib_end)) =
+                    &entry.reused_delta_zlib
+                {
+                    let delta_len = usize::try_from(*delta_size).map_err(|_| {
+                        Error::CorruptObject("reused delta size exceeds usize".to_owned())
+                    })?;
+                    if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                        let dist = start.checked_sub(base_off).ok_or_else(|| {
+                            Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                        })?;
+                        encode_pack_object_header(&mut buf, 6, delta_len);
+                        encode_ofs_delta_distance(&mut buf, dist);
+                    } else {
+                        encode_pack_object_header(&mut buf, 7, delta_len);
+                        buf.extend_from_slice(base_oid.as_bytes());
+                    }
+                    buf.extend_from_slice(&pack_bytes[*zlib_start..*zlib_end]);
+                } else {
+                    let delta = if let Some(reused) = &entry.reused_delta {
+                        reused.clone()
+                    } else {
+                        let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
+                            d.to_vec()
+                        } else {
+                            odb.read(&base_oid)?.data
+                        };
+                        if entry.data.starts_with(&base_data) && entry.data.len() > base_data.len()
+                        {
+                            encode_prefix_extension_delta(&base_data, &entry.data)?
+                        } else {
+                            let base_ref = payloads
+                                .get(&base_oid)
+                                .copied()
+                                .unwrap_or(base_data.as_slice());
+                            delta_index_by_base
+                                .entry(base_oid)
+                                .or_insert_with(|| DeltaIndex::new(base_ref))
+                                .encode(&entry.data, 0)
+                                .ok_or_else(|| {
+                                    Error::CorruptObject(
+                                        "failed to encode pack delta for object".into(),
+                                    )
+                                })?
+                        }
+                    };
+                    if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                        let dist = start.checked_sub(base_off).ok_or_else(|| {
+                            Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                        })?;
+                        encode_pack_object_header(&mut buf, 6, delta.len());
+                        encode_ofs_delta_distance(&mut buf, dist);
+                    } else {
+                        encode_pack_object_header(&mut buf, 7, delta.len());
+                        if base_oid.as_bytes().len() != algo.len() {
+                            return Err(Error::CorruptObject(
+                                "ref-delta base oid width mismatch".to_owned(),
+                            ));
+                        }
+                        buf.extend_from_slice(base_oid.as_bytes());
+                    }
+                    write_zlib(&mut buf, &delta)?;
+                }
+                oid_to_offset.insert(entry.oid, start);
+            }
+        }
+    }
+    w.write_all(&buf).map_err(Error::Io)?;
+    Ok(())
+}
+
 /// Serialize a precomputed object list into a pack (used by [`build_pack`] and filtered bundles).
 ///
 /// # Errors
@@ -498,7 +659,7 @@ fn pack_type_code(kind: ObjectKind) -> u8 {
 
 /// Append a PACK object header: 3-bit type + variable-length size (little-endian
 /// 7-bit groups, MSB = continuation). Lifted from the CLI pack writer.
-fn encode_pack_object_header(buf: &mut Vec<u8>, type_code: u8, payload_len: usize) {
+pub(crate) fn encode_pack_object_header(buf: &mut Vec<u8>, type_code: u8, payload_len: usize) {
     let mut size = payload_len;
     let first = ((type_code & 0x7) << 4) | (size & 0x0f) as u8;
     size >>= 4;
@@ -1008,7 +1169,7 @@ fn write_zlib(buf: &mut Vec<u8>, data: &[u8]) -> Result<()> {
 
 /// Encode an `OFS_DELTA` base distance (Git's offset varint). Lifted verbatim
 /// from the CLI pack writer's `encode_git_ofs_delta_distance`.
-fn encode_ofs_delta_distance(buf: &mut Vec<u8>, mut ofs: u64) {
+pub(crate) fn encode_ofs_delta_distance(buf: &mut Vec<u8>, mut ofs: u64) {
     let mut dheader = [0u8; 32];
     let mut pos = dheader.len() - 1;
     dheader[pos] = (ofs & 0x7f) as u8;

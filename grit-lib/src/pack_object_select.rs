@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery};
+use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use crate::error::Result;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -57,14 +57,17 @@ pub fn enumerate_pack_objects(
     walk_enumeration(odb, wants, haves, opts)
 }
 
-fn try_bitmap_enumeration(
+/// Bitmap reachability for upload-pack when shallow grafts and filters allow it.
+///
+/// Returns the send-side [`ReachableSet`] and the peer `have` closure as object ids.
+pub fn try_bitmap_reachable_for_upload(
     odb: &Odb,
     wants: &[ObjectId],
     haves: &[ObjectId],
-    opts: &PackEnumerateOptions<'_>,
-) -> Result<Option<PackObjectSelection>> {
-    // Explicit shallow boundaries are only applied by the object walk today.
-    if !opts.shallow_grafts.is_empty() {
+    filter: Option<&ObjectFilter>,
+    shallow_grafts: &HashSet<ObjectId>,
+) -> Result<Option<(ReachableSet, HashSet<ObjectId>)>> {
+    if !shallow_grafts.is_empty() {
         return Ok(None);
     }
     let Some(git_dir) = odb.config_git_dir() else {
@@ -101,7 +104,7 @@ fn try_bitmap_enumeration(
         ReachabilityQuery {
             wants,
             haves,
-            filter: opts.filter,
+            filter,
         },
         missing_wants,
     ) {
@@ -111,9 +114,23 @@ fn try_bitmap_enumeration(
         Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
 
+    Ok(Some((send_set, have_set.object_ids())))
+}
+
+fn try_bitmap_enumeration(
+    odb: &Odb,
+    wants: &[ObjectId],
+    haves: &[ObjectId],
+    opts: &PackEnumerateOptions<'_>,
+) -> Result<Option<PackObjectSelection>> {
+    let Some((send_set, have_closure)) =
+        try_bitmap_reachable_for_upload(odb, wants, haves, opts.filter, opts.shallow_grafts)?
+    else {
+        return Ok(None);
+    };
+    let index = send_set.bitmap_index();
     let send: Vec<ObjectId> = send_set.iter_grouped_by_kind().collect();
-    let have_closure = have_set.object_ids();
-    let blob_name_hashes = blob_name_hashes_from_bitmap(&index, &send, &have_closure);
+    let blob_name_hashes = blob_name_hashes_from_bitmap(index, &send, &have_closure);
     Ok(Some(PackObjectSelection {
         send,
         have_closure,

@@ -8,9 +8,9 @@ use super::{
     write_line, AdvertisedRef, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::objects::{ObjectId, ObjectKind};
+use crate::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackProgress};
 use crate::repo::Repository;
 use crate::shallow::INFINITE_DEPTH;
-use crate::transfer::{build_pack, PackBuildOptions};
 
 /// Capabilities offered in a v0/v1 advertisement, before the per-repository ones.
 const V0_CAPABILITIES: &[&str] = &[
@@ -157,20 +157,15 @@ fn serve_v0(
         None => write_line(output, "NAK")?,
     }
     let sideband = request.caps.contains("side-band-64k");
-    let pack = if request.is_shallow() {
-        build_deepen_pack(
-            repo,
-            &refs,
-            &request.wants,
-            request.deepen,
-            &request.client_shallow,
-            &common,
-            &request.caps,
-        )?
-    } else {
-        build_response_pack(repo, &refs, &request.wants, &common, &request.caps)?
-    };
-    write_pack(output, &pack, sideband)
+    stream_response_pack(
+        repo,
+        &refs,
+        &request.wants,
+        &common,
+        &request.caps,
+        output,
+        sideband,
+    )
 }
 
 /// Write the v0 ref advertisement: `HEAD` and every ref, capabilities on the
@@ -522,21 +517,17 @@ fn fetch_v2(
             write_v2_shallow_info(output, &bounds)?;
         }
     }
-    let pack = if shallow {
-        build_deepen_pack(
-            repo,
-            &refs,
-            &wants,
-            deepen,
-            &client_shallow,
-            &common,
-            &caps,
-        )?
-    } else {
-        build_response_pack(repo, &refs, &wants, &common, &caps)?
-    };
     write_line(output, "packfile")?;
-    write_pack(output, &pack, true)
+    if shallow {
+        let mut haves = common.to_vec();
+        if deepen != Some(INFINITE_DEPTH) {
+            haves.extend(deepen_haves_excluding_history(repo, &wants, deepen)?);
+        }
+        let _ = client_shallow;
+        stream_response_pack(repo, &refs, &wants, &haves, &caps, output, true)
+    } else {
+        stream_response_pack(repo, &refs, &wants, &common, &caps, output, true)
+    }
 }
 
 fn read_packet_stash(input: &mut dyn Read, stash: &mut Option<Packet>) -> Result<Option<Packet>> {
@@ -647,32 +638,17 @@ fn deepen_haves_excluding_history(
     Ok(haves)
 }
 
-fn build_deepen_pack(
-    repo: &Repository,
-    refs: &[AdvertisedRef],
-    wants: &[ObjectId],
-    deepen: Option<u32>,
-    client_shallow: &[ObjectId],
-    common: &[ObjectId],
-    caps: &HashSet<String>,
-) -> Result<Vec<u8>> {
-    let mut haves = common.to_vec();
-    if deepen != Some(INFINITE_DEPTH) {
-        haves.extend(deepen_haves_excluding_history(repo, wants, deepen)?);
-    }
-    let _ = client_shallow;
-    build_response_pack(repo, refs, wants, &haves, caps)
-}
-
-/// Build the pack answering a fetch, adding annotated tags when `include-tag`
+/// Stream the pack answering a fetch, adding annotated tags when `include-tag`
 /// was negotiated.
-fn build_response_pack(
+fn stream_response_pack(
     repo: &Repository,
     refs: &[AdvertisedRef],
     wants: &[ObjectId],
     common: &[ObjectId],
     caps: &HashSet<String>,
-) -> Result<Vec<u8>> {
+    output: &mut dyn Write,
+    sideband: bool,
+) -> Result<()> {
     let mut pack_wants = wants.to_vec();
     if caps.contains("include-tag") {
         pack_wants.extend(included_tags(repo, refs, wants, common)?);
@@ -686,12 +662,36 @@ fn build_response_pack(
         use_ofs_delta: caps.contains("ofs-delta"),
         ..PackBuildOptions::default()
     };
-    Ok(build_pack(
-        &repo.odb,
-        &pack_wants,
-        common,
-        &pack_opts,
-    )?)
+    let mut progress = |_ev: PackProgress| {};
+    if sideband {
+        let mut framed = crate::pkt_line::SidebandChannel1Writer::new(&mut *output);
+        write_upload_pack_stream(
+            repo,
+            &pack_wants,
+            common,
+            &HashSet::new(),
+            None,
+            &pack_opts,
+            &mut progress,
+            &mut framed,
+        )
+        .map_err(ServeError::from)?;
+        framed.finish().map_err(ServeError::from)?;
+        write_flush(output)
+    } else {
+        write_upload_pack_stream(
+            repo,
+            &pack_wants,
+            common,
+            &HashSet::new(),
+            None,
+            &pack_opts,
+            &mut progress,
+            output,
+        )
+        .map_err(ServeError::from)?;
+        Ok(())
+    }
 }
 
 /// Annotated tags the client did not ask for but whose target commit is being
@@ -751,15 +751,4 @@ fn commit_closure(
         queue.extend(commit.parents);
     }
     Ok(seen)
-}
-
-/// Write a pack, framed on side-band channel 1 when negotiated, then a flush.
-fn write_pack(output: &mut dyn Write, pack: &[u8], sideband: bool) -> Result<()> {
-    if sideband {
-        crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, pack)?;
-        write_flush(output)
-    } else {
-        output.write_all(pack)?;
-        Ok(())
-    }
 }
