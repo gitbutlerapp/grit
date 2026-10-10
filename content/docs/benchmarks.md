@@ -205,7 +205,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 | `grep` | none | Deferred — no porcelain driver in scope |
 | `rebase` | none | `pick-series` grit-bench scenario (20× `grit pick`) as upper-bound proxy |
 | `reset` | none | Deferred |
-| `stash push` | `stash-push-pop` grit-bench scenario | `grit stash` + `grit stash pop` vs `git stash push` + `git stash pop` (see `suite-after-LH.json`) |
+| `stash push` | `stash-push-pop` grit-bench scenario | `grit stash` + `grit stash pop` vs `git stash push` + `git stash pop` (see `stash-push-pop-LH.json`) |
 
 ### Object reads
 
