@@ -113,10 +113,10 @@ fn fetch_once(
             &mut NoProgress,
             Some(factory),
         )
-        .map_err(map_fetch_remote_error)
+        .map_err(map_remote_fetch_error)
 }
 
-fn map_fetch_remote_error(err: RemoteError) -> anyhow::Error {
+fn map_remote_fetch_error(err: RemoteError) -> anyhow::Error {
     if matches!(
         &err,
         RemoteError::Library(grit_lib::error::Error::BundleMissingPrerequisites)
