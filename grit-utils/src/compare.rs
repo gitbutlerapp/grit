@@ -116,6 +116,7 @@ mod tests {
                 git: dummy_stats(git_median),
                 grit: dummy_stats(grit_median),
                 ratio,
+                grit_failure: None,
             }],
         }
     }

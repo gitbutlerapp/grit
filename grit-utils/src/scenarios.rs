@@ -171,6 +171,7 @@ pub fn run_scenario(
         git: git_stats,
         grit: grit_stats,
         ratio,
+        grit_failure: None,
     })
 }
 

@@ -49,6 +49,15 @@ pub enum DriverKind {
     Lib,
 }
 
+/// Why a grit-side benchmark run did not complete (timeout, memory cap, or crash).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BenchFailure {
+    /// Short machine-readable reason (`timeout`, `memory_cap`, `command_failed`).
+    pub kind: String,
+    /// Human-readable detail (stderr snippet, signal name, etc.).
+    pub message: String,
+}
+
 /// One benchmark scenario (grit vs git).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScenarioResult {
@@ -61,6 +70,9 @@ pub struct ScenarioResult {
     pub grit: TimingStats,
     /// `grit_median_ms / git_median_ms` (values below 1.0 mean grit is faster).
     pub ratio: f64,
+    /// Set when the grit command did not finish within caps (for example serve-clone OOM).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grit_failure: Option<BenchFailure>,
 }
 
 /// Full grit-bench report (schema v1).

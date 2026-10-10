@@ -128,6 +128,7 @@ mod tests {
                     peak_rss_bytes: None,
                 },
                 ratio: 0.505,
+                grit_failure: None,
             }],
         }
     }

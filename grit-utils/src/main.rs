@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use grit_utils::binary::{require_hyperfine, resolve_binary};
+use grit_utils::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::odb_driver::{self, open_repo};
@@ -79,6 +80,12 @@ enum Cmd {
     Odb,
     /// ODB cat-file / rev-list scenarios on the repacked 100k synthetic repo
     OdbBackend,
+    /// Reachability bitmap scenarios on repacked upstream git.git
+    Bitmaps {
+        /// Prepared bare repo (default: cached clone at pinned tag with repack -adb)
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
     /// Internal: library-backed workloads for ODB benchmarks
     #[command(hide = true)]
     Drive {
@@ -149,6 +156,15 @@ enum DriveCmd {
         repo: PathBuf,
         #[arg(default_value = "2000")]
         limit: usize,
+    },
+    RevListCount {
+        repo: PathBuf,
+    },
+    RevListCountObjects {
+        repo: PathBuf,
+    },
+    ServeClone {
+        repo: PathBuf,
     },
 }
 
@@ -223,6 +239,18 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         DriveCmd::LogPatch { repo, limit } => {
             let repo = open_repo(repo)?;
             odb_driver::log_patch(&repo, *limit)?;
+        }
+        DriveCmd::RevListCount { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_count(&repo)?;
+        }
+        DriveCmd::RevListCountObjects { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_count_objects(&repo)?;
+        }
+        DriveCmd::ServeClone { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::serve_clone(&repo)?;
         }
     }
     Ok(())
@@ -342,6 +370,25 @@ fn main() -> Result<()> {
             let bench_exe = std::env::current_exe().context("current exe")?;
             run_odb_backend_suite(&hyperfine, &git, &grit, &bench_exe, &cfg, timestamp)?
         }
+        Cmd::Bitmaps { repo } => {
+            eprintln!("Running bitmap reachability benchmarks...");
+            let cfg = BitmapRunConfig {
+                warmup: cli.warmup,
+                min_runs: cli.min_runs,
+                prepare_bin: std::env::current_exe()
+                    .unwrap_or_else(|_| PathBuf::from("grit-bench")),
+            };
+            let bench_exe = std::env::current_exe().context("current exe")?;
+            run_bitmaps_suite(
+                &hyperfine,
+                &git,
+                &grit,
+                &bench_exe,
+                &cfg,
+                repo.as_deref(),
+                timestamp,
+            )?
+        }
         Cmd::HotPaths {
             sizes,
             fsmonitor_fixture,
@@ -379,7 +426,10 @@ fn main() -> Result<()> {
 
     let rendered = render_report(&cli.format, &report)?;
     write_output(&cli, &rendered)?;
-    if !matches!(cli.command, Cmd::Odb | Cmd::OdbBackend) {
+    if !matches!(
+        cli.command,
+        Cmd::Odb | Cmd::OdbBackend | Cmd::Bitmaps { .. }
+    ) {
         remove_dir_robust(&scratch_dir());
     }
     Ok(())

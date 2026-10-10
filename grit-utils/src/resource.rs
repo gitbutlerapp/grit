@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -155,4 +155,41 @@ pub fn median_wall_ms(
 #[allow(dead_code)]
 pub fn hyperfine_entry_mean_ms(entry: &HyperfineResultEntry) -> f64 {
     entry.mean * 1000.0
+}
+
+/// Limits for grit `serve-clone` benchmark runs (avoid OOM hangs).
+#[derive(Debug, Clone, Copy)]
+pub struct ServeCloneCaps {
+    pub timeout: Duration,
+    pub max_rss_bytes: u64,
+}
+
+/// Read serve-clone caps from the environment with factory VM defaults.
+pub fn serve_clone_caps() -> ServeCloneCaps {
+    let timeout_secs = std::env::var("GRIT_BENCH_SERVE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(120);
+    let max_rss_gib = std::env::var("GRIT_BENCH_SERVE_MAX_RSS_GIB")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(12.0);
+    ServeCloneCaps {
+        timeout: Duration::from_secs(timeout_secs),
+        max_rss_bytes: (max_rss_gib * 1024.0 * 1024.0 * 1024.0) as u64,
+    }
+}
+
+/// Prefix a shell command with `timeout -s KILL` when running on Unix.
+pub fn wrap_command_with_timeout(command: &str, timeout: Duration) -> String {
+    let secs = timeout.as_secs().max(1);
+    #[cfg(unix)]
+    {
+        format!("timeout -s KILL {secs}s {command}")
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = secs;
+        command.to_string()
+    }
 }

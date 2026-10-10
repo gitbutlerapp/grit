@@ -11,6 +11,7 @@ use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
 use grit_lib::pack::{read_object_from_pack_at_offset, read_pack_index_cached, PackIndex};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::{rev_list, RevListOptions, RevListResult};
+use grit_lib::serve::{upload_pack, ProtocolVersion, ServeOptions};
 
 /// Read hex object ids from stdin and emit `git cat-file --batch` lines.
 pub fn cat_file_batch(repo: &Repository) -> Result<()> {
@@ -456,6 +457,75 @@ fn read_blob_or_empty(repo: &Repository, oid: ObjectId, missing: bool) -> Result
         return Ok(Vec::new());
     }
     Ok(object.data)
+}
+
+/// `rev-list --count --all` (commit count only).
+pub fn rev_list_count(repo: &Repository) -> Result<()> {
+    let opts = RevListOptions {
+        all_refs: true,
+        count: true,
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result = rev_list(repo, &[], &[], &opts).context("rev-list --count --all")?;
+    let n = result.commits.len();
+    println!("{n}");
+    Ok(())
+}
+
+/// `rev-list --count --objects --all --use-bitmap-index`.
+pub fn rev_list_count_objects(repo: &Repository) -> Result<()> {
+    let opts = RevListOptions {
+        all_refs: true,
+        count: true,
+        objects: true,
+        use_bitmap_index: true,
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result = repo
+        .odb
+        .with_pack_read_context(|| rev_list(repo, &[], &[], &opts))
+        .context("rev-list --count --objects --all")?;
+    let n = result.commits.len() + result.objects.len();
+    println!("{n}");
+    Ok(())
+}
+
+struct CountingWriter {
+    bytes: u64,
+}
+
+impl Write for CountingWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.bytes += buf.len() as u64;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Stateless v0 upload-pack serving every ref; output goes to a sink, bytes on stdout.
+pub fn serve_clone(repo: &Repository) -> Result<()> {
+    let req_path = repo
+        .git_dir
+        .join(crate::serve_request::SERVE_CLONE_REQUEST_FILE);
+    let req = std::fs::read(&req_path)
+        .with_context(|| format!("read serve-clone request {}", req_path.display()))?;
+    let mut input: &[u8] = &req;
+    let mut sink = CountingWriter { bytes: 0 };
+    let opts = ServeOptions {
+        protocol: ProtocolVersion::V0,
+        stateless_rpc: true,
+        advertise_refs: false,
+        agent: String::new(),
+        hidden_refs: Vec::new(),
+    };
+    upload_pack(repo, &mut input, &mut sink, &opts).context("upload-pack serve-clone")?;
+    println!("{}", sink.bytes);
+    Ok(())
 }
 
 /// Open a bare or normal repo at `path` for driver subcommands.

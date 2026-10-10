@@ -2,6 +2,8 @@
 
 pub mod bench_env;
 pub mod binary;
+pub mod bitmap_fixture;
+pub mod bitmap_suite;
 pub mod compare;
 pub mod fixture;
 pub mod hot_path_fixture;
@@ -14,6 +16,7 @@ pub mod render;
 pub mod resource;
 pub mod scenarios;
 pub mod schema;
+pub mod serve_request;
 pub mod shell;
 pub mod stats;
 
