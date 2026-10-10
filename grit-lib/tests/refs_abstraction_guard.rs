@@ -147,7 +147,10 @@ fn scan_rs_files(dir: &Path, violations: &mut Vec<String>) {
 
 fn legacy_reftable_repo_probe_token() -> String {
     String::from_utf8(
-        [105, 115, 95, 114, 101, 102, 116, 97, 98, 108, 101, 95, 114, 101, 112, 111].to_vec(),
+        [
+            105, 115, 95, 114, 101, 102, 116, 97, 98, 108, 101, 95, 114, 101, 112, 111,
+        ]
+        .to_vec(),
     )
     .expect("ascii token")
 }
