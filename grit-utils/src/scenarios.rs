@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{
-    create_repo, dirty_repo, prepare_add_iteration, prepare_commit_iteration,
-    prepare_restore_iteration, scratch_dir,
+    create_repo, create_repo_with_history, dirty_repo, modify_files_for_diff,
+    prepare_add_iteration, prepare_commit_iteration, prepare_restore_iteration, scratch_dir,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_switch,
@@ -18,7 +18,7 @@ use crate::hot_path_fixture::{
 use crate::hyperfine::{run_hyperfine, HyperfineRun};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::schema::{BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION};
-use crate::shell::shell_command;
+use crate::shell::{shell_command, shell_quote};
 use crate::stats::{median_ratio, timing_from_hyperfine};
 
 /// Driver selection for a scenario (CLI today; library hooks reserved).
@@ -273,6 +273,103 @@ pub fn run_restore_suite(
         )?);
     }
     Ok(build_report(git, grit, timestamp, scenarios))
+}
+
+/// Worktree diff with ~48 modified files (`git diff` vs `grit diff`).
+pub fn run_diff_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    sizes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    const MODIFIED: usize = 48;
+    let mut scenarios = Vec::new();
+    for &size in sizes {
+        let repo = create_repo(git, size)?;
+        modify_files_for_diff(&repo, MODIFIED)?;
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("diff-{size}"),
+                group: "diff".into(),
+                fixture: format!("synthetic-{size}"),
+                description: format!(
+                    "worktree diff with {MODIFIED} modified tracked files (git diff, grit diff)"
+                ),
+                grit_argv: vec!["diff".into()],
+                git_argv: vec!["diff".into()],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
+/// Last 100 commits, one line each (`git log -100 --oneline` vs paged `grit log`).
+pub fn run_log_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    sizes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    const COMMITS: usize = 100;
+    const PAGES: usize = 10;
+    let mut scenarios = Vec::new();
+    for &size in sizes {
+        let repo = create_repo_with_history(git, size, COMMITS)?;
+        let grit_cmd = grit_log_pages_shell(grit, PAGES);
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("log-{size}"),
+                group: "log".into(),
+                fixture: format!("synthetic-{size}"),
+                description: format!(
+                    "last {COMMITS} commits one line each (git log -100 --oneline, grit log pages)"
+                ),
+                grit_argv: sh_script(grit_cmd),
+                git_argv: vec!["log".into(), "-100".into(), "--oneline".into()],
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: true,
+                git_via_shell: false,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
+}
+
+fn grit_log_pages_shell(grit: &Path, pages: usize) -> String {
+    let grit_q = shell_quote(&grit.to_string_lossy());
+    format!(
+        r#"{grit_q} log >/dev/null 2>&1 || exit 1
+before=""
+for _ in $(seq 1 {pages}); do
+  if [ -z "$before" ]; then
+    page=$({grit_q} log)
+  else
+    page=$({grit_q} log --before="$before")
+  fi
+  printf '%s\n' "$page" | awk '!/^→/ && !/^$/ {{print}}'
+  before=$(printf '%s\n' "$page" | sed -n 's/^→ more: grit log --before=//p')
+  [ -z "$before" ] && break
+done"#
+    )
 }
 
 /// Stage-all benchmark for each file count (`git add -A` vs `grit add`).

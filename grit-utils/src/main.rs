@@ -15,9 +15,10 @@ use grit_utils::odb_driver::{self, open_repo};
 use grit_utils::odb_suite::{run_odb_backend_suite, run_odb_suite, OdbRunConfig};
 use grit_utils::render::{render_markdown, render_text};
 use grit_utils::scenarios::{
-    run_add_suite, run_commit_suite, run_hot_path_suite, run_prepare_add, run_prepare_commit,
-    run_prepare_merge, run_prepare_pick, run_prepare_pick_series, run_prepare_restore,
-    run_prepare_switch, run_restore_suite, run_status_suite, RunConfig,
+    run_add_suite, run_commit_suite, run_diff_suite, run_hot_path_suite, run_log_suite,
+    run_prepare_add, run_prepare_commit, run_prepare_merge, run_prepare_pick,
+    run_prepare_pick_series, run_prepare_restore, run_prepare_switch, run_restore_suite,
+    run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use std::net::TcpListener;
@@ -75,6 +76,16 @@ enum Cmd {
     /// Benchmark `grit restore` at selected repo sizes
     Restore {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000, 100_000])]
+        sizes: Vec<usize>,
+    },
+    /// Worktree diff with dozens of modified files
+    Diff {
+        #[arg(long, value_delimiter = ',', default_values_t = vec![10_000])]
+        sizes: Vec<usize>,
+    },
+    /// Last 100 commits, one line each
+    Log {
+        #[arg(long, value_delimiter = ',', default_values_t = vec![10_000])]
         sizes: Vec<usize>,
     },
     /// Switch / pick / merge hot-path scenarios (L/H sizes by default)
@@ -454,6 +465,16 @@ fn main() -> Result<()> {
             eprintln!("Running restore benchmarks...");
             let cfg = run_config(&cli, false);
             run_restore_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::Diff { sizes } => {
+            eprintln!("Running diff benchmarks...");
+            let cfg = run_config(&cli, false);
+            run_diff_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::Log { sizes } => {
+            eprintln!("Running log benchmarks...");
+            let cfg = run_config(&cli, false);
+            run_log_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
         }
         Cmd::Odb => {
             eprintln!("Running ODB read benchmarks...");

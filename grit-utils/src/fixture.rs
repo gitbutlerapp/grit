@@ -63,6 +63,54 @@ pub fn create_repo(git: &Path, file_count: usize) -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Append `commit_count` empty commits on top of an existing repo (for log benchmarks).
+pub fn extend_with_empty_commits(dir: &Path, git: &Path, commit_count: usize) -> Result<()> {
+    for i in 0..commit_count {
+        run_git(
+            git,
+            dir,
+            &["commit", "--allow-empty", "-q", "-m", &format!("bench {i}")],
+        )?;
+    }
+    Ok(())
+}
+
+/// Create a repo with `file_count` tracked files and at least `commit_count` commits.
+pub fn create_repo_with_history(
+    git: &Path,
+    file_count: usize,
+    commit_count: usize,
+) -> Result<PathBuf> {
+    let dir = create_repo(git, file_count)?;
+    if commit_count > 1 {
+        extend_with_empty_commits(&dir, git, commit_count - 1)?;
+    }
+    Ok(dir)
+}
+
+/// Modify the first `count` tracked `.txt` files (unstaged) for worktree diff benchmarks.
+pub fn modify_files_for_diff(dir: &Path, count: usize) -> Result<()> {
+    use std::io::Write as _;
+
+    let files = walkdir(dir)?;
+    let mut modified = 0;
+    for path in files {
+        if modified >= count {
+            break;
+        }
+        if path.extension().is_some_and(|e| e == "txt") {
+            let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
+            writeln!(file, "diff bench line")?;
+            modified += 1;
+        }
+    }
+    anyhow::ensure!(
+        modified >= count,
+        "expected to modify at least {count} .txt files, modified {modified}"
+    );
+    Ok(())
+}
+
 /// Dirty the worktree (~10% modified, ~5% untracked).
 pub fn dirty_repo(dir: &Path, count: usize) -> Result<()> {
     let modify_count = count / 10;
@@ -209,6 +257,24 @@ mod tests {
 
     fn which_git() -> PathBuf {
         crate::binary::resolve_binary("git", None).expect("git")
+    }
+
+    #[test]
+    fn create_repo_with_history_has_commit_count() {
+        let git = which_git();
+        let repo = create_repo_with_history(&git, 50, 100).unwrap();
+        let out = Command::new(&git)
+            .args(["rev-list", "--count", "HEAD"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let n = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse::<usize>()
+            .unwrap();
+        assert_eq!(n, 100);
+        remove_dir_robust(&scratch_dir());
     }
 
     fn create_min_repo(git: &Path, dir: &Path) -> Result<()> {
