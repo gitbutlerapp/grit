@@ -945,6 +945,15 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     assert_eq!(renamed["from"], "from.txt");
     assert_eq!(renamed["to"], "to.txt");
 
+    write_file(&seed.join("scratch.txt"), "x\n");
+    let clean_preview = gs_json(&seed, &["clean"]);
+    assert_eq!(keys(&clean_preview), ["removed"]);
+    assert!(clean_preview["removed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p.as_str() == Some("scratch.txt")));
+    let _ = gs_ok(&seed, &["clean", "-f"]);
     let committed = gs_json(&seed, &["commit", "first"]);
     assert_eq!(
         keys(&committed),

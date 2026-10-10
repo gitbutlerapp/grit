@@ -173,6 +173,17 @@ enum Command {
         #[arg(short = 'f', long = "force")]
         force: bool,
     },
+    /// Remove untracked files from the working tree.
+    Clean {
+        /// Limit cleaning to these paths. Omit to scan the whole tree.
+        paths: Vec<String>,
+        /// Actually delete files. Without this flag, only prints what would be removed.
+        #[arg(short, long)]
+        force: bool,
+        /// Remove ignored files as well (like `git clean -x`).
+        #[arg(long)]
+        ignored: bool,
+    },
     /// Stage every change and record a new commit.
     Commit {
         /// Commit message (you can also pass it with -m).
@@ -490,6 +501,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         Command::Mv { paths, force } => {
             emit_with_markdown(&commands::mv::run(&paths, force)?, opts)
         }
+        Command::Clean {
+            paths,
+            force,
+            ignored,
+        } => emit_with_markdown(&commands::clean::run(&paths, force, ignored)?, opts),
         Command::Commit {
             message,
             message_flag,
