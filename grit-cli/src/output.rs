@@ -31,6 +31,8 @@ pub enum OutputMode {
     Human,
     /// A single machine-readable JSON object on stdout.
     Json,
+    /// Agent-friendly structured output (JSON document on stdout).
+    Markdown,
 }
 
 /// Rendering options for a command outcome.
@@ -47,6 +49,9 @@ impl OutputOptions {
     pub fn validate(&self) -> Result<()> {
         if self.filter.is_some() && self.mode != OutputMode::Json {
             bail!("--filter requires --json");
+        }
+        if self.mode == OutputMode::Markdown && self.filter.is_some() {
+            bail!("--filter cannot be used with --markdown");
         }
         Ok(())
     }
@@ -69,6 +74,7 @@ pub fn emit<T: Serialize + HumanRender>(value: &T, opts: &OutputOptions) -> Resu
     match opts.mode {
         OutputMode::Human => value.render_human(),
         OutputMode::Json => write_json(value, opts.filter.as_deref())?,
+        OutputMode::Markdown => write_json(value, None)?,
     }
     Ok(())
 }
@@ -115,6 +121,12 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
             } else {
                 eprintln!("error: {human}");
             }
+        }
+        OutputMode::Markdown => {
+            let payload = serde_json::json!({ "error": human });
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            let _ = stdio::io_result(writeln!(lock, "{payload}"));
         }
         OutputMode::Json => {
             let payload = if let Some(expr) = opts.filter.as_deref() {

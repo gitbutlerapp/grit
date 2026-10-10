@@ -9,7 +9,6 @@ mod commands;
 mod context;
 mod diagnostics;
 mod json_filter;
-mod net;
 mod output;
 mod ref_name_messages;
 mod stdio;
@@ -26,8 +25,11 @@ use output::{emit, OutputMode, OutputOptions};
 #[command(name = "grit", version, about = "A simple Grit-powered CLI")]
 pub(crate) struct Cli {
     /// Emit machine-readable JSON instead of human-readable text.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with = "markdown")]
     json: bool,
+    /// Emit agent-friendly structured output (JSON document).
+    #[arg(long, global = true, conflicts_with = "json")]
+    markdown: bool,
     /// jq-like expression applied to JSON output (requires `--json`).
     ///
     /// Examples: `.branch`, `.commits[].oid`, `{branch, clean}`.
@@ -46,6 +48,20 @@ enum RemoteAction {
         name: String,
         /// The remote's URL or path.
         url: String,
+    },
+    /// List references on a remote (like `git ls-remote`).
+    Refs {
+        /// Configured remote name or a literal URL/path.
+        remote_or_url: String,
+        /// Only show refs under `refs/heads/`.
+        #[arg(long)]
+        heads: bool,
+        /// Only show refs under `refs/tags/`.
+        #[arg(long)]
+        tags: bool,
+        /// Optional ref prefixes (same rules as `git ls-remote`).
+        #[arg(value_name = "PREFIX")]
+        prefixes: Vec<String>,
     },
 }
 
@@ -241,6 +257,8 @@ fn main() {
     let opts = OutputOptions {
         mode: if cli.json {
             OutputMode::Json
+        } else if cli.markdown {
+            OutputMode::Markdown
         } else {
             OutputMode::Human
         },
@@ -269,10 +287,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
     match cli.command.unwrap_or(Command::Status) {
         Command::Init { path, bare } => emit(&commands::init::run(path, bare)?, opts),
         Command::Clone { url, dir } => emit(&commands::clone::run(&url, dir, opts.mode)?, opts),
-        Command::Remote { action } => {
-            let add = action.map(|RemoteAction::Add { name, url }| (name, url));
-            emit(&commands::remote::run(add)?, opts)
-        }
+        Command::Remote { action } => match action {
+            None => emit(&commands::remote::run_list_or_add(None)?, opts),
+            Some(RemoteAction::Add { name, url }) => {
+                emit(&commands::remote::run_list_or_add(Some((name, url)))?, opts)
+            }
+            Some(RemoteAction::Refs {
+                remote_or_url,
+                heads,
+                tags,
+                prefixes,
+            }) => emit(
+                &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes)?,
+                opts,
+            ),
+        },
         Command::Log { before } => emit(&commands::log::run(before)?, opts),
         Command::Diff { commit } => emit(&commands::diff::run(commit)?, opts),
         Command::Show { object } => emit(&commands::show::run(object)?, opts),
@@ -352,7 +381,7 @@ mod tests {
 
     /// Options every command accepts; they're documented once on the docs
     /// overview page rather than on each command's page.
-    const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "filter"];
+    const GLOBAL_OPTIONS: &[&str] = &["help", "version", "json", "markdown", "filter"];
 
     /// Required `##` sections on every command page, in order. `Markdown output`
     /// may appear after `JSON output` when the command supports `--markdown`.

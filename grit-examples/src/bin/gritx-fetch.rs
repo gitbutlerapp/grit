@@ -73,7 +73,7 @@ fn run() -> Result<()> {
         ..Default::default()
     };
 
-    let outcome = remote::fetch(&git_dir, &r, &opts)?;
+    let outcome = remote::fetch(&repo, &r, &opts)?;
 
     let changed = outcome
         .updates

@@ -1,19 +1,22 @@
-//! `grit remote` — list remotes, or add one.
+//! `grit remote` — list remotes, add one, or list refs on a remote.
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
+use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, RemoteRef};
 use grit_lib::repo::Repository;
 use serde::Serialize;
+use std::collections::HashMap;
 
 use crate::context;
 use crate::output::HumanRender;
 
-/// Result of `grit remote`, tagged by `action` (`list` / `add`).
+/// Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).
 #[derive(Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum RemoteOutcome {
     List { remotes: Vec<RemoteEntry> },
     Add { name: String, url: String },
+    Refs { refs: Vec<RemoteRefEntry> },
 }
 
 /// One remote in a `list` outcome.
@@ -21,6 +24,17 @@ pub enum RemoteOutcome {
 pub struct RemoteEntry {
     pub name: String,
     pub url: String,
+}
+
+/// One ref in a `refs` outcome.
+#[derive(Serialize)]
+pub struct RemoteRefEntry {
+    pub name: String,
+    pub oid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peeled: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symref_target: Option<String>,
 }
 
 impl HumanRender for RemoteOutcome {
@@ -36,17 +50,97 @@ impl HumanRender for RemoteOutcome {
                 }
             }
             RemoteOutcome::Add { name, url } => println!("Added remote {name} → {url}"),
+            RemoteOutcome::Refs { refs } => {
+                for entry in refs {
+                    if let Some(target) = &entry.symref_target {
+                        println!("ref: {target}\t{}", entry.name);
+                    }
+                    println!("{}\t{}", entry.oid, entry.name);
+                }
+            }
         }
     }
 }
 
 /// `Some((name, url))` adds a remote; `None` lists them.
-pub fn run(add: Option<(String, String)>) -> Result<RemoteOutcome> {
+pub fn run_list_or_add(add: Option<(String, String)>) -> Result<RemoteOutcome> {
     let repo = context::discover()?;
     match add {
         None => list(&repo),
         Some((name, url)) => add_remote(&repo, &name, &url),
     }
+}
+
+pub fn run_refs(
+    remote_or_url: &str,
+    heads: bool,
+    tags: bool,
+    prefixes: Vec<String>,
+) -> Result<RemoteOutcome> {
+    let repo = context::discover().ok();
+    let config = repo
+        .as_ref()
+        .map(|r| {
+            ConfigSet::load(&crate::context::environment(), Some(&r.git_dir), true)
+                .context("could not load config")
+        })
+        .transpose()?;
+    let remote = resolve_remote_or_url(config.as_ref(), remote_or_url)?;
+    let opts = ListRefsOptions {
+        prefixes,
+        heads,
+        tags,
+        ..Default::default()
+    };
+    let factory = DefaultHttpClientFactory;
+    let raw = remote
+        .list_refs(repo.as_ref(), &opts, Some(&factory))
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    let entries = map_remote_refs(&raw);
+    Ok(RemoteOutcome::Refs { refs: entries })
+}
+
+fn resolve_remote_or_url(config: Option<&ConfigSet>, remote_or_url: &str) -> Result<Remote> {
+    if let Some(config) = config {
+        if remote_names(config).iter().any(|n| n == remote_or_url) {
+            return Remote::from_config(config, remote_or_url)
+                .map_err(|e| anyhow::Error::msg(e.to_string()));
+        }
+    }
+    if looks_like_url_or_path(remote_or_url) {
+        Remote::from_url(remote_or_url).map_err(|e| anyhow::Error::msg(e.to_string()))
+    } else {
+        bail!(
+            "unknown remote '{remote_or_url}' (not configured — pass a URL or path, or use `grit remote add`)"
+        );
+    }
+}
+
+fn looks_like_url_or_path(s: &str) -> bool {
+    s.contains("://")
+        || s.starts_with('/')
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || s.contains(':')
+        || s.ends_with(".git")
+}
+
+fn map_remote_refs(raw: &[RemoteRef]) -> Vec<RemoteRefEntry> {
+    let mut peel_by_tag: HashMap<String, String> = HashMap::new();
+    for entry in raw {
+        if let Some(base) = entry.name.strip_suffix("^{}") {
+            peel_by_tag.insert(base.to_owned(), entry.oid.to_hex());
+        }
+    }
+    raw.iter()
+        .filter(|e| !e.name.ends_with("^{}"))
+        .map(|entry| RemoteRefEntry {
+            name: entry.name.clone(),
+            oid: entry.oid.to_hex(),
+            peeled: peel_by_tag.get(&entry.name).cloned(),
+            symref_target: entry.symref_target.clone(),
+        })
+        .collect()
 }
 
 fn list(repo: &Repository) -> Result<RemoteOutcome> {
@@ -95,7 +189,6 @@ fn remote_names(config: &ConfigSet) -> Vec<String> {
         .iter()
         .filter_map(|entry| {
             let rest = entry.key.strip_prefix("remote.")?;
-            // `remote.<name>.<key>` — the name is everything before the last dot.
             rest.rsplit_once('.').map(|(name, _)| name.to_owned())
         })
         .collect();

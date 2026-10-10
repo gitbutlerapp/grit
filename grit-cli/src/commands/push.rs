@@ -14,8 +14,10 @@ use serde::Serialize;
 
 use crate::commands::auth;
 use crate::context;
-use crate::net;
 use crate::output::HumanRender;
+use grit_lib::fetch::NoProgress;
+use grit_lib::remote::{DefaultHttpClientFactory, Remote, DEFAULT_REMOTE};
+use grit_lib::transfer::PushOptions;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
 #[derive(Serialize)]
@@ -80,7 +82,7 @@ pub fn run(tags: bool) -> Result<PushOutcome> {
                 expect_absent: false,
             })
             .collect::<Vec<_>>();
-        ("--tags".to_owned(), net::DEFAULT_REMOTE.to_owned(), specs)
+        ("--tags".to_owned(), DEFAULT_REMOTE.to_owned(), specs)
     } else {
         let (short_name, oid) = match resolve_head(&repo.git_dir)? {
             HeadState::Branch {
@@ -96,7 +98,7 @@ pub fn run(tags: bool) -> Result<PushOutcome> {
         let remote = config
             .get(&format!("branch.{short_name}.remote"))
             .filter(|r| !r.trim().is_empty())
-            .unwrap_or_else(|| net::DEFAULT_REMOTE.to_owned());
+            .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
         let dst = config
             .get(&format!("branch.{short_name}.merge"))
             .filter(|m| m.starts_with("refs/"))
@@ -114,12 +116,15 @@ pub fn run(tags: bool) -> Result<PushOutcome> {
     };
 
     // On an HTTPS auth failure, `grit auth` can refresh the token and we retry once.
-    let report = match net::push(&repo, &config, &remote, &specs) {
+    let factory = DefaultHttpClientFactory;
+    let report = match push_once(&repo, &config, &remote, &specs, &factory) {
         Ok(report) => report,
         Err(err) => {
-            let url = net::remote_url(&config, &remote).unwrap_or_default();
+            let url = config
+                .get(&format!("remote.{remote}.url"))
+                .unwrap_or_default();
             if auth::offer_reauth(&err, &url)? {
-                net::push(&repo, &config, &remote, &specs)?
+                push_once(&repo, &config, &remote, &specs, &factory)?
             } else {
                 return Err(err);
             }
@@ -168,4 +173,26 @@ pub fn run(tags: bool) -> Result<PushOutcome> {
         results,
         rejected,
     })
+}
+
+fn push_once(
+    repo: &grit_lib::repo::Repository,
+    config: &ConfigSet,
+    remote_name: &str,
+    specs: &[PushRefSpec],
+    factory: &DefaultHttpClientFactory,
+) -> Result<grit_lib::transfer::PushOutcome> {
+    Remote::from_config(config, remote_name)
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?
+        .push(
+            repo,
+            specs,
+            PushOptions {
+                tracking_remote: Some(remote_name.to_owned()),
+                ..Default::default()
+            },
+            &mut NoProgress,
+            Some(factory),
+        )
+        .map_err(|e| anyhow::Error::msg(e.to_string()))
 }
