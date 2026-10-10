@@ -65,6 +65,7 @@ flate2.workspace = true
 # `http-ureq` provides the default ureq-backed HTTP client used by gritx-fetch /
 # gritx-push for smart-HTTP remotes.
 grit-lib = { path = "../grit-lib", features = ["http-ureq"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile.workspace = true
 
 [dev-dependencies]

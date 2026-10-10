@@ -9,6 +9,7 @@ use grit_lib::repo::Repository;
 
 pub mod packfile_kv;
 pub mod remote;
+pub mod sqlite_odb;
 
 /// Resolve a revision-like string as a ref first, then as a raw object id.
 pub fn resolve_name(repo: &Repository, name: &str) -> Result<ObjectId> {
