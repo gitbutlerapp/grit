@@ -335,6 +335,38 @@ pub fn delete_reflog_entries(git_dir: &Path, refname: &str, indices: &[usize]) -
     Ok(())
 }
 
+/// Like [`delete_reflog_entries`], but reconnects surviving `old_oid` values after
+/// a gap (Git stash drop / `EXPIRE_REFLOGS_REWRITE`).
+pub fn delete_reflog_entries_rechain(
+    git_dir: &Path,
+    refname: &str,
+    indices: &[usize],
+) -> Result<()> {
+    let mut entries = read_reflog(git_dir, refname)?;
+    if entries.is_empty() {
+        return Ok(());
+    }
+    entries.reverse();
+    let indices_set: std::collections::HashSet<usize> = indices.iter().copied().collect();
+    let mut kept: Vec<ReflogEntry> = entries
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !indices_set.contains(i))
+        .map(|(_, e)| e)
+        .collect();
+    kept.reverse();
+    for i in 1..kept.len() {
+        kept[i].old_oid = kept[i - 1].new_oid;
+    }
+    if crate::reftable::is_reftable_repo(git_dir) {
+        return crate::reftable::reftable_replace_reflog(git_dir, refname, &kept);
+    }
+    let path = reflog_path(git_dir, refname);
+    let lines: String = kept.iter().map(format_reflog_entry).collect();
+    fs::write(&path, lines)?;
+    Ok(())
+}
+
 /// Expire (prune) reflog entries older than a given timestamp (Unix seconds).
 ///
 /// If `expire_time` is `None`, removes all entries.

@@ -35,7 +35,7 @@ use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
     UntrackedScan,
 };
-use crate::reflog::{delete_reflog_entries, read_reflog, truncate_last_reflog_line};
+use crate::reflog::{delete_reflog_entries_rechain, read_reflog, truncate_last_reflog_line};
 use crate::refs::{self, append_reflog, delete_ref, write_ref};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -733,6 +733,8 @@ pub fn push_stash(repo: &Repository, options: &StashCreateOptions) -> Result<Opt
         parse_commit(&obj.data)?.tree
     };
     checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
+    let mut head_index = index_from_tree(repo, &head_tree)?;
+    repo.write_index(&mut head_index)?;
     if !built.untracked_paths.is_empty() {
         remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
     }
@@ -780,7 +782,7 @@ pub fn drop_stash(repo: &Repository, n: usize, identity: &str) -> Result<()> {
         return Err(Error::StashNotFound { n });
     }
     let _ = identity;
-    delete_reflog_entries(&repo.git_dir, "refs/stash", &[n])?;
+    delete_reflog_entries_rechain(&repo.git_dir, "refs/stash", &[n])?;
     let remaining = read_reflog(&repo.git_dir, "refs/stash")?;
     if let Some(top_entry) = remaining.last() {
         refs::write_ref(&repo.git_dir, "refs/stash", &top_entry.new_oid)?;

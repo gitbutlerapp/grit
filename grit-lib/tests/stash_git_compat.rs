@@ -3,6 +3,7 @@
 use grit_lib::porcelain::stash::{
     create_stash, drop_stash, list_stashes, pop_stash, push_stash, stash_diff, StashCreateOptions,
 };
+use grit_lib::reflog::read_reflog;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -142,6 +143,87 @@ fn git_stash_list_order_visible_to_grit_pop_and_drop() {
     drop_stash(&repo, 0, "Test <t@example.com> 0 +0000").expect("drop last");
     let list_after = git_cmd(dir.path(), &["stash", "list"]);
     assert!(list_after.trim().is_empty(), "refs/stash should be gone");
+}
+
+#[test]
+fn push_stash_clears_index_when_worktree_matches_head_but_index_staged() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f"), "base\n").expect("write");
+    git_cmd(dir.path(), &["add", "f"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+
+    std::fs::write(dir.path().join("f"), "staged\n").expect("stage");
+    git_cmd(dir.path(), &["add", "f"]);
+    std::fs::write(dir.path().join("f"), "base\n").expect("revert worktree only");
+
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options(false, None))
+        .expect("push")
+        .expect("had staged index change");
+
+    let porcelain = git_cmd(dir.path(), &["status", "--porcelain=v1"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "push_stash must leave clean index and worktree, got:\n{porcelain}"
+    );
+}
+
+#[test]
+fn drop_stash_middle_entry_rechains_reflog_like_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("t"), "v\n").expect("write");
+    git_cmd(dir.path(), &["add", "t"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+
+    for msg in ["one", "two", "three"] {
+        std::fs::write(dir.path().join("t"), format!("{msg}\n")).expect("write");
+        git_cmd(dir.path(), &["stash", "push", "-m", msg]);
+    }
+
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    let git_dir = tempfile::tempdir().expect("git copy");
+    copy_repo(dir.path(), grit_dir.path());
+    copy_repo(dir.path(), git_dir.path());
+
+    drop_stash(
+        &open_grit(grit_dir.path()),
+        1,
+        "Test <t@example.com> 0 +0000",
+    )
+    .expect("grit drop middle");
+    git_cmd(git_dir.path(), &["stash", "drop", "stash@{1}"]);
+
+    let grit_log =
+        std::fs::read_to_string(grit_dir.path().join(".git/logs/refs/stash")).expect("grit reflog");
+    let git_log =
+        std::fs::read_to_string(git_dir.path().join(".git/logs/refs/stash")).expect("git reflog");
+    assert_eq!(
+        grit_log, git_log,
+        "middle stash drop must rewrite the reflog like git"
+    );
+
+    let entries = read_reflog(&grit_dir.path().join(".git"), "refs/stash").expect("parse");
+    for window in entries.windows(2) {
+        assert_eq!(
+            window[0].new_oid, window[1].old_oid,
+            "reflog chain must connect after drop"
+        );
+    }
+}
+
+fn copy_repo(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).expect("mkdir");
+    let status = std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", from.display()),
+            &to.to_string_lossy(),
+        ])
+        .status()
+        .expect("cp");
+    assert!(status.success());
 }
 
 #[test]
