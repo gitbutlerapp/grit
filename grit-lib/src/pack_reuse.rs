@@ -1,7 +1,5 @@
 //! Verbatim pack reuse for bitmap-accelerated upload-pack (streaming PACK v2).
 
-#![allow(dead_code, clippy::too_many_arguments)]
-
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
@@ -21,7 +19,8 @@ use crate::pack_index::PackIndex;
 use crate::pack_map::PackData;
 use crate::pack_object_select::try_bitmap_reachable_for_upload;
 use crate::pack_objects::{
-    encode_ofs_delta_distance, encode_pack_object_header, PackBuildOptions, PackProgress, PackStats,
+    encode_ofs_delta_distance, encode_pack_object_header, write_delta_pack_stream,
+    PackBuildOptions, PackProgress, PackStats,
 };
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -33,9 +32,106 @@ struct BitmappedPack {
     bitmap_nr: u32,
 }
 
+/// Active verbatim reuse context while streaming a pack body.
+pub struct StreamingReuse {
+    pack: BitmappedPack,
+    reuse_bits: Bitmap,
+    index: Arc<crate::pack_bitmap::BitmapIndex>,
+    source_to_output: HashMap<u64, u64>,
+}
+
+impl StreamingReuse {
+    fn new(pack: BitmappedPack, reuse_bits: Bitmap, send_set: &ReachableSet) -> Self {
+        Self {
+            pack,
+            reuse_bits,
+            index: Arc::clone(send_set.bitmap_index()),
+            source_to_output: HashMap::new(),
+        }
+    }
+
+    fn marks_reuse(&self, oid: &ObjectId) -> bool {
+        let Some(pos) = self.index.position_of(oid) else {
+            return false;
+        };
+        self.reuse_bits.get(pos as usize)
+    }
+
+    /// Copy a whole packed object when marked reusable; returns bytes written.
+    pub(crate) fn try_write_whole(
+        &mut self,
+        w: &mut dyn Write,
+        oid: &ObjectId,
+        out_offset: u64,
+        opts: &PackBuildOptions,
+    ) -> Result<Option<u64>> {
+        if !opts.reuse_objects || !self.marks_reuse(oid) {
+            return Ok(None);
+        }
+        let objects_dir = self
+            .pack
+            .idx
+            .idx_path
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| Error::CorruptObject("pack path layout".to_owned()))?;
+        let written = match write_whole_reused(w, objects_dir, oid, opts) {
+            Ok(n) => n,
+            Err(_) => return Ok(None),
+        };
+        if let Some(entry_off) = self.pack.idx.find_offset(oid) {
+            self.source_to_output.insert(entry_off, out_offset);
+        }
+        Ok(Some(written))
+    }
+
+    /// Copy or rewrite a delta object when marked reusable.
+    pub(crate) fn try_write_delta(
+        &mut self,
+        w: &mut dyn Write,
+        oid: &ObjectId,
+        out_offset: u64,
+        in_pack_base: Option<u64>,
+        opts: &PackBuildOptions,
+        oid_to_offset: &HashMap<ObjectId, u64>,
+    ) -> Result<Option<u64>> {
+        if !self.marks_reuse(oid) {
+            return Ok(None);
+        }
+        let Some(entry_off) = self.pack.idx.find_offset(oid) else {
+            return Ok(None);
+        };
+        let pack_bytes = self.pack.pack_bytes.as_ref();
+        let mut offset_map: HashMap<u64, u64> = self.source_to_output.clone();
+        for (base_oid, out_off) in oid_to_offset {
+            if let Some(src) = self.pack.idx.find_offset(base_oid) {
+                offset_map.entry(src).or_insert(*out_off);
+            }
+        }
+        let hb = self.pack.idx.hash_bytes();
+        let written = match write_one_reused(
+            w,
+            &self.pack,
+            pack_bytes,
+            entry_off,
+            hb,
+            opts,
+            &offset_map,
+            out_offset,
+            in_pack_base,
+        ) {
+            Ok(n) => n,
+            Err(_) => return Ok(None),
+        };
+        self.source_to_output.insert(entry_off, out_offset);
+        Ok(Some(written))
+    }
+}
+
 /// Write a PACK stream to `w` using bitmap reachability and verbatim reuse when possible.
 ///
 /// Returns [`None`] when reuse is unavailable (caller should stream via [`crate::pack_objects::PackObjects`]).
+#[allow(clippy::too_many_arguments)]
 pub fn try_write_streaming_pack(
     repo: &Repository,
     wants: &[ObjectId],
@@ -46,58 +142,37 @@ pub fn try_write_streaming_pack(
     progress: &mut dyn FnMut(PackProgress),
     w: &mut dyn Write,
 ) -> Result<Option<PackStats>> {
-    let _ = (
-        repo,
-        wants,
-        haves,
-        shallow_grafts,
-        filter,
-        opts,
-        progress,
-        w,
-    );
-    if try_bitmap_reachable_for_upload(&repo.odb, wants, haves, filter, shallow_grafts)?.is_none() {
+    let Some((send_set, have_closure)) =
+        try_bitmap_reachable_for_upload(&repo.odb, wants, haves, filter, shallow_grafts)?
+    else {
+        return Ok(None);
+    };
+    let index = send_set.bitmap_index();
+    let objects_dir = repo.odb.objects_dir();
+    let packs = resolve_bitmapped_packs(objects_dir, index, allow_multi_pack_reuse(repo))?;
+    if packs.is_empty() || !send_set.extended_objects().is_empty() {
         return Ok(None);
     }
-    // Verbatim reuse streaming is implemented below but not yet enabled; upload-pack
-    // already streams via [`crate::pack_objects::PackObjects`] when this returns `None`.
-    Ok(None)
-}
+    let pack = packs.into_iter().next().expect("non-empty");
+    let send: Vec<ObjectId> = send_set.iter_grouped_by_kind().collect();
+    progress(PackProgress::Enumerated { total: send.len() });
 
-struct CountWriter<W: Write> {
-    inner: W,
-    count: u64,
-}
+    let send_bits = send_set.reuse_send_bits();
+    let reuse_bits = compute_reuse_bits(&pack, &send_bits, &send_set)?;
 
-impl<W: Write> CountWriter<W> {
-    fn new(inner: W) -> Self {
-        Self { inner, count: 0 }
-    }
-    fn bytes(&self) -> u64 {
-        self.count
-    }
-}
+    let blob_name_hashes =
+        crate::pack_object_select::blob_name_hashes_for_send(index, &send, &have_closure);
+    let plan =
+        crate::pack_objects::plan_deltas(&repo.odb, &send, &have_closure, opts, &blob_name_hashes)?;
+    progress(PackProgress::PlannedDeltas);
 
-impl<W: Write> Write for CountWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let n = self.inner.write(buf)?;
-        self.count += n as u64;
-        Ok(n)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
-    }
+    let mut reuse = StreamingReuse::new(pack, reuse_bits, &send_set);
+    let stats = write_delta_pack_stream(&repo.odb, &plan, opts, w, Some(&mut reuse))?;
+    Ok(Some(stats))
 }
 
 fn allow_multi_pack_reuse(_repo: &Repository) -> bool {
     false
-}
-
-fn write_pack_header(w: &mut dyn Write, count: u32) -> Result<()> {
-    w.write_all(b"PACK").map_err(Error::Io)?;
-    w.write_all(&2u32.to_be_bytes()).map_err(Error::Io)?;
-    w.write_all(&count.to_be_bytes()).map_err(Error::Io)?;
-    Ok(())
 }
 
 fn resolve_bitmapped_packs(
@@ -128,8 +203,7 @@ fn resolve_bitmapped_packs(
                 let stem = pref.strip_suffix(".idx").unwrap_or(&pref);
                 if let Some(pos) = idx_names.iter().position(|n| n == &pref) {
                     ranges.retain(|r| r.pack_id == pos as u32);
-                } else if let Some((_, pack)) = indexes.get(stem).map(|i| (stem, i)) {
-                    let _ = pack;
+                } else if indexes.contains_key(stem) {
                     ranges.retain(|r| {
                         idx_names
                             .get(r.pack_id as usize)
@@ -191,7 +265,7 @@ fn compute_reuse_bits(
 ) -> Result<Bitmap> {
     let mut reuse = Bitmap::new();
     let pack_bytes = pack.pack_bytes.as_ref();
-    let _hb = pack.idx.hash_bytes();
+    let hb = pack.idx.hash_bytes();
     loop {
         let mut changed = false;
         for rel in 0..pack.bitmap_nr {
@@ -210,13 +284,14 @@ fn compute_reuse_bits(
             }
             let mut p = entry_off as usize;
             let (ty, _) = parse_pack_object_header(pack_bytes, &mut p)?;
-            let mark = match ty {
-                PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => true,
-                PackedType::RefDelta | PackedType::OfsDelta => false,
-            };
-            if mark {
-                reuse.set(pos as usize);
-                changed = true;
+            match ty {
+                PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
+                    reuse.set(pos as usize);
+                    changed = true;
+                }
+                PackedType::OfsDelta | PackedType::RefDelta => {
+                    let _ = (hb, send_set);
+                }
             }
         }
         if !changed {
@@ -257,49 +332,10 @@ fn delta_base_oid(
     }))
 }
 
-fn write_reused_from_pack(
-    w: &mut dyn Write,
-    pack: &BitmappedPack,
-    reuse_bits: &Bitmap,
-    send_set: &ReachableSet,
-    opts: &PackBuildOptions,
-    reused_oids: &mut HashSet<ObjectId>,
-    pack_offset: &mut u64,
-) -> Result<u32> {
-    let mut count = 0u32;
-    let mut offset_map: HashMap<u64, u64> = HashMap::new();
-    for rel in 0..pack.bitmap_nr {
-        let pos = pack.bitmap_pos + rel;
-        if !reuse_bits.get(pos as usize) {
-            continue;
-        }
-        let oid = send_set
-            .bitmap_index()
-            .oid_at(pos)
-            .map_err(|_| Error::CorruptObject("bitmap oid missing during reuse".to_owned()))?;
-        let objects_dir = pack
-            .idx
-            .idx_path
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| Error::CorruptObject("pack path layout".to_owned()))?;
-        let start_out = *pack_offset;
-        let written = write_whole_reused(w, objects_dir, &oid, *pack_offset, opts)?;
-        *pack_offset += written;
-        if let Some(entry_off) = pack.idx.find_offset(&oid) {
-            offset_map.insert(entry_off, start_out);
-        }
-        reused_oids.insert(oid);
-        count += 1;
-    }
-    Ok(count)
-}
-
 fn write_whole_reused(
     w: &mut dyn Write,
     objects_dir: &Path,
     oid: &ObjectId,
-    _pack_offset: u64,
     opts: &PackBuildOptions,
 ) -> Result<u64> {
     if opts.reuse_objects {
@@ -322,6 +358,7 @@ fn write_one_reused(
     opts: &PackBuildOptions,
     offset_map: &HashMap<u64, u64>,
     pack_offset: u64,
+    in_pack_base: Option<u64>,
 ) -> Result<u64> {
     let Some(end) = pack_entry_raw_end(&pack.idx, pack_bytes, entry_off) else {
         return Err(Error::CorruptObject(
@@ -346,7 +383,7 @@ fn write_one_reused(
                 w.write_all(slice).map_err(Error::Io)?;
                 return Ok(slice.len() as u64);
             };
-            if let Some(new_base) = offset_map.get(&base_offset).copied() {
+            if let Some(new_base) = offset_map.get(&base_offset).copied().or(in_pack_base) {
                 let dist = pack_offset
                     .checked_sub(new_base)
                     .ok_or_else(|| Error::CorruptObject("ofs-delta fixup underflow".to_owned()))?;

@@ -138,6 +138,14 @@ fn try_bitmap_enumeration(
     }))
 }
 
+pub(crate) fn blob_name_hashes_for_send(
+    index: &BitmapIndex,
+    send: &[ObjectId],
+    have_closure: &HashSet<ObjectId>,
+) -> HashMap<ObjectId, u32> {
+    blob_name_hashes_from_bitmap(index, send, have_closure)
+}
+
 fn blob_name_hashes_from_bitmap(
     index: &BitmapIndex,
     send: &[ObjectId],

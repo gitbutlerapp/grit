@@ -430,16 +430,31 @@ fn write_fake_ssh(grit_bin: &Path, dir: &Path) -> Option<PathBuf> {
     let body = format!(
         r#"#!/bin/sh
 cmd=
-for cmd in "$@"; do :; done
+for arg do
+  case "$arg" in
+    git-upload-pack|git-upload-pack\ *)
+      cmd=$arg
+      break
+      ;;
+  esac
+done
 case "$cmd" in
-  "git-upload-pack "*)
+  git-upload-pack\ *)
     path="${{cmd#git-upload-pack }}"
-    path="${{path#\'}}"; path="${{path%\'}}"
-    path="${{path#\"}}"; path="${{path%\"}}"
-    exec "{grit}" upload-pack "$path"
     ;;
-  *) exec sh -c "$cmd" ;;
+  git-upload-pack)
+    path=$2
+    ;;
+  *)
+    path=
+    ;;
 esac
+path="${{path#\'}}"; path="${{path%\'}}"
+path="${{path#\"}}"; path="${{path%\"}}"
+if test -n "$path"; then
+  exec "{grit}" upload-pack "$path"
+fi
+exec "$@"
 "#,
         grit = grit_bin.display()
     );

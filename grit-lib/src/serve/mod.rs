@@ -206,6 +206,22 @@ pub(crate) fn write_line(out: &mut dyn std::io::Write, data: &str) -> Result<()>
     Ok(())
 }
 
+/// Write one v2 fetch response line, using sideband channel 1 when `sideband_all`.
+pub(crate) fn write_v2_fetch_line(
+    out: &mut dyn std::io::Write,
+    data: &str,
+    sideband_all: bool,
+) -> Result<()> {
+    if sideband_all {
+        let payload = format!("{data}\n");
+        crate::pkt_line::write_sideband_packet(out, 1, payload.as_bytes())
+            .map_err(crate::error::Error::Io)?;
+    } else {
+        write_line(out, data)?;
+    }
+    Ok(())
+}
+
 /// Write a flush packet.
 pub(crate) fn write_flush(out: &mut dyn std::io::Write) -> Result<()> {
     out.write_all(crate::pkt_line::FLUSH.as_bytes())?;

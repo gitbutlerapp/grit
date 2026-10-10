@@ -200,10 +200,26 @@ impl<'a, W: Write + ?Sized + 'a> SidebandChannel1Writer<'a, W> {
 impl<'a, W: Write + ?Sized + 'a> Write for SidebandChannel1Writer<'a, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         const MAX_PAYLOAD: usize = 65515;
-        self.pending.extend_from_slice(buf);
-        while self.pending.len() >= MAX_PAYLOAD {
-            let chunk: Vec<u8> = self.pending.drain(..MAX_PAYLOAD).collect();
-            write_sideband_packet(self.inner, 1, &chunk)?;
+        let mut offset = 0usize;
+        // Drain any carry-over first without duplicating the new slice.
+        if !self.pending.is_empty() {
+            let need = MAX_PAYLOAD.saturating_sub(self.pending.len());
+            if need > 0 && offset < buf.len() {
+                let take = need.min(buf.len());
+                self.pending.extend_from_slice(&buf[..take]);
+                offset += take;
+            }
+            while self.pending.len() >= MAX_PAYLOAD {
+                let chunk: Vec<u8> = self.pending.drain(..MAX_PAYLOAD).collect();
+                write_sideband_packet(self.inner, 1, &chunk)?;
+            }
+        }
+        while offset + MAX_PAYLOAD <= buf.len() {
+            write_sideband_packet(self.inner, 1, &buf[offset..offset + MAX_PAYLOAD])?;
+            offset += MAX_PAYLOAD;
+        }
+        if offset < buf.len() {
+            self.pending.extend_from_slice(&buf[offset..]);
         }
         Ok(buf.len())
     }

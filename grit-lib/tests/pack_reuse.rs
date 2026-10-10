@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::objects::ObjectId;
+use grit_lib::pack::{packed_full_object_slice, read_local_pack_indexes_cached};
 use grit_lib::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::{HashAlgo, RepoFixture};
@@ -136,6 +137,7 @@ fn stream_clone_pack(repo: &Repository, wants: &[ObjectId], haves: &[ObjectId]) 
         wants,
         haves,
         &HashSet::new(),
+        &HashSet::new(),
         None,
         &opts,
         &mut progress,
@@ -154,6 +156,18 @@ fn full_clone_reuses_pack_and_git_index_pack_strict_ok() {
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let pack = stream_clone_pack(&repo, &[tip], &[]);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
+    let objects = fx.path().join(".git").join("objects");
+    let indexes = read_local_pack_indexes_cached(&objects).expect("indexes");
+    assert!(!indexes.is_empty(), "expected a source pack");
+    let blob = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD:a.txt"]).stdout.trim()).unwrap();
+    let verbatim = packed_full_object_slice(&objects, &blob)
+        .expect("lookup")
+        .expect("reusable slice");
+    assert!(
+        pack.windows(verbatim.len())
+            .any(|w| w == verbatim.as_slice()),
+        "clone pack must contain verbatim reused bytes from the source pack"
+    );
 }
 
 #[test]
@@ -234,6 +248,7 @@ fn thin_pack_ref_delta_conversion() {
         &repo,
         &[tip],
         &[parent],
+        &HashSet::new(),
         &HashSet::new(),
         None,
         &opts,
