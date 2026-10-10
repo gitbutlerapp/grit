@@ -88,6 +88,8 @@ pub enum RemoteUrl {
     Http(String),
     /// `https://` smart HTTP URL.
     Https(String),
+    /// On-disk git bundle file (detected by signature, not extension).
+    Bundle(PathBuf),
 }
 
 impl RemoteUrl {
@@ -102,7 +104,7 @@ impl RemoteUrl {
     pub fn as_wire_url(&self) -> Option<&str> {
         match self {
             Self::Git(s) | Self::Ssh(s) | Self::Http(s) | Self::Https(s) => Some(s.as_str()),
-            Self::Local(_) | Self::File(_) => None,
+            Self::Local(_) | Self::File(_) | Self::Bundle(_) => None,
         }
     }
 
@@ -110,7 +112,7 @@ impl RemoteUrl {
     #[must_use]
     pub fn to_url_string(&self) -> String {
         match self {
-            Self::Local(p) | Self::File(p) => p.to_string_lossy().into_owned(),
+            Self::Local(p) | Self::File(p) | Self::Bundle(p) => p.to_string_lossy().into_owned(),
             Self::Git(s) | Self::Ssh(s) | Self::Http(s) | Self::Https(s) => s.clone(),
         }
     }
@@ -133,7 +135,11 @@ pub fn parse_remote_url(url: &str) -> RemoteResult<RemoteUrl> {
     if url.starts_with("file://") {
         let path = crate::transport_path::file_url_to_local_path(url)
             .map_err(|e| RemoteError::InvalidUrl(e.to_string()))?;
-        return Ok(RemoteUrl::File(PathBuf::from(path)));
+        let path = PathBuf::from(path);
+        if crate::bundle_remote::is_bundle_path(&path) {
+            return Ok(RemoteUrl::Bundle(path));
+        }
+        return Ok(RemoteUrl::File(path));
     }
     if url.starts_with("git://") {
         crate::transport::parse_git_url(url).map_err(|e| RemoteError::InvalidUrl(e.to_string()))?;
@@ -150,7 +156,11 @@ pub fn parse_remote_url(url: &str) -> RemoteResult<RemoteUrl> {
         return Ok(RemoteUrl::Ssh(url.to_owned()));
     }
     if is_local_path_remote_url(url) && url_is_local_not_ssh(url) {
-        return Ok(RemoteUrl::Local(PathBuf::from(url)));
+        let path = PathBuf::from(url);
+        if crate::bundle_remote::is_bundle_path(&path) {
+            return Ok(RemoteUrl::Bundle(path));
+        }
+        return Ok(RemoteUrl::Local(path));
     }
     Err(RemoteError::UnsupportedScheme)
 }
@@ -362,6 +372,7 @@ impl Remote {
     ) -> RemoteResult<Vec<RemoteRef>> {
         let (git_dir, work_tree, odb) = repo_context(repo);
         match &self.fetch_url {
+            RemoteUrl::Bundle(path) => list_refs_from_bundle(path, opts),
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git = local_git_dir_from_url(&self.fetch_url, git_dir, work_tree)?;
                 let remote_odb =
@@ -383,6 +394,9 @@ impl Remote {
         connect: ConnectOptions,
     ) -> RemoteResult<FetchOutcome> {
         match url {
+            RemoteUrl::Bundle(path) => {
+                Ok(crate::bundle_remote::fetch_from_bundle(&repo.git_dir, path, opts)?)
+            }
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git =
                     local_git_dir_from_url(url, &repo.git_dir, repo.work_tree.as_deref())?;
@@ -455,6 +469,7 @@ impl Remote {
                     progress,
                 )?)
             }
+            RemoteUrl::Bundle(_) => Err(RemoteError::UnsupportedScheme),
         }
     }
 
@@ -487,7 +502,7 @@ impl Remote {
                 let mut conn = transport.connect(wire, Service::UploadPack, &connect_opts)?;
                 list_refs_from_connection(&mut *conn, local_git_dir, odb, opts)
             }
-            RemoteUrl::Local(_) | RemoteUrl::File(_) => unreachable!(),
+            RemoteUrl::Local(_) | RemoteUrl::File(_) | RemoteUrl::Bundle(_) => unreachable!(),
         }
     }
 }
@@ -940,6 +955,27 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// List references from a on-disk git directory (local / `file://` remotes).
 ///
 /// # Errors
+fn list_refs_from_bundle(path: &Path, opts: &ListRefsOptions) -> RemoteResult<Vec<RemoteRef>> {
+    let bundle = crate::bundle::Bundle::open(path)
+        .map_err(|e| RemoteError::Library(Error::Message(e.to_string())))?;
+    let mut out = Vec::new();
+    for (name, oid) in &bundle.header().refs {
+        if !ref_matches_list_opts(name, opts) {
+            continue;
+        }
+        if name != "HEAD" && !crate::refs::is_valid_fetch_advertised_ref(name) {
+            continue;
+        }
+        out.push(RemoteRef {
+            name: name.clone(),
+            oid: *oid,
+            symref_target: None,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
 ///
 /// Returns [`RemoteError::Library`] on I/O or ref resolution failures.
 pub fn list_refs_from_git_dir(

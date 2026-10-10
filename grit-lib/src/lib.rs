@@ -117,6 +117,7 @@ pub mod blame;
 pub mod bloom;
 pub mod branch_tracking;
 pub mod bundle;
+pub mod bundle_remote;
 pub mod check_ref_format;
 pub mod clone;
 pub mod combined_diff_patch;
