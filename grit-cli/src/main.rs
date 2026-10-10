@@ -18,7 +18,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
-use output::{emit, OutputMode, OutputOptions};
+use output::{emit, emit_with_markdown, OutputMode, OutputOptions};
 
 /// A small, opinionated Git client built on `grit-lib`.
 #[derive(Debug, Parser)]
@@ -304,7 +304,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
                 heads,
                 tags,
                 prefixes,
-            }) => emit(
+            }) => emit_with_markdown(
                 &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes)?,
                 opts,
             ),
