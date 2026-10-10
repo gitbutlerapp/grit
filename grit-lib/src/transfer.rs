@@ -22,7 +22,7 @@ use std::path::Path;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
-use crate::delta_encode::{encode_lcp_delta, encode_prefix_extension_delta};
+use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
@@ -1130,6 +1130,7 @@ fn serialize_pack_with_deltas(
         .collect();
 
     let mut oid_to_offset: HashMap<ObjectId, u64> = HashMap::new();
+    let mut delta_index_by_base: HashMap<ObjectId, DeltaIndex> = HashMap::new();
 
     for entry in &plan.entries {
         let start = buf.len() as u64;
@@ -1175,7 +1176,19 @@ fn serialize_pack_with_deltas(
                         {
                             encode_prefix_extension_delta(&base_data, &entry.data)?
                         } else {
-                            encode_lcp_delta(&base_data, &entry.data)?
+                            let base_ref = payloads
+                                .get(&base_oid)
+                                .copied()
+                                .unwrap_or(base_data.as_slice());
+                            delta_index_by_base
+                                .entry(base_oid)
+                                .or_insert_with(|| DeltaIndex::new(base_ref))
+                                .encode(&entry.data, 0)
+                                .ok_or_else(|| {
+                                    Error::CorruptObject(
+                                        "failed to encode pack delta for object".into(),
+                                    )
+                                })?
                         }
                     };
 

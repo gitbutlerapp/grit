@@ -107,6 +107,10 @@ harness = false
 name = "odb_read"
 harness = false
 
+[[bench]]
+name = "delta_encode"
+harness = false
+
 [dev-dependencies]
 criterion.workspace = true
 grit-test-support = { path = "../grit-test-support" }

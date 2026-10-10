@@ -5,7 +5,7 @@ mod pack_delta_scenarios;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use grit_lib::delta_encode::{encode_lcp_delta, encode_prefix_extension_delta};
+use grit_lib::delta_encode::{encode_delta, encode_lcp_delta, encode_prefix_extension_delta};
 use grit_lib::error::Error;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::odb::Odb;
@@ -16,6 +16,7 @@ use grit_lib::pack::{
     PackedDeltaDependency,
 };
 use grit_lib::unpack_objects::apply_delta;
+use grit_test_support::git_fsck;
 use grit_test_support::objects::{
     hash_loose_object, write_pack_and_index, DeltaOps, HashAlgo, IndexPackOptions,
     ObjectKind as PackObjectKind, PackBuilder, RepoFixture,
@@ -85,6 +86,57 @@ fn t5303_apply_delta_source_size_mismatch_is_rejected() {
 }
 
 // --- delta_encode round-trip via git index-pack ---
+
+#[test]
+fn rolling_hash_delta_mid_edit_index_pack_strict_and_git_fsck() {
+    run_algo(HashAlgo::Sha1, |algo| {
+        let base = b"pack delta base line\n".repeat(4000);
+        let mut target = base.clone();
+        let mid = target.len() / 2;
+        target.splice(mid..mid, b"// grit rolling-hash insert\n".repeat(40));
+        let delta = encode_delta(&base, &target, 0).expect("encode");
+        assert_eq!(apply_delta(&base, &delta).expect("apply"), target);
+        assert!(
+            delta.len() * 100 <= target.len() * 105,
+            "delta {} vs target {} bytes",
+            delta.len(),
+            target.len()
+        );
+
+        let base_oid = ObjectId::from_hex(&hash_loose_object(algo, "blob", &base)).unwrap();
+        let built = {
+            let mut builder = PackBuilder::new(algo);
+            builder.add_full(PackObjectKind::Blob, &base);
+            builder.add_ref_delta(base_oid.as_bytes(), &delta, delta.len());
+            builder.build()
+        };
+        let repo = RepoFixture::init(algo).expect("init");
+        let outcome = write_pack_and_index(
+            &repo.objects_dir(),
+            "rolling-hash",
+            &built.bytes,
+            algo,
+            &IndexPackOptions::default(),
+        );
+        assert!(outcome.index_ok, "{}", outcome.index_stderr);
+
+        let pack_path = outcome.pack_path;
+        let strict = std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["index-pack", "--strict", "-v"])
+            .arg(&pack_path)
+            .output()
+            .expect("git index-pack --strict");
+        assert!(
+            strict.status.success(),
+            "strict index-pack: {}",
+            String::from_utf8_lossy(&strict.stderr)
+        );
+
+        let fsck = git_fsck(repo.path(), true);
+        assert!(fsck.ok, "git fsck --strict: {:?}", fsck.msg_ids);
+    });
+}
 
 #[test]
 fn delta_encode_lcp_and_prefix_extension_index_pack_with_git() {
