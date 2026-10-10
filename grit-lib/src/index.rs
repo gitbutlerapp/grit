@@ -2753,8 +2753,9 @@ fn write_lock_pid_file(pid_path: &Path) -> io::Result<()> {
 
 /// Exclusive `.git/index.lock` held for a mutating porcelain operation.
 ///
-/// Acquire with [`Self::acquire`] before changing the working tree; persist the index, then
-/// release on drop when uncommitted.
+/// Acquire with [`Self::acquire`] before changing the working tree; persist the index with
+/// [`Repository::write_index`](crate::repo::Repository::write_index), then release on drop when
+/// uncommitted.
 pub struct IndexLock {
     pub(crate) index_path: PathBuf,
     pub(crate) lock_path: PathBuf,
