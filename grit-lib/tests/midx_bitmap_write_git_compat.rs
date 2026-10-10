@@ -324,7 +324,10 @@ fn incremental_layer_writes_no_placeholder() {
     midx_support::assert_no_zero_byte_midx_bitmaps(&pack_dir);
 }
 
-fn extend_chain_with_incremental_layers(repo: &RepoFixture, pack_dir: &Path) -> Option<Vec<String>> {
+fn extend_chain_with_incremental_layers(
+    repo: &RepoFixture,
+    pack_dir: &Path,
+) -> Option<Vec<String>> {
     for i in 0..4 {
         std::fs::write(
             repo.path().join(format!("chain-{i}.txt")),
