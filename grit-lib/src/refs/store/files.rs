@@ -46,30 +46,48 @@ pub struct FilesRefStore {
     namespace_prefix: Option<String>,
     #[allow(dead_code)]
     log_refs: LogRefsConfig,
-    packed_cache: Mutex<HashMap<String, ObjectId>>,
+    packed_cache: Mutex<PackedCacheEntry>,
     prepared: Mutex<Option<PreparedFilesBatch>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackedRefsStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+#[derive(Debug)]
+struct PackedCacheEntry {
+    stamp: PackedRefsStamp,
+    map: HashMap<String, ObjectId>,
 }
 
 #[derive(Debug)]
 struct PreparedFilesBatch {
     #[allow(dead_code)]
     lock_name: String,
+    #[allow(dead_code)]
     updates: Vec<RefUpdate>,
     ref_locks: HashMap<String, PathBuf>,
     packed_lock: Option<PathBuf>,
+    /// Ref/reflog state observed at prepare (must drive commit, not a reload).
+    before_commit: RefBatchState,
+    after_commit: RefBatchState,
 }
 
 impl FilesRefStore {
     /// Open a files backend at `config.git_dir`.
     #[must_use]
     pub fn open(config: FilesRefStoreConfig) -> Self {
-        let packed = read_packed_refs_map(&config.common_dir).unwrap_or_default();
+        let path = config.common_dir.join("packed-refs");
+        let stamp = Self::packed_refs_stamp(&path);
+        let map = read_packed_refs_map(&config.common_dir).unwrap_or_default();
         Self {
             git_dir: config.git_dir,
             common_dir: config.common_dir,
             namespace_prefix: config.namespace_prefix,
             log_refs: config.log_refs,
-            packed_cache: Mutex::new(packed),
+            packed_cache: Mutex::new(PackedCacheEntry { stamp, map }),
             prepared: Mutex::new(None),
         }
     }
@@ -87,12 +105,29 @@ impl FilesRefStore {
         }))
     }
 
-    fn invalidate_packed_cache(&self) {
-        if let Ok(map) = read_packed_refs_map(&self.common_dir) {
-            if let Ok(mut cache) = self.packed_cache.lock() {
-                *cache = map;
-            }
+    fn packed_refs_stamp(path: &Path) -> PackedRefsStamp {
+        match fs::metadata(path) {
+            Ok(meta) => PackedRefsStamp {
+                len: meta.len(),
+                modified: meta.modified().ok(),
+            },
+            Err(_) => PackedRefsStamp {
+                len: 0,
+                modified: None,
+            },
         }
+    }
+
+    fn refresh_packed_cache_if_stale(&self) -> Result<()> {
+        let path = self.common_dir.join("packed-refs");
+        let stamp = Self::packed_refs_stamp(&path);
+        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.stamp == stamp {
+            return Ok(());
+        }
+        guard.map = read_packed_refs_map(&self.common_dir)?;
+        guard.stamp = stamp;
+        Ok(())
     }
 
     fn read_raw_at_route(&self, route: &RefStorageRoute) -> Result<Option<RawRef>> {
@@ -103,8 +138,9 @@ impl FilesRefStore {
             Err(Error::Io(ref e)) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
+        self.refresh_packed_cache_if_stale()?;
         let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(oid) = cache.get(&route.storage_name) {
+        if let Some(oid) = cache.map.get(&route.storage_name) {
             return Ok(Some(RawRef::Direct(*oid)));
         }
         Ok(None)
@@ -115,9 +151,10 @@ impl FilesRefStore {
     }
 
     fn load_raw_map_prefix(&self, logical_prefix: &str) -> Result<BTreeMap<String, RawRef>> {
+        self.refresh_packed_cache_if_stale()?;
         let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
         let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-        for (storage, oid) in cache.iter() {
+        for (storage, oid) in cache.map.iter() {
             let logical = self.logical_name(storage);
             if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
                 map.insert(logical, RawRef::Direct(*oid));
@@ -206,11 +243,14 @@ impl FilesRefStore {
     }
 
     fn needs_packed_lock(&self, updates: &[RefUpdate]) -> bool {
+        if self.refresh_packed_cache_if_stale().is_err() {
+            return false;
+        }
         let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
         updates.iter().any(|u| {
             u.new_value.is_none()
                 && !u.flags.log_only
-                && cache.contains_key(&self.route(&u.name).storage_name)
+                && cache.map.contains_key(&self.route(&u.name).storage_name)
         })
     }
 
@@ -326,8 +366,12 @@ impl FilesRefStore {
             if b == a {
                 continue;
             }
-            let (_, path, default_lock) = self.ref_lock_paths(name);
-            let lock = held_locks.get(name).unwrap_or(&default_lock);
+            let lock = held_locks.get(name).ok_or_else(|| {
+                Error::Message(format!(
+                    "ref '{name}' changed at commit without a prepare-time lock"
+                ))
+            })?;
+            let (_, path, _) = self.ref_lock_paths(name);
             match a {
                 None => {
                     self.delete_loose_ref(name, lock, packed_lock_held)?;
@@ -337,7 +381,7 @@ impl FilesRefStore {
                 }
             }
         }
-        self.invalidate_packed_cache();
+        let _ = self.refresh_packed_cache_if_stale();
         Ok(())
     }
 }
@@ -422,11 +466,12 @@ impl RefStore for FilesRefStore {
             )?;
         }
 
-        let mut after = state.snapshot();
+        let before_commit = state.snapshot();
+        let mut after_commit = before_commit.clone();
         for update in &updates {
-            apply_update(&mut after, update)?;
+            apply_update(&mut after_commit, update)?;
         }
-        let changed = changed_ref_names(&state.refs, &after.refs);
+        let changed = changed_ref_names(&before_commit.refs, &after_commit.refs);
 
         let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
         for name in &changed {
@@ -488,6 +533,8 @@ impl RefStore for FilesRefStore {
             updates,
             ref_locks,
             packed_lock,
+            before_commit,
+            after_commit,
         });
 
         Ok(Box::new(FilesPrepared {
@@ -580,21 +627,14 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
             return Ok(());
         };
 
-        let before = self
-            .store
-            .load_batch_state()
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        let mut after = before.snapshot();
-        for update in &batch.updates {
-            apply_update(&mut after, update)?;
-        }
-
         let packed_lock_held = batch.packed_lock.is_some();
 
-        if let Err(err) =
-            self.store
-                .persist_state_diff(&before, &after, &batch.ref_locks, packed_lock_held)
-        {
+        if let Err(err) = self.store.persist_state_diff(
+            &batch.before_commit,
+            &batch.after_commit,
+            &batch.ref_locks,
+            packed_lock_held,
+        ) {
             FilesRefStore::release_locks(&batch);
             return Err(RefStoreError::Corrupt(err.to_string()));
         }

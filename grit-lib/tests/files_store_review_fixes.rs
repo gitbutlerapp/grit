@@ -1,6 +1,8 @@
-//! Regression tests for FilesRefStore namespace context and refname validation.
+//! Regression tests for FilesRefStore namespace context, refname validation,
+//! prepared-commit symref races, and packed-refs cache invalidation.
 
 use std::fs;
+use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{
@@ -13,6 +15,10 @@ const TRAVERSAL_REF: &str = "refs/heads/../../config";
 
 fn sample_oid() -> ObjectId {
     "67bf698f3ab735e92fb011a99cff3497c44d30c1".parse().unwrap()
+}
+
+fn other_oid() -> ObjectId {
+    "1111111111111111111111111111111111111111".parse().unwrap()
 }
 
 fn bare_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -136,4 +142,109 @@ fn files_store_rejects_invalid_refname_corpus() {
             "name {name}: {err:?}"
         );
     }
+}
+
+#[test]
+fn files_store_commit_uses_prepare_time_symref_target_not_raced_target() {
+    let (_dir, git_dir) = bare_git_dir();
+    let oid_a = sample_oid();
+    let oid_b = other_oid();
+    let new_oid = "2222222222222222222222222222222222222222"
+        .parse::<ObjectId>()
+        .unwrap();
+
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/a\n").expect("HEAD");
+    fs::write(git_dir.join("refs/heads/a"), format!("{oid_a}\n")).expect("a");
+    fs::write(git_dir.join("refs/heads/b"), format!("{oid_b}\n")).expect("b");
+
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "HEAD".to_owned(),
+            new_value: Some(RawRef::Direct(new_oid)),
+            expected: Expected::Any,
+            reflog: None,
+            flags: Default::default(),
+        })
+        .expect("txn");
+    let prepared = store.prepare(txn).expect("prepare");
+
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/b\n").expect("retarget HEAD");
+    let b_lock = git_dir.join("refs/heads/b.lock");
+    fs::write(&b_lock, "held-by-other-writer\n").expect("b.lock");
+
+    prepared
+        .commit()
+        .expect("commit must use frozen prepare targets");
+
+    assert_eq!(
+        fs::read_to_string(&b_lock).expect("b.lock"),
+        "held-by-other-writer\n",
+        "must not clobber an unheld lock path"
+    );
+    assert_eq!(
+        fs::read_to_string(git_dir.join("refs/heads/b")).expect("b"),
+        format!("{oid_b}\n"),
+        "raced symref target must be unchanged"
+    );
+    assert_eq!(
+        fs::read_to_string(git_dir.join("refs/heads/a")).expect("a"),
+        format!("{new_oid}\n"),
+        "prepare-time peeled target must be updated"
+    );
+}
+
+#[test]
+fn files_store_observes_external_packed_refs_without_reopen() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let git_dir = dir.path().to_path_buf();
+    let init = Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(&git_dir)
+        .status()
+        .expect("git init");
+    assert!(init.success(), "git init --bare failed");
+
+    let oid = sample_oid();
+    fs::write(git_dir.join("refs/heads/main"), format!("{oid}\n")).expect("loose main");
+
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("read loose"),
+        Some(RawRef::Direct(oid))
+    );
+
+    let status = Command::new("git")
+        .args(["pack-refs", "--all"])
+        .env("GIT_DIR", &git_dir)
+        .status()
+        .expect("git pack-refs");
+    assert!(status.success(), "git pack-refs failed");
+    assert!(
+        git_dir.join("packed-refs").is_file(),
+        "expected packed-refs after pack-refs"
+    );
+
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("read packed"),
+        Some(RawRef::Direct(oid)),
+        "long-lived store must reload packed-refs after external rewrite"
+    );
+}
+
+#[test]
+fn files_store_observes_new_packed_refs_file_without_reopen() {
+    let (_dir, git_dir) = bare_git_dir();
+    let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
+    assert_eq!(store.read_raw("refs/heads/main").expect("missing"), None);
+
+    let oid = sample_oid();
+    let mut packed = String::from("# pack-refs with: peeled fully-peeled sorted \n");
+    packed.push_str(&format!("{oid} refs/heads/main\n"));
+    fs::write(git_dir.join("packed-refs"), packed).expect("packed-refs");
+
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("read new packed"),
+        Some(RawRef::Direct(oid))
+    );
 }
