@@ -346,8 +346,10 @@ pub fn delete_reflog_entries_rechain(
     if entries.is_empty() {
         return Ok(());
     }
+    let oldest_newest_first_idx = entries.len().saturating_sub(1);
     entries.reverse();
     let indices_set: std::collections::HashSet<usize> = indices.iter().copied().collect();
+    let removed_oldest = indices_set.contains(&oldest_newest_first_idx);
     let mut kept: Vec<ReflogEntry> = entries
         .into_iter()
         .enumerate()
@@ -355,6 +357,11 @@ pub fn delete_reflog_entries_rechain(
         .map(|(_, e)| e)
         .collect();
     kept.reverse();
+    if removed_oldest {
+        if let Some(first) = kept.first_mut() {
+            first.old_oid = ObjectId::zero();
+        }
+    }
     for i in 1..kept.len() {
         kept[i].old_oid = kept[i - 1].new_oid;
     }

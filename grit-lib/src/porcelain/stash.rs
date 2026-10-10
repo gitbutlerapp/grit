@@ -837,6 +837,44 @@ pub fn stash_diff(repo: &Repository, n: usize) -> Result<Vec<DiffEntry>> {
     )
 }
 
+/// Write one flattened tree entry into the worktree (blob, symlink, or gitlink).
+fn materialize_flat_entry_in_worktree(
+    repo: &Repository,
+    work_tree: &Path,
+    entry: &FlatTreeEntry,
+) -> Result<()> {
+    let file_path = work_tree.join(&entry.path);
+    if let Some(parent) = file_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if entry.mode == MODE_GITLINK {
+        fs::create_dir_all(&file_path)?;
+        return Ok(());
+    }
+    let blob = repo.odb.read(&entry.oid)?;
+    if entry.mode == MODE_SYMLINK {
+        let target = String::from_utf8(blob.data).map_err(|_| Error::StashSymlinkNotUtf8)?;
+        if file_path.exists() || file_path.symlink_metadata().is_ok() {
+            let _ = fs::remove_file(&file_path);
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &file_path)?;
+        #[cfg(not(unix))]
+        fs::write(&file_path, target.as_bytes())?;
+    } else {
+        write_regular_file_replacing_symlink(&file_path, &blob.data)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if entry.mode == MODE_EXECUTABLE {
+                let perms = fs::Permissions::from_mode(0o755);
+                fs::set_permissions(&file_path, perms)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Paths whose worktree content the stash would change vs. its HEAD-at-stash base.
 pub fn stash_worktree_change_paths(
     repo: &Repository,
@@ -1186,6 +1224,11 @@ pub fn apply_stash(
 
     if restore_index {
         // --index: restore the index to the stash's index state for changed files
+        for base_entry in &base_tree_entries {
+            if flat_tree_lookup(&idx_tree_entries, &base_entry.path).is_none() {
+                new_index.remove(base_entry.path.as_bytes());
+            }
+        }
         for idx_entry in &idx_tree_entries {
             let path = &idx_entry.path;
             let base_oid = flat_tree_lookup(&base_tree_entries, path).map(|e| &e.oid);
@@ -1359,12 +1402,7 @@ pub fn apply_stash(
         let ut_commit = parse_commit(&ut_obj.data)?;
         let ut_entries = flatten_tree_full(&repo.odb, &ut_commit.tree, "")?;
         for entry in &ut_entries {
-            let file_path = work_tree.join(&entry.path);
-            if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let blob = repo.odb.read(&entry.oid)?;
-            fs::write(&file_path, &blob.data)?;
+            materialize_flat_entry_in_worktree(repo, work_tree, entry)?;
         }
     }
 

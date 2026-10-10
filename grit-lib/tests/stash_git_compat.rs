@@ -170,6 +170,42 @@ fn push_stash_clears_index_when_worktree_matches_head_but_index_staged() {
 }
 
 #[test]
+fn drop_stash_oldest_entry_rechains_reflog_like_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("t"), "v\n").expect("write");
+    git_cmd(dir.path(), &["add", "t"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+
+    for msg in ["one", "two", "three"] {
+        std::fs::write(dir.path().join("t"), format!("{msg}\n")).expect("write");
+        git_cmd(dir.path(), &["stash", "push", "-m", msg]);
+    }
+
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    let git_dir = tempfile::tempdir().expect("git copy");
+    copy_repo(dir.path(), grit_dir.path());
+    copy_repo(dir.path(), git_dir.path());
+
+    drop_stash(
+        &open_grit(grit_dir.path()),
+        2,
+        "Test <t@example.com> 0 +0000",
+    )
+    .expect("grit drop oldest");
+    git_cmd(git_dir.path(), &["stash", "drop", "stash@{2}"]);
+
+    let grit_log =
+        std::fs::read_to_string(grit_dir.path().join(".git/logs/refs/stash")).expect("grit reflog");
+    let git_log =
+        std::fs::read_to_string(git_dir.path().join(".git/logs/refs/stash")).expect("git reflog");
+    assert_eq!(
+        grit_log, git_log,
+        "oldest stash drop must rewrite the reflog like git"
+    );
+}
+
+#[test]
 fn drop_stash_middle_entry_rechains_reflog_like_git() {
     let dir = tempfile::tempdir().expect("tempdir");
     init_repo(dir.path());
@@ -259,6 +295,86 @@ fn pop_keeps_entry_on_conflict() {
         .expect("pop with conflict");
     assert!(conflicts, "three-way conflict should keep stash entry");
     assert_eq!(list_stashes(&repo).expect("list").len(), 1);
+}
+
+#[test]
+fn pop_stash_with_index_restores_staged_deletion_like_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f"), "content\n").expect("write");
+    git_cmd(dir.path(), &["add", "f"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    git_cmd(dir.path(), &["rm", "f"]);
+    git_cmd(dir.path(), &["stash", "push", "-m", "staged rm"]);
+
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    let git_dir = tempfile::tempdir().expect("git copy");
+    copy_repo(dir.path(), grit_dir.path());
+    copy_repo(dir.path(), git_dir.path());
+
+    pop_stash(
+        &open_grit(grit_dir.path()),
+        grit_dir.path(),
+        0,
+        true,
+        "Test <t@example.com> 0 +0000",
+    )
+    .expect("grit pop --index");
+    git_cmd(git_dir.path(), &["stash", "pop", "--index"]);
+
+    let grit_p = git_cmd(grit_dir.path(), &["status", "--porcelain=v1"]);
+    let git_p = git_cmd(git_dir.path(), &["status", "--porcelain=v1"]);
+    assert_eq!(
+        grit_p, git_p,
+        "staged deletion must match git stash pop --index"
+    );
+    assert!(
+        grit_p.starts_with("D  f"),
+        "expected staged deletion D  f, got:\n{grit_p}"
+    );
+}
+
+#[test]
+fn pop_stash_restores_untracked_symlink_like_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("tracked"), "t\n").expect("write");
+    git_cmd(dir.path(), &["add", "tracked"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    std::os::unix::fs::symlink("target", dir.path().join("link")).expect("symlink");
+    git_cmd(dir.path(), &["stash", "push", "-u", "-m", "symlink"]);
+
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    let git_dir = tempfile::tempdir().expect("git copy");
+    copy_repo(dir.path(), grit_dir.path());
+    copy_repo(dir.path(), git_dir.path());
+
+    pop_stash(
+        &open_grit(grit_dir.path()),
+        grit_dir.path(),
+        0,
+        false,
+        "Test <t@example.com> 0 +0000",
+    )
+    .expect("grit pop");
+    git_cmd(git_dir.path(), &["stash", "pop"]);
+
+    let grit_link = grit_dir.path().join("link");
+    let git_link = git_dir.path().join("link");
+    assert!(grit_link.is_symlink(), "grit must restore symlink");
+    assert!(git_link.is_symlink(), "git must restore symlink");
+    assert_eq!(
+        std::fs::read_link(&grit_link).expect("read grit"),
+        std::fs::read_link(&git_link).expect("read git")
+    );
+
+    let grit_list = git_cmd(grit_dir.path(), &["stash", "list"]);
+    let git_list = git_cmd(git_dir.path(), &["stash", "list"]);
+    assert_eq!(
+        grit_list.trim(),
+        git_list.trim(),
+        "stash entry dropped after pop"
+    );
 }
 
 #[test]
