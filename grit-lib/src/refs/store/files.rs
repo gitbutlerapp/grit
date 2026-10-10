@@ -12,14 +12,15 @@ use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, prune_empty_loose_ref_parents, read_packed_refs_map, read_ref_file,
-    remove_empty_ref_directory, remove_packed_ref, LogRefsConfig, Ref,
+    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, LogRefsConfig,
+    Ref,
 };
 
-use super::apply::{apply_update, resolve_map, simulate_batch_apply, RefBatchState};
+use super::apply::{apply_update, simulate_batch_apply, RefBatchState};
 use super::error::RefStoreError;
-use super::routing::{resolve_common_dir, route_ref_storage, RefStorageRoute};
-use super::transaction::RefTransaction;
-use super::validation::verify_create_conflicts;
+use super::routing::{resolve_common_dir, route_ref_storage_with_namespace, RefStorageRoute};
+use super::transaction::{expected_matches, RefTransaction};
+use super::validation::{validate_storable_refname, verify_create_conflicts};
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
@@ -42,7 +43,6 @@ pub struct FilesRefStoreConfig {
 pub struct FilesRefStore {
     git_dir: PathBuf,
     common_dir: PathBuf,
-    #[allow(dead_code)]
     namespace_prefix: Option<String>,
     #[allow(dead_code)]
     log_refs: LogRefsConfig,
@@ -111,19 +111,51 @@ impl FilesRefStore {
     }
 
     fn load_raw_map(&self) -> Result<BTreeMap<String, RawRef>> {
+        self.load_raw_map_prefix("")
+    }
+
+    fn load_raw_map_prefix(&self, logical_prefix: &str) -> Result<BTreeMap<String, RawRef>> {
         let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
         let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-        for (name, oid) in cache.iter() {
-            map.insert(name.clone(), RawRef::Direct(*oid));
+        for (storage, oid) in cache.iter() {
+            let logical = self.logical_name(storage);
+            if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
+                map.insert(logical, RawRef::Direct(*oid));
+            }
         }
         drop(cache);
 
+        let storage_prefix = self.namespace_prefix.as_deref().unwrap_or("refs/");
         for base in [self.common_dir.as_path(), self.git_dir.as_path()] {
-            let refs_root = base.join("refs");
-            if refs_root.is_dir() {
-                collect_loose_raw_refs(&refs_root, "refs/", &mut map)?;
+            if self.namespace_prefix.is_some() {
+                let root = base.join(storage_prefix.trim_end_matches('/'));
+                if root.is_dir() {
+                    let mut storage_map = BTreeMap::new();
+                    collect_loose_raw_refs(&root, storage_prefix, &mut storage_map)?;
+                    for (storage, value) in storage_map {
+                        let logical = self.logical_name(&storage);
+                        if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
+                            map.insert(logical, value);
+                        }
+                    }
+                }
+            } else {
+                let refs_root = base.join("refs");
+                if refs_root.is_dir() {
+                    let mut storage_map = BTreeMap::new();
+                    collect_loose_raw_refs(&refs_root, "refs/", &mut storage_map)?;
+                    for (storage, value) in storage_map {
+                        let logical = self.logical_name(&storage);
+                        if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
+                            map.insert(logical, value);
+                        }
+                    }
+                }
             }
-            if base.join("HEAD").is_file() {
+            if self.namespace_prefix.is_none()
+                && head_matches_prefix(logical_prefix)
+                && base.join("HEAD").is_file()
+            {
                 if let Ok(r) = read_ref_file(&base.join("HEAD")) {
                     map.insert("HEAD".to_owned(), ref_to_raw(r));
                 }
@@ -137,7 +169,7 @@ impl FilesRefStore {
         for base in [self.common_dir.as_path(), self.git_dir.as_path()] {
             let logs = base.join("logs");
             if logs.is_dir() {
-                collect_reflog_refs(&logs, "", &self.git_dir, &mut out)?;
+                collect_reflog_refs(&logs, "", self, &mut out)?;
             }
         }
         Ok(out)
@@ -151,7 +183,19 @@ impl FilesRefStore {
     }
 
     fn route(&self, refname: &str) -> RefStorageRoute {
-        route_ref_storage(&self.git_dir, refname)
+        route_ref_storage_with_namespace(&self.git_dir, refname, self.namespace_prefix.as_deref())
+    }
+
+    fn logical_name(&self, storage: &str) -> String {
+        crate::ref_namespace::logical_ref_name_with_prefix(
+            self.namespace_prefix.as_deref(),
+            storage,
+        )
+    }
+
+    fn reflog_path(&self, logical: &str) -> PathBuf {
+        let route = self.route(logical);
+        route.storage_dir.join("logs").join(&route.storage_name)
     }
 
     fn ref_lock_paths(&self, refname: &str) -> (RefStorageRoute, PathBuf, PathBuf) {
@@ -207,10 +251,14 @@ impl FilesRefStore {
         Ok(())
     }
 
-    fn delete_loose_ref(&self, refname: &str, lock: &Path) -> Result<()> {
+    fn delete_loose_ref(&self, refname: &str, lock: &Path, packed_lock_held: bool) -> Result<()> {
         let route = self.route(refname);
         let path = route.storage_dir.join(&route.storage_name);
-        remove_packed_ref(&route.storage_dir, &route.storage_name)?;
+        if packed_lock_held {
+            remove_packed_ref_under_lock(&route.storage_dir, &route.storage_name)?;
+        } else {
+            remove_packed_ref(&route.storage_dir, &route.storage_name)?;
+        }
         remove_empty_ref_directory(&path);
         let _ = fs::remove_file(&path);
         prune_empty_loose_ref_parents(&route.storage_dir, &path);
@@ -219,7 +267,7 @@ impl FilesRefStore {
     }
 
     fn persist_reflog(&self, name: &str, entries: &[ReflogEntry]) -> Result<()> {
-        let path = crate::refs::reflog_file_path(&self.git_dir, name);
+        let path = self.reflog_path(name);
         if entries.is_empty() {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
@@ -252,6 +300,7 @@ impl FilesRefStore {
         before: &RefBatchState,
         after: &RefBatchState,
         held_locks: &HashMap<String, PathBuf>,
+        packed_lock_held: bool,
     ) -> Result<()> {
         let mut names: BTreeSet<String> = BTreeSet::new();
         names.extend(before.refs.keys().cloned());
@@ -281,7 +330,7 @@ impl FilesRefStore {
             let lock = held_locks.get(name).unwrap_or(&default_lock);
             match a {
                 None => {
-                    self.delete_loose_ref(name, lock)?;
+                    self.delete_loose_ref(name, lock, packed_lock_held)?;
                 }
                 Some(value) => {
                     FilesRefStore::write_loose_value(&path, lock, value)?;
@@ -307,14 +356,14 @@ impl RefStore for FilesRefStore {
         prefix: &str,
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
-        let map = self.load_raw_map()?;
+        let map = self.load_raw_map_prefix(prefix)?;
         for (name, value) in map.range(prefix.to_string()..) {
             if !name.starts_with(prefix) {
                 break;
             }
             let peeled = match &value {
                 RawRef::Direct(_) => None,
-                RawRef::Symbolic(_) => resolve_map(&map, name, 0).ok(),
+                RawRef::Symbolic(target) => self.resolve(target).ok(),
             };
             let entry = RefEntry {
                 name: name.clone(),
@@ -335,6 +384,10 @@ impl RefStore for FilesRefStore {
         RefTransaction::validate_no_duplicates(txn.updates())?;
         let mut updates = txn.into_updates();
         updates.sort_by(|a, b| a.name.cmp(&b.name));
+
+        for update in &updates {
+            validate_storable_refname(&update.name)?;
+        }
 
         let mut prepared_guard = self.prepared.lock().unwrap_or_else(|e| e.into_inner());
         if prepared_guard.is_some() {
@@ -376,18 +429,34 @@ impl RefStore for FilesRefStore {
         let changed = changed_ref_names(&state.refs, &after.refs);
 
         let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
-        for name in changed {
-            let (_, _, lock) = self.ref_lock_paths(&name);
+        for name in &changed {
+            let (_, _, lock) = self.ref_lock_paths(name);
             if let Some(parent) = lock.parent() {
                 fs::create_dir_all(parent).map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             }
-            if let Err(err) = self.acquire_ref_lock(&lock, &name) {
+            if let Err(err) = self.acquire_ref_lock(&lock, name) {
                 for acquired in ref_locks.values() {
                     let _ = fs::remove_file(acquired);
                 }
                 return Err(err);
             }
-            ref_locks.insert(name, lock);
+            ref_locks.insert(name.clone(), lock);
+        }
+
+        for update in &updates {
+            let actual = self
+                .read_raw(&update.name)
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+            if !expected_matches(actual.as_ref(), &update.expected) {
+                for acquired in ref_locks.values() {
+                    let _ = fs::remove_file(acquired);
+                }
+                return Err(RefStoreError::ExpectedMismatch {
+                    name: update.name.clone(),
+                    expected: update.expected.clone(),
+                    actual,
+                });
+            }
         }
 
         let mut packed_lock = None;
@@ -428,7 +497,7 @@ impl RefStore for FilesRefStore {
     }
 
     fn reflog_exists(&self, name: &str) -> Result<bool> {
-        Ok(reflog::reflog_exists(&self.git_dir, name))
+        Ok(self.reflog_path(name).is_file())
     }
 
     fn for_each_reflog_entry(
@@ -437,7 +506,7 @@ impl RefStore for FilesRefStore {
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
-        let entries = reflog::read_reflog(&self.git_dir, name)?;
+        let entries = read_reflog_at_path(&self.reflog_path(name))?;
         if reverse {
             for entry in entries.iter().rev() {
                 if f(entry).is_break() {
@@ -455,7 +524,8 @@ impl RefStore for FilesRefStore {
     }
 
     fn create_reflog(&self, name: &str) -> Result<()> {
-        let path = crate::refs::reflog_file_path(&self.git_dir, name);
+        validate_storable_refname(name).map_err(|e| Error::Message(e.to_string()))?;
+        let path = self.reflog_path(name);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -468,7 +538,7 @@ impl RefStore for FilesRefStore {
     }
 
     fn delete_reflog(&self, name: &str) -> Result<()> {
-        let path = crate::refs::reflog_file_path(&self.git_dir, name);
+        let path = self.reflog_path(name);
         let _ = fs::remove_file(path);
         Ok(())
     }
@@ -482,7 +552,7 @@ impl RefStore for FilesRefStore {
         for base in [self.common_dir.as_path(), self.git_dir.as_path()] {
             let logs = base.join("logs");
             if logs.is_dir() {
-                collect_reflog_ref_names(&logs, "", &mut names)?;
+                collect_reflog_ref_names(&logs, "", self, &mut names)?;
             }
         }
         for name in names {
@@ -519,13 +589,11 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
             apply_update(&mut after, update)?;
         }
 
-        if let Some(packed_lock) = &batch.packed_lock {
-            let _ = fs::remove_file(packed_lock);
-        }
+        let packed_lock_held = batch.packed_lock.is_some();
 
-        if let Err(err) = self
-            .store
-            .persist_state_diff(&before, &after, &batch.ref_locks)
+        if let Err(err) =
+            self.store
+                .persist_state_diff(&before, &after, &batch.ref_locks, packed_lock_held)
         {
             FilesRefStore::release_locks(&batch);
             return Err(RefStoreError::Corrupt(err.to_string()));
@@ -560,6 +628,12 @@ impl Drop for FilesPrepared<'_> {
             }
         }
     }
+}
+
+fn head_matches_prefix(logical_prefix: &str) -> bool {
+    logical_prefix.is_empty()
+        || "HEAD".starts_with(logical_prefix)
+        || logical_prefix.starts_with("HEAD")
 }
 
 fn ref_to_raw(r: Ref) -> RawRef {
@@ -608,7 +682,7 @@ fn collect_loose_raw_refs(
 fn collect_reflog_refs(
     dir: &Path,
     prefix: &str,
-    git_dir: &Path,
+    store: &FilesRefStore,
     out: &mut BTreeMap<String, Vec<ReflogEntry>>,
 ) -> Result<()> {
     let read = match fs::read_dir(dir) {
@@ -622,15 +696,28 @@ fn collect_reflog_refs(
         let refname = format!("{prefix}{name}");
         let path = entry.path();
         if path.is_dir() {
-            collect_reflog_refs(&path, &format!("{refname}/"), git_dir, out)?;
+            collect_reflog_refs(&path, &format!("{refname}/"), store, out)?;
         } else if path.is_file() {
-            let entries = reflog::read_reflog(git_dir, &refname)?;
+            let logical = store.logical_name(&refname);
+            let entries = read_reflog_at_path(&path)?;
             if !entries.is_empty() {
-                out.insert(refname, entries);
+                out.insert(logical, entries);
             }
         }
     }
     Ok(())
+}
+
+fn read_reflog_at_path(path: &Path) -> Result<Vec<ReflogEntry>> {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    Ok(content
+        .lines()
+        .filter_map(reflog::parse_reflog_line_for_store)
+        .collect())
 }
 
 fn changed_ref_names(
@@ -646,7 +733,12 @@ fn changed_ref_names(
         .collect()
 }
 
-fn collect_reflog_ref_names(dir: &Path, prefix: &str, out: &mut BTreeSet<String>) -> Result<()> {
+fn collect_reflog_ref_names(
+    dir: &Path,
+    prefix: &str,
+    store: &FilesRefStore,
+    out: &mut BTreeSet<String>,
+) -> Result<()> {
     let read = match fs::read_dir(dir) {
         Ok(r) => r,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -658,9 +750,9 @@ fn collect_reflog_ref_names(dir: &Path, prefix: &str, out: &mut BTreeSet<String>
         let refname = format!("{prefix}{name}");
         let path = entry.path();
         if path.is_dir() {
-            collect_reflog_ref_names(&path, &format!("{refname}/"), out)?;
+            collect_reflog_ref_names(&path, &format!("{refname}/"), store, out)?;
         } else if path.is_file() {
-            out.insert(refname);
+            out.insert(store.logical_name(&refname));
         }
     }
     Ok(())

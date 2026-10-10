@@ -15,9 +15,21 @@ pub struct RefStorageRoute {
 
 /// Compute storage directory and file name for `refname` in a linked checkout.
 #[must_use]
+#[allow(dead_code)]
 pub fn route_ref_storage(git_dir: &Path, refname: &str) -> RefStorageRoute {
+    route_ref_storage_with_namespace(git_dir, refname, None)
+}
+
+/// Like [`route_ref_storage`], but applies `namespace_prefix` from config instead of the environment.
+#[must_use]
+pub fn route_ref_storage_with_namespace(
+    git_dir: &Path,
+    refname: &str,
+    namespace_prefix: Option<&str>,
+) -> RefStorageRoute {
     let (storage_dir, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_name = crate::ref_namespace::storage_ref_name(&stor_name);
+    let storage_name =
+        crate::ref_namespace::storage_ref_name_with_prefix(namespace_prefix, &stor_name);
     RefStorageRoute {
         storage_dir,
         storage_name,

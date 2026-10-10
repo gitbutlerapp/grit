@@ -156,6 +156,11 @@ pub fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
 /// Parse a single reflog line.
 ///
 /// Format: `<old-hex> <new-hex> <identity>\t<message>`
+/// Parse one reflog line (for embedders that read log files directly).
+pub(crate) fn parse_reflog_line_for_store(line: &str) -> Option<ReflogEntry> {
+    parse_reflog_line(line)
+}
+
 fn parse_reflog_line(line: &str) -> Option<ReflogEntry> {
     // Split on tab first to separate identity from message
     let (before_tab, message) = if let Some(pos) = line.find('\t') {

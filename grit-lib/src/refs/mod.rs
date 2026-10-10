@@ -906,7 +906,7 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
     Ok(())
 }
 
-fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
+pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
     if let Some(rest) = refname.strip_prefix("refs/") {
         if rest.is_empty() || !crate::check_ref_format::is_valid_fetch_advertised_ref(refname) {
             return Err(Error::InvalidRef(format!(
@@ -1398,6 +1398,14 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
 
 /// Remove a single entry from the packed-refs file, rewriting it.
 pub(crate) fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
+    remove_packed_ref_inner(git_dir, refname, false)
+}
+
+pub(crate) fn remove_packed_ref_under_lock(git_dir: &Path, refname: &str) -> Result<()> {
+    remove_packed_ref_inner(git_dir, refname, true)
+}
+
+fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: bool) -> Result<()> {
     let packed_path = git_dir.join("packed-refs");
     let content = match fs::read(&packed_path) {
         Ok(c) => c,
@@ -1470,10 +1478,12 @@ pub(crate) fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
         // already present (t0600 "delete fails cleanly if packed-refs file is locked / .new
         // write fails").
         let lock = lock_path_for_ref(&packed_path); // packed-refs.lock
-        let abs_lock = fs::canonicalize(git_dir)
-            .map(|d| d.join("packed-refs.lock"))
-            .unwrap_or_else(|_| lock.clone());
-        acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
+        if !lock_already_held {
+            let abs_lock = fs::canonicalize(git_dir)
+                .map(|d| d.join("packed-refs.lock"))
+                .unwrap_or_else(|_| lock.clone());
+            acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
+        }
 
         let tmp = packed_path.with_extension("new");
         let mut created_tmp = false;
@@ -1492,9 +1502,10 @@ pub(crate) fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
             Ok(())
         })();
 
-        // Always release the lock; on failure clean up only a tempfile that we created (never a
-        // pre-existing `packed-refs.new` placed by the caller/test).
-        let _ = fs::remove_file(&lock);
+        // Release the lock unless the caller is holding it through a transaction.
+        if !lock_already_held {
+            let _ = fs::remove_file(&lock);
+        }
         if write_result.is_err() && created_tmp {
             let _ = fs::remove_file(&tmp);
         }

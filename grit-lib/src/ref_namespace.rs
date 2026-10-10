@@ -55,6 +55,25 @@ pub fn storage_ref_name(logical: &str) -> String {
     storage_ref_name_env(&Environment::empty(), logical)
 }
 
+/// Map a logical ref name using an explicit storage prefix (not from environment).
+#[must_use]
+pub fn storage_ref_name_with_prefix(prefix: Option<&str>, logical: &str) -> String {
+    match prefix {
+        Some(p) if logical.starts_with(p) => logical.to_owned(),
+        Some(p) => format!("{p}{logical}"),
+        None => logical.to_owned(),
+    }
+}
+
+/// Strip an explicit storage prefix to recover the logical ref name.
+#[must_use]
+pub fn logical_ref_name_with_prefix(prefix: Option<&str>, storage: &str) -> String {
+    match prefix {
+        Some(p) if storage.starts_with(p) => storage[p.len()..].to_owned(),
+        _ => storage.to_owned(),
+    }
+}
+
 /// Map a logical ref name using an explicit [`Environment`].
 #[must_use]
 pub fn storage_ref_name_env(env: &Environment, logical: &str) -> String {

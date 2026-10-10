@@ -47,6 +47,13 @@ pub enum RefStoreError {
     /// Stored data for a ref or reflog is malformed.
     #[error("corrupt ref store: {0}")]
     Corrupt(String),
+
+    /// Ref name is not safe to store (traversal, illegal component, etc.).
+    #[error("refusing to update ref with bad name '{name}'")]
+    InvalidRefName {
+        /// The rejected ref name.
+        name: String,
+    },
 }
 
 impl From<RefnameUnavailable> for RefStoreError {
