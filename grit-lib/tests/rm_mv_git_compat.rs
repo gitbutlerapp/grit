@@ -211,6 +211,51 @@ fn mv_directory_tree() {
 }
 
 #[test]
+fn mv_self_move_with_force_is_non_destructive() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("a"), "payload\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let err = move_path(&repo, "a", "a", true).expect_err("self mv");
+    assert!(matches!(err, grit_lib::error::Error::Message(_)));
+
+    assert!(repo_dir.join("a").is_file(), "worktree file must remain");
+    let status = git_porcelain(repo_dir);
+    assert!(
+        status.trim().is_empty(),
+        "index must stay clean after refused self-move, got:\n{status}"
+    );
+}
+
+#[test]
+fn mv_directory_refuses_missing_tracked_child() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(repo_dir.join("d")).unwrap();
+    std::fs::write(repo_dir.join("d/a"), "a\n").unwrap();
+    std::fs::write(repo_dir.join("d/b"), "b\n").unwrap();
+    commit_all(repo_dir, "init");
+    std::fs::remove_file(repo_dir.join("d/b")).unwrap();
+
+    let repo = grit_repo(repo_dir);
+    let err = move_path(&repo, "d", "e", false).expect_err("mv missing child");
+    assert!(matches!(err, grit_lib::error::Error::Message(_)));
+
+    assert!(repo_dir.join("d/a").is_file());
+    assert!(!repo_dir.join("d/b").exists());
+    assert!(!repo_dir.join("e").exists());
+    let status = git_porcelain(repo_dir);
+    assert!(
+        status.contains(" D d/b") || status.contains("D d/b"),
+        "deletion of d/b unchanged:\n{status}"
+    );
+}
+
+#[test]
 fn mv_destination_exists_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo_dir = tmp.path();

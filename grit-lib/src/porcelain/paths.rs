@@ -151,6 +151,19 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
         )));
     }
 
+    if final_dst == src {
+        return Err(Error::Message(format!(
+            "cannot move into itself, source={src}, destination={final_dst}"
+        )));
+    }
+
+    let renames = plan_index_renames(&index, &src, &final_dst)?;
+    if renames.is_empty() {
+        return Err(Error::Message(format!("nothing to move, source={src}")));
+    }
+
+    ensure_worktree_move_sources_exist(work_tree, &renames)?;
+
     if !force && destination_exists(work_tree, &index, &final_dst, dst_is_dir_target) {
         return Err(Error::Message(format!(
             "destination exists, source={src}, destination={final_dst}"
@@ -159,11 +172,6 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
 
     if force {
         clear_destination(work_tree, &mut index, &final_dst)?;
-    }
-
-    let renames = plan_index_renames(&index, &src, &final_dst)?;
-    if renames.is_empty() {
-        return Err(Error::Message(format!("nothing to move, source={src}")));
     }
 
     rename_worktree_paths(work_tree, &src, &final_dst, &renames)?;
@@ -406,6 +414,25 @@ fn is_subdirectory(candidate: &str, parent_dir: &str) -> bool {
     }
     let plen = parent_dir.len();
     candidate.starts_with(parent_dir) && candidate.as_bytes().get(plen) == Some(&b'/')
+}
+
+fn ensure_worktree_move_sources_exist(
+    work_tree: &Path,
+    renames: &[(String, String)],
+) -> Result<()> {
+    for (from, to) in renames {
+        let abs = work_tree.join(from);
+        if abs.is_file() || abs.is_symlink() {
+            continue;
+        }
+        if abs.is_dir() {
+            continue;
+        }
+        return Err(Error::Message(format!(
+            "bad source, source={from}, destination={to}"
+        )));
+    }
+    Ok(())
 }
 
 fn plan_index_renames(index: &Index, src: &str, final_dst: &str) -> Result<Vec<(String, String)>> {

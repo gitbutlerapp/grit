@@ -12,9 +12,9 @@ use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::ObjectId;
+use crate::ref_storage::RefStorageFormat;
 use crate::refs;
 use crate::remote::{HttpClientFactory, Remote, DEFAULT_REMOTE};
-use crate::ref_storage::RefStorageFormat;
 use crate::repo::{init_repository, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode};
 use crate::transport_path::{
@@ -142,17 +142,16 @@ pub fn clone(
         return Err(CloneError::DestNotEmpty(dir.to_owned()));
     }
 
-    let repo =
-        init_repository(
-            &opts.dest,
-            false,
-            &opts.initial_branch,
-            None,
-            RefStorageFormat::default(),
-        )
-        .map_err(|e| {
-            CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
-        })?;
+    let repo = init_repository(
+        &opts.dest,
+        false,
+        &opts.initial_branch,
+        None,
+        RefStorageFormat::default(),
+    )
+    .map_err(|e| {
+        CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
+    })?;
 
     let origin_url = stored_clone_remote_url(&opts.url);
     set_local_config(
