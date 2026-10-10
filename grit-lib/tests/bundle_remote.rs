@@ -46,7 +46,14 @@ fn fetch_from_git_bundle_matches_git_fetch() {
     ));
 
     let dest = tempfile::tempdir().expect("dest");
-    init_repository(dest.path(), false, "main", None, "files").expect("init");
+    init_repository(
+        dest.path(),
+        false,
+        "main",
+        None,
+        grit_lib::RefStorageFormat::Files,
+    )
+    .expect("init");
     assert!(git_in(
         dest.path(),
         &["commit", "--allow-empty", "-qm", "seed"],
