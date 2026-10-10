@@ -285,12 +285,7 @@ h1{font-size:44px}h1.cmd{font-size:36px}.half h1,.half>h2{font-size:44px}
         <span class="f">println!</span>(<span class="s">&quot;tag {name} {}&quot;</span>, oid.<span class="f">to_hex</span>());
     }
 
-    <span class="k">let</span> storage = <span class="k">if</span> grit_lib::reftable::<span class="f">is_reftable_repo</span>(git_dir) {
-        <span class="s">&quot;reftable&quot;</span>
-    } <span class="k">else</span> {
-        <span class="s">&quot;files&quot;</span>
-    };
-    <span class="f">println!</span>(<span class="s">&quot;ref_storage={storage}&quot;</span>);
+    <span class="f">println!</span>(<span class="s">&quot;ref_storage={}&quot;</span>, repo.refs().format());
 
     <span class="k">let</span> target = head
         .<span class="f">oid</span>()

@@ -194,13 +194,15 @@
 
 **Scope.**
 - Define a trait for reads, iteration with prefix, transactions (prepare/commit/abort with locking) and the reflog.
-- Implement the files and reftable backends behind it, removing the 72 ad-hoc `reftable::is_reftable_repo` checks across 20 files.
+- Implement the files and reftable backends behind it, removing ad-hoc reftable-backend probes across the tree.
 - Make backend selection come from repository config.
 
 **Acceptance.**
-- No `is_reftable_repo` call sites remain outside backend selection.
+- No legacy reftable-backend probe call sites remain outside backend selection.
 - Ref tests pass for both backends.
 - for-each-ref and update-ref benchmarks within 1.2× of git on 100k refs.
+
+**Status (2026-10-10).** `RefStore` trait, files/reftable/memory backends, repository-owned store, and batch transport updates are in place. Legacy reftable-backend probes are removed; `refs_abstraction_guard` keeps backend selection in `ref_storage` / `refs/store`. Remaining work: files/reftable perf vs git on 100k refs (ROADMAP follow-on steps).
 
 ## 13. Network, bundles and packing in the library
 *Workstream: Library*

@@ -1,46 +1,41 @@
 ---
 title: Refs
-summary: Resolve HEAD, list branches and tags, update refs with reflog, and how grit-lib picks loose, packed, or reftable storage.
+summary: Repository ref handles, transactions, backend selection, and path-based helpers.
 ---
 
-References name commits (and other objects). grit-lib exposes them through [`refs`](rustdoc:grit_lib::refs) and [`reftable`](rustdoc:grit_lib::reftable), with [`reflog`](rustdoc:grit_lib::reflog) for update history. The [`references`](rustdoc:grit_lib::references) module groups these for navigation in rustdoc.
+References name commits and other objects. Prefer an open [`Repository`](rustdoc:grit_lib::repo::Repository): call [`refs()`](rustdoc:grit_lib::repo::Repository::refs) to borrow the cached [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) selected for that repository, or [`with_ref_store`](rustdoc:grit_lib::repo::Repository::with_ref_store) to inject a custom backend (for example [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) or a wrapper like the [`custom_ref_store`](../../grit-examples/src/bin/custom_ref_store.rs) example).
+
+Path-based helpers in [`refs`](rustdoc:grit_lib::refs) (`resolve_ref`, `list_refs`, `write_ref`, …) still work on a git directory; they open the same backend via [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store). Rev-parse and porcelain on a `Repository` always go through the handle's store.
+
+## Backend selection
+
+On-disk layout is chosen once from **repository-local** config (`extensions.refStorage`), never from global or system config. [`RefStorageFormat::detect`](rustdoc:grit_lib::RefStorageFormat::detect) in [`ref_storage`](rustdoc:grit_lib::ref_storage) reads that value and returns [`Files`](rustdoc:grit_lib::RefStorageFormat::Files) (loose refs plus `packed-refs`) or [`Reftable`](rustdoc:grit_lib::RefStorageFormat::Reftable). [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store) and [`RepoCaches::open_ref_store`](rustdoc:grit_lib::repo_caches::RepoCaches::open_ref_store) construct [`FilesRefStore`](rustdoc:grit_lib::refs::store::FilesRefStore) or [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore). The store's [`format()`](rustdoc:grit_lib::refs::store::RefStore::format) reports which backend is active (`files`, `reftable`, or `memory` for injected stores).
+
+## Transactions
+
+Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTransaction): queue [`RefUpdate`](rustdoc:grit_lib::refs::store::RefUpdate) entries with [`Expected`](rustdoc:grit_lib::refs::store::Expected) old-value checks, optional [`ReflogUpdate`](rustdoc:grit_lib::refs::store::ReflogUpdate), then [`RefStore::prepare`](rustdoc:grit_lib::refs::store::RefStore::prepare) → commit or abort. Fetch, push, receive-pack, and [`update_refs`](rustdoc:grit_lib::gc::update_refs) route through this path so locking and compare-and-swap semantics stay in the backend.
 
 ## Resolving HEAD and symbolic refs
 
-[`resolve_head`](rustdoc:grit_lib::state::resolve_head) reads `HEAD` and returns a [`HeadState`](rustdoc:grit_lib::state::HeadState): on a branch (symbolic ref plus commit, if any), detached at a commit, or invalid. To resolve any ref name to an object id, use [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref), which follows symbolic refs with cycle detection.
+[`resolve_head`](rustdoc:grit_lib::state::resolve_head) reads `HEAD` and returns a [`HeadState`](rustdoc:grit_lib::state::HeadState). [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref) (or [`RefStore::resolve`](rustdoc:grit_lib::refs::store::RefStore::resolve) on the repository store) follows symbolic refs with cycle detection. [`read_ref_file`](rustdoc:grit_lib::refs::read_ref_file) returns a [`Ref`](rustdoc:grit_lib::refs::Ref) without resolving the full chain.
 
-[`read_ref_file`](rustdoc:grit_lib::refs::read_ref_file) returns a [`Ref`](rustdoc:grit_lib::refs::Ref) (`Direct` or `Symbolic`) without resolving the whole chain.
+## Listing, writing, and reflog
 
-## Listing branches and tags
+[`list_refs`](rustdoc:grit_lib::refs::list_refs) and [`list_refs_for_repository`](rustdoc:grit_lib::refs::list_refs_for_repository) iterate with a prefix. [`write_ref`](rustdoc:grit_lib::refs::write_ref) and [`write_symbolic_ref`](rustdoc:grit_lib::refs::write_symbolic_ref) update single refs; use transactions when updating many refs atomically.
 
-[`list_refs`](rustdoc:grit_lib::refs::list_refs) takes a prefix such as `refs/heads/` or `refs/tags/` and returns sorted `(name, ObjectId)` pairs. Loose refs under `refs/` override stale lines in `packed-refs`, matching Git. [`list_refs_glob`](rustdoc:grit_lib::refs::list_refs_glob) applies pattern matching when you need DWIM-style filtering.
+Reflog helpers live in [`reflog`](rustdoc:grit_lib::reflog) and on [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (`for_each_reflog_entry`, `replace_reflog`, …). [`append_reflog`](rustdoc:grit_lib::refs::append_reflog) records an update; [`read_reflog`](rustdoc:grit_lib::reflog::read_reflog) reads entries back.
 
-## Creating and updating refs with reflog
+## Examples
 
-[`write_ref`](rustdoc:grit_lib::refs::write_ref) points a ref at a commit (or other object). [`write_symbolic_ref`](rustdoc:grit_lib::refs::write_symbolic_ref) updates symbolic refs such as `HEAD`.
-
-Record history with [`append_reflog`](rustdoc:grit_lib::refs::append_reflog), then read it back with [`read_reflog`](rustdoc:grit_lib::reflog::read_reflog). Each [`ReflogEntry`](rustdoc:grit_lib::reflog::ReflogEntry) carries old and new ids, identity, and message. Batch updates can use [`update_refs`](rustdoc:grit_lib::gc::update_refs) when you need compare-and-swap semantics across many refs.
-
-## Loose, packed, and reftable backends
-
-By default, grit uses the **files** backend: one file per ref under `refs/`, plus an optional `packed-refs` file. [`list_refs`](rustdoc:grit_lib::refs::list_refs) and [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref) merge packed and loose sources so callers see a single namespace.
-
-When `extensions.refStorage = reftable` is set in config, the same functions use the **reftable** backend. Backend selection is centralized: [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store) detects the on-disk format from repository-local config and opens [`FilesRefStore`](rustdoc:grit_lib::refs::store::FilesRefStore) or [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore). An open [`Repository`](rustdoc:grit_lib::repo::Repository) caches that store on [`RepoCaches`](rustdoc:grit_lib::repo_caches::RepoCaches); call `refs()` on the handle to borrow the store, or `with_ref_store` to inject a custom backend (for example [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore)).
-
-## Pluggable ref storage (`RefStore`)
-
-[`refs::store`](rustdoc:grit_lib::refs::store) defines [`RefStore`](rustdoc:grit_lib::refs::store::RefStore): raw reads, sorted prefix iteration, compare-and-swap transactions ([`RefTransaction`](rustdoc:grit_lib::refs::store::RefTransaction) → prepare/commit/abort), and reflog helpers. [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) is for tests and embedders; [`FilesRefStore`](rustdoc:grit_lib::refs::store::FilesRefStore) and [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore) match on-disk layouts. Path-based helpers such as [`resolve_ref`](rustdoc:grit_lib::refs::resolve_ref) delegate to [`open_ref_store`](rustdoc:grit_lib::refs::store::open_ref_store); rev-parse on a [`Repository`](rustdoc:grit_lib::repo::Repository) resolves ref names through the handle's cached store.
-
-## Example
-
-The program below resolves `HEAD`, lists branches and tags, updates `refs/heads/library-guide-demo`, and appends a reflog entry:
+**Library guide** — resolve HEAD, list branches and tags, update a demo branch (included on this page):
 
 <!-- include: grit-examples/src/bin/guide_refs.rs -->
 
-Run against any repository with at least one commit:
+**Custom ref store** — wrap [`MemoryRefStore`](rustdoc:grit_lib::refs::store::MemoryRefStore) with operation counting and inject it via [`with_ref_store`](rustdoc:grit_lib::repo::Repository::with_ref_store):
+
+<!-- include: grit-examples/src/bin/custom_ref_store.rs -->
 
 ```bash
 cargo run --bin guide_refs /path/to/repo
-git -C /path/to/repo rev-parse refs/heads/library-guide-demo
-git -C /path/to/repo reflog show refs/heads/library-guide-demo
+cargo run --bin custom_ref_store
 ```
