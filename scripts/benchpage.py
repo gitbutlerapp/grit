@@ -23,11 +23,12 @@ class Scenario:
     group: str
     fixture: str
     description: str
-    git_mean_ms: float
+    driver: str
+    git_mean_ms: float | None
     grit_mean_ms: float
-    git_stddev_ms: float
+    git_stddev_ms: float | None
     grit_stddev_ms: float
-    ratio: float
+    ratio: float | None
 
     @staticmethod
     def from_json(raw: object, *, baseline: Path, index: int) -> Scenario:
@@ -35,14 +36,26 @@ class Scenario:
         if not isinstance(raw, dict):
             raise SystemExit(f"{label} must be an object")
         scenario_id = raw.get("id", index)
-        for key in ("id", "group", "fixture", "git", "grit"):
+        for key in ("id", "group", "fixture", "grit"):
             if key not in raw:
                 raise SystemExit(f"{label} (id={scenario_id!r}) missing required field {key!r}")
 
-        git = raw["git"]
+        driver = str(raw.get("driver", "cli"))
+        grit_only = driver == "criterion"
+        if not grit_only and "git" not in raw:
+            raise SystemExit(f"{label} (id={scenario_id!r}) missing required field 'git'")
+
+        git = raw.get("git")
         grit = raw["grit"]
-        if not isinstance(git, dict) or not isinstance(grit, dict):
-            raise SystemExit(f"{label} (id={scenario_id!r}) git/grit must be objects")
+        if grit_only:
+            if git is not None:
+                raise SystemExit(
+                    f"{label} (id={scenario_id!r}) criterion driver must not include git timings"
+                )
+        elif not isinstance(git, dict):
+            raise SystemExit(f"{label} (id={scenario_id!r}) git must be an object")
+        if not isinstance(grit, dict):
+            raise SystemExit(f"{label} (id={scenario_id!r}) grit must be an object")
 
         def require_ms(block: dict, tool: str, field: str) -> float:
             if field not in block:
@@ -56,16 +69,24 @@ class Scenario:
                     f"{label} (id={scenario_id!r}) invalid {tool}.{field}: {block[field]!r}"
                 ) from exc
 
-        git_mean = require_ms(git, "git", "mean_ms")
+        git_mean: float | None = None
+        git_stddev: float | None = None
+        if isinstance(git, dict):
+            git_mean = require_ms(git, "git", "mean_ms")
+            git_stddev = require_ms(git, "git", "stddev_ms")
         grit_mean = require_ms(grit, "grit", "mean_ms")
-        git_stddev = require_ms(git, "git", "stddev_ms")
         grit_stddev = require_ms(grit, "grit", "stddev_ms")
-        ratio = grit_mean / git_mean if git_mean else float("inf")
+        ratio: float | None
+        if git_mean is not None and git_mean:
+            ratio = grit_mean / git_mean
+        else:
+            ratio = None
         return Scenario(
             id=str(raw["id"]),
             group=str(raw["group"]),
             fixture=str(raw["fixture"]),
             description=str(raw.get("description", "")),
+            driver=driver,
             git_mean_ms=git_mean,
             grit_mean_ms=grit_mean,
             git_stddev_ms=git_stddev,
@@ -174,9 +195,17 @@ def format_ms(value: float) -> str:
     return f"{value:.2f}"
 
 
-def format_ratio(ratio: float) -> tuple[str, bool]:
+def format_ratio(ratio: float | None) -> tuple[str, bool]:
+    if ratio is None:
+        return "—", False
     text = f"{ratio:.2f}×"
     return text, ratio > SLOW_RATIO_THRESHOLD
+
+
+def format_optional_ms(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return format_ms(value)
 
 
 def render_header(bundle: BenchBundle) -> str:
@@ -208,7 +237,7 @@ def render_group_table(group: str, scenarios: list[Scenario]) -> str:
             f"<tr{row_class}>"
             f"<td><code>{html.escape(scenario.id)}</code></td>"
             f"<td>{html.escape(scenario.fixture)}</td>"
-            f"<td>{format_ms(scenario.git_mean_ms)}</td>"
+            f"<td>{format_optional_ms(scenario.git_mean_ms)}</td>"
             f"<td>{format_ms(scenario.grit_mean_ms)}</td>"
             f"<td>{ratio_text}</td>"
             f"<td>{spread}</td>"
@@ -234,11 +263,14 @@ def render_summary(bundle: BenchBundle) -> str:
     rows: list[str] = []
     for group in sorted(by_group):
         items = by_group[group]
-        ratios = [s.ratio for s in items]
-        median = statistics.median(ratios)
-        worst = max(ratios)
-        median_text, _ = format_ratio(median)
-        worst_text, worst_slow = format_ratio(worst)
+        ratios = [s.ratio for s in items if s.ratio is not None]
+        if ratios:
+            median = statistics.median(ratios)
+            worst = max(ratios)
+            median_text, _ = format_ratio(median)
+            worst_text, worst_slow = format_ratio(worst)
+        else:
+            median_text, worst_text, worst_slow = "—", "—", False
         row_class = ' class="bench-slow"' if worst_slow else ""
         rows.append(
             f"<tr{row_class}>"
@@ -295,7 +327,7 @@ def render_group_table_markdown(group: str, scenarios: list[Scenario]) -> str:
         ratio_text, _slow = format_ratio(scenario.ratio)
         spread = f"±{format_ms(scenario.grit_stddev_ms)} ms"
         lines.append(
-            f"| `{scenario.id}` | {scenario.fixture} | {format_ms(scenario.git_mean_ms)} | "
+            f"| `{scenario.id}` | {scenario.fixture} | {format_optional_ms(scenario.git_mean_ms)} | "
             f"{format_ms(scenario.grit_mean_ms)} | {ratio_text} | {spread} |"
         )
     return "\n".join(lines)
@@ -313,11 +345,14 @@ def render_summary_markdown(bundle: BenchBundle) -> str:
     ]
     for group in sorted(by_group):
         items = by_group[group]
-        ratios = [s.ratio for s in items]
-        median = statistics.median(ratios)
-        worst = max(ratios)
-        median_text, _ = format_ratio(median)
-        worst_text, _ = format_ratio(worst)
+        ratios = [s.ratio for s in items if s.ratio is not None]
+        if ratios:
+            median = statistics.median(ratios)
+            worst = max(ratios)
+            median_text, _ = format_ratio(median)
+            worst_text, _ = format_ratio(worst)
+        else:
+            median_text, worst_text = "—", "—"
         lines.append(f"| {group} | {len(items)} | {median_text} | {worst_text} |")
     return "\n".join(lines)
 

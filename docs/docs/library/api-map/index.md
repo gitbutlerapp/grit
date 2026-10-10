@@ -106,6 +106,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::TextAttr` | enum | Per-file text attribute from .gitattributes. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.TextAttr.html) |
 | `grit_lib::crlf::WorkTreeEncodingError` | enum | Working-tree encoding conversion failure (Git reencode_string_len returning NULL). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.WorkTreeEncodingError.html) |
 | `grit_lib::delta_encode` | module | Encode Git pack binary deltas (format decoded by crate::unpack_objects::apply_delta). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/index.html) |
+| `grit_lib::delta_encode::DeltaIndex` | struct | Rolling-hash index over a base buffer for reuse when encoding many targets. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/struct.DeltaIndex.html) |
 | `grit_lib::delta_islands` | module | Delta islands — restrict cross-island deltas in pack-objects (--delta-islands). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/index.html) |
 | `grit_lib::delta_islands::DeltaIslands` | struct | Computed island marks for a pack-objects run. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.DeltaIslands.html) |
 | `grit_lib::delta_islands::IslandBitmap` | struct | One island membership bitmap (one bit per deduplicated island). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.IslandBitmap.html) |

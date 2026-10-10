@@ -228,6 +228,7 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | --- | ---: | ---: | ---: |
 | add | 2 | 2.56× | 2.59× |
 | commit | 2 | 0.58× | 0.68× |
+| delta_encode | 2 | — | — |
 | merge | 2 | 3.40× | 3.84× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 6 | 14.90× | 98.20× |
@@ -248,6 +249,13 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | --- | --- | ---: | ---: | ---: | --- |
 | `commit-10000` | synthetic-10000 | 167 | 81.3 | 0.49× | ±9.20 ms |
 | `commit-100000` | synthetic-100000 | 1,680 | 1,140 | 0.68× | ±48.6 ms |
+
+### delta_encode
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `delta-encode-binary-256k` | synthetic-256k-binary | — | 0.36 | — | ±0.00 ms |
+| `delta-encode-text-256k` | synthetic-256k-text | — | 0.54 | — | ±0.01 ms |
 
 ### merge
 

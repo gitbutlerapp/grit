@@ -176,6 +176,36 @@ class BenchpageTest(unittest.TestCase):
         self.assertIn("'machine'", msg)
         self.assertIn("object", msg)
 
+    def test_criterion_driver_grit_only(self) -> None:
+        report = {
+            **FIXTURE_REPORT,
+            "scenarios": [
+                {
+                    "id": "delta-encode-text-256k",
+                    "group": "delta_encode",
+                    "fixture": "synthetic-256k-text",
+                    "description": "Criterion only",
+                    "driver": "criterion",
+                    "grit": {
+                        "mean_ms": 48.0,
+                        "median_ms": 48.0,
+                        "stddev_ms": 1.0,
+                        "min_ms": 47.0,
+                        "max_ms": 49.0,
+                        "runs_ms": [48.0],
+                    },
+                }
+            ],
+        }
+        path = self.tmp / "criterion.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        bundle = benchpage.merge_baselines([path])
+        self.assertEqual(len(bundle.scenarios), 1)
+        self.assertIsNone(bundle.scenarios[0].git_mean_ms)
+        self.assertIsNone(bundle.scenarios[0].ratio)
+        html_out = benchpage.render_tables(bundle)
+        self.assertIn("—", html_out)
+
     def test_scenario_row_count_matches_baseline(self) -> None:
         bundle = benchpage.merge_baselines([self.baseline])
         html_out = benchpage.render_tables(bundle)
@@ -206,7 +236,7 @@ class BenchpageTest(unittest.TestCase):
         self.assertEqual(benchpage.count_data_rows(html_out), expected)
 
     def test_docs_check_fails_when_baseline_tampered(self) -> None:
-        baseline_path = ROOT / "grit-utils" / "baselines" / "hot-paths-before.json"
+        baseline_path = ROOT / "grit-utils" / "baselines" / "hot-paths-after.json"
         if not baseline_path.is_file():
             self.skipTest("no committed baseline on main yet")
         original = baseline_path.read_text(encoding="utf-8")

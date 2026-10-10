@@ -2910,6 +2910,7 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::crlf::TextAttr` | enum | Per-file text attribute from .gitattributes. | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.TextAttr.html) |
 | `grit_lib::crlf::WorkTreeEncodingError` | enum | Working-tree encoding conversion failure (Git reencode_string_len returning NULL). | [API](https://docs.rs/grit-lib/latest/grit_lib/crlf/enum.WorkTreeEncodingError.html) |
 | `grit_lib::delta_encode` | module | Encode Git pack binary deltas (format decoded by crate::unpack_objects::apply_delta). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/index.html) |
+| `grit_lib::delta_encode::DeltaIndex` | struct | Rolling-hash index over a base buffer for reuse when encoding many targets. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/struct.DeltaIndex.html) |
 | `grit_lib::delta_islands` | module | Delta islands — restrict cross-island deltas in pack-objects (--delta-islands). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/index.html) |
 | `grit_lib::delta_islands::DeltaIslands` | struct | Computed island marks for a pack-objects run. | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.DeltaIslands.html) |
 | `grit_lib::delta_islands::IslandBitmap` | struct | One island membership bitmap (one bit per deduplicated island). | [API](https://docs.rs/grit-lib/latest/grit_lib/delta_islands/struct.IslandBitmap.html) |
@@ -3923,6 +3924,10 @@ For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`
 
 When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) with the entry offset from [`PackIndex`](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.PackIndex.html) so the read path does not repeat index lookup by OID.
 
+## Pack deltas (encoding)
+
+When building new pack deltas (as opposed to reusing on-disk zlib), grit-lib indexes the base blob with [`DeltaIndex`](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/struct.DeltaIndex.html) and encodes targets with a rolling fingerprint matcher. Reuse one index across many targets in a pack-objects window; `encode` on that index accepts an optional `max_size` cap (zero means no limit). An empty target yields a valid delta (header varints only). [`encode_delta`](https://docs.rs/grit-lib/latest/grit_lib/delta_encode/fn.encode_delta.html) is a convenience wrapper for one-off base/target pairs.
+
 ## Example
 
 This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
@@ -4722,6 +4727,7 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | --- | ---: | ---: | ---: |
 | add | 2 | 2.56× | 2.59× |
 | commit | 2 | 0.58× | 0.68× |
+| delta_encode | 2 | — | — |
 | merge | 2 | 3.40× | 3.84× |
 | object_reads | 8 | 234.49× | 4569.02× |
 | odb_backend | 6 | 14.90× | 98.20× |
@@ -4742,6 +4748,13 @@ Acceptance bars for step 480 are **≤1.2×** git wall time and **≤1.5×** git
 | --- | --- | ---: | ---: | ---: | --- |
 | `commit-10000` | synthetic-10000 | 167 | 81.3 | 0.49× | ±9.20 ms |
 | `commit-100000` | synthetic-100000 | 1,680 | 1,140 | 0.68× | ±48.6 ms |
+
+### delta_encode
+
+| Scenario | Fixture | Git mean (ms) | Grit mean (ms) | Grit / Git | Spread |
+| --- | --- | ---: | ---: | ---: | --- |
+| `delta-encode-binary-256k` | synthetic-256k-binary | — | 0.36 | — | ±0.00 ms |
+| `delta-encode-text-256k` | synthetic-256k-text | — | 0.54 | — | ±0.01 ms |
 
 ### merge
 
