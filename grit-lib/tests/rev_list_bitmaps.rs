@@ -14,6 +14,16 @@ fn git_ok(repo: &RepoFixture, args: &[&str]) {
     assert!(out.ok, "git {:?} failed: {}", args, out.stderr);
 }
 
+fn git_stdout(repo: &RepoFixture, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .current_dir(repo.path())
+        .args(args)
+        .output()
+        .expect("git");
+    assert!(out.status.success(), "git {args:?} failed");
+    std::str::from_utf8(&out.stdout).unwrap().trim().to_string()
+}
+
 fn git_count(repo: &RepoFixture, extra: &[&str]) -> usize {
     let mut args = vec!["rev-list", "--count"];
     args.extend_from_slice(extra);
@@ -110,10 +120,7 @@ fn count_objects_matches_git_use_bitmap_index() {
     repack_with_bitmap(&fixture);
     write_commit_graph(&fixture);
     let repo = open_repo(fixture.path());
-    let git_n = git_count(
-        &fixture,
-        &["--objects", "--all", "--use-bitmap-index"],
-    );
+    let git_n = git_count(&fixture, &["--objects", "--all", "--use-bitmap-index"]);
     let opts = RevListOptions {
         all_refs: true,
         count: true,
@@ -133,10 +140,7 @@ fn count_objects_auto_bitmap_without_flag() {
     build_history(&fixture);
     repack_with_bitmap(&fixture);
     let repo = open_repo(fixture.path());
-    let git_n = git_count(
-        &fixture,
-        &["--objects", "--all", "--use-bitmap-index"],
-    );
+    let git_n = git_count(&fixture, &["--objects", "--all", "--use-bitmap-index"]);
     let opts = RevListOptions {
         all_refs: true,
         count: true,
@@ -226,6 +230,103 @@ fn incompatible_options_fall_back() {
     }
 }
 
+fn git_rev_list_object_set(
+    fixture: &RepoFixture,
+    positive: &[&str],
+    negative: &[&str],
+    use_bitmap: bool,
+) -> HashSet<ObjectId> {
+    let mut args: Vec<String> = vec!["rev-list".into(), "--objects".into()];
+    if use_bitmap {
+        args.push("--use-bitmap-index".into());
+    }
+    for p in positive {
+        args.push((*p).to_string());
+    }
+    for n in negative {
+        args.push(if n.starts_with('^') {
+            (*n).to_string()
+        } else {
+            format!("^{n}")
+        });
+    }
+    let out = Command::new("git")
+        .current_dir(fixture.path())
+        .args(&args)
+        .output()
+        .expect("git rev-list");
+    assert!(
+        out.status.success(),
+        "git rev-list: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+        .split(|&b| b == b'\n')
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let token = std::str::from_utf8(l)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap();
+            ObjectId::from_hex(token).expect("oid")
+        })
+        .collect()
+}
+
+fn grit_rev_list_object_set(
+    repo: &Repository,
+    positive: &[&str],
+    negative: &[&str],
+    use_bitmap: bool,
+) -> (HashSet<ObjectId>, bool) {
+    let pos: Vec<String> = positive.iter().map(|s| (*s).to_string()).collect();
+    let neg: Vec<String> = negative
+        .iter()
+        .map(|s| s.strip_prefix('^').unwrap_or(s).to_string())
+        .collect();
+    let opts = RevListOptions {
+        objects: true,
+        use_bitmap_index: use_bitmap,
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result = rev_list(repo, &pos, &neg, &opts).expect("rev-list");
+    let mut set = HashSet::new();
+    set.extend(result.commits);
+    set.extend(result.objects.iter().map(|(o, _)| *o));
+    (set, result.bitmap_object_format)
+}
+
+#[test]
+fn bitmap_honors_negative_blob_root() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_history(&fixture);
+    repack_with_bitmap(&fixture);
+    let repo = open_repo(fixture.path());
+    let head = "HEAD";
+    let blob = git_stdout(&fixture, &["rev-parse", "HEAD:readme"]);
+    let git_set = git_rev_list_object_set(&fixture, &[head], &[&blob], true);
+    let (grit_set, bitmap) = grit_rev_list_object_set(&repo, &[head], &[&blob], true);
+    assert!(bitmap, "expected bitmap acceleration");
+    assert!(!git_set.contains(&ObjectId::from_hex(&blob).unwrap()));
+    assert_eq!(grit_set, git_set);
+}
+
+#[test]
+fn bitmap_honors_negative_tree_root() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    build_history(&fixture);
+    repack_with_bitmap(&fixture);
+    let repo = open_repo(fixture.path());
+    let head = "HEAD";
+    let tree = git_stdout(&fixture, &["rev-parse", "HEAD^{tree}"]);
+    let git_set = git_rev_list_object_set(&fixture, &[head], &[&tree], true);
+    let (grit_set, bitmap) = grit_rev_list_object_set(&repo, &[head], &[&tree], true);
+    assert!(bitmap, "expected bitmap acceleration");
+    assert_eq!(grit_set, git_set);
+}
+
 #[test]
 fn no_bitmap_count_uses_commit_graph() {
     let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
@@ -238,11 +339,7 @@ fn no_bitmap_count_uses_commit_graph() {
         .read_dir()
         .unwrap()
         .filter_map(|e| e.ok())
-        .any(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "bitmap")
-        });
+        .any(|e| e.path().extension().is_some_and(|ext| ext == "bitmap"));
     assert!(!has_bitmap, "fixture should have no pack bitmap");
     let repo = open_repo(fixture.path());
     let metrics = repo.odb.hot_path_metrics_arc();

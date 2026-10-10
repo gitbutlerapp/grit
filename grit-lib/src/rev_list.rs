@@ -14,7 +14,6 @@ use std::sync::Arc;
 
 use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, ReachabilityQuery};
 use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphChain};
-use crate::pack_bitmap::BitmapIndex;
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
@@ -24,6 +23,7 @@ use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::commits_reachable_excluding_ancestors_of;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::store::ObjectStore;
+use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
 use crate::reflog::{list_reflog_refs, read_reflog};
@@ -676,8 +676,7 @@ impl RevListResult {
     /// Commit count for `--count` (fast path or [`Self::commits`] length).
     #[must_use]
     pub fn commit_count(&self) -> usize {
-        self.reachable_commit_count
-            .unwrap_or(self.commits.len())
+        self.reachable_commit_count.unwrap_or(self.commits.len())
     }
 
     /// Total printed lines for `--count --objects`.
@@ -936,9 +935,14 @@ pub fn rev_list(
         return Err(Error::InvalidRef("no revisions specified".to_owned()));
     }
 
-    if let Some(result) =
-        try_rev_list_accelerated(repo, &include, &exclude, &object_roots, options)?
-    {
+    if let Some(result) = try_rev_list_accelerated(
+        repo,
+        &include,
+        &exclude,
+        &object_roots,
+        &negative_object_roots,
+        options,
+    )? {
         return Ok(result);
     }
 
@@ -4869,16 +4873,6 @@ fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
         && !options.no_object_names
 }
 
-fn bitmap_walk_to_error(err: BitmapWalkError) -> Error {
-    match err {
-        BitmapWalkError::Unsupported(_) => {
-            Error::CorruptObject("bitmap walk unsupported".to_owned())
-        }
-        BitmapWalkError::Bitmap(e) => Error::CorruptObject(format!("pack bitmap: {e}")),
-        BitmapWalkError::Repository(e) => e,
-    }
-}
-
 fn wants_bitmap_rev_list(options: &RevListOptions) -> bool {
     options.objects && (options.use_bitmap_index || options.count)
 }
@@ -4888,6 +4882,7 @@ fn try_rev_list_accelerated(
     include: &[ObjectId],
     exclude: &[ObjectId],
     object_roots: &[RootObject],
+    negative_object_roots: &[RootObject],
     options: &RevListOptions,
 ) -> Result<Option<RevListResult>> {
     if !rev_list_acceleration_compatible(options) {
@@ -4961,32 +4956,44 @@ fn try_rev_list_accelerated(
         Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
 
+    let skip_trees = skip_tree_descent_for_object_type_filter(options.filter.as_ref());
+    let excluded_object_ids = excluded_object_root_ids(
+        repo,
+        negative_object_roots,
+        options.missing_action,
+        None,
+        skip_trees,
+        true,
+        false,
+    )?;
+
     let commit_count = reachable
-        .count_by_kind(ObjectKind::Commit)
-        .map_err(bitmap_walk_to_error)?;
+        .iter_by_kind(ObjectKind::Commit)
+        .filter(|oid| !excluded_object_ids.contains(oid))
+        .count();
     let non_commit_count = [ObjectKind::Tree, ObjectKind::Blob, ObjectKind::Tag]
         .into_iter()
-        .map(|k| reachable.count_by_kind(k).map_err(bitmap_walk_to_error))
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .sum::<usize>();
+        .flat_map(|kind| reachable.iter_by_kind(kind))
+        .filter(|oid| !excluded_object_ids.contains(oid))
+        .count();
 
     let (commits, objects) = if options.count {
         (Vec::new(), Vec::new())
     } else {
-        let commits: Vec<ObjectId> = reachable.iter_by_kind(ObjectKind::Commit).collect();
-        let objects: Vec<(ObjectId, String)> = [
-            ObjectKind::Tree,
-            ObjectKind::Blob,
-            ObjectKind::Tag,
-        ]
-        .into_iter()
-        .flat_map(|kind| {
-            reachable
-                .iter_by_kind(kind)
-                .map(|oid| (oid, String::new()))
-        })
-        .collect();
+        let commits: Vec<ObjectId> = reachable
+            .iter_by_kind(ObjectKind::Commit)
+            .filter(|oid| !excluded_object_ids.contains(oid))
+            .collect();
+        let objects: Vec<(ObjectId, String)> =
+            [ObjectKind::Tree, ObjectKind::Blob, ObjectKind::Tag]
+                .into_iter()
+                .flat_map(|kind| {
+                    reachable
+                        .iter_by_kind(kind)
+                        .filter(|oid| !excluded_object_ids.contains(oid))
+                        .map(|oid| (oid, String::new()))
+                })
+                .collect();
         (commits, objects)
     };
 
