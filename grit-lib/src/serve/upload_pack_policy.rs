@@ -141,7 +141,7 @@ pub(crate) fn validate_wants(
     policy: &UploadPackPolicy,
 ) -> Result<()> {
     if policy.allow_reachable_sha1_in_want {
-        let reachable = reachable_from_advertised(repo, refs, head)?;
+        let reachable = reachable_from_repository_tips(repo)?;
         for w in wants {
             if !reachable.contains(w) {
                 return Err(ServeError::NotOurRef(*w));
@@ -150,7 +150,7 @@ pub(crate) fn validate_wants(
         return Ok(());
     }
     if policy.allow_tip_sha1_in_want {
-        let tips = advertised_tip_commits(repo, refs, head);
+        let tips = repository_tip_commits(repo)?;
         for w in wants {
             if !tips.contains(w) {
                 return Err(ServeError::NotOurRef(*w));
@@ -171,34 +171,24 @@ pub(crate) fn validate_wants(
     Ok(())
 }
 
-fn advertised_tip_commits(
-    repo: &Repository,
-    refs: &[AdvertisedRef],
-    head: Option<ObjectId>,
-) -> HashSet<ObjectId> {
+/// Peeled commit tips for every ref in the repository (including hidden refs).
+fn repository_tip_commits(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut tips = HashSet::new();
-    if let Some(h) = head {
-        if let Ok(p) = super::peel_tag(repo, h) {
+    for (_, oid) in crate::refs::list_refs(&repo.git_dir, "refs/")? {
+        if let Ok(p) = super::peel_tag(repo, oid) {
             tips.insert(p);
         }
     }
-    for r in refs {
-        if let Ok(p) = super::peel_tag(repo, r.oid) {
+    if let Ok(head) = crate::refs::resolve_ref(&repo.git_dir, "HEAD") {
+        if let Ok(p) = super::peel_tag(repo, head) {
             tips.insert(p);
         }
-        if let Some(peeled) = r.peeled {
-            tips.insert(peeled);
-        }
     }
-    tips
+    Ok(tips)
 }
 
-fn reachable_from_advertised(
-    repo: &Repository,
-    refs: &[AdvertisedRef],
-    head: Option<ObjectId>,
-) -> Result<HashSet<ObjectId>> {
-    let tips = advertised_tip_commits(repo, refs, head);
+fn reachable_from_repository_tips(repo: &Repository) -> Result<HashSet<ObjectId>> {
+    let tips = repository_tip_commits(repo)?;
     let mut seen = HashSet::new();
     let mut q: VecDeque<ObjectId> = tips.iter().copied().collect();
     while let Some(oid) = q.pop_front() {

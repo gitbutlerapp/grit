@@ -5940,6 +5940,24 @@ pub fn shallow_grafts_for_upload_pack_deepen(
     border_commits_not_in_client_shallow(repo, &included, &client_set)
 }
 
+/// Shallow borders when the client sent `deepen-relative` and the caller already computed
+/// the absolute target depth (Git `get_shallow_commits` after `deepen_relative` adjustment).
+#[must_use]
+pub fn shallow_grafts_for_upload_pack_target_depth(
+    repo: &Repository,
+    wants: &[ObjectId],
+    client_shallow: &[ObjectId],
+    target_depth: usize,
+) -> Vec<ObjectId> {
+    if target_depth == 0 || wants.is_empty() {
+        return Vec::new();
+    }
+    let server_shallow = shallow_boundary_oids(&repo.git_dir);
+    let client_set: HashSet<ObjectId> = client_shallow.iter().copied().collect();
+    let included = commits_within_parent_depth(repo, wants, target_depth, &server_shallow);
+    border_commits_not_in_client_shallow(repo, &included, &client_set)
+}
+
 fn commit_parent_ids(repo: &Repository, oid: ObjectId) -> Vec<ObjectId> {
     let Ok(obj) = repo.odb.read(&oid) else {
         return Vec::new();
