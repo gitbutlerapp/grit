@@ -6,6 +6,11 @@ use grit_utils::binary::{require_hyperfine, resolve_binary};
 use grit_utils::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
 use grit_utils::compare::compare_files;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
+use grit_utils::network_fixture::NetworkProfile;
+use grit_utils::network_suite::{
+    prepare_network_clone, prepare_network_fetch_incr, prepare_network_fetch_noop,
+    prepare_network_push, run_network_suite,
+};
 use grit_utils::odb_driver::{self, open_repo};
 use grit_utils::odb_suite::{run_odb_backend_suite, run_odb_suite, OdbRunConfig};
 use grit_utils::render::{render_markdown, render_text};
@@ -15,6 +20,7 @@ use grit_utils::scenarios::{
     run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
+use std::net::TcpListener;
 use time::OffsetDateTime;
 
 #[derive(Parser)]
@@ -28,6 +34,9 @@ struct Cli {
 
     #[arg(long, global = true)]
     git: Option<PathBuf>,
+
+    #[arg(long, global = true)]
+    http_server: Option<PathBuf>,
 
     #[arg(long, global = true, default_value = "text")]
     format: OutputFormat,
@@ -86,6 +95,12 @@ enum Cmd {
         #[arg(long)]
         repo: Option<PathBuf>,
     },
+    /// Clone, fetch, push, and ls-remote over file and smart HTTP
+    Network {
+        /// Use tiny cached fixtures (for integration tests).
+        #[arg(long)]
+        smoke: bool,
+    },
     /// Internal: library-backed workloads for ODB benchmarks
     #[command(hide = true)]
     Drive {
@@ -141,6 +156,41 @@ enum Cmd {
     PrepareCommit {
         #[arg(long)]
         git: PathBuf,
+    },
+    #[command(hide = true)]
+    ServeGitHttp {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:0")]
+        bind: String,
+    },
+    #[command(hide = true)]
+    PrepareNetworkClone {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        bare: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareNetworkFetchIncr {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        bare: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareNetworkFetchNoop {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        bare: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareNetworkPush {
+        #[arg(long)]
+        git: PathBuf,
+        #[arg(long)]
+        bare: PathBuf,
     },
 }
 
@@ -299,6 +349,39 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_commit(&git);
         }
+        Cmd::ServeGitHttp { root, bind } => {
+            let git = resolve_binary("git", cli.git.as_deref())?;
+            let listener = TcpListener::bind(bind).context("bind")?;
+            eprintln!(
+                "git http-backend serving {} (ctrl-c to stop)",
+                root.display()
+            );
+            for mut stream in listener.incoming().flatten() {
+                let git = git.clone();
+                let root = root.clone();
+                std::thread::spawn(move || {
+                    let _ = grit_utils::network_http::handle_git_http_connection(
+                        &git,
+                        &root,
+                        &mut stream,
+                    );
+                });
+            }
+            return Ok(());
+        }
+        Cmd::PrepareNetworkClone { bare, .. } => return prepare_network_clone(bare.as_path()),
+        Cmd::PrepareNetworkFetchIncr { git, bare } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_network_fetch_incr(&git, bare.as_path());
+        }
+        Cmd::PrepareNetworkFetchNoop { git, bare } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_network_fetch_noop(&git, bare.as_path());
+        }
+        Cmd::PrepareNetworkPush { git, bare } => {
+            let git = resolve_binary("git", Some(git))?;
+            return prepare_network_push(&git, bare.as_path());
+        }
         _ => {}
     }
 
@@ -398,6 +481,24 @@ fn main() -> Result<()> {
                 timestamp,
             )?
         }
+        Cmd::Network { smoke } => {
+            eprintln!("Running network benchmarks...");
+            let profile = if *smoke {
+                NetworkProfile::Smoke
+            } else {
+                NetworkProfile::Production
+            };
+            let cfg = run_config(&cli, true);
+            run_network_suite(
+                &hyperfine,
+                &git,
+                &grit,
+                cli.http_server.as_deref(),
+                &cfg,
+                profile,
+                timestamp,
+            )?
+        }
         Cmd::HotPaths {
             sizes,
             fsmonitor_fixture,
@@ -431,14 +532,19 @@ fn main() -> Result<()> {
         | Cmd::PreparePick { .. }
         | Cmd::PrepareMerge { .. }
         | Cmd::PreparePickSeries { .. }
-        | Cmd::PrepareCommit { .. } => unreachable!(),
+        | Cmd::PrepareCommit { .. }
+        | Cmd::PrepareNetworkClone { .. }
+        | Cmd::PrepareNetworkFetchIncr { .. }
+        | Cmd::PrepareNetworkFetchNoop { .. }
+        | Cmd::PrepareNetworkPush { .. }
+        | Cmd::ServeGitHttp { .. } => unreachable!(),
     };
 
     let rendered = render_report(&cli.format, &report)?;
     write_output(&cli, &rendered)?;
     if !matches!(
         cli.command,
-        Cmd::Odb | Cmd::OdbBackend | Cmd::Bitmaps { .. }
+        Cmd::Odb | Cmd::OdbBackend | Cmd::Bitmaps { .. } | Cmd::Network { .. }
     ) {
         remove_dir_robust(&scratch_dir());
     }
