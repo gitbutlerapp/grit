@@ -166,6 +166,10 @@ pub fn format_warning_message(w: &Warning) -> String {
         Warning::MidxUnknownPreferredPack { name } => format!(
             "multi-pack-index preferred pack '{name}' not found in pack directory"
         ),
+        Warning::PackBitmapIgnored { path, reason } => format!(
+            "pack bitmap ignored at {}: {reason}",
+            path.display()
+        ),
         _ => format!("{w:?}"),
     }
 }
@@ -208,6 +212,7 @@ fn warning_kind(w: &Warning) -> String {
         Warning::MidxBitmapMissingReverseIndex => "midx_bitmap_missing_reverse_index".into(),
         Warning::MidxPackIndexUnavailable { .. } => "midx_pack_index_unavailable".into(),
         Warning::MidxUnknownPreferredPack { .. } => "midx_unknown_preferred_pack".into(),
+        Warning::PackBitmapIgnored { .. } => "pack_bitmap_ignored".into(),
         _ => "other".into(),
     }
 }

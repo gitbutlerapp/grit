@@ -62,6 +62,10 @@ files = [
     "pack_map.rs",
     "pack_index_build.rs",
     "pack_zlib.rs",
+    "pack_bitmap/mod.rs",
+    "pack_bitmap/error.rs",
+    "pack_bitmap/index.rs",
+    "pack_bitmap/order.rs",
 ]
 minimum = 86.3
 
@@ -153,6 +157,18 @@ minimum = 89.3
 
 [file."pack_zlib.rs"]
 minimum = 73.4
+
+[file."pack_bitmap/mod.rs"]
+minimum = 85.0
+
+[file."pack_bitmap/error.rs"]
+minimum = 85.0
+
+[file."pack_bitmap/index.rs"]
+minimum = 85.0
+
+[file."pack_bitmap/order.rs"]
+minimum = 85.0
 
 [file."promisor.rs"]
 minimum = 81.1
