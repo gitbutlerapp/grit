@@ -101,12 +101,16 @@ fn local_change_diffs(
     Ok((staged, unstaged, index_changed))
 }
 
-fn ensure_worktree_clean_with_message(repo: &Repository, message: &str) -> Result<()> {
+fn ensure_worktree_clean_with_message(
+    repo: &Repository,
+    message: &str,
+    persist_index_stat_refresh: bool,
+) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
     let index_path = repo.index_path();
     let (staged, unstaged, index_changed) =
         local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
-    if index_changed && repo.try_write_index(&mut snapshot.index)? {
+    if persist_index_stat_refresh && index_changed && repo.try_write_index(&mut snapshot.index)? {
         snapshot.index.source_mtime = index_file_mtime(&index_path);
     }
     if !staged.is_empty() || !unstaged.is_empty() {
@@ -124,6 +128,7 @@ pub fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_with_message(
         repo,
         "you have uncommitted changes — commit them before picking",
+        false,
     )
 }
 
@@ -136,6 +141,7 @@ pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
     ensure_worktree_clean_with_message(
         repo,
         "you have uncommitted changes — commit them before merging",
+        true,
     )
 }
 

@@ -1832,6 +1832,19 @@ pub struct BranchCommitRefUpdate<'a> {
     pub reflog_message: &'a str,
 }
 
+/// Verify a branch tip matches `expected` before committing a new OID.
+///
+/// # Errors
+///
+/// Returns [`Error::RefNotFound`] or [`Error::RefStale`] when the CAS check fails.
+pub fn verify_branch_commit_cas(
+    expected: Option<ObjectId>,
+    current: Option<ObjectId>,
+    refname: &str,
+) -> Result<()> {
+    verify_branch_cas(expected, current, refname)
+}
+
 fn verify_branch_cas(
     expected: Option<ObjectId>,
     current: Option<ObjectId>,
@@ -1929,50 +1942,102 @@ fn test_branch_ref_pause_before_commit() {
 #[cfg(not(test))]
 fn test_branch_ref_pause_before_commit() {}
 
-fn update_branch_for_commit_files(
+/// Loose branch ref lock held between CAS validation and the ref file commit.
+///
+/// Dropping without [`commit_branch_commit_ref_lock`](Self::commit) aborts the lock file.
+pub struct BranchCommitRefLock {
+    lock_path: PathBuf,
+    disarmed: bool,
+}
+
+impl BranchCommitRefLock {
+    /// Acquire the branch ref lock and verify `expected_old` before worktree mutations.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`update_branch_for_commit_with_config`], except no reflogs or ref write occur yet.
+    pub fn acquire(
+        git_dir: &Path,
+        branch_ref: &str,
+        expected_old: Option<ObjectId>,
+    ) -> Result<Self> {
+        ensure_refname_safe_for_storage(branch_ref)?;
+        let storage_dir = ref_storage_dir(git_dir, branch_ref);
+        if packed_ref_namespace_conflict(&storage_dir, branch_ref)? {
+            return Err(Error::InvalidRef(format!(
+                "cannot update ref '{}': reference namespace conflict",
+                branch_ref
+            )));
+        }
+        let stor = crate::ref_namespace::storage_ref_name(branch_ref);
+        let path = storage_dir.join(&stor);
+        remove_empty_ref_directory(&path);
+        if fs::symlink_metadata(&path)
+            .map(|m| m.file_type().is_dir())
+            .unwrap_or(false)
+        {
+            let display = ref_path_for_display(&path);
+            return Err(crate::error::RefLockError::DirectoryInTheWay {
+                refname: branch_ref.to_owned(),
+                path: display,
+            }
+            .into());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let lock = lock_path_for_ref(&path);
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)?;
+
+        let current = read_loose_or_packed_oid(git_dir, branch_ref)?;
+        if let Err(err) = verify_branch_cas(expected_old, current, branch_ref) {
+            abort_loose_ref_lock(&lock);
+            return Err(err);
+        }
+
+        Ok(Self {
+            lock_path: lock,
+            disarmed: false,
+        })
+    }
+
+    /// Write reflogs and commit the branch ref while holding the lock from [`Self::acquire`].
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O or reflog failures; the lock is aborted unless the ref commit succeeds.
+    pub fn commit(
+        mut self,
+        git_dir: &Path,
+        update: &BranchCommitRefUpdate<'_>,
+        reflog_old: &ObjectId,
+        config: &ConfigSet,
+    ) -> Result<()> {
+        complete_branch_commit_ref_lock_files(git_dir, &mut self, update, reflog_old, config)?;
+        self.disarmed = true;
+        Ok(())
+    }
+}
+
+impl Drop for BranchCommitRefLock {
+    fn drop(&mut self) {
+        if !self.disarmed {
+            abort_loose_ref_lock(&self.lock_path);
+        }
+    }
+}
+
+fn complete_branch_commit_ref_lock_files(
     git_dir: &Path,
+    lock: &mut BranchCommitRefLock,
     update: &BranchCommitRefUpdate<'_>,
     reflog_old: &ObjectId,
     config: &ConfigSet,
 ) -> Result<()> {
-    ensure_refname_safe_for_storage(update.branch_ref)?;
-    let storage_dir = ref_storage_dir(git_dir, update.branch_ref);
-    if packed_ref_namespace_conflict(&storage_dir, update.branch_ref)? {
-        return Err(Error::InvalidRef(format!(
-            "cannot update ref '{}': reference namespace conflict",
-            update.branch_ref
-        )));
-    }
-    let stor = crate::ref_namespace::storage_ref_name(update.branch_ref);
-    let path = storage_dir.join(&stor);
-    remove_empty_ref_directory(&path);
-    if fs::symlink_metadata(&path)
-        .map(|m| m.file_type().is_dir())
-        .unwrap_or(false)
-    {
-        let display = ref_path_for_display(&path);
-        return Err(crate::error::RefLockError::DirectoryInTheWay {
-            refname: update.branch_ref.to_owned(),
-            path: display,
-        }
-        .into());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let lock = lock_path_for_ref(&path);
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)?;
-
-    let current = read_loose_or_packed_oid(git_dir, update.branch_ref)?;
-    if let Err(err) = verify_branch_cas(update.expected_old, current, update.branch_ref) {
-        abort_loose_ref_lock(&lock);
-        return Err(err);
-    }
-
     let mut branch_reflog_written = false;
     if should_autocreate_reflog_with_config(config, git_dir, update.branch_ref) {
         match append_reflog_with_config(
@@ -1987,7 +2052,7 @@ fn update_branch_for_commit_files(
         ) {
             Ok(()) => branch_reflog_written = true,
             Err(err) => {
-                abort_loose_ref_lock(&lock);
+                abort_loose_ref_lock(&lock.lock_path);
                 return Err(err);
             }
         }
@@ -2007,21 +2072,34 @@ fn update_branch_for_commit_files(
             if branch_reflog_written {
                 let _ = crate::reflog::truncate_last_reflog_line(git_dir, update.branch_ref);
             }
-            abort_loose_ref_lock(&lock);
+            abort_loose_ref_lock(&lock.lock_path);
             return Err(err);
         }
     }
 
     test_branch_ref_pause_before_commit();
 
+    let storage_dir = ref_storage_dir(git_dir, update.branch_ref);
+    let stor = crate::ref_namespace::storage_ref_name(update.branch_ref);
+    let path = storage_dir.join(&stor);
     let content = format!("{}\n", update.new_oid);
     {
         use std::io::Write as _;
-        let mut file = fs::OpenOptions::new().write(true).open(&lock)?;
+        let mut file = fs::OpenOptions::new().write(true).open(&lock.lock_path)?;
         file.write_all(content.as_bytes())?;
     }
-    fs::rename(&lock, &path)?;
+    fs::rename(&lock.lock_path, &path)?;
     Ok(())
+}
+
+fn update_branch_for_commit_files(
+    git_dir: &Path,
+    update: &BranchCommitRefUpdate<'_>,
+    reflog_old: &ObjectId,
+    config: &ConfigSet,
+) -> Result<()> {
+    let lock = BranchCommitRefLock::acquire(git_dir, update.branch_ref, update.expected_old)?;
+    lock.commit(git_dir, update, reflog_old, config)
 }
 
 fn update_branch_for_commit_reftable(
