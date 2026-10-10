@@ -1263,24 +1263,46 @@ impl Index {
         skip_hash: bool,
         config: Option<&ConfigSet>,
     ) -> Result<()> {
-        let mut body = Vec::new();
-        // Fast path: entries loaded from disk (or maintained via `add_or_replace`) are already in
-        // canonical order; serializing from `&self` skips a full clone of every entry. The
-        // comparator must stay identical to [`Index::sort`] (path, then stage) — format v4 path
-        // compression depends on it.
-        if self.entries_sorted {
-            self.serialize_into(&mut body)?;
-        } else {
-            let mut sorted = self.clone();
-            sorted.sort();
-            sorted.serialize_into(&mut body)?;
-        }
+        self.write_to_path_with_config_and_lock(path, skip_hash, config, None)
+    }
 
+    /// Persist the index using an already-held [`IndexLock`] from [`IndexLock::acquire`].
+    pub(crate) fn write_to_path_with_config_and_lock(
+        &self,
+        path: &Path,
+        skip_hash: bool,
+        config: Option<&ConfigSet>,
+        existing_lock: Option<&mut IndexLock>,
+    ) -> Result<()> {
+        let body = self.serialize_index_body()?;
         let checksum: Vec<u8> = if skip_hash {
             vec![0u8; self.hash_algo.len()]
         } else {
             hash_index_body(self.hash_algo, &body)
         };
+
+        if let Some(lock) = existing_lock {
+            if lock.index_path != path {
+                return Err(Error::Message(
+                    "index lock path does not match write target".into(),
+                ));
+            }
+            lock.file.write_all(&body).map_err(Error::Io)?;
+            lock.file.write_all(&checksum).map_err(Error::Io)?;
+            drop(std::mem::replace(
+                &mut lock.file,
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&lock.lock_path)
+                    .map_err(Error::Io)?,
+            ));
+            fs::rename(&lock.lock_path, &lock.index_path).map_err(Error::Io)?;
+            lock.committed = true;
+            if lock.wrote_pid {
+                let _ = fs::remove_file(&lock.pid_path);
+            }
+            return Ok(());
+        }
 
         let tmp_path = path.with_extension("lock");
         let pid_path = pid_path_for_lock(&tmp_path);
@@ -1331,12 +1353,22 @@ impl Index {
             }
             return Err(Error::Io(e));
         }
-        {
-            if wrote_pid_file {
-                let _ = fs::remove_file(&pid_path);
-            }
+        if wrote_pid_file {
+            let _ = fs::remove_file(&pid_path);
         }
         Ok(())
+    }
+
+    fn serialize_index_body(&self) -> Result<Vec<u8>> {
+        let mut body = Vec::new();
+        if self.entries_sorted {
+            self.serialize_into(&mut body)?;
+        } else {
+            let mut sorted = self.clone();
+            sorted.sort();
+            sorted.serialize_into(&mut body)?;
+        }
+        Ok(body)
     }
 
     /// Serialise the index body (without trailing checksum) into `out`.
@@ -2714,6 +2746,78 @@ fn write_lock_pid_file(pid_path: &Path) -> io::Result<()> {
         .open(pid_path)?;
     writeln!(file, "pid {}", std::process::id())?;
     Ok(())
+}
+
+/// Exclusive `.git/index.lock` held for a mutating porcelain operation.
+///
+/// Acquire with [`Self::acquire`] before changing the working tree; persist the index with
+/// [`Index::write_to_path_with_config_and_lock`], then release on drop when uncommitted.
+pub struct IndexLock {
+    pub(crate) index_path: PathBuf,
+    pub(crate) lock_path: PathBuf,
+    pub(crate) pid_path: PathBuf,
+    pub(crate) file: fs::File,
+    pub(crate) wrote_pid: bool,
+    pub(crate) committed: bool,
+}
+
+impl IndexLock {
+    /// Create `.git/index.lock` exclusively, failing when another process holds it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] with `AlreadyExists` when the lock file is present.
+    pub fn acquire(index_path: &Path, config: Option<&ConfigSet>) -> Result<Self> {
+        let lock_path = index_path.with_extension("lock");
+        let pid_path = pid_path_for_lock(&lock_path);
+        let lockfile_pid_enabled = lockfile_pid_enabled(index_path, config);
+
+        let file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let message = build_lock_exists_message(&lock_path, &pid_path, &e);
+                return Err(Error::Io(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    message,
+                )));
+            }
+            Err(e) => return Err(Error::Io(e)),
+        };
+
+        let mut wrote_pid = false;
+        if lockfile_pid_enabled {
+            write_lock_pid_file(&pid_path).map_err(|e| {
+                let _ = fs::remove_file(&lock_path);
+                Error::Io(e)
+            })?;
+            wrote_pid = true;
+        }
+
+        Ok(Self {
+            index_path: index_path.to_path_buf(),
+            lock_path,
+            pid_path,
+            file,
+            wrote_pid,
+            committed: false,
+        })
+    }
+}
+
+impl Drop for IndexLock {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let _ = fs::remove_file(&self.lock_path);
+        if self.wrote_pid {
+            let _ = fs::remove_file(&self.pid_path);
+        }
+    }
 }
 
 /// Detail lines Git prints when the index lock file already exists (used by stash and similar).

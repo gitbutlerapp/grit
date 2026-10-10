@@ -64,6 +64,64 @@ fn grit_repo(dir: &std::path::Path) -> Repository {
     Repository::discover(Some(dir)).expect("open repo")
 }
 
+fn hold_index_lock(repo: &Repository) -> std::fs::File {
+    let lock_path = repo.index_path().with_extension("lock");
+    std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&lock_path)
+        .expect("create index.lock")
+}
+
+#[test]
+fn rm_leaves_worktree_when_index_lock_held() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("a"), "keep\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let _lock = hold_index_lock(&repo);
+    let err = remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec!["a".into()],
+            pathspec_sources: vec!["a".into()],
+            ..Default::default()
+        },
+    )
+    .expect_err("rm with index.lock");
+    assert!(matches!(err, grit_lib::error::Error::Io(_)));
+
+    assert!(repo_dir.join("a").is_file());
+    assert!(
+        git_porcelain(repo_dir).trim().is_empty(),
+        "index and worktree must be unchanged"
+    );
+}
+
+#[test]
+fn mv_leaves_worktree_when_index_lock_held() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("a"), "payload\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let _lock = hold_index_lock(&repo);
+    let err = move_path(&repo, "a", "b", false).expect_err("mv with index.lock");
+    assert!(matches!(err, grit_lib::error::Error::Io(_)));
+
+    assert!(repo_dir.join("a").is_file());
+    assert!(!repo_dir.join("b").exists());
+    assert!(
+        git_porcelain(repo_dir).trim().is_empty(),
+        "index and worktree must be unchanged"
+    );
+}
+
 #[test]
 fn rm_clean_file_staged_deletion() {
     let tmp = tempfile::tempdir().expect("tempdir");

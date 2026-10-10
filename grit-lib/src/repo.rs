@@ -955,6 +955,61 @@ impl Repository {
         crate::pack_bitmap::PackBitmapWriter::write(self, pack_idx_path, options, now)
     }
 
+    /// Acquire `.git/index.lock` before mutating the working tree for index+worktree commands.
+    ///
+    /// Call [`Self::commit_index_update`] to persist the index and release the lock, or drop the
+    /// lock without committing to abort without writing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] when the lock file already exists or cannot be created.
+    pub fn begin_index_update(&self) -> Result<crate::index::IndexLock> {
+        test_inject_index_write_fail()?;
+        let path = self.index_path();
+        let cfg = self.config()?;
+        crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
+    }
+
+    /// Write `index` to disk using a lock from [`Self::begin_index_update`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates index finalization, serialization, and I/O failures.
+    pub fn commit_index_update(
+        &self,
+        lock: &mut crate::index::IndexLock,
+        index: &mut Index,
+        updated_workdir: bool,
+    ) -> Result<()> {
+        test_inject_index_write_fail()?;
+        index.hash_algo = self.odb.hash_algo();
+        self.finalize_sparse_index_if_needed(index)?;
+        let path = self.index_path();
+        let prev_index_mtime = crate::index::index_file_mtime(&path);
+        let cfg = self.config()?;
+        if let Some(work_tree) = self.work_tree.as_deref() {
+            crate::diff::smudge_racily_clean_entries(
+                &self.odb,
+                &self.git_dir,
+                index,
+                work_tree,
+                prev_index_mtime,
+                Some(cfg.as_ref()),
+                Some(self.caches().filters()),
+            );
+        }
+        let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
+        index.write_to_path_with_config_and_lock(
+            &path,
+            skip_hash,
+            Some(cfg.as_ref()),
+            Some(lock),
+        )?;
+        let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
+        let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None);
+        Ok(())
+    }
+
     /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`).
     ///
     /// Opportunistic writers such as `status` stat refresh call this instead of

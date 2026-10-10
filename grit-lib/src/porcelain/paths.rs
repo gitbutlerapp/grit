@@ -51,7 +51,7 @@ pub struct MoveOutcome {
 /// Refuses when a tracked path has staged or unstaged modifications unless `force` is set.
 /// Directory prefixes require `recursive`. Empty parent directories are removed after
 /// deleting files. Cache-tree entries for touched paths are invalidated before the index
-/// is written atomically through [`Repository::write_index`].
+/// is written atomically after the index lock is acquired ([`Repository::begin_index_update`]).
 ///
 /// # Errors
 ///
@@ -67,6 +67,7 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
         return Err(Error::Message("you must specify path(s) to remove".into()));
     }
 
+    let mut lock = repo.begin_index_update()?;
     let mut index = repo.load_index()?;
     let head_tree = resolve_head_tree(repo)?;
     let tracked_paths = tracked_stage0_paths(&index);
@@ -86,32 +87,27 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
         }
     }
 
-    let mut removed_worktree: Vec<PathBuf> = Vec::new();
+    if to_remove.is_empty() {
+        return Ok(RemoveOutcome::default());
+    }
+
+    let path_bytes: Vec<&[u8]> = to_remove.iter().map(|p| p.as_bytes()).collect();
+    index.remove_paths(path_bytes);
+    repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
+
     if !opts.cached {
+        let mut removed_worktree: Vec<PathBuf> = Vec::new();
         for path in &to_remove {
             let abs = work_tree.join(path);
             if abs.is_file() || abs.is_symlink() {
                 fs::remove_file(&abs)
                     .map_err(|e| Error::PathError(format!("removing '{}': {e}", path)))?;
                 removed_worktree.push(abs);
-            } else if abs.is_dir() {
-                // Tracked directory entries are removed via their file paths below.
-                continue;
             }
         }
-    }
-
-    let path_bytes: Vec<&[u8]> = to_remove.iter().map(|p| p.as_bytes()).collect();
-    index.remove_paths(path_bytes);
-
-    if !opts.cached {
-        for abs in &removed_worktree {
-            remove_empty_parent_dirs(work_tree, abs);
+        for abs in removed_worktree {
+            remove_empty_parent_dirs(work_tree, &abs);
         }
-    }
-
-    if !to_remove.is_empty() {
-        repo.write_index(&mut index)?;
     }
 
     Ok(RemoveOutcome { removed: to_remove })
@@ -132,6 +128,7 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
         .as_deref()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
 
+    let mut lock = repo.begin_index_update()?;
     let mut index = repo.load_index()?;
     let src = normalize_repo_path(src);
     let dst = normalize_repo_path(dst);
@@ -170,28 +167,36 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
         )));
     }
 
+    let force_clear_worktree = if force {
+        Some(worktree_paths_to_clear(work_tree, &index, &final_dst))
+    } else {
+        None
+    };
     if force {
-        clear_destination(work_tree, &mut index, &final_dst)?;
+        clear_destination_index(&mut index, &final_dst);
     }
-
-    rename_worktree_paths(work_tree, &src, &final_dst, &renames)?;
 
     let old_paths: Vec<Vec<u8>> = renames
         .iter()
         .map(|(from, _)| from.as_bytes().to_vec())
         .collect();
     let mut new_entries = Vec::with_capacity(renames.len());
-    for (from, to) in renames {
+    for (from, to) in &renames {
         let old = index.get(from.as_bytes(), 0).ok_or_else(|| {
             Error::Message(format!("internal error: missing index entry for '{from}'"))
         })?;
-        new_entries.push(entry_with_relpath(old.clone(), &to));
+        new_entries.push(entry_with_relpath(old.clone(), to));
     }
 
     let old_refs: Vec<&[u8]> = old_paths.iter().map(|p| p.as_slice()).collect();
     index.remove_paths_and_insert(old_refs, new_entries);
 
-    repo.write_index(&mut index)?;
+    repo.commit_index_update(&mut lock, &mut index, true)?;
+
+    if let Some(paths) = force_clear_worktree {
+        remove_worktree_paths(work_tree, &paths)?;
+    }
+    rename_worktree_paths(work_tree, &src, &final_dst, &renames)?;
 
     Ok(MoveOutcome {
         from: src,
@@ -387,24 +392,35 @@ fn destination_exists(work_tree: &Path, index: &Index, dst: &str, _dst_was_dir: 
     index.get(dst.as_bytes(), 0).is_some() || !index_paths_under(index, dst, false).is_empty()
 }
 
-fn clear_destination(work_tree: &Path, index: &mut Index, dst: &str) -> Result<()> {
-    let paths = index_paths_under(index, dst, true);
-    if paths.is_empty() && index.get(dst.as_bytes(), 0).is_none() {
+fn worktree_paths_to_clear(work_tree: &Path, index: &Index, dst: &str) -> Vec<String> {
+    let mut paths = index_paths_under(index, dst, true);
+    if paths.is_empty() {
         let abs = work_tree.join(dst);
         if abs.is_file() || abs.is_symlink() {
-            fs::remove_file(&abs)
-                .map_err(|e| Error::PathError(format!("removing '{dst}': {e}")))?;
-            remove_empty_parent_dirs(work_tree, &abs);
+            paths.push(dst.to_string());
         }
-        return Ok(());
     }
-    for path in &paths {
+    paths
+}
+
+fn clear_destination_index(index: &mut Index, dst: &str) {
+    let paths = index_paths_under(index, dst, true);
+    if paths.is_empty() {
+        index.remove(dst.as_bytes());
+    } else {
+        index.remove_paths(paths.iter().map(|p| p.as_bytes()));
+    }
+}
+
+fn remove_worktree_paths(work_tree: &Path, paths: &[String]) -> Result<()> {
+    for path in paths {
         let abs = work_tree.join(path);
         if abs.is_file() || abs.is_symlink() {
-            let _ = fs::remove_file(&abs);
+            fs::remove_file(&abs)
+                .map_err(|e| Error::PathError(format!("removing '{path}': {e}")))?;
+            remove_empty_parent_dirs(work_tree, &abs);
         }
     }
-    index.remove_paths(paths.iter().map(|p| p.as_bytes()));
     Ok(())
 }
 
@@ -512,4 +528,58 @@ fn entry_with_relpath(mut entry: IndexEntry, path: &str) -> IndexEntry {
     let path_len = entry.path.len().min(0xFFF) as u16;
     entry.flags = path_len | ((stage as u16) << 12);
     entry
+}
+
+#[cfg(test)]
+mod index_lock_transaction_tests {
+    use std::fs;
+
+    use crate::porcelain::add::{stage, StageOptions};
+    use crate::progress::NullProgress;
+    use crate::repo::{init_repository, set_test_inject_index_write_fail, Repository};
+
+    use super::{move_path, remove_paths, RemoveOptions};
+
+    fn init_repo(root: &std::path::Path) -> Repository {
+        init_repository(root, false, "main", None, Default::default()).expect("init")
+    }
+
+    #[test]
+    fn remove_paths_injected_index_write_failure_leaves_worktree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        set_test_inject_index_write_fail(true);
+        let err = remove_paths(
+            &repo,
+            &RemoveOptions {
+                pathspecs: vec!["a.txt".into()],
+                pathspec_sources: vec!["a.txt".into()],
+                ..Default::default()
+            },
+        )
+        .expect_err("injected write failure");
+        set_test_inject_index_write_fail(false);
+        assert!(matches!(err, crate::error::Error::Io(_)));
+        assert!(root.join("a.txt").is_file());
+    }
+
+    #[test]
+    fn move_path_injected_index_write_failure_leaves_worktree() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
+
+        set_test_inject_index_write_fail(true);
+        let err = move_path(&repo, "a.txt", "b.txt", false).expect_err("injected write failure");
+        set_test_inject_index_write_fail(false);
+        assert!(matches!(err, crate::error::Error::Io(_)));
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("b.txt").exists());
+    }
 }
