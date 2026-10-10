@@ -981,6 +981,16 @@ impl Repository {
         index: &mut Index,
         updated_workdir: bool,
     ) -> Result<()> {
+        self.flush_index_update(lock, index)?;
+        self.finish_index_update(lock, updated_workdir)
+    }
+
+    /// Serialize `index` into a held [`crate::index::IndexLock`] without replacing the on-disk index.
+    pub fn flush_index_update(
+        &self,
+        lock: &mut crate::index::IndexLock,
+        index: &mut Index,
+    ) -> Result<()> {
         test_inject_index_write_fail()?;
         index.hash_algo = self.odb.hash_algo();
         self.finalize_sparse_index_if_needed(index)?;
@@ -999,12 +1009,22 @@ impl Repository {
             );
         }
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
-        index.write_to_path_with_config_and_lock(
+        index.write_to_path_with_config_and_lock_mode(
             &path,
             skip_hash,
             Some(cfg.as_ref()),
             Some(lock),
-        )?;
+            false,
+        )
+    }
+
+    /// Commit a staged index lock after a successful working-tree update.
+    pub fn finish_index_update(
+        &self,
+        lock: &mut crate::index::IndexLock,
+        updated_workdir: bool,
+    ) -> Result<()> {
+        lock.commit_replace_index()?;
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
         let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None);
         Ok(())

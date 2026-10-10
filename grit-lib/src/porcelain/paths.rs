@@ -130,8 +130,8 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
 
     let mut lock = repo.begin_index_update()?;
     let mut index = repo.load_index()?;
-    let src = normalize_repo_path(src);
-    let dst = normalize_repo_path(dst);
+    let src = normalize_and_validate_repo_relative(work_tree, src)?;
+    let dst = normalize_and_validate_repo_relative(work_tree, dst)?;
 
     let src_entries = index_paths_under(&index, &src, true);
     if src_entries.is_empty() {
@@ -141,6 +141,7 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
     }
 
     let (final_dst, dst_is_dir_target) = resolve_move_destination(work_tree, &index, &src, &dst)?;
+    let final_dst = normalize_and_validate_repo_relative(work_tree, &final_dst)?;
 
     if is_subdirectory(&final_dst, &src) {
         return Err(Error::Message(format!(
@@ -191,12 +192,18 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
     let old_refs: Vec<&[u8]> = old_paths.iter().map(|p| p.as_slice()).collect();
     index.remove_paths_and_insert(old_refs, new_entries);
 
-    repo.commit_index_update(&mut lock, &mut index, true)?;
+    repo.flush_index_update(&mut lock, &mut index)?;
 
-    if let Some(paths) = force_clear_worktree {
-        remove_worktree_paths(work_tree, &paths)?;
+    let worktree_result = (|| -> Result<()> {
+        if let Some(paths) = force_clear_worktree {
+            remove_worktree_paths(work_tree, &paths)?;
+        }
+        rename_worktree_paths(work_tree, &src, &final_dst, &renames)
+    })();
+    match worktree_result {
+        Ok(()) => repo.finish_index_update(&mut lock, true)?,
+        Err(err) => return Err(err),
     }
-    rename_worktree_paths(work_tree, &src, &final_dst, &renames)?;
 
     Ok(MoveOutcome {
         from: src,
@@ -267,6 +274,13 @@ fn collect_removal_paths(
             continue;
         }
 
+        if !opts.recursive && has_child_paths(spec, tracked) {
+            let prefix = format!("{spec}/");
+            if matches.iter().any(|path| path.starts_with(&prefix)) {
+                return Err(Error::NotRemovingRecursively(resolved.clone()));
+            }
+        }
+
         for path in matches {
             if has_child_paths(&path, tracked) && !opts.recursive {
                 return Err(Error::NotRemovingRecursively(path.clone()));
@@ -334,6 +348,41 @@ fn path_or_ancestor_modified(path: &str, modified: &HashSet<String>) -> bool {
 
 fn normalize_repo_path(path: &str) -> String {
     path.trim_start_matches("./").replace('\\', "/")
+}
+
+fn normalize_and_validate_repo_relative(work_tree: &Path, path: &str) -> Result<String> {
+    let cleaned = path.trim_start_matches("./").replace('\\', "/");
+    if cleaned.is_empty() {
+        return Err(Error::PathError("empty path".into()));
+    }
+
+    let rel = if cleaned.starts_with('/') {
+        let normalized = crate::git_path::normalize_path_copy(&cleaned).map_err(|_| {
+            Error::PathError(format!("path '{path}' escapes repository work tree"))
+        })?;
+        crate::git_path::abspath_part_inside_repo(&normalized, work_tree).ok_or_else(|| {
+            Error::PathError(format!("path '{path}' is outside repository work tree"))
+        })?
+    } else {
+        crate::git_path::normalize_path_copy(&cleaned).map_err(|_| {
+            Error::PathError(format!("path '{path}' escapes repository work tree"))
+        })?
+    };
+
+    if rel.is_empty() {
+        return Err(Error::PathError(format!(
+            "path '{path}' is outside repository work tree"
+        )));
+    }
+
+    let abs = work_tree.join(&rel);
+    if crate::git_path::strip_worktree_prefix(&abs, work_tree).is_none() {
+        return Err(Error::PathError(format!(
+            "path '{path}' is outside repository work tree"
+        )));
+    }
+
+    Ok(rel)
 }
 
 fn index_paths_under(index: &Index, prefix: &str, include_exact: bool) -> Vec<String> {
@@ -523,10 +572,9 @@ fn rename_worktree_paths(
 }
 
 fn entry_with_relpath(mut entry: IndexEntry, path: &str) -> IndexEntry {
-    let stage = entry.stage();
     entry.path = path.as_bytes().to_vec();
     let path_len = entry.path.len().min(0xFFF) as u16;
-    entry.flags = path_len | ((stage as u16) << 12);
+    entry.flags = (entry.flags & !0x0FFF) | path_len;
     entry
 }
 

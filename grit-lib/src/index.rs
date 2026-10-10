@@ -1274,6 +1274,19 @@ impl Index {
         config: Option<&ConfigSet>,
         existing_lock: Option<&mut IndexLock>,
     ) -> Result<()> {
+        self.write_to_path_with_config_and_lock_mode(path, skip_hash, config, existing_lock, true)
+    }
+
+    /// Like [`Self::write_to_path_with_config_and_lock`], but can leave the index uncommitted
+    /// when `commit` is false (bytes are written to an existing [`IndexLock`] only).
+    pub(crate) fn write_to_path_with_config_and_lock_mode(
+        &self,
+        path: &Path,
+        skip_hash: bool,
+        config: Option<&ConfigSet>,
+        existing_lock: Option<&mut IndexLock>,
+        commit: bool,
+    ) -> Result<()> {
         let body = self.serialize_index_body()?;
         let checksum: Vec<u8> = if skip_hash {
             vec![0u8; self.hash_algo.len()]
@@ -1287,19 +1300,9 @@ impl Index {
                     "index lock path does not match write target".into(),
                 ));
             }
-            lock.file.write_all(&body).map_err(Error::Io)?;
-            lock.file.write_all(&checksum).map_err(Error::Io)?;
-            drop(std::mem::replace(
-                &mut lock.file,
-                fs::OpenOptions::new()
-                    .write(true)
-                    .open(&lock.lock_path)
-                    .map_err(Error::Io)?,
-            ));
-            fs::rename(&lock.lock_path, &lock.index_path).map_err(Error::Io)?;
-            lock.committed = true;
-            if lock.wrote_pid {
-                let _ = fs::remove_file(&lock.pid_path);
+            lock.write_index_contents(&body, &checksum)?;
+            if commit {
+                lock.commit_replace_index()?;
             }
             return Ok(());
         }
@@ -2762,6 +2765,30 @@ pub struct IndexLock {
 }
 
 impl IndexLock {
+    /// Write serialized index bytes into the held lock file without replacing `index`.
+    pub(crate) fn write_index_contents(&mut self, body: &[u8], checksum: &[u8]) -> Result<()> {
+        self.file.write_all(body).map_err(Error::Io)?;
+        self.file.write_all(checksum).map_err(Error::Io)?;
+        drop(std::mem::replace(
+            &mut self.file,
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&self.lock_path)
+                .map_err(Error::Io)?,
+        ));
+        Ok(())
+    }
+
+    /// Rename the staged lock file over the on-disk index.
+    pub(crate) fn commit_replace_index(&mut self) -> Result<()> {
+        fs::rename(&self.lock_path, &self.index_path).map_err(Error::Io)?;
+        self.committed = true;
+        if self.wrote_pid {
+            let _ = fs::remove_file(&self.pid_path);
+        }
+        Ok(())
+    }
+
     /// Create `.git/index.lock` exclusively, failing when another process holds it.
     ///
     /// # Errors

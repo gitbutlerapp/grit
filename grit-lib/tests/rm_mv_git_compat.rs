@@ -1,5 +1,6 @@
 //! `remove_paths` / `move_path` compatibility with the system `git` binary.
 
+use std::fs;
 use std::process::Command;
 
 use grit_lib::porcelain::paths::{move_path, remove_paths, RemoveOptions};
@@ -311,6 +312,136 @@ fn mv_directory_refuses_missing_tracked_child() {
         status.contains(" D d/b") || status.contains("D d/b"),
         "deletion of d/b unchanged:\n{status}"
     );
+}
+
+#[test]
+fn rm_directory_pathspec_refused_without_recursive() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(repo_dir.join("dir")).unwrap();
+    std::fs::write(repo_dir.join("dir/file"), "f\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let err = remove_paths(
+        &repo,
+        &RemoveOptions {
+            pathspecs: vec!["dir".into()],
+            pathspec_sources: vec!["dir".into()],
+            recursive: false,
+            ..Default::default()
+        },
+    )
+    .expect_err("rm dir without -r");
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::NotRemovingRecursively(_)
+    ));
+    assert!(repo_dir.join("dir/file").is_file());
+    let status = git_porcelain(repo_dir);
+    assert!(status.is_empty(), "expected unchanged repo:\n{status}");
+}
+
+#[test]
+fn mv_rejects_destination_outside_work_tree() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("tracked"), "body\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let err = move_path(&repo, "tracked", "../escaped", false).expect_err("mv outside repo");
+    assert!(matches!(err, grit_lib::error::Error::PathError(_)));
+    assert!(repo_dir.join("tracked").is_file());
+    let index = repo.load_index().expect("index");
+    assert!(index.get("tracked".as_bytes(), 0).is_some());
+}
+
+#[test]
+fn mv_refused_when_index_lock_held_externally() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("tracked"), "body\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let lock_path = repo_dir.join(".git/index.lock");
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&lock_path)
+        .expect("pre-create index.lock");
+
+    let repo = grit_repo(repo_dir);
+    let index_before = repo.load_index().expect("index before");
+    let err = move_path(&repo, "tracked", "moved", false).expect_err("mv with held lock");
+    assert!(matches!(err, grit_lib::error::Error::Io(_)));
+    assert!(repo_dir.join("tracked").is_file());
+    assert!(!repo_dir.join("moved").exists());
+    assert!(git_porcelain(repo_dir).is_empty());
+    assert_eq!(
+        index_before.entries(),
+        repo.load_index().expect("index after").entries()
+    );
+}
+
+#[test]
+fn mv_worktree_failure_leaves_index_unchanged() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("tracked"), "body\n").unwrap();
+    std::fs::write(repo_dir.join("blocked"), "blocker\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let repo = grit_repo(repo_dir);
+    let index_before = repo.load_index().expect("index before");
+    let err = move_path(&repo, "tracked", "blocked/child", false).expect_err("mv into file");
+    assert!(matches!(err, grit_lib::error::Error::PathError(_)));
+    assert!(repo_dir.join("tracked").is_file());
+    assert!(repo_dir.join("blocked").is_file());
+    assert_eq!(
+        index_before.entries(),
+        repo.load_index().expect("index after").entries()
+    );
+}
+
+#[test]
+fn mv_force_refused_when_index_lock_held_externally() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("source"), "from\n").unwrap();
+    std::fs::write(repo_dir.join("destination"), "to\n").unwrap();
+    commit_all(repo_dir, "init");
+
+    let lock_path = repo_dir.join(".git/index.lock");
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&lock_path)
+        .expect("pre-create index.lock");
+
+    let repo = grit_repo(repo_dir);
+    let index_before = repo.load_index().expect("index before");
+    let err = move_path(&repo, "source", "destination", true).expect_err("force mv with lock");
+    assert!(
+        matches!(err, grit_lib::error::Error::Io(_)),
+        "expected index lock failure, got {err:?}"
+    );
+    assert!(repo_dir.join("source").is_file());
+    assert!(repo_dir.join("destination").is_file());
+    let status = git_porcelain(repo_dir);
+    assert!(
+        status.is_empty(),
+        "force mv must not delete destination when lock is held:\n{status}"
+    );
+    let index_after = repo.load_index().expect("index after");
+    assert_eq!(index_before.entries(), index_after.entries());
+    assert!(index_after.get("source".as_bytes(), 0).is_some());
+    assert!(index_after.get("destination".as_bytes(), 0).is_some());
 }
 
 #[test]
