@@ -876,7 +876,7 @@ pub fn fetch_local(
     // (e.g. `refs/remotes/origin/a`) otherwise blocks creating a nested ref the
     // same fetch introduces (`refs/remotes/origin/a/b`) with a "File exists"
     // directory/file conflict (matches `git fetch --prune` ordering).
-    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
+    let mut prune_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     if opts.prune {
         prune_tracking_refs(
             local_git_dir,
@@ -887,13 +887,17 @@ pub fn fetch_local(
             if opts.dry_run {
                 None
             } else {
-                Some(&mut store_batch)
+                Some(&mut prune_batch)
             },
         )?;
+    }
+    if !opts.dry_run && !prune_batch.is_empty() {
+        crate::refs::commit_ref_store_batch(local_git_dir, &prune_batch)?;
     }
 
     let packed = crate::refs::PackedRefs::load(local_git_dir)?;
 
+    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     for m in &matched {
         let Some(local_ref) = &m.local_ref else {
             // dst empty: fetched but not stored. Report as a no-store update.
@@ -1101,33 +1105,40 @@ pub fn push_local(
         )?;
     }
 
-    // Second pass: apply accepted ref updates in one store transaction (objects copied above).
+    // Second pass: apply ref updates (one transaction per ref unless `atomic`).
     let mut ref_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
-    for d in &decisions {
+    for d in &mut decisions {
         if !d.apply || opts.dry_run {
             continue;
         }
         match &d.action {
             PushAction::Update(src) => {
-                ref_batch.push(push_store_ref_update(
+                let update = push_store_ref_update(
                     d.result.remote_ref.as_str(),
                     Some(*src),
                     d.result.old_oid,
-                ));
+                );
+                if opts.atomic {
+                    ref_batch.push(update);
+                } else if let Err(err) = crate::refs::commit_store_update(remote_git_dir, update) {
+                    apply_ref_store_error_to_push_decision(d, &err, false);
+                }
             }
             PushAction::Delete => {
-                ref_batch.push(push_store_ref_update(
-                    d.result.remote_ref.as_str(),
-                    None,
-                    d.result.old_oid,
-                ));
+                let update =
+                    push_store_ref_update(d.result.remote_ref.as_str(), None, d.result.old_oid);
+                if opts.atomic {
+                    ref_batch.push(update);
+                } else if let Err(err) = crate::refs::commit_store_update(remote_git_dir, update) {
+                    apply_ref_store_error_to_push_decision(d, &err, false);
+                }
             }
             PushAction::None => {}
         }
     }
-    if !opts.dry_run && !ref_batch.is_empty() {
+    if opts.atomic && !opts.dry_run && !ref_batch.is_empty() {
         if let Err(err) = crate::refs::commit_ref_store_batch(remote_git_dir, &ref_batch) {
-            demote_applied_push_on_ref_store_error(&mut decisions, err);
+            apply_atomic_batch_ref_store_error(&mut decisions, &ref_batch, err);
         }
     }
 
@@ -1162,23 +1173,79 @@ fn push_store_ref_update(
     }
 }
 
-fn demote_applied_push_on_ref_store_error(decisions: &mut [PushDecision], err: Error) {
+fn push_status_for_ref_store_error(err: &Error) -> PushRefStatus {
+    match err {
+        Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch { .. }) => {
+            PushRefStatus::RejectStale
+        }
+        _ => PushRefStatus::RemoteRejected,
+    }
+}
+
+fn ref_store_error_refname(err: &Error) -> Option<String> {
+    let Error::RefStore(store_err) = err else {
+        return None;
+    };
+    Some(match store_err {
+        crate::refs::store::RefStoreError::ExpectedMismatch { name, .. }
+        | crate::refs::store::RefStoreError::DuplicateUpdate { name }
+        | crate::refs::store::RefStoreError::LockHeld { name }
+        | crate::refs::store::RefStoreError::InvalidRefName { name } => name.clone(),
+        crate::refs::store::RefStoreError::NameUnavailable { reason } => match reason {
+            crate::refs::RefnameUnavailable::SameBatch { refname, .. }
+            | crate::refs::RefnameUnavailable::AncestorExists {
+                new_ref: refname, ..
+            }
+            | crate::refs::RefnameUnavailable::DescendantExists {
+                new_ref: refname, ..
+            } => refname.clone(),
+        },
+        crate::refs::store::RefStoreError::SymrefLoop
+        | crate::refs::store::RefStoreError::Corrupt(_) => return None,
+    })
+}
+
+fn apply_ref_store_error_to_push_decision(d: &mut PushDecision, err: &Error, _atomic: bool) {
+    d.result.status = push_status_for_ref_store_error(err);
+    d.result.message = Some(err.to_string());
+    d.apply = false;
+}
+
+fn apply_atomic_batch_ref_store_error(
+    decisions: &mut [PushDecision],
+    batch: &[crate::refs::store::RefUpdate],
+    err: Error,
+) {
+    let fail_ref = ref_store_error_refname(&err);
     let message = err.to_string();
-    for d in decisions.iter_mut().filter(|d| d.apply) {
-        d.result.status = match &err {
-            Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch { .. }) => {
-                PushRefStatus::RejectStale
+    let batch_names: HashSet<&str> = batch.iter().map(|u| u.name.as_str()).collect();
+    let mut in_batch = decisions
+        .iter_mut()
+        .filter(|d| d.apply && batch_names.contains(d.result.remote_ref.as_str()));
+    if let Some(fail_name) = fail_ref {
+        for d in in_batch {
+            if d.result.remote_ref == fail_name {
+                d.result.status = push_status_for_ref_store_error(&err);
+                d.result.message = Some(message.clone());
+            } else {
+                d.result.status = PushRefStatus::AtomicPushFailed;
+                d.result.message = Some("atomic push failed".to_owned());
             }
-            Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { .. }) => {
-                PushRefStatus::RemoteRejected
+            d.apply = false;
+        }
+    } else {
+        let mut first = true;
+        for d in in_batch {
+            if first {
+                d.result.status = push_status_for_ref_store_error(&err);
+                d.result.message = Some(message.clone());
+                first = false;
+            } else {
+                d.result.status = PushRefStatus::AtomicPushFailed;
+                d.result.message = Some("atomic push failed".to_owned());
             }
-            Error::RefStore(crate::refs::store::RefStoreError::LockHeld { .. }) => {
-                PushRefStatus::RemoteRejected
-            }
-            _ => PushRefStatus::RemoteRejected,
-        };
-        d.result.message = Some(message.clone());
-        d.apply = false;
+            d.apply = false;
+        }
     }
 }
 

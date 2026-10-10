@@ -1393,7 +1393,7 @@ pub fn fetch_remote(
 
     let mut updates: Vec<RefUpdate> = Vec::new();
 
-    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
+    let mut prune_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     let t_prune = std::time::Instant::now();
     if opts.prune {
         prune_tracking_refs(
@@ -1405,11 +1405,16 @@ pub fn fetch_remote(
             if opts.dry_run {
                 None
             } else {
-                Some(&mut store_batch)
+                Some(&mut prune_batch)
             },
         )?;
     }
+    if !opts.dry_run && !prune_batch.is_empty() {
+        crate::refs::commit_ref_store_batch(local_git_dir, &prune_batch)?;
+    }
     let d_prune = t_prune.elapsed();
+
+    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
 
     // Load `packed-refs` once for the whole apply. Resolving each ref's previous
     // value (and the per-write namespace-conflict check) would otherwise re-read

@@ -280,7 +280,7 @@ fn complete_bundle_fetch(
     };
 
     let mut updates: Vec<RefUpdate> = Vec::new();
-    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
+    let mut prune_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     if opts.prune {
         prune_tracking_refs(
             local_git_dir,
@@ -291,11 +291,15 @@ fn complete_bundle_fetch(
             if opts.dry_run {
                 None
             } else {
-                Some(&mut store_batch)
+                Some(&mut prune_batch)
             },
         )?;
     }
+    if !opts.dry_run && !prune_batch.is_empty() {
+        crate::refs::commit_ref_store_batch(local_git_dir, &prune_batch)?;
+    }
 
+    let mut store_batch: Vec<crate::refs::store::RefUpdate> = Vec::new();
     for m in &matched {
         let Some(local_ref) = &m.local_ref else {
             updates.push(RefUpdate {

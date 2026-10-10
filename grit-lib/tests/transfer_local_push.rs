@@ -328,6 +328,136 @@ fn push_local_atomic_rejects_all_on_any_failure() {
 }
 
 #[test]
+fn push_local_non_atomic_df_applies_first_ref_only() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    let remote_git = remote.as_path();
+
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    std::fs::write(local.join("f.txt"), "x\n").unwrap();
+    git(&local, &["add", "f.txt"]);
+    git(&local, &["commit", "-q", "-m", "tip"]);
+    let tip = rev_parse(&local, "refs/heads/main");
+
+    let outcome = push_local(
+        &local_git,
+        remote_git,
+        &[
+            PushRefSpec {
+                src: Some(tip),
+                dst: "refs/heads/parent".to_owned(),
+                force: false,
+                delete: false,
+                expected_old: None,
+                expect_absent: false,
+            },
+            PushRefSpec {
+                src: Some(tip),
+                dst: "refs/heads/parent/child".to_owned(),
+                force: false,
+                delete: false,
+                expected_old: None,
+                expect_absent: false,
+            },
+        ],
+        &PushOptions::default(),
+    )
+    .expect("non-atomic df push");
+
+    let parent = outcome
+        .results
+        .iter()
+        .find(|r| r.remote_ref == "refs/heads/parent")
+        .expect("parent result");
+    let child = outcome
+        .results
+        .iter()
+        .find(|r| r.remote_ref == "refs/heads/parent/child")
+        .expect("child result");
+    assert_eq!(parent.status, PushRefStatus::Ok);
+    assert_eq!(child.status, PushRefStatus::RemoteRejected);
+    assert_eq!(remote_ref(remote_git, "refs/heads/parent"), Some(tip));
+    assert_eq!(remote_ref(remote_git, "refs/heads/parent/child"), None);
+    fsck_clean(remote_git);
+}
+
+#[test]
+fn push_local_atomic_store_batch_df_marks_atomic_push_failed() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    let remote_git = remote.as_path();
+
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    std::fs::write(local.join("f.txt"), "x\n").unwrap();
+    git(&local, &["add", "f.txt"]);
+    git(&local, &["commit", "-q", "-m", "tip"]);
+    let tip = rev_parse(&local, "refs/heads/main");
+
+    let outcome = push_local(
+        &local_git,
+        remote_git,
+        &[
+            PushRefSpec {
+                src: Some(tip),
+                dst: "refs/heads/parent".to_owned(),
+                force: false,
+                delete: false,
+                expected_old: None,
+                expect_absent: false,
+            },
+            PushRefSpec {
+                src: Some(tip),
+                dst: "refs/heads/parent/child".to_owned(),
+                force: false,
+                delete: false,
+                expected_old: None,
+                expect_absent: false,
+            },
+        ],
+        &PushOptions {
+            atomic: true,
+            ..PushOptions::default()
+        },
+    )
+    .expect("atomic df push");
+
+    let parent = outcome
+        .results
+        .iter()
+        .find(|r| r.remote_ref == "refs/heads/parent")
+        .expect("parent result");
+    let child = outcome
+        .results
+        .iter()
+        .find(|r| r.remote_ref == "refs/heads/parent/child")
+        .expect("child result");
+    assert_eq!(
+        child.status,
+        PushRefStatus::RemoteRejected,
+        "D/F batch should reject the nested ref"
+    );
+    assert_eq!(
+        parent.status,
+        PushRefStatus::AtomicPushFailed,
+        "otherwise-accepted ref demoted when atomic batch fails"
+    );
+    assert_eq!(remote_ref(remote_git, "refs/heads/parent"), None);
+    assert_eq!(remote_ref(remote_git, "refs/heads/parent/child"), None);
+}
+
+#[test]
 fn push_local_updates_remote_tracking_ref_when_configured() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let remote = tmp.path().join("remote.git");
