@@ -13,7 +13,7 @@ use crate::progress::ProgressSink;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::signing::{should_sign_commit, sign_serialized_commit, GpgConfig};
-use crate::state::{resolve_head, HeadState};
+use crate::state::{clear_merge_state, read_merge_heads, resolve_head, HeadState};
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 use std::fs;
 use std::path::Path;
@@ -86,6 +86,10 @@ pub fn create_commit(
     };
 
     let mut index = repo.load_index()?;
+    if index.has_unmerged_entries() {
+        return Err(Error::IndexUnmerged);
+    }
+    let merge_heads = read_merge_heads(&repo.git_dir)?;
     let index_path = repo.git_dir.join("index");
     let commit_env = CommitHookEnv {
         index_file: Some(index_path.as_path()),
@@ -135,9 +139,17 @@ pub fn create_commit(
         message.push('\n');
     }
 
+    let concluding_merge = !merge_heads.is_empty();
+    let mut parents: Vec<ObjectId> = parent.into_iter().collect();
+    for merge_head in merge_heads {
+        if !parents.iter().any(|p| p == &merge_head) {
+            parents.push(merge_head);
+        }
+    }
+
     let commit_data = CommitData {
         tree,
-        parents: parent.into_iter().collect(),
+        parents,
         author: req.author.clone(),
         committer: req.committer.clone(),
         author_raw: Vec::new(),
@@ -182,6 +194,10 @@ pub fn create_commit(
         },
         config.as_ref(),
     )?;
+
+    if concluding_merge {
+        clear_merge_state(&repo.git_dir)?;
+    }
 
     let _ = run_commit_hook_checked(repo, "post-commit", &[], None, &commit_env);
 

@@ -39,6 +39,10 @@ impl HumanRender for CommitOutcome {
 pub fn run(message: Option<String>) -> Result<CommitOutcome> {
     let repo = context::discover()?;
 
+    if repo.load_index()?.has_unmerged_entries() {
+        return Err(map_commit_error(Error::IndexUnmerged));
+    }
+
     add::stage(&repo, &[])?;
 
     let message = match message {
@@ -91,6 +95,9 @@ fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
         Error::NothingToCommit => anyhow::anyhow!("nothing to commit — working tree clean"),
         Error::DetachedHead => anyhow::anyhow!("HEAD is detached; grit commit needs a branch"),
+        Error::IndexUnmerged => anyhow::anyhow!(
+            "cannot commit: the index still has unmerged paths — resolve conflicts and stage the result"
+        ),
         other => anyhow::anyhow!("{other}"),
     }
 }

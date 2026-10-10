@@ -621,6 +621,35 @@ pub fn read_merge_msg(git_dir: &Path) -> Result<Option<String>> {
     }
 }
 
+/// Remove merge-in-progress sentinel files after a successful merge commit.
+///
+/// Matches the files Git drops when a merge concludes with `git commit` (not `--abort`).
+///
+/// # Parameters
+///
+/// - `git_dir` — path to the `.git` directory.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] if a present sentinel file cannot be removed.
+pub fn clear_merge_state(git_dir: &Path) -> Result<()> {
+    const MERGE_SENTINELS: &[&str] = &[
+        "MERGE_HEAD",
+        "MERGE_MSG",
+        "MERGE_MODE",
+        "MERGE_LOG",
+        "AUTO_MERGE",
+        "SQUASH_MSG",
+    ];
+    for name in MERGE_SENTINELS {
+        let path = git_dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(Error::Io)?;
+        }
+    }
+    Ok(())
+}
+
 /// Read CHERRY_PICK_HEAD when it contains a valid 40-hex OID; `None` if missing, empty, or invalid
 /// (Git ignores malformed `CHERRY_PICK_HEAD` for the "commit $abbrev" line; sequencer still applies).
 pub fn read_cherry_pick_head(git_dir: &Path) -> Result<Option<ObjectId>> {
