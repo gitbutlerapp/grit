@@ -33,7 +33,7 @@ pub enum ReplayDirection {
 /// Inputs for [`replay_commit`].
 #[derive(Debug, Clone)]
 pub struct ReplayRequest {
-    /// Commit object to replay (must be a non-merge commit for [`ReplayDirection::Pick`]).
+    /// Commit object to replay (must have exactly one parent).
     pub commit: ObjectId,
     /// Pick or revert semantics for the three-way merge and commit message.
     pub direction: ReplayDirection,
@@ -68,13 +68,13 @@ pub enum ReplayOutcome {
 ///
 /// Requires a clean worktree (same checks as `grit pick`), a branch `HEAD`, and a
 /// resolvable first-parent chain for the source commit. The source must not be a
-/// merge commit when picking.
+/// merge commit.
 ///
 /// # Errors
 ///
 /// - [`Error::DetachedHead`] when `HEAD` is not on a branch.
 /// - [`Error::UnbornHead`] when the branch has no commits yet.
-/// - [`Error::MergeCommit`] when picking a merge commit.
+/// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
 /// - [`Error::ReplaySourceAtHead`] when the source commit is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
 pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOutcome> {
@@ -99,7 +99,7 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
 
     let source_obj = repo.odb.read(&req.commit)?;
     let source = parse_commit(&source_obj.data)?;
-    if req.direction == ReplayDirection::Pick && source.parents.len() > 1 {
+    if source.parents.len() > 1 {
         return Err(Error::MergeCommit { oid: req.commit });
     }
 

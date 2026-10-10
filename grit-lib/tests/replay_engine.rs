@@ -222,6 +222,32 @@ fn replay_pick_rejects_merge_commit() {
 }
 
 #[test]
+fn replay_revert_rejects_merge_commit() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "a.txt", "1\n", "initial");
+    git(root.path(), &["checkout", "-qb", "side"]);
+    commit_file(root.path(), "b.txt", "2\n", "side");
+    git(root.path(), &["checkout", "main"]);
+    commit_file(root.path(), "a.txt", "3\n", "main");
+    git(root.path(), &["merge", "--no-edit", "side"]);
+    let merge = oid_from_rev(root.path(), "HEAD");
+    commit_file(root.path(), "c.txt", "after merge\n", "after merge");
+
+    let repo = open_repo(root.path());
+    let err = replay_revert(&repo, merge).unwrap_err();
+    assert!(
+        matches!(err, Error::MergeCommit { .. }),
+        "unexpected error: {err:?}"
+    );
+    assert_eq!(
+        resolve_ref(&repo.git_dir, "HEAD").expect("head"),
+        oid_from_rev(root.path(), "HEAD"),
+        "revert must not advance HEAD on merge commit"
+    );
+}
+
+#[test]
 fn replay_pick_root_commit() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());

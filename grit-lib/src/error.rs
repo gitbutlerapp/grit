@@ -462,7 +462,8 @@ pub enum Error {
     #[error("no commits yet on this branch")]
     UnbornHead,
 
-    /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits.
+    /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits
+    /// until callers can select a mainline parent explicitly.
     #[error("merge commit {oid}")]
     MergeCommit { oid: crate::objects::ObjectId },
 
