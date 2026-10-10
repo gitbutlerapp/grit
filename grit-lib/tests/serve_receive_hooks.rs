@@ -468,14 +468,22 @@ fn update_hook_runs_without_quarantine_env_after_migrate() {
     );
 }
 
+fn git_sha256_bare_init_supported() -> bool {
+    let Ok(probe) = tempfile::tempdir() else {
+        return false;
+    };
+    Command::new("git")
+        .current_dir(probe.path())
+        .args(["init", "-q", "--object-format=sha256", "--bare", "."])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 #[test]
 fn sha256_pre_receive_stdin_uses_full_width_null_oid() {
-    if Command::new("git")
-        .args(["init", "-q", "--object-format=sha256", "--bare"])
-        .status()
-        .map(|s| !s.success())
-        .unwrap_or(true)
-    {
+    if !git_sha256_bare_init_supported() {
         eprintln!("SKIP: git cannot create sha256 repos");
         return;
     }
