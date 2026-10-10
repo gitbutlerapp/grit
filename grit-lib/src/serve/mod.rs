@@ -142,7 +142,7 @@ pub(crate) struct AdvertisedRef {
 /// Refs whose names are not safe to send, or that point at missing objects,
 /// are left out rather than failing the whole advertisement.
 pub(crate) fn advertised_refs(repo: &Repository, hidden: &[String]) -> Result<Vec<AdvertisedRef>> {
-    let mut refs = crate::refs::list_refs(&repo.git_dir, "refs/")?;
+    let mut refs = crate::refs::list_refs_for_repository(repo, "refs/")?;
     refs.sort_by(|a, b| a.0.cmp(&b.0));
     let mut out = Vec::with_capacity(refs.len());
     for (name, oid) in refs {

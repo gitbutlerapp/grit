@@ -150,11 +150,21 @@ impl FilesRefStore {
         self.load_raw_map_prefix("")
     }
 
+    fn packed_storage_visible(&self, storage: &str) -> bool {
+        match self.namespace_prefix.as_deref() {
+            None => true,
+            Some(prefix) => storage.starts_with(prefix),
+        }
+    }
+
     fn load_raw_map_prefix(&self, logical_prefix: &str) -> Result<BTreeMap<String, RawRef>> {
         self.refresh_packed_cache_if_stale()?;
         let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
         let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
         for (storage, oid) in cache.map.iter() {
+            if !self.packed_storage_visible(storage) {
+                continue;
+            }
             let logical = self.logical_name(storage);
             if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
                 map.insert(logical, RawRef::Direct(*oid));
