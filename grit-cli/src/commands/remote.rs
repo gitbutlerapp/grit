@@ -84,44 +84,38 @@ impl HumanRender for RemoteOutcome {
 
 impl MarkdownRender for RemoteOutcome {
     fn render_markdown(&self) {
-        let RemoteOutcome::Refs { refs, .. } = self else {
-            return;
-        };
-        println!("## Remote refs\n");
-        if refs.is_empty() {
-            println!("No refs matched.\n");
-            return;
-        }
-        println!("| Ref | Object | Peeled | Symref target |");
-        println!("| --- | --- | --- | --- |");
-        for entry in refs {
-            let peeled = entry.peeled.as_deref().unwrap_or("—");
-            let sym = entry.symref_target.as_deref().unwrap_or("—");
-            println!(
-                "| `{}` | `{}` | {} | {} |",
-                entry.name,
-                entry.oid,
-                if peeled == "—" {
-                    "—".to_owned()
-                } else {
-                    format!("`{peeled}`")
-                },
-                if sym == "—" {
-                    "—".to_owned()
-                } else {
-                    format!("`{sym}`")
-                }
-            );
-        }
-        println!();
-    }
-}
-
-impl MarkdownRender for RemoteOutcome {
-    fn render_markdown(&self) {
         match self {
             RemoteOutcome::List { remotes } => markdown::print_remote_list(remotes),
             RemoteOutcome::Add { name, url } => println!("Added remote `{name}` → {url}."),
+            RemoteOutcome::Refs { refs, .. } => {
+                println!("## Remote refs\n");
+                if refs.is_empty() {
+                    println!("No refs matched.\n");
+                    return;
+                }
+                println!("| Ref | Object | Peeled | Symref target |");
+                println!("| --- | --- | --- | --- |");
+                for entry in refs {
+                    let peeled = entry.peeled.as_deref().unwrap_or("—");
+                    let sym = entry.symref_target.as_deref().unwrap_or("—");
+                    println!(
+                        "| `{}` | `{}` | {} | {} |",
+                        entry.name,
+                        entry.oid,
+                        if peeled == "—" {
+                            "—".to_owned()
+                        } else {
+                            format!("`{peeled}`")
+                        },
+                        if sym == "—" {
+                            "—".to_owned()
+                        } else {
+                            format!("`{sym}`")
+                        }
+                    );
+                }
+                println!();
+            }
         }
     }
 }

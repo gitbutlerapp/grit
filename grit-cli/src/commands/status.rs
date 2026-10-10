@@ -170,6 +170,14 @@ impl StatusOutcome {
     }
 
     fn render_markdown_hints(&self) {
+        if !self.conflicts.is_empty() {
+            println!("→ resolve conflicts, then grit commit `\"message\"`");
+            return;
+        }
+        if self.merging {
+            println!("→ grit commit `\"message\"` to finish the merge");
+            return;
+        }
         let mut hints = Vec::new();
         if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
             hints.push("grit add `PATH` to stage");
@@ -219,6 +227,14 @@ impl StatusOutcome {
             }
             HeaderKind::Invalid => {
                 println!("HEAD is in an unknown state");
+                println!();
+            }
+            HeaderKind::MergeInProgress => {
+                println!("On **`{branch}`** · merging — resolve conflicts");
+                println!();
+            }
+            HeaderKind::OtherInProgress => {
+                println!("On **`{branch}`** · operation in progress");
                 println!();
             }
         }
