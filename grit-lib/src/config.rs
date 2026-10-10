@@ -1931,6 +1931,30 @@ impl ConfigSet {
             .and_then(|n| usize::try_from(n).ok())
     }
 
+    /// In-pack delta window (`pack.window`, Git default: 10 when unset).
+    ///
+    /// An explicit `0` disables newly computed deltas (on-disk reuse may still apply).
+    #[must_use]
+    pub fn pack_object_window(&self) -> usize {
+        match self.get_i64("pack.window") {
+            None => 10,
+            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(10),
+            Some(Ok(_)) | Some(Err(_)) => 10,
+        }
+    }
+
+    /// In-pack delta chain depth cap (`pack.depth`, Git default: 50 when unset).
+    ///
+    /// An explicit `0` disables newly computed deltas (on-disk reuse may still apply).
+    #[must_use]
+    pub fn pack_object_depth(&self) -> usize {
+        match self.get_i64("pack.depth") {
+            None => crate::pack::DEFAULT_PACK_DEPTH,
+            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(crate::pack::DEFAULT_PACK_DEPTH),
+            Some(Ok(_)) | Some(Err(_)) => crate::pack::DEFAULT_PACK_DEPTH,
+        }
+    }
+
     /// [`crate::hash::Parallelism`] for pack indexing from merged config.
     #[must_use]
     pub fn pack_index_parallelism(&self) -> crate::hash::Parallelism {
@@ -4146,6 +4170,34 @@ fn extract_section_header(line: &str) -> String {
     // Preserve any comment on the section header itself (between ] and key),
     // but git doesn't really do this. Just return up to ].
     trimmed[..=end].to_owned()
+}
+
+#[cfg(test)]
+mod pack_object_config_tests {
+    use super::{ConfigFile, ConfigScope, ConfigSet};
+    use std::path::Path;
+
+    fn set_from_snippet(text: &str) -> ConfigSet {
+        let path = Path::new(".git/config");
+        let file = ConfigFile::parse(path, text, ConfigScope::Local).expect("parse config snippet");
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn pack_object_window_and_depth_defaults() {
+        let set = ConfigSet::new();
+        assert_eq!(set.pack_object_window(), 10);
+        assert_eq!(set.pack_object_depth(), crate::pack::DEFAULT_PACK_DEPTH);
+    }
+
+    #[test]
+    fn pack_object_window_and_depth_preserve_explicit_zero() {
+        let set = set_from_snippet("[pack]\n\twindow = 0\n\tdepth = 0\n");
+        assert_eq!(set.pack_object_window(), 0);
+        assert_eq!(set.pack_object_depth(), 0);
+    }
 }
 
 #[cfg(test)]

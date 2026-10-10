@@ -7,7 +7,7 @@
 //! refspec matching `fetch_local` uses), running the
 //! [`crate::fetch_negotiator::SkippingNegotiator`] `want`/`have`/`done`
 //! exchange, demultiplexing the side-band pack, ingesting it with
-//! [`crate::unpack_objects`], and classifying ref updates into the shared
+//! [`crate::index_pack::ingest_received_pack`], and classifying ref updates into the shared
 //! [`crate::transfer::FetchOutcome`].
 //!
 //! This is the protocol-v0/v1 negotiation loop lifted from the CLI's
@@ -1067,7 +1067,7 @@ fn skip_v2_section_until_boundary(reader: &mut dyn Read) -> Result<()> {
 ///
 /// The flow mirrors [`crate::transfer::fetch_local`], but the remote ref list
 /// comes from the connection's advertisement, the objects arrive over the wire
-/// (negotiated pack -> [`crate::unpack_objects`]), and the local repo is opened
+/// (negotiated pack -> [`crate::index_pack::ingest_received_pack`]), and the local repo is opened
 /// to classify ancestry. Reuses the refspec matching, tag-mode, prune, and
 /// classification helpers from [`crate::transfer`].
 ///

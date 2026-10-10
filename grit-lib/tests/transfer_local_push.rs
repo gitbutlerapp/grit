@@ -666,3 +666,77 @@ fn linked_worktree_resolves_relative_remote_from_worktree_root() {
     assert_eq!(outcome.results.len(), 1);
     assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);
 }
+
+fn git_count_objects(git_dir: &Path) -> (u32, u32) {
+    let out = git(git_dir, &["count-objects", "-v"]);
+    let mut loose = 0u32;
+    let mut packs = 0u32;
+    for line in out.lines() {
+        if let Some(v) = line.strip_prefix("count: ") {
+            loose = v.trim().parse().expect("count");
+        }
+        if let Some(v) = line.strip_prefix("packs: ") {
+            packs = v.trim().parse().expect("packs");
+        }
+    }
+    (loose, packs)
+}
+
+#[test]
+fn push_local_installs_single_pack_without_loose_objects() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    let remote_git = remote.as_path();
+
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    for i in 0..6 {
+        let mut body = String::from("shared header for delta tests\n");
+        body.push_str(&"z".repeat(2048));
+        body.push_str(&format!("file-{i}\n"));
+        std::fs::write(local.join(format!("blob{i}.txt")), body).unwrap();
+        git(&local, &["add", "."]);
+        git(&local, &["commit", "-q", "-m", &format!("commit {i}")]);
+    }
+    git(
+        &local,
+        &[
+            "repack",
+            "-q",
+            "-a",
+            "-d",
+            "-f",
+            "--window=10",
+            "--depth=50",
+        ],
+    );
+    let tip = rev_parse(&local, "refs/heads/main");
+
+    push_local(
+        &local_git,
+        remote_git,
+        &[PushRefSpec {
+            src: Some(tip),
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        }],
+        &PushOptions::default(),
+    )
+    .expect("push to empty bare remote");
+
+    let (loose, packs) = git_count_objects(remote_git);
+    assert_eq!(
+        loose, 0,
+        "remote must not store pushed objects as loose files"
+    );
+    assert_eq!(packs, 1, "remote must retain one packfile");
+    fsck_clean(remote_git);
+}
