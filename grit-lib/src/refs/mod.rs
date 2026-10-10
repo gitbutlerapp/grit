@@ -212,25 +212,24 @@ pub fn read_raw_ref(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
 }
 
 fn read_raw_ref_files(git_dir: &Path, refname: &str) -> Result<RawRefLookup> {
-    let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
-    let storage_owned = crate::ref_namespace::storage_ref_name(&stor_name);
-    let (names, n): ([&str; 2], usize) = if storage_owned != stor_name {
-        ([storage_owned.as_str(), stor_name.as_str()], 2)
-    } else {
-        ([stor_name.as_str(), stor_name.as_str()], 1)
-    };
-
-    for name in names.iter().take(n) {
-        if let Some(lookup) = read_raw_ref_at(store.join(name))? {
-            return Ok(lookup);
-        }
-
-        if packed_ref_name_exists(&store, name)? {
-            return Ok(RawRefLookup::Exists);
+    let store = crate::refs::store::FilesRefStore::from_git_dir(git_dir)?;
+    use crate::refs::store::RefStore;
+    match store.read_raw(refname)? {
+        Some(_) => Ok(RawRefLookup::Exists),
+        None => {
+            let (storage_dir, stor_name) =
+                crate::worktree_ref::resolve_ref_storage(git_dir, refname);
+            let path = storage_dir.join(&stor_name);
+            if fs::symlink_metadata(&path)
+                .map(|m| m.is_dir())
+                .unwrap_or(false)
+            {
+                Ok(RawRefLookup::IsDirectory)
+            } else {
+                Ok(RawRefLookup::NotFound)
+            }
         }
     }
-
-    Ok(RawRefLookup::NotFound)
 }
 
 /// Lock file path for a loose ref file (`<refpath>.lock`), matching Git's naming for nested refs.
@@ -828,7 +827,7 @@ fn parse_packed_refs_to_map(path: &Path, data: &[u8]) -> Result<HashMap<String, 
     Ok(map)
 }
 
-fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, ObjectId>> {
+pub(crate) fn read_packed_refs_map(store: &Path) -> Result<HashMap<String, ObjectId>> {
     let packed_path = store.join("packed-refs");
     let data = match fs::read(&packed_path) {
         Ok(d) => d,
@@ -872,7 +871,7 @@ fn acquire_packed_refs_lock(git_dir: &Path, lock: &Path, lock_display: &Path) ->
 }
 
 /// Look up a refname in `packed-refs`.
-fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
+pub(crate) fn lookup_packed_ref(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
     Ok(read_packed_refs_map(git_dir)?.get(refname).copied())
 }
 
@@ -907,7 +906,7 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
     Ok(())
 }
 
-fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
+pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
     if let Some(rest) = refname.strip_prefix("refs/") {
         if rest.is_empty() || !crate::check_ref_format::is_valid_fetch_advertised_ref(refname) {
             return Err(Error::InvalidRef(format!(
@@ -1258,7 +1257,7 @@ fn ref_path_for_display(path: &Path) -> String {
 /// if `path` is not a directory. Mirrors Git's `remove_empty_directories`
 /// (`remove_dir_recursively(REMOVE_DIR_EMPTY_ONLY)`), used to clear stale directories that sit
 /// where a ref file must be created or deleted.
-fn remove_empty_ref_directory(path: &Path) {
+pub(crate) fn remove_empty_ref_directory(path: &Path) {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_dir() => {}
         _ => return,
@@ -1292,7 +1291,7 @@ fn dir_tree_has_files(dir: &Path) -> bool {
 }
 
 /// Walk upward from `ref_path`'s parent, removing empty directories until `refs/`.
-fn prune_empty_loose_ref_parents(storage_dir: &Path, ref_path: &Path) {
+pub(crate) fn prune_empty_loose_ref_parents(storage_dir: &Path, ref_path: &Path) {
     let refs_root = storage_dir.join("refs");
     let mut current = ref_path.parent();
     while let Some(dir) = current {
@@ -1398,7 +1397,15 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
 }
 
 /// Remove a single entry from the packed-refs file, rewriting it.
-fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
+pub(crate) fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
+    remove_packed_ref_inner(git_dir, refname, false)
+}
+
+pub(crate) fn remove_packed_ref_under_lock(git_dir: &Path, refname: &str) -> Result<()> {
+    remove_packed_ref_inner(git_dir, refname, true)
+}
+
+fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: bool) -> Result<()> {
     let packed_path = git_dir.join("packed-refs");
     let content = match fs::read(&packed_path) {
         Ok(c) => c,
@@ -1471,10 +1478,12 @@ fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
         // already present (t0600 "delete fails cleanly if packed-refs file is locked / .new
         // write fails").
         let lock = lock_path_for_ref(&packed_path); // packed-refs.lock
-        let abs_lock = fs::canonicalize(git_dir)
-            .map(|d| d.join("packed-refs.lock"))
-            .unwrap_or_else(|_| lock.clone());
-        acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
+        if !lock_already_held {
+            let abs_lock = fs::canonicalize(git_dir)
+                .map(|d| d.join("packed-refs.lock"))
+                .unwrap_or_else(|_| lock.clone());
+            acquire_packed_refs_lock(git_dir, &lock, &abs_lock)?;
+        }
 
         let tmp = packed_path.with_extension("new");
         let mut created_tmp = false;
@@ -1493,9 +1502,10 @@ fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
             Ok(())
         })();
 
-        // Always release the lock; on failure clean up only a tempfile that we created (never a
-        // pre-existing `packed-refs.new` placed by the caller/test).
-        let _ = fs::remove_file(&lock);
+        // Release the lock unless the caller is holding it through a transaction.
+        if !lock_already_held {
+            let _ = fs::remove_file(&lock);
+        }
         if write_result.is_err() && created_tmp {
             let _ = fs::remove_file(&tmp);
         }
@@ -1690,7 +1700,7 @@ fn clear_conflicting_reflog_files(logs_root: &Path, target: &Path) {
 
 /// Render a reflog entry's `(old, new)` OIDs as hex, widening a null OID to the
 /// width of the non-null side so the line matches the repository hash algorithm.
-fn reflog_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, String) {
+pub(crate) fn reflog_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, String) {
     let width = if !old.is_zero() {
         old.algo().hex_len()
     } else if !new.is_zero() {

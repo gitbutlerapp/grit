@@ -5,8 +5,22 @@ use std::collections::BTreeSet;
 
 use crate::refs::RefnameUnavailable;
 
+use super::error::RefStoreError;
 use super::RawRef;
 use super::RefUpdate;
+
+/// Reject ref names that must not touch the filesystem (path traversal, illegal `refs/` shape).
+pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
+    crate::refs::ensure_refname_safe_for_storage(name).map_err(|err| {
+        if matches!(err, crate::error::Error::InvalidRef(_)) {
+            RefStoreError::InvalidRefName {
+                name: name.to_owned(),
+            }
+        } else {
+            RefStoreError::Corrupt(err.to_string())
+        }
+    })
+}
 
 fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
     child.len() > parent.len()

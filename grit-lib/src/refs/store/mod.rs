@@ -5,13 +5,17 @@
 //! embeddable in-memory implementation used by tests and callers that keep refs
 //! outside a repository directory.
 
+mod apply;
 mod error;
+mod files;
 mod memory;
+mod routing;
 mod transaction;
 mod types;
 mod validation;
 
 pub use error::RefStoreError;
+pub use files::{FilesRefStore, FilesRefStoreConfig};
 pub use memory::MemoryRefStore;
 pub use transaction::RefTransaction;
 pub use types::{

@@ -1,39 +1,28 @@
 //! In-memory [`super::RefStore`] for embedders and tests.
 
-use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 use std::sync::Mutex;
 
-use crate::diff::zero_oid;
 use crate::error::Result;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
-use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
-use crate::refs::SYMREF_MAXDEPTH;
 
+use super::apply::{apply_update, resolve_map, simulate_batch_apply, RefBatchState};
 use super::error::RefStoreError;
-use super::transaction::{expected_matches, RefTransaction};
+use super::transaction::RefTransaction;
 use super::validation::verify_create_conflicts;
-use super::{
-    PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate,
-    RefUpdateFlags, ReflogUpdate,
-};
+use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 
 #[derive(Debug, Clone)]
 struct MemoryRefStoreInner {
-    refs: BTreeMap<String, RawRef>,
-    reflogs: BTreeMap<String, Vec<ReflogEntry>>,
+    state: RefBatchState,
     prepared: Option<PreparedBatch>,
 }
 
 impl MemoryRefStoreInner {
-    fn snapshot_for_apply(&self) -> Self {
-        Self {
-            refs: self.refs.clone(),
-            reflogs: self.reflogs.clone(),
-            prepared: None,
-        }
+    fn snapshot_for_apply(&self) -> RefBatchState {
+        self.state.snapshot()
     }
 }
 
@@ -61,8 +50,7 @@ impl MemoryRefStore {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(MemoryRefStoreInner {
-                refs: BTreeMap::new(),
-                reflogs: BTreeMap::new(),
+                state: RefBatchState::default(),
                 prepared: None,
             }),
         }
@@ -80,7 +68,7 @@ impl MemoryRefStore {
                 name: active.lock_name.clone(),
             });
         }
-        inner.refs.insert(name.into(), value);
+        inner.state.refs.insert(name.into(), value);
         Ok(())
     }
 }
@@ -92,7 +80,7 @@ impl RefStore for MemoryRefStore {
 
     fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(inner.refs.get(name).cloned())
+        Ok(inner.state.refs.get(name).cloned())
     }
 
     fn for_each_ref(
@@ -101,13 +89,13 @@ impl RefStore for MemoryRefStore {
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        for (name, value) in inner.refs.range(prefix.to_string()..) {
+        for (name, value) in inner.state.refs.range(prefix.to_string()..) {
             if !name.starts_with(prefix) {
                 break;
             }
             let peeled = match &value {
                 RawRef::Direct(_) => None,
-                RawRef::Symbolic(_) => resolve_map(&inner.refs, name, 0).ok(),
+                RawRef::Symbolic(_) => resolve_map(&inner.state.refs, name, 0).ok(),
             };
             let entry = RefEntry {
                 name: name.clone(),
@@ -134,8 +122,8 @@ impl RefStore for MemoryRefStore {
             });
         }
 
-        verify_create_conflicts(&inner.refs, &updates)?;
-        simulate_batch_apply(&inner, &updates)?;
+        verify_create_conflicts(&inner.state.refs, &updates)?;
+        simulate_batch_apply(&inner.state, &updates)?;
 
         let lock_name = updates
             .first()
@@ -151,7 +139,7 @@ impl RefStore for MemoryRefStore {
 
     fn reflog_exists(&self, name: &str) -> Result<bool> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(inner.reflogs.contains_key(name))
+        Ok(inner.state.reflogs.contains_key(name))
     }
 
     fn for_each_reflog_entry(
@@ -161,7 +149,7 @@ impl RefStore for MemoryRefStore {
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(entries) = inner.reflogs.get(name) else {
+        let Some(entries) = inner.state.reflogs.get(name) else {
             return Ok(());
         };
         if reverse {
@@ -182,25 +170,25 @@ impl RefStore for MemoryRefStore {
 
     fn create_reflog(&self, name: &str) -> Result<()> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.reflogs.entry(name.to_owned()).or_default();
+        inner.state.reflogs.entry(name.to_owned()).or_default();
         Ok(())
     }
 
     fn delete_reflog(&self, name: &str) -> Result<()> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.reflogs.remove(name);
+        inner.state.reflogs.remove(name);
         Ok(())
     }
 
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.reflogs.insert(name.to_owned(), entries);
+        inner.state.reflogs.insert(name.to_owned(), entries);
         Ok(())
     }
 
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        for name in inner.reflogs.keys() {
+        for name in inner.state.reflogs.keys() {
             if f(name).is_break() {
                 break;
             }
@@ -224,8 +212,7 @@ impl PreparedRefTransaction for MemoryPrepared<'_> {
         for update in &batch.updates {
             apply_update(&mut trial, update)?;
         }
-        inner.refs = trial.refs;
-        inner.reflogs = trial.reflogs;
+        inner.state = trial;
         self.committed = true;
         Ok(())
     }
@@ -249,200 +236,11 @@ impl Drop for MemoryPrepared<'_> {
     }
 }
 
-fn apply_update(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> StoreResult<()> {
-    let reflog_oids = update.reflog.as_ref().map(|_| {
-        (
-            reflog_old_oid_before(inner, update),
-            reflog_new_oid_before(inner, update),
-        )
-    });
-
-    apply_ref_change(inner, update)?;
-
-    if let (Some(log), Some((old_oid, new_oid))) = (&update.reflog, reflog_oids) {
-        append_reflog_entry(inner, &update.name, old_oid, new_oid, log);
-    }
-    Ok(())
-}
-
-fn simulate_batch_apply(inner: &MemoryRefStoreInner, updates: &[RefUpdate]) -> StoreResult<()> {
-    let mut trial = inner.snapshot_for_apply();
-    for update in updates {
-        let actual = trial.refs.get(&update.name);
-        if !expected_matches(actual, &update.expected) {
-            return Err(RefStoreError::ExpectedMismatch {
-                name: update.name.clone(),
-                expected: update.expected.clone(),
-                actual: actual.cloned(),
-            });
-        }
-        apply_update(&mut trial, update)?;
-    }
-    Ok(())
-}
-
-fn apply_ref_change(inner: &mut MemoryRefStoreInner, update: &RefUpdate) -> StoreResult<()> {
-    if update.flags.log_only {
-        return Ok(());
-    }
-    match &update.new_value {
-        None => {
-            if should_deref_symref(inner, update) {
-                let target = symref_peel_write_target(&inner.refs, &update.name)?;
-                inner.refs.remove(&target);
-            } else {
-                inner.refs.remove(&update.name);
-            }
-        }
-        Some(new_value) => {
-            if should_deref_symref_update(inner, update) {
-                let RawRef::Direct(oid) = new_value else {
-                    return Err(RefStoreError::Corrupt(
-                        "deref update requires direct oid".to_owned(),
-                    ));
-                };
-                let target = symref_peel_write_target(&inner.refs, &update.name)?;
-                inner.refs.insert(target, RawRef::Direct(*oid));
-            } else {
-                inner.refs.insert(update.name.clone(), new_value.clone());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn should_deref_symref(inner: &MemoryRefStoreInner, update: &RefUpdate) -> bool {
-    !update.flags.no_deref && matches!(inner.refs.get(&update.name), Some(RawRef::Symbolic(_)))
-}
-
-fn should_deref_symref_update(inner: &MemoryRefStoreInner, update: &RefUpdate) -> bool {
-    should_deref_symref(inner, update)
-        && matches!(update.new_value.as_ref(), Some(RawRef::Direct(_)))
-}
-
-fn symref_peel_write_target(
-    refs: &BTreeMap<String, RawRef>,
-    sym_name: &str,
-) -> StoreResult<String> {
-    let Some(RawRef::Symbolic(first)) = refs.get(sym_name) else {
-        return Err(RefStoreError::Corrupt(format!(
-            "not a symbolic ref: {sym_name}"
-        )));
-    };
-    resolve_symref_peel_target(refs, first)
-}
-
-fn resolve_symref_peel_target(refs: &BTreeMap<String, RawRef>, start: &str) -> StoreResult<String> {
-    let mut name = start.to_owned();
-    let mut depth = 0;
-    loop {
-        if depth >= SYMREF_MAXDEPTH {
-            return Err(RefStoreError::SymrefLoop);
-        }
-        match refs.get(name.as_str()) {
-            Some(RawRef::Direct(_)) => return Ok(name),
-            Some(RawRef::Symbolic(next)) => {
-                name = next.clone();
-                depth += 1;
-            }
-            None => return Ok(name),
-        }
-    }
-}
-
-fn append_reflog_entry(
-    inner: &mut MemoryRefStoreInner,
-    name: &str,
-    old_oid: ObjectId,
-    new_oid: ObjectId,
-    log: &ReflogUpdate,
-) {
-    let identity = format_reflog_identity(&log.identity, log.time);
-    let entry = ReflogEntry {
-        old_oid,
-        new_oid,
-        identity,
-        message: log.message.clone(),
-    };
-    inner
-        .reflogs
-        .entry(name.to_owned())
-        .or_default()
-        .push(entry);
-}
-
-fn format_reflog_identity(identity: &str, time: time::OffsetDateTime) -> String {
-    if identity.chars().any(|c| c.is_ascii_digit()) {
-        return identity.to_owned();
-    }
-    let offset = time.offset().whole_seconds();
-    let hours = offset / 3600;
-    let minutes = (offset.abs() % 3600) / 60;
-    format!(
-        "{identity} {} {:+03}{:02}",
-        time.unix_timestamp(),
-        hours,
-        minutes
-    )
-}
-
-fn reflog_old_oid_before(inner: &MemoryRefStoreInner, update: &RefUpdate) -> ObjectId {
-    resolved_oid_at_name(inner, &update.name, update.flags).unwrap_or_else(|_| zero_oid())
-}
-
-fn reflog_new_oid_before(inner: &MemoryRefStoreInner, update: &RefUpdate) -> ObjectId {
-    if update.flags.log_only {
-        return reflog_old_oid_before(inner, update);
-    }
-    match &update.new_value {
-        None => zero_oid(),
-        Some(RawRef::Direct(oid)) if should_deref_symref_update(inner, update) => *oid,
-        Some(value) => {
-            oid_for_reflog_value(inner, value, update.flags).unwrap_or_else(|_| zero_oid())
-        }
-    }
-}
-
-fn resolved_oid_at_name(
-    inner: &MemoryRefStoreInner,
-    name: &str,
-    flags: RefUpdateFlags,
-) -> StoreResult<ObjectId> {
-    let Some(value) = inner.refs.get(name) else {
-        return Ok(zero_oid());
-    };
-    oid_for_reflog_value(inner, value, flags)
-}
-
-fn oid_for_reflog_value(
-    inner: &MemoryRefStoreInner,
-    value: &RawRef,
-    flags: RefUpdateFlags,
-) -> StoreResult<ObjectId> {
-    match value {
-        RawRef::Direct(oid) => Ok(*oid),
-        RawRef::Symbolic(target) if flags.no_deref => Ok(zero_oid()),
-        RawRef::Symbolic(target) => resolve_map(&inner.refs, target, 0),
-    }
-}
-
-fn resolve_map(refs: &BTreeMap<String, RawRef>, name: &str, depth: usize) -> StoreResult<ObjectId> {
-    if depth >= SYMREF_MAXDEPTH {
-        return Err(RefStoreError::SymrefLoop);
-    }
-    let Some(value) = refs.get(name) else {
-        return Err(RefStoreError::Corrupt(format!("ref not found: {name}")));
-    };
-    match value {
-        RawRef::Direct(oid) => Ok(*oid),
-        RawRef::Symbolic(target) => resolve_map(refs, target, depth + 1),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::refs::store::{Expected, RefTransaction};
+    use crate::objects::ObjectId;
+    use crate::refs::store::RefTransaction;
 
     fn oid(byte: u8) -> ObjectId {
         let mut bytes = [0u8; 20];

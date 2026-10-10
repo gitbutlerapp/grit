@@ -87,12 +87,15 @@ pub struct RefUpdate {
 pub enum RefStorageFormat {
     /// In-memory store for tests and embedders.
     Memory,
+    /// Loose refs and `packed-refs` under a git directory.
+    Files,
 }
 
 impl std::fmt::Display for RefStorageFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Memory => f.write_str("memory"),
+            Self::Files => f.write_str("files"),
         }
     }
 }

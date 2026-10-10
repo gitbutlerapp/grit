@@ -421,6 +421,8 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::refs::RefnameUnavailable` | enum | Why a reference name cannot be created (Git refs_verify_refname_available style). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/enum.RefnameUnavailable.html) |
 | `grit_lib::refs::store` | module | Pluggable reference storage: typed transactions and backends. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/index.html) |
 | `grit_lib::refs::store::Expected` | enum | Compare-and-swap expectation for a single ref update. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/enum.Expected.html) |
+| `grit_lib::refs::store::FilesRefStore` | struct | Loose + packed ref storage on disk. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.FilesRefStore.html) |
+| `grit_lib::refs::store::FilesRefStoreConfig` | struct | Explicit context for a files ref store (no environment reads for namespace). | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.FilesRefStoreConfig.html) |
 | `grit_lib::refs::store::MemoryRefStore` | struct | Fully in-memory ref database with transactional updates. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/struct.MemoryRefStore.html) |
 | `grit_lib::refs::store::PreparedRefTransaction` | trait | Committable ref update batch returned from RefStore::prepare. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/trait.PreparedRefTransaction.html) |
 | `grit_lib::refs::store::RawRef` | enum | Storage-level ref value without DWIM or resolution. | [API](https://docs.rs/grit-lib/latest/grit_lib/refs/store/enum.RawRef.html) |
