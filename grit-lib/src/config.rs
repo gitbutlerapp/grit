@@ -97,15 +97,6 @@ pub mod cascade_load_counters {
             }
         });
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn record_cache_validated() {
-        MEASURING.with(|m| {
-            if m.get() {
-                CACHE_VALIDATED.fetch_add(1, Ordering::SeqCst);
-            }
-        });
-    }
 }
 use crate::refs;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
@@ -1714,34 +1705,6 @@ impl ConfigFile {
             Error::Io(e)
         })?;
         Ok(())
-    }
-
-    /// Find the line index of a section header, or create one.
-    #[allow(dead_code)]
-    fn find_or_create_section(&mut self, section: &str, subsection: Option<&str>) -> usize {
-        let sec_lower = section.to_lowercase();
-        let mut parser = Parser::new();
-        let mut last_match = None;
-
-        for (idx, line) in self.raw_lines.iter().enumerate() {
-            if parser.try_parse_section(line) && section_matches(&parser, &sec_lower, subsection) {
-                last_match = Some(idx);
-            }
-        }
-        if let Some(idx) = last_match {
-            return idx;
-        }
-
-        // Create new section at end of file
-        let header = match subsection {
-            Some(sub) => {
-                let escaped = escape_subsection(sub);
-                format!("[{} \"{}\"]", section, escaped)
-            }
-            None => format!("[{}]", section),
-        };
-        self.raw_lines.push(header);
-        self.raw_lines.len() - 1
     }
 
     /// Find the line index of a section header (case-insensitive match),
@@ -4076,15 +4039,6 @@ fn split_key(key: &str) -> Result<(String, Option<String>, String)> {
     };
 
     Ok((section, subsection, variable))
-}
-
-/// Extract the variable name from a canonical key.
-#[allow(dead_code)]
-fn variable_name_from_key(key: &str) -> &str {
-    match key.rfind('.') {
-        Some(i) => &key[i + 1..],
-        None => key,
-    }
 }
 
 /// Parse a section name that may contain a subsection (e.g. `"remote.origin"`).

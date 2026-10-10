@@ -265,9 +265,18 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::objects::TagData` | struct | Parsed representation of an annotated tag object. | [API](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.TagData.html) |
 | `grit_lib::objects::TreeEntry` | struct | A single entry in a Git tree object. | [API](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.TreeEntry.html) |
 | `grit_lib::odb` | module | Loose object database: reading and writing zlib-compressed Git objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/index.html) |
+| `grit_lib::odb::LooseStore` | struct | On-disk loose object store for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.LooseStore.html) |
+| `grit_lib::odb::LooseStore` | struct | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/../struct.LooseStore.html) |
+| `grit_lib::odb::MemoryStore` | struct | In-memory object map keyed by ObjectId. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.MemoryStore.html) |
+| `grit_lib::odb::ObjectStore` | trait | Read-only object storage: lookup, metadata, streaming, and enumeration. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/trait.ObjectStore.html) |
 | `grit_lib::odb::Odb` | struct | A loose-object database rooted at a given objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) |
+| `grit_lib::odb::OdbBuilder` | struct | Configure and construct an Odb with a pluggable primary backend. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.OdbBuilder.html) |
+| `grit_lib::odb::WritableObjectStore` | trait | Object storage that supports inserting new objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/trait.WritableObjectStore.html) |
 | `grit_lib::odb::WriteOptions` | struct | Options for Odb::write_with_options. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.WriteOptions.html) |
+| `grit_lib::odb::builder` | module | Build an Odb with a custom primary store and optional read overlays. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/builder/index.html) |
+| `grit_lib::odb::builder::OdbBuilder` | struct | Configure and construct an Odb with a pluggable primary backend. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/builder/struct.OdbBuilder.html) |
 | `grit_lib::odb::store` | module | Pluggable object storage backends and the ObjectStore trait surface. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/index.html) |
+| `grit_lib::odb::store::CompositeStore` | struct | Build an Odb with a custom primary store and optional read overlays. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) |
 | `grit_lib::odb::store::CompositeStore` | struct | Read-only store that consults an ordered list of backends. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) |
 | `grit_lib::odb::store::FilesSource` | struct | Read/write object storage backed by one objects/ directory tree. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) |
 | `grit_lib::odb::store::MemoryStore` | struct | In-memory object map keyed by ObjectId. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.MemoryStore.html) |
@@ -279,8 +288,6 @@ This page is regenerated from the local `grit-lib` rustdoc build (`cargo doc -p 
 | `grit_lib::odb::store::PackedObjects` | struct | Pack-index-backed read-only ObjectStore for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.PackedObjects.html) |
 | `grit_lib::odb::store::WritableObjectStore` | trait | Object storage that supports inserting new objects. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.WritableObjectStore.html) |
 | `grit_lib::odb::store::loose` | module | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/index.html) |
-| `grit_lib::odb::store::loose::LooseStore` | struct | Pluggable object storage backends and the ObjectStore trait surface. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
-| `grit_lib::odb::store::loose::LooseStore` | struct | Loose-object storage under objects/xx/<suffix> (zlib-compressed Git objects). | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
 | `grit_lib::odb::store::loose::LooseStore` | struct | On-disk loose object store for one objects/ directory. | [API](https://docs.rs/grit-lib/latest/grit_lib/odb/store/loose/struct.LooseStore.html) |
 | `grit_lib::pack` | module | Pack and pack-index helpers for object counting and verification. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/index.html) |
 | `grit_lib::pack::LocalPackInfo` | struct | Basic information about local packs. | [API](https://docs.rs/grit-lib/latest/grit_lib/pack/struct.LocalPackInfo.html) |

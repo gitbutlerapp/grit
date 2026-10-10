@@ -3992,11 +3992,11 @@ mod tests {
         let odb_a = Odb::new(&objects_a);
         let odb_b = Odb::new(&objects_b);
         assert!(
-            !Arc::ptr_eq(odb_a.pack_store(), odb_b.pack_store()),
+            !Arc::ptr_eq(odb_a.pack_store().unwrap(), odb_b.pack_store().unwrap()),
             "independent Odb opens must not share pack stores"
         );
-        pack_cache::test_reset_dir_rescan_count_on_store(odb_a.pack_store(), &pack_a_dir);
-        pack_cache::test_reset_dir_rescan_count_on_store(odb_b.pack_store(), &pack_b_dir);
+        pack_cache::test_reset_dir_rescan_count_on_store(odb_a.pack_store().unwrap(), &pack_a_dir);
+        pack_cache::test_reset_dir_rescan_count_on_store(odb_b.pack_store().unwrap(), &pack_b_dir);
 
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let b0 = Arc::clone(&barrier);
@@ -4018,11 +4018,11 @@ mod tests {
         h2.join().expect("thread b");
 
         assert_eq!(
-            pack_cache::test_dir_rescan_count_on_store(odb_a.pack_store(), &pack_a_dir),
+            pack_cache::test_dir_rescan_count_on_store(odb_a.pack_store().unwrap(), &pack_a_dir),
             1
         );
         assert_eq!(
-            pack_cache::test_dir_rescan_count_on_store(odb_b.pack_store(), &pack_b_dir),
+            pack_cache::test_dir_rescan_count_on_store(odb_b.pack_store().unwrap(), &pack_b_dir),
             1
         );
     }
@@ -4195,7 +4195,7 @@ mod tests {
         let odb_a = Odb::new(&objects);
         let odb_b = Odb::new(&objects);
         assert!(
-            !std::sync::Arc::ptr_eq(odb_a.pack_store(), odb_b.pack_store()),
+            !std::sync::Arc::ptr_eq(odb_a.pack_store().unwrap(), odb_b.pack_store().unwrap()),
             "sibling Odbs must have distinct pack stores"
         );
         odb_b.read(&oid_old).expect("warm b store");

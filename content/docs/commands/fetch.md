@@ -17,6 +17,8 @@ Downloads everything new from a remote and updates your remote-tracking branches
 
 Each updated ref is listed with its old and new commit.
 
+Repositories created as shallow clones with Git (for example `git clone --depth 1`) are supported: `grit fetch` respects the existing shallow boundary, does not create tag refs to missing commits, and leaves a clean repository when there is nothing new to download.
+
 ## Options
 
 | Option | Description |

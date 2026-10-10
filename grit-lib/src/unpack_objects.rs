@@ -469,6 +469,62 @@ pub fn pack_is_thin(data: &[u8], algo: HashAlgo) -> bool {
 }
 
 fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
+    use crate::pack_zlib::skip_zlib_at;
+
+    let mut rd = PackReader::new(data);
+    if rd.read_exact(4)? != b"PACK" {
+        return Ok(false);
+    }
+    let _version = rd.read_u32_be()?;
+    let nr_objects = rd.read_u32_be()? as usize;
+
+    let mut ref_delta_bases: Vec<ObjectId> = Vec::new();
+    let mut saw_ref_delta = false;
+
+    for _ in 0..nr_objects {
+        let obj_offset = rd.pos;
+        let (type_code, size) = rd.read_type_size()?;
+        match type_code {
+            1..=4 => {
+                let zlib_offset = rd.pos;
+                let consumed = skip_zlib_at(data, zlib_offset, size)?;
+                rd.pos = zlib_offset + consumed;
+            }
+            6 => {
+                let neg = rd.read_ofs_neg_offset()?;
+                let _base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
+                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
+                })?;
+                let zlib_offset = rd.pos;
+                let consumed = skip_zlib_at(data, zlib_offset, size)?;
+                rd.pos = zlib_offset + consumed;
+            }
+            7 => {
+                saw_ref_delta = true;
+                let base_bytes = rd.read_exact(algo.len())?;
+                let base_oid = ObjectId::from_bytes(base_bytes)?;
+                ref_delta_bases.push(base_oid);
+                let zlib_offset = rd.pos;
+                let consumed = skip_zlib_at(data, zlib_offset, size)?;
+                rd.pos = zlib_offset + consumed;
+            }
+            _ => return Ok(false),
+        }
+    }
+
+    if !saw_ref_delta {
+        return Ok(false);
+    }
+
+    pack_is_thin_with_ofs_deltas(data, algo, ref_delta_bases)
+}
+
+/// Legacy path when the pack contains OFS deltas (must resolve chains to collect OIDs).
+fn pack_is_thin_with_ofs_deltas(
+    data: &[u8],
+    algo: HashAlgo,
+    ref_delta_bases: Vec<ObjectId>,
+) -> Result<bool> {
     let mut rd = PackReader::new(data);
     if rd.read_exact(4)? != b"PACK" {
         return Ok(false);
@@ -478,7 +534,6 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
 
     let mut by_offset: HashMap<usize, (ObjectKind, Vec<u8>)> = HashMap::new();
     let mut by_oid: HashMap<ObjectId, (ObjectKind, Vec<u8>)> = HashMap::new();
-    let mut ref_delta_bases: Vec<ObjectId> = Vec::new();
     let mut pending: Vec<PendingDelta> = Vec::new();
 
     for _ in 0..nr_objects {
@@ -508,7 +563,6 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
             7 => {
                 let base_bytes = rd.read_exact(algo.len())?;
                 let base_oid = ObjectId::from_bytes(base_bytes)?;
-                ref_delta_bases.push(base_oid);
                 let delta_data = rd.decompress(size)?;
                 pending.push(PendingDelta {
                     offset: obj_offset,
@@ -551,7 +605,6 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
         }
     }
 
-    // Thin iff a ref-delta names a base OID that is not stored anywhere in this pack.
     Ok(ref_delta_bases.iter().any(|b| !by_oid.contains_key(b)))
 }
 

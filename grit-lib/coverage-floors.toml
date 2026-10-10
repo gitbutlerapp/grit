@@ -11,7 +11,7 @@ minimum = 85.0
 
 [aggregate.refs-config]
 groups = ["refs", "reflog", "config", "ignore", "attributes"]
-minimum = 57.4
+minimum = 85.0
 
 [group.attributes]
 files = [
@@ -31,7 +31,7 @@ minimum = 86.5
 files = [
     "config.rs",
 ]
-minimum = 66.4
+minimum = 85.0
 
 [group.ignore]
 files = [
@@ -48,9 +48,11 @@ minimum = 85.0
 
 [group.odb]
 files = [
-    "odb.rs",
+    "odb/mod.rs",
+    "odb/store/mod.rs",
+    "odb/store/packs.rs",
 ]
-minimum = 85.0
+minimum = 81.1
 
 [group.pack]
 files = [
@@ -61,13 +63,13 @@ files = [
     "pack_index_build.rs",
     "pack_zlib.rs",
 ]
-minimum = 86.1
+minimum = 86.3
 
 [group.reflog]
 files = [
     "reflog.rs",
 ]
-minimum = 83.4
+minimum = 85.0
 
 [group.refs]
 files = [
@@ -75,7 +77,7 @@ files = [
     "reftable.rs",
     "check_ref_format.rs",
 ]
-minimum = 69.9
+minimum = 85.0
 
 [group.supporting]
 files = [
@@ -96,7 +98,7 @@ minimum = 85.0
 minimum = 91.6
 
 [file."check_ref_format.rs"]
-minimum = 95.2
+minimum = 96.1
 
 [file."commit_graph_file.rs"]
 minimum = 85.0
@@ -105,7 +107,7 @@ minimum = 85.0
 minimum = 87.9
 
 [file."config.rs"]
-minimum = 66.4
+minimum = 85.0
 
 [file."delta_encode.rs"]
 minimum = 93.3
@@ -125,11 +127,17 @@ minimum = 85.0
 [file."objects.rs"]
 minimum = 86.6
 
-[file."odb.rs"]
-minimum = 85.0
+[file."odb/mod.rs"]
+minimum = 83.3
+
+[file."odb/store/mod.rs"]
+minimum = 89.0
+
+[file."odb/store/packs.rs"]
+minimum = 57.8
 
 [file."pack.rs"]
-minimum = 85.0
+minimum = 85.3
 
 [file."pack_index.rs"]
 minimum = 89.7
@@ -150,13 +158,13 @@ minimum = 73.4
 minimum = 81.1
 
 [file."reflog.rs"]
-minimum = 83.4
+minimum = 84.2
 
 [file."refs.rs"]
-minimum = 72.3
+minimum = 79.8
 
 [file."reftable.rs"]
-minimum = 75.6
+minimum = 83.8
 
 [file."unpack_objects.rs"]
 minimum = 82.9

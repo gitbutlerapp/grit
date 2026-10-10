@@ -458,6 +458,109 @@ impl Repository {
         Self::open_with(&options, git_dir, work_tree)
     }
 
+    /// Open a repository using a pre-built [`crate::odb::Odb`] from [`crate::odb::OdbBuilder`].
+    ///
+    /// The builder's [`crate::odb::OdbBuilder::files`] path must match this repository's
+    /// `objects/` directory (including linked worktrees via `commondir`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::open`], when the git directory is invalid.
+    pub fn open_with_odb(
+        options: &RepositoryOptions,
+        git_dir: &Path,
+        work_tree: Option<&Path>,
+        builder: crate::odb::OdbBuilder,
+    ) -> Result<Self> {
+        let git_dir = git_dir
+            .canonicalize()
+            .map_err(|_| Error::NotARepository(git_dir.display().to_string()))?;
+
+        validate_repository_format(&git_dir)?;
+        let environment = Arc::new(options.environment.clone());
+        let command_runner = Arc::clone(&options.command_runner);
+
+        let head_path = git_dir.join("HEAD");
+        if !head_path.exists() && !head_path.is_symlink() {
+            return Err(Error::NotARepository(git_dir.display().to_string()));
+        }
+
+        let objects_dir = if git_dir.join("objects").exists() {
+            git_dir.join("objects")
+        } else if let Some(common_dir) = resolve_common_dir(&git_dir) {
+            common_dir.join("objects")
+        } else {
+            return Err(Error::NotARepository(git_dir.display().to_string()));
+        };
+
+        if !objects_dir.exists() {
+            return Err(Error::NotARepository(git_dir.display().to_string()));
+        }
+
+        if builder.objects_dir() != objects_dir.as_path() {
+            return Err(Error::PathError(format!(
+                "OdbBuilder objects dir '{}' does not match repository objects '{}'",
+                builder.objects_dir().display(),
+                objects_dir.display()
+            )));
+        }
+
+        let work_tree = match work_tree {
+            Some(p) => {
+                let cwd = environment.discovery_cwd();
+                let mut resolved = if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    cwd.join(p)
+                };
+                if resolved.exists() {
+                    resolved = resolved
+                        .canonicalize()
+                        .map_err(|_| Error::PathError(p.display().to_string()))?;
+                }
+                Some(resolved)
+            }
+            None => None,
+        };
+
+        let caches = RepoCaches::with_diagnostics(
+            Arc::clone(&command_runner),
+            Arc::clone(&options.diagnostics),
+        );
+        let odb = builder
+            .build()
+            .with_config_git_dir(git_dir.clone())
+            .with_shared_config_state(caches.clone(), environment.clone())
+            .with_resolved_work_tree(work_tree.clone());
+
+        let git_prefix = work_tree
+            .as_ref()
+            .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
+
+        let repo = Self {
+            git_dir,
+            work_tree,
+            odb,
+            explicit_git_dir: false,
+            discovery_root: None,
+            work_tree_from_env: false,
+            discovery_via_gitfile: false,
+            caches,
+            environment,
+            git_prefix,
+            command_runner,
+            diagnostics: Arc::clone(&options.diagnostics),
+            network_trace: options.network_trace,
+            reference_unix_time: options.reference_unix_time,
+            test_assume_different_owner: options.test_assume_different_owner,
+            force_split_index: options.force_split_index,
+        };
+        let cfg = repo.ensure_config_arc()?;
+        repo.install_config_snapshot(cfg);
+        warn_core_bare_worktree_conflict(options, &repo.git_dir);
+        Ok(repo)
+    }
+
     /// Discover a repository with explicit options (alias for [`Self::discover_with`]).
     pub fn discover_with_options(start: Option<&Path>, options: RepositoryOptions) -> Result<Self> {
         Self::discover_with(&options, start)

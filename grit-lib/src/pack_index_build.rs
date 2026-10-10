@@ -14,9 +14,20 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 #[derive(Clone)]
+enum BasePayload {
+    /// Re-inflate from the pack when a dependent delta is resolved.
+    InPack {
+        zlib_offset: usize,
+        uncompressed_size: usize,
+    },
+    /// Bytes from the ODB when a ref-delta base is not in this pack.
+    Owned(Vec<u8>),
+}
+
+#[derive(Clone)]
 struct IndexBase {
     kind: ObjectKind,
-    data: Vec<u8>,
+    payload: BasePayload,
 }
 
 struct PendingIndexDelta {
@@ -48,17 +59,24 @@ struct WholeSlot {
 struct WholeInflated {
     offset: usize,
     pack_end: usize,
+    zlib_offset: usize,
     kind: ObjectKind,
+    uncompressed_size: usize,
     data: Vec<u8>,
 }
 
-struct WholeResolved {
+struct WholeHashed {
     record: PackIndexRecord,
     offset: usize,
     oid: ObjectId,
     kind: ObjectKind,
-    data: Vec<u8>,
+    zlib_offset: usize,
+    uncompressed_size: usize,
+    retain_payload: bool,
 }
+
+/// Upper bound on inflated whole objects held from parallel workers at once.
+const WHOLE_PARALLEL_BATCH: usize = 64;
 
 struct PackHeader {
     #[allow(dead_code)]
@@ -144,12 +162,15 @@ fn scan_whole_objects_inflate(
         match type_code {
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
+                let zlib_offset = rd.pos;
                 let data = rd.decompress(size)?;
                 let pack_end = rd.pos;
                 whole_objects.push(WholeInflated {
                     offset: obj_offset,
                     pack_end,
+                    zlib_offset,
                     kind,
+                    uncompressed_size: size,
                     data,
                 });
             }
@@ -233,37 +254,49 @@ fn inflate_hash_whole_objects_parallel(
     if whole_slots.is_empty() {
         return Ok(());
     }
-    let resolved = try_par_hash_with_force(&whole_slots, threads, |work| {
-        let data = decompress_zlib_at_index(pack, work.zlib_offset, work.uncompressed_size)?;
-        let oid = hash_object(algo, work.kind, &data);
-        Ok(WholeResolved {
-            record: PackIndexRecord {
-                oid,
-                offset: u64::try_from(work.offset).unwrap_or(u64::MAX),
-                crc32: crc32fast::hash(&pack[work.offset..work.pack_end]),
-            },
-            offset: work.offset,
-            oid,
-            kind: work.kind,
-            data,
-        })
-    })
-    .map_err(|e: crate::hash::ParallelHashError<Error>| match e {
-        crate::hash::ParallelHashError::Task(err) => err,
-    })?;
+    let ofs_base_refs = state.ofs_base_refs.clone();
+    let oid_base_refs = state.oid_base_refs.clone();
 
-    for item in resolved {
-        state.records.push(item.record);
-        retain_bases_for_whole(
-            item.offset,
-            item.oid,
-            item.kind,
-            item.data,
-            state.ofs_base_refs,
-            state.oid_base_refs,
-            state.ofs_bases,
-            state.oid_bases,
-        );
+    for chunk in whole_slots.chunks(WHOLE_PARALLEL_BATCH) {
+        let hashed = try_par_hash_with_force(chunk, threads, |work| {
+            let data = decompress_zlib_at_index(pack, work.zlib_offset, work.uncompressed_size)?;
+            let oid = hash_object(algo, work.kind, &data);
+            let retain_ofs = ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0;
+            let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
+            Ok(WholeHashed {
+                record: PackIndexRecord {
+                    oid,
+                    offset: u64::try_from(work.offset).unwrap_or(u64::MAX),
+                    crc32: crc32fast::hash(&pack[work.offset..work.pack_end]),
+                },
+                offset: work.offset,
+                oid,
+                kind: work.kind,
+                zlib_offset: work.zlib_offset,
+                uncompressed_size: work.uncompressed_size,
+                retain_payload: retain_ofs || retain_oid,
+            })
+        })
+        .map_err(|e: crate::hash::ParallelHashError<Error>| match e {
+            crate::hash::ParallelHashError::Task(err) => err,
+        })?;
+
+        for item in hashed {
+            state.records.push(item.record);
+            if item.retain_payload {
+                retain_pack_base_for_whole(
+                    item.offset,
+                    item.oid,
+                    item.kind,
+                    item.zlib_offset,
+                    item.uncompressed_size,
+                    state.ofs_base_refs,
+                    state.oid_base_refs,
+                    state.ofs_bases,
+                    state.oid_bases,
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -338,16 +371,21 @@ fn hash_whole_objects_serial(
             offset: u64::try_from(work.offset).unwrap_or(u64::MAX),
             crc32: crc32fast::hash(&pack[work.offset..work.pack_end]),
         });
-        retain_bases_for_whole(
-            work.offset,
-            oid,
-            work.kind,
-            work.data,
-            state.ofs_base_refs,
-            state.oid_base_refs,
-            state.ofs_bases,
-            state.oid_bases,
-        );
+        if state.ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0
+            || state.oid_base_refs.get(&oid).copied().unwrap_or(0) > 0
+        {
+            retain_pack_base_for_whole(
+                work.offset,
+                oid,
+                work.kind,
+                work.zlib_offset,
+                work.uncompressed_size,
+                state.ofs_base_refs,
+                state.oid_base_refs,
+                state.ofs_bases,
+                state.oid_bases,
+            );
+        }
     }
     Ok(())
 }
@@ -373,7 +411,41 @@ fn verify_pack_trailer(pack: &[u8], consumed: usize, algo: HashAlgo) -> Result<(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn retain_bases_for_whole(
+fn retain_pack_base_for_whole(
+    offset: usize,
+    oid: ObjectId,
+    kind: ObjectKind,
+    zlib_offset: usize,
+    uncompressed_size: usize,
+    ofs_base_refs: &HashMap<usize, u32>,
+    oid_base_refs: &HashMap<ObjectId, u32>,
+    ofs_bases: &mut HashMap<usize, IndexBase>,
+    oid_bases: &mut HashMap<ObjectId, IndexBase>,
+) {
+    let payload = BasePayload::InPack {
+        zlib_offset,
+        uncompressed_size,
+    };
+    let retain_ofs = ofs_base_refs.get(&offset).copied().unwrap_or(0) > 0;
+    let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
+    let base = IndexBase { kind, payload };
+    match (retain_ofs, retain_oid) {
+        (true, true) => {
+            ofs_bases.insert(offset, base.clone());
+            oid_bases.insert(oid, base);
+        }
+        (true, false) => {
+            ofs_bases.insert(offset, base);
+        }
+        (false, true) => {
+            oid_bases.insert(oid, base);
+        }
+        (false, false) => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn retain_owned_base_for_delta(
     offset: usize,
     oid: ObjectId,
     kind: ObjectKind,
@@ -383,35 +455,45 @@ fn retain_bases_for_whole(
     ofs_bases: &mut HashMap<usize, IndexBase>,
     oid_bases: &mut HashMap<ObjectId, IndexBase>,
 ) {
+    let payload = BasePayload::Owned(data);
     let retain_ofs = ofs_base_refs.get(&offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
+    let base = IndexBase { kind, payload };
     match (retain_ofs, retain_oid) {
         (true, true) => {
-            ofs_bases.insert(
-                offset,
-                IndexBase {
-                    kind,
-                    data: data.clone(),
-                },
-            );
-            oid_bases.insert(oid, IndexBase { kind, data });
+            ofs_bases.insert(offset, base.clone());
+            oid_bases.insert(oid, base);
         }
         (true, false) => {
-            ofs_bases.insert(offset, IndexBase { kind, data });
+            ofs_bases.insert(offset, base);
         }
         (false, true) => {
-            oid_bases.insert(oid, IndexBase { kind, data });
+            oid_bases.insert(oid, base);
         }
         (false, false) => {}
     }
 }
 
-struct DeltaResolved {
+fn base_inflated_bytes<'a>(pack: &'a [u8], base: &'a IndexBase) -> Result<Cow<'a, [u8]>> {
+    match &base.payload {
+        BasePayload::InPack {
+            zlib_offset,
+            uncompressed_size,
+        } => Ok(Cow::Owned(decompress_zlib_at_index(
+            pack,
+            *zlib_offset,
+            *uncompressed_size,
+        )?)),
+        BasePayload::Owned(data) => Ok(Cow::Borrowed(data.as_slice())),
+    }
+}
+
+struct DeltaHashed {
     record: PackIndexRecord,
     offset: usize,
     oid: ObjectId,
     kind: ObjectKind,
-    data: Vec<u8>,
+    owned_base: Option<Vec<u8>>,
     base_offset: Option<usize>,
     base_oid: Option<ObjectId>,
 }
@@ -445,41 +527,47 @@ fn resolve_pending_deltas_parallel(
             )));
         }
 
-        let resolved = try_par_hash_with_force(&ready, threads, |delta| {
-            resolve_one_delta(
-                pack,
-                delta,
-                state.ofs_bases,
-                state.oid_bases,
-                state.odb,
-                algo,
-            )
-        })
-        .map_err(|e: crate::hash::ParallelHashError<Error>| match e {
-            crate::hash::ParallelHashError::Task(err) => err,
-        })?;
+        let ofs_out_refs = state.ofs_base_refs.clone();
+        let oid_out_refs = state.oid_base_refs.clone();
+        let mut base_release: Vec<(Option<usize>, Option<ObjectId>)> = Vec::new();
 
-        for item in resolved {
-            state.records.push(item.record);
-            if state.ofs_base_refs.get(&item.offset).copied().unwrap_or(0) > 0 {
-                state.ofs_bases.insert(
-                    item.offset,
-                    IndexBase {
-                        kind: item.kind,
-                        data: item.data.clone(),
-                    },
-                );
+        for batch in ready.chunks(WHOLE_PARALLEL_BATCH) {
+            let hashed = try_par_hash_with_force(batch, threads, |delta| {
+                resolve_one_delta(
+                    pack,
+                    delta,
+                    state.ofs_bases,
+                    state.oid_bases,
+                    state.odb,
+                    algo,
+                    &ofs_out_refs,
+                    &oid_out_refs,
+                )
+            })
+            .map_err(|e: crate::hash::ParallelHashError<Error>| match e {
+                crate::hash::ParallelHashError::Task(err) => err,
+            })?;
+
+            for item in hashed {
+                state.records.push(item.record);
+                if let Some(data) = item.owned_base {
+                    retain_owned_base_for_delta(
+                        item.offset,
+                        item.oid,
+                        item.kind,
+                        data,
+                        state.ofs_base_refs,
+                        state.oid_base_refs,
+                        state.ofs_bases,
+                        state.oid_bases,
+                    );
+                }
+                base_release.push((item.base_offset, item.base_oid));
             }
-            if state.oid_base_refs.get(&item.oid).copied().unwrap_or(0) > 0 {
-                state.oid_bases.insert(
-                    item.oid,
-                    IndexBase {
-                        kind: item.kind,
-                        data: item.data,
-                    },
-                );
-            }
-            if let Some(base_off) = item.base_offset {
+        }
+
+        for (base_off, base_id) in base_release {
+            if let Some(base_off) = base_off {
                 if let Some(n) = state.ofs_base_refs.get_mut(&base_off) {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
@@ -487,11 +575,11 @@ fn resolve_pending_deltas_parallel(
                     }
                 }
             }
-            if let Some(ref base_id) = item.base_oid {
-                if let Some(n) = state.oid_base_refs.get_mut(base_id) {
+            if let Some(base_id) = base_id {
+                if let Some(n) = state.oid_base_refs.get_mut(&base_id) {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
-                        state.oid_bases.remove(base_id);
+                        state.oid_bases.remove(&base_id);
                     }
                 }
             }
@@ -518,6 +606,7 @@ fn delta_base_ready(
     false
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_one_delta(
     pack: &[u8],
     delta: &PendingIndexDelta,
@@ -525,15 +614,18 @@ fn resolve_one_delta(
     oid_bases: &HashMap<ObjectId, IndexBase>,
     odb: &Odb,
     algo: HashAlgo,
-) -> Result<DeltaResolved> {
+    ofs_out_refs: &HashMap<usize, u32>,
+    oid_out_refs: &HashMap<ObjectId, u32>,
+) -> Result<DeltaHashed> {
     let delta_data = decompress_zlib_at_index(pack, delta.zlib_offset, delta.uncompressed_size)?;
     let base: Option<(ObjectKind, Cow<'_, [u8]>)> = if let Some(base_off) = delta.base_offset {
-        ofs_bases
-            .get(&base_off)
-            .map(|b| (b.kind, Cow::Borrowed(b.data.as_slice())))
+        match ofs_bases.get(&base_off) {
+            Some(b) => Some((b.kind, base_inflated_bytes(pack, b)?)),
+            None => None,
+        }
     } else if let Some(ref base_id) = delta.base_oid {
         if let Some(b) = oid_bases.get(base_id) {
-            Some((b.kind, Cow::Borrowed(b.data.as_slice())))
+            Some((b.kind, base_inflated_bytes(pack, b)?))
         } else if let Ok(obj) = odb.read(base_id) {
             Some((obj.kind, Cow::Owned(obj.data)))
         } else {
@@ -547,7 +639,10 @@ fn resolve_one_delta(
     };
     let result = apply_delta(base_data.as_ref(), &delta_data)?;
     let oid = hash_object(algo, base_kind, &result);
-    Ok(DeltaResolved {
+    let retain_ofs = ofs_out_refs.get(&delta.offset).copied().unwrap_or(0) > 0;
+    let retain_oid = oid_out_refs.get(&oid).copied().unwrap_or(0) > 0;
+    let retain = retain_ofs || retain_oid;
+    Ok(DeltaHashed {
         record: PackIndexRecord {
             oid,
             offset: u64::try_from(delta.offset).unwrap_or(u64::MAX),
@@ -556,7 +651,7 @@ fn resolve_one_delta(
         offset: delta.offset,
         oid,
         kind: base_kind,
-        data: result,
+        owned_base: retain.then_some(result),
         base_offset: delta.base_offset,
         base_oid: delta.base_oid,
     })

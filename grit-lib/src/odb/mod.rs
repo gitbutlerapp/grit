@@ -10,23 +10,34 @@
 //!
 //! # Usage
 //!
+//! Files-backed repositories (default):
+//!
 //! ```no_run
 //! use std::path::Path;
 //! use grit_lib::odb::Odb;
 //!
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
+//!
+//! Custom primary store — see [`OdbBuilder`] and [`crate::repo::Repository::open_with_odb`].
 
+pub mod builder;
 pub mod store;
+
+#[doc(inline)]
+pub use builder::OdbBuilder;
 
 pub(crate) use store::loose::{
     build_store_bytes, decompress_zlib_loose_bytes, for_each_loose_object_id,
-    loose_store_bytes_header_valid, parse_object_bytes, read_loose_object_info,
+    loose_store_bytes_header_valid, parse_object_bytes,
+    read_loose_object_info,
     read_zlib_loose_payload, zlib_compress_store_bytes,
 };
+#[doc(inline)]
 pub use store::LooseStore;
 pub use store::{CompositeStore, FilesSource, ObjectStream};
-use store::{MemoryStore, ObjectStore, WritableObjectStore};
+#[doc(inline)]
+pub use store::{MemoryStore, ObjectStore, WritableObjectStore};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -176,6 +187,12 @@ pub struct Odb {
     alternate_pack_stores: Arc<Mutex<HashMap<PathBuf, Arc<PackStore>>>>,
     /// Bumps when [`Self::register_submodule_object_directories_from_index`] repopulates submodule sources.
     submodule_sources_generation: Arc<AtomicU64>,
+    /// When set, replaces the lazy [`FilesSource`] primary ([`OdbBuilder::primary`]).
+    custom_primary: Option<Arc<dyn WritableObjectStore>>,
+    /// Read-only layers from [`OdbBuilder::push_read_source`], after primary, before alternates.
+    extra_read_sources: Vec<Arc<dyn ObjectStore>>,
+    /// When false, alternate object directories are not consulted ([`OdbBuilder::alternates`]).
+    alternates_enabled: bool,
 }
 
 impl std::fmt::Debug for Odb {
@@ -256,6 +273,9 @@ impl Odb {
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
             submodule_sources_generation: Arc::new(AtomicU64::new(0)),
+            custom_primary: None,
+            extra_read_sources: Vec::new(),
+            alternates_enabled: true,
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -302,6 +322,9 @@ impl Odb {
             pack_store: Arc::new(PackStore::new(objects_dir.to_path_buf())),
             alternate_pack_stores: Arc::new(Mutex::new(HashMap::new())),
             submodule_sources_generation: Arc::new(AtomicU64::new(0)),
+            custom_primary: None,
+            extra_read_sources: Vec::new(),
+            alternates_enabled: true,
             #[cfg(test)]
             exists_probe: Arc::new(AtomicUsize::new(0)),
             #[cfg(test)]
@@ -620,6 +643,7 @@ impl Odb {
     ///
     /// Propagates failures while opening pack, MIDX, or loose backends.
     pub fn primary(&self) -> Result<Arc<FilesSource>> {
+        self.require_files_primary("primary")?;
         if let Ok(guard) = self.primary_source.read() {
             if let Some(src) = guard.as_ref() {
                 return Ok(Arc::clone(src));
@@ -657,6 +681,9 @@ impl Odb {
     ///
     /// Propagates failures while opening any alternate files source.
     pub fn sources(&self) -> Result<Arc<CompositeStore>> {
+        if !self.alternates_enabled {
+            return Ok(Arc::new(CompositeStore::new(Vec::new(), self.hash_algo())));
+        }
         let key = self.alternate_sources_key();
         if let Ok(guard) = self.alternate_sources_cache.read() {
             if guard.file_generation == key.file_generation
@@ -771,6 +798,9 @@ impl Odb {
     /// to [`HashAlgo::Sha1`] when no config can be read.
     #[must_use]
     pub fn hash_algo(&self) -> HashAlgo {
+        if let Some(primary) = &self.custom_primary {
+            return primary.hash_algo();
+        }
         *self.hash_algo_cache.get_or_init(|| {
             if self.config_git_dir.is_none() && self.objects_dir.parent().is_none() {
                 return HashAlgo::Sha1;
@@ -831,9 +861,9 @@ impl Odb {
     }
 
     /// Pack/MIDX read cache shared by this handle and its [`Clone`]s.
-    #[must_use]
-    pub fn pack_store(&self) -> &Arc<PackStore> {
-        &self.pack_store
+    pub fn pack_store(&self) -> Result<&Arc<PackStore>> {
+        self.require_files_primary("pack_store")?;
+        Ok(&self.pack_store)
     }
 
     /// Drop cached pack listings, parsed indexes, pack bytes, delta bases, and MIDX layers.
@@ -869,6 +899,9 @@ impl Odb {
     }
 
     fn multi_pack_index_reads_enabled(&self) -> bool {
+        if self.custom_primary.is_some() {
+            return false;
+        }
         if self.config_git_dir.is_none() {
             return false;
         }
@@ -895,9 +928,44 @@ impl Odb {
     }
 
     /// Return the path to the `objects/` directory.
+    ///
+    /// This is always the repository layout path (including for custom primaries that do not
+    /// store objects on disk). Prefer [`Self::files_objects_dir`] when the operation requires a
+    /// files-backed primary; filesystem maintenance returns
+    /// [`Error::UnsupportedObjectStore`] otherwise.
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
+    }
+
+    fn try_read_extra_sources(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        for src in &self.extra_read_sources {
+            if let Some(obj) = src.read(oid)? {
+                return Ok(Some(obj));
+            }
+        }
+        Ok(None)
+    }
+
+    fn try_read_info_extra_sources(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        for src in &self.extra_read_sources {
+            if let Some(info) = src.read_info(oid)? {
+                return Ok(Some(info));
+            }
+        }
+        Ok(None)
+    }
+
+    fn try_open_stream_extra_sources(
+        &self,
+        oid: &ObjectId,
+    ) -> Result<Option<store::ObjectStream<'_>>> {
+        for src in &self.extra_read_sources {
+            if let Some(stream) = src.open_stream(oid)? {
+                return Ok(Some(stream));
+            }
+        }
+        Ok(None)
     }
 
     /// Return the attached git directory, if one was set with
@@ -933,6 +1001,13 @@ impl Odb {
         if oid.is_canonical_empty_tree() {
             return true;
         }
+        if self.custom_primary.is_some() {
+            return self
+                .primary_writable()
+                .ok()
+                .and_then(|primary| primary.contains(oid).ok())
+                .unwrap_or(false);
+        }
         self.with_pack_store_for(&self.objects_dir, || {
             exists_materialized_in_objects_dir(&self.objects_dir, oid)
         })
@@ -950,12 +1025,17 @@ impl Odb {
             return true;
         }
         if self
-            .primary()
+            .primary_writable()
             .ok()
             .and_then(|primary| primary.contains(oid).ok())
             == Some(true)
         {
             return true;
+        }
+        for src in &self.extra_read_sources {
+            if src.contains(oid).ok() == Some(true) {
+                return true;
+            }
         }
         if !self.alternate_object_lookup_needed() {
             return false;
@@ -1113,6 +1193,7 @@ impl Odb {
     }
 
     fn local_loose(&self) -> Result<LooseStore> {
+        self.require_files_primary("loose_write")?;
         Ok(LooseStore::new(
             self.objects_dir.clone(),
             self.hash_algo(),
@@ -1146,6 +1227,12 @@ impl Odb {
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(obj);
         }
+        if oid.is_well_known_empty_tree() {
+            return Ok(Object {
+                kind: ObjectKind::Tree,
+                data: Vec::new(),
+            });
+        }
 
         let use_midx = self.multi_pack_index_reads_enabled();
         if use_midx {
@@ -1154,7 +1241,8 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
-        let primary = self.primary()?;
+        let primary = self.primary_writable()?;
+        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
         let read_primary = || primary.read(oid);
         match if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
@@ -1164,16 +1252,26 @@ impl Odb {
         } {
             Ok(Some(obj)) => return Ok(obj),
             Ok(None) => {}
-            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
+            Err(err)
+                if files_primary
+                    .as_ref()
+                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+            {
                 unreadable_local_loose = Some(err);
             }
             Err(err) => return Err(err),
         }
 
-        match self.sources()?.read(oid) {
-            Ok(Some(obj)) => return Ok(obj),
-            Ok(None) => {}
-            Err(err) => return Err(err),
+        if let Some(obj) = self.try_read_extra_sources(oid)? {
+            return Ok(obj);
+        }
+
+        if self.alternates_enabled {
+            match self.sources()?.read(oid) {
+                Ok(Some(obj)) => return Ok(obj),
+                Ok(None) => {}
+                Err(err) => return Err(err),
+            }
         }
 
         if let Some(err) = unreadable_local_loose {
@@ -1215,21 +1313,32 @@ impl Odb {
             self.ensure_midx_prepared();
         }
 
-        let primary = self.primary()?;
+        let primary = self.primary_writable()?;
+        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
         match primary.read_info(oid) {
             Ok(Some(info)) => return Ok(info),
             Ok(None) => {}
-            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
+            Err(err)
+                if files_primary
+                    .as_ref()
+                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+            {
                 unreadable_local_loose = Some(err);
             }
             Err(err) => return Err(err),
         }
 
-        match self.sources()?.read_info(oid) {
-            Ok(Some(info)) => return Ok(info),
-            Ok(None) => {}
-            Err(err) => return Err(err),
+        if let Some(info) = self.try_read_info_extra_sources(oid)? {
+            return Ok(info);
+        }
+
+        if self.alternates_enabled {
+            match self.sources()?.read_info(oid) {
+                Ok(Some(info)) => return Ok(info),
+                Ok(None) => {}
+                Err(err) => return Err(err),
+            }
         }
 
         if let Some(err) = unreadable_local_loose {
@@ -1260,20 +1369,30 @@ impl Odb {
             self.ensure_midx_prepared();
         }
         self.sync_delta_base_cache_limit();
-        let primary = self.primary()?;
+        let primary = self.primary_writable()?;
+        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
         match primary.open_stream(oid) {
             Ok(Some(stream)) => return materialize_stream(stream),
             Ok(None) => {}
-            Err(err) if primary.local_loose_exists_but_unreadable(oid, &err) => {
+            Err(err)
+                if files_primary
+                    .as_ref()
+                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+            {
                 unreadable_local_loose = Some(err);
             }
             Err(err) => return Err(err),
         }
-        match self.sources()?.open_stream(oid) {
-            Ok(Some(stream)) => return materialize_stream(stream),
-            Ok(None) => {}
-            Err(err) => return Err(err),
+        if let Some(stream) = self.try_open_stream_extra_sources(oid)? {
+            return materialize_stream(stream);
+        }
+        if self.alternates_enabled {
+            match self.sources()?.open_stream(oid) {
+                Ok(Some(stream)) => return materialize_stream(stream),
+                Ok(None) => {}
+                Err(err) => return Err(err),
+            }
         }
         if let Some(err) = unreadable_local_loose {
             return Err(err);
@@ -1301,10 +1420,17 @@ impl Odb {
                 return Ok(());
             }
         }
-        if visit(self.primary()?.as_ref())? {
+        if visit(self.primary_writable()?.as_ref())? {
             return Ok(());
         }
-        let _ = visit(self.sources()?.as_ref())?;
+        for src in &self.extra_read_sources {
+            if visit(src.as_ref())? {
+                return Ok(());
+            }
+        }
+        if self.alternates_enabled {
+            let _ = visit(self.sources()?.as_ref())?;
+        }
         Ok(())
     }
 
@@ -1321,11 +1447,26 @@ impl Odb {
                 return Ok(());
             }
         }
-        append_lookup_prefix_layer(self.primary()?.as_ref(), prefix, limit, out, &mut seen)?;
+        append_lookup_prefix_layer(
+            self.primary_writable()?.as_ref(),
+            prefix,
+            limit,
+            out,
+            &mut seen,
+        )?;
         if limit != 0 && out.len() >= limit {
             return Ok(());
         }
-        append_lookup_prefix_layer(self.sources()?.as_ref(), prefix, limit, out, &mut seen)
+        for src in &self.extra_read_sources {
+            append_lookup_prefix_layer(src.as_ref(), prefix, limit, out, &mut seen)?;
+            if limit != 0 && out.len() >= limit {
+                return Ok(());
+            }
+        }
+        if self.alternates_enabled {
+            append_lookup_prefix_layer(self.sources()?.as_ref(), prefix, limit, out, &mut seen)?;
+        }
+        Ok(())
     }
 
     /// Enumerate loose objects in this database's primary `objects/` directory as `(oid, path)`.
@@ -1428,6 +1569,11 @@ impl Odb {
         zlib_store: &[u8],
         options: WriteOptions,
     ) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_loose_zlib_prehashed",
+            });
+        }
         let primary = self.primary()?;
         if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
             return Ok(existing);
@@ -1465,6 +1611,26 @@ impl Odb {
     ) -> Result<ObjectId> {
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
+
+        if let Some(primary) = &self.custom_primary {
+            let already_exists = if options.trust_new_loose {
+                false
+            } else if options.assume_loose_only_existence {
+                primary.contains(&oid)?
+            } else {
+                self.exists(&oid)
+            };
+            if self.overlay_active()
+                && !already_exists
+                && self.overlay_store_object(oid, kind, data)
+            {
+                return Ok(oid);
+            }
+            if already_exists {
+                return Ok(oid);
+            }
+            return WritableObjectStore::write(primary.as_ref(), kind, data, options);
+        }
 
         let primary = self.primary()?;
         if let Some(existing) = primary.try_finish_duplicate_write(&oid, options)? {
@@ -1506,6 +1672,11 @@ impl Odb {
     ///
     /// Same as [`Self::write`].
     pub fn write_local(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_local",
+            });
+        }
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
 
@@ -1524,6 +1695,11 @@ impl Odb {
     /// before local packs are removed. Unlike [`Self::write_local`], objects present only in a
     /// promisor pack are still written because [`Self::exists_local`] treats those as absent.
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_loose_materialize",
+            });
+        }
         let store_bytes = build_store_bytes(kind, data);
         let oid = hash_bytes_with(self.hash_algo(), &store_bytes);
         if let Ok(primary) = self.primary() {
@@ -1549,10 +1725,24 @@ impl Odb {
     /// - [`Error::CorruptObject`] — the provided bytes don't form a valid header.
     /// - [`Error::Io`] / [`Error::Zlib`] — storage errors.
     pub fn write_raw(&self, store_bytes: &[u8]) -> Result<ObjectId> {
-        // Validate the header before storing
-        parse_object_bytes(store_bytes)?;
-
+        let obj = parse_object_bytes(store_bytes)?;
         let oid = hash_bytes_with(self.hash_algo(), store_bytes);
+
+        if let Some(primary) = &self.custom_primary {
+            if self.exists(&oid) {
+                return Ok(oid);
+            }
+            if self.overlay_active() && self.overlay_store_object(oid, obj.kind, &obj.data) {
+                return Ok(oid);
+            }
+            return WritableObjectStore::write(
+                primary.as_ref(),
+                obj.kind,
+                &obj.data,
+                WriteOptions::default(),
+            );
+        }
+
         if let Some(existing) = self.try_freshen_existing(&oid) {
             return Ok(existing);
         }
@@ -1569,6 +1759,11 @@ impl Odb {
     ///
     /// Same as [`Self::write_raw`].
     pub fn write_raw_local(&self, store_bytes: &[u8]) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_raw_local",
+            });
+        }
         parse_object_bytes(store_bytes)?;
 
         let oid = hash_bytes_with(self.hash_algo(), store_bytes);

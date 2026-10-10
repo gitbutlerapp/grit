@@ -626,6 +626,43 @@ impl UreqHttpClient {
         finish(result, &self.transport_timeouts)
     }
 
+    fn do_post_open(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+        auth: Option<&str>,
+    ) -> Result<(RawResponseHead, LowSpeedReader<Box<dyn Read + Send>>)> {
+        let idempotent = content_type == "application/x-git-upload-pack-request";
+        let result = retry_interrupted(idempotent, || {
+            let mut req = self
+                .agent
+                .post(url)
+                .header("Content-Type", content_type)
+                .header("Accept", accept)
+                .header("User-Agent", &self.user_agent);
+            if let Some(v) = git_protocol {
+                req = req.header("Git-Protocol", v);
+            }
+            if let Some(a) = auth {
+                req = req.header("Authorization", a);
+            }
+            if let Some(cookie) = self.cookie_header_for_url(url) {
+                req = req.header("Cookie", &cookie);
+            }
+            for (name, value) in self.extra_headers_for_url(url) {
+                req = req.header(&name, &value);
+            }
+            req.send(body)
+        });
+        match result {
+            Ok(resp) => open_response_body(resp, &self.transport_timeouts),
+            Err(e) => Err(Error::Message(format!("http transport error: {e}"))),
+        }
+    }
+
     fn do_post(
         &self,
         url: &str,
@@ -660,6 +697,85 @@ impl UreqHttpClient {
             req.send(body)
         });
         finish(result, &self.transport_timeouts)
+    }
+
+    fn with_auth_retry_post_stream(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> Result<LowSpeedReader<Box<dyn Read + Send>>> {
+        let initial_auth = self.cached_auth_header_for_url(url);
+        let (head, reader) = self.do_post_open(
+            url,
+            content_type,
+            accept,
+            body,
+            git_protocol,
+            initial_auth.as_deref(),
+        )?;
+        if head.status != 401 {
+            self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
+            self.save_response_cookies(&head.set_cookie);
+            if head.status >= 400 {
+                drain_response_body(reader);
+                return Err(http_status_error(url, head.status));
+            }
+            return Ok(reader);
+        }
+        drain_response_body(reader);
+        let Some(provider) = self.credentials.as_ref() else {
+            self.clear_auth_header();
+            return Err(Error::Auth(format!(
+                "{url}: server requires authentication (401) but no credential provider is configured"
+            )));
+        };
+        if !offers_basic(&head.www_authenticate) {
+            return Err(Error::Auth(format!(
+                "{url}: server requires an unsupported auth scheme: {:?}",
+                head.www_authenticate
+            )));
+        }
+        let auth_url = effective_info_refs_url_after_redirect(url, Some(head.final_url.as_str()));
+        let Some(input) = credential_for_url(&auth_url, &self.credential_config) else {
+            return Err(Error::Auth(format!(
+                "{auth_url}: server requires authentication (401) but the URL could not be decomposed into credential fields"
+            )));
+        };
+        let cred = provider
+            .fill(&input)
+            .map_err(|e| Error::Auth(format!("{auth_url}: could not obtain credentials: {e}")))?;
+        let Some(header) = basic_auth_header(&cred) else {
+            return Err(Error::Auth(format!(
+                "{auth_url}: credential helper returned no usable username/password"
+            )));
+        };
+        let (retry_head, retry_reader) =
+            self.do_post_open(url, content_type, accept, body, git_protocol, Some(&header))?;
+        if retry_head.status == 401 {
+            let _ = provider.reject(&cred);
+            self.clear_auth_header();
+            drain_response_body(retry_reader);
+            return Err(Error::Auth(format!(
+                "{url}: supplied credentials were rejected (401)"
+            )));
+        }
+        if retry_head.status >= 400 {
+            let _ = provider.reject(&cred);
+            self.clear_auth_header();
+            drain_response_body(retry_reader);
+            return Err(http_status_error(url, retry_head.status));
+        }
+        let _ = provider.approve(&cred);
+        if http_origins_match(&auth_url, &retry_head.final_url) {
+            self.store_auth_header(header, &auth_url);
+        } else {
+            self.clear_auth_header();
+        }
+        self.save_response_cookies(&retry_head.set_cookie);
+        Ok(retry_reader)
     }
 
     /// Run `attempt` (a GET or POST closure) with auth-retry on 401, returning
@@ -756,6 +872,24 @@ impl HttpClient for UreqHttpClient {
         .map(|(body, _)| body)
     }
 
+    fn post_into_reader(
+        &self,
+        url: &str,
+        content_type: &str,
+        accept: &str,
+        body: &[u8],
+        git_protocol: Option<&str>,
+    ) -> Result<Box<dyn Read + Send>> {
+        let gp = git_protocol.or(self.git_protocol.as_deref());
+        Ok(Box::new(self.with_auth_retry_post_stream(
+            url,
+            content_type,
+            accept,
+            body,
+            gp,
+        )?))
+    }
+
     fn get_with_final_url(
         &self,
         url: &str,
@@ -817,21 +951,49 @@ fn read_response(
     resp: ureq::http::Response<ureq::Body>,
     timeouts: &HttpTransportTimeouts,
 ) -> Result<RawResponse> {
+    let (head, mut reader) = open_response_body(resp, timeouts)?;
+    let mut body = Vec::new();
+    reader.read_to_end(&mut body).map_err(Error::Io)?;
+    Ok(RawResponse {
+        status: head.status,
+        www_authenticate: head.www_authenticate,
+        set_cookie: head.set_cookie,
+        body,
+        final_url: head.final_url,
+    })
+}
+
+/// Response metadata without buffering the body.
+struct RawResponseHead {
+    status: u16,
+    www_authenticate: Vec<String>,
+    set_cookie: Vec<String>,
+    final_url: String,
+}
+
+fn open_response_body(
+    resp: ureq::http::Response<ureq::Body>,
+    timeouts: &HttpTransportTimeouts,
+) -> Result<(RawResponseHead, LowSpeedReader<Box<dyn Read + Send>>)> {
     use ureq::ResponseExt as _;
     let status = resp.status().as_u16();
     let final_url = resp.get_uri().to_string();
     let www_authenticate = header_values(resp.headers(), "WWW-Authenticate");
     let set_cookie = header_values(resp.headers(), "Set-Cookie");
-    let mut body = Vec::new();
-    let mut reader = LowSpeedReader::new(resp.into_body().into_reader(), timeouts);
-    reader.read_to_end(&mut body).map_err(Error::Io)?;
-    Ok(RawResponse {
-        status,
-        www_authenticate,
-        set_cookie,
-        body,
-        final_url,
-    })
+    let reader = resp.into_body().into_reader();
+    Ok((
+        RawResponseHead {
+            status,
+            www_authenticate,
+            set_cookie,
+            final_url,
+        },
+        LowSpeedReader::new(Box::new(reader) as Box<dyn Read + Send>, timeouts),
+    ))
+}
+
+fn drain_response_body(mut reader: LowSpeedReader<Box<dyn Read + Send>>) {
+    let _ = std::io::copy(&mut reader, &mut std::io::sink());
 }
 
 /// Collect all values for a header as owned UTF-8 strings (skipping any that

@@ -154,7 +154,7 @@ Upstream `t/` scripts for refs, reflog, config, ignore rules, and attributes are
 | — | `core.logAllRefUpdates` modes vs git auto-create | `grit-lib/tests/reflog_roundtrip.rs` (`log_all_ref_updates_modes_match_git`) | covered |
 | — | delete / truncate vs `git reflog delete` | `grit-lib/tests/reflog_roundtrip.rs` (`delete_reflog_and_truncate_match_git`) | covered (files backend byte-compare) |
 | t1300-config.sh | config write: set/add/replace-all/unset/count, sections, quoting, multivar errors, lock file | `grit-lib/tests/config_write.rs` (`t1300_edit_matches_git_byte_for_byte`, `config_lock_present_is_typed_error_and_preserves_file`) | covered (read/parse subset on other steps; `--comment` cases grit-only on Git &lt; 2.46) |
-| t1303-write-readonly.sh | write paths, subsection escaping, round-trip after edit | `grit-lib/tests/config_write.rs` (`subsection_backslash_in_name`, `grit_edited_repo_config_git_status_and_reread`) | partial (readonly-file cases N/A) |
+| t1303-write-readonly.sh | write paths, subsection escaping, round-trip after edit | `grit-lib/tests/config_write.rs` (`t1300_edit_matches_git_byte_for_byte`, `grit_edited_repo_config_git_status_and_reread`) | partial (readonly-file cases N/A; subsection escape covered inside oracle `CASES`) |
 | t1300 | config read (whitespace, escapes, continuations, bare keys, subsections); oracle vs `git config --file` | `grit-lib/tests/config_parse.rs` (`t1300_values_match_git_config_get`) | covered (read subset) |
 | t1303 | wacky config (BOM, CRLF, long lines) | `grit-lib/tests/config_parse.rs` (`t1303_wacky_files_match_git`) | covered |
 | t1305 | `[include]` / `[includeIf]` and `--show-origin` | `grit-lib/tests/config_includes.rs` (`t1305_include_and_includeif_match_git_show_origin`) | covered |
@@ -222,6 +222,10 @@ Detailed rows for remaining t1405 cases and other plan steps are filled in as la
 | `t/unit-tests/u-reftable-table.c` | Table footer, CRC, corruption | `grit-lib/tests/reftable_format.rs` (`corruption_*`, `every_truncation_is_typed_error_no_panic`) | covered |
 | `t/unit-tests/u-reftable-basics.c` | Empty table, update-index bounds, dump blocks | `grit-lib/tests/reftable_format.rs` (`empty_table_*`, `dump_reftable_blocks_stable_structure`) | covered |
 | `t0613-reftable-write-options.sh` | Config-driven block size, restart interval, indexObjects | `grit-lib/tests/reftable_format.rs` (`write_options_block_size_and_restart_interval_applied`) | covered (geometricFactor parsed; stack compaction in later step) |
+| `t0610-reftable-concurrent-writers.sh` | Many concurrent writers; ref transactions commit one table | `grit-lib/tests/refs_transactions.rs` (`concurrent_reftable_cas_single_winner`, `reftable_transaction_one_table_single_update_index`) | covered (loose-refs CAS paths in `refs_lock_coverage.rs`) |
+| `t0612-reftable-jgit.sh` | JGit reftable interoperability | — | skipped (no JGit harness in CI; on-disk format covered by `reftable_format.rs`) |
+| `t0614-refs-fsck.sh` | Refs verify / fsck diagnostics on loose and reftable backends | `grit-lib/tests/refs_fsck_coverage.rs`, `grit-lib/tests/reftable_format.rs` (`corruption_*`) | partial (repository-level `git fsck` parity deferred; ref-name and packed-refs checks covered) |
+| `t1460-refs-migrate.sh` | `git refs migrate` loose ↔ reftable | — | gap (no `grit refs migrate` CLI; reftable read/write in library only — defer until migrate command lands) |
 
 ### Documentation site and rustdoc jobs
 
