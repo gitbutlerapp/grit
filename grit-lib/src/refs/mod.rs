@@ -408,37 +408,6 @@ fn first_packed_descendant_ref(store: &Path, refname: &str) -> Result<Option<Str
         .cloned())
 }
 
-fn packed_ref_with_prefix(git_dir: &Path, prefix_with_slash: &str) -> Result<Option<String>> {
-    let packed = store::paths::packed_refs_path(git_dir);
-    let content = match fs::read_to_string(&packed) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(Error::Io(e)),
-    };
-    let mut best: Option<String> = None;
-    for line in content.lines() {
-        if line.is_empty() || line.starts_with('#') || line.starts_with('^') {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let _oid = parts.next();
-        let Some(name) = parts.next() else {
-            continue;
-        };
-        let name = name.trim();
-        if name.starts_with(prefix_with_slash) {
-            let take = match &best {
-                None => true,
-                Some(b) => name < b.as_str(),
-            };
-            if take {
-                best = Some(name.to_owned());
-            }
-        }
-    }
-    Ok(best)
-}
-
 fn packed_ref_name_exists(git_dir: &Path, refname: &str) -> Result<bool> {
     Ok(read_packed_refs_map(git_dir)?.contains_key(refname))
 }
