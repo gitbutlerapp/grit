@@ -396,6 +396,18 @@ fn read_raw_ref_at(path: PathBuf) -> Result<Option<RawRefLookup>> {
     }
 }
 
+/// First packed ref name strictly under `refname/` (sorted `packed-refs` prefix scan).
+fn first_packed_descendant_ref(store: &Path, refname: &str) -> Result<Option<String>> {
+    let leaf_dir = format!("{refname}/");
+    let map = read_packed_refs_map_for_prefix(store, refname)?;
+    let sorted: BTreeSet<String> = map.keys().cloned().collect();
+    Ok(sorted
+        .range(leaf_dir.clone()..)
+        .next()
+        .filter(|name| name.starts_with(&leaf_dir))
+        .cloned())
+}
+
 fn packed_ref_with_prefix(git_dir: &Path, prefix_with_slash: &str) -> Result<Option<String>> {
     let packed = store::paths::packed_refs_path(git_dir);
     let content = match fs::read_to_string(&packed) {
@@ -443,11 +455,39 @@ fn refname_namespace_conflicts(existing: &str, candidate: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// Whether any name in `sorted_packed` namespace-conflicts with `candidate`.
+///
+/// Uses prefix walks and one sorted range probe — `O(log n)` in the number of
+/// packed refs — instead of scanning every packed name.
+pub(crate) fn packed_refname_namespace_conflict(
+    sorted_packed: &BTreeSet<String>,
+    candidate: &str,
+) -> bool {
+    let segments: Vec<&str> = candidate.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.len() > 1 {
+        let mut dirname = String::new();
+        for part in &segments[..segments.len() - 1] {
+            if !dirname.is_empty() {
+                dirname.push('/');
+            }
+            dirname.push_str(part);
+            if sorted_packed.contains(&dirname) {
+                return true;
+            }
+        }
+    }
+
+    let leaf_dir = format!("{candidate}/");
+    if let Some(existing) = sorted_packed.range(leaf_dir.clone()..).next() {
+        if existing.starts_with(&leaf_dir) {
+            return true;
+        }
+    }
+    false
+}
+
 fn packed_ref_namespace_conflict(git_dir: &Path, refname: &str) -> Result<bool> {
-    let map = read_packed_refs_map(git_dir)?;
-    Ok(map
-        .keys()
-        .any(|existing| refname_namespace_conflicts(existing, refname)))
+    Ok(PackedRefs::load(git_dir)?.has_namespace_conflict(refname))
 }
 
 /// Returns true if `packed-refs` in the ref storage directory for `refname` contains that name.
@@ -630,7 +670,7 @@ pub fn verify_refname_available_for_create(
     let under = list_refs(&git_dir, &leaf_dir).unwrap_or_default();
     if under.is_empty() {
         let packed_dir = common_dir(&git_dir).unwrap_or_else(|| git_dir.clone());
-        if let Ok(Some(name)) = packed_ref_with_prefix(&packed_dir, &leaf_dir) {
+        if let Ok(Some(name)) = first_packed_descendant_ref(&packed_dir, refname) {
             if !skip.contains(&name) {
                 return Err(RefnameUnavailable::DescendantExists {
                     blocking: name,
@@ -639,7 +679,7 @@ pub fn verify_refname_available_for_create(
             }
         }
         if packed_dir != git_dir {
-            if let Ok(Some(name)) = packed_ref_with_prefix(&git_dir, &leaf_dir) {
+            if let Ok(Some(name)) = first_packed_descendant_ref(&git_dir, refname) {
                 if !skip.contains(&name) {
                     return Err(RefnameUnavailable::DescendantExists {
                         blocking: name,
@@ -1321,6 +1361,12 @@ pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> 
 /// was loose (and thus resolved from disk, not the snapshot) to begin with.
 pub struct PackedRefs {
     map: HashMap<String, ObjectId>,
+    sorted_names: BTreeSet<String>,
+}
+
+fn packed_refs_from_map(map: HashMap<String, ObjectId>) -> PackedRefs {
+    let sorted_names = map.keys().cloned().collect();
+    PackedRefs { map, sorted_names }
 }
 
 impl PackedRefs {
@@ -1335,7 +1381,7 @@ impl PackedRefs {
     pub fn load(git_dir: &Path) -> Result<Self> {
         let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
         let map = read_packed_refs_map(&store)?;
-        Ok(Self { map })
+        Ok(packed_refs_from_map(map))
     }
 
     /// Validate the full `packed-refs` file but retain only entries listed in `names`.
@@ -1345,23 +1391,19 @@ impl PackedRefs {
     /// Same as [`Self::load`].
     pub(crate) fn load_for_ref_names(git_dir: &Path, names: &HashSet<String>) -> Result<Self> {
         if names.is_empty() {
-            return Ok(Self {
-                map: HashMap::new(),
-            });
+            return Ok(packed_refs_from_map(HashMap::new()));
         }
         let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
         let packed_path = store::paths::packed_refs_path(&store);
         let data = match fs::read(&packed_path) {
             Ok(d) => d,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                return Ok(Self {
-                    map: HashMap::new(),
-                })
+                return Ok(packed_refs_from_map(HashMap::new()));
             }
             Err(e) => return Err(Error::Io(e)),
         };
         let map = parse_packed_refs_to_map_with_names(&packed_path, &data, names)?;
-        Ok(Self { map })
+        Ok(packed_refs_from_map(map))
     }
 
     /// The packed value recorded for `refname`, if any.
@@ -1375,9 +1417,14 @@ impl PackedRefs {
     /// Mirrors the internal `packed_ref_namespace_conflict` helper against the snapshot.
     #[must_use]
     pub fn has_namespace_conflict(&self, refname: &str) -> bool {
-        self.map
-            .keys()
-            .any(|existing| refname_namespace_conflicts(existing, refname))
+        packed_refname_namespace_conflict(&self.sorted_names, refname)
+    }
+
+    /// Record a ref written as loose during a cached apply batch so later
+    /// namespace checks in the same batch see it without reloading `packed-refs`.
+    pub(crate) fn record_loose_write(&mut self, refname: &str, oid: ObjectId) {
+        self.map.insert(refname.to_owned(), oid);
+        self.sorted_names.insert(refname.to_owned());
     }
 }
 
@@ -1437,7 +1484,7 @@ pub fn write_ref_cached(
     git_dir: &Path,
     refname: &str,
     oid: &ObjectId,
-    packed: &PackedRefs,
+    packed: &mut PackedRefs,
 ) -> Result<()> {
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return write_ref(git_dir, refname, oid);
@@ -1449,7 +1496,9 @@ pub fn write_ref_cached(
         )));
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
-    write_ref_at_storage(&storage_dir, refname, oid)
+    write_ref_at_storage(&storage_dir, refname, oid)?;
+    packed.record_loose_write(refname, *oid);
+    Ok(())
 }
 
 /// Render a ref-store path for user-facing diagnostics the way Git does: relative to the
@@ -3285,6 +3334,29 @@ mod refname_available_tests {
     }
 
     #[test]
+    fn packed_namespace_index_matches_pairwise_scan() {
+        let mut sorted: BTreeSet<String> = BTreeSet::new();
+        for i in 0..500 {
+            sorted.insert(format!("refs/heads/b{i:05}"));
+        }
+        sorted.insert("refs/heads/parent".into());
+        sorted.insert("refs/heads/a/b".into());
+        let candidates = [
+            "refs/heads/b00001",
+            "refs/heads/parent/child",
+            "refs/heads/new",
+            "refs/heads/a",
+        ];
+        for candidate in candidates {
+            let indexed = packed_refname_namespace_conflict(&sorted, candidate);
+            let linear = sorted
+                .iter()
+                .any(|existing| refname_namespace_conflicts(existing, candidate));
+            assert_eq!(indexed, linear, "candidate {candidate}");
+        }
+    }
+
+    #[test]
     fn list_refs_glob_b05_star_matches_one_thousand_packed_refs() {
         let git_dir = Path::new("/tmp/grit-bench-refs-cache/refs-100k-packed");
         if !git_dir.is_dir() {
@@ -3418,8 +3490,8 @@ mod ref_storage_traversal_guard_tests {
     #[test]
     fn write_ref_cached_rejects_traversal_refname() {
         let (_dir, git_dir) = bare_repo_with_config();
-        let packed = PackedRefs::load(&git_dir).unwrap();
-        let result = write_ref_cached(&git_dir, TRAVERSAL_REF, &sample_oid(), &packed);
+        let mut packed = PackedRefs::load(&git_dir).unwrap();
+        let result = write_ref_cached(&git_dir, TRAVERSAL_REF, &sample_oid(), &mut packed);
         assert_invalid_ref_preserves_config(&git_dir, result);
     }
 

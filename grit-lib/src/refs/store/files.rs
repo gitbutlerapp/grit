@@ -12,9 +12,9 @@ use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, prune_empty_loose_ref_parents,
-    read_packed_refs_map, read_packed_refs_map_for_names, read_packed_refs_map_for_prefix,
-    read_ref_file, remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock,
-    LogRefsConfig, Ref,
+    read_packed_refs_map, read_packed_refs_map_for_prefix, read_ref_file,
+    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, LogRefsConfig,
+    Ref,
 };
 
 use super::apply::{apply_update, ref_lock_names_for_updates, simulate_batch_apply, RefBatchState};
@@ -133,21 +133,6 @@ impl FilesRefStore {
             return Ok(());
         }
         guard.map = read_packed_refs_map(&self.common_dir)?
-            .into_iter()
-            .collect();
-        guard.stamp = stamp;
-        guard.loaded = true;
-        Ok(())
-    }
-
-    fn refresh_packed_cache_for_logical_names(&self, names: &HashSet<String>) -> Result<()> {
-        if names.is_empty() {
-            return Ok(());
-        }
-        let path = super::paths::packed_refs_path(&self.common_dir);
-        let stamp = Self::packed_refs_stamp(&path);
-        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
-        guard.map = read_packed_refs_map_for_names(&self.common_dir, names)?
             .into_iter()
             .collect();
         guard.stamp = stamp;
@@ -598,8 +583,9 @@ impl RefStore for FilesRefStore {
                 .iter()
                 .all(|u| matches!(u.expected, Expected::Oid(_)))
         {
-            let names: HashSet<String> = updates.iter().map(|u| u.name.clone()).collect();
-            let _ = self.refresh_packed_cache_for_logical_names(&names);
+            // CAS batches need the full packed snapshot for correct batch state and
+            // per-ref recheck; a name-filtered map breaks lookups for other packed refs.
+            let _ = self.refresh_packed_cache_if_stale();
         }
 
         for update in &updates {
