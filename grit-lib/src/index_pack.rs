@@ -15,7 +15,7 @@ use crate::odb::Odb;
 use crate::pack::{verify_pack_and_collect, write_v2_pack_index_with_trailer};
 use crate::pack_map::PackData;
 use crate::transfer::fix_thin_pack_path;
-use crate::unpack_objects::{pack_index_records_with_threads, PackIndexRecord};
+use crate::unpack_objects::PackIndexRecord;
 
 /// Result of installing a pack under `objects/pack/`.
 #[derive(Debug, Clone)]
@@ -177,7 +177,12 @@ pub fn install_pack_path(
             .and_then(|s| s.to_str())
             .is_some_and(|s| s.starts_with("tmp_pack_"));
     if in_place_temp {
-        let records = pack_index_records_with_threads(pack, odb, opts.index_parallelism(odb))?;
+        let records = crate::pack_index_build::build_pack_index_records(
+            pack,
+            odb,
+            opts.index_parallelism(odb),
+            !opts.skip_post_index_verify,
+        )?;
         let trailer = pack[pack.len() - hb..].to_vec();
         drop(pack_data);
         let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
@@ -226,13 +231,12 @@ pub fn install_pack_path(
         let indexed = PackData::open(&stage_pack)?;
         let (records, trailer) = {
             let pack_bytes: &[u8] = indexed.deref();
-            verify_trailer(odb.hash_algo(), pack_bytes).map_err(|e| {
-                Error::CorruptObject(format!(
-                    "received pack checksum mismatch (download may be incomplete): {e}"
-                ))
-            })?;
-            let records =
-                pack_index_records_with_threads(pack_bytes, odb, opts.index_parallelism(odb))?;
+            let records = crate::pack_index_build::build_pack_index_records(
+                pack_bytes,
+                odb,
+                opts.index_parallelism(odb),
+                !opts.skip_post_index_verify,
+            )?;
             let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
             (records, trailer)
         };
@@ -287,6 +291,7 @@ mod tests {
     use crate::objects::ObjectKind;
     use crate::odb::Odb;
     use crate::pack::read_pack_index;
+    use crate::unpack_objects::pack_index_records_with_threads;
     use std::process::Command;
 
     fn git_index_pack(pack: &[u8]) -> (tempfile::TempDir, Vec<u8>) {

@@ -655,7 +655,7 @@ pub fn pack_index_records_with_threads(
     odb: &Odb,
     parallelism: crate::hash::Parallelism,
 ) -> Result<Vec<PackIndexRecord>> {
-    crate::pack_index_build::build_pack_index_records(data, odb, parallelism)
+    crate::pack_index_build::build_pack_index_records(data, odb, parallelism, true)
 }
 
 fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<ObjectId, Object>> {

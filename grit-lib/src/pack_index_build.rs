@@ -76,7 +76,7 @@ struct WholeHashed {
 }
 
 /// Upper bound on inflated whole objects held from parallel workers at once.
-const WHOLE_PARALLEL_BATCH: usize = 64;
+const WHOLE_PARALLEL_BATCH: usize = 256;
 
 struct PackHeader {
     #[allow(dead_code)]
@@ -85,10 +85,14 @@ struct PackHeader {
 }
 
 /// Build index records for `pack`, using up to `parallelism` worker threads.
+///
+/// When `verify_trailer` is false, skips the full-pack SHA-1 trailer check during
+/// the object scan (used when the caller already validated the stream on the wire).
 pub fn build_pack_index_records(
     pack: &[u8],
     odb: &Odb,
     parallelism: Parallelism,
+    verify_trailer: bool,
 ) -> Result<Vec<PackIndexRecord>> {
     let algo = odb.hash_algo();
     let threads = parallelism.threads();
@@ -110,10 +114,18 @@ pub fn build_pack_index_records(
     };
 
     if threads.get() <= 1 {
-        let whole_objects = scan_whole_objects_inflate(pack, &header, &mut pending, &mut state)?;
+        let whole_objects =
+            scan_whole_objects_inflate(pack, &header, &mut pending, &mut state, verify_trailer)?;
         hash_whole_objects_serial(pack, whole_objects, algo, &mut state)?;
     } else {
-        let whole_slots = scan_whole_slots_skip(pack, &header, &mut pending, &mut state, algo)?;
+        let whole_slots = scan_whole_slots_skip(
+            pack,
+            &header,
+            &mut pending,
+            &mut state,
+            algo,
+            verify_trailer,
+        )?;
         inflate_hash_whole_objects_parallel(pack, whole_slots, threads, algo, &mut state)?;
     }
 
@@ -148,6 +160,7 @@ fn scan_whole_objects_inflate(
     header: &PackHeader,
     pending: &mut Vec<PendingIndexDelta>,
     state: &mut IndexBuildState<'_>,
+    verify_trailer: bool,
 ) -> Result<Vec<WholeInflated>> {
     let hb = state.odb.hash_algo().len();
     let mut rd = PackReader::new(pack);
@@ -189,7 +202,9 @@ fn scan_whole_objects_inflate(
     }
 
     let consumed = rd.pos;
-    verify_pack_trailer(pack, consumed, state.odb.hash_algo())?;
+    if verify_trailer {
+        verify_pack_trailer(pack, consumed, state.odb.hash_algo())?;
+    }
     Ok(whole_objects)
 }
 
@@ -199,6 +214,7 @@ fn scan_whole_slots_skip(
     pending: &mut Vec<PendingIndexDelta>,
     state: &mut IndexBuildState<'_>,
     algo: HashAlgo,
+    verify_trailer: bool,
 ) -> Result<Vec<WholeSlot>> {
     let hb = algo.len();
     let mut rd = PackReader::new(pack);
@@ -240,7 +256,9 @@ fn scan_whole_slots_skip(
     }
 
     let consumed = rd.pos;
-    verify_pack_trailer(pack, consumed, algo)?;
+    if verify_trailer {
+        verify_pack_trailer(pack, consumed, algo)?;
+    }
     Ok(whole_slots)
 }
 
