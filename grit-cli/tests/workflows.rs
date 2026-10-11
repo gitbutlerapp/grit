@@ -882,6 +882,57 @@ fn diff_succeeds_with_uninitialized_gitlink_on_clean_tree() -> TestResult {
     Ok(())
 }
 
+/// A retargeted worktree symlink must show both link targets, matching Git.
+#[cfg(unix)]
+#[test]
+fn diff_worktree_retargeted_symlink_shows_both_targets() -> TestResult {
+    use std::os::unix::fs::symlink;
+
+    let scratch = Scratch::new("diff-symlink-retarget")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, ["init", "."])?;
+
+    write_file(&repo.join("f.txt"), "target\n")?;
+    symlink("f.txt", repo.join("L"))?;
+    gs_ok(&repo, ["add", "L"])?;
+    gs_ok(&repo, ["commit", "-m", "initial"])?;
+
+    fs::remove_file(repo.join("L"))?;
+    symlink("g.txt", repo.join("L"))?;
+
+    let grit = gs(&repo, ["diff"])?;
+    assert_eq!(grit.status, Some(0), "{}", grit.dump());
+    assert!(
+        grit.stdout.contains("-f.txt") && grit.stdout.contains("+g.txt"),
+        "grit diff must show both symlink targets:\n{}",
+        grit.dump()
+    );
+
+    let grit_json = gs(&repo, ["diff", "--json"])?;
+    assert_eq!(grit_json.status, Some(0), "{}", grit_json.dump());
+    let parsed: serde_json::Value = serde_json::from_str(&grit_json.stdout)?;
+    let lines = parsed["files"][0]["hunks"][0]["lines"]
+        .as_array()
+        .ok_or("expected diff lines")?;
+    assert!(lines.iter().any(|line| {
+        line["kind"] == "del" && line["segments"][0]["text"] == "f.txt"
+    }));
+    assert!(lines.iter().any(|line| {
+        line["kind"] == "add" && line["segments"][0]["text"] == "g.txt"
+    }));
+
+    let git = git_in(&repo, &["diff", "--no-ext-diff"])?;
+    assert_eq!(git.status, Some(0), "{}", git.dump());
+    assert!(
+        git.stdout.contains("-f.txt") && git.stdout.contains("+g.txt"),
+        "system git must show both symlink targets:\n{}",
+        git.dump()
+    );
+
+    Ok(())
+}
+
 #[test]
 fn diff_commit_gitlink_to_regular_file_typechange() -> TestResult {
     let scratch = Scratch::new("gitlink-to-file")?;
