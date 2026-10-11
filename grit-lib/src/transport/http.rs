@@ -746,6 +746,31 @@ pub fn http_client_arc(client: impl HttpClient + 'static) -> std::sync::Arc<dyn 
 /// # Errors
 ///
 /// Returns an error if discovery, negotiation, pack ingest, or ref updates fail.
+fn http_ingest_pack_options(fix_thin: bool) -> crate::index_pack::IngestPackOptions {
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    crate::index_pack::IngestPackOptions {
+        fix_thin,
+        skip_post_index_verify: true,
+        threads: Some(threads),
+        ..Default::default()
+    }
+}
+
+fn fetch_git_protocol_header(opts: &FetchOptions, client: &dyn HttpClient) -> Option<String> {
+    if let Some(v) = opts.http_protocol_version {
+        return match v {
+            0 => Some(String::new()),
+            _ => Some(
+                crate::protocol::client_git_protocol_header_value(v)
+                    .unwrap_or_else(|| format!("version={v}")),
+            ),
+        };
+    }
+    client.git_protocol_header().map(str::to_owned)
+}
+
 pub fn http_fetch(
     client: std::sync::Arc<dyn HttpClient>,
     local_git_dir: &Path,
@@ -765,6 +790,509 @@ pub fn http_fetch(
         diagnostics: opts.diagnostics.clone(),
         network_trace: opts.network_trace,
         ..Default::default()
+||||||| Common ancestor
+    use crate::net_trace::net_trace;
+    let git_protocol_owned = fetch_git_protocol_header(opts, client);
+    let git_protocol = git_protocol_owned.as_deref();
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "http_fetch: begin — {} ({} refspec(s), tags={:?})",
+        repo_url,
+        opts.refspecs.len(),
+        opts.tags
+    );
+    // 1. Discovery (request v2 via the client's default `Git-Protocol` header;
+    // a v0/v1 server ignores it and returns the classic advertisement). If the
+    // server redirects `info/refs` to another location, re-base every following
+    // request onto it (Git's `http.followRedirects`): re-fetch discovery from
+    // the new base so the request carries the `?service=` query a redirect may
+    // drop, and so the stateless-RPC POSTs target the redirected host (which a
+    // client that won't follow a POST redirect would otherwise miss).
+    let info_url = info_refs_url(repo_url);
+    let (body, final_url) = client.get_with_final_url(&info_url, git_protocol)?;
+    let rebased = rebased_base_from_redirect(repo_url, final_url.as_deref());
+    let repo_url_owned;
+    let (repo_url, disc) = match rebased {
+        Some(new_base) => {
+            net_trace!(
+                opts.network_trace,
+                opts.diagnostics.as_ref(),
+                "http_fetch: redirected base {repo_url} -> {new_base}"
+            );
+            client.reset_auth_after_redirect_rebase();
+            let url = info_refs_url(&new_base);
+            let body = client.get(&url, git_protocol)?;
+            let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
+            repo_url_owned = new_base;
+            (repo_url_owned.as_str(), disc)
+        }
+        None => {
+            let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
+            (repo_url, disc)
+        }
+    };
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "http_fetch: discovered protocol v{}, {} ref(s)",
+        disc.protocol_version,
+        disc.refs.len()
+    );
+    if disc.protocol_version >= 2 && opts.http_protocol_version.unwrap_or(2) >= 2 {
+        net_trace!(
+            opts.network_trace,
+            opts.diagnostics.as_ref(),
+            "http_fetch: delegating to v2 stateless fetch"
+        );
+        return http_fetch_v2(client, local_git_dir, repo_url, &disc, opts, progress);
+    }
+
+    let local_odb = open_odb(local_git_dir);
+
+    let default_branch = disc
+        .head_symref
+        .as_deref()
+        .map(|t| t.strip_prefix("refs/heads/").unwrap_or(t).to_owned());
+
+    let remote_refs: Vec<(String, ObjectId)> = disc
+        .refs
+        .iter()
+        .filter(|r| r.name != "HEAD" && !r.name.ends_with("^{}"))
+        .map(|r| (r.name.clone(), r.oid))
+        .collect();
+    let advertised_peel = advertised_peel_from_v0_refs(&disc.refs);
+
+    // 2. Parse refspecs.
+    let mut positive: Vec<RefspecItem> = Vec::new();
+    let mut negatives: Vec<RefspecItem> = Vec::new();
+    for spec in &opts.refspecs {
+        let item = parse_fetch_refspec(spec)
+            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
+        if item.negative {
+            negatives.push(item);
+        } else {
+            positive.push(item);
+        }
+    }
+    for spec in &opts.negative_refspecs {
+        let item = parse_fetch_refspec(spec)
+            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
+        negatives.push(item);
+    }
+
+    // 3. Match refs to refspecs.
+    let mut plan = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
+    extend_match_plan_with_tags(
+        &mut plan,
+        opts.tags,
+        &remote_refs,
+        &advertised_peel,
+        &negatives,
+    );
+    let MatchPlan {
+        mut matched, wants, ..
+    } = plan;
+
+    // 5. Wants → negotiate + ingest the pack. Normally the matched oids absent
+    // locally; for a deepen/`--unshallow` request we must still `want` the tips
+    // even if present so the server fills in ancestors past the old boundary.
+    let local_shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
+    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
+    let need: Vec<ObjectId> = if shallow_request {
+        wants.iter().copied().collect()
+    } else {
+        wants
+            .iter()
+            .copied()
+            .filter(|oid| !local_odb.exists(oid))
+            .collect()
+    };
+
+    let mut shallow_update = crate::fetch::ShallowUpdate::default();
+    let mut pack_oids = std::collections::HashSet::new();
+
+    if !need.is_empty() && !opts.dry_run {
+        let (pack, su) = negotiate_pack_http(
+            client,
+            local_git_dir,
+            repo_url,
+            &disc.caps,
+            &disc.refs,
+            &need,
+            opts,
+            &local_shallow,
+            progress,
+        )?;
+        shallow_update = su;
+        if let Some(pack_path) = pack {
+            pack_oids = crate::index_pack::ingest_received_pack_path(
+                pack_path,
+                &local_odb,
+                &http_ingest_pack_options(),
+            )?;
+        }
+    }
+
+    // Apply shallow/unshallow boundary updates to the on-disk `shallow` file.
+    if !opts.dry_run {
+        crate::shallow::apply_shallow_updates(
+            local_git_dir,
+            &shallow_update.shallow,
+            &shallow_update.unshallow,
+        )?;
+    }
+
+    // 6. For TagMode::Following, drop tags whose target did not arrive.
+    if opts.tags == TagMode::Following {
+        crate::fetch::retain_following_tags(
+            &local_odb,
+            &mut matched,
+            &pack_oids,
+            &crate::shallow::load_shallow_boundaries(local_git_dir),
+        )?;
+    }
+
+    // 7. Classify + apply ref updates.
+    let local_repo = if opts.dry_run {
+        None
+    } else {
+        crate::repo::Repository::open(local_git_dir, None).ok()
+    };
+
+    let mut updates: Vec<RefUpdate> = Vec::new();
+    if opts.prune {
+        prune_tracking_refs(
+            local_git_dir,
+            &positive,
+            &remote_refs,
+            opts.dry_run,
+            &mut updates,
+        )?;
+    }
+
+    for m in &matched {
+        let Some(local_ref) = &m.local_ref else {
+            updates.push(RefUpdate {
+                remote_ref: m.remote_ref.clone(),
+                local_ref: None,
+                old_oid: None,
+                new_oid: Some(m.oid),
+                mode: UpdateMode::NoChangeNeeded,
+                note: Some("not stored (empty destination)".to_owned()),
+            });
+            continue;
+        };
+        let old = crate::refs::resolve_ref(local_git_dir, local_ref).ok();
+        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let write = matches!(
+            mode,
+            UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
+        );
+        if write && !opts.dry_run {
+            crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
+        }
+        updates.push(RefUpdate {
+            remote_ref: m.remote_ref.clone(),
+            local_ref: Some(local_ref.clone()),
+            old_oid: old,
+            new_oid: Some(m.oid),
+            mode,
+            note: None,
+        });
+    }
+
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "http_fetch: done — {} ref update(s)",
+        updates.len()
+    );
+    crate::fetch::finish_initial_remote_fetch_layout(
+        local_git_dir,
+        opts,
+        default_branch.as_deref(),
+    )?;
+    Ok(FetchOutcome {
+        updates,
+        default_branch,
+        new_shallow: shallow_update.shallow,
+        new_unshallow: shallow_update.unshallow,
+    })
+}
+
+/// Fetch from a smart-HTTP remote that speaks protocol v2 (stateless multi-POST).
+///
+/// `disc` is the already-parsed v2 capability advertisement (no refs). This
+/// recovers the ref map with a `command=ls-refs` POST, matches refspecs / tags
+/// with the same shared [`crate::transfer`] helpers as the v0/v1 path, then
+/// negotiates the pack with `command=fetch` POSTs (each round resends the
+/// capability echo, all `want`s, and the accumulated `have`s) and demuxes the
+/// side-band-64k `packfile` section. Lifted from the CLI's stateless v2 flow
+/// (`http_ls_refs` / `http_negotiate_only_common` / `http_fetch_pack`), reusing
+/// the v2 request framing factored out of [`crate::fetch`].
+fn http_fetch_v2(
+    client: &dyn HttpClient,
+    local_git_dir: &Path,
+    repo_url: &str,
+    disc: &Discovery,
+    opts: &FetchOptions,
+    progress: &mut dyn Progress,
+) -> Result<FetchOutcome> {
+    let local_odb = open_odb(local_git_dir);
+    // The v2 capability lines, as a `Vec<String>` for the `protocol_v2` /
+    // `crate::fetch` helpers (each entry is one advertised capability line, e.g.
+    // `agent=…`, `fetch=…`, `object-format=…`).
+    let server_caps: Vec<String> = disc.caps.iter().cloned().collect();
+
+    let post_url = upload_pack_url(repo_url);
+    let content_type = format!("application/x-{UPLOAD_PACK}-request");
+    let accept = format!("application/x-{UPLOAD_PACK}-result");
+    // Pin v2 on every POST so the server runs its v2 serve loop for this request.
+    let git_protocol = "version=2";
+
+    // 1. Recover the ref map via `command=ls-refs`.
+    let (remote_refs, head_symref, advertised_peel) = {
+        let req = crate::fetch::build_v2_ls_refs_request(
+            &server_caps,
+            &local_odb,
+            opts.tags,
+            &opts.refspecs,
+        )?;
+        let resp = client.post(&post_url, &content_type, &accept, &req, Some(git_protocol))?;
+        let mut cur = Cursor::new(resp);
+        crate::fetch::parse_v2_ls_refs_response(&mut cur)?
+    };
+    let default_branch = head_symref
+        .as_deref()
+        .map(|t| t.strip_prefix("refs/heads/").unwrap_or(t).to_owned());
+
+    // 2. Parse refspecs.
+    let mut positive: Vec<RefspecItem> = Vec::new();
+    let mut negatives: Vec<RefspecItem> = Vec::new();
+    for spec in &opts.refspecs {
+        let item = parse_fetch_refspec(spec)
+            .map_err(|e| Error::Message(format!("invalid refspec '{spec}': {e}")))?;
+        if item.negative {
+            negatives.push(item);
+        } else {
+            positive.push(item);
+        }
+    }
+    for spec in &opts.negative_refspecs {
+        let item = parse_fetch_refspec(spec)
+            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
+        negatives.push(item);
+    }
+
+    // 3. Match refs to refspecs (shared with the v0/v1 path).
+    let mut plan = match_refspecs(&remote_refs, &advertised_peel, &positive, &negatives);
+    extend_match_plan_with_tags(
+        &mut plan,
+        opts.tags,
+        &remote_refs,
+        &advertised_peel,
+        &negatives,
+    );
+    let MatchPlan {
+        mut matched, wants, ..
+    } = plan;
+
+    // 5. Wants → negotiate + ingest the pack. Normally the matched oids absent
+    // locally; for a deepen/`--unshallow` request we must still `want` the tips
+    // even if present so the server fills in ancestors past the old boundary.
+    let local_shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
+    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
+    let need: Vec<ObjectId> = if shallow_request {
+        wants.iter().copied().collect()
+    } else {
+        wants
+            .iter()
+            .copied()
+            .filter(|oid| !local_odb.exists(oid))
+            .collect()
+    };
+
+    let mut shallow_update = crate::fetch::ShallowUpdate::default();
+    let mut pack_oids = std::collections::HashSet::new();
+
+    if !need.is_empty() && !opts.dry_run {
+        let deepen = crate::fetch::V2DeepenArgs::from_opts(opts, &local_shallow);
+        let (pack, su) = negotiate_pack_v2_http(
+            client,
+            local_git_dir,
+            &post_url,
+            &content_type,
+            &accept,
+            git_protocol,
+            &server_caps,
+            &local_odb,
+            &need,
+            &deepen,
+            progress,
+        )?;
+        shallow_update = su;
+        if let Some(pack_path) = pack {
+            pack_oids = crate::index_pack::ingest_received_pack_path(
+                pack_path,
+                &local_odb,
+                &http_ingest_pack_options(),
+            )?;
+        }
+    }
+
+    // Apply shallow/unshallow boundary updates to the on-disk `shallow` file.
+    if !opts.dry_run {
+        crate::shallow::apply_shallow_updates(
+            local_git_dir,
+            &shallow_update.shallow,
+            &shallow_update.unshallow,
+        )?;
+    }
+
+    // 6. For TagMode::Following, drop tags whose target did not arrive.
+    if opts.tags == TagMode::Following {
+        crate::fetch::retain_following_tags(
+            &local_odb,
+            &mut matched,
+            &pack_oids,
+            &crate::shallow::load_shallow_boundaries(local_git_dir),
+        )?;
+    }
+
+    // 7. Classify + apply ref updates (shared with the v0/v1 path).
+    let local_repo = if opts.dry_run {
+        None
+    } else {
+        crate::repo::Repository::open(local_git_dir, None).ok()
+    };
+
+    let mut updates: Vec<RefUpdate> = Vec::new();
+    if opts.prune {
+        prune_tracking_refs(
+            local_git_dir,
+            &positive,
+            &remote_refs,
+            opts.dry_run,
+            &mut updates,
+        )?;
+    }
+
+    for m in &matched {
+        let Some(local_ref) = &m.local_ref else {
+            updates.push(RefUpdate {
+                remote_ref: m.remote_ref.clone(),
+                local_ref: None,
+                old_oid: None,
+                new_oid: Some(m.oid),
+                mode: UpdateMode::NoChangeNeeded,
+                note: Some("not stored (empty destination)".to_owned()),
+            });
+            continue;
+        };
+        let old = crate::refs::resolve_ref(local_git_dir, local_ref).ok();
+        let mode = classify_update(old.as_ref(), &m.oid, m.force, m.is_tag, local_repo.as_ref());
+        let write = matches!(
+            mode,
+            UpdateMode::New | UpdateMode::FastForward | UpdateMode::Forced
+        );
+        if write && !opts.dry_run {
+            crate::refs::write_ref(local_git_dir, local_ref, &m.oid)?;
+        }
+        updates.push(RefUpdate {
+            remote_ref: m.remote_ref.clone(),
+            local_ref: Some(local_ref.clone()),
+            old_oid: old,
+            new_oid: Some(m.oid),
+            mode,
+            note: None,
+        });
+    }
+
+    crate::net_trace::net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "http_fetch (v2): done — {} ref update(s)",
+        updates.len()
+    );
+    crate::fetch::finish_initial_remote_fetch_layout(
+        local_git_dir,
+        opts,
+        default_branch.as_deref(),
+    )?;
+    Ok(FetchOutcome {
+        updates,
+        default_branch,
+        new_shallow: shallow_update.shallow,
+        new_unshallow: shallow_update.unshallow,
+    })
+}
+
+/// Negotiate and download the pack for `wants` over stateless-RPC HTTP using
+/// protocol v2 (`command=fetch`), returning the raw pack bytes.
+///
+/// Stateless: every POST resends the capability echo, every `want`, and all the
+/// `have`s accumulated so far. The round structure mirrors the v0/v1 stateless
+/// loop and the streaming v2 path:
+///
+/// * no local history → a single POST with `want`s + `done`, then read the
+///   `packfile` section;
+/// * otherwise → batched rounds that send `want`s + the growing have-prefix
+///   *without* `done`, reading the `acknowledgments` section each time. When the
+///   server replies `ready`, that same response carries the pack (read it and
+///   stop). If the haves are exhausted without `ready`, a final POST sends every
+///   have + `done` and reads the pack.
+#[allow(clippy::too_many_arguments)]
+fn negotiate_pack_v2_http(
+    client: &dyn HttpClient,
+    local_git_dir: &Path,
+    post_url: &str,
+    content_type: &str,
+    accept: &str,
+    git_protocol: &str,
+    server_caps: &[String],
+    local_odb: &crate::odb::Odb,
+    wants: &[ObjectId],
+    deepen: &crate::fetch::V2DeepenArgs,
+    progress: &mut dyn Progress,
+) -> Result<(Option<std::path::PathBuf>, crate::fetch::ShallowUpdate)> {
+    if wants.is_empty() {
+        return Ok((None, crate::fetch::ShallowUpdate::default()));
+    }
+    let object_format = crate::fetch::v2_object_format(server_caps, local_odb);
+    let cap_echo = protocol_v2::cap_lines_for_command_request(server_caps);
+    let sideband_all = protocol_v2::fetch_supports_sideband_all(server_caps);
+
+    // A deepen/shallow request does not offer haves (its objects bottom out at
+    // grafts), forcing the single-round path so the server precedes the pack with
+    // a `shallow-info` section.
+    let shallow_request = deepen.is_shallow_request();
+
+    // The ordered have list, built with the shared skipping-negotiator helper so
+    // the wire offers match the streaming v2 path exactly. Empty for a shallow
+    // request.
+    let haves = if shallow_request {
+        Vec::new()
+    } else {
+        crate::fetch::v2_local_haves(local_git_dir, wants)?
+    };
+
+    let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
+    let mut shallow_update = crate::fetch::ShallowUpdate::default();
+    let mut scratch = Vec::new();
+    let mut got_pack = false;
+
+    let mut read_pack_from_reader = |reader: &mut dyn Read| -> Result<()> {
+        scratch.clear();
+        crate::fetch::read_v2_fetch_pack_response(
+            reader,
+            &mut scratch,
+            Some(&mut pack_receive),
+            &mut shallow_update,
+            progress,
+        )?;
+        got_pack = true;
+        Ok(())
     };
     let transport = SmartHttpTransport::new(client);
     let mut conn = transport.connect(repo_url, Service::UploadPack, &connect)?;

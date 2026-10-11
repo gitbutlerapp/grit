@@ -327,6 +327,7 @@ fn install_pack_path_matches_git_index() {
         &IngestPackOptions {
             fix_thin: false,
             threads: Some(8),
+            skip_post_index_verify: false,
         },
     )
     .expect("install");

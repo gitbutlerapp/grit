@@ -158,6 +158,38 @@ pub fn is_ancestor(repo: &Repository, ancestor: ObjectId, descendant: ObjectId) 
     cache.is_ancestor(ancestor, descendant)
 }
 
+/// Reachability test using only the object database (no commit-graph setup).
+///
+/// Suitable for client-side fast-forward checks on modest histories (e.g. push).
+pub fn is_ancestor_odb_walk(
+    odb: &crate::odb::Odb,
+    ancestor: ObjectId,
+    descendant: ObjectId,
+) -> Result<bool> {
+    if ancestor == descendant {
+        return Ok(true);
+    }
+    let mut seen = HashSet::new();
+    let mut queue = VecDeque::from([descendant]);
+    while let Some(cur) = queue.pop_front() {
+        if !seen.insert(cur) {
+            continue;
+        }
+        if cur == ancestor {
+            return Ok(true);
+        }
+        let obj = odb.read(&cur)?;
+        if obj.kind != ObjectKind::Commit {
+            continue;
+        }
+        let commit = parse_commit(&obj.data)?;
+        for parent in commit.parents {
+            queue.push_back(parent);
+        }
+    }
+    Ok(false)
+}
+
 /// Returns the ref path under `logs/` used for fork-point reflog scanning for `merge-base --fork-point`
 /// and `rebase --fork-point`, matching Git's resolution order.
 ///

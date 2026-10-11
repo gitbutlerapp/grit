@@ -327,15 +327,13 @@ fn plan_push(
     adv: &AdvertisedState,
     opts: &PushOptions,
 ) -> Result<PlanOutcome> {
-    let local_repo = crate::repo::Repository::open(local_git_dir, None).ok();
-
     let mut decisions: Vec<PushDecision> = Vec::with_capacity(refs.len());
     for spec in refs {
         decisions.push(decide_push_wire(
             spec,
             local_odb,
+            local_git_dir,
             &adv.remote_refs,
-            local_repo.as_ref(),
         )?);
     }
 
@@ -520,8 +518,8 @@ struct PushDecision {
 fn decide_push_wire(
     spec: &PushRefSpec,
     local_odb: &crate::odb::Odb,
+    local_git_dir: &Path,
     remote_refs: &HashMap<String, ObjectId>,
-    local_repo: Option<&crate::repo::Repository>,
 ) -> Result<PushDecision> {
     let remote_current = remote_refs.get(&spec.dst).copied();
 
@@ -641,9 +639,15 @@ fn decide_push_wire(
 
     // Existing ref: fast-forward when the remote's current commit is an ancestor
     // of the source; otherwise non-fast-forward (allowed only with force).
-    let is_ff = local_repo
-        .map(|r| crate::merge_base::is_ancestor(r, old, src).unwrap_or(false))
-        .unwrap_or(false);
+    let is_ff = if spec.force {
+        false
+    } else if crate::merge_base::is_ancestor_odb_walk(local_odb, old, src)? {
+        true
+    } else if let Ok(repo) = crate::repo::Repository::open(local_git_dir, None) {
+        crate::merge_base::is_ancestor(&repo, old, src).unwrap_or(false)
+    } else {
+        false
+    };
 
     if is_ff {
         Ok(PushDecision {

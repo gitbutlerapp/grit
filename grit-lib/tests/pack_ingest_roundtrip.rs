@@ -50,26 +50,32 @@ const INGEST_VARIANTS: &[IngestPackOptions] = &[
     IngestPackOptions {
         fix_thin: false,
         threads: Some(1),
+        skip_post_index_verify: false,
     },
     IngestPackOptions {
         fix_thin: false,
         threads: Some(8),
+        skip_post_index_verify: false,
     },
     IngestPackOptions {
         fix_thin: false,
         threads: None,
+        skip_post_index_verify: false,
     },
     IngestPackOptions {
         fix_thin: true,
         threads: Some(1),
+        skip_post_index_verify: false,
     },
     IngestPackOptions {
         fix_thin: true,
         threads: Some(8),
+        skip_post_index_verify: false,
     },
     IngestPackOptions {
         fix_thin: true,
         threads: None,
+        skip_post_index_verify: false,
     },
 ];
 
@@ -1216,6 +1222,7 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
         &IngestPackOptions {
             fix_thin: true,
             threads: Some(4),
+            ..Default::default()
         },
     )
     .expect("fix thin install");
@@ -1285,8 +1292,16 @@ fn rss_harness_install_pack_path() {
         .ok()
         .and_then(|s| s.parse().ok());
     let fix_thin = std::env::var("GRIT_FIX_THIN").ok().as_deref() != Some("0");
-    install_pack_path(&staging, &odb, &IngestPackOptions { fix_thin, threads })
-        .expect("install pack");
+    install_pack_path(
+        &staging,
+        &odb,
+        &IngestPackOptions {
+            fix_thin,
+            threads,
+            ..Default::default()
+        },
+    )
+    .expect("install pack");
 }
 
 #[test]

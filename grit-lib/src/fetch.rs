@@ -1337,7 +1337,14 @@ pub fn fetch_remote(
                 &local_odb,
                 &crate::index_pack::IngestPackOptions {
                     fix_thin: true,
-                    threads: opts.index_pack_threads,
+                    skip_post_index_verify: true,
+                    threads: opts.index_pack_threads.or_else(|| {
+                        Some(
+                            std::thread::available_parallelism()
+                                .map(|n| n.get())
+                                .unwrap_or(4),
+                        )
+                    }),
                     ..Default::default()
                 },
             )?

@@ -170,6 +170,47 @@ pub fn install_pack_path(
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
     let final_pack = pack_dir.join(format!("{stem}.pack"));
     let idx_path = pack_dir.join(format!("{stem}.idx"));
+
+    let in_place_temp = owned.parent().is_some_and(|p| p == pack_dir)
+        && owned
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.starts_with("tmp_pack_"));
+    if in_place_temp {
+        let records = pack_index_records_with_threads(pack, odb, opts.index_parallelism(odb))?;
+        let trailer = pack[pack.len() - hb..].to_vec();
+        drop(pack_data);
+        let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
+        let entries: Vec<(ObjectId, u64, u32)> = records
+            .into_iter()
+            .map(|PackIndexRecord { oid, offset, crc32 }| (oid, offset, crc32))
+            .collect();
+        let tmp_idx = pack_dir.join(format!(".{stem}.idx.install"));
+        let install_result = (|| -> Result<HashSet<ObjectId>> {
+            write_v2_pack_index_with_trailer(&tmp_idx, &entries, &trailer, hb)?;
+            if !opts.skip_post_index_verify {
+                verify_pack_and_collect(&tmp_idx)?;
+            }
+            if std::fs::rename(&owned, &final_pack).is_err() {
+                std::fs::copy(&owned, &final_pack).map_err(Error::Io)?;
+                let _ = std::fs::remove_file(&owned);
+            }
+            std::fs::rename(&tmp_idx, &idx_path).map_err(|e| {
+                let _ = std::fs::remove_file(&final_pack);
+                Error::Io(e)
+            })?;
+            Ok(oids)
+        })();
+        if install_result.is_err() {
+            let _ = std::fs::remove_file(&final_pack);
+            let _ = std::fs::remove_file(&tmp_idx);
+            let _ = std::fs::remove_file(&owned);
+        }
+        let oids = install_result?;
+        odb.invalidate_packs();
+        return Ok(oids);
+    }
+
     let stage = pack_dir.join(format!(".{stem}-install"));
     let stage_pack = stage.join(format!("{stem}.pack"));
     let stage_idx = stage.join(format!("{stem}.idx"));
