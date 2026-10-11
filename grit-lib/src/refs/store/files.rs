@@ -12,9 +12,9 @@ use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, prune_empty_loose_ref_parents,
-    read_packed_refs_map, read_packed_refs_map_for_prefix, read_ref_file,
-    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, LogRefsConfig,
-    Ref,
+    read_packed_refs_map, read_packed_refs_map_for_names, read_packed_refs_map_for_prefix,
+    read_ref_file, remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock,
+    LogRefsConfig, Ref,
 };
 
 use super::apply::{apply_update, ref_lock_names_for_updates, simulate_batch_apply, RefBatchState};
@@ -138,6 +138,58 @@ impl FilesRefStore {
         guard.stamp = stamp;
         guard.loaded = true;
         Ok(())
+    }
+
+    /// Merge packed entries for `names` into the cache without dropping other cached lines.
+    fn refresh_packed_cache_merge_names(&self, names: &HashSet<String>) -> Result<()> {
+        if names.is_empty() {
+            return Ok(());
+        }
+        let path = super::paths::packed_refs_path(&self.common_dir);
+        let stamp = Self::packed_refs_stamp(&path);
+        let partial = read_packed_refs_map_for_names(&self.common_dir, names)?;
+        let mut guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if !guard.loaded || guard.stamp != stamp {
+            guard.map.clear();
+            guard.stamp = stamp;
+            guard.loaded = true;
+        }
+        for (storage, oid) in partial {
+            guard.map.insert(storage, oid);
+        }
+        Ok(())
+    }
+
+    fn batch_may_create_ref(&self, updates: &[RefUpdate]) -> Result<bool> {
+        for update in updates {
+            if update.flags.log_only {
+                continue;
+            }
+            if update.new_value.is_none() {
+                continue;
+            }
+            if self.read_raw(&update.name)?.is_none() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn load_batch_state_for_prepare(&self, updates: &[RefUpdate]) -> Result<RefBatchState> {
+        let mut refs = BTreeMap::new();
+        for update in updates {
+            if update.flags.log_only {
+                continue;
+            }
+            if let Some(raw) = self.read_raw(&update.name)? {
+                refs.insert(update.name.clone(), raw);
+            }
+        }
+        self.insert_head_for_batch_state(&mut refs)?;
+        Ok(RefBatchState {
+            refs,
+            reflogs: self.load_reflog_map()?,
+        })
     }
 
     fn read_raw_at_route(&self, route: &RefStorageRoute) -> Result<Option<RawRef>> {
@@ -458,7 +510,7 @@ impl FilesRefStore {
         &self,
         before: &RefBatchState,
         after: &RefBatchState,
-        held_locks: &mut HashMap<String, PathBuf>,
+        _held_locks: &mut HashMap<String, PathBuf>,
         packed_lock_held: bool,
         updates: &[RefUpdate],
     ) -> Result<()> {
@@ -485,7 +537,13 @@ impl FilesRefStore {
             let name = &update.name;
             let b = before.refs.get(name);
             let a = after.refs.get(name);
-            if b == a {
+            let materialize_packed_as_loose = update.new_value.is_some()
+                && before.refs.contains_key(name)
+                && self
+                    .loose_ref_file_exists(name)
+                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+                    == false;
+            if b == a && !materialize_packed_as_loose {
                 continue;
             }
             let (_, _, lock_path) = self.ref_lock_paths(name);
@@ -583,9 +641,8 @@ impl RefStore for FilesRefStore {
                 .iter()
                 .all(|u| matches!(u.expected, Expected::Oid(_)))
         {
-            // CAS batches need the full packed snapshot for correct batch state and
-            // per-ref recheck; a name-filtered map breaks lookups for other packed refs.
-            let _ = self.refresh_packed_cache_if_stale();
+            let names: HashSet<String> = updates.iter().map(|u| u.name.clone()).collect();
+            let _ = self.refresh_packed_cache_merge_names(&names);
         }
 
         for update in &updates {
@@ -602,9 +659,16 @@ impl RefStore for FilesRefStore {
             });
         }
 
-        let preliminary = self
-            .load_batch_state()
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+        let preliminary = if self
+            .batch_may_create_ref(&updates)
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+        {
+            self.load_batch_state()
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+        } else {
+            self.load_batch_state_for_prepare(&updates)
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+        };
         verify_create_conflicts(&preliminary.refs, &updates)?;
         let lock_names = ref_lock_names_for_updates(&preliminary, &updates);
 

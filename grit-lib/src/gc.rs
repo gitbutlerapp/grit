@@ -406,6 +406,7 @@ mod update_refs_tests {
 
     #[test]
     fn apply_cas_rejects_after_concurrent_packed_delete() {
+        let _pause_serial = refs::test_pause_injection_serial_guard();
         use std::path::Path;
         use std::process::Command;
         use std::sync::Arc;
@@ -528,6 +529,7 @@ mod update_refs_tests {
 
     #[test]
     fn unconditional_create_rejects_after_concurrent_packed_parent() {
+        let _pause_serial = refs::test_pause_injection_serial_guard();
         use std::path::Path;
         use std::process::Command;
         use std::sync::Arc;

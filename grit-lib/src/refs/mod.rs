@@ -2163,6 +2163,26 @@ fn abort_loose_ref_lock(lock: &Path) {
 }
 
 #[cfg(test)]
+mod test_pause_inject_serial {
+    use std::sync::{Mutex, OnceLock};
+
+    static SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+
+    pub fn lock() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Serialize tests that install global ref pause injection hooks (parallel `cargo test` safe).
+#[cfg(test)]
+pub fn test_pause_injection_serial_guard() -> std::sync::MutexGuard<'static, ()> {
+    test_pause_inject_serial::lock()
+}
+
+#[cfg(test)]
 mod branch_ref_pause_inject {
     use std::sync::{Condvar, Mutex, OnceLock};
 
@@ -3164,6 +3184,7 @@ mod update_branch_for_commit_tests {
 
     #[test]
     fn update_branch_for_commit_holds_lock_until_ref_commit() {
+        let _pause_serial = super::test_pause_injection_serial_guard();
         let tmp = TempDir::new().unwrap();
         let repo = init_repository(
             tmp.path(),
