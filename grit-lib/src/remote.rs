@@ -608,14 +608,14 @@ fn list_refs_http(
     let (protocol_version, refs, caps, head_symref) =
         if effective_base.trim_end_matches('/') != repo_url.trim_end_matches('/') {
             client.reset_auth_after_redirect_rebase();
-            crate::transport::http::discover_upload_pack_exact(
+            crate::transport::http::discover_upload_pack_for_list_refs(
                 client.as_ref(),
                 &effective_base,
                 git_protocol,
             )
             .map_err(RemoteError::Library)?
         } else {
-            crate::transport::http::discover_upload_pack_from_body(&body)
+            crate::transport::http::discover_upload_pack_for_list_refs_from_body(&body)
                 .map_err(RemoteError::Library)?
         };
 
