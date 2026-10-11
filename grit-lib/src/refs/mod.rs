@@ -412,18 +412,6 @@ fn packed_ref_name_exists(git_dir: &Path, refname: &str) -> Result<bool> {
     Ok(read_packed_refs_map(git_dir)?.contains_key(refname))
 }
 
-fn refname_namespace_conflicts(existing: &str, candidate: &str) -> bool {
-    if existing == candidate {
-        return false;
-    }
-    existing
-        .strip_prefix(candidate)
-        .is_some_and(|rest| rest.starts_with('/'))
-        || candidate
-            .strip_prefix(existing)
-            .is_some_and(|rest| rest.starts_with('/'))
-}
-
 /// Whether any name in `sorted_packed` namespace-conflicts with `candidate`.
 ///
 /// Uses prefix walks and one sorted range probe — `O(log n)` in the number of
@@ -1324,10 +1312,11 @@ pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> 
 /// objects are transferred. Loading the file once into this snapshot and using
 /// [`resolve_ref_cached`] / [`write_ref_cached`] makes the apply linear.
 ///
-/// The snapshot is read-only and reflects `packed-refs` at load time. Loose-ref
-/// writes performed during the same apply do not invalidate it: each ref's
-/// previous value is independent, so a stale snapshot only ever omits a ref that
-/// was loose (and thus resolved from disk, not the snapshot) to begin with.
+/// The snapshot reflects `packed-refs` at load time. [`write_ref_cached`] may
+/// update it via [`PackedRefs::record_loose_write`] so later namespace checks in
+/// the same apply batch see loose refs without reloading the file. Otherwise
+/// treat it as read-only: stale packed data only omits refs that were loose on
+/// disk (resolved outside the snapshot) to begin with.
 pub struct PackedRefs {
     map: HashMap<String, ObjectId>,
     sorted_names: BTreeSet<String>,
@@ -2135,6 +2124,7 @@ fn abort_loose_ref_lock(lock: &Path) {
 mod test_pause_inject_serial {
     use std::sync::{Mutex, OnceLock};
 
+    // hygiene: test-only pause injection serialization
     static SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
 
     pub fn lock() -> std::sync::MutexGuard<'static, ()> {
@@ -3321,6 +3311,18 @@ mod refname_available_tests {
             err,
             RefnameUnavailable::AncestorExists { ref blocking, .. } if blocking == "refs/1l/c"
         ));
+    }
+
+    fn refname_namespace_conflicts(existing: &str, candidate: &str) -> bool {
+        if existing == candidate {
+            return false;
+        }
+        existing
+            .strip_prefix(candidate)
+            .is_some_and(|rest| rest.starts_with('/'))
+            || candidate
+                .strip_prefix(existing)
+                .is_some_and(|rest| rest.starts_with('/'))
     }
 
     #[test]
