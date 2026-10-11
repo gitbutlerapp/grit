@@ -1249,9 +1249,46 @@ fn advertised_peel_from_v0_refs(refs: &[AdvRef]) -> std::collections::HashMap<St
 /// # Errors
 ///
 /// Returns an error if discovery, negotiation, pack ingest, or ref updates fail.
-||||||| Common ancestor
-/// Returns an error if discovery fails, a refspec is invalid, or negotiation /
-/// pack ingest / ref I/O fails.
+
+/// True when the local object store has no installed packs or loose objects yet.
+fn object_store_empty_for_fetch(objects_dir: &Path) -> bool {
+    let pack_dir = objects_dir.join("pack");
+    if pack_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&pack_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let s = name.to_string_lossy();
+                if s.starts_with("tmp_") || s.starts_with('.') {
+                    continue;
+                }
+                if s.ends_with(".pack") || s.ends_with(".idx") {
+                    return false;
+                }
+            }
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(objects_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name == "pack" || name == "info" {
+                continue;
+            }
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_dir()
+                && name.len() == 2
+                && std::fs::read_dir(entry.path())
+                    .map(|mut d| d.next().is_some())
+                    .unwrap_or(false)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn http_ingest_pack_options(fix_thin: bool) -> crate::index_pack::IngestPackOptions {
     let threads = std::thread::available_parallelism()
         .map(|n| (n.get() * 2).clamp(4, 8))
@@ -1260,7 +1297,6 @@ fn http_ingest_pack_options(fix_thin: bool) -> crate::index_pack::IngestPackOpti
         fix_thin,
         skip_post_index_verify: true,
         threads: Some(threads),
-        ..Default::default()
     }
 }
 
