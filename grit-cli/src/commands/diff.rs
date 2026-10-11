@@ -28,6 +28,7 @@ use grit_lib::diff::{
 use grit_lib::merge_base::merge_base_for_diff_two_commits;
 use grit_lib::objects::ObjectId;
 use grit_lib::odb::Odb;
+use grit_lib::porcelain::stash::worktree_bytes_for_index_mode;
 use grit_lib::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_revision_for_range_end,
     split_double_dot_range, split_triple_dot_range,
@@ -467,7 +468,8 @@ fn new_side_bytes(odb: &Odb, e: &DiffEntry, work_tree: Option<&Path>) -> Result<
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     if let (Some(wt), Some(p)) = (work_tree, e.new_path.as_deref().or(e.old_path.as_deref())) {
-        Ok(file_bytes(&wt.join(p)))
+        let mode = u32::from_str_radix(&e.new_mode, 8).unwrap_or_default();
+        Ok(file_bytes(&wt.join(p), mode))
     } else {
         blob_bytes(odb, &e.new_oid)
     }
@@ -512,9 +514,10 @@ fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
     Ok(bytes_for_diff(&data))
 }
 
-/// Read a worktree file. A missing file reads as empty (treated as a deletion).
-fn file_bytes(path: &Path) -> (SideBytes, bool) {
-    match std::fs::read(path) {
+/// Read a worktree file without following a tracked symlink. A missing file
+/// reads as empty (treated as a deletion).
+fn file_bytes(path: &Path, mode: u32) -> (SideBytes, bool) {
+    match worktree_bytes_for_index_mode(path, mode) {
         Ok(data) => bytes_for_diff(&data),
         Err(_) => (SideBytes::from_bytes(Vec::new()), false),
     }
