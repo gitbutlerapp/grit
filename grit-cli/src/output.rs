@@ -85,16 +85,8 @@ pub trait HumanRender {
 }
 
 /// Render a command outcome as agent-friendly Markdown on stdout.
-///
-/// The default implementation lists top-level JSON fields; commands override this
-/// when they have structured human-oriented Markdown (log, diff, status, …).
 pub trait MarkdownRender: Serialize {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()>
-    where
-        Self: Sized,
-    {
-        render_value_markdown(self, w, ctx)
-    }
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()>;
 }
 
 /// Render a command outcome to stdout in the chosen mode.
@@ -205,32 +197,6 @@ pub fn progress(mode: OutputMode, msg: &str) {
     }
 }
 
-/// Default Markdown rendering: bullet list of top-level JSON fields.
-pub fn render_value_markdown<T: Serialize>(
-    value: &T,
-    w: &mut dyn Write,
-    _ctx: &RenderContext,
-) -> Result<()> {
-    let Ok(serde_json::Value::Object(map)) = serde_json::to_value(value) else {
-        outln!(w, "(could not render outcome as Markdown)");
-        return Ok(());
-    };
-    for (key, val) in map {
-        outln!(w, "- **{key}**: {}", markdown_scalar(&val));
-    }
-    Ok(())
-}
-
-fn markdown_scalar(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Null => "null".to_owned(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Shared JSON DTOs — small, stable serializations of grit-lib data. Defined
 // here (not in grit-lib) so the JSON schema stays decoupled from internal types.
@@ -310,7 +276,13 @@ mod tests {
         }
     }
 
-    impl MarkdownRender for SampleOutcome {}
+    impl MarkdownRender for SampleOutcome {
+        fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+            outln!(w, "- **branch**: `{}`", self.branch);
+            outln!(w, "- **clean**: {}", self.clean);
+            Ok(())
+        }
+    }
 
     fn sample_ctx() -> RenderContext {
         RenderContext {

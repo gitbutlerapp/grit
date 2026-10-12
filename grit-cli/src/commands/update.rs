@@ -16,6 +16,7 @@ use std::process::{Command, Stdio};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
+use crate::markdown;
 use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// URL of the POSIX-sh installer (used on Unix).
@@ -41,7 +42,12 @@ impl HumanRender for UpdateOutcome {
     }
 }
 
-impl MarkdownRender for UpdateOutcome {}
+impl MarkdownRender for UpdateOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_update_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 /// Send the installer's stdout to our stderr in JSON mode so our stdout stays a
 /// single clean object; inherit normally in human mode.

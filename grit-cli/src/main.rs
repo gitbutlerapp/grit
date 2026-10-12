@@ -908,6 +908,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
 }
 
 #[cfg(test)]
+mod render_outcome_snapshots;
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;

@@ -11,6 +11,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::context;
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ref_name_messages::branch_short_name_error_message;
 
@@ -70,7 +71,12 @@ impl HumanRender for WorktreeOutcome {
     }
 }
 
-impl MarkdownRender for WorktreeOutcome {}
+impl MarkdownRender for WorktreeOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_worktree_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 pub fn run_list() -> Result<WorktreeOutcome> {
     let repo = context::discover()?;

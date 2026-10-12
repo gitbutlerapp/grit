@@ -119,7 +119,6 @@ impl CliFixture {
     pub fn snapshot_all_modes(&self, snapshot_name: &str, args: &[&str], snapshot_dir: &Path) {
         Self::assert_all_modes_snapshot(
             snapshot_name,
-            args,
             snapshot_dir,
             self,
             self.capture_mode(args, ModeKind::Human),
@@ -142,22 +141,39 @@ impl CliFixture {
         let json = json_fixture.capture_mode(args, ModeKind::Json);
         let markdown_fixture = fresh();
         let markdown = markdown_fixture.capture_mode(args, ModeKind::Markdown);
-        Self::assert_all_modes_snapshot(
+        Self::assert_all_modes_snapshot_with_fixtures(
             snapshot_name,
-            args,
             snapshot_dir,
-            &human_fixture,
+            &[&human_fixture, &json_fixture, &markdown_fixture],
             human,
             json,
             markdown,
         );
     }
 
-    fn assert_all_modes_snapshot(
+    /// Assert a three-mode snapshot (human / JSON / Markdown) with shared redactions.
+    pub fn assert_all_modes_snapshot(
         snapshot_name: &str,
-        _args: &[&str],
         snapshot_dir: &Path,
         filter_fixture: &Self,
+        human: ModeCapture,
+        json: ModeCapture,
+        markdown: ModeCapture,
+    ) {
+        Self::assert_all_modes_snapshot_with_fixtures(
+            snapshot_name,
+            snapshot_dir,
+            &[filter_fixture],
+            human,
+            json,
+            markdown,
+        );
+    }
+
+    fn assert_all_modes_snapshot_with_fixtures(
+        snapshot_name: &str,
+        snapshot_dir: &Path,
+        filter_fixtures: &[&Self],
         human: ModeCapture,
         json: ModeCapture,
         markdown: ModeCapture,
@@ -169,7 +185,43 @@ impl CliFixture {
         };
 
         let mut settings = insta::Settings::clone_current();
-        register_cli_snapshot_filters(&mut settings, filter_fixture);
+        register_cli_snapshot_filters_for(&mut settings, filter_fixtures);
+        settings.set_snapshot_path(snapshot_dir);
+        settings.bind(|| {
+            insta::assert_json_snapshot!(snapshot_name, payload);
+        });
+    }
+
+    /// Assert an insta snapshot of pre-rendered human, JSON, and Markdown output
+    /// (for outcomes that cannot be exercised through the CLI in tests).
+    pub fn snapshot_rendered_modes(
+        snapshot_name: &str,
+        snapshot_dir: &Path,
+        human_stdout: &str,
+        json_stdout: &str,
+        markdown_stdout: &str,
+    ) {
+        let human = ModeCapture {
+            exit: 0,
+            stdout: human_stdout.to_owned(),
+            stderr: String::new(),
+        };
+        let json = ModeCapture {
+            exit: 0,
+            stdout: json_stdout.to_owned(),
+            stderr: String::new(),
+        };
+        let markdown = ModeCapture {
+            exit: 0,
+            stdout: markdown_stdout.to_owned(),
+            stderr: String::new(),
+        };
+        let payload = AllModesSnapshot {
+            human: &human,
+            json: &json,
+            markdown: &markdown,
+        };
+        let mut settings = insta::Settings::clone_current();
         settings.set_snapshot_path(snapshot_dir);
         settings.bind(|| {
             insta::assert_json_snapshot!(snapshot_name, payload);
@@ -217,11 +269,12 @@ enum ModeKind {
     Markdown,
 }
 
+/// One captured CLI invocation (stdout, stderr, exit code).
 #[derive(Serialize)]
-struct ModeCapture {
-    exit: i32,
-    stdout: String,
-    stderr: String,
+pub struct ModeCapture {
+    pub exit: i32,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 #[derive(Serialize)]
@@ -233,6 +286,12 @@ struct AllModesSnapshot<'a> {
 
 /// Register shared insta redactions for CLI snapshots in `settings`.
 pub fn register_cli_snapshot_filters(settings: &mut insta::Settings, fixture: &CliFixture) {
+    register_cli_snapshot_filters_for(settings, &[fixture]);
+}
+
+/// Like [`register_cli_snapshot_filters`], but redact every fixture path (for
+/// `snapshot_fresh_all_modes`, where human/json/markdown use separate repos).
+pub fn register_cli_snapshot_filters_for(settings: &mut insta::Settings, fixtures: &[&CliFixture]) {
     settings.add_filter(
         r"(?i)\b\d+\s+(?:second|minute|hour|day|week|month|year)s?\s+ago\b",
         "[TIME_AGO]",
@@ -240,12 +299,14 @@ pub fn register_cli_snapshot_filters(settings: &mut insta::Settings, fixture: &C
     settings.add_filter(r"(?i)\bjust now\b", "[TIME_AGO]");
     settings.add_filter(r"\b\d+(?:\.\d+)?(?:ms|s|m)\b", "[DURATION]");
 
-    let repo = regex::escape(fixture.path().to_string_lossy().as_ref());
-    settings.add_filter(&repo, "[REPO]");
+    for fixture in fixtures {
+        let repo = regex::escape(fixture.path().to_string_lossy().as_ref());
+        settings.add_filter(&repo, "[REPO]");
 
-    let home = regex::escape(fixture.home_root().to_string_lossy().as_ref());
-    if home != repo {
-        settings.add_filter(&home, "[HOME]");
+        let home = regex::escape(fixture.home_root().to_string_lossy().as_ref());
+        if home != repo {
+            settings.add_filter(&home, "[HOME]");
+        }
     }
 }
 

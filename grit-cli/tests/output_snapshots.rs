@@ -184,6 +184,75 @@ fn write_file(dir: &Path, name: &str, contents: &str) {
     std::fs::write(dir.join(name), contents).unwrap_or_else(|e| panic!("write {name}: {e}"));
 }
 
+fn prepare_stash(fixture: &CliFixture) {
+    fixture
+        .run(&["stash", "push", "-m", "snapshot stash"])
+        .expect_success("stash push");
+}
+
+const LINKED_WT: &str = "linked-wt";
+
+#[test]
+fn snapshot_stash_push() {
+    snapshot_fresh("stash_push", &["stash", "push", "-m", "wip"], |_| {});
+}
+
+#[test]
+fn snapshot_stash_list() {
+    snapshot_fresh("stash_list", &["stash", "list"], prepare_stash);
+}
+
+#[test]
+fn snapshot_stash_show() {
+    snapshot_fresh("stash_show", &["stash", "show"], prepare_stash);
+}
+
+#[test]
+fn snapshot_stash_apply() {
+    snapshot_fresh("stash_apply", &["stash", "apply"], prepare_stash);
+}
+
+#[test]
+fn snapshot_stash_pop() {
+    snapshot_fresh("stash_pop", &["stash", "pop"], prepare_stash);
+}
+
+#[test]
+fn snapshot_stash_drop() {
+    snapshot_fresh("stash_drop", &["stash", "drop"], prepare_stash);
+}
+
+#[test]
+fn snapshot_worktree_list() {
+    snapshot_fresh("worktree_list", &["worktree", "list"], |fixture| {
+        fixture
+            .run(&["worktree", "add", LINKED_WT, "-b", "wt-branch"])
+            .expect_success("worktree add");
+    });
+}
+
+#[test]
+fn snapshot_worktree_add() {
+    snapshot_fresh(
+        "worktree_add",
+        &["worktree", "add", LINKED_WT, "-b", "wt-new"],
+        |_| {},
+    );
+}
+
+#[test]
+fn snapshot_worktree_remove() {
+    snapshot_fresh(
+        "worktree_remove",
+        &["worktree", "remove", LINKED_WT, "-f"],
+        |fixture| {
+            fixture
+                .run(&["worktree", "add", LINKED_WT, "-b", "wt-rm"])
+                .expect_success("worktree add");
+        },
+    );
+}
+
 trait ExpectSuccess {
     fn expect_success(self, label: &str) -> grit_test_support::Output;
 }

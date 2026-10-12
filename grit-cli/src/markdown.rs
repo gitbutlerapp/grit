@@ -5,12 +5,18 @@ use std::io::Write;
 use grit_lib::diff::{DiffEntry, DiffStatus};
 
 use crate::commands::add::AddOutcome;
+use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
 use crate::commands::merge::MergeOutcome;
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
+use crate::commands::stash::{
+    StashApplyOutcome, StashDropOutcome, StashPopOutcome, StashPushOutcome,
+};
 use crate::commands::switch::SwitchOutcome;
+use crate::commands::update::UpdateOutcome;
+use crate::commands::worktree::{WorktreeOutcome, WorktreeRow};
 use crate::context::{self, CommitSummary};
 use crate::output::{outln, RenderContext};
 use crate::stdio;
@@ -437,6 +443,190 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
         outln!(w, "- Created and switched to **`{}`**", outcome.branch);
     } else {
         outln!(w, "- Switched to **`{}`**", outcome.branch);
+    }
+    Ok(())
+}
+
+/// Result of `grit stash` / `grit stash push`.
+pub fn print_stash_push_outcome(
+    w: &mut dyn Write,
+    outcome: &StashPushOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Stash");
+    outln!(w);
+    match outcome {
+        StashPushOutcome::Nothing => outln!(w, "No local changes to save."),
+        StashPushOutcome::Saved { oid, message } => {
+            let short = short_hex(oid);
+            if message.is_empty() {
+                outln!(w, "- Saved working tree and index state · `{short}`");
+            } else {
+                outln!(w, "- Saved **{message}** · `{short}`");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Result of `grit stash apply`.
+pub fn print_stash_apply_outcome(
+    w: &mut dyn Write,
+    outcome: &StashApplyOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Stash apply");
+    outln!(w);
+    if outcome.conflicts {
+        outln!(
+            w,
+            "- **stash@{{{}}}** · stopped with conflicts",
+            outcome.index
+        );
+        for path in &outcome.conflict_paths {
+            outln!(w, "  - `{path}`");
+        }
+    } else {
+        outln!(w, "- Applied **stash@{{{}}}**", outcome.index);
+    }
+    Ok(())
+}
+
+/// Result of `grit stash pop`.
+pub fn print_stash_pop_outcome(w: &mut dyn Write, outcome: &StashPopOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Stash pop");
+    outln!(w);
+    if outcome.conflicts {
+        outln!(
+            w,
+            "- **stash@{{{}}}** · stopped with conflicts (entry kept)",
+            outcome.index
+        );
+        for path in &outcome.conflict_paths {
+            outln!(w, "  - `{path}`");
+        }
+    } else {
+        let note = if outcome.dropped { "applied" } else { "empty" };
+        outln!(w, "- Dropped **stash@{{{}}}** ({note})", outcome.index);
+    }
+    Ok(())
+}
+
+/// Result of `grit stash drop`.
+pub fn print_stash_drop_outcome(
+    w: &mut dyn Write,
+    outcome: &StashDropOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Stash drop");
+    outln!(w);
+    outln!(w, "- Dropped **stash@{{{}}}**", outcome.index);
+    Ok(())
+}
+
+/// Result of `grit worktree` (list / add / remove / prune).
+pub fn print_worktree_outcome(w: &mut dyn Write, outcome: &WorktreeOutcome) -> anyhow::Result<()> {
+    match outcome {
+        WorktreeOutcome::List { worktrees } => {
+            outln!(w, "## Worktrees");
+            outln!(w);
+            print_worktree_table(w, worktrees)?;
+        }
+        WorktreeOutcome::Add { path, branch, head } => {
+            outln!(w, "## Worktree add");
+            outln!(w);
+            let short = short_hex(head);
+            if let Some(b) = branch {
+                outln!(w, "- Created **`{path}`** on branch **`{b}`** · `{short}`");
+            } else {
+                outln!(w, "- Created **`{path}`** (detached) · `{short}`");
+            }
+        }
+        WorktreeOutcome::Remove { path } => {
+            outln!(w, "## Worktree remove");
+            outln!(w);
+            outln!(w, "- Removed **`{path}`**");
+        }
+    }
+    Ok(())
+}
+
+fn print_worktree_table(w: &mut dyn Write, worktrees: &[WorktreeRow]) -> anyhow::Result<()> {
+    if worktrees.is_empty() {
+        outln!(w, "No worktrees.");
+        return Ok(());
+    }
+    outln!(w, "| Path | Branch | HEAD |");
+    outln!(w, "| --- | --- | --- |");
+    for wt in worktrees {
+        let branch = wt
+            .branch
+            .as_deref()
+            .map(|b| format!("`{b}`"))
+            .unwrap_or_else(|| {
+                if wt.detached {
+                    "_(detached)_".into()
+                } else {
+                    "—".into()
+                }
+            });
+        let head = if wt.head.is_empty() {
+            "—".to_owned()
+        } else {
+            format!("`{}`", short_hex(&wt.head))
+        };
+        outln!(
+            w,
+            "| {} | {} | {} |",
+            escape_table_cell(&wt.path),
+            branch,
+            head
+        );
+    }
+    Ok(())
+}
+
+/// Result of `grit auth` sign-in.
+pub fn print_auth_outcome(w: &mut dyn Write, outcome: &AuthOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Auth");
+    outln!(w);
+    if outcome.authenticated {
+        outln!(w, "- Signed in to **`{}`**", outcome.host);
+    } else {
+        outln!(w, "- Not signed in to **`{}`**", outcome.host);
+    }
+    Ok(())
+}
+
+/// Result of `grit auth logout`.
+pub fn print_logout_outcome(w: &mut dyn Write, outcome: &LogoutOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Auth logout");
+    outln!(w);
+    if outcome.logged_out {
+        outln!(
+            w,
+            "- Signed out of **`{}`** (stored token removed)",
+            outcome.host
+        );
+    } else {
+        outln!(
+            w,
+            "- No credential helper configured for **`{}`**",
+            outcome.host
+        );
+    }
+    Ok(())
+}
+
+/// Result of `grit update`.
+pub fn print_update_outcome(w: &mut dyn Write, outcome: &UpdateOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Update");
+    outln!(w);
+    if outcome.updated {
+        outln!(
+            w,
+            "- Updated grit (ran installer; previous version **{}**)",
+            outcome.version
+        );
+    } else {
+        outln!(w, "- Update did not run (version **{}**)", outcome.version);
     }
     Ok(())
 }

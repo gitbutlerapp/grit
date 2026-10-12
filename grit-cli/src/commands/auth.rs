@@ -28,6 +28,7 @@ use grit_lib::remote::http_client::{HttpClient, UreqHttpClient};
 use grit_lib::repo::Repository;
 use serde::Serialize;
 
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit auth` (sign-in).
@@ -48,7 +49,12 @@ impl HumanRender for AuthOutcome {
     }
 }
 
-impl MarkdownRender for AuthOutcome {}
+impl MarkdownRender for AuthOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_auth_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 /// Result of `grit auth logout`.
 #[derive(Serialize)]
@@ -76,7 +82,12 @@ impl HumanRender for LogoutOutcome {
     }
 }
 
-impl MarkdownRender for LogoutOutcome {}
+impl MarkdownRender for LogoutOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_logout_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 /// GitHub OAuth App client id used for the device flow. This is grit's
 /// registered OAuth App; the device flow uses no client secret, so the id is not
