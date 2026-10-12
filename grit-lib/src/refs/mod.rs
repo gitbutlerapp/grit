@@ -1218,6 +1218,48 @@ pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
     )
 }
 
+/// Per-ref update flags for [`RefUpdate`] (e.g. `REF_NO_DEREF` on `HEAD`).
+#[must_use]
+pub fn ref_update_flags(refname: &str) -> RefUpdateFlags {
+    legacy_ref_update_flags(refname)
+}
+
+/// Create a new direct ref and its initial reflog line in one store transaction.
+///
+/// # Errors
+///
+/// Returns an error when the ref already exists, the name is invalid, or ref/reflog I/O fails.
+pub fn create_ref_with_reflog(
+    git_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+    identity: &str,
+    message: &str,
+) -> Result<()> {
+    let config = ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(git_dir),
+        true,
+    )
+    .unwrap_or_default();
+    let reflog = if should_autocreate_reflog_with_config(&config, git_dir, refname) {
+        Some(ReflogUpdate {
+            identity: identity.to_owned(),
+            message: message.to_owned(),
+            time: time::OffsetDateTime::now_utc(),
+        })
+    } else {
+        None
+    };
+    store_write_value(
+        git_dir,
+        refname,
+        Some(StoreRawRef::Direct(*oid)),
+        Expected::Missing,
+        reflog,
+    )
+}
+
 /// Write a loose ref file under `storage_dir`: the body shared by [`write_ref`]
 /// and [`write_ref_cached`], run after the packed-refs namespace-conflict check.
 fn write_ref_at_storage(storage_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {

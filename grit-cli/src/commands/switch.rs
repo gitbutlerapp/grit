@@ -70,16 +70,9 @@ pub fn run(
         resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
     };
 
-    let create_start_point = if create { start_point.clone() } else { None };
-    let outcome = switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode,
-            create_start_point,
-        },
-    )
-    .map_err(anyhow::Error::new)
-    .context("could not switch")?;
+    let outcome = switch_repository(&repo, &SwitchOptions { mode })
+        .map_err(anyhow::Error::new)
+        .context("could not switch")?;
 
     Ok(SwitchOutcome {
         branch: outcome.branch,

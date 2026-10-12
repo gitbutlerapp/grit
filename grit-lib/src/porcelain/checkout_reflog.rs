@@ -2,11 +2,10 @@
 
 use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
-use crate::diff::zero_oid;
 use crate::error::Result;
 use crate::ident_resolve::resolve_loose_committer_parts_with;
 use crate::objects::ObjectId;
-use crate::refs::append_reflog_with_config;
+use crate::refs::{self, append_reflog_with_config, create_ref_with_reflog, delete_ref};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 
@@ -87,26 +86,72 @@ pub fn append_head_checkout_reflog(
     )
 }
 
-/// Append `branch: Created from …` on a new branch ref.
-pub fn append_branch_created_reflog(
+/// Create a branch ref and `branch: Created from …` reflog atomically.
+pub fn create_branch_ref_with_reflog(
     repo: &Repository,
     branch_ref: &str,
     start_oid: ObjectId,
     source_label: &str,
 ) -> Result<()> {
-    let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
     let identity = checkout_reflog_identity(repo);
     let message = format!("branch: Created from {source_label}");
-    append_reflog_with_config(
-        &repo.git_dir,
-        branch_ref,
-        &zero_oid(),
-        &start_oid,
-        &identity,
-        &message,
-        false,
-        Some(&config),
-    )
+    create_ref_with_reflog(&repo.git_dir, branch_ref, &start_oid, &identity, &message)
+}
+
+fn restore_head(repo: &Repository, head_before: &HeadState) -> Result<()> {
+    match head_before {
+        HeadState::Branch { refname, .. } => {
+            refs::write_symbolic_ref(&repo.git_dir, "HEAD", refname)?;
+        }
+        HeadState::Detached { oid } => refs::write_ref(&repo.git_dir, "HEAD", oid)?,
+        HeadState::Branch { .. } | HeadState::Invalid => {}
+    }
+    Ok(())
+}
+
+/// Create branch (if needed), move `HEAD`, append checkout reflog; roll back branch on failure.
+pub fn finish_switch_ref_updates(
+    repo: &Repository,
+    head_before: &HeadState,
+    branch_create: Option<(String, ObjectId, String)>,
+    detached: bool,
+    branch_ref: &str,
+    target_oid: ObjectId,
+    from_label: &str,
+    to_label: &str,
+) -> Result<()> {
+    let created_branch = branch_create.as_ref().map(|(name, _, _)| name.clone());
+    if let Some((refname, oid, source)) = branch_create {
+        if let Err(err) = create_branch_ref_with_reflog(repo, &refname, oid, &source) {
+            return Err(err);
+        }
+    }
+
+    let head_result = if detached {
+        refs::write_ref(&repo.git_dir, "HEAD", &target_oid)
+    } else {
+        refs::write_symbolic_ref(&repo.git_dir, "HEAD", branch_ref)
+    };
+
+    if let Err(err) = head_result {
+        if let Some(refname) = created_branch {
+            let _ = delete_ref(&repo.git_dir, &refname);
+        }
+        return Err(err);
+    }
+
+    let Some(old_oid) = head_before.oid().copied() else {
+        return Ok(());
+    };
+
+    if let Err(err) = append_head_checkout_reflog(repo, old_oid, target_oid, from_label, to_label) {
+        let _ = restore_head(repo, head_before);
+        if let Some(refname) = created_branch {
+            let _ = delete_ref(&repo.git_dir, &refname);
+        }
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Whether `HEAD` already points at this attached branch tip (no checkout reflog).

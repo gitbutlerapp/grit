@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::checkout_tree_changes;
 use crate::porcelain::checkout_reflog::{
-    append_branch_created_reflog, append_head_checkout_reflog, checkout_reflog_from_label,
+    append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
     is_already_detached_at, is_already_on_branch, switch_create_reflog_source_label,
 };
 use crate::porcelain::worktree_guard::{
@@ -31,7 +31,12 @@ pub enum SwitchMode {
         oid: ObjectId,
     },
     /// Create `refs/heads/<branch>` at `start_oid`, then check it out.
-    Create { branch: String, start_oid: ObjectId },
+    Create {
+        branch: String,
+        start_oid: ObjectId,
+        /// Label for `branch: Created from …` (e.g. `HEAD`, `main`, `refs/remotes/origin/topic`).
+        create_source_label: String,
+    },
     /// Detached `HEAD` at `commit`.
     Detached {
         commit: ObjectId,
@@ -44,8 +49,6 @@ pub enum SwitchMode {
 #[derive(Debug, Clone)]
 pub struct SwitchOptions {
     pub mode: SwitchMode,
-    /// Explicit start point passed to `-c`, for branch-creation reflog wording.
-    pub create_start_point: Option<String>,
 }
 
 /// Result of [`switch_repository`].
@@ -87,6 +90,7 @@ pub fn resolve_create_branch(
     Ok(SwitchMode::Create {
         branch: branch.to_owned(),
         start_oid,
+        create_source_label: switch_create_reflog_source_label(start_point),
     })
 }
 
@@ -123,6 +127,7 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
             return Ok(SwitchMode::Create {
                 branch: short,
                 start_oid: oid,
+                create_source_label: candidate,
             });
         }
     }
@@ -194,13 +199,21 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
                 None,
                 branch.clone(),
             ),
-            SwitchMode::Create { branch, start_oid } => (
+            SwitchMode::Create {
+                branch,
+                start_oid,
+                create_source_label,
+            } => (
                 *start_oid,
                 format!("refs/heads/{branch}"),
                 true,
                 false,
                 branch.clone(),
-                Some((format!("refs/heads/{branch}"), *start_oid)),
+                Some((
+                    format!("refs/heads/{branch}"),
+                    *start_oid,
+                    create_source_label.clone(),
+                )),
                 branch.clone(),
             ),
             SwitchMode::Detached {
@@ -222,6 +235,13 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
     }
 
     if !detached && is_already_on_branch(repo, &branch_ref, target_oid)? {
+        let head_before = resolve_head(&repo.git_dir)?;
+        if let (Some(old_oid), Some(from_label)) = (
+            head_before.oid().copied(),
+            checkout_reflog_from_label(&head_before),
+        ) {
+            append_head_checkout_reflog(repo, old_oid, target_oid, &from_label, &branch_label)?;
+        }
         return Ok(SwitchOutcome {
             branch: branch_label,
             created,
@@ -247,7 +267,6 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
         &branch_label,
         pending_create,
         &reflog_to,
-        opts.create_start_point.as_deref(),
     )
 }
 
@@ -258,9 +277,8 @@ fn switch_to_target(
     created: bool,
     detached: bool,
     branch_label: &str,
-    pending_create: Option<(String, ObjectId)>,
+    pending_create: Option<(String, ObjectId, String)>,
     reflog_to_label: &str,
-    create_start_point: Option<&str>,
 ) -> Result<SwitchOutcome> {
     let head_before = resolve_head(&repo.git_dir)?;
     let head_oid = head_before.oid().copied();
@@ -281,21 +299,26 @@ fn switch_to_target(
         .collect();
     checkout_tree_changes(repo, &tree_changes)?;
 
-    if let Some((refname, oid)) = &pending_create {
-        refs::write_ref(&repo.git_dir, refname, oid)?;
-        let source = switch_create_reflog_source_label(create_start_point);
-        append_branch_created_reflog(repo, refname, *oid, &source)?;
-    }
-
-    if detached {
-        refs::write_ref(&repo.git_dir, "HEAD", &target_oid)?;
-    } else {
-        refs::write_symbolic_ref(&repo.git_dir, "HEAD", branch_ref)?;
-    }
-
-    if let (Some(old_oid), Some(from_label)) = (head_oid, checkout_reflog_from_label(&head_before))
-    {
-        append_head_checkout_reflog(repo, old_oid, target_oid, &from_label, reflog_to_label)?;
+    if let (Some(_), Some(from_label)) = (head_oid, checkout_reflog_from_label(&head_before)) {
+        finish_switch_ref_updates(
+            repo,
+            &head_before,
+            pending_create,
+            detached,
+            branch_ref,
+            target_oid,
+            &from_label,
+            reflog_to_label,
+        )?;
+    } else if let Some((refname, oid, source)) = pending_create {
+        crate::porcelain::checkout_reflog::create_branch_ref_with_reflog(
+            repo, &refname, oid, &source,
+        )?;
+        if detached {
+            refs::write_ref(&repo.git_dir, "HEAD", &target_oid)?;
+        } else {
+            refs::write_symbolic_ref(&repo.git_dir, "HEAD", branch_ref)?;
+        }
     }
 
     Ok(SwitchOutcome {
@@ -509,7 +532,6 @@ mod tests {
                     branch: "other".into(),
                     oid: refs::resolve_ref(&repo.git_dir, "refs/heads/other").expect("oid"),
                 },
-                create_start_point: None,
             },
         )
         .expect("switch");
@@ -542,8 +564,8 @@ mod tests {
                 mode: SwitchMode::Create {
                     branch: "leaked".into(),
                     start_oid: refs::resolve_ref(&repo.git_dir, "refs/heads/other").expect("oid"),
+                    create_source_label: "HEAD".into(),
                 },
-                create_start_point: None,
             },
         )
         .expect_err("conflict");

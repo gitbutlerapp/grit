@@ -12,6 +12,7 @@ use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::RefStorageFormat;
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -122,7 +123,6 @@ fn run_repro_sequence(repo: &Repository) {
         repo,
         &SwitchOptions {
             mode: resolve_create_branch(repo, "topic", None).unwrap(),
-            create_start_point: None,
         },
     )
     .expect("switch -c topic");
@@ -135,7 +135,6 @@ fn run_repro_sequence(repo: &Repository) {
                 branch: "main".into(),
                 oid: main_oid,
             },
-            create_start_point: None,
         },
     )
     .expect("switch main");
@@ -148,7 +147,6 @@ fn run_repro_sequence(repo: &Repository) {
                 commit: detach,
                 reflog_to_label: "HEAD~1".into(),
             },
-            create_start_point: None,
         },
     )
     .expect("detach");
@@ -160,7 +158,6 @@ fn run_repro_sequence(repo: &Repository) {
                 branch: "main".into(),
                 oid: main_oid,
             },
-            create_start_point: None,
         },
     )
     .expect("switch main");
@@ -220,7 +217,6 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
         &repo,
         &SwitchOptions {
             mode: resolve_create_branch(&repo, "topic", None).unwrap(),
-            create_start_point: None,
         },
     )
     .expect("topic");
@@ -232,7 +228,6 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
                 branch: "main".into(),
                 oid: main_oid,
             },
-            create_start_point: None,
         },
     )
     .expect("main");
@@ -243,14 +238,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
         other => panic!("expected existing topic, got {other:?}"),
     }
 
-    switch_repository(
-        &repo,
-        &SwitchOptions {
-            mode: mode_minus,
-            create_start_point: None,
-        },
-    )
-    .expect("switch -");
+    switch_repository(&repo, &SwitchOptions { mode: mode_minus }).expect("switch -");
 
     switch_repository(
         &repo,
@@ -259,7 +247,6 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
                 branch: "main".into(),
                 oid: main_oid,
             },
-            create_start_point: None,
         },
     )
     .expect("main again");
@@ -299,7 +286,6 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
         &repo,
         &SwitchOptions {
             mode: resolve_create_branch(&repo, "topic", None).expect("create mode"),
-            create_start_point: None,
         },
     )
     .expect("switch -c topic");
@@ -314,5 +300,80 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
     assert!(
         !dir.path().join(".git/logs/refs/heads/topic").exists(),
         "new branch reflog must not be auto-created when logAllRefUpdates=false"
+    );
+}
+
+#[test]
+fn same_branch_switch_appends_head_checkout_reflog() {
+    let (_dir, repo) = init_repo();
+    let c1 = grit_commit(&repo, "f", "1\n", None);
+    let _c2 = grit_commit(&repo, "f", "1\n2\n", Some(c1));
+    let main_oid = refs::resolve_ref(&repo.git_dir, "refs/heads/main").unwrap();
+
+    switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            },
+        },
+    )
+    .expect("same-branch switch");
+
+    let head_log = read_reflog(&repo.git_dir, "HEAD").expect("head log");
+    assert!(
+        head_log
+            .iter()
+            .any(|e| e.message == "checkout: moving from main to main"),
+        "expected same-branch checkout reflog, got {:?}",
+        head_log
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
+    let (_dir, repo) = init_repo();
+    let tip = grit_commit(&repo, "f", "1\n", None);
+    refs::write_ref(&repo.git_dir, "refs/remotes/origin/topic", &tip).expect("remote");
+
+    let mode = resolve_switch_target(&repo, "topic").expect("resolve");
+    match &mode {
+        SwitchMode::Create {
+            create_source_label,
+            ..
+        } => assert_eq!(create_source_label, "refs/remotes/origin/topic"),
+        other => panic!("expected create from remote, got {other:?}"),
+    }
+
+    switch_repository(&repo, &SwitchOptions { mode }).expect("switch");
+
+    let topic_log = read_reflog(&repo.git_dir, "refs/heads/topic").expect("topic log");
+    assert_eq!(topic_log.len(), 1);
+    assert_eq!(
+        topic_log[0].message,
+        "branch: Created from refs/remotes/origin/topic"
+    );
+}
+
+#[test]
+fn create_branch_leaves_no_ref_when_reflog_dir_not_writable() {
+    let (dir, repo) = init_repo();
+    let _tip = grit_commit(&repo, "f", "1\n", None);
+    let logs_heads = dir.path().join(".git/logs/refs/heads");
+    std::fs::create_dir_all(&logs_heads).expect("logs dir");
+    std::fs::set_permissions(&logs_heads, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+
+    let err = create_branch(&repo, "fail").expect_err("reflog should fail");
+    assert!(!err.to_string().is_empty());
+
+    std::fs::set_permissions(&logs_heads, std::fs::Permissions::from_mode(0o755))
+        .expect("restore chmod");
+    assert!(
+        refs::resolve_ref(&repo.git_dir, "refs/heads/fail").is_err(),
+        "branch ref must not exist when reflog write fails"
     );
 }

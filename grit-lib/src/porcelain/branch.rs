@@ -3,7 +3,7 @@
 use crate::check_ref_format::validate_branch_short_name;
 use crate::error::{Error, Result};
 use crate::porcelain::checkout_reflog::{
-    append_branch_created_reflog, branch_create_reflog_source_label,
+    branch_create_reflog_source_label, create_branch_ref_with_reflog,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -44,9 +44,8 @@ pub fn create_branch(repo: &Repository, name: &str) -> Result<CreateBranchOutcom
         HeadState::Invalid => return Err(Error::Message("HEAD is in an unknown state".into())),
     };
 
-    refs::write_ref(&repo.git_dir, &branch_ref, &base)?;
     let source = branch_create_reflog_source_label(&head);
-    append_branch_created_reflog(repo, &branch_ref, base, &source)?;
+    create_branch_ref_with_reflog(repo, &branch_ref, base, &source)?;
 
     Ok(CreateBranchOutcome {
         name: name.to_owned(),
