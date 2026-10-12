@@ -29,6 +29,20 @@ Bare repositories have `work_tree: None`. Linked worktrees and gitfile indirecti
 
 [`Repository::config`](rustdoc:grit_lib::repo::Repository) returns a lazily loaded snapshot of the merged cascade (system / global / local / worktree / environment overrides). Prefer it on hot paths instead of calling `ConfigSet::load` repeatedly. Keys use Git’s dotted names (`user.name`, `core.bare`, …).
 
+## Typed domain handles
+
+Beyond [`Repository::refs`](rustdoc:grit_lib::repo::Repository) and the object store on [`Repository::odb`](rustdoc:grit_lib::repo::Repository), the repository exposes scoped handles for larger subsystems:
+
+| Method | Handle | Role |
+| --- | --- | --- |
+| [`Repository::remotes`](rustdoc:grit_lib::repo::Repository) | [`RepositoryRemotes`](rustdoc:grit_lib::repo_handles::RepositoryRemotes) | List/get remotes, `ls-remote`, fetch, push |
+| [`Repository::worktrees`](rustdoc:grit_lib::repo::Repository) | [`RepositoryWorktrees`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees) | List/add/remove/lock linked worktrees |
+| [`Repository::stash`](rustdoc:grit_lib::repo::Repository) | [`RepositoryStash`](rustdoc:grit_lib::repo_handles::RepositoryStash) | Stash list/push/apply/pop/drop |
+| [`Repository::notes`](rustdoc:grit_lib::repo::Repository) | [`RepositoryNotes`](rustdoc:grit_lib::repo_handles::RepositoryNotes) | Notes list/read/add/remove via [`NotesRef`](rustdoc:grit_lib::notes::NotesRef) |
+| [`Repository::bundles`](rustdoc:grit_lib::repo::Repository) | [`RepositoryBundles`](rustdoc:grit_lib::repo_handles::RepositoryBundles) | Bundle create/verify/list-heads/unbundle |
+
+Transport options, stash identity, and notes author/committer lines are passed in as arguments on these methods (no hidden wall-clock reads in the handle layer).
+
 ## Errors
 
 Library operations return [`grit_lib::error::Result`](rustdoc:grit_lib::error::Result). The [`Error`](rustdoc:grit_lib::error::Error) enum covers I/O, missing objects, bad repository layout, and invalid user input. Match on variants in application code; the `grit` CLI maps them to exit codes and messages separately.

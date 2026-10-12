@@ -10,6 +10,8 @@
 #   make docs         - preview grit-scm.com locally (Next.js dev server in site/)
 #   make docs-check   - same checks as the Site workflow: content, links, tests, build
 #   make gate         - pre-integration gate (fmt, clippy, rustdoc, workspace tests)
+#   make public-api   - regenerate grit-lib/public-api.txt (pinned nightly + cargo-public-api)
+#   make public-api-check - diff committed public API snapshot against a fresh run
 #   make coverage     - llvm-cov on grit-lib with per-module floor ratchet
 #   make clean        - remove build artifacts
 
@@ -20,7 +22,7 @@ export CARGO_BUILD_JOBS
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
 
-.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage
+.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage public-api public-api-check
 
 all: build
 
@@ -44,6 +46,12 @@ doc:
 
 gate:
 	./scripts/gate.sh
+
+public-api:
+	./scripts/public-api.sh generate
+
+public-api-check:
+	./scripts/public-api.sh check
 
 clean:
 	$(CARGO) clean
