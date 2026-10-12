@@ -57,7 +57,7 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # use grit_lib::notes::NotesRef;
     /// # use grit_lib::repo::Repository;
     /// # use std::path::Path;
-    /// # fn demo() -> grit_lib::Result<()> {
+    /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")))?;
     /// let notes = repo.notes().list(&NotesRef::commits())?;
     /// let _ = notes.len();
@@ -100,7 +100,8 @@ impl<'repo> RepositoryNotes<'repo> {
     ///
     /// # Errors
     ///
-    /// Propagates blob write and notes commit failures.
+    /// Propagates notes tree read errors (invalid existing notes ref), blob write,
+    /// and notes commit failures.
     ///
     /// # Examples
     ///
@@ -109,7 +110,7 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # use grit_lib::objects::ObjectId;
     /// # use grit_lib::repo::Repository;
     /// # use grit_lib::repo_handles::NotesWriteOptions;
-    /// # fn demo() -> grit_lib::Result<()> {
+    /// # fn demo() -> grit_lib::error::Result<()> {
     /// # let repo = Repository::discover(None)?;
     /// # let object = ObjectId::zero();
     /// let opts = NotesWriteOptions {
@@ -129,7 +130,7 @@ impl<'repo> RepositoryNotes<'repo> {
         options: &NotesWriteOptions,
     ) -> Result<()> {
         let blob = self.repo.odb.write(ObjectKind::Blob, content)?;
-        let mut entries = read_notes_tree(self.repo, notes_ref.as_str()).unwrap_or_default();
+        let mut entries = read_notes_tree(self.repo, notes_ref.as_str())?;
         upsert_note_entry(&mut entries, &object.to_hex(), blob);
         write_notes_commit_idents(
             self.repo,
@@ -152,7 +153,7 @@ impl<'repo> RepositoryNotes<'repo> {
         object: &ObjectId,
         options: &NotesWriteOptions,
     ) -> Result<()> {
-        let mut entries = read_notes_tree(self.repo, notes_ref.as_str()).unwrap_or_default();
+        let mut entries = read_notes_tree(self.repo, notes_ref.as_str())?;
         if !remove_note_entry(&mut entries, &object.to_hex()) {
             return Ok(());
         }

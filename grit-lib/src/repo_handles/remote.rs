@@ -39,7 +39,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// ```
     /// # use grit_lib::repo::Repository;
     /// # use std::path::Path;
-    /// # fn demo() -> grit_lib::Result<()> {
+    /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")))?;
     /// let names = repo.remotes().list()?;
     /// let _ = names;
@@ -197,7 +197,7 @@ pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
         let Some(rest) = entry.key.strip_prefix("remote.") else {
             continue;
         };
-        let Some((name, key)) = rest.split_once('.') else {
+        let Some((name, key)) = rest.rsplit_once('.') else {
             continue;
         };
         if key == "url" && !name.is_empty() {
@@ -205,4 +205,29 @@ pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
         }
     }
     names.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::configured_remote_names;
+    use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+
+    #[test]
+    fn configured_remote_names_parses_dotted_subsections() {
+        let file = ConfigFile::parse(
+            std::path::Path::new("cfg"),
+            r#"[remote "team.prod"]
+	url = /tmp/upstream.git
+[remote "origin"]
+	url = /tmp/origin.git
+"#,
+            ConfigScope::Local,
+        )
+        .expect("parse");
+        let mut set = ConfigSet::new();
+        set.merge(&file);
+        let names = configured_remote_names(&set);
+        assert!(names.contains(&"team.prod".to_owned()));
+        assert!(names.contains(&"origin".to_owned()));
+    }
 }

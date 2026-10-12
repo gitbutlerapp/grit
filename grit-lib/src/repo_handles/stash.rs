@@ -60,7 +60,7 @@ impl<'repo> RepositoryStash<'repo> {
     /// ```
     /// # use grit_lib::repo::Repository;
     /// # use std::path::Path;
-    /// # fn demo() -> grit_lib::Result<()> {
+    /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")))?;
     /// let entries = repo.stash().list()?;
     /// let _ = entries.len();
@@ -85,7 +85,7 @@ impl<'repo> RepositoryStash<'repo> {
     /// # use grit_lib::repo::Repository;
     /// # use grit_lib::repo_handles::StashPushOptions;
     /// # use std::path::Path;
-    /// # fn demo() -> grit_lib::Result<()> {
+    /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")))?;
     /// let opts = StashPushOptions {
     ///     message: Some("wip".into()),

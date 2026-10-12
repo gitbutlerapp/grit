@@ -5,7 +5,8 @@ use std::process::Command;
 
 use grit_lib::fetch::NoProgress;
 use grit_lib::notes::NotesRef;
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::refs;
 use grit_lib::remote::ListRefsOptions;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{
@@ -359,4 +360,80 @@ fn handle_fetch_push_local_bare_remote() {
         .ls_remote(&remote, &ListRefsOptions::default(), None)
         .expect("ls-remote");
     assert!(ls.iter().any(|r| r.name == "refs/heads/main"));
+}
+
+#[test]
+fn handle_remote_list_includes_dotted_remote_names() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let bare = tempfile::tempdir().expect("bare");
+    git_cmd(
+        bare.path(),
+        &["init", "-q", "--bare", "-b", "main", "upstream.git"],
+    );
+    let upstream = bare.path().join("upstream.git");
+    git_cmd(
+        dir.path(),
+        &["remote", "add", "team.prod", upstream.to_str().unwrap()],
+    );
+    let listed = git_cmd(dir.path(), &["remote"]);
+    assert!(
+        listed.lines().any(|l| l.trim() == "team.prod"),
+        "git remote should list team.prod:\n{listed}"
+    );
+
+    let repo = open_grit(dir.path());
+    repo.reload_config().expect("reload");
+    let names = repo.remotes().list().expect("list");
+    assert!(
+        names.iter().any(|n| n == "team.prod"),
+        "handle list should include team.prod: {names:?}"
+    );
+}
+
+#[test]
+fn handle_notes_add_rejects_invalid_existing_notes_ref() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f"), "b\n").unwrap();
+    git_cmd(dir.path(), &["add", "f"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    let commit: ObjectId = git_cmd(dir.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+
+    let repo = open_grit(dir.path());
+    let blob = repo
+        .odb
+        .write(ObjectKind::Blob, b"not a commit\n")
+        .expect("blob");
+    refs::write_ref(&repo.git_dir, "refs/notes/commits", &blob).expect("seed bad notes ref");
+
+    let notes_before = git_cmd(dir.path(), &["rev-parse", "refs/notes/commits"]);
+    let err = repo
+        .notes()
+        .add(
+            &NotesRef::commits(),
+            &commit,
+            b"note\n",
+            &NotesWriteOptions {
+                message: "add".into(),
+                committer: IDENT.into(),
+                author: None,
+            },
+        )
+        .expect_err("must not write on corrupt notes ref");
+    assert!(
+        !err.to_string().is_empty(),
+        "error should describe invalid notes ref"
+    );
+
+    let notes_after = git_cmd(dir.path(), &["rev-parse", "refs/notes/commits"]);
+    assert_eq!(
+        notes_before.trim(),
+        notes_after.trim(),
+        "notes ref must be unchanged after failed add"
+    );
+    assert_fsck_strict(dir.path());
 }
