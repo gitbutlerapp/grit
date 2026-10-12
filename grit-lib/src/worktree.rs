@@ -35,6 +35,8 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
     /// Administrative directory: common git dir for main, else `worktrees/<id>/`.
     pub admin_dir: PathBuf,
+    /// True when the working tree directory is gone (Git `prunable` in `worktree list`).
+    pub is_prunable: bool,
 }
 
 /// Shared git directory for `git_dir` (follows `commondir` for linked worktrees).
@@ -220,6 +222,7 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
         is_locked: false,
         lock_reason: None,
         admin_dir: common.clone(),
+        is_prunable: false,
     });
 
     let worktrees_dir = common.join("worktrees");
@@ -240,6 +243,7 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
         let wt_head = resolve_linked_head(&admin, &common);
         let wt_path = read_worktree_path(&admin)?;
         let (is_locked, lock_reason) = read_lock_state(&admin)?;
+        let is_prunable = worktree_entry_is_prunable(&admin, &wt_path, is_locked);
         entries.push(WorktreeEntry {
             path: wt_path,
             head: wt_head,
@@ -247,6 +251,7 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
             is_locked,
             lock_reason,
             admin_dir: admin,
+            is_prunable,
         });
     }
 
@@ -425,6 +430,8 @@ pub struct AddLinkedWorktreeOptions {
     pub detach: bool,
     /// Start commit (revision spec). Defaults to the current `HEAD` commit.
     pub start_point: Option<String>,
+    /// Replace a stale registration when the working tree directory is missing.
+    pub force: bool,
 }
 
 /// Register and populate a linked worktree (Git `worktree add` layout).
@@ -444,10 +451,12 @@ pub fn add_linked_worktree(
         ));
     }
 
-    let wt_path = opts
-        .path
-        .canonicalize()
-        .unwrap_or_else(|_| opts.path.clone());
+    let wt_path = if opts.path.exists() {
+        path_for_disk_compare(&opts.path)
+    } else {
+        opts.path.clone()
+    };
+    let admin_plan = plan_admin_dir_for_add(&common, &wt_path, opts.force)?;
     ensure_empty_or_missing(&wt_path)?;
 
     let start_spec = opts.start_point.as_deref().unwrap_or("HEAD");
@@ -501,39 +510,285 @@ pub fn add_linked_worktree(
         Some(branch_ref)
     };
 
-    let admin = allocate_worktree_admin_dir(&common, &wt_path);
-    fs::create_dir_all(&admin).map_err(Error::Io)?;
-    fs::create_dir_all(&wt_path).map_err(Error::Io)?;
+    let admin = admin_plan.admin_dir;
+    let worktree_absent_before = !wt_path.exists();
+    let mut stale_guard = admin_plan
+        .stale_admins
+        .map(StaleWorktreeAdminBackup::remove_and_backup)
+        .transpose()?;
 
-    let wt_git = wt_path.join(".git");
-    fs::write(
-        &wt_git,
-        format!(
-            "gitdir: {}\n",
-            absolute_path_for_gitfile_stored_path(&admin)
-        ),
-    )
-    .map_err(Error::Io)?;
-    let wt_git_abs = absolute_path_for_gitfile_stored_path(&wt_git);
-    fs::write(admin.join("commondir"), "../..\n").map_err(Error::Io)?;
-    fs::write(admin.join("gitdir"), format!("{wt_git_abs}\n")).map_err(Error::Io)?;
+    let finish = (|| -> Result<WorktreeEntry> {
+        fs::create_dir_all(&admin).map_err(Error::Io)?;
+        if let Some(guard) = stale_guard.as_mut() {
+            guard.set_new_admin(&admin);
+        }
+        fs::create_dir_all(&wt_path).map_err(Error::Io)?;
+        if let Some(guard) = stale_guard.as_mut() {
+            guard.track_replacement_worktree(&wt_path, worktree_absent_before);
+        }
 
-    if let Some(ref branch_ref) = head_ref {
-        fs::write(admin.join("HEAD"), format!("ref: {branch_ref}\n")).map_err(Error::Io)?;
-    } else {
-        fs::write(admin.join("HEAD"), format!("{start_oid}\n")).map_err(Error::Io)?;
+        let wt_git = wt_path.join(".git");
+        fs::write(
+            &wt_git,
+            format!(
+                "gitdir: {}\n",
+                absolute_path_for_gitfile_stored_path(&admin)
+            ),
+        )
+        .map_err(Error::Io)?;
+        let wt_git_abs = absolute_path_for_gitfile_stored_path(&wt_git);
+        fs::write(admin.join("commondir"), "../..\n").map_err(Error::Io)?;
+        fs::write(admin.join("gitdir"), format!("{wt_git_abs}\n")).map_err(Error::Io)?;
+
+        if let Some(ref branch_ref) = head_ref {
+            fs::write(admin.join("HEAD"), format!("ref: {branch_ref}\n")).map_err(Error::Io)?;
+        } else {
+            fs::write(admin.join("HEAD"), format!("{start_oid}\n")).map_err(Error::Io)?;
+        }
+
+        copy_filtered_worktree_config(&common, &admin)?;
+
+        let linked = Repository::discover(Some(&wt_path))?;
+        checkout_between_trees(&linked, None, &tree_oid)?;
+
+        linked_worktree_entry(&admin, &common)
+    })();
+
+    match finish {
+        Ok(entry) => {
+            if let Some(guard) = stale_guard.take() {
+                guard.commit();
+            }
+            Ok(entry)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Remove admin directories for linked worktrees whose working tree is gone.
+///
+/// Skips locked worktrees. Returns paths to pruned working trees (for reporting).
+///
+/// # Errors
+///
+/// Propagates I/O failures while reading or removing admin directories.
+pub fn prune_linked_worktrees(repo: &Repository) -> Result<Vec<PathBuf>> {
+    let common = common_git_dir(&repo.git_dir);
+    let worktrees_dir = common.join("worktrees");
+    if !worktrees_dir.is_dir() {
+        return Ok(Vec::new());
     }
 
-    copy_filtered_worktree_config(&common, &admin)?;
+    let mut pruned = Vec::new();
+    for entry in list_worktrees(repo)? {
+        if entry.admin_dir == common || entry.is_locked || !entry.is_prunable {
+            continue;
+        }
+        let wt_path = entry.path.clone();
+        fs::remove_dir_all(&entry.admin_dir).map_err(Error::Io)?;
+        pruned.push(wt_path);
+    }
+    Ok(pruned)
+}
 
-    let linked = Repository::discover(Some(&wt_path))?;
-    checkout_between_trees(&linked, None, &tree_oid)?;
+fn linked_worktree_entry(admin: &Path, common: &Path) -> Result<WorktreeEntry> {
+    let wt_path = read_worktree_path(admin)?;
+    let wt_head = resolve_linked_head(admin, common);
+    let (is_locked, lock_reason) = read_lock_state(admin)?;
+    let is_prunable = worktree_entry_is_prunable(admin, &wt_path, is_locked);
+    Ok(WorktreeEntry {
+        path: wt_path,
+        head: wt_head,
+        is_bare: false,
+        is_locked,
+        lock_reason,
+        admin_dir: admin.to_path_buf(),
+        is_prunable,
+    })
+}
 
-    let wt_canon = path_for_disk_compare(&wt_path);
-    list_worktrees(repo)?
-        .into_iter()
-        .find(|e| e.path == wt_canon)
-        .ok_or_else(|| Error::Message("worktree was added but could not be listed".into()))
+fn worktree_entry_is_prunable(admin: &Path, wt_path: &Path, is_locked: bool) -> bool {
+    if is_locked {
+        return false;
+    }
+    if admin.join("prunable").is_file() {
+        return true;
+    }
+    !wt_path.exists()
+}
+
+/// Resolve `path` for [`add_linked_worktree`].
+///
+/// Relative paths are interpreted from `relative_to` (typically the process working
+/// directory at the CLI boundary). The result is absolute and stable for registry
+/// comparison even when the leaf directory does not exist yet.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when `path` has no final component.
+pub fn resolve_linked_worktree_add_path(path: &Path, relative_to: &Path) -> Result<PathBuf> {
+    if path.exists() {
+        return Ok(path_for_disk_compare(path));
+    }
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        relative_to.join(path)
+    };
+    if let Some(parent) = absolute.parent().filter(|p| p.exists()) {
+        let Some(name) = absolute.file_name() else {
+            return Err(Error::Message("invalid worktree path".into()));
+        };
+        let mut resolved = path_for_disk_compare(parent);
+        resolved.push(name);
+        return Ok(resolved);
+    }
+    Ok(absolute)
+}
+
+struct WorktreeAdminAddPlan {
+    admin_dir: PathBuf,
+    stale_admins: Option<Vec<PathBuf>>,
+}
+
+/// On failure after stale admin dirs were moved aside, restore them.
+struct StaleWorktreeAdminBackup {
+    moved_aside: Vec<(PathBuf, PathBuf)>,
+    new_admin: Option<PathBuf>,
+    replacement_worktree: Option<(PathBuf, bool)>,
+}
+
+impl StaleWorktreeAdminBackup {
+    fn remove_and_backup(stale_admins: Vec<PathBuf>) -> Result<Self> {
+        let mut moved_aside = Vec::new();
+        for (i, admin) in stale_admins.into_iter().enumerate() {
+            let id = admin
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "wt".to_owned());
+            let aside = admin
+                .parent()
+                .ok_or_else(|| Error::Message("invalid worktree admin path".into()))?
+                .join(format!(".{id}-stale-backup-{i}"));
+            if aside.exists() {
+                fs::remove_dir_all(&aside).map_err(Error::Io)?;
+            }
+            fs::rename(&admin, &aside).map_err(Error::Io)?;
+            moved_aside.push((admin, aside));
+        }
+        Ok(Self {
+            moved_aside,
+            new_admin: None,
+            replacement_worktree: None,
+        })
+    }
+
+    fn set_new_admin(&mut self, admin: &Path) {
+        self.new_admin = Some(admin.to_path_buf());
+    }
+
+    fn track_replacement_worktree(&mut self, path: &Path, absent_before_replacement: bool) {
+        self.replacement_worktree = Some((path.to_path_buf(), absent_before_replacement));
+    }
+
+    fn commit(mut self) {
+        for (_, aside) in self.moved_aside.drain(..) {
+            let _ = fs::remove_dir_all(aside);
+        }
+    }
+}
+
+impl Drop for StaleWorktreeAdminBackup {
+    fn drop(&mut self) {
+        if self.moved_aside.is_empty() {
+            return;
+        }
+        if let Some((wt_path, absent_before)) = self.replacement_worktree.take() {
+            if absent_before {
+                let _ = fs::remove_dir_all(&wt_path);
+            } else if wt_path.join(".git").is_file() {
+                let _ = fs::remove_file(wt_path.join(".git"));
+            }
+        }
+        if let Some(new_admin) = self.new_admin.take() {
+            let _ = fs::remove_dir_all(new_admin);
+        }
+        for (admin, aside) in &self.moved_aside {
+            let _ = fs::remove_dir_all(admin);
+            let _ = fs::rename(aside, admin);
+        }
+    }
+}
+
+fn linked_admins_for_worktree_path(common: &Path, wt_path: &Path) -> Result<Vec<PathBuf>> {
+    let target = path_for_disk_compare(wt_path);
+    let worktrees_dir = common.join("worktrees");
+    if !worktrees_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut admins = Vec::new();
+    for entry in fs::read_dir(&worktrees_dir).map_err(Error::Io)? {
+        let entry = entry.map_err(Error::Io)?;
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let admin = entry.path();
+        let registered = read_worktree_path(&admin)?;
+        if path_for_disk_compare(&registered) == target {
+            admins.push(admin);
+        }
+    }
+    Ok(admins)
+}
+
+fn plan_admin_dir_for_add(
+    common: &Path,
+    wt_path: &Path,
+    force: bool,
+) -> Result<WorktreeAdminAddPlan> {
+    let existing = linked_admins_for_worktree_path(common, wt_path)?;
+    if existing.is_empty() {
+        return Ok(WorktreeAdminAddPlan {
+            admin_dir: allocate_worktree_admin_dir(common, wt_path),
+            stale_admins: None,
+        });
+    }
+
+    let display = wt_path.display().to_string();
+    if wt_path.exists() {
+        return Err(Error::WorktreePathRegistered { path: display });
+    }
+    if !force {
+        return Err(Error::WorktreePathRegisteredMissing { path: display });
+    }
+
+    let worktrees_dir = common.join("worktrees");
+    let base = sanitize_worktree_id_component(&worktree_path_basename(wt_path));
+    let base = if base.is_empty() {
+        "worktree".to_owned()
+    } else {
+        base
+    };
+    let preferred = worktrees_dir.join(&base);
+    let admin_dir = existing
+        .iter()
+        .find(|admin| {
+            admin
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy() == base)
+        })
+        .cloned()
+        .unwrap_or_else(|| {
+            if preferred.exists() {
+                allocate_worktree_admin_dir(common, wt_path)
+            } else {
+                preferred
+            }
+        });
+    Ok(WorktreeAdminAddPlan {
+        admin_dir,
+        stale_admins: Some(existing),
+    })
 }
 
 /// Remove a linked worktree and its admin directory.
@@ -548,7 +803,12 @@ pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Re
     let entry = list_worktrees(repo)?
         .into_iter()
         .find(|e| e.path == target)
-        .ok_or_else(|| Error::Message(format!("'{target:?}' is not a registered worktree")))?;
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "'{}' is not a registered worktree",
+                target.display()
+            ))
+        })?;
     if entry.admin_dir == common {
         return Err(Error::Message("cannot remove the main working tree".into()));
     }
@@ -564,7 +824,7 @@ pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Re
     let linked = Repository::discover(Some(&entry.path))?;
     if !force && worktree_has_local_changes(&linked)? {
         return Err(Error::Message(
-            "worktree contains modified or untracked files; use force to remove".into(),
+            "worktree contains modified or untracked files; use -f or --force to remove".into(),
         ));
     }
 
@@ -763,6 +1023,7 @@ mod tests {
                 new_branch: true,
                 detach: false,
                 start_point: Some("HEAD".into()),
+                force: false,
             },
         )
         .unwrap();
@@ -891,6 +1152,7 @@ mod tests {
                 new_branch: true,
                 detach: false,
                 start_point: None,
+                force: false,
             },
         )
         .unwrap_err();
@@ -927,6 +1189,7 @@ mod tests {
                 new_branch: true,
                 detach: false,
                 start_point: Some("HEAD".into()),
+                force: false,
             },
         )
         .unwrap();
@@ -946,6 +1209,58 @@ mod tests {
         assert!(ensure_branch_not_checked_out_in_any_worktree(&repo, "feature").is_err());
         assert!(ensure_branch_not_checked_out_elsewhere(&linked_repo, "feature").is_ok());
         assert!(ensure_branch_not_checked_out_elsewhere(&repo, "feature").is_err());
+    }
+
+    #[test]
+    fn missing_registered_path_rejects_add_without_force() {
+        use std::process::Command;
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        fs::create_dir_all(&main).unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .current_dir(&main)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        git(&["init", "-q", "-b", "main"]);
+        fs::write(main.join("t"), b"1\n").unwrap();
+        git(&["add", "t"]);
+        git(&["commit", "-qm", "init"]);
+
+        let repo = Repository::discover(Some(&main)).unwrap();
+        let linked = tmp.path().join("linked");
+        add_linked_worktree(
+            &repo,
+            &AddLinkedWorktreeOptions {
+                path: linked.clone(),
+                branch: Some("a".into()),
+                new_branch: true,
+                detach: false,
+                start_point: Some("HEAD".into()),
+                force: false,
+            },
+        )
+        .unwrap();
+        fs::remove_dir_all(&linked).unwrap();
+        assert!(matches!(
+            add_linked_worktree(
+                &repo,
+                &AddLinkedWorktreeOptions {
+                    path: linked.clone(),
+                    branch: Some("b".into()),
+                    new_branch: true,
+                    detach: false,
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                },
+            )
+            .unwrap_err(),
+            Error::WorktreePathRegisteredMissing { .. }
+        ));
     }
 
     #[test]
@@ -980,6 +1295,7 @@ mod tests {
                 new_branch: true,
                 detach: false,
                 start_point: Some("HEAD".into()),
+                force: false,
             },
         )
         .unwrap();

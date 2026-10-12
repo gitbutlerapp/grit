@@ -491,6 +491,16 @@ pub enum Error {
         worktree_path: String,
     },
 
+    /// A linked worktree path is already registered under `.git/worktrees/`.
+    #[error(
+        "'{path}' is a missing but already registered worktree; use add with --force to override, or prune or remove to clear"
+    )]
+    WorktreePathRegisteredMissing { path: String },
+
+    /// A linked worktree path is already registered and its directory still exists.
+    #[error("'{path}' is already a registered worktree")]
+    WorktreePathRegistered { path: String },
+
     /// Stash commit object has fewer parents or an invalid shape for apply/show.
     #[error("corrupt stash commit: {0}")]
     CorruptStash(&'static str),

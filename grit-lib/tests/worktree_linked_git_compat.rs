@@ -41,6 +41,7 @@ fn grit_add_and_remove_linked_worktree_git_list() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".to_owned()),
+            force: false,
         },
     )
     .expect("add worktree");

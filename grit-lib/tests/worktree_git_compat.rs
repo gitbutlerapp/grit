@@ -53,6 +53,7 @@ fn t2400_worktree_admin_dir_roundtrip_with_git() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("grit add");
@@ -113,6 +114,7 @@ fn t2404_worktree_config_matches_git() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("add");
@@ -159,6 +161,7 @@ fn t2402_worktree_list_matches_git_porcelain() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("add");
@@ -204,6 +207,7 @@ fn per_worktree_refs_resolve_like_git() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("add");
@@ -258,6 +262,7 @@ fn t2401_remove_linked_worktree_matches_git() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("add");

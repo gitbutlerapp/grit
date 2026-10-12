@@ -39,6 +39,7 @@ fn add_detach_linked_worktree_and_list_locked_state() {
             new_branch: false,
             detach: true,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("detach add");
@@ -86,6 +87,7 @@ fn add_worktree_on_existing_branch() {
             new_branch: false,
             detach: false,
             start_point: None,
+            force: false,
         },
     )
     .expect("existing branch checkout");
@@ -111,6 +113,7 @@ fn remove_dirty_worktree_requires_force() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("add");
@@ -139,6 +142,7 @@ fn second_worktree_same_branch_is_rejected() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("first");
@@ -152,6 +156,7 @@ fn second_worktree_same_branch_is_rejected() {
             new_branch: false,
             detach: false,
             start_point: None,
+            force: false,
         },
     )
     .is_err());

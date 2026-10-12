@@ -690,6 +690,7 @@ fn t3908_stash_in_linked_worktree() {
             new_branch: true,
             detach: false,
             start_point: Some("HEAD".into()),
+            force: false,
         },
     )
     .expect("add worktree");

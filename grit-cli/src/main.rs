@@ -131,6 +131,9 @@ enum WorktreeAction {
         /// Check out in detached HEAD mode.
         #[arg(long = "detach")]
         detach: bool,
+        /// Reuse a stale registration when the working tree directory is missing.
+        #[arg(short, long)]
+        force: bool,
     },
     /// Remove a linked worktree.
     Remove {
@@ -140,6 +143,8 @@ enum WorktreeAction {
         #[arg(short, long)]
         force: bool,
     },
+    /// Drop registrations for linked worktrees whose directories are gone.
+    Prune,
 }
 
 /// Subcommands of `grit bundle`.
@@ -726,16 +731,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
                 start_point,
                 branch,
                 detach,
+                force,
             } => {
                 let new_branch = branch.is_some();
                 emit(
-                    &commands::worktree::run_add(path, start_point, branch, new_branch, detach)?,
+                    &commands::worktree::run_add(
+                        path,
+                        start_point,
+                        branch,
+                        new_branch,
+                        detach,
+                        force,
+                    )?,
                     opts,
                 )
             }
             WorktreeAction::Remove { path, force } => {
                 emit(&commands::worktree::run_remove(path, force)?, opts)
             }
+            WorktreeAction::Prune => emit(&commands::worktree::run_prune()?, opts),
         },
         Command::Switch {
             branch,
