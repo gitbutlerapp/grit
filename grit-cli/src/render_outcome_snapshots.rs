@@ -7,9 +7,11 @@ use std::path::Path;
 use grit_test_support::CliFixture;
 use time::OffsetDateTime;
 
-use crate::commands::auth::AuthOutcome;
+use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::update::UpdateOutcome;
-use crate::output::{render_to_string, OutputMode, RenderContext};
+use crate::output::{render_to_string, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use grit_test_support::ModeCapture;
+use serde::Serialize;
 
 fn snapshot_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots"))
@@ -21,6 +23,47 @@ fn sample_ctx() -> RenderContext {
     }
 }
 
+#[derive(Serialize)]
+struct AuthRenderSnapshot {
+    sign_in: AuthModesSnapshot,
+    logout: AuthModesSnapshot,
+}
+
+#[derive(Serialize)]
+struct AuthModesSnapshot {
+    human: ModeCapture,
+    json: ModeCapture,
+    markdown: ModeCapture,
+}
+
+fn capture_outcome<T: HumanRender + MarkdownRender + serde::Serialize>(
+    value: &T,
+    ctx: &RenderContext,
+) -> AuthModesSnapshot {
+    AuthModesSnapshot {
+        human: mode_capture(
+            &render_to_string(value, OutputMode::Human, ctx).expect("human"),
+            0,
+        ),
+        json: mode_capture(
+            &render_to_string(value, OutputMode::Json, ctx).expect("json"),
+            0,
+        ),
+        markdown: mode_capture(
+            &render_to_string(value, OutputMode::Markdown, ctx).expect("markdown"),
+            0,
+        ),
+    }
+}
+
+fn mode_capture(stdout: &str, exit: i32) -> ModeCapture {
+    ModeCapture {
+        exit,
+        stdout: stdout.to_owned(),
+        stderr: String::new(),
+    }
+}
+
 #[test]
 fn auth_render() {
     let ctx = sample_ctx();
@@ -28,11 +71,20 @@ fn auth_render() {
         authenticated: true,
         host: "github.com".to_owned(),
     };
-    let human = render_to_string(&sign_in, OutputMode::Human, &ctx).expect("human");
-    let json = render_to_string(&sign_in, OutputMode::Json, &ctx).expect("json");
-    let markdown = render_to_string(&sign_in, OutputMode::Markdown, &ctx).expect("markdown");
-
-    CliFixture::snapshot_rendered_modes("auth_render", snapshot_dir(), &human, &json, &markdown);
+    let logout = LogoutOutcome {
+        logged_out: true,
+        host: "github.com".to_owned(),
+    };
+    let payload = AuthRenderSnapshot {
+        sign_in: capture_outcome(&sign_in, &ctx),
+        logout: capture_outcome(&logout, &ctx),
+    };
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_path(snapshot_dir());
+    settings.set_prepend_module_to_snapshot(false);
+    settings.bind(|| {
+        insta::assert_json_snapshot!("grit_test_support__cli_fixture__auth_render", payload);
+    });
 }
 
 #[test]

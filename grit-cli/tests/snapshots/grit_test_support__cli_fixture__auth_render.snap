@@ -1,21 +1,40 @@
 ---
-source: grit-test-support/src/cli_fixture.rs
+source: grit-cli/src/render_outcome_snapshots.rs
 expression: payload
 ---
 {
-  "human": {
-    "exit": 0,
-    "stdout": "\n✓ Signed in to GitHub — token stored for github.com.\n",
-    "stderr": ""
+  "sign_in": {
+    "human": {
+      "exit": 0,
+      "stdout": "\n✓ Signed in to GitHub — token stored for github.com.\n",
+      "stderr": ""
+    },
+    "json": {
+      "exit": 0,
+      "stdout": "{\n  \"authenticated\": true,\n  \"host\": \"github.com\"\n}\n",
+      "stderr": ""
+    },
+    "markdown": {
+      "exit": 0,
+      "stdout": "## Auth\n\n- Signed in to **`github.com`**\n",
+      "stderr": ""
+    }
   },
-  "json": {
-    "exit": 0,
-    "stdout": "{\n  \"authenticated\": true,\n  \"host\": \"github.com\"\n}\n",
-    "stderr": ""
-  },
-  "markdown": {
-    "exit": 0,
-    "stdout": "## Auth\n\n- Signed in to **`github.com`**\n",
-    "stderr": ""
+  "logout": {
+    "human": {
+      "exit": 0,
+      "stdout": "✓ Signed out of GitHub — removed the stored token for github.com.\n",
+      "stderr": ""
+    },
+    "json": {
+      "exit": 0,
+      "stdout": "{\n  \"logged_out\": true,\n  \"host\": \"github.com\"\n}\n",
+      "stderr": ""
+    },
+    "markdown": {
+      "exit": 0,
+      "stdout": "## Auth logout\n\n- Signed out of **`github.com`** (stored token removed)\n",
+      "stderr": ""
+    }
   }
 }
