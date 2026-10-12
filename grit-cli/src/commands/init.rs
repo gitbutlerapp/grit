@@ -1,6 +1,7 @@
 //! `grit init` — create a new, empty repository.
 
 use std::path::PathBuf;
+use std::io::Write;
 
 use anyhow::{Context, Result};
 use grit_lib::git_path::user_display_path;
@@ -8,7 +9,7 @@ use grit_lib::ref_storage::RefStorageFormat;
 use grit_lib::repo::init_repository;
 use serde::Serialize;
 
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -31,7 +32,7 @@ pub struct InitOutcome {
 }
 
 impl HumanRender for InitOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let kind = if self.bare {
             "bare repository"
         } else {
@@ -48,11 +49,12 @@ impl HumanRender for InitOutcome {
                 self.path, self.ref_format
             );
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for InitOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let kind = if self.bare {
             "bare repository"
         } else {
@@ -62,6 +64,7 @@ impl MarkdownRender for InitOutcome {
             "Initialized empty {kind} at `{}` (default branch `{}`, ref-format `{}`).",
             self.path, self.branch, self.ref_format
         );
+        Ok(())
     }
 }
 

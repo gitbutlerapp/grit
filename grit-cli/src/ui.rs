@@ -1,8 +1,12 @@
 //! Small output-formatting helpers shared by `grit` commands.
 
 use std::borrow::Cow;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
+
+use anyhow::Result;
+
+use crate::output::outln;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use grit_lib::git_path::relative_path_for_display;
@@ -89,9 +93,8 @@ const AUTHOR_MAX: usize = 15;
 /// date columns aligned. Colors are applied only on a TTY. The author is capped
 /// at [`AUTHOR_MAX`], and on a terminal the subject is truncated so the row never
 /// wraps.
-pub fn commit_rows(commits: &[CommitSummary]) -> Vec<String> {
+pub fn commit_rows(commits: &[CommitSummary], now: i64) -> Vec<String> {
     let color = use_color();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let term_width = terminal_size::terminal_size().map(|(w, _)| w.0 as usize);
 
     let cells: Vec<(String, String, String, &str)> = commits
@@ -192,15 +195,16 @@ fn status_color(status: &DiffStatus) -> &'static str {
 /// Each line is `  <glyph>  <label>  <path>`: the glyph and the fixed-width label
 /// column come first (colored by status on a TTY) so the paths line up.
 pub fn print_change_group(
+    w: &mut dyn Write,
     title: &str,
     entries: &[DiffEntry],
     path_display: Option<&PathDisplayContext>,
-) {
+) -> Result<()> {
     if entries.is_empty() {
-        return;
+        return Ok(());
     }
     let color = use_color();
-    println!("{}", paint(color, "1", title));
+    outln!(w, "{}", paint(color, "1", title));
     for entry in entries {
         let g = glyph(&entry.status);
         let l = label(entry);
@@ -209,28 +213,35 @@ pub fn print_change_group(
         let shown = path_display
             .map(|ctx| ctx.format_repo_path(repo_path).into_owned())
             .unwrap_or_else(|| repo_path.to_owned());
-        println!(
+        outln!(
+            w,
             "  {}  {}",
             paint(color, status_color(&entry.status), &marker),
             shown
         );
     }
-    println!();
+    outln!(w);
+    Ok(())
 }
 
 /// Print the untracked-files group (does nothing when empty).
-pub fn print_untracked(paths: &[String], path_display: Option<&PathDisplayContext>) {
+pub fn print_untracked(
+    w: &mut dyn Write,
+    paths: &[String],
+    path_display: Option<&PathDisplayContext>,
+) -> Result<()> {
     if paths.is_empty() {
-        return;
+        return Ok(());
     }
     let color = use_color();
-    println!("{}", paint(color, "1", "Untracked"));
+    outln!(w, "{}", paint(color, "1", "Untracked"));
     for path in paths {
         let shown = path_display
             .map(|ctx| ctx.format_repo_path(path).into_owned())
             .unwrap_or_else(|| path.clone());
         let marker = format!("?  {l:<width$}", l = "untracked", width = LABEL_WIDTH);
-        println!("  {}  {shown}", paint(color, "31", &marker));
+        outln!(w, "  {}  {shown}", paint(color, "31", &marker));
     }
-    println!();
+    outln!(w);
+    Ok(())
 }

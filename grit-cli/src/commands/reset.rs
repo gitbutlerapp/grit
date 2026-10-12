@@ -1,6 +1,7 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
 use anyhow::{Context, Result};
+use std::io::Write;
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, ResetOutcome};
@@ -8,7 +9,7 @@ use grit_lib::rev_parse::resolve_revision;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// CLI view of [`ResetOutcome`].
 #[derive(Serialize)]
@@ -31,24 +32,26 @@ impl From<ResetOutcome> for ResetCliOutcome {
 }
 
 impl HumanRender for ResetCliOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         println!(
             "Reset {} to {} ({})",
             self.r#ref,
             &self.target[..7.min(self.target.len())],
             self.mode
         );
+        Ok(())
     }
 }
 
 impl MarkdownRender for ResetCliOutcome {
-    fn render_markdown(&self) {
-        println!("## Reset");
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Reset");
         println!();
-        println!("- **ref:** `{}`", self.r#ref);
-        println!("- **mode:** `{}`", self.mode);
-        println!("- **target:** `{}`", self.target);
-        println!("- **previous:** `{}`", self.previous);
+        outln!(w, "- **ref:** `{}`", self.r#ref);
+        outln!(w, "- **mode:** `{}`", self.mode);
+        outln!(w, "- **target:** `{}`", self.target);
+        outln!(w, "- **previous:** `{}`", self.previous);
+        Ok(())
     }
 }
 

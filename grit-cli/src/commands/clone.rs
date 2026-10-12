@@ -1,6 +1,7 @@
 //! `grit clone` — copy a remote repository into a new directory.
 
 use std::path::{Path, PathBuf};
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -13,7 +14,7 @@ use grit_lib::remote::DefaultHttpClientFactory;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{progress, HumanRender, MarkdownRender, OutputMode};
+use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext, outln};
 use crate::progress::{format_bytes, TerminalProgress};
 
 /// Result of `grit clone`.
@@ -39,7 +40,7 @@ pub struct CloneOutcome {
 }
 
 impl HumanRender for CloneOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let size = format_bytes(self.bytes);
         let secs = self.elapsed.as_secs_f64();
         println!(
@@ -51,24 +52,26 @@ impl HumanRender for CloneOutcome {
             self.tags,
             self.files,
         );
+        Ok(())
     }
 }
 
 impl MarkdownRender for CloneOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let size = format_bytes(self.bytes);
         let secs = self.elapsed.as_secs_f64();
-        println!("## Clone complete");
+        outln!(w, "## Clone complete");
         println!();
-        println!("- **path**: `{}`", self.path);
-        println!("- **branch**: `{}`", self.branch);
-        println!("- **url**: `{}`", self.url);
-        println!("- **objects**: {}", self.objects);
-        println!("- **bytes**: {} ({size})", self.bytes);
-        println!("- **branches**: {}", self.branches);
-        println!("- **tags**: {}", self.tags);
-        println!("- **files**: {}", self.files);
-        println!("- **elapsed**: {secs:.2}s");
+        outln!(w, "- **path**: `{}`", self.path);
+        outln!(w, "- **branch**: `{}`", self.branch);
+        outln!(w, "- **url**: `{}`", self.url);
+        outln!(w, "- **objects**: {}", self.objects);
+        outln!(w, "- **bytes**: {} ({size})", self.bytes);
+        outln!(w, "- **branches**: {}", self.branches);
+        outln!(w, "- **tags**: {}", self.tags);
+        outln!(w, "- **files**: {}", self.files);
+        outln!(w, "- **elapsed**: {secs:.2}s");
+        Ok(())
     }
 }
 

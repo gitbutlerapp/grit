@@ -10,12 +10,13 @@
 //! one-line installs use.
 
 use std::path::PathBuf;
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
-use crate::output::{progress, HumanRender, MarkdownRender, OutputMode};
+use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext, outln};
 
 /// URL of the POSIX-sh installer (used on Unix).
 #[cfg(not(windows))]
@@ -34,8 +35,9 @@ pub struct UpdateOutcome {
 }
 
 impl HumanRender for UpdateOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         // The installer's own output is the user-facing feedback; nothing extra.
+        Ok(())
     }
 }
 

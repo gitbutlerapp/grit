@@ -1,6 +1,7 @@
 //! `grit commit` — stage every change and record a new commit.
 
 use anyhow::{bail, Context, Result};
+use std::io::Write;
 use grit_lib::error::Error;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::objects::parse_commit;
@@ -10,7 +11,7 @@ use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
 
 use crate::context::{self, subject_line};
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 use grit_lib::porcelain::add::stage_for_commit;
 
 /// Result of `grit commit`.
@@ -24,7 +25,7 @@ pub struct CommitOutcome {
 }
 
 impl HumanRender for CommitOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         println!(
             "[{} {}] {}",
             self.branch,
@@ -36,6 +37,7 @@ impl HumanRender for CommitOutcome {
             self.changes,
             if self.changes == 1 { "" } else { "s" }
         );
+        Ok(())
     }
 }
 

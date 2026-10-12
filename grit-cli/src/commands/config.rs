@@ -6,6 +6,7 @@
 //! config (`~/.gitconfig`).
 
 use std::path::PathBuf;
+use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
@@ -13,7 +14,7 @@ use serde::Serialize;
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Result of `grit config`, tagged by `action`.
 #[derive(Serialize)]
@@ -38,7 +39,7 @@ pub struct ConfigEntry {
 }
 
 impl HumanRender for ConfigOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         match self {
             // `get` prints just the value, matching `git config <key>`.
             ConfigOutcome::Get { value, .. } => println!("{value}"),
@@ -53,19 +54,21 @@ impl HumanRender for ConfigOutcome {
             // `set` / `unset` are silent in human mode (as before).
             ConfigOutcome::Set { .. } | ConfigOutcome::Unset { .. } => {}
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for ConfigOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         match self {
             ConfigOutcome::Get { key, value } => {
-                println!("`{key}` = {value}");
+                outln!(w, "`{key}` = {value}");
             }
-            ConfigOutcome::List { entries } => markdown::print_config_entries(entries),
+            ConfigOutcome::List { entries } => markdown::print_config_entries(w, entries)?,
             ConfigOutcome::Set { key, value } => println!("Set `{key}` = {value}."),
             ConfigOutcome::Unset { key } => println!("Unset `{key}`."),
         }
+        Ok(())
     }
 }
 

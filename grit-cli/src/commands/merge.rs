@@ -5,7 +5,8 @@
 //! markers in the worktree.
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender};
+use std::io::Write;
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
@@ -97,7 +98,7 @@ impl MergeOutcome {
 }
 
 impl HumanRender for MergeOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let short = self.oid.as_deref().map(short_hex).unwrap_or_default();
         match self.result.as_str() {
             "up_to_date" => println!("Already up to date."),
@@ -120,6 +121,7 @@ impl HumanRender for MergeOutcome {
             ),
             other => println!("{other}"),
         }
+        Ok(())
     }
 }
 

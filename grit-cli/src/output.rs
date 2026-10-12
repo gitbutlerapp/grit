@@ -17,7 +17,8 @@
 use anyhow::{bail, Result};
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use serde::Serialize;
-use std::io::{ErrorKind, Write as _};
+use std::io::{ErrorKind, Write};
+use time::OffsetDateTime;
 
 use crate::cli_messages::human_error_message;
 use crate::context::CommitSummary;
@@ -25,6 +26,24 @@ use crate::json_error::structured_json_payload;
 use crate::json_filter::apply_json_filter;
 use crate::stdio;
 use crate::ui::entry_path;
+
+/// Wall-clock instant captured once per process invocation for relative dates.
+#[derive(Clone, Copy, Debug)]
+pub struct RenderContext {
+    /// Current time with repository timezone semantics applied at capture.
+    pub now: OffsetDateTime,
+}
+
+/// Write one line to `w`, treating a closed pipe as success.
+#[macro_export]
+macro_rules! outln {
+    ($w:expr $(, $($rest:tt)*)?) => {{
+        $crate::stdio::io_result(::std::writeln!($w $(, $($rest)*)*))
+            .map_err(|e| ::anyhow::anyhow!("writing output: {e}"))?
+    }};
+}
+
+pub(crate) use outln;
 
 /// How a command's outcome should be rendered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,11 +79,9 @@ impl OutputOptions {
 }
 
 /// Render a value as the command's human-readable output.
-///
-/// Implementations print to stdout directly (via `println!` and the `ui`
-/// helpers), so the existing text output is reproduced byte-for-byte.
 pub trait HumanRender {
-    fn render_human(&self);
+    /// Write human-oriented text to `w`.
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()>;
 }
 
 /// Render a command outcome as agent-friendly Markdown on stdout.
@@ -72,11 +89,11 @@ pub trait HumanRender {
 /// The default implementation lists top-level JSON fields; commands override this
 /// when they have structured human-oriented Markdown (log, diff, status, …).
 pub trait MarkdownRender: Serialize {
-    fn render_markdown(&self)
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()>
     where
         Self: Sized,
     {
-        render_value_markdown(self);
+        render_value_markdown(self, w, ctx)
     }
 }
 
@@ -87,43 +104,45 @@ pub trait MarkdownRender: Serialize {
 pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
     value: &T,
     opts: &OutputOptions,
+    ctx: &RenderContext,
 ) -> Result<()> {
     opts.validate()?;
-    match opts.mode {
-        OutputMode::Human => value.render_human(),
-        OutputMode::Json => write_json(value, opts.filter.as_deref())?,
-        OutputMode::Markdown => value.render_markdown(),
-    }
-    Ok(())
-}
-
-/// Like [`emit`], but uses [`MarkdownRender`] for [`OutputMode::Markdown`].
-pub fn emit_with_markdown<T: Serialize + HumanRender + MarkdownRender>(
-    value: &T,
-    opts: &OutputOptions,
-) -> Result<()> {
-    opts.validate()?;
-    match opts.mode {
-        OutputMode::Human => value.render_human(),
-        OutputMode::Json => write_json(value, opts.filter.as_deref())?,
-        OutputMode::Markdown => value.render_markdown(),
-    }
-    Ok(())
-}
-
-/// Serialize `value` to stdout, optionally applying a jq-like `filter`.
-fn write_json<T: Serialize>(value: &T, filter: Option<&str>) -> Result<()> {
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
+    match opts.mode {
+        OutputMode::Human => value.render_human(&mut lock, ctx)?,
+        OutputMode::Json => write_json(&mut lock, value, opts.filter.as_deref())?,
+        OutputMode::Markdown => value.render_markdown(&mut lock, ctx)?,
+    }
+    Ok(())
+}
+
+/// Render an outcome into an in-memory string (for tests and tooling).
+pub fn render_to_string<T: Serialize + HumanRender + MarkdownRender>(
+    value: &T,
+    mode: OutputMode,
+    ctx: &RenderContext,
+) -> Result<String> {
+    let mut buf = Vec::new();
+    match mode {
+        OutputMode::Human => value.render_human(&mut buf, ctx)?,
+        OutputMode::Json => write_json(&mut buf, value, None)?,
+        OutputMode::Markdown => value.render_markdown(&mut buf, ctx)?,
+    }
+    Ok(String::from_utf8(buf)?)
+}
+
+/// Serialize `value` to `w`, optionally applying a jq-like `filter`.
+fn write_json<T: Serialize>(w: &mut dyn Write, value: &T, filter: Option<&str>) -> Result<()> {
     if let Some(expr) = filter {
         let full = serde_json::to_value(value)
             .map_err(|e| anyhow::anyhow!("serializing JSON output: {e}"))?;
         let filtered = apply_json_filter(&full, expr)?;
-        json_write(serde_json::to_writer_pretty(&mut lock, &filtered))?;
+        json_write(serde_json::to_writer_pretty(&mut *w, &filtered))?;
     } else {
-        json_write(serde_json::to_writer_pretty(&mut lock, value))?;
+        json_write(serde_json::to_writer_pretty(&mut *w, value))?;
     }
-    let _ = stdio::io_result(writeln!(lock));
+    stdio::io_result(writeln!(w)).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
     Ok(())
 }
 
@@ -186,14 +205,19 @@ pub fn progress(mode: OutputMode, msg: &str) {
 }
 
 /// Default Markdown rendering: bullet list of top-level JSON fields.
-pub fn render_value_markdown<T: Serialize>(value: &T) {
+pub fn render_value_markdown<T: Serialize>(
+    value: &T,
+    w: &mut dyn Write,
+    _ctx: &RenderContext,
+) -> Result<()> {
     let Ok(serde_json::Value::Object(map)) = serde_json::to_value(value) else {
-        println!("(could not render outcome as Markdown)");
-        return;
+        outln!(w, "(could not render outcome as Markdown)");
+        return Ok(());
     };
     for (key, val) in map {
-        println!("- **{key}**: {}", markdown_scalar(&val));
+        outln!(w, "- **{key}**: {}", markdown_scalar(&val));
     }
+    Ok(())
 }
 
 fn markdown_scalar(value: &serde_json::Value) -> String {
@@ -263,5 +287,59 @@ pub fn change_json(entry: &DiffEntry) -> ChangeJson {
     ChangeJson {
         path: entry_path(entry).to_owned(),
         status: change_status_str(&entry.status).to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Serialize;
+    use std::io::Write;
+
+    #[derive(Serialize)]
+    struct SampleOutcome {
+        branch: &'static str,
+        clean: bool,
+    }
+
+    impl HumanRender for SampleOutcome {
+        fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+            outln!(w, "branch={} clean={}", self.branch, self.clean);
+            Ok(())
+        }
+    }
+
+    impl MarkdownRender for SampleOutcome {}
+
+    fn sample_ctx() -> RenderContext {
+        RenderContext {
+            now: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
+        }
+    }
+
+    #[test]
+    fn render_to_string_human_json_markdown() {
+        let value = SampleOutcome {
+            branch: "main",
+            clean: true,
+        };
+        let ctx = sample_ctx();
+        let human = render_to_string(&value, OutputMode::Human, &ctx).expect("human");
+        assert_eq!(human, "branch=main clean=true\n");
+        let json = render_to_string(&value, OutputMode::Json, &ctx).expect("json");
+        assert!(json.contains("\"branch\": \"main\""));
+        let md = render_to_string(&value, OutputMode::Markdown, &ctx).expect("markdown");
+        assert!(md.contains("**branch**"));
+        assert!(md.contains("**clean**"));
+    }
+
+    #[test]
+    fn filter_still_requires_json() {
+        let opts = OutputOptions {
+            mode: OutputMode::Human,
+            filter: Some(".branch".to_owned()),
+        };
+        let err = opts.validate().expect_err("filter without json");
+        assert!(err.to_string().contains("--filter requires --json"));
     }
 }

@@ -7,6 +7,7 @@
 //! introduced (rendered with the same delta-style as `grit diff`).
 
 use std::io::IsTerminal;
+use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::{parse_tag, ObjectId, ObjectKind};
@@ -18,7 +19,7 @@ use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
 use crate::context::{self, subject_line};
 use crate::dates::rfc3339_from_identity_when;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Width budget for the `+`/`-` change bars in the diffstat.
 const BAR_WIDTH: usize = 40;
@@ -229,13 +230,13 @@ impl Person {
 // --- Human rendering --------------------------------------------------------
 
 impl MarkdownRender for ShowOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if let Some(tag) = &self.tag {
-            println!("# Tag `{}`", tag.name);
+            outln!(w, "# Tag `{}`", tag.name);
             if let Some(tagger) = &tag.tagger {
                 println!();
-                println!("**Tagger:** {} <{}>", tagger.name, tagger.email);
-                println!("**Date:** {}", tagger.date);
+                outln!(w, "**Tagger:** {} <{}>", tagger.name, tagger.email);
+                outln!(w, "**Date:** {}", tagger.date);
             }
             if !tag.message.trim().is_empty() {
                 println!();
@@ -244,20 +245,20 @@ impl MarkdownRender for ShowOutcome {
             println!();
         } else if self.kind == "branch" {
             if let Some(name) = &self.ref_name {
-                println!("# Branch `{name}`");
+                outln!(w, "# Branch `{name}`");
                 println!();
             }
         } else if self.kind == "tag" {
             if let Some(name) = &self.ref_name {
-                println!("# Tag `{name}`");
+                outln!(w, "# Tag `{name}`");
                 println!();
             }
         }
 
         let short = self.commit.oid.get(..7).unwrap_or(self.commit.oid.as_str());
-        println!("# Commit `{short}`");
+        outln!(w, "# Commit `{short}`");
         println!();
-        println!("**Oid:** `{}`", self.commit.oid);
+        outln!(w, "**Oid:** `{}`", self.commit.oid);
         if self.commit.parents.len() > 1 {
             let parents: Vec<String> = self
                 .commit
@@ -265,16 +266,16 @@ impl MarkdownRender for ShowOutcome {
                 .iter()
                 .map(|p| format!("`{}`", p.get(..7).unwrap_or(p.as_str())))
                 .collect();
-            println!("**Merge parents:** {}", parents.join(", "));
+            outln!(w, "**Merge parents:** {}", parents.join(", "));
         }
         println!(
             "**Author:** {} <{}>",
             self.commit.author.name, self.commit.author.email
         );
-        println!("**Date:** {}", self.commit.author.date);
+        outln!(w, "**Date:** {}", self.commit.author.date);
         println!();
         if !self.commit.subject.is_empty() {
-            println!("## {}", self.commit.subject);
+            outln!(w, "## {}", self.commit.subject);
             println!();
         }
         let body = message_body(&self.commit.message, &self.commit.subject);
@@ -282,31 +283,32 @@ impl MarkdownRender for ShowOutcome {
             print_markdown_message(&body);
             println!();
         }
-        render_markdown_stat(&self.stat);
+        render_markdown_stat(w, &self.stat)?;
+        Ok(())
     }
 }
 
 impl HumanRender for ShowOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let color = use_color();
 
         // Annotated tags lead with their own block.
         if let Some(tag) = &self.tag {
             println!("{}", paint(color, "33;1", &format!("tag {}", tag.name)));
             if let Some(tagger) = &tag.tagger {
-                println!("Tagger: {} <{}>", tagger.name, tagger.email);
-                println!("Date:   {}", tagger.date);
+                outln!(w, "Tagger: {} <{}>", tagger.name, tagger.email);
+                outln!(w, "Date:   {}", tagger.date);
             }
             println!();
             print_message(&tag.message);
             println!();
         } else if self.kind == "branch" {
             if let Some(name) = &self.ref_name {
-                println!("{}", paint(color, "36", &format!("branch {name}")));
+                outln!(w, "{}", paint(color, "36", &format!("branch {name}")));
             }
         } else if self.kind == "tag" {
             if let Some(name) = &self.ref_name {
-                println!("{}", paint(color, "36", &format!("tag {name}")));
+                outln!(w, "{}", paint(color, "36", &format!("tag {name}")));
             }
         }
 
@@ -322,26 +324,27 @@ impl HumanRender for ShowOutcome {
                 .iter()
                 .map(|p| p.get(..7).unwrap_or(p).to_owned())
                 .collect();
-            println!("Merge:  {}", abbrev.join(" "));
+            outln!(w, "Merge:  {}", abbrev.join(" "));
         }
         println!(
             "Author: {} <{}>",
             self.commit.author.name, self.commit.author.email
         );
-        println!("Date:   {}", self.commit.author.date);
+        outln!(w, "Date:   {}", self.commit.author.date);
         println!();
         print_message(&self.commit.message);
 
-        render_stat(&self.stat, color);
+        render_stat(w, &self.stat, color)?;
+        Ok(())
     }
 }
 
 /// Render the diffstat, mirroring `git show --stat`.
-pub(crate) fn render_stat(stat: &DiffStat, color: bool) {
+pub(crate) fn render_stat(w: &mut dyn Write, stat: &DiffStat, color: bool) -> Result<()> {
     if stat.files.is_empty() {
-        return;
+        return Ok(());
     }
-    println!();
+    outln!(w);
 
     let name_width = stat
         .files
@@ -360,15 +363,16 @@ pub(crate) fn render_stat(stat: &DiffStat, color: bool) {
     for file in &stat.files {
         let path = stat_path(file);
         if file.binary {
-            println!(" {path:<name_width$} | Bin");
+            outln!(w, " {path:<name_width$} | Bin");
             continue;
         }
         let total = file.insertions + file.deletions;
         let bar = change_bar(file.insertions, file.deletions, max_changes, color);
-        println!(" {path:<name_width$} | {total:>3} {bar}");
+        outln!(w, " {path:<name_width$} | {total:>3} {bar}");
     }
 
-    println!(" {}", summary_line(stat));
+    outln!(w, " {}", summary_line(stat));
+    Ok(())
 }
 
 /// `old => new` for a rename, otherwise just the path.
@@ -474,24 +478,25 @@ fn message_body(full: &str, subject: &str) -> String {
     }
 }
 
-pub(crate) fn render_markdown_stat(stat: &DiffStat) {
+pub(crate) fn render_markdown_stat(w: &mut dyn Write, stat: &DiffStat) -> Result<()> {
     if stat.files.is_empty() {
-        return;
+        return Ok(());
     }
-    println!("## Changes");
-    println!();
-    println!("| File | + | − |");
-    println!("| --- | ---: | ---: |");
+    outln!(w, "## Changes");
+    outln!(w);
+    outln!(w, "| File | + | − |");
+    outln!(w, "| --- | ---: | ---: |");
     for file in &stat.files {
         let path = markdown::escape_table_cell(&stat_path(file));
         if file.binary {
-            println!("| `{path}` | binary | |");
+            outln!(w, "| `{path}` | binary | |");
         } else {
-            println!("| `{path}` | {} | {} |", file.insertions, file.deletions);
+            outln!(w, "| `{path}` | {} | {} |", file.insertions, file.deletions);
         }
     }
-    println!();
-    println!("{}", summary_line(stat));
+    outln!(w);
+    outln!(w, "{}", summary_line(stat));
+    Ok(())
 }
 
 fn use_color() -> bool {

@@ -5,9 +5,10 @@ use grit_lib::pathspec::{pathdiff, resolve_pathspec_in_worktree};
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions, RemoveOutcome};
 use grit_lib::repo::Repository;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// CLI outcome for `grit rm`.
 #[derive(Serialize)]
@@ -17,25 +18,27 @@ pub struct RmOutcome {
 }
 
 impl HumanRender for RmOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self.removed.len() {
             0 => {}
-            1 => println!("Removed {}.", self.removed[0]),
-            n => println!("Removed {n} paths."),
+            1 => outln!(w, "Removed {}.", self.removed[0]),
+            n => outln!(w, "Removed {n} paths."),
         }
+        Ok(())
     }
 }
 
-impl crate::output::MarkdownRender for RmOutcome {
-    fn render_markdown(&self) {
+impl MarkdownRender for RmOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.removed.is_empty() {
-            println!("- **removed**: _(none)_");
-            return;
+            outln!(w, "- **removed**: _(none)_");
+            return Ok(());
         }
-        println!("- **removed**:");
+        outln!(w, "- **removed**:");
         for path in &self.removed {
-            println!("  - `{path}`");
+            outln!(w, "  - `{path}`");
         }
+        Ok(())
     }
 }
 

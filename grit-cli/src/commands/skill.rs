@@ -1,9 +1,10 @@
 //! `grit skill` — print an agent skill that explains how to use grit.
 
 use anyhow::Result;
+use std::io::Write;
 use serde::Serialize;
 
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// The skill text, with `{version}` replaced by the running grit's version.
 const SKILL: &str = include_str!("skill.md");
@@ -25,16 +26,18 @@ pub struct SkillOutcome {
 }
 
 impl HumanRender for SkillOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         // Exactly the file, so `grit skill > SKILL.md` works.
         print!("{}", self.content);
+        Ok(())
     }
 }
 
 impl MarkdownRender for SkillOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         // Same bytes as human mode so agents can save or parse the skill file.
         print!("{}", self.content);
+        Ok(())
     }
 }
 

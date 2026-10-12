@@ -5,6 +5,7 @@
 //! remote if needed.
 
 use anyhow::{bail, Context, Result};
+use std::io::Write;
 use grit_lib::config::ConfigSet;
 use grit_lib::push_report::PushRefStatus;
 use grit_lib::refs;
@@ -15,7 +16,7 @@ use serde::Serialize;
 use crate::commands::auth;
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 use grit_lib::fetch::NoProgress;
 use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
 use grit_lib::transfer::{PushOptions, resolve_push_delete_ref};
@@ -46,7 +47,7 @@ pub struct PushRefResult {
 }
 
 impl HumanRender for PushOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         for result in &self.results {
             let target = format!("{} {}", self.remote, result.ref_name);
             match result.status.as_str() {
@@ -59,12 +60,14 @@ impl HumanRender for PushOutcome {
                 ),
             }
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for PushOutcome {
-    fn render_markdown(&self) {
-        markdown::print_push_results(&self.remote, &self.branch, &self.results);
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        markdown::print_push_results(w, &self.remote, &self.branch, &self.results)?;
+        Ok(())
     }
 }
 
