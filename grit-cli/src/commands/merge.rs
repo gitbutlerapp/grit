@@ -5,8 +5,7 @@
 //! markers in the worktree.
 
 use crate::context;
-use std::io::Write;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
@@ -15,6 +14,7 @@ use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
+use std::io::Write;
 
 /// Result of `grit merge` (and the merge half of `grit pull`).
 #[derive(Serialize)]
@@ -98,12 +98,16 @@ impl MergeOutcome {
 }
 
 impl HumanRender for MergeOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let short = self.oid.as_deref().map(short_hex).unwrap_or_default();
         match self.result.as_str() {
-            "up_to_date" => println!("Already up to date."),
-            "fast_forward" => println!("Fast-forwarded {} → {short}", self.branch),
-            "merged" => println!("Merged {} into the current branch ({short})", self.branch),
+            "up_to_date" => outln!(w, "Already up to date."),
+            "fast_forward" => outln!(w, "Fast-forwarded {} → {short}", self.branch),
+            "merged" => outln!(
+                w,
+                "Merged {} into the current branch ({short})",
+                self.branch
+            ),
             "conflicts" => {
                 eprintln!("Merge has conflicts in:");
                 for path in self.conflicts.as_deref().unwrap_or(&[]) {
@@ -113,13 +117,14 @@ impl HumanRender for MergeOutcome {
                     "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."
                 );
             }
-            "aborted" => println!("Merge aborted."),
-            "set_upstream" => println!(
+            "aborted" => outln!(w, "Merge aborted."),
+            "set_upstream" => outln!(
+                w,
                 "Set {} to {}.",
                 self.branch,
                 self.upstream.as_deref().unwrap_or_default()
             ),
-            other => println!("{other}"),
+            other => outln!(w, "{other}"),
         }
         Ok(())
     }

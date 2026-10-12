@@ -15,7 +15,6 @@
 //! on a TTY (honoring `NO_COLOR`); piped output is plain text with `+`/`-`.
 
 use anyhow::{Context, Result};
-use std::io::Write;
 use grit_lib::diff::{
     diff_commits_with_renames, diff_index_to_tree, diff_index_to_worktree_with_options,
     diff_trees_with_renames, read_submodule_head_oid, read_worktree_bytes_for_mode,
@@ -35,11 +34,12 @@ use grit_lib::rev_parse::{
 use grit_lib::state::resolve_head;
 use serde::Serialize;
 use std::io::IsTerminal;
+use std::io::Write;
 use std::path::Path;
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Lines of unchanged context to show around each change.
 const CONTEXT_LINES: usize = 3;
@@ -664,7 +664,7 @@ fn build_file_diff(fc: FileChange) -> FileDiff {
 // --- Human (delta-style) rendering -----------------------------------------
 
 impl HumanRender for DiffOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.files.is_empty() {
             outln!(w, "No changes.");
             return Ok(());

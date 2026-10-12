@@ -1,8 +1,7 @@
 //! `grit pick` — cherry-pick a single commit onto the current branch.
 
 use crate::context;
-use std::io::Write;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -10,6 +9,7 @@ use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::rev_parse::resolve_revision;
 use serde::Serialize;
+use std::io::Write;
 
 /// Result of `grit pick`.
 #[derive(Serialize)]
@@ -23,7 +23,7 @@ pub struct PickOutcome {
 }
 
 impl HumanRender for PickOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let new_short = self.oid.get(..7).unwrap_or(&self.oid);
         let src_short = self.source.get(..7).unwrap_or(&self.source);
         outln!(w, "Picked {src_short} → {new_short} {}", self.subject);

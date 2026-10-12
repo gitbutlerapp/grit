@@ -5,21 +5,21 @@
 //! remote if needed.
 
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::config::ConfigSet;
 use grit_lib::push_report::PushRefStatus;
 use grit_lib::refs;
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::transfer::PushRefSpec;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::commands::auth;
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use grit_lib::fetch::NoProgress;
 use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
-use grit_lib::transfer::{PushOptions, resolve_push_delete_ref};
+use grit_lib::transfer::{resolve_push_delete_ref, PushOptions};
 use std::collections::HashSet;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
@@ -47,12 +47,12 @@ pub struct PushRefResult {
 }
 
 impl HumanRender for PushOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for result in &self.results {
             let target = format!("{} {}", self.remote, result.ref_name);
             match result.status.as_str() {
-                "ok" => println!("  pushed {} → {target}", self.branch),
-                "up_to_date" => println!("  {target} already up to date"),
+                "ok" => outln!(w, "  pushed {} → {target}", self.branch),
+                "up_to_date" => outln!(w, "  {target} already up to date"),
                 // Rejections are diagnostics → stderr (as before).
                 _ => eprintln!(
                     "  rejected {target}: {}",
@@ -65,7 +65,7 @@ impl HumanRender for PushOutcome {
 }
 
 impl MarkdownRender for PushOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         markdown::print_push_results(w, &self.remote, &self.branch, &self.results)?;
         Ok(())
     }
@@ -82,15 +82,11 @@ pub fn run(
 
     let (branch_label, remote, specs) = if !delete_refs.is_empty() {
         let remote = configured_remote_for_push(&repo, &config, remote_override);
-        let remote_handle = Remote::from_config(&config, &remote)
-            .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+        let remote_handle =
+            Remote::from_config(&config, &remote).map_err(|e| anyhow::Error::msg(e.to_string()))?;
         let factory = DefaultHttpClientFactory;
         let advertised = remote_handle
-            .list_refs(
-                Some(&repo),
-                &ListRefsOptions::default(),
-                Some(&factory),
-            )
+            .list_refs(Some(&repo), &ListRefsOptions::default(), Some(&factory))
             .map_err(|e| anyhow::Error::msg(e.to_string()))?;
         let remote_names: HashSet<String> = advertised
             .into_iter()

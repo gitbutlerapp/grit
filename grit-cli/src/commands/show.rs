@@ -19,7 +19,7 @@ use crate::commands::diff::{diff_of_commit, DiffOutcome, LineKind};
 use crate::context::{self, subject_line};
 use crate::dates::rfc3339_from_identity_when;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Width budget for the `+`/`-` change bars in the diffstat.
 const BAR_WIDTH: usize = 40;
@@ -230,34 +230,34 @@ impl Person {
 // --- Human rendering --------------------------------------------------------
 
 impl MarkdownRender for ShowOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if let Some(tag) = &self.tag {
             outln!(w, "# Tag `{}`", tag.name);
             if let Some(tagger) = &tag.tagger {
-                println!();
+                outln!(w);
                 outln!(w, "**Tagger:** {} <{}>", tagger.name, tagger.email);
                 outln!(w, "**Date:** {}", tagger.date);
             }
             if !tag.message.trim().is_empty() {
-                println!();
-                print_markdown_message(&tag.message);
+                outln!(w);
+                print_markdown_message(w, &tag.message)?;
             }
-            println!();
+            outln!(w);
         } else if self.kind == "branch" {
             if let Some(name) = &self.ref_name {
                 outln!(w, "# Branch `{name}`");
-                println!();
+                outln!(w);
             }
         } else if self.kind == "tag" {
             if let Some(name) = &self.ref_name {
                 outln!(w, "# Tag `{name}`");
-                println!();
+                outln!(w);
             }
         }
 
         let short = self.commit.oid.get(..7).unwrap_or(self.commit.oid.as_str());
         outln!(w, "# Commit `{short}`");
-        println!();
+        outln!(w);
         outln!(w, "**Oid:** `{}`", self.commit.oid);
         if self.commit.parents.len() > 1 {
             let parents: Vec<String> = self
@@ -268,20 +268,22 @@ impl MarkdownRender for ShowOutcome {
                 .collect();
             outln!(w, "**Merge parents:** {}", parents.join(", "));
         }
-        println!(
+        outln!(
+            w,
             "**Author:** {} <{}>",
-            self.commit.author.name, self.commit.author.email
+            self.commit.author.name,
+            self.commit.author.email
         );
         outln!(w, "**Date:** {}", self.commit.author.date);
-        println!();
+        outln!(w);
         if !self.commit.subject.is_empty() {
             outln!(w, "## {}", self.commit.subject);
-            println!();
+            outln!(w);
         }
         let body = message_body(&self.commit.message, &self.commit.subject);
         if !body.is_empty() {
-            print_markdown_message(&body);
-            println!();
+            print_markdown_message(w, &body)?;
+            outln!(w);
         }
         render_markdown_stat(w, &self.stat)?;
         Ok(())
@@ -289,19 +291,19 @@ impl MarkdownRender for ShowOutcome {
 }
 
 impl HumanRender for ShowOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let color = use_color();
 
         // Annotated tags lead with their own block.
         if let Some(tag) = &self.tag {
-            println!("{}", paint(color, "33;1", &format!("tag {}", tag.name)));
+            outln!(w, "{}", paint(color, "33;1", &format!("tag {}", tag.name)));
             if let Some(tagger) = &tag.tagger {
                 outln!(w, "Tagger: {} <{}>", tagger.name, tagger.email);
                 outln!(w, "Date:   {}", tagger.date);
             }
-            println!();
-            print_message(&tag.message);
-            println!();
+            outln!(w);
+            print_message(w, &tag.message)?;
+            outln!(w);
         } else if self.kind == "branch" {
             if let Some(name) = &self.ref_name {
                 outln!(w, "{}", paint(color, "36", &format!("branch {name}")));
@@ -313,7 +315,8 @@ impl HumanRender for ShowOutcome {
         }
 
         // Commit block.
-        println!(
+        outln!(
+            w,
             "{}",
             paint(color, "33", &format!("commit {}", self.commit.oid))
         );
@@ -326,13 +329,15 @@ impl HumanRender for ShowOutcome {
                 .collect();
             outln!(w, "Merge:  {}", abbrev.join(" "));
         }
-        println!(
+        outln!(
+            w,
             "Author: {} <{}>",
-            self.commit.author.name, self.commit.author.email
+            self.commit.author.name,
+            self.commit.author.email
         );
         outln!(w, "Date:   {}", self.commit.author.date);
-        println!();
-        print_message(&self.commit.message);
+        outln!(w);
+        print_message(w, &self.commit.message)?;
 
         render_stat(w, &self.stat, color)?;
         Ok(())
@@ -452,20 +457,22 @@ fn plural(n: usize) -> &'static str {
 }
 
 /// Print a message indented four spaces, like `git show`.
-fn print_message(message: &str) {
+fn print_message(w: &mut dyn Write, message: &str) -> Result<()> {
     for line in message.lines() {
         if line.is_empty() {
-            println!();
+            outln!(w);
         } else {
-            println!("    {line}");
+            outln!(w, "    {line}");
         }
     }
+    Ok(())
 }
 
-fn print_markdown_message(message: &str) {
+fn print_markdown_message(w: &mut dyn Write, message: &str) -> Result<()> {
     for line in message.lines() {
-        println!("{line}");
+        outln!(w, "{line}");
     }
+    Ok(())
 }
 
 fn message_body(full: &str, subject: &str) -> String {

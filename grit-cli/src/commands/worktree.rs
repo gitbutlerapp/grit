@@ -1,17 +1,17 @@
 //! `grit worktree` — list, add, and remove linked worktrees.
 
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::check_ref_format::validate_branch_short_name;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, remove_linked_worktree, AddLinkedWorktreeOptions,
 };
 use serde::Serialize;
+use std::io::Write;
 use std::path::PathBuf;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::ref_name_messages::branch_short_name_error_message;
 
 /// Result of `grit worktree`, tagged by `action`.
@@ -44,7 +44,7 @@ pub struct WorktreeRow {
 }
 
 impl HumanRender for WorktreeOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             WorktreeOutcome::List { worktrees } => {
                 for wt in worktrees {
@@ -64,7 +64,7 @@ impl HumanRender for WorktreeOutcome {
                     outln!(w, "Created worktree at {path} (detached)");
                 }
             }
-            WorktreeOutcome::Remove { path } => println!("Removed worktree {path}"),
+            WorktreeOutcome::Remove { path } => outln!(w, "Removed worktree {path}"),
         }
         Ok(())
     }

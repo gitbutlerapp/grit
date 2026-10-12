@@ -50,11 +50,7 @@ pub fn print_change_section(
         let shown = path_display
             .map(|ctx| ctx.format_repo_path(repo_path).into_owned())
             .unwrap_or_else(|| repo_path.to_owned());
-        outln!(
-            w,
-            "- **{}** `{shown}`",
-            change_label(&entry.status)
-        );
+        outln!(w, "- **{}** `{shown}`", change_label(&entry.status));
     }
     outln!(w);
     Ok(())
@@ -136,8 +132,7 @@ pub fn diff_code_fence(body: &str) -> (String, String) {
 fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
     let (open, close) = diff_code_fence(body);
     outln!(w, "{open}");
-    stdio::io_result(writeln!(w, "{body}"))
-        .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    stdio::io_result(writeln!(w, "{body}")).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
     outln!(w, "{close}");
     Ok(())
 }
@@ -228,12 +223,7 @@ pub fn print_config_entries(
     outln!(w, "| --- | --- |");
     for entry in entries {
         let value = entry.value.as_deref().unwrap_or("");
-        outln!(
-            w,
-            "| `{}` | {} |",
-            entry.key,
-            escape_table_cell(value)
-        );
+        outln!(w, "| `{}` | {} |", entry.key, escape_table_cell(value));
     }
     Ok(())
 }
@@ -244,7 +234,7 @@ pub fn print_config_entries(
 /// any remaining `\r`/`\n` with visible escapes, and escapes `|`.
 #[must_use]
 pub fn escape_table_cell(s: &str) -> String {
-    let trimmed = s.trim_end_matches(|c| c == '\n' || c == '\r');
+    let trimmed = s.trim_end_matches(['\n', '\r']);
     trimmed
         .replace('|', "\\|")
         .replace('\r', "\\r")
@@ -257,7 +247,10 @@ pub fn print_remote_list(
     remotes: &[crate::commands::remote::RemoteEntry],
 ) -> anyhow::Result<()> {
     if remotes.is_empty() {
-        outln!(w, "No remotes. Add one with: `grit remote add <name> <url>`.");
+        outln!(
+            w,
+            "No remotes. Add one with: `grit remote add <name> <url>`."
+        );
         return Ok(());
     }
     outln!(w, "| Name | URL |");

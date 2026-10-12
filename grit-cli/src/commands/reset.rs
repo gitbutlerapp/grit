@@ -1,15 +1,15 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
 use anyhow::{Context, Result};
-use std::io::Write;
 use grit_lib::config::ConfigSet;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, ResetOutcome};
 use grit_lib::rev_parse::resolve_revision;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// CLI view of [`ResetOutcome`].
 #[derive(Serialize)]
@@ -32,8 +32,9 @@ impl From<ResetOutcome> for ResetCliOutcome {
 }
 
 impl HumanRender for ResetCliOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
-        println!(
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(
+            w,
             "Reset {} to {} ({})",
             self.r#ref,
             &self.target[..7.min(self.target.len())],
@@ -44,9 +45,9 @@ impl HumanRender for ResetCliOutcome {
 }
 
 impl MarkdownRender for ResetCliOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Reset");
-        println!();
+        outln!(w);
         outln!(w, "- **ref:** `{}`", self.r#ref);
         outln!(w, "- **mode:** `{}`", self.mode);
         outln!(w, "- **target:** `{}`", self.target);
@@ -56,6 +57,7 @@ impl MarkdownRender for ResetCliOutcome {
 }
 
 pub fn run(rev: Option<String>, soft: bool, mixed: bool, hard: bool) -> Result<ResetCliOutcome> {
+    #[allow(clippy::if_same_then_else)]
     let mode = if soft {
         ResetMode::Soft
     } else if hard {

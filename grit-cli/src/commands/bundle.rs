@@ -1,7 +1,7 @@
 //! `grit bundle` — create, verify, and list git bundle files.
 
-use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use grit_lib::bundle::{Bundle, BundleError, BundleVerifyReport};
@@ -10,7 +10,7 @@ use grit_lib::objects::ObjectId;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Outcome of `grit bundle create`.
 #[derive(Serialize)]
@@ -53,17 +53,18 @@ impl From<(&str, ObjectId)> for BundleRefJson {
 }
 
 impl HumanRender for BundleCreateOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "Wrote bundle {} ({} refs).", self.path, self.refs);
         Ok(())
     }
 }
 
 impl HumanRender for BundleVerifyOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.ok {
             outln!(w, "{} is valid", self.path);
-            println!(
+            outln!(
+                w,
                 "The bundle uses this hash algorithm: {}",
                 self.hash_algorithm
             );
@@ -86,7 +87,7 @@ impl HumanRender for BundleVerifyOutcome {
 }
 
 impl MarkdownRender for BundleCreateOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Bundle create\n");
         outln!(w, "- **path:** `{}`", self.path);
         outln!(w, "- **refs:** {}", self.refs);
@@ -95,7 +96,7 @@ impl MarkdownRender for BundleCreateOutcome {
 }
 
 impl MarkdownRender for BundleVerifyOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Bundle verify\n");
         outln!(w, "- **path:** `{}`", self.path);
         outln!(w, "- **ok:** {}", self.ok);
@@ -112,7 +113,7 @@ impl MarkdownRender for BundleVerifyOutcome {
 }
 
 impl MarkdownRender for BundleListOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Bundle list\n");
         outln!(w, "- **path:** `{}`\n", self.path);
         if self.references.is_empty() {
@@ -130,7 +131,7 @@ impl MarkdownRender for BundleListOutcome {
 }
 
 impl HumanRender for BundleListOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for reference in &self.references {
             outln!(w, "{} {}", reference.oid, reference.name);
         }

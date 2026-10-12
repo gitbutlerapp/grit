@@ -4,15 +4,15 @@
 //! a thin wrapper over the library.
 
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::pathspec::{pathdiff, resolve_pathspec_in_worktree};
 use grit_lib::porcelain::add::{stage as stage_paths, StageMode, StageOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit add`: how many changes were staged.
 #[derive(Serialize)]

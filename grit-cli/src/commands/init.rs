@@ -1,7 +1,7 @@
 //! `grit init` — create a new, empty repository.
 
-use std::path::PathBuf;
 use std::io::Write;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use grit_lib::git_path::user_display_path;
@@ -9,7 +9,7 @@ use grit_lib::ref_storage::RefStorageFormat;
 use grit_lib::repo::init_repository;
 use serde::Serialize;
 
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -32,21 +32,25 @@ pub struct InitOutcome {
 }
 
 impl HumanRender for InitOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let kind = if self.bare {
             "bare repository"
         } else {
             "repository"
         };
         if self.reinitialized {
-            println!(
+            outln!(
+                w,
                 "Reinitialized existing {kind} in {} (ref-format: {})",
-                self.path, self.ref_format
+                self.path,
+                self.ref_format
             );
         } else {
-            println!(
+            outln!(
+                w,
                 "Initialized empty {kind} in {} (ref-format: {})",
-                self.path, self.ref_format
+                self.path,
+                self.ref_format
             );
         }
         Ok(())
@@ -54,15 +58,18 @@ impl HumanRender for InitOutcome {
 }
 
 impl MarkdownRender for InitOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let kind = if self.bare {
             "bare repository"
         } else {
             "repository"
         };
-        println!(
+        outln!(
+            w,
             "Initialized empty {kind} at `{}` (default branch `{}`, ref-format `{}`).",
-            self.path, self.branch, self.ref_format
+            self.path,
+            self.branch,
+            self.ref_format
         );
         Ok(())
     }

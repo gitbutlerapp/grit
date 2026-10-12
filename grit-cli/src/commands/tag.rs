@@ -1,7 +1,10 @@
 //! `grit tag` — list tags, or create / delete one.
 
+use crate::context;
+use crate::markdown;
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ref_name_messages::tag_short_name_error_message;
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::check_ref_format::validate_tag_short_name;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::tag::{create_tag, tag_ref_metadata, CreateTagRequest, TagKind};
@@ -10,10 +13,7 @@ use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
-use crate::context;
-use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
-use crate::ref_name_messages::tag_short_name_error_message;
+use std::io::Write;
 
 /// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
 #[derive(Serialize)]
@@ -65,7 +65,7 @@ impl HumanRender for TagOutcome {
 }
 
 impl MarkdownRender for TagOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             TagOutcome::List { tags } => markdown::print_tag_list(w, tags)?,
             TagOutcome::Create {

@@ -16,7 +16,7 @@ use serde::{Serialize, Serializer};
 use crate::commands::diff::{self, DiffOutcome};
 use crate::commands::show::{self, DiffStat};
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit stash push` (or bare `grit stash`).
 pub enum StashPushOutcome {
@@ -45,15 +45,18 @@ impl Serialize for StashPushOutcome {
 }
 
 impl HumanRender for StashPushOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            Self::Nothing => println!("No local changes to save"),
+            Self::Nothing => outln!(w, "No local changes to save"),
             Self::Saved { oid, message } => {
                 let short = oid.get(..7).unwrap_or(oid.as_str());
                 if message.is_empty() {
                     outln!(w, "Saved working directory and index state {short}");
                 } else {
-                    outln!(w, "Saved working directory and index state {message} {short}");
+                    outln!(
+                        w,
+                        "Saved working directory and index state {message} {short}"
+                    );
                 }
             }
         }
@@ -76,7 +79,7 @@ pub struct StashListEntry {
 }
 
 impl HumanRender for StashListOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for entry in &self.0 {
             let short = entry.oid.get(..7).unwrap_or(&entry.oid);
             outln!(w, "stash@{{{}}} {}: {}", entry.index, short, entry.message);
@@ -86,7 +89,7 @@ impl HumanRender for StashListOutcome {
 }
 
 impl MarkdownRender for StashListOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.0.is_empty() {
             outln!(w, "- _(no stash entries)_");
             return Ok(());
@@ -153,7 +156,7 @@ pub struct StashApplyOutcome {
 }
 
 impl HumanRender for StashApplyOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.conflicts {
             eprintln!("Stash apply left conflicts in:");
             for path in &self.conflict_paths {
@@ -179,7 +182,7 @@ pub struct StashPopOutcome {
 }
 
 impl HumanRender for StashPopOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.conflicts {
             eprintln!("Stash pop left conflicts in:");
             for path in &self.conflict_paths {
@@ -187,7 +190,8 @@ impl HumanRender for StashPopOutcome {
             }
             eprintln!("The stash entry was kept.");
         } else {
-            println!(
+            outln!(
+                w,
                 "Dropped stash@{{{}}} ({})",
                 self.index,
                 if self.dropped { "applied" } else { "empty" }
@@ -206,7 +210,7 @@ pub struct StashDropOutcome {
 }
 
 impl HumanRender for StashDropOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "Dropped stash@{{{}}}", self.index);
         Ok(())
     }
@@ -353,7 +357,7 @@ fn stash_oid_at(repo: &Repository, n: usize) -> Result<grit_lib::objects::Object
         .into_iter()
         .find(|e| e.index == n)
         .map(|e| e.oid)
-        .ok_or_else(|| Error::StashNotFound { n })
+        .ok_or(Error::StashNotFound { n })
         .map_err(map_stash_error)
 }
 

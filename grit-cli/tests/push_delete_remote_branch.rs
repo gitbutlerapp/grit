@@ -74,7 +74,10 @@ fn delete_remote_branch_after_local_branch_deleted() {
     std::fs::write(local.join("g"), "y\n").unwrap();
     git(&local, &["add", "g"]);
     git(&local, &["commit", "-qm", "topic"]);
-    git(&local, &["push", "-q", "origin", "HEAD:refs/heads/old-topic"]);
+    git(
+        &local,
+        &["push", "-q", "origin", "HEAD:refs/heads/old-topic"],
+    );
     assert!(ls_remote_heads(&origin).contains(&"refs/heads/old-topic".to_owned()));
 
     git(&local, &["checkout", "main"]);

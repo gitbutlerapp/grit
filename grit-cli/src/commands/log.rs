@@ -4,13 +4,13 @@
 //! there's more, prints the command to fetch the next page.
 
 use anyhow::{Context, Result};
-use std::io::Write;
 use grit_lib::rev_list::{rev_list, RevListOptions};
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context::{self, subject_line, CommitSummary};
 use crate::markdown;
-use crate::output::{CommitJson, HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;
 
 /// How many commits to show per page.
@@ -54,7 +54,11 @@ impl MarkdownRender for LogOutcome {
         markdown::print_commit_list(w, &self.commit_rows, ctx)?;
         if let Some(next) = &self.next {
             outln!(w);
-            outln!(w, "More history: run `grit log --before={}`", short_hex(next));
+            outln!(
+                w,
+                "More history: run `grit log --before={}`",
+                short_hex(next)
+            );
         }
         Ok(())
     }

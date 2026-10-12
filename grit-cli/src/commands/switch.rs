@@ -1,15 +1,15 @@
 //! `grit switch` — move to another branch, remote branch, or detached commit.
 
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
 };
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit switch`.
 #[derive(Serialize)]
@@ -22,7 +22,7 @@ pub struct SwitchOutcome {
 }
 
 impl HumanRender for SwitchOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.detached {
             let short = self
                 .commit

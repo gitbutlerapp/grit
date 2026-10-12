@@ -634,12 +634,16 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             bare,
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
-        Command::Clone { url, dir } => emit(&commands::clone::run(&url, dir, opts.mode)?, opts, ctx),
+        Command::Clone { url, dir } => {
+            emit(&commands::clone::run(&url, dir, opts.mode)?, opts, ctx)
+        }
         Command::Remote { action } => match action {
             None => emit(&commands::remote::run_list_or_add(None)?, opts, ctx),
-            Some(RemoteAction::Add { name, url }) => {
-                emit(&commands::remote::run_list_or_add(Some((name, url)))?, opts, ctx)
-            }
+            Some(RemoteAction::Add { name, url }) => emit(
+                &commands::remote::run_list_or_add(Some((name, url)))?,
+                opts,
+                ctx,
+            ),
             Some(RemoteAction::Refs {
                 remote_or_url,
                 heads,
@@ -681,9 +685,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             cached,
             force,
         } => emit(&commands::rm::run(&paths, cached, force)?, opts, ctx),
-        Command::Mv { paths, force } => {
-            emit(&commands::mv::run(&paths, force)?, opts, ctx)
-        }
+        Command::Mv { paths, force } => emit(&commands::mv::run(&paths, force)?, opts, ctx),
         Command::Clean {
             paths,
             force,
@@ -703,7 +705,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             name,
             delete,
             force_delete,
-        } => emit(&commands::branch::run(name, delete, force_delete)?, opts, ctx),
+        } => emit(
+            &commands::branch::run(name, delete, force_delete)?,
+            opts,
+            ctx,
+        ),
         Command::Bundle { action } => match action {
             BundleAction::Create { file, revs } => {
                 emit(&commands::bundle::run_create(file.into(), revs)?, opts, ctx)
@@ -725,7 +731,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             delete,
             message,
             object,
-        } => emit(&commands::tag::run(name, delete, message, object)?, opts, ctx),
+        } => emit(
+            &commands::tag::run(name, delete, message, object)?,
+            opts,
+            ctx,
+        ),
         Command::Worktree { action } => match action {
             WorktreeAction::List => emit(&commands::worktree::run_list()?, opts, ctx),
             WorktreeAction::Add {

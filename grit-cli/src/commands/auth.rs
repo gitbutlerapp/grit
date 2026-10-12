@@ -28,7 +28,7 @@ use grit_lib::remote::http_client::{HttpClient, UreqHttpClient};
 use grit_lib::repo::Repository;
 use serde::Serialize;
 
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit auth` (sign-in).
 #[derive(Serialize)]
@@ -39,7 +39,11 @@ pub struct AuthOutcome {
 
 impl HumanRender for AuthOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "\n✓ Signed in to GitHub — token stored for {}.", self.host);
+        outln!(
+            w,
+            "\n✓ Signed in to GitHub — token stored for {}.",
+            self.host
+        );
         Ok(())
     }
 }

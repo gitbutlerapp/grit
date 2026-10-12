@@ -49,11 +49,9 @@ fn grit_mv_case_only_rename_updates_index() {
     let null = null_config();
     let git_dir = dir.path().join(".git");
 
-    assert!(
-        run_grit(grit, dir.path(), &["init"], &null)
-            .status
-            .success()
-    );
+    assert!(run_grit(grit, dir.path(), &["init"], &null)
+        .status
+        .success());
     fs::write(
         git_dir.join("config"),
         "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tignorecase = true\n\tbare = false\n",
@@ -61,11 +59,9 @@ fn grit_mv_case_only_rename_updates_index() {
     .expect("config");
 
     fs::write(dir.path().join("README.md"), b"hi\n").expect("write");
-    assert!(
-        run_grit(grit, dir.path(), &["add", "README.md"], &null)
-            .status
-            .success()
-    );
+    assert!(run_grit(grit, dir.path(), &["add", "README.md"], &null)
+        .status
+        .success());
     assert!(
         run_grit(grit, dir.path(), &["commit", "-m", "first"], &null)
             .status

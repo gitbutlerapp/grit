@@ -1,9 +1,9 @@
 //! `grit branch` — list branches, or create / delete one.
 
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::branch_tracking::upstream_tracking_full_ref;
 use grit_lib::check_ref_format::validate_branch_short_name;
+use std::io::Write;
 
 use crate::ref_name_messages::branch_short_name_error_message;
 use grit_lib::merge_base::is_ancestor;
@@ -15,7 +15,7 @@ use serde::Serialize;
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit branch`, tagged by `action` (`list` / `create` / `delete`).
 #[derive(Serialize)]

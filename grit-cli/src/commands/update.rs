@@ -9,14 +9,14 @@
 //! runs the PowerShell installer (`irm <url> | iex`), the same scripts the documented
 //! one-line installs use.
 
-use std::path::PathBuf;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
-use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext, outln};
+use crate::output::{progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// URL of the POSIX-sh installer (used on Unix).
 #[cfg(not(windows))]
@@ -35,7 +35,7 @@ pub struct UpdateOutcome {
 }
 
 impl HumanRender for UpdateOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, _w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         // The installer's own output is the user-facing feedback; nothing extra.
         Ok(())
     }

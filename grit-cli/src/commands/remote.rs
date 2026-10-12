@@ -1,17 +1,17 @@
 //! `grit remote` — list remotes, add one, or list refs on a remote.
 
 use anyhow::{bail, Context, Result};
-use std::io::Write;
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, RemoteRef};
 use grit_lib::repo::Repository;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, OutputMode, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).
 #[derive(Serialize)]

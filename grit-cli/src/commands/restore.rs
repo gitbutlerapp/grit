@@ -1,14 +1,14 @@
 //! `grit restore` — restore working tree and/or index paths.
 
 use anyhow::{Context, Result};
-use std::io::Write;
 use grit_lib::pathspec::{pathdiff, resolve_pathspec_in_worktree};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreOutcome, RestoreSource};
 use grit_lib::rev_parse::resolve_revision;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// CLI result (mirrors [`RestoreOutcome`]).
 #[derive(Serialize, Clone)]
@@ -27,7 +27,7 @@ impl From<RestoreOutcome> for RestoreCliOutcome {
 }
 
 impl HumanRender for RestoreCliOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for path in &self.restored {
             outln!(w, "Restored {path}");
         }
@@ -39,7 +39,7 @@ impl HumanRender for RestoreCliOutcome {
 }
 
 impl MarkdownRender for RestoreCliOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Restore");
         if self.restored.is_empty() && self.removed.is_empty() {
             outln!(w, "\nNo paths changed.");

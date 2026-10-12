@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// CLI outcome for `grit rm`.
 #[derive(Serialize)]

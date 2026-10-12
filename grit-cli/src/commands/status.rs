@@ -2,16 +2,18 @@
 //! you're ahead by, what's changed, and what to do next.
 
 use anyhow::{Context, Result};
-use std::io::Write;
 use grit_lib::diff::DiffEntry;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation};
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context::{self, CommitSummary};
 use crate::markdown;
-use crate::output::{change_json, ChangeJson, CommitJson, HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{
+    change_json, outln, ChangeJson, CommitJson, HumanRender, MarkdownRender, RenderContext,
+};
 use crate::ui::{self, PathDisplayContext};
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
@@ -206,7 +208,11 @@ impl StatusOutcome {
         let target = self.target.as_deref().unwrap_or_default();
         match self.header {
             HeaderKind::AheadOfTarget => {
-                outln!(w, "On **`{branch}`** · **{}** ahead of `{target}`", self.ahead);
+                outln!(
+                    w,
+                    "On **`{branch}`** · **{}** ahead of `{target}`",
+                    self.ahead
+                );
                 if !self.commit_rows.is_empty() {
                     outln!(w);
                     markdown::print_commit_list(

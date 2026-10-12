@@ -65,8 +65,7 @@ fn pathless_add_and_commit_after_git_add_n() {
         "grit add failed: {}",
         String::from_utf8_lossy(&add_json.stderr)
     );
-    let v: serde_json::Value =
-        serde_json::from_slice(&add_json.stdout).expect("add --json parses");
+    let v: serde_json::Value = serde_json::from_slice(&add_json.stdout).expect("add --json parses");
     assert_eq!(
         v["staged"].as_u64(),
         Some(1),

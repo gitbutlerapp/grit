@@ -1,18 +1,18 @@
 //! `grit fetch` — download refs and objects from a remote (default `origin`).
 
 use crate::output::OutputMode;
-use std::io::Write;
 use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::remote::{DefaultHttpClientFactory, RemoteError, DEFAULT_REMOTE};
 use grit_lib::transfer::{resolve_fetch_prune, FetchOptions, TagMode};
 use serde::Serialize;
+use std::io::Write;
 
 use crate::commands::auth;
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit fetch`: the refs that changed.
 #[derive(Serialize)]
@@ -33,7 +33,7 @@ pub struct FetchUpdate {
 }
 
 impl HumanRender for FetchOutcome {
-    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for update in &self.updates {
             let from = update.old_oid.as_deref().map_or("new", short_hex);
             let to = update.new_oid.as_deref().map_or("deleted", short_hex);
@@ -42,7 +42,8 @@ impl HumanRender for FetchOutcome {
         if self.updated == 0 {
             outln!(w, "Already up to date with {}.", self.remote);
         } else {
-            println!(
+            outln!(
+                w,
                 "Fetched {} update{} from {}.",
                 self.updated,
                 plural(self.updated),
@@ -54,7 +55,7 @@ impl HumanRender for FetchOutcome {
 }
 
 impl MarkdownRender for FetchOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         markdown::print_fetch_updates(w, &self.remote, &self.updates, self.updated)?;
         Ok(())
     }

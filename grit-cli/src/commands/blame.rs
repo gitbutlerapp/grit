@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::context::{self, relative_date_from};
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit blame`.
 #[derive(Serialize)]
@@ -68,7 +68,7 @@ impl HumanRender for BlameOutcome {
 }
 
 impl MarkdownRender for BlameOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Blame: `{}`\n", self.file);
         outln!(w, "Revision `{}`\n", self.rev);
         if self.lines.is_empty() {
@@ -103,7 +103,7 @@ fn short_oid(full: &str) -> String {
 /// Strip trailing line terminators from blamed line text for display and JSON.
 fn normalize_blame_line_content(content: String) -> String {
     content
-        .trim_end_matches(|c| c == '\n' || c == '\r')
+        .trim_end_matches(['\n', '\r'])
         .to_owned()
 }
 
