@@ -2,6 +2,7 @@
 //! you're ahead by, what's changed, and what to do next.
 
 use anyhow::{Context, Result};
+use std::io::Write;
 use grit_lib::diff::DiffEntry;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
@@ -10,7 +11,7 @@ use serde::Serialize;
 
 use crate::context::{self, CommitSummary};
 use crate::markdown;
-use crate::output::{change_json, ChangeJson, CommitJson, HumanRender, MarkdownRender};
+use crate::output::{change_json, ChangeJson, CommitJson, HumanRender, MarkdownRender, RenderContext, outln};
 use crate::ui::{self, PathDisplayContext};
 
 /// Maximum number of commits to list in the status shortlog before summarizing.
@@ -71,91 +72,96 @@ pub struct StatusOutcome {
 }
 
 impl HumanRender for StatusOutcome {
-    fn render_human(&self) {
-        self.render_header();
-        self.render_changes();
-        self.render_hints();
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        self.render_header(w, ctx)?;
+        self.render_changes(w)?;
+        self.render_hints(w)?;
+        Ok(())
     }
 }
 
 impl MarkdownRender for StatusOutcome {
-    fn render_markdown(&self) {
-        self.render_markdown_header();
-        self.render_markdown_changes();
-        self.render_markdown_hints();
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        self.render_markdown_header(w, ctx)?;
+        self.render_markdown_changes(w)?;
+        self.render_markdown_hints(w)?;
+        Ok(())
     }
 }
 
 impl StatusOutcome {
-    fn render_header(&self) {
+    fn render_header(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let branch = self.branch.as_deref().unwrap_or_default();
         let target = self.target.as_deref().unwrap_or_default();
+        let now = ctx.now.unix_timestamp();
         match self.header {
             HeaderKind::AheadOfTarget => {
-                println!("On {branch}  ·  {} ahead of {target}", self.ahead);
-                println!();
-                for row in ui::commit_rows(&self.commit_rows)
+                outln!(w, "On {branch}  ·  {} ahead of {target}", self.ahead);
+                outln!(w);
+                for row in ui::commit_rows(&self.commit_rows, now)
                     .iter()
                     .take(SHORTLOG_LIMIT)
                 {
-                    println!("{row}");
+                    outln!(w, "{row}");
                 }
                 if self.ahead > SHORTLOG_LIMIT {
-                    println!("  … and {} more", self.ahead - SHORTLOG_LIMIT);
+                    outln!(w, "  … and {} more", self.ahead - SHORTLOG_LIMIT);
                 }
-                println!();
+                outln!(w);
             }
             HeaderKind::EvenWith => {
-                println!("On {branch}  ·  even with {target}");
-                println!();
+                outln!(w, "On {branch}  ·  even with {target}");
+                outln!(w);
             }
             HeaderKind::NoTarget => {
-                println!("On {branch}");
-                println!();
+                outln!(w, "On {branch}");
+                outln!(w);
             }
             HeaderKind::Unborn => {
-                println!("On {branch} — no commits yet");
-                println!();
+                outln!(w, "On {branch} — no commits yet");
+                outln!(w);
             }
             HeaderKind::Detached => {
                 let short = self.head.as_deref().map(short_hex).unwrap_or_default();
-                println!("Detached at {short}");
-                println!();
+                outln!(w, "Detached at {short}");
+                outln!(w);
             }
             HeaderKind::Invalid => {
-                println!("HEAD is in an unknown state");
-                println!();
+                outln!(w, "HEAD is in an unknown state");
+                outln!(w);
             }
             HeaderKind::MergeInProgress => {
-                println!("On {branch}  ·  merging — resolve conflicts");
-                println!();
+                outln!(w, "On {branch}  ·  merging — resolve conflicts");
+                outln!(w);
             }
             HeaderKind::OtherInProgress => {
-                println!("On {branch}  ·  operation in progress");
-                println!();
+                outln!(w, "On {branch}  ·  operation in progress");
+                outln!(w);
             }
         }
+        Ok(())
     }
 
-    fn render_changes(&self) {
+    fn render_changes(&self, w: &mut dyn Write) -> Result<()> {
         if self.clean {
-            println!("Nothing to commit — working tree clean.");
-            return;
+            outln!(w, "Nothing to commit — working tree clean.");
+            return Ok(());
         }
         let display = self.path_display.as_ref();
-        ui::print_change_group("Staged", &self.staged_entries, display);
-        ui::print_change_group("Changed (not staged)", &self.unstaged_entries, display);
-        ui::print_untracked(&self.untracked, display);
+        ui::print_change_group(w, "Staged", &self.staged_entries, display)?;
+        ui::print_change_group(w, "Changed (not staged)", &self.unstaged_entries, display)?;
+        ui::print_untracked(w, &self.untracked, display)?;
+        Ok(())
     }
 
-    fn render_hints(&self) {
+    fn render_hints(&self, w: &mut dyn Write) -> Result<()> {
         if !self.conflicts.is_empty() {
-            println!("→ resolve conflicts, then grit commit \"message\"");
-            return;
+            outln!(w, "→ resolve conflicts, then grit commit \"message\"");
+            return Ok(());
         }
         if self.merging {
-            println!("→ grit commit \"message\" to finish the merge");
-            return;
+            outln!(w, "→ grit commit \"message\" to finish the merge");
+            return Ok(());
         }
         let mut hints = Vec::new();
         if !self.unstaged_entries.is_empty() {
@@ -168,18 +174,19 @@ impl StatusOutcome {
             hints.push("grit commit \"message\" to commit");
         }
         if !hints.is_empty() {
-            println!("→ {}", hints.join("  ·  "));
+            outln!(w, "→ {}", hints.join("  ·  "));
         }
+        Ok(())
     }
 
-    fn render_markdown_hints(&self) {
+    fn render_markdown_hints(&self, w: &mut dyn Write) -> Result<()> {
         if !self.conflicts.is_empty() {
-            println!("→ resolve conflicts, then grit commit `\"message\"`");
-            return;
+            outln!(w, "→ resolve conflicts, then grit commit `\"message\"`");
+            return Ok(());
         }
         if self.merging {
-            println!("→ grit commit `\"message\"` to finish the merge");
-            return;
+            outln!(w, "→ grit commit `\"message\"` to finish the merge");
+            return Ok(());
         }
         let mut hints = Vec::new();
         if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
@@ -189,69 +196,74 @@ impl StatusOutcome {
             hints.push("grit commit `\"message\"` to commit");
         }
         if !hints.is_empty() {
-            println!("→ {}", hints.join("  ·  "));
+            outln!(w, "→ {}", hints.join("  ·  "));
         }
+        Ok(())
     }
 
-    fn render_markdown_header(&self) {
+    fn render_markdown_header(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let branch = self.branch.as_deref().unwrap_or_default();
         let target = self.target.as_deref().unwrap_or_default();
         match self.header {
             HeaderKind::AheadOfTarget => {
-                println!("On **`{branch}`** · **{}** ahead of `{target}`", self.ahead);
+                outln!(w, "On **`{branch}`** · **{}** ahead of `{target}`", self.ahead);
                 if !self.commit_rows.is_empty() {
-                    println!();
+                    outln!(w);
                     markdown::print_commit_list(
+                        w,
                         &self.commit_rows[..self.commit_rows.len().min(SHORTLOG_LIMIT)],
-                    );
+                        ctx,
+                    )?;
                     if self.ahead > SHORTLOG_LIMIT {
-                        println!();
-                        println!("… and {} more commit(s).", self.ahead - SHORTLOG_LIMIT);
+                        outln!(w);
+                        outln!(w, "… and {} more commit(s).", self.ahead - SHORTLOG_LIMIT);
                     }
                 }
-                println!();
+                outln!(w);
             }
             HeaderKind::EvenWith => {
-                println!("On **`{branch}`** · even with `{target}`");
-                println!();
+                outln!(w, "On **`{branch}`** · even with `{target}`");
+                outln!(w);
             }
             HeaderKind::NoTarget => {
-                println!("On **`{branch}`**");
-                println!();
+                outln!(w, "On **`{branch}`**");
+                outln!(w);
             }
             HeaderKind::Unborn => {
-                println!("On **`{branch}`** — no commits yet");
-                println!();
+                outln!(w, "On **`{branch}`** — no commits yet");
+                outln!(w);
             }
             HeaderKind::Detached => {
                 let short = self.head.as_deref().map(short_hex).unwrap_or_default();
-                println!("Detached at `{short}`");
-                println!();
+                outln!(w, "Detached at `{short}`");
+                outln!(w);
             }
             HeaderKind::Invalid => {
-                println!("HEAD is in an unknown state");
-                println!();
+                outln!(w, "HEAD is in an unknown state");
+                outln!(w);
             }
             HeaderKind::MergeInProgress => {
-                println!("On **`{branch}`** · merging — resolve conflicts");
-                println!();
+                outln!(w, "On **`{branch}`** · merging — resolve conflicts");
+                outln!(w);
             }
             HeaderKind::OtherInProgress => {
-                println!("On **`{branch}`** · operation in progress");
-                println!();
+                outln!(w, "On **`{branch}`** · operation in progress");
+                outln!(w);
             }
         }
+        Ok(())
     }
 
-    fn render_markdown_changes(&self) {
+    fn render_markdown_changes(&self, w: &mut dyn Write) -> Result<()> {
         if self.clean {
-            println!("Nothing to commit — working tree clean.");
-            return;
+            outln!(w, "Nothing to commit — working tree clean.");
+            return Ok(());
         }
         let display = self.path_display.as_ref();
-        markdown::print_change_section("Staged", &self.staged_entries, display);
-        markdown::print_change_section("Changed (not staged)", &self.unstaged_entries, display);
-        markdown::print_untracked(&self.untracked, display);
+        markdown::print_change_section(w, "Staged", &self.staged_entries, display)?;
+        markdown::print_change_section(w, "Changed (not staged)", &self.unstaged_entries, display)?;
+        markdown::print_untracked(w, &self.untracked, display)?;
+        Ok(())
     }
 }
 

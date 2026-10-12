@@ -1,6 +1,7 @@
 //! `grit clean` — remove untracked files from the working tree.
 
 use anyhow::{bail, Context, Result};
+use std::io::Write;
 use grit_lib::pathspec::{pathdiff, resolve_pathspec_in_worktree};
 use grit_lib::porcelain::clean::{clean_untracked, CleanOptions};
 use grit_lib::progress::NullProgress;
@@ -8,7 +9,7 @@ use grit_lib::repo::Repository;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Result of `grit clean`.
 #[derive(Serialize)]
@@ -20,14 +21,14 @@ pub struct CleanOutcome {
 }
 
 impl HumanRender for CleanOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.removed.is_empty() {
             if self.dry_run {
-                println!("Nothing to clean.");
+                outln!(w, "Nothing to clean.");
             } else {
-                println!("Removed nothing.");
+                outln!(w, "Removed nothing.");
             }
-            return;
+            return Ok(());
         }
         let prefix = if self.dry_run {
             "Would remove"
@@ -35,26 +36,28 @@ impl HumanRender for CleanOutcome {
             "Removed"
         };
         for path in &self.removed {
-            println!("{prefix} {path}");
+            outln!(w, "{prefix} {path}");
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for CleanOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.removed.is_empty() {
-            println!("No untracked paths to remove.");
-            return;
+            outln!(w, "No untracked paths to remove.");
+            return Ok(());
         }
         let heading = if self.dry_run {
             "Would remove"
         } else {
             "Removed"
         };
-        println!("## {heading}\n");
+        outln!(w, "## {heading}\n");
         for path in &self.removed {
-            println!("- `{path}`");
+            outln!(w, "- `{path}`");
         }
+        Ok(())
     }
 }
 

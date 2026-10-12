@@ -24,7 +24,7 @@ use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
-use output::{emit, emit_with_markdown, OutputMode, OutputOptions};
+use output::{emit, OutputMode, OutputOptions, RenderContext};
 
 /// A small, opinionated Git client built on `grit-lib`.
 #[derive(Debug, Parser)]
@@ -535,7 +535,11 @@ fn main() {
         output::emit_error(&err, &opts);
         std::process::exit(1);
     }
-    if let Err(err) = dispatch(cli, &opts) {
+    let env = context::environment();
+    let render_ctx = RenderContext {
+        now: context::wall_clock_now(&env),
+    };
+    if let Err(err) = dispatch(cli, &opts, &render_ctx) {
         output::emit_error(&err, &opts);
         let code = if err
             .downcast_ref::<commands::bundle::MissingPrerequisites>()
@@ -623,35 +627,36 @@ fn reject_non_human_plumbing(cli: &Cli, opts: &OutputOptions) -> Result<()> {
     bail!("`grit {name}` does not support --json or --markdown");
 }
 
-fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
+fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
     match cli.command.unwrap_or(Command::Status) {
         Command::Init {
             path,
             bare,
             ref_format,
-        } => emit(&commands::init::run(path, bare, ref_format)?, opts),
-        Command::Clone { url, dir } => emit(&commands::clone::run(&url, dir, opts.mode)?, opts),
+        } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
+        Command::Clone { url, dir } => emit(&commands::clone::run(&url, dir, opts.mode)?, opts, ctx),
         Command::Remote { action } => match action {
-            None => emit(&commands::remote::run_list_or_add(None)?, opts),
+            None => emit(&commands::remote::run_list_or_add(None)?, opts, ctx),
             Some(RemoteAction::Add { name, url }) => {
-                emit(&commands::remote::run_list_or_add(Some((name, url)))?, opts)
+                emit(&commands::remote::run_list_or_add(Some((name, url)))?, opts, ctx)
             }
             Some(RemoteAction::Refs {
                 remote_or_url,
                 heads,
                 tags,
                 prefixes,
-            }) => emit_with_markdown(
+            }) => emit(
                 &commands::remote::run_refs(&remote_or_url, heads, tags, prefixes, opts.mode)?,
                 opts,
+                ctx,
             ),
         },
-        Command::Log { before } => emit(&commands::log::run(before)?, opts),
+        Command::Log { before } => emit(&commands::log::run(before)?, opts, ctx),
         Command::Blame {
             file,
             rev,
             line_range,
-        } => emit_with_markdown(&commands::blame::run(file, rev, line_range)?, opts),
+        } => emit(&commands::blame::run(file, rev, line_range)?, opts, ctx),
         Command::Diff {
             staged,
             unstaged,
@@ -665,24 +670,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
                 commits,
             })?,
             opts,
+            ctx,
         ),
-        Command::Show { object } => emit(&commands::show::run(object)?, opts),
-        Command::Status => emit(&commands::status::run()?, opts),
-        Command::Shortlog => emit(&commands::shortlog::run()?, opts),
-        Command::Add { paths } => emit(&commands::add::run(&paths)?, opts),
+        Command::Show { object } => emit(&commands::show::run(object)?, opts, ctx),
+        Command::Status => emit(&commands::status::run()?, opts, ctx),
+        Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
+        Command::Add { paths } => emit(&commands::add::run(&paths)?, opts, ctx),
         Command::Rm {
             paths,
             cached,
             force,
-        } => emit_with_markdown(&commands::rm::run(&paths, cached, force)?, opts),
+        } => emit(&commands::rm::run(&paths, cached, force)?, opts, ctx),
         Command::Mv { paths, force } => {
-            emit_with_markdown(&commands::mv::run(&paths, force)?, opts)
+            emit(&commands::mv::run(&paths, force)?, opts, ctx)
         }
         Command::Clean {
             paths,
             force,
             ignored,
-        } => emit_with_markdown(&commands::clean::run(&paths, force, ignored)?, opts),
+        } => emit(&commands::clean::run(&paths, force, ignored)?, opts, ctx),
         Command::Commit {
             message,
             message_flag,
@@ -691,26 +697,27 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         } => emit(
             &commands::commit::run(message.or(message_flag), amend)?,
             opts,
+            ctx,
         ),
         Command::Branch {
             name,
             delete,
             force_delete,
-        } => emit(&commands::branch::run(name, delete, force_delete)?, opts),
+        } => emit(&commands::branch::run(name, delete, force_delete)?, opts, ctx),
         Command::Bundle { action } => match action {
             BundleAction::Create { file, revs } => {
-                emit_with_markdown(&commands::bundle::run_create(file.into(), revs)?, opts)
+                emit(&commands::bundle::run_create(file.into(), revs)?, opts, ctx)
             }
             BundleAction::Verify { file } => {
                 let outcome = commands::bundle::run_verify(file.into())?;
-                emit_with_markdown(&outcome, opts)?;
+                emit(&outcome, opts, ctx)?;
                 if !outcome.ok {
                     std::process::exit(1);
                 }
                 Ok(())
             }
             BundleAction::List { file } => {
-                emit_with_markdown(&commands::bundle::run_list(file.into())?, opts)
+                emit(&commands::bundle::run_list(file.into())?, opts, ctx)
             }
         },
         Command::Tag {
@@ -718,9 +725,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             delete,
             message,
             object,
-        } => emit(&commands::tag::run(name, delete, message, object)?, opts),
+        } => emit(&commands::tag::run(name, delete, message, object)?, opts, ctx),
         Command::Worktree { action } => match action {
-            WorktreeAction::List => emit(&commands::worktree::run_list()?, opts),
+            WorktreeAction::List => emit(&commands::worktree::run_list()?, opts, ctx),
             WorktreeAction::Add {
                 path,
                 start_point,
@@ -731,10 +738,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
                 emit(
                     &commands::worktree::run_add(path, start_point, branch, new_branch, detach)?,
                     opts,
+                    ctx,
                 )
             }
             WorktreeAction::Remove { path, force } => {
-                emit(&commands::worktree::run_remove(path, force)?, opts)
+                emit(&commands::worktree::run_remove(path, force)?, opts, ctx)
             }
         },
         Command::Switch {
@@ -745,23 +753,24 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         } => emit(
             &commands::switch::run(branch, start_point, create, detach)?,
             opts,
+            ctx,
         ),
         Command::Reset {
             rev,
             soft,
             mixed,
             hard,
-        } => emit(&commands::reset::run(rev, soft, mixed, hard)?, opts),
+        } => emit(&commands::reset::run(rev, soft, mixed, hard)?, opts, ctx),
         Command::Merge { branch, abort } => {
             let outcome = commands::merge::run(branch.as_deref(), abort)?;
-            emit(&outcome, opts)?;
+            emit(&outcome, opts, ctx)?;
             if outcome.result == "conflicts" {
                 std::process::exit(1);
             }
             Ok(())
         }
-        Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts),
-        Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts),
+        Command::Pick { commit } => emit(&commands::pick::run(&commit)?, opts, ctx),
+        Command::Revert { commit } => emit(&commands::revert::run(&commit)?, opts, ctx),
         Command::Stash {
             action,
             message,
@@ -770,6 +779,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             None => emit(
                 &commands::stash::run_push(message, include_untracked)?,
                 opts,
+                ctx,
             ),
             Some(StashAction::Push {
                 message: push_message,
@@ -780,14 +790,15 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
                     include_untracked || push_untracked,
                 )?,
                 opts,
+                ctx,
             ),
-            Some(StashAction::List) => emit_with_markdown(&commands::stash::run_list()?, opts),
+            Some(StashAction::List) => emit(&commands::stash::run_list()?, opts, ctx),
             Some(StashAction::Show { index, patch }) => {
-                emit_with_markdown(&commands::stash::run_show(index, patch)?, opts)
+                emit(&commands::stash::run_show(index, patch)?, opts, ctx)
             }
             Some(StashAction::Apply { index }) => {
                 let outcome = commands::stash::run_apply(index)?;
-                emit_with_markdown(&outcome, opts)?;
+                emit(&outcome, opts, ctx)?;
                 if outcome.conflicts {
                     std::process::exit(1);
                 }
@@ -795,14 +806,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             }
             Some(StashAction::Pop { index }) => {
                 let outcome = commands::stash::run_pop(index)?;
-                emit_with_markdown(&outcome, opts)?;
+                emit(&outcome, opts, ctx)?;
                 if outcome.conflicts {
                     std::process::exit(1);
                 }
                 Ok(())
             }
             Some(StashAction::Drop { index }) => {
-                emit_with_markdown(&commands::stash::run_drop(index)?, opts)
+                emit(&commands::stash::run_drop(index)?, opts, ctx)
             }
         },
         Command::Restore {
@@ -810,9 +821,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             staged,
             worktree,
             source,
-        } => emit_with_markdown(
+        } => emit(
             &commands::restore::run(paths, staged, worktree, source)?,
             opts,
+            ctx,
         ),
         Command::Fetch {
             remote,
@@ -821,10 +833,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         } => emit(
             &commands::fetch::run(remote, prune, no_prune, opts.mode)?,
             opts,
+            ctx,
         ),
         Command::Pull => {
             let outcome = commands::pull::run(opts.mode)?;
-            emit(&outcome, opts)?;
+            emit(&outcome, opts, ctx)?;
             if outcome.result == "conflicts" {
                 std::process::exit(1);
             }
@@ -836,7 +849,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             remote,
         } => {
             let outcome = commands::push::run(tags, &delete, remote)?;
-            emit(&outcome, opts)?;
+            emit(&outcome, opts, ctx)?;
             // The outcome (per-ref results) is reported in both modes; a rejected
             // push is still a failure, so mirror Git and exit non-zero.
             if outcome.rejected {
@@ -845,11 +858,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
             Ok(())
         }
         Command::Auth { action } => match action {
-            None => emit(&commands::auth::run()?, opts),
-            Some(AuthAction::Logout) => emit(&commands::auth::logout()?, opts),
+            None => emit(&commands::auth::run()?, opts, ctx),
+            Some(AuthAction::Logout) => emit(&commands::auth::logout()?, opts, ctx),
         },
-        Command::Update => emit(&commands::update::run(opts.mode)?, opts),
-        Command::Skill => emit(&commands::skill::run()?, opts),
+        Command::Update => emit(&commands::update::run(opts.mode)?, opts, ctx),
+        Command::Skill => emit(&commands::skill::run()?, opts, ctx),
         Command::Completions { shell } => commands::completions::run(shell),
         Command::Config {
             global,
@@ -860,6 +873,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions) -> Result<()> {
         } => emit(
             &commands::config::run(global, list, unset, key, value)?,
             opts,
+            ctx,
         ),
         // `manager` speaks Git's credential protocol on stdout; it has no JSON form.
         Command::Manager { operation } => commands::manager::run(&operation),

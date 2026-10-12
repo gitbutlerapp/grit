@@ -1,6 +1,7 @@
 //! `grit remote` — list remotes, add one, or list refs on a remote.
 
 use anyhow::{bail, Context, Result};
+use std::io::Write;
 use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote, RemoteRef};
 use grit_lib::repo::Repository;
@@ -10,8 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender, OutputMode};
-use crate::stdio;
+use crate::output::{HumanRender, MarkdownRender, OutputMode, RenderContext, outln};
 
 /// Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).
 #[derive(Serialize)]
@@ -58,73 +58,71 @@ pub struct RemoteRefLine {
 }
 
 impl HumanRender for RemoteOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             RemoteOutcome::List { remotes } => {
                 if remotes.is_empty() {
-                    println!("No remotes. Add one with: grit remote add <name> <url>");
-                    return;
+                    outln!(w, "No remotes. Add one with: grit remote add <name> <url>");
+                    return Ok(());
                 }
                 for remote in remotes {
-                    println!("{}\t{}", remote.name, remote.url);
+                    outln!(w, "{}\t{}", remote.name, remote.url);
                 }
             }
-            RemoteOutcome::Add { name, url } => println!("Added remote {name} → {url}"),
+            RemoteOutcome::Add { name, url } => outln!(w, "Added remote {name} → {url}"),
             RemoteOutcome::Refs { lines, .. } => {
-                let mut out = String::with_capacity(lines.len().saturating_mul(52));
                 for line in lines {
                     if line.symref {
-                        use std::fmt::Write as _;
-                        let _ = writeln!(out, "ref: {}\t{}", line.oid, line.name);
+                        outln!(w, "ref: {}\t{}", line.oid, line.name);
                     } else {
-                        use std::fmt::Write as _;
-                        let _ = writeln!(out, "{}\t{}", line.oid, line.name);
+                        outln!(w, "{}\t{}", line.oid, line.name);
                     }
                 }
-                use std::io::Write as _;
-                let mut stdout = std::io::BufWriter::new(std::io::stdout());
-                let _ = stdio::io_result(stdout.write_all(out.as_bytes()));
-                let _ = stdio::io_result(stdout.flush());
             }
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for RemoteOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            RemoteOutcome::List { remotes } => markdown::print_remote_list(remotes),
-            RemoteOutcome::Add { name, url } => println!("Added remote `{name}` → {url}."),
+            RemoteOutcome::List { remotes } => markdown::print_remote_list(w, remotes)?,
+            RemoteOutcome::Add { name, url } => outln!(w, "Added remote `{name}` → {url}."),
             RemoteOutcome::Refs { refs, .. } => {
-                println!("## Remote refs\n");
+                outln!(w, "## Remote refs\n");
                 if refs.is_empty() {
-                    println!("No refs matched.\n");
-                    return;
+                    outln!(w, "No refs matched.\n");
+                    return Ok(());
                 }
-                println!("| Ref | Object | Peeled | Symref target |");
-                println!("| --- | --- | --- | --- |");
+                outln!(w, "| Ref | Object | Peeled | Symref target |");
+                outln!(w, "| --- | --- | --- | --- |");
                 for entry in refs {
                     let peeled = entry.peeled.as_deref().unwrap_or("—");
                     let sym = entry.symref_target.as_deref().unwrap_or("—");
-                    println!(
+                    let peeled_cell = if peeled == "—" {
+                        "—".to_owned()
+                    } else {
+                        format!("`{peeled}`")
+                    };
+                    let sym_cell = if sym == "—" {
+                        "—".to_owned()
+                    } else {
+                        format!("`{sym}`")
+                    };
+                    outln!(
+                        w,
                         "| `{}` | `{}` | {} | {} |",
                         entry.name,
                         entry.oid,
-                        if peeled == "—" {
-                            "—".to_owned()
-                        } else {
-                            format!("`{peeled}`")
-                        },
-                        if sym == "—" {
-                            "—".to_owned()
-                        } else {
-                            format!("`{sym}`")
-                        }
+                        peeled_cell,
+                        sym_cell
                     );
                 }
-                println!();
+                outln!(w);
             }
         }
+        Ok(())
     }
 }
 

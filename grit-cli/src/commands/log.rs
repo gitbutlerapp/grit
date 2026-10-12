@@ -4,12 +4,13 @@
 //! there's more, prints the command to fetch the next page.
 
 use anyhow::{Context, Result};
+use std::io::Write;
 use grit_lib::rev_list::{rev_list, RevListOptions};
 use serde::Serialize;
 
 use crate::context::{self, subject_line, CommitSummary};
 use crate::markdown;
-use crate::output::{CommitJson, HumanRender, MarkdownRender};
+use crate::output::{CommitJson, HumanRender, MarkdownRender, RenderContext, outln};
 use crate::ui;
 
 /// How many commits to show per page.
@@ -27,32 +28,35 @@ pub struct LogOutcome {
 }
 
 impl HumanRender for LogOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.commits.is_empty() {
-            println!("No commits yet.");
-            return;
+            outln!(w, "No commits yet.");
+            return Ok(());
         }
-        for row in ui::commit_rows(&self.commit_rows) {
-            println!("{row}");
+        let now = ctx.now.unix_timestamp();
+        for row in ui::commit_rows(&self.commit_rows, now) {
+            outln!(w, "{row}");
         }
         if let Some(next) = &self.next {
-            println!();
-            println!("→ more: grit log --before={}", short_hex(next));
+            outln!(w);
+            outln!(w, "→ more: grit log --before={}", short_hex(next));
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for LogOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.commit_rows.is_empty() {
-            println!("No commits yet.");
-            return;
+            outln!(w, "No commits yet.");
+            return Ok(());
         }
-        markdown::print_commit_list(&self.commit_rows);
+        markdown::print_commit_list(w, &self.commit_rows, ctx)?;
         if let Some(next) = &self.next {
-            println!();
-            println!("More history: run `grit log --before={}`", short_hex(next));
+            outln!(w);
+            outln!(w, "More history: run `grit log --before={}`", short_hex(next));
         }
+        Ok(())
     }
 }
 

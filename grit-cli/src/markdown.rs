@@ -1,24 +1,30 @@
 //! Shared Markdown formatters for `--markdown` command output.
 
-use std::io::Write as _;
+use std::io::Write;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
 
 use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
 use crate::context::{self, CommitSummary};
+use crate::output::{outln, RenderContext};
 use crate::stdio;
 use crate::ui::{self, PathDisplayContext};
 
 /// Print a list of commits as Markdown bullets (`oid`, subject, author, date).
-pub fn print_commit_list(commits: &[CommitSummary]) {
+pub fn print_commit_list(
+    w: &mut dyn Write,
+    commits: &[CommitSummary],
+    ctx: &RenderContext,
+) -> anyhow::Result<()> {
     if commits.is_empty() {
-        println!("No commits.");
-        return;
+        outln!(w, "No commits.");
+        return Ok(());
     }
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let now = ctx.now.unix_timestamp();
     for c in commits {
-        println!("{}", commit_bullet(c, now));
+        outln!(w, "{}", commit_bullet(c, now));
     }
+    Ok(())
 }
 
 fn commit_bullet(c: &CommitSummary, now: i64) -> String {
@@ -30,22 +36,28 @@ fn commit_bullet(c: &CommitSummary, now: i64) -> String {
 
 /// Print a titled group of index/worktree changes.
 pub fn print_change_section(
+    w: &mut dyn Write,
     title: &str,
     entries: &[DiffEntry],
     path_display: Option<&PathDisplayContext>,
-) {
+) -> anyhow::Result<()> {
     if entries.is_empty() {
-        return;
+        return Ok(());
     }
-    println!("## {title}");
+    outln!(w, "## {title}");
     for entry in entries {
         let repo_path = ui::entry_path(entry);
         let shown = path_display
             .map(|ctx| ctx.format_repo_path(repo_path).into_owned())
             .unwrap_or_else(|| repo_path.to_owned());
-        println!("- **{}** `{shown}`", change_label(&entry.status));
+        outln!(
+            w,
+            "- **{}** `{shown}`",
+            change_label(&entry.status)
+        );
     }
-    println!();
+    outln!(w);
+    Ok(())
 }
 
 fn change_label(status: &DiffStatus) -> &'static str {
@@ -61,45 +73,51 @@ fn change_label(status: &DiffStatus) -> &'static str {
 }
 
 /// Print untracked paths under a heading.
-pub fn print_untracked(paths: &[String], path_display: Option<&PathDisplayContext>) {
+pub fn print_untracked(
+    w: &mut dyn Write,
+    paths: &[String],
+    path_display: Option<&PathDisplayContext>,
+) -> anyhow::Result<()> {
     if paths.is_empty() {
-        return;
+        return Ok(());
     }
-    println!("## Untracked");
+    outln!(w, "## Untracked");
     for path in paths {
         let shown = path_display
             .map(|ctx| ctx.format_repo_path(path).into_owned())
             .unwrap_or_else(|| path.clone());
-        println!("- `{shown}`");
+        outln!(w, "- `{shown}`");
     }
-    println!();
+    outln!(w);
+    Ok(())
 }
 
 /// Render a full diff outcome as Markdown (one fenced `diff` block per file).
-pub fn print_diff_files(files: &[FileDiff]) {
+pub fn print_diff_files(w: &mut dyn Write, files: &[FileDiff]) -> anyhow::Result<()> {
     if files.is_empty() {
-        println!("No changes.");
-        return;
+        outln!(w, "No changes.");
+        return Ok(());
     }
     for (i, file) in files.iter().enumerate() {
         if i > 0 {
-            println!();
+            outln!(w);
         }
         let header = match &file.old_path {
             Some(old) => format!("{old} → {}", file.path),
             None => file.path.clone(),
         };
-        println!("## {header}");
+        outln!(w, "## {header}");
         if file.binary {
             if file.content_changed {
-                println!();
-                println!("Binary file differs.");
+                outln!(w);
+                outln!(w, "Binary file differs.");
             }
             continue;
         }
-        println!();
-        print_fenced_diff(&render_file_patch(file));
+        outln!(w);
+        print_fenced_diff(w, &render_file_patch(file))?;
     }
+    Ok(())
 }
 
 /// Pick a fence delimiter longer than any run of backticks appearing in `body`.
@@ -115,13 +133,13 @@ pub fn diff_code_fence(body: &str) -> (String, String) {
     }
 }
 
-fn print_fenced_diff(body: &str) {
+fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
     let (open, close) = diff_code_fence(body);
-    println!("{open}");
-    let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
-    let _ = stdio::io_result(writeln!(lock, "{body}"));
-    let _ = stdio::io_result(writeln!(lock, "{close}"));
+    outln!(w, "{open}");
+    stdio::io_result(writeln!(w, "{body}"))
+        .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    outln!(w, "{close}");
+    Ok(())
 }
 
 fn render_file_patch(file: &FileDiff) -> String {
@@ -178,33 +196,46 @@ fn segments_text(segments: &[Segment]) -> String {
 }
 
 /// Branch list: current branch marked, others plain.
-pub fn print_branch_list(branches: &[crate::commands::branch::BranchEntry]) {
+pub fn print_branch_list(
+    w: &mut dyn Write,
+    branches: &[crate::commands::branch::BranchEntry],
+) -> anyhow::Result<()> {
     if branches.is_empty() {
-        println!("No branches yet.");
-        return;
+        outln!(w, "No branches yet.");
+        return Ok(());
     }
-    println!("## Branches");
+    outln!(w, "## Branches");
     for branch in branches {
         if branch.current {
-            println!("- **`{}`** (current)", branch.name);
+            outln!(w, "- **`{}`** (current)", branch.name);
         } else {
-            println!("- `{}`", branch.name);
+            outln!(w, "- `{}`", branch.name);
         }
     }
+    Ok(())
 }
 
 /// Config entries as a two-column table.
-pub fn print_config_entries(entries: &[crate::commands::config::ConfigEntry]) {
+pub fn print_config_entries(
+    w: &mut dyn Write,
+    entries: &[crate::commands::config::ConfigEntry],
+) -> anyhow::Result<()> {
     if entries.is_empty() {
-        println!("No config entries.");
-        return;
+        outln!(w, "No config entries.");
+        return Ok(());
     }
-    println!("| Key | Value |");
-    println!("| --- | --- |");
+    outln!(w, "| Key | Value |");
+    outln!(w, "| --- | --- |");
     for entry in entries {
         let value = entry.value.as_deref().unwrap_or("");
-        println!("| `{}` | {} |", entry.key, escape_table_cell(value));
+        outln!(
+            w,
+            "| `{}` | {} |",
+            entry.key,
+            escape_table_cell(value)
+        );
     }
+    Ok(())
 }
 
 /// Escape cell text so it stays on one Markdown table row.
@@ -221,25 +252,37 @@ pub fn escape_table_cell(s: &str) -> String {
 }
 
 /// Remotes as a two-column table.
-pub fn print_remote_list(remotes: &[crate::commands::remote::RemoteEntry]) {
+pub fn print_remote_list(
+    w: &mut dyn Write,
+    remotes: &[crate::commands::remote::RemoteEntry],
+) -> anyhow::Result<()> {
     if remotes.is_empty() {
-        println!("No remotes. Add one with: `grit remote add <name> <url>`.");
-        return;
+        outln!(w, "No remotes. Add one with: `grit remote add <name> <url>`.");
+        return Ok(());
     }
-    println!("| Name | URL |");
-    println!("| --- | --- |");
+    outln!(w, "| Name | URL |");
+    outln!(w, "| --- | --- |");
     for remote in remotes {
-        println!("| `{}` | {} |", remote.name, escape_table_cell(&remote.url));
+        outln!(
+            w,
+            "| `{}` | {} |",
+            remote.name,
+            escape_table_cell(&remote.url)
+        );
     }
+    Ok(())
 }
 
 /// Tag names with short oids.
-pub fn print_tag_list(tags: &[crate::commands::tag::TagEntry]) {
+pub fn print_tag_list(
+    w: &mut dyn Write,
+    tags: &[crate::commands::tag::TagEntry],
+) -> anyhow::Result<()> {
     if tags.is_empty() {
-        println!("No tags yet.");
-        return;
+        outln!(w, "No tags yet.");
+        return Ok(());
     }
-    println!("## Tags");
+    outln!(w, "## Tags");
     for tag in tags {
         let short = tag.oid.get(..7).unwrap_or(&tag.oid);
         let peel = tag
@@ -247,21 +290,23 @@ pub fn print_tag_list(tags: &[crate::commands::tag::TagEntry]) {
             .as_ref()
             .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
             .unwrap_or_default();
-        println!("- `{}` · {} `{short}`{peel}", tag.name, tag.kind);
+        outln!(w, "- `{}` · {} `{short}`{peel}", tag.name, tag.kind);
     }
+    Ok(())
 }
 
 /// Fetch ref updates as bullets (`ref` · old → new).
 pub fn print_fetch_updates(
+    w: &mut dyn Write,
     remote: &str,
     updates: &[crate::commands::fetch::FetchUpdate],
     updated: usize,
-) {
+) -> anyhow::Result<()> {
     if updates.is_empty() && updated == 0 {
-        println!("Already up to date with `{remote}`.");
-        return;
+        outln!(w, "Already up to date with `{remote}`.");
+        return Ok(());
     }
-    println!("## Updates from `{remote}`");
+    outln!(w, "## Updates from `{remote}`");
     for update in updates {
         let from = update.old_oid.as_deref().map(short_hex).unwrap_or("new");
         let to = update
@@ -269,15 +314,17 @@ pub fn print_fetch_updates(
             .as_deref()
             .map(short_hex)
             .unwrap_or("deleted");
-        println!("- `{}` · `{from}` → `{to}`", update.ref_name);
+        outln!(w, "- `{}` · `{from}` → `{to}`", update.ref_name);
     }
     if updated > 0 {
-        println!();
-        println!(
+        outln!(w);
+        outln!(
+            w,
             "Fetched **{updated}** update{}.",
             if updated == 1 { "" } else { "s" }
         );
     }
+    Ok(())
 }
 
 fn short_hex(oid: &str) -> &str {
@@ -285,6 +332,43 @@ fn short_hex(oid: &str) -> &str {
 }
 
 /// Per-ref push results.
+pub fn print_push_results(
+    w: &mut dyn Write,
+    remote: &str,
+    branch: &str,
+    results: &[crate::commands::push::PushRefResult],
+) -> anyhow::Result<()> {
+    if results.is_empty() {
+        outln!(w, "No refs pushed to `{remote}`.");
+        return Ok(());
+    }
+    outln!(w, "## Push to `{remote}`");
+    for result in results {
+        let target = format!("{remote} {}", result.ref_name);
+        match result.status.as_str() {
+            "ok" => outln!(
+                w,
+                "- **`{}`** · pushed `{branch}` → `{target}`",
+                result.ref_name
+            ),
+            "up_to_date" => outln!(
+                w,
+                "- **`{}`** · `{target}` already up to date",
+                result.ref_name
+            ),
+            _ => {
+                let reason = result.reason.as_deref().unwrap_or("rejected");
+                outln!(
+                    w,
+                    "- **`{}`** · rejected `{target}`: {reason}",
+                    result.ref_name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{diff_code_fence, escape_table_cell};
@@ -314,37 +398,5 @@ mod tests {
     #[test]
     fn escape_table_cell_replaces_internal_newlines_and_pipes() {
         assert_eq!(escape_table_cell("a|b\nc"), "a\\|b\\nc");
-    }
-}
-
-pub fn print_push_results(
-    remote: &str,
-    branch: &str,
-    results: &[crate::commands::push::PushRefResult],
-) {
-    if results.is_empty() {
-        println!("No refs pushed to `{remote}`.");
-        return;
-    }
-    println!("## Push to `{remote}`");
-    for result in results {
-        let target = format!("{remote} {}", result.ref_name);
-        match result.status.as_str() {
-            "ok" => println!(
-                "- **`{}`** · pushed `{branch}` → `{target}`",
-                result.ref_name
-            ),
-            "up_to_date" => println!(
-                "- **`{}`** · `{target}` already up to date",
-                result.ref_name
-            ),
-            _ => {
-                let reason = result.reason.as_deref().unwrap_or("rejected");
-                println!(
-                    "- **`{}`** · rejected `{target}`: {reason}",
-                    result.ref_name
-                );
-            }
-        }
     }
 }

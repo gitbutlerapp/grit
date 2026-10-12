@@ -1,7 +1,8 @@
 //! `grit revert` — undo a single commit with a new inverse commit.
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender};
+use std::io::Write;
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -22,10 +23,11 @@ pub struct RevertOutcome {
 }
 
 impl HumanRender for RevertOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let new_short = self.oid.get(..7).unwrap_or(&self.oid);
         let src_short = self.source.get(..7).unwrap_or(&self.source);
-        println!("Reverted {src_short} → {new_short} {}", self.subject);
+        outln!(w, "Reverted {src_short} → {new_short} {}", self.subject);
+        Ok(())
     }
 }
 

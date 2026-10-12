@@ -1,6 +1,7 @@
 //! `grit branch` — list branches, or create / delete one.
 
 use anyhow::{bail, Context, Result};
+use std::io::Write;
 use grit_lib::branch_tracking::upstream_tracking_full_ref;
 use grit_lib::check_ref_format::validate_branch_short_name;
 
@@ -14,7 +15,7 @@ use serde::Serialize;
 
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Result of `grit branch`, tagged by `action` (`list` / `create` / `delete`).
 #[derive(Serialize)]
@@ -45,40 +46,40 @@ pub struct BranchEntry {
 }
 
 impl HumanRender for BranchOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             BranchOutcome::List { branches, .. } => {
                 if branches.is_empty() {
-                    println!("No branches yet.");
-                    return;
+                    outln!(w, "No branches yet.");
+                    return Ok(());
                 }
                 for branch in branches {
                     if branch.current {
-                        println!("* {}", branch.name);
+                        outln!(w, "* {}", branch.name);
                     } else {
-                        println!("  {}", branch.name);
+                        outln!(w, "  {}", branch.name);
                     }
                 }
             }
-            BranchOutcome::Create { name } => println!("Created branch {name}"),
+            BranchOutcome::Create { name } => outln!(w, "Created branch {name}"),
             BranchOutcome::Delete {
                 name, short_oid, ..
-            } => println!("Deleted branch {name} (was {short_oid})."),
+            } => outln!(w, "Deleted branch {name} (was {short_oid})."),
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for BranchOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            BranchOutcome::List { branches, .. } => markdown::print_branch_list(branches),
-            BranchOutcome::Create { name } => println!("Created branch `{name}`."),
+            BranchOutcome::List { branches, .. } => markdown::print_branch_list(w, branches)?,
+            BranchOutcome::Create { name } => outln!(w, "Created branch `{name}`."),
             BranchOutcome::Delete {
                 name, short_oid, ..
-            } => {
-                println!("Deleted branch `{name}` (was `{short_oid}`).");
-            }
+            } => outln!(w, "Deleted branch `{name}` (was `{short_oid}`)."),
         }
+        Ok(())
     }
 }
 

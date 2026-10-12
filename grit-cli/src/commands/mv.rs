@@ -5,9 +5,10 @@ use grit_lib::pathspec::{pathdiff, resolve_pathspec_in_worktree};
 use grit_lib::porcelain::paths::move_path;
 use grit_lib::repo::Repository;
 use serde::Serialize;
+use std::io::Write;
 
 use crate::context;
-use crate::output::HumanRender;
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// CLI outcome for `grit mv`.
 #[derive(Serialize)]
@@ -19,15 +20,17 @@ pub struct MvOutcome {
 }
 
 impl HumanRender for MvOutcome {
-    fn render_human(&self) {
-        println!("Renamed {} -> {}.", self.from, self.to);
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "Renamed {} -> {}.", self.from, self.to);
+        Ok(())
     }
 }
 
-impl crate::output::MarkdownRender for MvOutcome {
-    fn render_markdown(&self) {
-        println!("- **from**: `{}`", self.from);
-        println!("- **to**: `{}`", self.to);
+impl MarkdownRender for MvOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "- **from**: `{}`", self.from);
+        outln!(w, "- **to**: `{}`", self.to);
+        Ok(())
     }
 }
 

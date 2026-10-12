@@ -1,6 +1,7 @@
 //! `grit tag` — list tags, or create / delete one.
 
 use anyhow::{bail, Context, Result};
+use std::io::Write;
 use grit_lib::check_ref_format::validate_tag_short_name;
 use grit_lib::ident_resolve::IdentRole;
 use grit_lib::porcelain::tag::{create_tag, tag_ref_metadata, CreateTagRequest, TagKind};
@@ -9,11 +10,9 @@ use grit_lib::repo::Repository;
 use grit_lib::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head, HeadState};
 use serde::Serialize;
-use time::OffsetDateTime;
-
 use crate::context;
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 use crate::ref_name_messages::tag_short_name_error_message;
 
 /// Result of `grit tag`, tagged by `action` (`list` / `create` / `delete`).
@@ -47,27 +46,28 @@ pub struct TagEntry {
 }
 
 impl HumanRender for TagOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             TagOutcome::List { tags } => {
                 if tags.is_empty() {
-                    println!("No tags yet.");
-                    return;
+                    outln!(w, "No tags yet.");
+                    return Ok(());
                 }
                 for tag in tags {
-                    println!("  {}", tag.name);
+                    outln!(w, "  {}", tag.name);
                 }
             }
-            TagOutcome::Create { name, .. } => println!("Created tag {name}"),
-            TagOutcome::Delete { name } => println!("Deleted tag {name}"),
+            TagOutcome::Create { name, .. } => outln!(w, "Created tag {name}"),
+            TagOutcome::Delete { name } => outln!(w, "Deleted tag {name}"),
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for TagOutcome {
-    fn render_markdown(&self) {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         match self {
-            TagOutcome::List { tags } => markdown::print_tag_list(tags),
+            TagOutcome::List { tags } => markdown::print_tag_list(w, tags)?,
             TagOutcome::Create {
                 name,
                 oid,
@@ -84,10 +84,11 @@ impl MarkdownRender for TagOutcome {
                     .as_ref()
                     .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
                     .unwrap_or_default();
-                println!("Created tag `{name}`{kind_note} at `{short}`{peel}.");
+                outln!(w, "Created tag `{name}`{kind_note} at `{short}`{peel}.");
             }
-            TagOutcome::Delete { name } => println!("Deleted tag `{name}`."),
+            TagOutcome::Delete { name } => outln!(w, "Deleted tag `{name}`."),
         }
+        Ok(())
     }
 }
 
@@ -159,7 +160,7 @@ fn create(
 
     let env = context::environment();
     let config = repo.config().context("could not load config")?;
-    let now = OffsetDateTime::now_utc();
+    let now = context::wall_clock_now(repo.environment());
     let tagger = if message.is_some() {
         Some(
             context::identity(

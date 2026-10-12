@@ -1,6 +1,7 @@
 //! `grit bundle` — create, verify, and list git bundle files.
 
 use std::path::{Path, PathBuf};
+use std::io::Write;
 
 use anyhow::{bail, Result};
 use grit_lib::bundle::{Bundle, BundleError, BundleVerifyReport};
@@ -9,7 +10,7 @@ use grit_lib::objects::ObjectId;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Outcome of `grit bundle create`.
 #[derive(Serialize)]
@@ -52,25 +53,26 @@ impl From<(&str, ObjectId)> for BundleRefJson {
 }
 
 impl HumanRender for BundleCreateOutcome {
-    fn render_human(&self) {
-        println!("Wrote bundle {} ({} refs).", self.path, self.refs);
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        outln!(w, "Wrote bundle {} ({} refs).", self.path, self.refs);
+        Ok(())
     }
 }
 
 impl HumanRender for BundleVerifyOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.ok {
-            println!("{} is valid", self.path);
+            outln!(w, "{} is valid", self.path);
             println!(
                 "The bundle uses this hash algorithm: {}",
                 self.hash_algorithm
             );
             if self.references.is_empty() {
-                println!("The bundle contains no refs.");
+                outln!(w, "The bundle contains no refs.");
             } else {
-                println!("The bundle contains {} refs:", self.references.len());
+                outln!(w, "The bundle contains {} refs:", self.references.len());
                 for reference in &self.references {
-                    println!("{} {}", reference.oid, reference.name);
+                    outln!(w, "{} {}", reference.oid, reference.name);
                 }
             }
         } else {
@@ -79,55 +81,60 @@ impl HumanRender for BundleVerifyOutcome {
                 eprintln!("missing prerequisite {oid}");
             }
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for BundleCreateOutcome {
-    fn render_markdown(&self) {
-        println!("## Bundle create\n");
-        println!("- **path:** `{}`", self.path);
-        println!("- **refs:** {}", self.refs);
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Bundle create\n");
+        outln!(w, "- **path:** `{}`", self.path);
+        outln!(w, "- **refs:** {}", self.refs);
+        Ok(())
     }
 }
 
 impl MarkdownRender for BundleVerifyOutcome {
-    fn render_markdown(&self) {
-        println!("## Bundle verify\n");
-        println!("- **path:** `{}`", self.path);
-        println!("- **ok:** {}", self.ok);
-        println!("- **hash_algorithm:** {}", self.hash_algorithm);
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Bundle verify\n");
+        outln!(w, "- **path:** `{}`", self.path);
+        outln!(w, "- **ok:** {}", self.ok);
+        outln!(w, "- **hash_algorithm:** {}", self.hash_algorithm);
         if !self.references.is_empty() {
-            println!("\n| Ref | OID |");
-            println!("| --- | --- |");
+            outln!(w, "\n| Ref | OID |");
+            outln!(w, "| --- | --- |");
             for reference in &self.references {
-                println!("| `{}` | `{}` |", reference.name, reference.oid);
+                outln!(w, "| `{}` | `{}` |", reference.name, reference.oid);
             }
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for BundleListOutcome {
-    fn render_markdown(&self) {
-        println!("## Bundle list\n");
-        println!("- **path:** `{}`\n", self.path);
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Bundle list\n");
+        outln!(w, "- **path:** `{}`\n", self.path);
         if self.references.is_empty() {
-            println!("No refs in bundle header.\n");
-            return;
+            outln!(w, "No refs in bundle header.\n");
+            return Ok(());
         }
-        println!("| Ref | OID |");
-        println!("| --- | --- |");
+        outln!(w, "| Ref | OID |");
+        outln!(w, "| --- | --- |");
         for reference in &self.references {
-            println!("| `{}` | `{}` |", reference.name, reference.oid);
+            outln!(w, "| `{}` | `{}` |", reference.name, reference.oid);
         }
-        println!();
+        outln!(w);
+        Ok(())
     }
 }
 
 impl HumanRender for BundleListOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         for reference in &self.references {
-            println!("{} {}", reference.oid, reference.name);
+            outln!(w, "{} {}", reference.oid, reference.name);
         }
+        Ok(())
     }
 }
 

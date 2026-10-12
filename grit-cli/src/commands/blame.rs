@@ -1,6 +1,7 @@
 //! `grit blame` — show who last modified each line of a file.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result};
@@ -11,7 +12,7 @@ use serde::Serialize;
 
 use crate::context::{self, relative_date_from};
 use crate::markdown;
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Result of `grit blame`.
 #[derive(Serialize)]
@@ -50,10 +51,11 @@ struct BlameDisplayLine {
 }
 
 impl HumanRender for BlameOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for line in &self.display_lines {
             let short = short_oid(&line.commit.to_hex());
-            println!(
+            outln!(
+                w,
                 "{short} ({author} {date} {final:>4}) {content}",
                 author = line.author_short,
                 date = line.date,
@@ -61,28 +63,36 @@ impl HumanRender for BlameOutcome {
                 content = line.content,
             );
         }
+        Ok(())
     }
 }
 
 impl MarkdownRender for BlameOutcome {
-    fn render_markdown(&self) {
-        println!("## Blame: `{}`\n", self.file);
-        println!("Revision `{}`\n", self.rev);
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Blame: `{}`\n", self.file);
+        outln!(w, "Revision `{}`\n", self.rev);
         if self.lines.is_empty() {
-            println!("No lines to show.\n");
-            return;
+            outln!(w, "No lines to show.\n");
+            return Ok(());
         }
-        println!("| Line | Commit | Author | Date | Original | Content |");
-        println!("| ---: | --- | --- | --- | ---: | --- |");
+        outln!(w, "| Line | Commit | Author | Date | Original | Content |");
+        outln!(w, "| ---: | --- | --- | --- | ---: | --- |");
         for line in &self.display_lines {
             let short = short_oid(&line.commit.to_hex());
             let content = markdown::escape_table_cell(&line.content);
-            println!(
+            outln!(
+                w,
                 "| {} | `{}` | {} | {} | {} | {} |",
-                line.final_line, short, line.author_short, line.date, line.original_line, content,
+                line.final_line,
+                short,
+                line.author_short,
+                line.date,
+                line.original_line,
+                content,
             );
         }
-        println!();
+        outln!(w);
+        Ok(())
     }
 }
 
@@ -124,7 +134,7 @@ pub fn run(file: String, rev: Option<String>, line_range: Option<String>) -> Res
         },
     )?;
 
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     Ok(outcome_from_result(normalized, start.to_hex(), result, now))
 }
 

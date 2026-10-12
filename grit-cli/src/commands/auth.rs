@@ -28,7 +28,7 @@ use grit_lib::remote::http_client::{HttpClient, UreqHttpClient};
 use grit_lib::repo::Repository;
 use serde::Serialize;
 
-use crate::output::{HumanRender, MarkdownRender};
+use crate::output::{HumanRender, MarkdownRender, RenderContext, outln};
 
 /// Result of `grit auth` (sign-in).
 #[derive(Serialize)]
@@ -38,8 +38,9 @@ pub struct AuthOutcome {
 }
 
 impl HumanRender for AuthOutcome {
-    fn render_human(&self) {
-        println!("\n✓ Signed in to GitHub — token stored for {}.", self.host);
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "\n✓ Signed in to GitHub — token stored for {}.", self.host);
+        Ok(())
     }
 }
 
@@ -53,18 +54,21 @@ pub struct LogoutOutcome {
 }
 
 impl HumanRender for LogoutOutcome {
-    fn render_human(&self) {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.logged_out {
-            println!(
+            outln!(
+                w,
                 "✓ Signed out of GitHub — removed the stored token for {}.",
                 self.host
             );
         } else {
-            println!(
+            outln!(
+                w,
                 "No credential helper is configured, so there's no stored token for {} to remove.",
                 self.host
             );
         }
+        Ok(())
     }
 }
 
