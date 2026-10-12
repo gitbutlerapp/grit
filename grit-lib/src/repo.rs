@@ -2067,6 +2067,20 @@ fn longest_ancestor_length(path: &str, ceilings: &[String]) -> Option<usize> {
     max_len
 }
 
+/// Path to the repository-local config file (`.git/config`, or `commondir/config` for a linked
+/// worktree admin directory that has no separate `config` file).
+///
+/// Used when writing `git config --local` semantics from library code.
+pub(crate) fn local_config_write_path(git_dir: &Path) -> PathBuf {
+    if let Some(path) = repository_config_path(git_dir) {
+        return path;
+    }
+    if let Some(common) = resolve_common_dir(git_dir) {
+        return common.join("config");
+    }
+    git_dir.join("config")
+}
+
 /// Determine the config file path for a repository or linked worktree.
 fn repository_config_path(git_dir: &Path) -> Option<PathBuf> {
     let local = git_dir.join("config");

@@ -91,8 +91,18 @@ fn legacy_ref_update_flags(refname: &str) -> RefUpdateFlags {
 }
 
 pub(crate) fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<()> {
-    let refname = update.name.clone();
     let store = open_ref_store(git_dir)?;
+    commit_ref_update_on_store(store.as_ref(), update)
+}
+
+/// Apply one ref update through an already-selected [`RefStore`] (for example the store on
+/// [`crate::repo::Repository`] after [`crate::repo::Repository::with_ref_store`]).
+///
+/// # Errors
+///
+/// Propagates validation, compare-and-swap, and backend errors.
+pub fn commit_ref_update_on_store(store: &dyn RefStore, update: RefUpdate) -> Result<()> {
+    let refname = update.name.clone();
     let txn = RefTransaction::new()
         .update(update)
         .map_err(crate::error::Error::from)?;
@@ -102,6 +112,53 @@ pub(crate) fn commit_store_update(git_dir: &Path, update: RefUpdate) -> Result<(
     prepared
         .commit()
         .map_err(|e| map_public_ref_store_error(Error::from(e), &refname))
+}
+
+/// Point `refname` at `oid` using `store`, optionally running loose-files prechecks when
+/// `store` uses the files backend under `git_dir`.
+///
+/// # Errors
+///
+/// Same as [`write_ref`], except updates go through `store` instead of reopening storage from
+/// `git_dir`.
+pub fn update_direct_ref_on_store(
+    store: &dyn RefStore,
+    git_dir: &Path,
+    refname: &str,
+    oid: &ObjectId,
+) -> Result<()> {
+    store_write_value_on_store(
+        store,
+        git_dir,
+        refname,
+        Some(StoreRawRef::Direct(*oid)),
+        Expected::Any,
+        None,
+    )
+}
+
+fn store_write_value_on_store(
+    store: &dyn RefStore,
+    git_dir: &Path,
+    refname: &str,
+    new_value: Option<StoreRawRef>,
+    expected: Expected,
+    reflog: Option<ReflogUpdate>,
+) -> Result<()> {
+    ensure_refname_safe_for_storage(refname)?;
+    if new_value.is_some() && store.format() == RefStorageFormat::Files {
+        files_legacy_write_precheck(git_dir, refname)?;
+    }
+    commit_ref_update_on_store(
+        store,
+        RefUpdate {
+            name: refname.to_owned(),
+            new_value,
+            expected,
+            reflog,
+            flags: legacy_ref_update_flags(refname),
+        },
+    )
 }
 
 /// Apply several ref updates in one [`RefStore::prepare`] / commit (all-or-nothing).
@@ -140,19 +197,14 @@ fn store_write_value(
     expected: Expected,
     reflog: Option<ReflogUpdate>,
 ) -> Result<()> {
-    ensure_refname_safe_for_storage(refname)?;
-    if new_value.is_some() {
-        files_legacy_write_precheck(git_dir, refname)?;
-    }
-    commit_store_update(
+    let store = open_ref_store(git_dir)?;
+    store_write_value_on_store(
+        store.as_ref(),
         git_dir,
-        RefUpdate {
-            name: refname.to_owned(),
-            new_value,
-            expected,
-            reflog,
-            flags: legacy_ref_update_flags(refname),
-        },
+        refname,
+        new_value,
+        expected,
+        reflog,
     )
 }
 

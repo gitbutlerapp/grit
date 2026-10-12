@@ -1,11 +1,11 @@
 //! Repository-scoped reference and reflog access via [`References`].
-use std::path::Path;
+use std::ops::ControlFlow;
 
 use crate::error::Result;
 use crate::objects::ObjectId;
-use crate::reflog::{read_reflog, ReflogEntry};
+use crate::reflog::ReflogEntry;
 use crate::refs::store::RefName;
-use crate::refs::{list_refs_for_repository, write_ref};
+use crate::refs::{list_refs_for_repository, update_direct_ref_on_store};
 use crate::repo::Repository;
 
 /// Resolve, list, and update refs for one open repository.
@@ -78,6 +78,9 @@ impl<'repo> References<'repo> {
 
     /// Point `name` at `oid`, creating parent directories as needed.
     ///
+    /// Uses the [`RefStore`](crate::refs::store::RefStore) installed on this repository (including
+    /// injected in-memory stores), not a fresh open from `git_dir` alone.
+    ///
     /// # Errors
     ///
     /// Propagates validation, locking, and I/O errors from the ref backend.
@@ -110,21 +113,23 @@ impl<'repo> References<'repo> {
     /// ```
     #[inline]
     pub fn update(&self, name: &RefName, oid: &ObjectId) -> Result<()> {
-        write_ref(self.git_dir(), name.as_str(), oid)
+        update_direct_ref_on_store(self.repo.refs(), &self.repo.git_dir, name.as_str(), oid)
     }
 
     /// Read reflog entries for `name` (oldest first).
     ///
     /// # Errors
     ///
-    /// Propagates reflog parse and I/O errors.
+    /// Propagates reflog parse and backend errors.
     #[inline]
     pub fn reflog(&self, name: &RefName) -> Result<Vec<ReflogEntry>> {
-        read_reflog(self.git_dir(), name.as_str())
-    }
-
-    #[inline]
-    fn git_dir(&self) -> &Path {
-        &self.repo.git_dir
+        let mut entries = Vec::new();
+        self.repo
+            .refs()
+            .for_each_reflog_entry(name.as_str(), false, &mut |entry| {
+                entries.push(entry.clone());
+                ControlFlow::Continue(())
+            })?;
+        Ok(entries)
     }
 }

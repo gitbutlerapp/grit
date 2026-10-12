@@ -50,14 +50,17 @@ impl<'repo> ConfigHandle<'repo> {
         Ok(self.snapshot()?.get(key))
     }
 
-    /// Set a key in `.git/config` and reload the in-memory config snapshot.
+    /// Set a key in the repository-local config file and reload the in-memory snapshot.
+    ///
+    /// For linked worktrees this writes `commondir/config` when the per-worktree git directory
+    /// has no `config` file, matching Git's `--local` target.
     ///
     /// # Errors
     ///
     /// Propagates config parse, validation, and I/O errors.
     #[inline]
     pub fn set_local(&self, key: &str, value: &str) -> Result<()> {
-        let path = self.repo.git_dir.join("config");
+        let path = crate::repo::local_config_write_path(&self.repo.git_dir);
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut file = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
         file.set(key, value)?;

@@ -4,11 +4,14 @@
 
 use std::fs;
 
+use std::sync::Arc;
+
 use grit_lib::diff::{format_raw, DiffEntry};
 use grit_lib::objects::ObjectKind;
-use grit_lib::refs::store::RefName;
+use grit_lib::refs::store::{MemoryRefStore, RefName, RefStorageFormat};
 use grit_lib::repo::Repository;
 use grit_lib::rev_list::RevListOptions;
+use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions};
 
 mod support;
 
@@ -264,6 +267,71 @@ fn normalize_raw(raw: &str) -> String {
         .filter(|l| !l.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn references_update_uses_injected_ref_store() {
+    let (test, repo) = seeded_files_repo();
+    let oid = repo
+        .objects()
+        .write(ObjectKind::Blob, b"not-a-commit")
+        .expect("blob");
+    let store = Arc::new(MemoryRefStore::new());
+    let repo = repo.with_ref_store(store);
+    let name = RefName::try_from("refs/heads/probe").expect("valid ref");
+    repo.references().update(&name, &oid).expect("update");
+    assert_eq!(repo.references().resolve(&name).expect("resolve"), oid);
+    assert!(
+        repo.refs().format() == RefStorageFormat::Memory,
+        "update must not fall back to on-disk files store"
+    );
+    assert!(
+        !test.worktree().join(".git/refs/heads/probe").exists(),
+        "injected store update must not write loose ref under git_dir"
+    );
+}
+
+#[test]
+fn config_handle_set_local_linked_worktree_matches_git() {
+    let history = HistoryRepo::init();
+    let main = history.worktree();
+    commit_file(main, "seed.txt", "x\n", "seed");
+
+    let linked = main.parent().expect("parent").join("linked-wt");
+    add_linked_worktree(
+        &open_grit_repo(main),
+        &AddLinkedWorktreeOptions {
+            path: linked.clone(),
+            branch: Some("linked".into()),
+            new_branch: true,
+            detach: false,
+            start_point: Some("HEAD".into()),
+        },
+    )
+    .expect("add linked worktree");
+
+    let linked_repo = open_grit_repo(&linked);
+    linked_repo
+        .config_handle()
+        .set_local("grit.handle.probe", "linked-value")
+        .expect("set local from linked wt");
+
+    assert_eq!(
+        linked_repo
+            .config_handle()
+            .get("grit.handle.probe")
+            .expect("get")
+            .as_deref(),
+        Some("linked-value")
+    );
+    assert_eq!(
+        git(
+            &linked,
+            &["config", "--local", "--get", "grit.handle.probe"]
+        )
+        .trim(),
+        "linked-value"
+    );
 }
 
 fn two_commit_history() -> HistoryRepo {
