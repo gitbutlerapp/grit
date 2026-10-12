@@ -226,7 +226,7 @@ fn snapshot_stash_drop() {
 fn snapshot_worktree_list() {
     snapshot_fresh("worktree_list", &["worktree", "list"], |fixture| {
         fixture
-            .run(&["worktree", "add", LINKED_WT, "-b", "wt-branch"])
+            .run(&["worktree", "add", LINKED_WT, "-b", "wt|branch"])
             .expect_success("worktree add");
     });
 }

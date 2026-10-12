@@ -559,7 +559,7 @@ fn print_worktree_table(w: &mut dyn Write, worktrees: &[WorktreeRow]) -> anyhow:
         let branch = wt
             .branch
             .as_deref()
-            .map(|b| format!("`{b}`"))
+            .map(|b| format!("`{}`", escape_table_cell(b)))
             .unwrap_or_else(|| {
                 if wt.detached {
                     "_(detached)_".into()
@@ -713,5 +713,33 @@ mod tests {
     #[test]
     fn escape_table_cell_replaces_internal_newlines_and_pipes() {
         assert_eq!(escape_table_cell("a|b\nc"), "a\\|b\\nc");
+    }
+
+    #[test]
+    fn worktree_list_table_escapes_pipe_in_branch_name() {
+        use crate::commands::worktree::{WorktreeOutcome, WorktreeRow};
+
+        let outcome = WorktreeOutcome::List {
+            worktrees: vec![WorktreeRow {
+                path: "/repo/linked-wt".into(),
+                head: "b5ea30de417ac84c09b8cfc0acf5f2c39efc611f".into(),
+                branch: Some("wt|branch".into()),
+                detached: false,
+                bare: false,
+                locked: false,
+                lock_reason: None,
+            }],
+        };
+        let mut buf = Vec::new();
+        super::print_worktree_outcome(&mut buf, &outcome).expect("markdown");
+        let rendered = String::from_utf8(buf).expect("utf-8");
+        let row = rendered
+            .lines()
+            .find(|line| line.contains("linked-wt"))
+            .expect("worktree row");
+        assert!(
+            row.contains("`wt\\|branch`"),
+            "branch cell should escape pipe delimiters: {row}"
+        );
     }
 }
