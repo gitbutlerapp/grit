@@ -515,7 +515,7 @@ pub fn unified_diff_histogram_with_prefix_and_funcname(
         }
     }
 
-    output
+    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
 }
 
 /// Full unified diff (`---` / `+++` / hunks) using Git's histogram algorithm,
@@ -6060,7 +6060,7 @@ pub fn unified_diff_with_prefix_and_funcname_and_algorithm(
         }
     }
 
-    output
+    annotate_unified_diff_no_newline_at_eof(&output, old_content, new_content)
 }
 
 /// Group diff ops into hunks like Git's `xdl_get_hunk`: two changes merge into one hunk while
@@ -7237,6 +7237,89 @@ pub fn format_stat_line_width(
             cw = cw
         )
     }
+}
+
+fn last_line_index_without_trailing_newline(text: &str) -> Option<usize> {
+    if text.is_empty() || text.ends_with('\n') {
+        return None;
+    }
+    Some(text.lines().count().saturating_sub(1))
+}
+
+fn parse_unified_hunk_starts(header: &str) -> Option<(usize, usize)> {
+    let rest = header.strip_prefix("@@ ")?;
+    let (old_part, new_part) = rest.split_once(" +")?;
+    let old_start = parse_unified_range_start(old_part.strip_prefix('-')?)?;
+    let new_start = parse_unified_range_start(new_part.split(" @@").next()?)?;
+    Some((old_start, new_start))
+}
+
+fn parse_unified_range_start(spec: &str) -> Option<usize> {
+    let spec = spec.trim();
+    if let Some((start, _)) = spec.split_once(',') {
+        start.parse().ok()
+    } else {
+        spec.parse().ok()
+    }
+}
+
+/// Insert Git `\ No newline at end of file` after `-`/`+` hunk lines when that side of the
+/// file lacks a trailing newline on the last line.
+#[must_use]
+pub fn annotate_unified_diff_no_newline_at_eof(patch: &str, old: &str, new: &str) -> String {
+    let old_last = last_line_index_without_trailing_newline(old);
+    let new_last = last_line_index_without_trailing_newline(new);
+    if old_last.is_none() && new_last.is_none() {
+        return patch.to_string();
+    }
+    let mut out = String::with_capacity(patch.len() + 64);
+    let mut old_line = 1usize;
+    let mut new_line = 1usize;
+    for line in patch.lines() {
+        if let Some((o, n)) = line
+            .strip_prefix("@@ ")
+            .and_then(|_| parse_unified_hunk_starts(line))
+        {
+            old_line = o;
+            new_line = n;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if line.starts_with("---") || line.starts_with("+++") || line.starts_with("diff ") {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if line.starts_with('-') {
+            out.push_str(line);
+            out.push('\n');
+            if old_last == Some(old_line.saturating_sub(1)) {
+                out.push_str("\\ No newline at end of file\n");
+            }
+            old_line += 1;
+            continue;
+        }
+        if line.starts_with('+') {
+            out.push_str(line);
+            out.push('\n');
+            if new_last == Some(new_line.saturating_sub(1)) {
+                out.push_str("\\ No newline at end of file\n");
+            }
+            new_line += 1;
+            continue;
+        }
+        if line.starts_with(' ') {
+            out.push_str(line);
+            out.push('\n');
+            old_line += 1;
+            new_line += 1;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 /// Normalise one line like Git's `-b` / `--ignore-space-change`.
@@ -9281,5 +9364,18 @@ mod smudge_racily_clean_tests {
         let smudged = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None, None, None);
         assert!(!smudged);
         assert_ne!(index.entries[0].size, 0);
+    }
+}
+
+#[cfg(test)]
+mod annotate_no_newline_tests {
+    use super::annotate_unified_diff_no_newline_at_eof;
+
+    #[test]
+    fn annotate_marks_both_sides_without_trailing_newline() {
+        let raw = "@@ -1 +1 @@\n-foo\n+f o o\n";
+        let out = annotate_unified_diff_no_newline_at_eof(raw, "foo", "f o o");
+        assert!(out.contains("\\ No newline at end of file"));
+        assert_eq!(out.matches("\\ No newline at end of file").count(), 2);
     }
 }

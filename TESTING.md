@@ -250,8 +250,29 @@ History-area upstream `t/` scripts are mapped in the subsections below as Rust c
 
 #### Diff: blobs and algorithms
 
+Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/support/diff_harness.rs) (`git diff --no-index` oracle, `grit_blob_patch`, `assert_patch_matches_git`, ported [`BlobPair`](grit-lib/tests/support/diff_harness.rs) fixtures). Integration tests: [`grit-lib/tests/diff_blob_algorithms.rs`](grit-lib/tests/diff_blob_algorithms.rs).
+
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
+| t4033-diff-patience.sh | patience / frobnitz / unique blob pairs | `diff_blob_algorithms.rs` (`t4033_patience_matches_git`) | covered |
+| t4050-diff-histogram.sh | histogram frobnitz / unique | `diff_blob_algorithms.rs` (`t4050_histogram_matches_git`) | covered |
+| t4071-diff-minimal.sh | minimal on shared alternative fixtures | `diff_blob_algorithms.rs` (`t4071_minimal_matches_git`) | partial (Myers-class fixtures; Git `--minimal` hunk shaping differs on stress cases) |
+| t4065-diff-anchored.sh | `--anchored` single unique anchor | `diff_blob_algorithms.rs` (`t4065_anchored_matches_git`) | partial (multi-anchor cases deferred) |
+| t4061-diff-indent.sh | `--indent-heuristic` / `diff.indentHeuristic` | `diff_blob_algorithms.rs` (`t4061_indent_heuristic_matches_git`) | covered (spaces.txt subset) |
+| t4015-diff-whitespace.sh | trailing whitespace blob diffs; `-b`/`-w` oracle notes | `diff_blob_algorithms.rs` (`t4015_whitespace_modes_match_git`) | partial (default ws; `--ignore-space-at-eol` equivalence checked via git oracle) |
+| t4012-diff-binary.sh | binary detection / parse git binary patch | `diff_blob_algorithms.rs` (`t4012_binary_patch_applies_with_git`) | partial (text patch parity; binary marker + apply parse) |
+| t4052-stat-output.sh | `--numstat` / `--stat` width layout | `diff_blob_algorithms.rs` (`t4052_numstat_and_stat_width_match_git`) | partial (numstat + grit stat line; `--stat=width` UX skipped on older git) |
+| t4032-diff-inter-hunk-context.sh | `-U0` + `--inter-hunk-context` hunk count | `diff_blob_algorithms.rs` (`t4032_inter_hunk_context_matches_git`) | covered |
+| t4029-diff-trailing-space.sh | trailing space line diff | `diff_blob_algorithms.rs` (`t4015_whitespace_modes_match_git`) | covered |
+| t4074-diff-shifted-matched-group.sh | histogram shifted groups | `diff_blob_algorithms.rs` (`t4050_histogram_matches_git` fixtures) | gap (histogram body vs git on shifted groups) |
+| t4063-diff-blobs.sh | blob oid diff headers | — | gap (repository blob diff CLI; harness covers raw blob bytes) |
+| t4051-diff-function-context.sh | `-W` function context | — | not ported in this harness |
+| t4055-diff-context.sh | `diff.context` config | — | not ported |
+| t4024-diff-optimize-common.sh | optimize common subexpression | — | not ported |
+| t4049-diff-stat-count.sh | stat count limits | — | not ported |
+| t4047-diff-dirstat.sh | `--dirstat` | — | not ported |
+| — | no newline at EOF markers | `diff_blob_algorithms.rs` (`no_newline_at_eof_pairs_match_git_or_apply`) | covered |
+| — | random apply `--check` all algorithms | `diff_blob_algorithms.rs` (`random_patches_apply_with_git_all_algorithms`) | covered |
 
 #### Diff: trees and renames
 

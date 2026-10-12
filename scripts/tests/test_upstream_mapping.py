@@ -45,7 +45,25 @@ REQUIRED_UPSTREAM_IDS = (
 REQUIRED_HISTORY_INDEX: tuple[str, ...] = ()
 REQUIRED_HISTORY_INDEX_EXT: tuple[str, ...] = ()
 REQUIRED_HISTORY_SPARSE: tuple[str, ...] = ()
-REQUIRED_HISTORY_DIFF_BLOBS: tuple[str, ...] = ()
+REQUIRED_HISTORY_DIFF_BLOBS: tuple[str, ...] = (
+    "t4033",
+    "t4050",
+    "t4071",
+    "t4065",
+    "t4061",
+    "t4015",
+    "t4012",
+    "t4052",
+    "t4032",
+    "t4029",
+    "t4074",
+    "t4063",
+    "t4051",
+    "t4055",
+    "t4024",
+    "t4049",
+    "t4047",
+)
 REQUIRED_HISTORY_DIFF_TREES: tuple[str, ...] = ()
 REQUIRED_HISTORY_REVWALK_ORDER: tuple[str, ...] = ()
 REQUIRED_HISTORY_REVWALK_SIMPLIFY: tuple[str, ...] = ()
