@@ -262,6 +262,8 @@
 - Coverage of these modules is ≥85%.
 - Overall grit-lib line coverage is ≥80% and gated in CI so it can't drop.
 
+**Status (factory step 1130, branch `factory/coverage-lock-1130`, commit `604fd4083` + workspace tip):** After s3–s11 on `origin/main`, `make coverage` on this branch measures **75.0%** grit-lib total (**132 488** lines, **33 122** missed) and **79.3%** `[aggregate.history]` (**37 726** / **7 820** missed). History-area groups at **≥85%**: `index` (87.4%), `index-ext` (85.7%), `merge` (87.9%), `stash-notes-worktree` (87.7%). Still below **85%**: `diff` (72.0%), `revwalk` (72.4%), `revparse` (78.0%). Supporting-module git-compat tests and `TESTING.md` Supporting mapping landed; `[total] minimum` and history floors **≥85%** remain open until the ~**6.6k** additional covered lines needed for 80% total (and diff/revwalk/revparse top-ups) land. CI coverage gate still fails on **`pack_index_build.rs`** (86.4% vs floor 88.5%) until that file is re-tested or the floor is ratcheted from a green run.
+
 **Refs-config coverage (factory step 660, canonical stack `7ba03a1`):** `make coverage` on the integrated 651–659 stack ratchets floors in `grit-lib/coverage-floors.toml`. Latest measured groups: attributes **86.3%**, reflog **86.3%**, ignore **88.3%**, config **86.0%**, refs **85.1%**, **refs-config aggregate 85.9%** (MIDX/core/ODB gates green after nested `odb/` path tracking). Floors for **config**, **refs**, and **refs-config** aggregate are locked at **≥85%** on branch `cursor/coverage-floors-660-91e0`.
 
 ## 17. Public API design pass
