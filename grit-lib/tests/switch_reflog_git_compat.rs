@@ -1,5 +1,6 @@
 //! Switch and branch creation write Git-compatible reflogs (issue #979).
 
+use grit_lib::diff::zero_oid;
 use grit_lib::index::entry_from_stat;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::branch::create_branch;
@@ -10,6 +11,7 @@ use grit_lib::porcelain::switch::{
 use grit_lib::reflog::read_reflog;
 use grit_lib::refs;
 use grit_lib::repo::{init_repository, Repository};
+use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::RefStorageFormat;
 use std::os::unix::fs::PermissionsExt;
@@ -80,6 +82,53 @@ fn grit_commit(
         .expect("commit");
     refs::write_ref(&repo.git_dir, "refs/heads/main", &co).expect("branch");
     refs::write_symbolic_ref(&repo.git_dir, "HEAD", "refs/heads/main").expect("head");
+    co
+}
+
+fn grit_commit_to_ref(
+    repo: &Repository,
+    branch_ref: &str,
+    path: &str,
+    contents: &str,
+    parent: Option<ObjectId>,
+) -> ObjectId {
+    let wt = repo.work_tree.as_ref().expect("wt");
+    std::fs::write(wt.join(path), contents).expect("write");
+    let mut index = repo.load_index().expect("index");
+    let oid = repo
+        .odb
+        .write(ObjectKind::Blob, contents.as_bytes())
+        .expect("blob");
+    index.add_or_replace(
+        entry_from_stat(
+            &wt.join(path),
+            path.as_bytes(),
+            oid,
+            grit_lib::index::MODE_REGULAR,
+        )
+        .expect("entry"),
+    );
+    index.sort();
+    let tree =
+        write_tree_update_index(&repo.odb, &mut index, "", WriteTreeFlags::silent()).expect("tree");
+    repo.write_index(&mut index).expect("write index");
+    let commit = CommitData {
+        tree,
+        parents: parent.into_iter().collect(),
+        author: "A <a@b.c> 0 +0000".into(),
+        committer: "A <a@b.c> 0 +0000".into(),
+        author_raw: vec![],
+        committer_raw: vec![],
+        encoding: None,
+        message: "c\n".into(),
+        raw_message: None,
+        extra_headers: Vec::new(),
+    };
+    let co = repo
+        .odb
+        .write(ObjectKind::Commit, &serialize_commit(&commit))
+        .expect("commit");
+    refs::write_ref(&repo.git_dir, branch_ref, &co).expect("branch");
     co
 }
 
@@ -357,6 +406,64 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
         topic_log[0].message,
         "branch: Created from refs/remotes/origin/topic"
     );
+}
+
+#[test]
+fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
+    let (dir, repo) = init_repo();
+    git_config(dir.path());
+    refs::write_symbolic_ref(&repo.git_dir, "HEAD", "refs/heads/main").expect("symhead");
+    let _ = std::fs::remove_file(repo.git_dir.join("refs/heads/main"));
+    let head = resolve_head(&repo.git_dir).expect("head");
+    assert!(matches!(
+        head,
+        HeadState::Branch {
+            oid: None,
+            short_name,
+            ..
+        } if short_name == "main"
+    ));
+
+    let tip = grit_commit_to_ref(&repo, "refs/heads/feature", "f", "1\n", None);
+
+    switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "feature".into(),
+                oid: tip,
+            },
+        },
+    )
+    .expect("switch to feature");
+
+    let head_after = resolve_head(&repo.git_dir).expect("head after");
+    assert!(matches!(
+        head_after,
+        HeadState::Branch {
+            ref refname,
+            oid: Some(oid),
+            ..
+        } if refname == "refs/heads/feature" && oid == tip
+    ));
+
+    let head_log = read_reflog(&repo.git_dir, "HEAD").expect("head log");
+    assert_eq!(head_log.len(), 1);
+    assert!(head_log[0].old_oid.is_zero() || head_log[0].old_oid == zero_oid());
+    assert_eq!(head_log[0].new_oid, tip);
+    assert_eq!(
+        head_log[0].message,
+        "checkout: moving from main to feature"
+    );
+
+    let git_show = Command::new("git")
+        .args(["reflog", "-1", "--format=%gs"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git reflog");
+    assert!(git_show.status.success());
+    let line = String::from_utf8(git_show.stdout).expect("utf8");
+    assert_eq!(line.trim(), "checkout: moving from main to feature");
 }
 
 #[test]

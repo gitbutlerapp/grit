@@ -236,10 +236,11 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
 
     if !detached && is_already_on_branch(repo, &branch_ref, target_oid)? {
         let head_before = resolve_head(&repo.git_dir)?;
-        if let (Some(old_oid), Some(from_label)) = (
-            head_before.oid().copied(),
-            checkout_reflog_from_label(&head_before),
-        ) {
+        if let Some(from_label) = checkout_reflog_from_label(&head_before) {
+            let old_oid = head_before
+                .oid()
+                .copied()
+                .unwrap_or_else(crate::diff::zero_oid);
             append_head_checkout_reflog(repo, old_oid, target_oid, &from_label, &branch_label)?;
         }
         return Ok(SwitchOutcome {
@@ -299,7 +300,7 @@ fn switch_to_target(
         .collect();
     checkout_tree_changes(repo, &tree_changes)?;
 
-    if let (Some(_), Some(from_label)) = (head_oid, checkout_reflog_from_label(&head_before)) {
+    if let Some(from_label) = checkout_reflog_from_label(&head_before) {
         finish_switch_ref_updates(
             repo,
             &head_before,

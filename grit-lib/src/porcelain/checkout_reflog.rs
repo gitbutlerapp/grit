@@ -2,6 +2,7 @@
 
 use crate::commit::{assemble_identity, identity_now_from_epoch};
 use crate::config::ConfigSet;
+use crate::diff::zero_oid;
 use crate::error::Result;
 use crate::ident_resolve::resolve_loose_committer_parts_with;
 use crate::objects::ObjectId;
@@ -27,13 +28,9 @@ pub fn checkout_reflog_identity(repo: &Repository) -> String {
 #[must_use]
 pub fn checkout_reflog_from_label(head: &HeadState) -> Option<String> {
     match head {
-        HeadState::Branch {
-            short_name,
-            oid: Some(_),
-            ..
-        } => Some(short_name.clone()),
+        HeadState::Branch { short_name, .. } => Some(short_name.clone()),
         HeadState::Detached { oid } => Some(oid.to_hex()),
-        HeadState::Branch { oid: None, .. } | HeadState::Invalid => None,
+        HeadState::Invalid => None,
     }
 }
 
@@ -140,8 +137,9 @@ pub fn finish_switch_ref_updates(
         return Err(err);
     }
 
-    let Some(old_oid) = head_before.oid().copied() else {
-        return Ok(());
+    let old_oid = match head_before {
+        HeadState::Branch { oid: None, .. } => zero_oid(),
+        _ => head_before.oid().copied().unwrap_or_else(zero_oid),
     };
 
     if let Err(err) = append_head_checkout_reflog(repo, old_oid, target_oid, from_label, to_label) {
