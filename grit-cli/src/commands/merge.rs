@@ -5,6 +5,7 @@
 //! markers in the worktree.
 
 use crate::context;
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::objects::ObjectId;
@@ -130,7 +131,12 @@ impl HumanRender for MergeOutcome {
     }
 }
 
-impl MarkdownRender for MergeOutcome {}
+impl MarkdownRender for MergeOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_merge_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)

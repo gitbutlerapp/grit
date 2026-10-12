@@ -26,6 +26,13 @@ impl CliFixture {
     /// Build the standard snapshot repository: two commits on `main`, a `feature`
     /// branch, one modified, one staged, and one untracked file.
     pub fn new() -> Self {
+        let fixture = Self::empty();
+        fixture.bootstrap();
+        fixture
+    }
+
+    /// Empty initialized repository with the same isolated environment as [`Self::new`].
+    pub fn empty() -> Self {
         let grit_bin = grit_bin();
         let home = tempfile::tempdir().unwrap_or_else(|e| panic!("cli fixture home tempdir: {e}"));
         let repo = tempfile::tempdir().unwrap_or_else(|e| panic!("cli fixture repo tempdir: {e}"));
@@ -34,7 +41,7 @@ impl CliFixture {
             home,
             grit_bin,
         };
-        fixture.bootstrap();
+        fixture.run_grit(&["init"]).expect_success("init");
         fixture
     }
 
@@ -51,6 +58,10 @@ impl CliFixture {
     }
 
     /// Run `grit` in this fixture with the standard snapshot environment.
+    pub fn run(&self, args: &[&str]) -> crate::Output {
+        self.run_grit(args)
+    }
+
     fn run_grit(&self, args: &[&str]) -> crate::Output {
         let out = self.run_grit_process(args);
         crate::Output {
@@ -77,7 +88,6 @@ impl CliFixture {
     }
 
     fn bootstrap(&self) {
-        self.run_grit(&["init"]).expect_success("init");
         write_file(self.path(), "tracked.txt", "tracked v1\n");
         self.run_grit(&["add", "tracked.txt"])
             .expect_success("add tracked");
@@ -107,10 +117,51 @@ impl CliFixture {
     /// `snapshot_dir` is the directory for `.snap` files (typically
     /// `grit-cli/tests/snapshots` from an integration test).
     pub fn snapshot_all_modes(&self, snapshot_name: &str, args: &[&str], snapshot_dir: &Path) {
-        let human = self.capture_mode(args, ModeKind::Human);
-        let json = self.capture_mode(args, ModeKind::Json);
-        let markdown = self.capture_mode(args, ModeKind::Markdown);
+        Self::assert_all_modes_snapshot(
+            snapshot_name,
+            args,
+            snapshot_dir,
+            self,
+            self.capture_mode(args, ModeKind::Human),
+            self.capture_mode(args, ModeKind::Json),
+            self.capture_mode(args, ModeKind::Markdown),
+        );
+    }
 
+    /// Like [`Self::snapshot_all_modes`], but builds a **new** repository for each
+    /// output mode. Use for commands that mutate history or branch state.
+    pub fn snapshot_fresh_all_modes(
+        snapshot_name: &str,
+        args: &[&str],
+        snapshot_dir: &Path,
+        fresh: impl Fn() -> Self,
+    ) {
+        let human_fixture = fresh();
+        let human = human_fixture.capture_mode(args, ModeKind::Human);
+        let json_fixture = fresh();
+        let json = json_fixture.capture_mode(args, ModeKind::Json);
+        let markdown_fixture = fresh();
+        let markdown = markdown_fixture.capture_mode(args, ModeKind::Markdown);
+        Self::assert_all_modes_snapshot(
+            snapshot_name,
+            args,
+            snapshot_dir,
+            &human_fixture,
+            human,
+            json,
+            markdown,
+        );
+    }
+
+    fn assert_all_modes_snapshot(
+        snapshot_name: &str,
+        _args: &[&str],
+        snapshot_dir: &Path,
+        filter_fixture: &Self,
+        human: ModeCapture,
+        json: ModeCapture,
+        markdown: ModeCapture,
+    ) {
         let payload = AllModesSnapshot {
             human: &human,
             json: &json,
@@ -118,7 +169,7 @@ impl CliFixture {
         };
 
         let mut settings = insta::Settings::clone_current();
-        register_cli_snapshot_filters(&mut settings, self);
+        register_cli_snapshot_filters(&mut settings, filter_fixture);
         settings.set_snapshot_path(snapshot_dir);
         settings.bind(|| {
             insta::assert_json_snapshot!(snapshot_name, payload);

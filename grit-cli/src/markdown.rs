@@ -4,7 +4,13 @@ use std::io::Write;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
 
+use crate::commands::add::AddOutcome;
+use crate::commands::commit::CommitOutcome;
 use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment};
+use crate::commands::merge::MergeOutcome;
+use crate::commands::pick::PickOutcome;
+use crate::commands::revert::RevertOutcome;
+use crate::commands::switch::SwitchOutcome;
 use crate::context::{self, CommitSummary};
 use crate::output::{outln, RenderContext};
 use crate::stdio;
@@ -322,6 +328,132 @@ pub fn print_fetch_updates(
 
 fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
+}
+
+/// Result of `grit commit` / `grit commit --amend`.
+pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Commit");
+    outln!(w);
+    let short = short_hex(&outcome.oid);
+    if outcome.amended {
+        outln!(
+            w,
+            "- Amended **`{}`** at `{short}` — {}",
+            outcome.branch,
+            outcome.subject
+        );
+    } else {
+        outln!(
+            w,
+            "- **`{}`** · `{short}` — {}",
+            outcome.branch,
+            outcome.subject
+        );
+    }
+    let word = if outcome.changes == 1 {
+        "change"
+    } else {
+        "changes"
+    };
+    outln!(w, "- **{}** {word} committed", outcome.changes);
+    Ok(())
+}
+
+/// Result of `grit merge` (and the merge half of `grit pull`).
+pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Merge");
+    outln!(w);
+    match outcome.result.as_str() {
+        "up_to_date" => {
+            outln!(w, "Already up to date with **`{}`**.", outcome.branch);
+        }
+        "fast_forward" => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(w, "- Fast-forwarded **`{}`** → `{short}`", outcome.branch);
+        }
+        "merged" => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(
+                w,
+                "- Merged **`{}`** into the current branch · `{short}`",
+                outcome.branch
+            );
+        }
+        "conflicts" => {
+            outln!(w, "- Merge **`{}`** stopped with conflicts", outcome.branch);
+            outln!(w);
+            for path in outcome.conflicts.as_deref().unwrap_or(&[]) {
+                outln!(w, "- `{path}`");
+            }
+            outln!(w);
+            outln!(
+                w,
+                "→ fix conflicts, then `grit commit \"message\"`, or `grit merge --abort`"
+            );
+        }
+        "aborted" => outln!(w, "Merge aborted."),
+        "set_upstream" => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            let upstream = outcome.upstream.as_deref().unwrap_or("");
+            outln!(
+                w,
+                "- Set **`{}`** to `{upstream}` · `{short}`",
+                outcome.branch
+            );
+        }
+        other => outln!(w, "{other}"),
+    }
+    Ok(())
+}
+
+/// Result of `grit pick`.
+pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Pick");
+    outln!(w);
+    let src = short_hex(&outcome.source);
+    let new = short_hex(&outcome.oid);
+    outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    Ok(())
+}
+
+/// Result of `grit revert`.
+pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Revert");
+    outln!(w);
+    let src = short_hex(&outcome.source);
+    let new = short_hex(&outcome.oid);
+    outln!(w, "- `{src}` → `{new}` — {}", outcome.subject);
+    Ok(())
+}
+
+/// Result of `grit switch`.
+pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Switch");
+    outln!(w);
+    if outcome.detached {
+        let short = outcome.commit.as_deref().map(short_hex).unwrap_or("HEAD");
+        outln!(w, "- HEAD detached at `{short}`");
+    } else if outcome.created {
+        outln!(w, "- Created and switched to **`{}`**", outcome.branch);
+    } else {
+        outln!(w, "- Switched to **`{}`**", outcome.branch);
+    }
+    Ok(())
+}
+
+/// Result of `grit add`.
+pub fn print_add_outcome(w: &mut dyn Write, outcome: &AddOutcome) -> anyhow::Result<()> {
+    outln!(w, "## Add");
+    outln!(w);
+    match outcome.staged {
+        0 if outcome.no_paths => {
+            outln!(w, "Nothing to stage — working tree clean.");
+        }
+        0 => {}
+        1 => outln!(w, "- Staged **1** change"),
+        n => outln!(w, "- Staged **{n}** changes"),
+    }
+    Ok(())
 }
 
 /// Per-ref push results.

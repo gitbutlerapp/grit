@@ -11,6 +11,7 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context::{self, subject_line};
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use grit_lib::porcelain::add::stage_for_commit;
 
@@ -43,7 +44,12 @@ impl HumanRender for CommitOutcome {
     }
 }
 
-impl MarkdownRender for CommitOutcome {}
+impl MarkdownRender for CommitOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_commit_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 pub fn run(message: Option<String>, amend: bool) -> Result<CommitOutcome> {
     let repo = context::discover()?;

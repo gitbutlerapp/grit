@@ -1,6 +1,7 @@
 //! `grit pick` — cherry-pick a single commit onto the current branch.
 
 use crate::context;
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
@@ -31,7 +32,12 @@ impl HumanRender for PickOutcome {
     }
 }
 
-impl MarkdownRender for PickOutcome {}
+impl MarkdownRender for PickOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_pick_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 /// Cherry-pick `commit` onto the current branch.
 pub fn run(commit: &str) -> Result<PickOutcome> {

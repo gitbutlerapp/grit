@@ -1,6 +1,7 @@
 //! `grit revert` — undo a single commit with a new inverse commit.
 
 use crate::context;
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
@@ -31,7 +32,12 @@ impl HumanRender for RevertOutcome {
     }
 }
 
-impl MarkdownRender for RevertOutcome {}
+impl MarkdownRender for RevertOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_revert_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 /// Revert `commit` on the current branch.
 pub fn run(commit: &str) -> Result<RevertOutcome> {

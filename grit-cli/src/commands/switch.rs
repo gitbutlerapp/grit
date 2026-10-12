@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit switch`.
@@ -41,7 +42,12 @@ impl HumanRender for SwitchOutcome {
     }
 }
 
-impl MarkdownRender for SwitchOutcome {}
+impl MarkdownRender for SwitchOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_switch_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 pub fn run(
     target: Option<String>,

@@ -12,6 +12,7 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
+use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Result of `grit add`: how many changes were staged.
@@ -20,7 +21,7 @@ pub struct AddOutcome {
     pub staged: usize,
     /// Whether the invocation had no path arguments (stages everything).
     #[serde(skip)]
-    no_paths: bool,
+    pub(crate) no_paths: bool,
 }
 
 impl HumanRender for AddOutcome {
@@ -35,7 +36,12 @@ impl HumanRender for AddOutcome {
     }
 }
 
-impl MarkdownRender for AddOutcome {}
+impl MarkdownRender for AddOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        markdown::print_add_outcome(w, self)?;
+        Ok(())
+    }
+}
 
 pub fn run(paths: &[String]) -> Result<AddOutcome> {
     let repo = context::discover()?;
