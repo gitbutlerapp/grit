@@ -105,6 +105,34 @@ jobs:
 
       - run: cargo clippy --workspace -- -D warnings
 
+  public-api:
+    name: public-api
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - name: Install pinned nightly and cargo-public-api (see scripts/public-api.sh)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+          PUBLIC_API_NIGHTLY_DATE="$(grep 'PUBLIC_API_NIGHTLY_DATE=' scripts/public-api.sh | cut -d'"' -f2)"
+          CARGO_PUBLIC_API_VERSION="$(grep 'CARGO_PUBLIC_API_VERSION=' scripts/public-api.sh | cut -d'"' -f2)"
+          rustup toolchain install "nightly-${PUBLIC_API_NIGHTLY_DATE}" --profile minimal
+          cargo install cargo-public-api --version "${CARGO_PUBLIC_API_VERSION}" --locked
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: public-api
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: make public-api-check
+
   rustdoc:
     name: rustdoc
     runs-on: ubuntu-latest

@@ -20,7 +20,7 @@ export CARGO_BUILD_JOBS
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
 
-.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage
+.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage public-api public-api-check
 
 all: build
 
@@ -47,6 +47,12 @@ gate:
 
 clean:
 	$(CARGO) clean
+
+public-api:
+	./scripts/public-api.sh generate
+
+public-api-check:
+	./scripts/public-api.sh check
 
 site/node_modules: site/package-lock.json
 	cd site && npm ci
