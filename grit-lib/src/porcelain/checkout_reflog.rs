@@ -6,7 +6,7 @@ use crate::diff::zero_oid;
 use crate::error::Result;
 use crate::ident_resolve::resolve_loose_committer_parts_with;
 use crate::objects::ObjectId;
-use crate::refs::{self, append_reflog};
+use crate::refs::append_reflog_with_config;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 
@@ -61,7 +61,10 @@ pub fn switch_create_reflog_source_label(start_point: Option<&str>) -> String {
     }
 }
 
-/// Append `checkout: moving from … to …` on `HEAD` when reflog autocreate is enabled.
+/// Append `checkout: moving from … to …` on `HEAD`.
+///
+/// Respects `core.logAllRefUpdates` for auto-creating a new log, but still appends when
+/// `HEAD` already has a reflog (Git `append_reflog` semantics).
 pub fn append_head_checkout_reflog(
     repo: &Repository,
     old_oid: ObjectId,
@@ -70,12 +73,9 @@ pub fn append_head_checkout_reflog(
     to_label: &str,
 ) -> Result<()> {
     let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
-    if !refs::should_autocreate_reflog_with_config(&config, &repo.git_dir, "HEAD") {
-        return Ok(());
-    }
     let identity = checkout_reflog_identity(repo);
     let message = format!("checkout: moving from {from_label} to {to_label}");
-    append_reflog(
+    append_reflog_with_config(
         &repo.git_dir,
         "HEAD",
         &old_oid,
@@ -83,6 +83,7 @@ pub fn append_head_checkout_reflog(
         &identity,
         &message,
         false,
+        Some(&config),
     )
 }
 
@@ -94,12 +95,9 @@ pub fn append_branch_created_reflog(
     source_label: &str,
 ) -> Result<()> {
     let config = ConfigSet::load(repo.environment(), Some(&repo.git_dir), true).unwrap_or_default();
-    if !refs::should_autocreate_reflog_with_config(&config, &repo.git_dir, branch_ref) {
-        return Ok(());
-    }
     let identity = checkout_reflog_identity(repo);
     let message = format!("branch: Created from {source_label}");
-    append_reflog(
+    append_reflog_with_config(
         &repo.git_dir,
         branch_ref,
         &zero_oid(),
@@ -107,6 +105,7 @@ pub fn append_branch_created_reflog(
         &identity,
         &message,
         false,
+        Some(&config),
     )
 }
 

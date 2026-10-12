@@ -270,3 +270,49 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
         other => panic!("expected topic, got {other:?}"),
     }
 }
+
+#[test]
+fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
+    let (dir, repo) = init_repo();
+    git_config(dir.path());
+    std::fs::write(dir.path().join("f"), "1\n").expect("write");
+    Command::new("git")
+        .args(["add", "f"])
+        .current_dir(dir.path())
+        .status()
+        .expect("git add");
+    Command::new("git")
+        .args(["commit", "-qm", "c1"])
+        .current_dir(dir.path())
+        .status()
+        .expect("git commit");
+    Command::new("git")
+        .args(["config", "core.logAllRefUpdates", "false"])
+        .current_dir(dir.path())
+        .status()
+        .expect("git config");
+
+    let before = read_reflog(&repo.git_dir, "HEAD").expect("head log");
+    assert_eq!(before.len(), 1, "git commit should seed HEAD reflog");
+
+    switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode: resolve_create_branch(&repo, "topic", None).expect("create mode"),
+            create_start_point: None,
+        },
+    )
+    .expect("switch -c topic");
+
+    let after = read_reflog(&repo.git_dir, "HEAD").expect("head log after");
+    assert_eq!(
+        after.len(),
+        2,
+        "checkout must append to existing HEAD reflog"
+    );
+    assert_eq!(after[1].message, "checkout: moving from main to topic");
+    assert!(
+        !dir.path().join(".git/logs/refs/heads/topic").exists(),
+        "new branch reflog must not be auto-created when logAllRefUpdates=false"
+    );
+}
