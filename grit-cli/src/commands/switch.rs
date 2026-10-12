@@ -62,6 +62,7 @@ pub fn run(
             .ok_or_else(|| anyhow::anyhow!("revision required with --detach"))?;
         SwitchMode::Detached {
             commit: resolve_revision_spec(&repo, spec).map_err(anyhow::Error::new)?,
+            reflog_to_label: spec.to_owned(),
         }
     } else if create {
         let branch = target.ok_or_else(|| anyhow::anyhow!("branch name required with --create"))?;

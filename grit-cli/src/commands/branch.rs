@@ -7,6 +7,7 @@ use std::io::Write;
 
 use crate::ref_name_messages::branch_short_name_error_message;
 use grit_lib::merge_base::is_ancestor;
+use grit_lib::porcelain::branch::create_branch;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
@@ -124,21 +125,7 @@ fn list(repo: &Repository) -> Result<BranchOutcome> {
 }
 
 fn create(repo: &Repository, name: &str) -> Result<BranchOutcome> {
-    if let Err(err) = validate_branch_short_name(name) {
-        bail!(branch_short_name_error_message(name, &err));
-    }
-    let branch_ref = format!("refs/heads/{name}");
-    if refs::resolve_ref(&repo.git_dir, &branch_ref).is_ok() {
-        bail!("branch '{name}' already exists");
-    }
-
-    let base = match resolve_head(&repo.git_dir)? {
-        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
-        HeadState::Branch { .. } => bail!("no commits yet to create a branch from"),
-        HeadState::Invalid => bail!("HEAD is in an unknown state"),
-    };
-
-    refs::write_ref(&repo.git_dir, &branch_ref, &base).context("could not create branch")?;
+    create_branch(repo, name).context("could not create branch")?;
     Ok(BranchOutcome::Create {
         name: name.to_owned(),
     })

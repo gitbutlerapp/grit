@@ -21,7 +21,9 @@
 //! - [`add::stage`] — stage worktree changes into the index without a full status pass.
 
 pub mod add;
+pub mod branch;
 pub mod checkout;
+pub mod checkout_reflog;
 pub mod cherry_pick;
 pub mod clean;
 pub mod commit;

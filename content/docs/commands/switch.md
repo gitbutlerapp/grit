@@ -9,6 +9,8 @@ order: 2
 
 ```text
 grit switch <branch>
+grit switch -
+grit switch @{-1}
 grit switch -c <branch> [<start-point>]
 grit switch --detach <rev>
 ```
@@ -36,6 +38,7 @@ Updating the working tree uses parallel checkout when the change set is large en
 | Option | Description |
 | --- | --- |
 | `<branch>` | Local branch to switch to, remote-tracking name to DWIM, or new branch name with `-c`. |
+| `-`, `@{-1}` | Switch to the previous branch (from the `HEAD` reflog); fails when there is no prior checkout entry. |
 | `<start-point>` | With `-c`, commit to create the branch from (defaults to `HEAD`). |
 | `-c`, `--create` | Create the branch first, then switch to it. Fails if the branch already exists. |
 | `--detach` | Check out a commit in detached `HEAD` mode instead of switching a branch. |
@@ -48,6 +51,9 @@ Created and switched to branch feature
 
 $ grit switch main
 Switched to branch main
+
+$ grit switch -
+Switched to branch feature
 
 $ grit switch -c br2 origin/br2
 Created and switched to branch br2
