@@ -7,9 +7,12 @@ use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
 fn git_ls_files(root: &std::path::Path, spec: &str) -> Vec<String> {
-    let out = Command::new("git")
-        .current_dir(root)
-        .args(["ls-files", spec])
+    let mut cmd = Command::new("git");
+    cmd.current_dir(root).args(["ls-files"]);
+    if !spec.is_empty() {
+        cmd.arg(spec);
+    }
+    let out = cmd
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()
