@@ -134,3 +134,26 @@ where
     }
     (count, first)
 }
+
+/// When exactly one [`DWIM_RULES`] entry matches `spec`, return that expanded ref name.
+///
+/// Rule order matches Git (`refs/tags` before `refs/heads`). Returns `None` when zero or
+/// more than one rule matches.
+#[must_use]
+pub fn sole_dwim_ref_name<F>(mut exists: F, spec: &str) -> Option<String>
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut count = 0usize;
+    let mut sole = None;
+    for rule in DWIM_RULES {
+        let candidate = rule.replace("{0}", spec);
+        if exists(&candidate) {
+            count += 1;
+            if sole.is_none() {
+                sole = Some(candidate);
+            }
+        }
+    }
+    if count == 1 { sole } else { None }
+}

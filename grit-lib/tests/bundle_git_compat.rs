@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::bundle::{read_header, write_bundle, Bundle, BundleError, BundleSpec, FilterSpec};
+use grit_lib::bundle_remote::write_bundle_from_rev_specs;
 use grit_lib::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -480,6 +481,59 @@ fn grit_write_filtered_bundle_omits_blobs_from_pack() {
     }
     assert!(saw_commit, "pack should contain a commit");
     assert!(saw_tree, "pack should contain a tree");
+}
+
+#[test]
+fn bundle_create_short_tag_name_matches_git_list_heads() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    init_repo_with_two_commits(src);
+    git_ok(src, &["tag", "lite"]);
+
+    let grit_bundle = src.join("grit.bundle");
+    let git_bundle = src.join("git.bundle");
+    write_bundle_from_rev_specs(
+        &grit_repo(src),
+        &grit_bundle,
+        &["lite".to_owned(), "main".to_owned()],
+    )
+    .expect("grit bundle");
+    git_ok(
+        src,
+        &[
+            "bundle",
+            "create",
+            git_bundle.to_str().unwrap(),
+            "lite",
+            "main",
+        ],
+    );
+
+    let grit_heads = git(
+        src,
+        &["bundle", "list-heads", grit_bundle.to_str().unwrap()],
+    );
+    let git_heads = git(src, &["bundle", "list-heads", git_bundle.to_str().unwrap()]);
+    assert_eq!(
+        normalize_bundle_heads(&grit_heads),
+        normalize_bundle_heads(&git_heads),
+        "grit bundle list-heads should match git\ngrit:\n{grit_heads}\ngit:\n{git_heads}"
+    );
+    assert!(grit_heads.contains("refs/tags/lite"));
+    assert!(!normalize_bundle_heads(&grit_heads)
+        .iter()
+        .any(|l| l.contains(" refs/heads/lite")));
+}
+
+fn normalize_bundle_heads(s: &str) -> Vec<String> {
+    let mut lines: Vec<String> = s
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    lines.sort();
+    lines
 }
 
 #[test]

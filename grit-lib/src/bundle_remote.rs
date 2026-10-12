@@ -85,15 +85,9 @@ fn display_ref_for_spec(repo: &Repository, spec: &str, _oid: ObjectId) -> Result
     if spec.starts_with("refs/") {
         return Ok(spec.to_owned());
     }
-    let resolve = |name: &str| crate::refs::resolve_ref(&repo.git_dir, name).ok();
-    let (count, _) = crate::worktree_ref::resolve_ref_dwim(resolve, spec);
-    if count == 1 {
-        for rule in ["{0}", "refs/{0}", "refs/heads/{0}", "refs/remotes/{0}"] {
-            let candidate = rule.replace("{0}", spec);
-            if crate::refs::resolve_ref(&repo.git_dir, &candidate).is_ok() {
-                return Ok(candidate);
-            }
-        }
+    let exists = |name: &str| crate::refs::resolve_ref(&repo.git_dir, name).is_ok();
+    if let Some(name) = crate::worktree_ref::sole_dwim_ref_name(exists, spec) {
+        return Ok(name);
     }
     Ok(format!("refs/heads/{}", spec.trim_start_matches("heads/")))
 }
@@ -420,5 +414,71 @@ mod tests {
         let (pos, neg) = split_revision_specs_for_bundle(&tokens);
         assert_eq!(pos, vec!["HEAD"]);
         assert_eq!(neg, vec!["HEAD~1"]);
+    }
+
+    #[test]
+    fn write_bundle_from_rev_specs_records_tag_dwim_as_refs_tags() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["init", "-q", "-b", "main", "."])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git init");
+        std::fs::write(dir.join("a.txt"), b"a\n").unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["add", "a.txt"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(dir)
+            .args([
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-qm",
+                "one",
+            ])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["tag", "lite"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+
+        let repo = Repository::discover(Some(dir)).expect("open repo");
+        let bundle_path = dir.join("t1.bundle");
+        write_bundle_from_rev_specs(&repo, &bundle_path, &["lite".to_owned(), "main".to_owned()])
+            .expect("write bundle");
+
+        let header = crate::bundle::Bundle::open(&bundle_path)
+            .expect("open bundle")
+            .header()
+            .clone();
+        let names: Vec<_> = header.refs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(
+            names.contains(&"refs/tags/lite"),
+            "expected refs/tags/lite in {names:?}"
+        );
+        assert!(
+            !names.contains(&"refs/heads/lite"),
+            "must not record tag as branch: {names:?}"
+        );
+        assert!(names.contains(&"refs/heads/main"));
     }
 }
