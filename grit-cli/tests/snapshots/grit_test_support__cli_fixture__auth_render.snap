@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "\n✓ Signed in to GitHub — token stored for github.com.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"authenticated\": true,\n  \"host\": \"github.com\"\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Auth\n\n- Signed in to **`github.com`**\n",
+    "stderr": ""
+  }
+}

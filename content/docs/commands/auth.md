@@ -86,6 +86,22 @@ After logout:
 
 `logged_out` is `false` when no credential helper is configured, since there's nowhere a token could be stored.
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a short result summary (the device-flow prompts still go to stderr during sign-in):
+
+```text
+- Signed in to **`github.com`**
+```
+
+Logout:
+
+```text
+- Signed out of **`github.com`** (stored token removed)
+```
+
+When no credential helper is configured, logout reports that there is nothing stored to remove.
+
 ## See also
 
 [grit push](../push/), [grit config](../config/), [grit manager](../manager/)

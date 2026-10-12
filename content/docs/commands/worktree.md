@@ -114,6 +114,21 @@ Remove:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for structured output.
+
+List shows a table of path, branch, and HEAD:
+
+```text
+| Path | Branch | HEAD |
+| --- | --- | --- |
+| /tmp/repo | `main` | `abc1234` |
+| /tmp/hotfix | `hotfix` | `abc1234` |
+```
+
+Add and remove use short headings with the path and branch (or detached HEAD) and commit oid.
+
 ## See also
 
 [grit switch](../switch/), [grit branch](../branch/)

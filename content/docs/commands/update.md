@@ -50,6 +50,14 @@ Example:
 
 With `--json`, the installer's progress goes to stderr so stdout carries only the JSON object.
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a one-line result on stdout (installer progress still goes to stderr in this mode):
+
+```text
+- Updated grit (ran installer; previous version **0.5.0**)
+```
+
 ## See also
 
 [Docs overview](../)
