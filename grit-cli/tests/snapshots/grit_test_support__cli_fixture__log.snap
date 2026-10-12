@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "  b5ea30d  Test  [TIME_AGO]  second\n  72934de  Test  [TIME_AGO]  first\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"commits\": [\n    {\n      \"oid\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n      \"subject\": \"second\",\n      \"author\": \"Test\",\n      \"author_date\": \"2023-11-14T22:13:20Z\",\n      \"relative_date\": \"[TIME_AGO]\"\n    },\n    {\n      \"oid\": \"72934dedd47ecaf7e340fd6c5ef46620187fb317\",\n      \"subject\": \"first\",\n      \"author\": \"Test\",\n      \"author_date\": \"2023-11-14T22:13:20Z\",\n      \"relative_date\": \"[TIME_AGO]\"\n    }\n  ],\n  \"next\": null\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "- `b5ea30d` second (Test, [TIME_AGO])\n- `72934de` first (Test, [TIME_AGO])\n",
+    "stderr": ""
+  }
+}

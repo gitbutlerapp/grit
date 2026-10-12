@@ -28,6 +28,26 @@ cargo test --workspace
 cargo test -p grit-lib --lib --release
 ```
 
+### CLI output snapshots
+
+`grit-cli/tests/output_snapshots.rs` exercises human, `--json`, and `--markdown` output together via [`CliFixture`](grit-test-support/src/cli_fixture.rs) in **`grit-test-support`**. Each scenario runs the built `grit` binary three times and compares stdout, stderr, and exit status against committed [insta](https://insta.rs/) snapshots under `grit-cli/tests/snapshots/`.
+
+```bash
+cargo test -p grit-cli --test output_snapshots
+```
+
+When you intentionally change CLI rendering or JSON/Markdown shape, refresh snapshots:
+
+```bash
+# Review and accept each diff interactively (requires `cargo install cargo-insta`)
+cargo insta review
+
+# Or update every snapshot in one shot (typical in CI/agent runs)
+INSTA_UPDATE=always cargo test -p grit-cli --test output_snapshots
+```
+
+Commit the updated `.snap` files with the code change. CI sets `CI=true`, so a stale snapshot fails the test instead of silently updating.
+
 ### Transport tests (fetch and push over smart HTTP)
 
 The smart-HTTP tests in `grit-lib/tests/` (`transport_http*`, `matrix_fetch`, `matrix_push`, `matrix_sha256`, `matrix_credentials`) start `grit-http-server`, which serves upload-pack and receive-pack **in-process** via `grit-lib` (no `grit` binary on `PATH` and no `GRIT_BIN`). The library client fetches and pushes against it, and `git` checks the results. They need the `http-ureq` feature and the `grit-http-server` binary built first; without it they print `SKIP:` and pass, so build before running:

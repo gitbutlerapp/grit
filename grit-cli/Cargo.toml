@@ -36,5 +36,7 @@ libc.workspace = true
 
 [dev-dependencies]
 grit-lib = { path = "../grit-lib" }
+grit-test-support = { path = "../grit-test-support" }
+insta = { version = "1.42", features = ["json", "filters"] }
 serde_json.workspace = true
 tempfile = "3"
