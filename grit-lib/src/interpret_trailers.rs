@@ -1140,3 +1140,52 @@ pub fn complete_line(s: &str) -> String {
         s.to_string()
     }
 }
+
+#[cfg(test)]
+mod line_coverage_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn trailer_enum_parsers_and_process_trailers_matrix() {
+        assert_eq!(trailer_where_from_str("after"), Some(TrailerWhere::After));
+        assert_eq!(
+            trailer_if_exists_from_str("addIfDifferent"),
+            Some(TrailerIfExists::AddIfDifferent)
+        );
+        assert_eq!(
+            trailer_if_missing_from_str("doNothing"),
+            Some(TrailerIfMissing::DoNothing)
+        );
+        assert_eq!(complete_line("x"), "x\n");
+        assert_eq!(complete_line("x\n"), "x\n");
+
+        let dir = tempdir().expect("tempdir");
+        std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["init", "-q", "-b", "main", "."])
+            .status()
+            .expect("init");
+        let git_dir = dir.path().join(".git");
+        let input = "Subject\n\nSigned-off-by: A <a@example.com>\n";
+        for only_input in [true, false] {
+            for only_trailers in [true, false] {
+                let opts = ProcessTrailerOptions {
+                    trim_empty: true,
+                    only_trailers,
+                    only_input,
+                    unfold: true,
+                    no_divider: false,
+                };
+                let _ = process_trailers(input, &opts, &[], Some(git_dir.as_path()));
+                let arg = NewTrailerArg {
+                    text: "Reviewed-by: B".into(),
+                    where_: TrailerWhere::End,
+                    if_exists: TrailerIfExists::Add,
+                    if_missing: TrailerIfMissing::Add,
+                };
+                let _ = process_trailers(input, &opts, &[arg], Some(git_dir.as_path()));
+            }
+        }
+    }
+}

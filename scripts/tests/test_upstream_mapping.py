@@ -172,7 +172,14 @@ REQUIRED_HISTORY_STASH_NOTES: tuple[str, ...] = (
     "t2406",
     "t4204",
 )
-REQUIRED_HISTORY_SUPPORTING: tuple[str, ...] = ()
+REQUIRED_HISTORY_SUPPORTING: tuple[str, ...] = (
+    "t1510",
+    "t1504",
+    "t6130",
+    "t6132",
+    "t4200",
+    "t6040",
+)
 
 
 def _mapping_sections(text: str) -> list[str]:
@@ -345,6 +352,21 @@ class UpstreamMappingTests(unittest.TestCase):
                 tid,
                 upstream_ids(index_ext_section),
                 f"{tid} missing from index-ext mapping rows",
+            )
+
+        supporting_start = text.index("#### Supporting")
+        supporting_end = text.find("\n#### ", supporting_start + 1)
+        supporting_section = (
+            text[supporting_start:supporting_end]
+            if supporting_end != -1
+            else text[supporting_start:]
+        )
+        supporting_ids = upstream_ids(supporting_section)
+        for tid in REQUIRED_HISTORY_SUPPORTING:
+            self.assertIn(
+                tid,
+                supporting_ids,
+                f"{tid} missing from supporting upstream mapping rows",
             )
 
     def test_history_subsection_placeholders_exist(self) -> None:

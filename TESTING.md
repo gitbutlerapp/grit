@@ -423,6 +423,20 @@ Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/suppor
 
 | upstream file | scenario | Rust test | status |
 | --- | --- | --- | --- |
+| t1510-repo-setup.sh | `GIT_DIR` / `GIT_WORK_TREE` discovery vs git | `repo_setup_git_compat.rs` (`t1510_repo_setup_git_dir_points_at_nested_git`, `t1510_repo_setup_git_work_tree_without_git_dir`) | covered |
+| t1504-ceiling-dirs.sh | `GIT_CEILING_DIRECTORIES` stops discovery above ceiling | `repo_setup_git_compat.rs` (`t1504_ceiling_directories_blocks_walk_above_ceiling`) | partial |
+| t6130-pathspec-wildcards.sh | glob / bracket pathspecs vs `git ls-files` | `pathspec_git_compat.rs` (`t6130_pathspec_glob_bracket_filename_matches_git`) | partial |
+| t6132-pathspec-exclude.sh | `:/!` exclude magic vs git | `pathspec_git_compat.rs` (`t6132_pathspec_exclude_matches_git`) | covered |
+| t4200-rerere.sh | rerere preimage records readable by git | `rerere_git_compat.rs` (`t4200_rerere_records_readable_by_git`) | partial |
+| t4204-patch-id.sh | (see stash/notes section) | `patch_ids.rs` | covered |
+| — | CRLF autocrlf round-trip normalization | `supporting_modules_sweep.rs` (`crlf_roundtrip_lf_crlf_matches_git_normalization`) | covered |
+| — | `.gitmodules` / submodule gitdir layout helpers | `supporting_modules_sweep.rs` (`gitmodules_and_submodule_gitdir_helpers`) | partial |
+| — | merge/rebase/cherry-pick in-progress detection | `supporting_modules_sweep.rs` (`state_detect_and_repo_state_on_fresh_repo`); `state_git_am_in_progress.rs` | partial |
+| t6040-tracking-branches.sh | ahead/behind vs `git rev-list --left-right --count` | `branch_tracking_git_compat.rs` (`t6040_branch_tracking_ahead_behind_matches_git`) | covered |
+| — | `git blame --porcelain` vs `blame_file` | `blame_git_compat.rs` (`blame_matches_git_porcelain_after_adcb_permutation`) | covered |
+| — | unified diff parse on git worktree diff | `apply_git_compat.rs` (`apply_parse_accepts_git_worktree_diff`) | partial |
+| — | `git interpret-trailers --parse` | `interpret_trailers_git_compat.rs` (`interpret_trailers_parse_matches_git`) | covered |
+| — | `git log --date=<mode>` vs `show_date` | `git_date_git_compat.rs` (`git_log_date_iso_matches_show_date`) | partial |
 
 ### Documentation site and rustdoc jobs
 

@@ -640,98 +640,6 @@ pub fn blob_text_for_diff(
     blob_text_for_diff_inner(None, git_dir, config, path, blob, None, use_textconv)
 }
 
-/// `diff --git` against parent `p` for merge commit `-m` output.
-#[allow(clippy::too_many_arguments)]
-pub fn format_parent_patch(
-    git_dir: &Path,
-    config: &ConfigSet,
-    odb: &Odb,
-    path: &str,
-    parent_tree: &ObjectId,
-    result_tree: &ObjectId,
-    abbrev: usize,
-    context: usize,
-    use_textconv: bool,
-) -> Option<String> {
-    let entries = diff_trees(odb, Some(parent_tree), Some(result_tree), "").ok()?;
-    let entry = entries.iter().find(|e| e.path() == path)?;
-    if entry.status == DiffStatus::Unmerged {
-        return None;
-    }
-
-    let old_blob = read_blob(odb, &entry.old_oid);
-    let new_blob = read_blob(odb, &entry.new_oid);
-    let textconv_for_patch = use_textconv && diff_textconv_active(git_dir, config, path);
-    let binary = !textconv_for_patch
-        && (is_binary_for_diff(git_dir, path, &old_blob)
-            || is_binary_for_diff(git_dir, path, &new_blob));
-
-    let old_abbrev = abbrev_hex(&entry.old_oid, abbrev);
-    let new_abbrev = abbrev_hex(&entry.new_oid, abbrev);
-
-    let mut out = String::new();
-    out.push_str(&format!("diff --git a/{path} b/{path}\n"));
-    // Header lines depend on whether the file was added / deleted / mode-changed / modified,
-    // matching git's `diff --git` body (added => `new file mode`, deleted => `deleted file mode`).
-    let (old_disp, new_disp) = match entry.status {
-        DiffStatus::Added => {
-            out.push_str(&format!("new file mode {}\n", entry.new_mode));
-            out.push_str(&format!("index {old_abbrev}..{new_abbrev}\n"));
-            ("/dev/null".to_string(), format!("b/{path}"))
-        }
-        DiffStatus::Deleted => {
-            out.push_str(&format!("deleted file mode {}\n", entry.old_mode));
-            out.push_str(&format!("index {old_abbrev}..{new_abbrev}\n"));
-            (format!("a/{path}"), "/dev/null".to_string())
-        }
-        _ => {
-            if entry.old_mode != entry.new_mode {
-                out.push_str(&format!("old mode {}\n", entry.old_mode));
-                out.push_str(&format!("new mode {}\n", entry.new_mode));
-                out.push_str(&format!("index {old_abbrev}..{new_abbrev}\n"));
-            } else {
-                out.push_str(&format!(
-                    "index {old_abbrev}..{new_abbrev} {}\n",
-                    entry.new_mode
-                ));
-            }
-            (format!("a/{path}"), format!("b/{path}"))
-        }
-    };
-
-    if binary {
-        out.push_str(&format!("Binary files {old_disp} and {new_disp} differ\n"));
-        return Some(out);
-    }
-
-    let old_t = if textconv_for_patch {
-        blob_text_for_diff_with_oid(odb, git_dir, config, path, &old_blob, &entry.old_oid, true)
-    } else {
-        blob_text_for_diff(git_dir, config, path, &old_blob, use_textconv)
-    };
-    let new_t = if textconv_for_patch {
-        blob_text_for_diff_with_oid(odb, git_dir, config, path, &new_blob, &entry.new_oid, true)
-    } else {
-        blob_text_for_diff(git_dir, config, path, &new_blob, use_textconv)
-    };
-    // Empty prefixes here because `old_disp`/`new_disp` already carry the `a/`/`b/` (or
-    // `/dev/null`) decoration computed from the file status above.
-    let patch = crate::diff::unified_diff_with_prefix(
-        &old_t,
-        &new_t,
-        &old_disp,
-        &new_disp,
-        context,
-        0,
-        "",
-        "",
-        true,
-        config.quote_path_fully(),
-    );
-    out.push_str(&patch);
-    Some(out)
-}
-
 /// Combined diff header: `diff --combined` or `diff --cc`.
 pub fn format_combined_binary_header(
     path: &str,
@@ -938,34 +846,6 @@ pub fn format_combined_textconv_patch(
         ws,
     ));
     Some(out)
-}
-
-/// Combined `diff --cc` for an unmerged **gitlink** path when stage blobs are absent from the ODB
-/// (e.g. `t4027` synthetic `1ff…` / `2ff…` OIDs). Uses full hex in `Subproject commit` lines like Git.
-#[must_use]
-pub fn format_gitlink_unmerged_conflict_combined(
-    path: &str,
-    stage2_oid: &ObjectId,
-    stage3_oid: &ObjectId,
-    result_subproject_line: &str,
-    abbrev: usize,
-) -> String {
-    let p1a = abbrev_hex(stage2_oid, abbrev);
-    let p2a = abbrev_hex(stage3_oid, abbrev);
-    let z = crate::diff::zero_oid();
-    let za = abbrev_hex(&z, abbrev);
-
-    let t_ours = format!("Subproject commit {}", stage2_oid.to_hex());
-    let t_theirs = format!("Subproject commit {}", stage3_oid.to_hex());
-    let tr = result_subproject_line.trim_end_matches('\n').to_owned();
-
-    let mut out = String::new();
-    out.push_str(&format!("diff --cc {path}\n"));
-    out.push_str(&format!("index {p1a},{p2a}..{za}\n"));
-    out.push_str(&format!("--- a/{path}\n"));
-    out.push_str(&format!("+++ b/{path}\n"));
-    out.push_str(&combined_hunk_two_parents(&t_ours, &t_theirs, &tr));
-    out
 }
 
 /// `git diff` / `git diff --cc` during a conflict: worktree file with markers.

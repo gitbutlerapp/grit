@@ -189,6 +189,12 @@ minimum = 50.0
             full_total = cov.library_total_stats(stats, src_root=src)
             self.assertLess(full_total.percent, keys_only.percent)
 
+    def test_total_floor_fails_at_79_9_percent(self) -> None:
+        total_stats = cov.LineStats(count=10_000, covered=7_990)
+        self.assertAlmostEqual(total_stats.percent, 79.9, places=1)
+        minimum = 80.0
+        self.assertFalse(total_stats.percent + 1e-9 >= minimum)
+
     def test_total_floor_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             floors_path = Path(tmp) / "floors.toml"
