@@ -13,10 +13,12 @@
 //! When `extensions.refStorage = reftable`, the reftable backend is used
 //! instead.  The public API is the same; dispatch is handled internally.
 
+pub mod handle;
 pub mod store;
 
 mod domain_reexports;
 pub use domain_reexports::*;
+pub use handle::References;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;

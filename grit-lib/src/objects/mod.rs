@@ -4,8 +4,10 @@
 //! bitmaps under this module. Flat [`crate::odb`] paths remain valid.
 
 mod core;
+pub mod handle;
 
 pub use core::*;
+pub use handle::Objects;
 
 /// Loose and composite object database ([`crate::odb`]).
 pub mod odb {

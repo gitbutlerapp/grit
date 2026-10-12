@@ -1,7 +1,9 @@
 //! Configuration cascade, identity, and repository bootstrap helpers.
 mod core;
+pub mod handle;
 
 pub use core::*;
+pub use handle::ConfigHandle;
 
 pub mod dotfile {
     //! Canonical re-export of [`crate::dotfile`].

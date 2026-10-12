@@ -1,7 +1,9 @@
 //! Git index (staging area) read/write and related cache extensions.
 mod core;
+pub mod handle;
 
 pub use core::*;
+pub use handle::IndexHandle;
 
 pub mod sparse_checkout {
     //! Canonical re-export of [`crate::sparse_checkout`].

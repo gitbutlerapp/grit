@@ -1,6 +1,41 @@
 //! Reference store value types.
 
+use crate::check_ref_format::{check_refname_format, RefNameError, RefNameOptions};
 use crate::objects::ObjectId;
+
+/// Validated full ref name (for example `refs/heads/main`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RefName(String);
+
+impl RefName {
+    /// Parse and validate `name` using Git refname rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RefNameError`] when the name is empty or otherwise invalid.
+    pub fn try_from(name: &str) -> Result<Self, RefNameError> {
+        check_refname_format(name, &RefNameOptions::default())?;
+        Ok(Self(name.to_owned()))
+    }
+
+    /// Borrow the stored ref name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for RefName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Display for RefName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// Storage-level ref value without DWIM or resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]

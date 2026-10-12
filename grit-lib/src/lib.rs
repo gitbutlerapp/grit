@@ -12,7 +12,10 @@
 //! ## Where to start
 //!
 //! - [`Repository`](repo::Repository) is the central handle — open or discover
-//!   one, then reach the object store, index, refs, and config through it.
+//!   one, then reach the object store, index, refs, and config through it or the
+//!   typed handles ([`objects::Objects`](objects::Objects), [`refs::References`](refs::References),
+//!   [`index::IndexHandle`](index::IndexHandle), [`config::ConfigHandle`](config::ConfigHandle),
+//!   [`revwalk::RevWalk`](revwalk::RevWalk), [`diff::Diff`](diff::Diff)).
 //! - [`prelude`] re-exports the handful of types most call sites need.
 //! - [`porcelain`] holds user-facing operations that return structured result
 //!   *models* (the CLI renders them). The flat module list below remains the

@@ -1,7 +1,9 @@
 //! Tree and content diffs, rename detection, merge diffs, and related helpers.
 mod core;
+pub mod handle;
 
 pub use core::*;
+pub use handle::Diff;
 
 pub mod bloom {
     //! Canonical re-export of [`crate::bloom`].

@@ -406,6 +406,48 @@ impl Repository {
         self.ref_store.as_ref()
     }
 
+    /// Object read/write handle for this repository.
+    #[inline]
+    #[must_use]
+    pub fn objects(&self) -> crate::objects::Objects<'_> {
+        crate::objects::Objects::new(self)
+    }
+
+    /// Reference resolve/list/update and reflog read handle.
+    #[inline]
+    #[must_use]
+    pub fn references(&self) -> crate::refs::References<'_> {
+        crate::refs::References::new(self)
+    }
+
+    /// Index load/write handle.
+    #[inline]
+    #[must_use]
+    pub fn index_handle(&self) -> crate::index::IndexHandle<'_> {
+        crate::index::IndexHandle::new(self)
+    }
+
+    /// Merged config read and local config write handle.
+    #[inline]
+    #[must_use]
+    pub fn config_handle(&self) -> crate::config::ConfigHandle<'_> {
+        crate::config::ConfigHandle::new(self)
+    }
+
+    /// Revision parse and rev-list handle.
+    #[inline]
+    #[must_use]
+    pub fn rev_walk(&self) -> crate::revwalk::RevWalk<'_> {
+        crate::revwalk::RevWalk::new(self)
+    }
+
+    /// Tree, index, and worktree diff handle.
+    #[inline]
+    #[must_use]
+    pub fn diff(&self) -> crate::diff::Diff<'_> {
+        crate::diff::Diff::new(self)
+    }
+
     /// Resolve `refname` through this repository's ref store.
     ///
     /// # Errors

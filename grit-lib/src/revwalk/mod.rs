@@ -1,4 +1,8 @@
 //! Revision walking: rev-parse, rev-list, merge-base, and commit-graph acceleration.
+pub mod handle;
+
+pub use handle::RevWalk;
+
 pub mod rev_list {
     //! Canonical re-export of [`crate::rev_list`].
     pub use crate::rev_list::*;
