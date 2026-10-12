@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "\nstaged.txt\nnew mode 100644\n@@ -0,0 +1 @@\n    1 │ + staged contents\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"files\": [\n    {\n      \"path\": \"staged.txt\",\n      \"status\": \"added\",\n      \"new_mode\": \"100644\",\n      \"binary\": false,\n      \"hunks\": [\n        {\n          \"old_start\": 0,\n          \"new_start\": 1,\n          \"old_lines\": 0,\n          \"new_lines\": 1,\n          \"lines\": [\n            {\n              \"kind\": \"add\",\n              \"new\": 1,\n              \"segments\": [\n                {\n                  \"text\": \"staged contents\",\n                  \"emphasis\": false\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## staged.txt\n\n```diff\n@@ -0,0 +1,1 @@\n+staged contents\n```\n",
+    "stderr": ""
+  }
+}

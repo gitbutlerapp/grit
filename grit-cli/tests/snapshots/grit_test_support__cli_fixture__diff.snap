@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "\nstaged.txt\nnew mode 100644\n@@ -0,0 +1 @@\n    1 │ + staged contents\n\ntracked.txt\n@@ -1 +1 @@\n 1    │ - tracked v2\n    1 │ + tracked modified\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"files\": [\n    {\n      \"path\": \"staged.txt\",\n      \"status\": \"added\",\n      \"new_mode\": \"100644\",\n      \"binary\": false,\n      \"hunks\": [\n        {\n          \"old_start\": 0,\n          \"new_start\": 1,\n          \"old_lines\": 0,\n          \"new_lines\": 1,\n          \"lines\": [\n            {\n              \"kind\": \"add\",\n              \"new\": 1,\n              \"segments\": [\n                {\n                  \"text\": \"staged contents\",\n                  \"emphasis\": false\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    },\n    {\n      \"path\": \"tracked.txt\",\n      \"status\": \"modified\",\n      \"old_mode\": \"100644\",\n      \"new_mode\": \"100644\",\n      \"binary\": false,\n      \"hunks\": [\n        {\n          \"old_start\": 1,\n          \"new_start\": 1,\n          \"old_lines\": 1,\n          \"new_lines\": 1,\n          \"lines\": [\n            {\n              \"kind\": \"del\",\n              \"old\": 1,\n              \"segments\": [\n                {\n                  \"text\": \"tracked v2\",\n                  \"emphasis\": true\n                }\n              ]\n            },\n            {\n              \"kind\": \"add\",\n              \"new\": 1,\n              \"segments\": [\n                {\n                  \"text\": \"tracked \",\n                  \"emphasis\": false\n                },\n                {\n                  \"text\": \"modified\",\n                  \"emphasis\": true\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## staged.txt\n\n```diff\n@@ -0,0 +1,1 @@\n+staged contents\n```\n\n## tracked.txt\n\n```diff\n@@ -1,1 +1,1 @@\n-tracked v2\n+tracked modified\n```\n",
+    "stderr": ""
+  }
+}

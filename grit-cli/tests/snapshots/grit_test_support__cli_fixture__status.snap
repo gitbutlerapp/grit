@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "On main  ·  even with main\n\nStaged\n  +  new           staged.txt\n\nChanged (not staged)\n  ~  modified      tracked.txt\n\nUntracked\n  ?  untracked     untracked.txt\n\n→ grit restore <file> to discard worktree changes  ·  grit add <file> to stage  ·  grit commit \"message\" to commit\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"branch\": \"main\",\n  \"detached\": false,\n  \"head\": \"b5ea30de417ac84c09b8cfc0acf5f2c39efc611f\",\n  \"target\": \"main\",\n  \"ahead\": 0,\n  \"commits\": [],\n  \"staged\": [\n    {\n      \"path\": \"staged.txt\",\n      \"status\": \"added\"\n    }\n  ],\n  \"unstaged\": [\n    {\n      \"path\": \"tracked.txt\",\n      \"status\": \"modified\"\n    }\n  ],\n  \"untracked\": [\n    \"untracked.txt\"\n  ],\n  \"clean\": false,\n  \"merging\": false\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "On **`main`** · even with `main`\n\n## Staged\n- **new** `staged.txt`\n\n## Changed (not staged)\n- **modified** `tracked.txt`\n\n## Untracked\n- `untracked.txt`\n\n→ grit add `PATH` to stage  ·  grit commit `\"message\"` to commit\n",
+    "stderr": ""
+  }
+}

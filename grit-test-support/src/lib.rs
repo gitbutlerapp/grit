@@ -4,10 +4,12 @@
 //! temporary workspace helpers, and cached filesystem fixtures used by
 //! integration tests in `grit` and `grit-lib`.
 
+pub mod cli_fixture;
 pub mod objects;
 pub mod odb_conformance;
 pub mod parallel;
 
+pub use cli_fixture::{register_cli_snapshot_filters, with_cli_snapshot_filters, CliFixture};
 pub use objects::{
     git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,
     git_midx_verify, git_supports_sha256, git_verify_pack, hash_loose_object, loose_object_path,
