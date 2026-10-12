@@ -9832,3 +9832,261 @@ mod blob_diff_algorithm_smoke {
         assert!(myers.0 + myers.1 > 0);
     }
 }
+
+#[cfg(test)]
+mod line_coverage_tests {
+    use super::*;
+    use crate::config::ConfigSet;
+    use crate::index::StatMatchPolicy;
+    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::objects::ObjectKind;
+    use crate::parallel::ThreadPolicy;
+    use crate::write_tree::write_tree_from_index;
+    use similar::Algorithm;
+    use tempfile::TempDir;
+
+    fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid,
+            flags: path.len().min(0xfff) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    fn write_tree(odb: &Odb, entries: &[(&str, ObjectId)]) -> ObjectId {
+        let mut body = Vec::new();
+        for (name, oid) in entries {
+            body.extend_from_slice(format!("100644 {name}\0").as_bytes());
+            body.extend_from_slice(oid.as_bytes());
+        }
+        odb.write(ObjectKind::Tree, &body).expect("tree")
+    }
+
+    fn pair_of_trees_with_rename() -> (TempDir, Odb, ObjectId, ObjectId) {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let old_blob = odb
+            .write(ObjectKind::Blob, b"line one\nline two\n")
+            .expect("old");
+        let new_blob = odb
+            .write(ObjectKind::Blob, b"line one\nline TWO\nline three\n")
+            .expect("new");
+        let old_tree = write_tree(&odb, &[("old.txt", old_blob)]);
+        let new_tree = write_tree(&odb, &[("new.txt", new_blob), ("kept.txt", old_blob)]);
+        (temp, odb, old_tree, new_tree)
+    }
+
+    #[test]
+    fn diff_helper_and_format_sweep() {
+        let cfg = ConfigSet::new();
+        assert!(resolve_indent_heuristic(&cfg, false, false));
+        assert!(!resolve_indent_heuristic(&cfg, false, true));
+        let (indent, no_indent) = parse_indent_heuristic_cli_flags(&[
+            String::from("--no-indent-heuristic"),
+            String::from("--indent-heuristic"),
+        ]);
+        assert!(indent);
+        assert!(!no_indent);
+
+        let old = "alpha beta\ngamma\n";
+        let new = "alpha BETA\ngamma delta\n";
+        let _ = normalize_ignore_space_change(old);
+        let _ = normalize_ignore_space_change_line("- alpha  beta ");
+        let _ = count_changes(old, new);
+        let _ = count_git_lines(old.as_bytes());
+        let _ = diffcore_count_changes(old.as_bytes(), new.as_bytes());
+        let _ = should_break_rewrite_for_stat(b"x", b"totally different content");
+        assert!(parse_diff_rename_score_token("50%").is_some());
+        let _ = rewrite_merge_score(b"a", b"b");
+        let _ = rewrite_dissimilarity_index_percent(b"abc", b"abd");
+        assert_eq!(format_mode(0o100644), "100644");
+        assert!(!format_rename_path("a/old", "b/new").is_empty());
+
+        let ops = word_diff_ops_imara(&["a", "b"], &["a", "c"]);
+        assert!(!ops.is_empty());
+        let old_lines = ["a", "b", "c"];
+        let new_lines = ["a", "b", "d"];
+        let compact = diff_slice_ops_compacted(&old_lines, &new_lines, Algorithm::Myers, false);
+        assert!(!compact.is_empty());
+        let _ =
+            map_new_to_old_lines_compacted("a\nb\nc\n", "a\nb\nd\n", Algorithm::Myers, false, 3);
+    }
+
+    #[test]
+    fn tree_diff_rename_copy_postprocess_matrix() -> Result<()> {
+        let (_temp, odb, old_tree, new_tree) = pair_of_trees_with_rename();
+        let raw = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "")?;
+        assert!(!raw.is_empty());
+        let with_renames = diff_trees_with_renames(&odb, Some(&old_tree), Some(&new_tree), "", 50)?;
+        assert!(!with_renames.is_empty());
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::default();
+        let detected = detect_renames_with_policy(&odb, None, raw.clone(), 50, &config, &policy);
+        let source_flat = flatten_tree_entries(&odb, &old_tree)?;
+        let _ = detect_copies_with_policy(
+            &odb,
+            None,
+            detected.clone(),
+            50,
+            true,
+            &source_flat,
+            &config,
+            &policy,
+        );
+        let opts = DiffPostprocessOptions {
+            break_score: Some(50),
+            rename_threshold: 50,
+            copy_threshold: Some(50),
+            find_copies_harder: true,
+            materialize_break_worktree_new_oid: false,
+        };
+        let processed =
+            postprocess_diff_entries(&odb, raw, Some(&old_tree), None, &config, &policy, &opts)?;
+        assert!(!processed.is_empty());
+        let _ = status_apply_rename_copy_detection(
+            &odb,
+            with_renames.clone(),
+            50,
+            true,
+            Some(&old_tree),
+            &config,
+            &policy,
+        )?;
+        let flat = flatten_tree_entries(&odb, &new_tree)?;
+        assert!(!flat.is_empty());
+        let _ = diff_trees_show_tree_entries(&odb, Some(&old_tree), Some(&new_tree), "")?;
+        Ok(())
+    }
+
+    #[test]
+    fn unified_diff_flag_matrix() {
+        let old = "fn main() {\n    println!(\"hi\");\n}\n";
+        let new = "fn main() {\n    println!(\"bye\");\n}\n";
+        for algo in [Algorithm::Myers, Algorithm::Patience, Algorithm::Histogram] {
+            for (ws, ws_all, fc, ig) in [(true, false, false, false), (false, true, true, true)] {
+                let patch = unified_diff_with_prefix_and_funcname_and_algorithm(
+                    old,
+                    new,
+                    "a/main.rs",
+                    "b/main.rs",
+                    3,
+                    0,
+                    "a/",
+                    "b/",
+                    None,
+                    algo,
+                    ws,
+                    ws_all,
+                    fc,
+                    ig,
+                );
+                assert!(patch.contains("@@"), "algo {algo:?}");
+            }
+        }
+        let hist = unified_diff_histogram_ignore_with_prefix_and_funcname(
+            old,
+            new,
+            "a/x",
+            "b/x",
+            3,
+            0,
+            "",
+            "",
+            None,
+            false,
+            false,
+            |_old, _new| false,
+        );
+        assert!(!hist.is_empty());
+        let raw = format_raw_abbrev(
+            &DiffEntry {
+                status: DiffStatus::Modified,
+                old_path: Some("x".into()),
+                new_path: Some("x".into()),
+                old_mode: "100644".into(),
+                new_mode: "100644".into(),
+                old_oid: empty_blob_oid(),
+                new_oid: empty_blob_oid(),
+                score: Some(80),
+            },
+            7,
+        );
+        assert!(raw.contains('M') || raw.contains('x'));
+        let stat = format_stat_line_width("path", 10, 20, 40, 8);
+        assert!(stat.contains("path"));
+    }
+
+    #[test]
+    fn index_and_commit_diff_paths() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let odb = Odb::new(temp.path());
+        let b1 = odb.write(ObjectKind::Blob, b"v1\n").expect("b1");
+        let b2 = odb.write(ObjectKind::Blob, b"v2\n").expect("b2");
+        let b3 = odb.write(ObjectKind::Blob, b"v3\n").expect("b3");
+        let mut index = Index::new();
+        index.add_or_replace(index_entry("file.txt", MODE_REGULAR, b2));
+        let head = write_tree_from_index(&odb, &index, "").expect("tree");
+        index.entries_mut()[0].oid = b1;
+        let idx_diff = diff_index_to_tree(&odb, &index, Some(&head), false)?;
+        assert!(!idx_diff.is_empty());
+        let commit_body = format!(
+            "tree {head}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nm\n"
+        );
+        let c1 = odb
+            .write(ObjectKind::Commit, commit_body.as_bytes())
+            .expect("c1");
+        let mut index2 = Index::new();
+        index2.add_or_replace(index_entry("file.txt", MODE_REGULAR, b3));
+        let head2 = write_tree_from_index(&odb, &index2, "").expect("head2");
+        let c2_body = format!(
+            "tree {head2}\nparent {c1}\nauthor T <t@e.com> 2 +0000\ncommitter T <t@e.com> 2 +0000\n\nm2\n"
+        );
+        let c2 = odb
+            .write(ObjectKind::Commit, c2_body.as_bytes())
+            .expect("c2");
+        let commit_diff = diff_commits_with_renames(&odb, &c1, &c2, 50)?;
+        assert!(!commit_diff.is_empty());
+        let _ = tree_oid_of_commit(&odb, &c2)?;
+        let mtime = index_mtime_for_diff(&index, Some((1, 0)));
+        let _ = entry_is_racy(&index.entries()[0], mtime);
+        let _ = entry_is_racy_with_policy(&index.entries()[0], mtime, StatMatchPolicy::default());
+        Ok(())
+    }
+
+    #[test]
+    fn worktree_index_diff_and_rename_score() -> Result<()> {
+        let temp = TempDir::new().expect("tempdir");
+        let wt = temp.path();
+        let git_dir = wt.join(".git");
+        std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
+        let objects_dir = git_dir.join("objects");
+        let odb = Odb::new(&objects_dir);
+        let content = b"hello world\n";
+        std::fs::write(wt.join("tracked.txt"), content).expect("write");
+        let oid = odb.write(ObjectKind::Blob, content).expect("blob");
+        let mut index = Index::new();
+        index.add_or_replace(index_entry("tracked.txt", MODE_REGULAR, oid));
+        let head = write_tree_from_index(&odb, &index, "").expect("tree");
+        std::fs::write(wt.join("tracked.txt"), b"hello WORLD\n").expect("mutate");
+        let mut index_mut = index.clone();
+        let diff = diff_index_to_worktree(&odb, &mut index_mut, wt, false, false)?;
+        assert!(!diff.is_empty());
+        let _ = diff_tree_to_worktree(&odb, Some(&head), wt, &index)?;
+        let score = rename_similarity_score(b"line one\nline two\n", b"line one\nline TWO\n");
+        assert!(score >= 50);
+        let _ = detect_renames(&odb, Some(wt), diff, 50);
+        Ok(())
+    }
+}

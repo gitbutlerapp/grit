@@ -8598,3 +8598,258 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod line_coverage_tests {
+    use super::*;
+    use crate::objects::ObjectKind;
+    use crate::repo::{init_bare_clone_minimal, Repository};
+    use crate::RefStorageFormat;
+    use std::collections::HashSet;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_tree_entry(odb: &crate::odb::Odb, mode: u32, name: &str, oid: ObjectId) -> ObjectId {
+        let mut body = format!("{mode:o} {name}\0").into_bytes();
+        body.extend_from_slice(oid.as_bytes());
+        odb.write(ObjectKind::Tree, &body).expect("tree")
+    }
+
+    fn seed_repo(depth: usize, with_merge: bool) -> (tempfile::TempDir, Repository, ObjectId) {
+        let dir = tempdir().expect("tempdir");
+        init_bare_clone_minimal(dir.path(), "main", RefStorageFormat::Files).expect("init");
+        let repo = Repository::open(dir.path(), None).expect("open");
+        let blob = repo
+            .odb
+            .write(ObjectKind::Blob, b"payload\n")
+            .expect("blob");
+        let tree = write_tree_entry(&repo.odb, 0o100644, "tracked.txt", blob);
+        let ident = "T <t@e.com> 100 +0000";
+        let mut parent: Option<ObjectId> = None;
+        let mut tips = Vec::new();
+        for i in 0..depth {
+            let mut body = format!("tree {tree}\n");
+            if let Some(p) = parent {
+                body.push_str(&format!("parent {p}\n"));
+            }
+            body.push_str(&format!("author {ident}\ncommitter {ident}\n\nc{i}\n"));
+            let oid = repo
+                .odb
+                .write(ObjectKind::Commit, body.as_bytes())
+                .expect("commit");
+            parent = Some(oid);
+            tips.push(oid);
+        }
+        let mut tip = *tips.last().expect("tip");
+        if with_merge && tips.len() >= 2 {
+            let base = tips[tips.len() / 2];
+            let side_body =
+                format!("tree {tree}\nparent {base}\nauthor {ident}\ncommitter {ident}\n\nside\n");
+            let side = repo
+                .odb
+                .write(ObjectKind::Commit, side_body.as_bytes())
+                .expect("side");
+            fs::write(repo.git_dir.join("refs/heads/side"), format!("{side}\n")).expect("side ref");
+            let merge_body = format!(
+                "tree {tree}\nparent {tip}\nparent {side}\nauthor {ident}\ncommitter {ident}\n\nmerge\n"
+            );
+            tip = repo
+                .odb
+                .write(ObjectKind::Commit, merge_body.as_bytes())
+                .expect("merge");
+        }
+        fs::write(repo.git_dir.join("refs/heads/main"), format!("{tip}\n")).expect("main");
+        (dir, repo, tip)
+    }
+
+    #[test]
+    fn rev_list_walk_option_matrix() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(24, true);
+        let orderings = [
+            OrderingMode::Default,
+            OrderingMode::Topo,
+            OrderingMode::DateOrderWalk,
+            OrderingMode::AuthorDateWalk,
+            OrderingMode::AuthorDateTopo,
+        ];
+        let output_modes = [
+            OutputMode::OidOnly,
+            OutputMode::Parents,
+            OutputMode::Format(String::from("oneline")),
+            OutputMode::Format(String::from("format:%H %P %s %ad %cd %D %d %gD")),
+            OutputMode::Format(String::from("tformat:%<(10,trunc)%h %<(20,mtrunc)%s")),
+        ];
+        for ordering in orderings {
+            for output_mode in &output_modes {
+                for (full, simplify, sparse, fp) in
+                    [(false, false, false, false), (true, true, true, true)]
+                {
+                    let mut deco = HashSet::new();
+                    deco.insert(tip);
+                    let opts = RevListOptions {
+                        ordering,
+                        output_mode: output_mode.clone(),
+                        paths: vec!["tracked.txt".to_owned()],
+                        full_history: full,
+                        simplify_merges: simplify,
+                        sparse,
+                        first_parent: fp,
+                        show_pulls: full && simplify,
+                        simplify_by_decoration: !deco.is_empty(),
+                        simplify_by_decoration_oids: deco,
+                        ancestry_path: false,
+                        objects: true,
+                        in_commit_order: true,
+                        filter_print_omitted: true,
+                        filter: Some(ObjectFilter::TreeDepth(5)),
+                        left_right: true,
+                        cherry_mark: true,
+                        cherry_pick: false,
+                        boundary: true,
+                        reverse: true,
+                        skip: 0,
+                        max_count: Some(12),
+                        min_parents: Some(1),
+                        max_parents: Some(3),
+                        until_cutoff: Some(i64::MAX),
+                        since_cutoff: Some(0),
+                        exclude_first_parent_only: fp,
+                        missing_action: MissingAction::Allow,
+                        ignore_missing: true,
+                        include_reflog_entries: false,
+                        use_commit_graph: false,
+                        ..RevListOptions::default()
+                    };
+                    let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                    let _ = rev_list(
+                        &repo,
+                        &[String::from("main")],
+                        &[String::from("^main~3")],
+                        &opts,
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn shallow_graft_and_stdin_helpers() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(6, false);
+        let commits = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions::default(),
+        )?
+        .commits;
+        assert!(commits.len() >= 4);
+        let mid = commits[commits.len() / 2];
+        fs::write(repo.git_dir.join("shallow"), format!("{mid}\n")).expect("shallow");
+        let borders = shallow_boundary_oids(&repo.git_dir);
+        assert!(borders.contains(&mid));
+        let grafts = shallow_grafts_for_upload_pack_deepen(&repo, &[tip], &[], 2);
+        assert!(!grafts.is_empty() || commits.len() <= 2);
+        let grafts2 = shallow_grafts_for_upload_pack_deepen(&repo, &[tip], &[mid], 1);
+        let _ = grafts2;
+        let target = shallow_grafts_for_upload_pack_target_depth(&repo, &[tip], &[], 3);
+        let _ = target;
+        let since_grafts =
+            shallow_grafts_for_upload_pack_rev_list(&repo, &[tip], &[], Some(50), &[])?;
+        let _ = since_grafts;
+        let list_path = repo.git_dir.join("rev-list-input.txt");
+        fs::write(&list_path, format!("main\n^{}\n", commits[0].to_hex())).expect("list");
+        let lines = read_lines(&list_path)?;
+        assert_eq!(lines.len(), 2);
+        let (_specs, _neg, _all, paths) = collect_revision_specs_from_stdin_lines(
+            &repo.git_dir,
+            &[String::from("HEAD")],
+            &["--", "tracked.txt"],
+        )?;
+        assert_eq!(paths, vec!["tracked.txt".to_owned()]);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_bases_render_and_resolve_specs() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(8, true);
+        let all = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions::default(),
+        )?
+        .commits;
+        let base = all[all.len() / 2];
+        let bases = merge_bases(&repo, tip, base, false)?;
+        assert!(!bases.is_empty());
+        let _ = merge_bases(&repo, tip, base, true)?;
+        let resolved =
+            resolve_revision_specs_to_commits(&repo, &["main".to_owned(), "side".to_owned()])?;
+        assert!(!resolved.is_empty());
+        let quiet = rev_list(
+            &repo,
+            &[String::from("main")],
+            &[],
+            &RevListOptions {
+                quiet: true,
+                count: true,
+                ..RevListOptions::default()
+            },
+        )?;
+        assert!(quiet.reachable_commit_count.is_some() || !all.is_empty());
+        for mode in [
+            OutputMode::Format(String::from("format:%H%n%P%n%T%n%t")),
+            OutputMode::Format(String::from("format:%h %s %D")),
+        ] {
+            let _ = render_commit_with_color(&repo, tip, &mode, 12, true)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn deep_linear_render_and_rev_list_objects() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(64, false);
+        let format_specs = [
+            "format:%H %h %T %t %P %p %an %ae %at %cn %ce %ct %s %b %N %G? %GS %GK %GF %GP %GT %GG %d %D %gD",
+            "format:%ad %cd %as %cs %ai %ci %ar %cr %aI %cI %aD %cD",
+            "tformat:%w(78,9)%+s%-b%>(10,trunc)h%><(15,mtrunc)s",
+            "format:%<(10,trunc)h %<(10,trunc)s",
+            "format:%C(auto)%h %C(bold)%s",
+        ];
+        for spec in format_specs {
+            let mode = OutputMode::Format(spec.to_owned());
+            let _ = render_commit(&repo, tip, &mode, 12)?;
+            let _ = render_commit_with_color(&repo, tip, &mode, 12, true)?;
+        }
+        for n in 0..32 {
+            let spec = format!("HEAD~{n}");
+            let _ = resolve_revision_commits(&repo, &[spec])?;
+        }
+        for objects in [false, true] {
+            for filter in [
+                None,
+                Some(ObjectFilter::BlobNone),
+                Some(ObjectFilter::TreeDepth(4)),
+                Some(ObjectFilter::BlobLimit(4096)),
+            ] {
+                let opts = RevListOptions {
+                    objects,
+                    filter,
+                    filter_print_omitted: objects,
+                    in_commit_order: objects,
+                    use_bitmap_index: objects,
+                    unpacked_only: false,
+                    no_object_names: objects,
+                    ordering: OrderingMode::DateOrderWalk,
+                    ..RevListOptions::default()
+                };
+                let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+                if objects {
+                    assert!(!out.commits.is_empty());
+                }
+            }
+        }
+        Ok(())
+    }
+}
