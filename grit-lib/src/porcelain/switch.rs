@@ -7,11 +7,16 @@ use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::checkout::checkout_tree_changes;
+use crate::porcelain::checkout_reflog::{
+    append_branch_created_reflog, append_head_checkout_reflog, checkout_reflog_from_label,
+    is_already_detached_at, is_already_on_branch, switch_create_reflog_source_label,
+};
 use crate::porcelain::worktree_guard::{
     ensure_no_untracked_overwrite, load_worktree_snapshot, local_change_diffs, TreeSwitchPlan,
 };
 use crate::refs;
 use crate::repo::Repository;
+use crate::rev_parse::expand_at_minus_to_branch_name;
 use crate::rev_parse::resolve_revision;
 use crate::state::resolve_head;
 
@@ -28,13 +33,19 @@ pub enum SwitchMode {
     /// Create `refs/heads/<branch>` at `start_oid`, then check it out.
     Create { branch: String, start_oid: ObjectId },
     /// Detached `HEAD` at `commit`.
-    Detached { commit: ObjectId },
+    Detached {
+        commit: ObjectId,
+        /// User-facing revision string for the reflog `to` label (e.g. `HEAD~1`).
+        reflog_to_label: String,
+    },
 }
 
 /// Inputs for [`switch_repository`].
 #[derive(Debug, Clone)]
 pub struct SwitchOptions {
     pub mode: SwitchMode,
+    /// Explicit start point passed to `-c`, for branch-creation reflog wording.
+    pub create_start_point: Option<String>,
 }
 
 /// Result of [`switch_repository`].
@@ -81,6 +92,12 @@ pub fn resolve_create_branch(
 
 /// Resolve a branch name, remote-tracking branch, or revision for `grit switch`.
 pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
+    let spec = normalize_switch_spec(spec);
+    if let Ok(Some(branch)) = expand_at_minus_to_branch_name(repo, spec) {
+        let oid = refs::resolve_ref(&repo.git_dir, &format!("refs/heads/{branch}"))?;
+        return Ok(SwitchMode::Existing { branch, oid });
+    }
+
     if let Ok(oid) = refs::resolve_ref(&repo.git_dir, &format!("refs/heads/{spec}")) {
         return Ok(SwitchMode::Existing {
             branch: spec.to_owned(),
@@ -115,6 +132,14 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
     }
 
     Err(Error::Message(format!("no branch named '{spec}'")))
+}
+
+fn normalize_switch_spec(spec: &str) -> &str {
+    if spec == "-" {
+        "@{-1}"
+    } else {
+        spec
+    }
 }
 
 fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<SwitchMode>> {
@@ -158,31 +183,59 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 
 /// Perform a branch switch or detached checkout.
 pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<SwitchOutcome> {
-    let (target_oid, branch_ref, created, detached, branch_label, pending_create) = match &opts.mode
-    {
-        SwitchMode::Existing { branch, oid } => (
-            *oid,
-            format!("refs/heads/{branch}"),
-            false,
-            false,
-            branch.clone(),
-            None,
-        ),
-        SwitchMode::Create { branch, start_oid } => (
-            *start_oid,
-            format!("refs/heads/{branch}"),
-            true,
-            false,
-            branch.clone(),
-            Some((format!("refs/heads/{branch}"), *start_oid)),
-        ),
-        SwitchMode::Detached { commit } => {
-            (*commit, String::new(), false, true, String::new(), None)
-        }
-    };
+    let (target_oid, branch_ref, created, detached, branch_label, pending_create, reflog_to) =
+        match &opts.mode {
+            SwitchMode::Existing { branch, oid } => (
+                *oid,
+                format!("refs/heads/{branch}"),
+                false,
+                false,
+                branch.clone(),
+                None,
+                branch.clone(),
+            ),
+            SwitchMode::Create { branch, start_oid } => (
+                *start_oid,
+                format!("refs/heads/{branch}"),
+                true,
+                false,
+                branch.clone(),
+                Some((format!("refs/heads/{branch}"), *start_oid)),
+                branch.clone(),
+            ),
+            SwitchMode::Detached {
+                commit,
+                reflog_to_label,
+            } => (
+                *commit,
+                String::new(),
+                false,
+                true,
+                String::new(),
+                None,
+                reflog_to_label.clone(),
+            ),
+        };
 
     if let SwitchMode::Existing { branch, .. } = &opts.mode {
         crate::worktree::ensure_branch_not_checked_out_elsewhere(repo, branch)?;
+    }
+
+    if !detached && is_already_on_branch(repo, &branch_ref, target_oid)? {
+        return Ok(SwitchOutcome {
+            branch: branch_label,
+            created,
+            detached,
+            commit: target_oid,
+        });
+    }
+    if detached && is_already_detached_at(repo, target_oid)? {
+        return Ok(SwitchOutcome {
+            branch: branch_label,
+            created,
+            detached,
+            commit: target_oid,
+        });
     }
 
     switch_to_target(
@@ -193,6 +246,8 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
         detached,
         &branch_label,
         pending_create,
+        &reflog_to,
+        opts.create_start_point.as_deref(),
     )
 }
 
@@ -204,8 +259,11 @@ fn switch_to_target(
     detached: bool,
     branch_label: &str,
     pending_create: Option<(String, ObjectId)>,
+    reflog_to_label: &str,
+    create_start_point: Option<&str>,
 ) -> Result<SwitchOutcome> {
-    let head_oid = resolve_head(&repo.git_dir)?.oid().copied();
+    let head_before = resolve_head(&repo.git_dir)?;
+    let head_oid = head_before.oid().copied();
     let head_tree = head_oid.map(|oid| commit_tree(repo, &oid)).transpose()?;
     let target_tree = commit_tree(repo, &target_oid)?;
 
@@ -225,12 +283,19 @@ fn switch_to_target(
 
     if let Some((refname, oid)) = &pending_create {
         refs::write_ref(&repo.git_dir, refname, oid)?;
+        let source = switch_create_reflog_source_label(create_start_point);
+        append_branch_created_reflog(repo, refname, *oid, &source)?;
     }
 
     if detached {
         refs::write_ref(&repo.git_dir, "HEAD", &target_oid)?;
     } else {
         refs::write_symbolic_ref(&repo.git_dir, "HEAD", branch_ref)?;
+    }
+
+    if let (Some(old_oid), Some(from_label)) = (head_oid, checkout_reflog_from_label(&head_before))
+    {
+        append_head_checkout_reflog(repo, old_oid, target_oid, &from_label, reflog_to_label)?;
     }
 
     Ok(SwitchOutcome {
@@ -444,6 +509,7 @@ mod tests {
                     branch: "other".into(),
                     oid: refs::resolve_ref(&repo.git_dir, "refs/heads/other").expect("oid"),
                 },
+                create_start_point: None,
             },
         )
         .expect("switch");
@@ -477,6 +543,7 @@ mod tests {
                     branch: "leaked".into(),
                     start_oid: refs::resolve_ref(&repo.git_dir, "refs/heads/other").expect("oid"),
                 },
+                create_start_point: None,
             },
         )
         .expect_err("conflict");

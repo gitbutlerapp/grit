@@ -60,6 +60,7 @@ pub fn run(
             .ok_or_else(|| anyhow::anyhow!("revision required with --detach"))?;
         SwitchMode::Detached {
             commit: resolve_revision_spec(&repo, spec).map_err(anyhow::Error::new)?,
+            reflog_to_label: spec.to_owned(),
         }
     } else if create {
         let branch = target.ok_or_else(|| anyhow::anyhow!("branch name required with --create"))?;
@@ -69,9 +70,16 @@ pub fn run(
         resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
     };
 
-    let outcome = switch_repository(&repo, &SwitchOptions { mode })
-        .map_err(anyhow::Error::new)
-        .context("could not switch")?;
+    let create_start_point = if create { start_point.clone() } else { None };
+    let outcome = switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode,
+            create_start_point,
+        },
+    )
+    .map_err(anyhow::Error::new)
+    .context("could not switch")?;
 
     Ok(SwitchOutcome {
         branch: outcome.branch,
