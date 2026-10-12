@@ -1,0 +1,24 @@
+{
+  "$id": "https://grit-scm.com/schemas/clean/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit clean`.",
+  "properties": {
+    "dry_run": {
+      "description": "Whether this run only previewed removals (no `-f`).",
+      "type": "boolean"
+    },
+    "removed": {
+      "description": "Paths removed, or that would be removed when `-f` was not passed.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "dry_run",
+    "removed"
+  ],
+  "title": "CleanOutcome",
+  "type": "object"
+}

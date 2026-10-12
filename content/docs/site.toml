@@ -42,6 +42,11 @@ file = "agents.md"
 slug = "agents"
 label = "Agent guide"
 
+[[section.page]]
+file = "schemas.md"
+slug = "schemas"
+label = "JSON schemas"
+
 [section.commands]
 groups = [
   "Getting started",

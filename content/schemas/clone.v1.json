@@ -1,0 +1,60 @@
+{
+  "$id": "https://grit-scm.com/schemas/clone/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit clone`.",
+  "properties": {
+    "branch": {
+      "description": "Default branch checked out.",
+      "type": "string"
+    },
+    "branches": {
+      "description": "Remote branches fetched.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "bytes": {
+      "description": "Pack bytes received during the fetch.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "Working-tree files checked out.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "objects": {
+      "description": "Objects received during the fetch.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "path": {
+      "description": "Destination directory.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Remote tags fetched.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "branch",
+    "branches",
+    "bytes",
+    "files",
+    "objects",
+    "path",
+    "tags",
+    "url"
+  ],
+  "title": "CloneOutcome",
+  "type": "object"
+}

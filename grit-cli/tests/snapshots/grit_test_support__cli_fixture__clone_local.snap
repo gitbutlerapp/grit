@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Cloned into 'cloned-human' on branch main — 8 objects ([SIZE]), 2 branches, 1 tags, 2 files in [DURATION].\n",
+    "stderr": "Cloning into 'cloned-human' ...\n"
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\n  \"url\": \"[UPSTREAM]\",\n  \"path\": \"cloned-json\",\n  \"branch\": \"main\",\n  \"objects\": 8,\n  \"bytes\": 596,\n  \"branches\": 2,\n  \"tags\": 1,\n  \"files\": 2\n}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Clone complete\n\n- **path**: `cloned-markdown`\n- **branch**: `main`\n- **url**: `[UPSTREAM]`\n- **objects**: 8\n- **bytes**: 596 ([SIZE])\n- **branches**: 2\n- **tags**: 1\n- **files**: 2\n- **elapsed**: [DURATION]\n",
+    "stderr": ""
+  }
+}

@@ -4,10 +4,11 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use anyhow::Error;
+use schemars::JsonSchema;
 use serde::Serialize;
 
 /// JSON object emitted on stdout for structured command failures.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct StructuredJsonError {
     /// Short, stable summary for scripts.
     pub error: String,
@@ -15,6 +16,7 @@ pub struct StructuredJsonError {
     pub kind: &'static str,
     /// Conflicting paths, when `kind == "conflict"`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflicts: Option<Vec<String>>,
 }
 

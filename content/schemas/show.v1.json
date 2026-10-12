@@ -1,0 +1,242 @@
+{
+  "$id": "https://grit-scm.com/schemas/show/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ChangeStatus": {
+      "description": "Machine-readable diff change status (`--json` / `--markdown` contract).",
+      "enum": [
+        "added",
+        "deleted",
+        "modified",
+        "type_changed",
+        "renamed",
+        "copied",
+        "unmerged"
+      ],
+      "type": "string"
+    },
+    "CommitInfo": {
+      "properties": {
+        "author": {
+          "$ref": "#/definitions/Person"
+        },
+        "committer": {
+          "$ref": "#/definitions/Person"
+        },
+        "message": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "committer",
+        "message",
+        "oid",
+        "parents",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "DiffStat": {
+      "description": "A diffstat: per-file insertion/deletion counts plus totals.",
+      "properties": {
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/FileStat"
+          },
+          "type": "array"
+        },
+        "files_changed": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "files",
+        "files_changed",
+        "insertions"
+      ],
+      "type": "object"
+    },
+    "FileStat": {
+      "properties": {
+        "binary": {
+          "type": "boolean"
+        },
+        "deletions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "old_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ChangeStatus"
+        }
+      },
+      "required": [
+        "binary",
+        "deletions",
+        "insertions",
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
+    "Person": {
+      "description": "A parsed identity line (`Name <email> <epoch> <tz>`).",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ShowKind": {
+      "description": "What `grit show` resolved (`--json` contract).",
+      "enum": [
+        "commit",
+        "branch",
+        "tag",
+        "annotated_tag"
+      ],
+      "type": "string"
+    },
+    "TagInfo": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tagger": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Person"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "name"
+      ],
+      "type": "object"
+    },
+    "WarningRecord": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit show`.",
+  "properties": {
+    "commit": {
+      "$ref": "#/definitions/CommitInfo"
+    },
+    "kind": {
+      "$ref": "#/definitions/ShowKind"
+    },
+    "ref_name": {
+      "description": "Branch or tag name, when shown via a ref.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stat": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/DiffStat"
+        }
+      ],
+      "description": "A summary (diffstat) of the change the commit introduced — not the full patch."
+    },
+    "tag": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TagInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Annotated-tag metadata, when `kind == \"annotated_tag\"`."
+    },
+    "warnings": {
+      "description": "Non-fatal warnings emitted while resolving the object.",
+      "items": {
+        "$ref": "#/definitions/WarningRecord"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "commit",
+    "kind",
+    "stat"
+  ],
+  "title": "ShowOutcome",
+  "type": "object"
+}

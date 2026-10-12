@@ -1,0 +1,21 @@
+{
+  "$id": "https://grit-scm.com/schemas/mv/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "CLI outcome for `grit mv`.",
+  "properties": {
+    "from": {
+      "description": "Source path before the move.",
+      "type": "string"
+    },
+    "to": {
+      "description": "Destination path after the move.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "from",
+    "to"
+  ],
+  "title": "MvOutcome",
+  "type": "object"
+}

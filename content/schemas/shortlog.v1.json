@@ -1,0 +1,70 @@
+{
+  "$id": "https://grit-scm.com/schemas/shortlog/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CommitJson": {
+      "description": "A commit in JSON output: full hex `oid`, subject, author, and dates.",
+      "properties": {
+        "author": {
+          "description": "Author display name (identity name when present, matching human log).",
+          "type": "string"
+        },
+        "author_date": {
+          "description": "Author timestamp in RFC 3339.",
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "relative_date": {
+          "description": "Relative author date (e.g. `3 days ago`), when `now` is supplied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "author",
+        "author_date",
+        "oid",
+        "subject"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit shortlog`.",
+  "properties": {
+    "ahead": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "commits": {
+      "items": {
+        "$ref": "#/definitions/CommitJson"
+      },
+      "type": "array"
+    },
+    "target": {
+      "description": "Target branch name, or `null` when none could be resolved.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "ahead",
+    "branch",
+    "commits"
+  ],
+  "title": "ShortlogOutcome",
+  "type": "object"
+}

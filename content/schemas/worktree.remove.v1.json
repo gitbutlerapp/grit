@@ -1,0 +1,141 @@
+{
+  "$id": "https://grit-scm.com/schemas/worktree.remove/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "WorktreeRow": {
+      "properties": {
+        "bare": {
+          "type": "boolean"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detached": {
+          "type": "boolean"
+        },
+        "head": {
+          "type": "string"
+        },
+        "lock_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "prunable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bare",
+        "detached",
+        "head",
+        "locked",
+        "path",
+        "prunable"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit worktree`, tagged by `action`.",
+  "oneOf": [
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "list"
+          ],
+          "type": "string"
+        },
+        "worktrees": {
+          "items": {
+            "$ref": "#/definitions/WorktreeRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "worktrees"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "add"
+          ],
+          "type": "string"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "head": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "head",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "remove"
+          ],
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "prune"
+          ],
+          "type": "string"
+        },
+        "pruned": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "pruned"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "WorktreeOutcome"
+}
