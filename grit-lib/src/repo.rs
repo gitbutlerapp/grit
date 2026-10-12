@@ -406,6 +406,36 @@ impl Repository {
         self.ref_store.as_ref()
     }
 
+    /// Remote configuration, `ls-remote`, fetch, and push for this repository.
+    #[must_use]
+    pub fn remotes(&self) -> crate::repo_handles::RepositoryRemotes<'_> {
+        crate::repo_handles::RepositoryRemotes::new(self)
+    }
+
+    /// Linked worktree listing and admin for this repository.
+    #[must_use]
+    pub fn worktrees(&self) -> crate::repo_handles::RepositoryWorktrees<'_> {
+        crate::repo_handles::RepositoryWorktrees::new(self)
+    }
+
+    /// Stash stack operations for this repository.
+    #[must_use]
+    pub fn stash(&self) -> crate::repo_handles::RepositoryStash<'_> {
+        crate::repo_handles::RepositoryStash::new(self)
+    }
+
+    /// Git notes read/write for this repository.
+    #[must_use]
+    pub fn notes(&self) -> crate::repo_handles::RepositoryNotes<'_> {
+        crate::repo_handles::RepositoryNotes::new(self)
+    }
+
+    /// Bundle create, verify, list-heads, and unbundle for this repository.
+    #[must_use]
+    pub fn bundles(&self) -> crate::repo_handles::RepositoryBundles<'_> {
+        crate::repo_handles::RepositoryBundles::new(self)
+    }
+
     /// Resolve `refname` through this repository's ref store.
     ///
     /// # Errors

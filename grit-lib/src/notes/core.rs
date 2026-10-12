@@ -282,6 +282,83 @@ pub fn write_notes_commit(
     Ok(())
 }
 
+/// Write a notes tree commit using explicit author and committer identity lines.
+///
+/// Identity strings must already include timestamp and timezone
+/// (`Name <email> unix tz`), matching [`crate::porcelain::stash::StashCreateOptions::identity`].
+///
+/// # Errors
+///
+/// Propagates object write, ref update, and reflog failures.
+pub fn write_notes_commit_idents(
+    repo: &Repository,
+    notes_ref: &str,
+    entries: &[NotesTreeEntry],
+    message: &str,
+    author: &str,
+    committer: &str,
+) -> Result<()> {
+    let fanout = notes_fanout(entries);
+    let rewritten_entries: Vec<_> = entries
+        .iter()
+        .map(|entry| NotesTreeEntry {
+            mode: entry.mode,
+            path: note_object_name(&entry.path)
+                .map(|name| path_with_fanout(&name, fanout))
+                .unwrap_or_else(|| entry.path.clone()),
+            oid: entry.oid,
+        })
+        .collect();
+    let tree_oid = write_notes_subtree(repo, &rewritten_entries)?;
+
+    let parent = resolve_ref(&repo.git_dir, notes_ref).ok();
+
+    let commit = CommitData {
+        tree: tree_oid,
+        parents: parent.into_iter().collect(),
+        author: author.to_owned(),
+        committer: committer.to_owned(),
+        author_raw: Vec::new(),
+        committer_raw: Vec::new(),
+        encoding: None,
+        message: if message.ends_with('\n') {
+            message.to_owned()
+        } else {
+            format!("{message}\n")
+        },
+        raw_message: None,
+        extra_headers: Vec::new(),
+    };
+
+    let commit_data = serialize_commit(&commit);
+    let commit_oid = repo.odb.write(ObjectKind::Commit, &commit_data)?;
+
+    let old_oid = resolve_ref(&repo.git_dir, notes_ref).unwrap_or_else(|_| zero_oid());
+    write_ref(&repo.git_dir, notes_ref, &commit_oid)?;
+    if should_autocreate_reflog(&repo.git_dir, notes_ref) {
+        let msg = message.trim_end_matches('\n');
+        let reflog_msg = format!("notes: {msg}");
+        let _ = append_reflog(
+            &repo.git_dir,
+            notes_ref,
+            &old_oid,
+            &commit_oid,
+            committer,
+            &reflog_msg,
+            false,
+        );
+    }
+    Ok(())
+}
+
+/// Remove a note for `object_hex` when present. Returns whether an entry was removed.
+#[must_use]
+pub fn remove_note_entry(entries: &mut Vec<NotesTreeEntry>, object_hex: &str) -> bool {
+    let before = entries.len();
+    entries.retain(|e| note_object_name(&e.path).as_deref() != Some(object_hex));
+    entries.len() < before
+}
+
 /// Build a Git ident string from config.
 /// Build an identity line for the notes commit, honoring the
 /// `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL,DATE}` environment variables exactly like
@@ -353,6 +430,36 @@ struct NotesMergePair {
     base_blob: Option<ObjectId>,
     remote_blob: Option<ObjectId>,
     local: LocalNoteState,
+}
+
+/// Full ref name for a Git notes namespace (`refs/notes/…`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NotesRef(String);
+
+impl NotesRef {
+    /// Default notes ref (`refs/notes/commits`).
+    #[must_use]
+    pub fn commits() -> Self {
+        Self("refs/notes/commits".to_owned())
+    }
+
+    /// Parse a short or full notes ref the same way Git's `--ref` flag does.
+    #[must_use]
+    pub fn parse(short_or_full: &str) -> Self {
+        Self(expand_notes_ref(short_or_full))
+    }
+
+    /// Borrow the canonical ref string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for NotesRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 /// Match Git's `expand_notes_ref` (`notes.c`): only `--ref` uses this; env/config refs are verbatim.

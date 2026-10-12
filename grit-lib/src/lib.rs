@@ -191,6 +191,7 @@ pub mod reftable;
 pub mod remote;
 pub mod repo;
 pub mod repo_caches;
+pub mod repo_handles;
 pub mod rerere;
 pub mod resolve_undo;
 pub mod rev_list;
