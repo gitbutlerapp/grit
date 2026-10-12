@@ -92,6 +92,22 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a `Commit` heading, branch and commit summary, and change count:
+
+```text
+- **`main`** · `9244cbd` — third
+- **3** changes committed
+```
+
+With `--amend`, the first bullet notes the amended branch tip:
+
+```text
+- Amended **`main`** at `2fb4e89` — third (amended)
+- **3** changes committed
+```
+
 ## See also
 
 [grit add](../add/), [grit status](../status/), [grit log](../log/), [grit config](../config/)

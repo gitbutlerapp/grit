@@ -75,6 +75,14 @@ Example:
 
 On failure because of conflicts, stdout is a single JSON object (exit code 1) with `error`, `kind` (`conflict`), and `conflicts` (sorted paths), same shape as [`grit merge`](../merge/).
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a `Pick` heading and a single line with source and new commit oids:
+
+```text
+- `b84beb4` → `b84beb4` — pick me
+```
+
 ## See also
 
 [grit merge](../merge/), [grit log](../log/)

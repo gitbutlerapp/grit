@@ -104,6 +104,24 @@ When the merge stops on conflicts (exit code 1), stdout is still a single JSON o
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a `Merge` heading and a result summary. Fast-forward:
+
+```text
+- Fast-forwarded **`main`** → `9244cbd`
+```
+
+When the merge stops on conflicts (exit code 1), stdout still carries structured Markdown with conflict paths and next steps:
+
+```text
+- Merge **`side`** stopped with conflicts
+
+- `f.txt`
+
+→ fix conflicts, then `grit commit "message"`, or `grit merge --abort`
+```
+
 ## See also
 
 [grit pull](../pull/), [grit pick](../pick/), [grit branch](../branch/)

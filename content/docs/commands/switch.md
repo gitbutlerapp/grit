@@ -97,7 +97,23 @@ Example (detached):
 
 ## Markdown output
 
-Pass `--markdown` for agent-friendly output (same fields as JSON, as a bullet list under a `## Switch` heading).
+Pass [`--markdown`](../global-options/) for a `Switch` heading and one summary line:
+
+```text
+- Switched to **`feature`**
+```
+
+Creating a branch:
+
+```text
+- Created and switched to **`topic`**
+```
+
+Detached HEAD:
+
+```text
+- HEAD detached at `9244cbd`
+```
 
 ## See also
 

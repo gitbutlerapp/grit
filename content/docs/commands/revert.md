@@ -77,6 +77,14 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for a `Revert` heading and source → revert commit line:
+
+```text
+- `9244cbd` → `bbbca73` — Revert "third"
+```
+
 ## See also
 
 [grit pick](../pick/), [grit merge](../merge/)

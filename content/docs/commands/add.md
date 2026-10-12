@@ -57,6 +57,20 @@ Example:
 }
 ```
 
+## Markdown output
+
+Pass [`--markdown`](../global-options/) for an `Add` heading and how many paths were staged:
+
+```text
+- Staged **1** change
+```
+
+When there is nothing to stage and you ran `grit add` with no paths:
+
+```text
+Nothing to stage — working tree clean.
+```
+
 ## See also
 
 [grit status](../status/), [grit commit](../commit/)
