@@ -5145,9 +5145,15 @@ fn compute_cherry_patch_id(
 ) -> Result<Option<ObjectId>> {
     let algo = repo.odb().hash_algo();
     if paths.is_empty() {
-        compute_patch_id(algo, repo.odb(), oid)
+        compute_patch_id(algo, repo.odb(), oid, crate::patch_ids::PatchIdMode::Stable)
     } else {
-        compute_patch_id_for_paths(algo, repo.odb(), oid, paths)
+        compute_patch_id_for_paths(
+            algo,
+            repo.odb(),
+            oid,
+            paths,
+            crate::patch_ids::PatchIdMode::Stable,
+        )
     }
 }
 

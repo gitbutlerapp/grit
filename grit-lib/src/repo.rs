@@ -626,6 +626,25 @@ impl Repository {
         crate::repo_handles::RepositoryNotes::new(self)
     }
 
+    /// Hook script discovery for this repository.
+    #[must_use]
+    pub fn hooks(&self) -> crate::repo_handles::RepositoryHooks<'_> {
+        crate::repo_handles::RepositoryHooks::new(self)
+    }
+
+    /// Patch-ID for a single commit (merge commits and empty diffs return `None`).
+    ///
+    /// # Errors
+    ///
+    /// Propagates object database read/parse failures.
+    pub fn patch_id(
+        &self,
+        commit: &crate::objects::ObjectId,
+        mode: crate::patch_ids::PatchIdMode,
+    ) -> crate::error::Result<Option<crate::objects::ObjectId>> {
+        crate::patch_ids::compute_patch_id(self.odb().hash_algo(), self.odb(), commit, mode)
+    }
+
     /// Bundle create, verify, list-heads, and unbundle for this repository.
     #[must_use]
     pub fn bundles(&self) -> crate::repo_handles::RepositoryBundles<'_> {

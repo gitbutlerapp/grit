@@ -17,12 +17,14 @@
 //! ```
 
 mod bundle;
+mod hooks;
 mod notes;
 mod remote;
 mod stash;
 mod worktree;
 
 pub use bundle::RepositoryBundles;
+pub use hooks::{HookInfo, HookSource, RepositoryHooks};
 pub use notes::{NotesWriteOptions, RepositoryNotes};
 pub use remote::RepositoryRemotes;
 pub use stash::{RepositoryStash, StashApplyOptions, StashPushOptions};

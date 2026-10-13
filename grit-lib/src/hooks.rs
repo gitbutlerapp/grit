@@ -395,26 +395,6 @@ fn resolve_hook_sequence(
     Ok(seq)
 }
 
-/// List hook display lines for `git hook list` (configured friendly names, then `hook from hookdir`).
-pub fn list_hooks_display_lines(
-    repo: Option<&Repository>,
-    hook_name: &str,
-    config: &ConfigSet,
-) -> Result<Vec<String>, String> {
-    let git_dir = repo.map(|r| r.git_dir());
-    let tables = HookConfigTables::from_config(config);
-    let mut lines = Vec::new();
-    for (friendly, _) in tables.hooks_for_event(hook_name)? {
-        lines.push(friendly);
-    }
-    if let Some(r) = repo {
-        let hooks_dir = resolve_hooks_dir_for_config(r.environment(), git_dir, Some(config));
-        if traditional_hook_candidate(r, &hooks_dir, hook_name).is_some() {
-            lines.push("hook from hookdir".to_owned());
-        }
-    }
-    Ok(lines)
-}
 #[expect(clippy::too_many_arguments)]
 /// Spawn a traditional hook executable. On ENOEXEC, retry with `/bin/sh`.
 fn spawn_traditional_hook(

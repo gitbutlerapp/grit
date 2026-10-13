@@ -416,8 +416,9 @@ pub fn compute_patch_id(
     algo: HashAlgo,
     odb: &Odb,
     commit_oid: &ObjectId,
+    mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(algo, odb, commit_oid, &[])
+    compute_patch_id_filtered(algo, odb, commit_oid, &[], mode)
 }
 
 /// Compute the patch-ID for a single commit, limited to matching pathspecs.
@@ -440,8 +441,9 @@ pub fn compute_patch_id_for_paths(
     odb: &Odb,
     commit_oid: &ObjectId,
     paths: &[String],
+    mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(algo, odb, commit_oid, paths)
+    compute_patch_id_filtered(algo, odb, commit_oid, paths, mode)
 }
 
 fn compute_patch_id_filtered(
@@ -449,7 +451,9 @@ fn compute_patch_id_filtered(
     odb: &Odb,
     commit_oid: &ObjectId,
     paths: &[String],
+    mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
+    let _ = mode;
     let digest_len = algo.len();
     let obj = odb.read(commit_oid)?;
     if obj.kind != ObjectKind::Commit {
@@ -483,6 +487,21 @@ fn compute_patch_id_filtered(
 
     // Sort by primary path (lexicographic), matching diffcore_std ordering.
     diffs.sort_by(|a, b| a.path().cmp(b.path()));
+
+    if diffs.len() == 1 {
+        let entry = &diffs[0];
+        if entry.old_oid != entry.new_oid {
+            let old_bytes = read_blob(odb, &entry.old_oid)?;
+            let new_bytes = read_blob(odb, &entry.new_oid)?;
+            if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
+                let mut patch = Vec::new();
+                patch_id_write_line(&mut patch, &format!("commit {}", commit_oid.to_hex()));
+                write_patch_id_binary_entry(&mut patch, entry)?;
+                let ids = compute_patch_ids_from_text(algo, &patch, mode);
+                return Ok(ids.into_iter().next().map(|(patch_id, _)| patch_id));
+            }
+        }
+    }
 
     let mut result = [0u8; PATCH_ID_DIGEST_MAX];
 
@@ -539,8 +558,8 @@ fn compute_patch_id_filtered(
             let new_bytes = read_blob(odb, &entry.new_oid)?;
 
             if merge_file::is_binary(&old_bytes) || merge_file::is_binary(&new_bytes) {
-                let a = entry.old_oid.to_hex();
-                let b = entry.new_oid.to_hex();
+                let a = patch_id_index_oid(&entry.old_oid);
+                let b = patch_id_index_oid(&entry.new_oid);
                 ctx.update(a.as_bytes());
                 ctx.update(b.as_bytes());
             } else {
@@ -586,6 +605,64 @@ fn diff_entry_matches_paths(entry: &DiffEntry, paths: &[String]) -> bool {
 
 fn parse_mode_u32(mode: &str) -> u32 {
     u32::from_str_radix(mode.trim(), 8).unwrap_or(0)
+}
+
+/// Abbreviated OID as it appears on `index` lines in `git show -p` (7 hex chars, or `0000000`).
+fn patch_id_write_line(out: &mut Vec<u8>, line: &str) {
+    out.extend_from_slice(line.as_bytes());
+    out.push(b'\n');
+}
+
+/// `git show -p` headers for a binary file (no unified hunks).
+fn write_patch_id_binary_entry(out: &mut Vec<u8>, entry: &DiffEntry) -> Result<()> {
+    let old_path = entry
+        .old_path
+        .as_deref()
+        .or(entry.new_path.as_deref())
+        .unwrap_or("");
+    let new_path = entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .unwrap_or("");
+    patch_id_write_line(out, &format!("diff --git a/{old_path} b/{new_path}"));
+    let old_mode = parse_mode_u32(&entry.old_mode);
+    let new_mode = parse_mode_u32(&entry.new_mode);
+    if old_mode == 0 {
+        patch_id_write_line(out, &format!("new file mode {}", entry.new_mode.trim()));
+    } else if new_mode == 0 {
+        patch_id_write_line(out, &format!("deleted file mode {}", entry.old_mode.trim()));
+    }
+    patch_id_write_line(
+        out,
+        &format!(
+            "index {}..{}",
+            patch_id_index_oid(&entry.old_oid),
+            patch_id_index_oid(&entry.new_oid),
+        ),
+    );
+    let old_side = entry
+        .old_path
+        .as_ref()
+        .map(|p| format!("a/{p}"))
+        .unwrap_or_else(|| "/dev/null".to_owned());
+    let new_side = entry
+        .new_path
+        .as_ref()
+        .map(|p| format!("b/{p}"))
+        .unwrap_or_else(|| "/dev/null".to_owned());
+    patch_id_write_line(
+        out,
+        &format!("Binary files {old_side} and {new_side} differ"),
+    );
+    Ok(())
+}
+
+fn patch_id_index_oid(oid: &ObjectId) -> String {
+    if *oid == zero_oid() {
+        return "0000000".to_owned();
+    }
+    oid.to_hex().chars().take(7).collect()
 }
 
 fn patch_id_add_string(ctx: &mut ObjectHasher, s: &[u8]) {
@@ -889,7 +966,7 @@ mod tests {
         let git_stable = git_patch_ids_from_log(dir.path(), "--stable");
         let assert_odb_matches_git = |commit_hex: &str, label: &str| {
             let commit: ObjectId = commit_hex.trim().parse().expect("commit oid");
-            let grit = compute_patch_id(HashAlgo::Sha1, &repo.odb(), &commit)
+            let grit = compute_patch_id(HashAlgo::Sha1, &repo.odb(), &commit, PatchIdMode::Stable)
                 .expect("patch")
                 .expect("some");
             let git_patch = git_stable
@@ -905,6 +982,11 @@ mod tests {
             &["rev-list", "--max-count=1", "--skip=4", "HEAD"],
         );
         assert_odb_matches_git(&second, "git patch-id for second commit");
+        let binary = git_in(
+            dir.path(),
+            &["rev-list", "--max-count=1", "--skip=3", "HEAD"],
+        );
+        assert_odb_matches_git(&binary, "git patch-id for binary commit");
         let rename = git_in(
             dir.path(),
             &["rev-list", "--max-count=1", "--skip=1", "HEAD"],
@@ -923,6 +1005,7 @@ mod tests {
             &repo.odb(),
             &add_h,
             &[String::from("h.txt")],
+            PatchIdMode::Stable,
         )
         .expect("filtered h.txt")
         .expect("some h.txt");
@@ -941,6 +1024,7 @@ mod tests {
                 &repo.odb(),
                 &add_h,
                 &[String::from("f.txt")],
+                PatchIdMode::Stable,
             )
             .expect("filtered f.txt")
             .is_none(),
@@ -958,8 +1042,10 @@ mod tests {
             .trim()
             .parse()
             .unwrap();
-        assert!(compute_patch_id(HashAlgo::Sha1, &repo.odb(), &merge_tip)
-            .expect("merge")
-            .is_none());
+        assert!(
+            compute_patch_id(HashAlgo::Sha1, &repo.odb(), &merge_tip, PatchIdMode::Stable)
+                .expect("merge")
+                .is_none()
+        );
     }
 }

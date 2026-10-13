@@ -139,10 +139,15 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
     let commit2 = git(repo_root, &["rev-parse", "HEAD"]).trim().to_string();
 
     let commit_oid: grit_lib::objects::ObjectId = commit2.parse().expect("parse commit oid");
-    let grit_patch = compute_patch_id(HashAlgo::Sha256, grit_repo.odb(), &commit_oid)
-        .expect("patch-id")
-        .expect("non-merge patch-id")
-        .to_hex();
+    let grit_patch = compute_patch_id(
+        HashAlgo::Sha256,
+        grit_repo.odb(),
+        &commit_oid,
+        grit_lib::diff::patch_ids::PatchIdMode::Stable,
+    )
+    .expect("patch-id")
+    .expect("non-merge patch-id")
+    .to_hex();
     let git_patch = git_patch_id_stable(repo_root, &commit2);
     assert_eq!(
         grit_patch, git_patch,
