@@ -251,7 +251,7 @@ pub(crate) mod prune_packed;
 pub(crate) mod push;
 pub(crate) mod push_cert;
 pub(crate) mod push_report;
-pub(crate) mod quote_path;
+pub mod quote_path;
 pub(crate) mod receive_pack;
 pub(crate) mod receive_quarantine;
 pub(crate) mod ref_exclusions;

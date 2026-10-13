@@ -4,6 +4,13 @@
 //! `ls-tree --name-only`) using a byte lookup table and optional full octal
 //! escaping for non-ASCII bytes when `quote_path_fully` is set (`core.quotepath`,
 //! default true).
+//!
+//! ```rust
+//! use grit_lib::quote_path::quote_c_style;
+//! # fn main() {
+//! assert_eq!(quote_c_style("bell\x07.txt", true), "\"bell\\a.txt\"");
+//! # }
+//! ```
 
 /// Lookup table from Git `quote.c` (`cq_lookup`). Values:
 /// - `1`: emit as `\<ooo>` three-digit octal
@@ -103,6 +110,14 @@ pub fn quote_c_style(path: &str, quote_fully: bool) -> String {
     quote_c_style_inner(path, quote_fully, false)
 }
 
+/// Quote a repository-relative path for human-facing CLI output (status, diff headers).
+///
+/// `quote_fully` mirrors Git's `core.quotepath` (see [`grit_lib::config::ConfigSet::quote_path_fully`]).
+#[must_use]
+pub fn quote_path_for_display(path: &str, quote_fully: bool) -> String {
+    quote_c_style(path, quote_fully)
+}
+
 /// Format one side of a `diff --git` / `---` / `+++` line: either `prefix/path` or
 /// `"prefix<escaped-path>"` when Git would C-quote the path (see `t3300-funny-names`).
 #[must_use]
@@ -145,6 +160,19 @@ mod tests {
         assert_eq!(quote_c_style(s, false), "\"濱野\\t純\"");
         let s2 = "濱野 純";
         assert_eq!(quote_c_style(s2, false), "濱野 純");
+    }
+
+    #[test]
+    fn c0_control_bytes_quoted() {
+        assert_eq!(
+            quote_c_style("evil\x1b[31mRED\x1b[0m.txt", true),
+            "\"evil\\033[31mRED\\033[0m.txt\""
+        );
+        assert_eq!(quote_c_style("bell\x07.txt", true), "\"bell\\a.txt\"");
+        assert_eq!(
+            quote_c_style("ctl\x01char.txt", true),
+            "\"ctl\\001char.txt\""
+        );
     }
 
     #[test]
