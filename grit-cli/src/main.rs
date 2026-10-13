@@ -172,6 +172,21 @@ enum BundleAction {
     },
 }
 
+/// Subcommands of `grit hooks`.
+#[derive(Debug, Subcommand)]
+enum HooksAction {
+    /// List hook scripts in the resolved hooks directory.
+    List,
+    /// Run a hook by name (passes `--` arguments through to the script).
+    Run {
+        /// Hook basename (e.g. `pre-commit`).
+        name: String,
+        /// Arguments forwarded to the hook after `--`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        hook_args: Vec<String>,
+    },
+}
+
 /// Subcommands of `grit auth`.
 #[derive(Debug, Subcommand)]
 enum AuthAction {
@@ -309,6 +324,21 @@ enum Command {
         /// Treat ref warnings as errors.
         #[arg(long)]
         strict: bool,
+    },
+    /// List hook scripts or run one by name.
+    Hooks {
+        #[command(subcommand)]
+        action: Option<HooksAction>,
+    },
+    /// Print stable patch-IDs for one or more commits.
+    #[command(name = "patch-id")]
+    PatchId {
+        /// Commits or revisions to hash (merge commits are skipped).
+        #[arg(value_name = "REV")]
+        revs: Vec<String>,
+        /// Use legacy unstable patch-ID algorithm (Git 1.9 and older).
+        #[arg(long)]
+        unstable: bool,
     },
     /// Stage every change and record a new commit.
     Commit {
@@ -744,6 +774,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 std::process::exit(code);
             }
             Ok(())
+        }
+        Command::Hooks { action } => match action {
+            None | Some(HooksAction::List) => emit(&commands::hooks::run_list()?, opts, ctx),
+            Some(HooksAction::Run { name, hook_args }) => {
+                let outcome = commands::hooks::run_hook_by_name(&name, &hook_args)?;
+                let code = commands::hooks::run_exit_code(&outcome);
+                emit(&outcome, opts, ctx)?;
+                if code != 0 {
+                    std::process::exit(code);
+                }
+                Ok(())
+            }
+        },
+        Command::PatchId { revs, unstable } => {
+            emit(&commands::patch_id::run(&revs, unstable)?, opts, ctx)
         }
         Command::Commit {
             message,

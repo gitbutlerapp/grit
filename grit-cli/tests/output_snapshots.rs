@@ -512,6 +512,58 @@ fn snapshot_worktree_remove() {
     );
 }
 
+#[test]
+fn snapshot_hooks_list() {
+    snapshot_fresh("hooks_list", &["hooks", "list"], |fixture| {
+        let hook = fixture.path().join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").expect("write hook");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o100755))
+                .expect("chmod");
+        }
+    });
+}
+
+#[test]
+fn snapshot_hooks_run() {
+    snapshot_fresh("hooks_run", &["hooks", "run", "pre-commit"], |fixture| {
+        let hook = fixture.path().join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").expect("write hook");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o100755))
+                .expect("chmod");
+        }
+    });
+}
+
+#[test]
+fn snapshot_hooks_run_propagates_exit_code() {
+    let snapshot_dir = snapshot_dir();
+    let fixture = CliFixture::new();
+    let hook = fixture.path().join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 17\n").expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o100755)).expect("chmod");
+    }
+    fixture.snapshot_all_modes_expect(
+        "hooks_run_exit_17",
+        &["hooks", "run", "pre-commit"],
+        &snapshot_dir,
+        17,
+    );
+}
+
+#[test]
+fn snapshot_patch_id() {
+    snapshot_all_modes("patch_id", &["patch-id", "HEAD"]);
+}
+
 trait ExpectSuccess {
     fn expect_success(self, label: &str) -> grit_test_support::Output;
 }
